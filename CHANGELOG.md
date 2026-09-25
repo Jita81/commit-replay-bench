@@ -8,6 +8,10 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the gates give the same verdict on a fresh clone, in a root container and offline
+
+mypy and ruff are pinned exactly (Dependabot moves them) and CI runs daily on `main`, because a SQLAlchemy release, not a commit, turned eight untyped query results into mypy errors; the eight are annotated. The suite no longer depends on the uid it runs as, a docker daemon or the network: tests name a non-root builder user (a ratchet refuses one that does not), the doctor tests never ask the host's daemon, and a `network` test is skipped with the host and the reason when the host is unreachable. `.coverage` and `coverage.xml` are ignored (assessment 2026-09-25 §E1–E2, DL-053).
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

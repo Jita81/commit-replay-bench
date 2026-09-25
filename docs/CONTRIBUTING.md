@@ -9,12 +9,20 @@ most of them, review enforces the rest. Read [ARCHITECTURE](ARCHITECTURE.md),
 ```bash
 # Python ≥ 3.12; uv on PATH (https://docs.astral.sh/uv/); git; docker for sandbox tests.
 uv venv -q .venv --python 3.12
-uv pip install -q -e '.[dev]' --python .venv/bin/python
-# optional extras: '.[openai]' '.[claude]' '.[server]' '.[postgres]' or '.[all]'
+uv pip install -q -e '.[server,postgres,mcp,dev]' --python .venv/bin/python
+# optional extras: '.[openai]' '.[claude]' or '.[all]'
 ```
 
-Run tools from the venv (`.venv/bin/…`). Do not commit `.venv/`, `uv.lock` is not yet
-committed (see [Known debt](ARCHITECTURE.md#93-known-debt-tracked)).
+The server, postgres and mcp extras are part of what the gates check: without them `mypy`
+cannot see the server and store code, and the suite skips it. Run tools from the venv
+(`.venv/bin/…`). Do not commit `.venv/`, `uv.lock` is not yet committed (see
+[Known debt](ARCHITECTURE.md#93-known-debt-tracked)).
+
+`mypy` and `ruff` are pinned to exact versions in the `dev` extra, so a fresh environment and
+CI give the same verdict on the same tree. Dependabot's `dev-tooling` group moves the pins in
+a pull request of their own. The other dependencies are resolved fresh on every run, so CI
+also runs every day on `main` with nothing changed: a new upstream release that moves a
+verdict fails there first, naming the release, not on the next unrelated pull request.
 
 ## The gates
 
@@ -25,13 +33,30 @@ Every PR must pass all of these locally **and** in CI (`.github/workflows/ci.yml
 .venv/bin/ruff format --check src tests
 .venv/bin/mypy                       # strict, over src/crb
 .venv/bin/lint-imports               # crb.core stdlib-only + downward layers
-.venv/bin/pytest -q --cov=crb --cov-fail-under=70
+.venv/bin/pytest -q -m "not sandbox_images" --cov=crb --cov-fail-under=70
 ```
 
+The pytest line is the one CI's `test` job runs. `sandbox_images` is left out because it
+builds the reference sandbox images, and CI's `sandbox-images` job runs it on its own.
+
 CI additionally runs `gitleaks` (secrets), `pip-audit` (known vulnerabilities in the
-resolved environment) and produces a CycloneDX SBOM. Tests that need infrastructure are
-marked and skipped when it is absent: `docker`, `toolchain(name)`, `live` (model
-credentials), `slow`.
+resolved environment) and produces a CycloneDX SBOM.
+
+The suite gives the same answer on a laptop, on the CI runner and in a root container with
+no docker daemon and no network. Tests that need something the machine may not have are
+marked, and skipped with the reason when it is absent:
+
+- `docker` — a docker daemon that answers `docker info`
+- `toolchain(name)` — a language toolchain on PATH (go, node, mvn, cargo)
+- `network(*hosts)` — outbound HTTPS to each named host; with no hosts named, the Python
+  package index. `tests/conftest.py` asks each host once per session before the test runs
+- `live` — model credentials
+- `slow` — a long end-to-end test
+
+Set `CRB_TEST_STRICT_WARMUP=1`, as CI does, to turn an unreachable registry or a failed
+toolchain warm-up into a failure instead of a skip. A missing docker daemon is always a skip.
+No test may depend on the uid it runs as: name a non-root user when you build builder
+container settings (`tests/test_builders_container.py` refuses a test that does not).
 
 **Run the full suite, not just your files.** A change to the core can alter a verdict
 elsewhere; the negative-controls and census-re-derivation gates (P1) exist to catch that.
@@ -133,7 +158,7 @@ workstream where possible. **Branch protection on `main` requires the CI jobs gr
 the branch up to date before a merge** (lint, types, layers, code-map, dod, both
 pytest matrices, PostgreSQL, security, container, walkthrough — the same commands you run
 locally:
-`pytest tests`, `ruff check`, `ruff format --check`, `mypy --strict src scripts`,
+`pytest -m "not sandbox_images"`, `ruff check`, `ruff format --check`, `mypy --strict src scripts`,
 `scripts/code_map.py --check`, `scripts/dod_check.py --check`,
 `scripts/claims_check.py --check`, `lint-imports`,
 `cd ui && npx tsc -b && npx vitest run`,

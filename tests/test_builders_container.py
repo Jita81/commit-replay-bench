@@ -101,6 +101,8 @@ from crb.core.workspace import HARNESS_SYMLINK, Workspace, sha256_bytes
 from fixtures import pyrepo as pr
 
 TESTS_DIR = Path(__file__).resolve().parent
+#: A named non-root uid:gid: the settings under test never depend on who runs the suite.
+NON_ROOT = "10001:10001"
 
 
 @pytest.fixture(autouse=True)
@@ -357,7 +359,9 @@ def test_settings_from_env_default_is_host() -> None:
     assert BuilderContainerSettings.from_env({}) is None
     assert BuilderContainerSettings.from_env({"CRB_BUILDER__EXECUTOR": "host"}) is None
     with pytest.raises(SandboxUnavailable, match="IMAGE"):
-        BuilderContainerSettings.from_env({"CRB_BUILDER__EXECUTOR": "docker"})
+        BuilderContainerSettings.from_env(
+            {"CRB_BUILDER__EXECUTOR": "docker", "CRB_BUILDER__USER": NON_ROOT}
+        )
     with pytest.raises(SandboxUnavailable, match="not one of"):
         BuilderContainerSettings.from_env({"CRB_BUILDER__EXECUTOR": "podman"})
 
@@ -390,14 +394,16 @@ def test_settings_fail_closed() -> None:
     with pytest.raises(SandboxUnavailable, match="root"):
         BuilderContainerSettings(image="i", user="root")
     with pytest.raises(SandboxUnavailable, match="allowlist"):
-        BuilderContainerSettings(image="i", allow_hosts=("bad host",))
+        BuilderContainerSettings(image="i", allow_hosts=("bad host",), user=NON_ROOT)
     with pytest.raises(SandboxUnavailable, match="allowlist"):
-        BuilderContainerSettings(image="i", allow_hosts=("*.anthropic.com",))
+        BuilderContainerSettings(image="i", allow_hosts=("*.anthropic.com",), user=NON_ROOT)
     with pytest.raises(SandboxUnavailable, match=r"docker\.sock"):
-        BuilderContainerSettings(image="i", extra_ro_mounts={"/var/run/docker.sock": "/x"})
-    s = BuilderContainerSettings(image="i", allow_hosts=())
+        BuilderContainerSettings(
+            image="i", extra_ro_mounts={"/var/run/docker.sock": "/x"}, user=NON_ROOT
+        )
+    s = BuilderContainerSettings(image="i", allow_hosts=(), user=NON_ROOT)
     assert not s.networked and s.describe()["egress_network"] == "none"
-    assert s.user == f"{os.getuid()}:{os.getgid()}"
+    assert s.user == NON_ROOT
     assert s.proxy_image == "i"
 
 
@@ -534,10 +540,11 @@ def test_probe_reports_off_and_down(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CRB_BUILDER__EXECUTOR", raising=False)
     assert probe_builder_container()[0] == "off"
     status, detail = probe_builder_container(
-        BuilderContainerSettings(image="i", docker_binary="/nonexistent/docker")
+        BuilderContainerSettings(image="i", docker_binary="/nonexistent/docker", user=NON_ROOT)
     )
     assert status == "down" and "docker" in detail
     monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    monkeypatch.setenv("CRB_BUILDER__USER", NON_ROOT)
     status, detail = probe_builder_container()
     assert status == "down" and "IMAGE" in detail
 
@@ -811,7 +818,7 @@ def test_adapter_sealed_path_grades_clean_on_the_real_worktree(
         executor=spec.executor,
         config=pyrepo.config,
         on_event=lambda a, p: events.append((a, dict(p))),
-        container=BuilderContainerSettings(image="crb-builder:test"),
+        container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
     )
     summary = run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
@@ -841,7 +848,7 @@ def test_adapter_sealed_path_fails_closed(
         runner=spec.runner,
         executor=spec.executor,
         config=pyrepo.config,
-        container=BuilderContainerSettings(image="crb-builder:test"),
+        container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
     )
     summary = run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
@@ -870,7 +877,7 @@ def test_adapter_unsealable_builder_keeps_the_real_worktree(
         runner=spec.runner,
         executor=spec.executor,
         config=pyrepo.config,
-        container=BuilderContainerSettings(image="crb-builder:test"),
+        container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
     )
     run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
@@ -908,7 +915,7 @@ def test_session_reports_the_spawned_containers_whose_kill_went_unconfirmed(
     stream's own bound, so the adapter can hand them to the worker's reaper."""
     executor = _ExecutorStub([None, True, False])
     session = ContainerSession(
-        BuilderContainerSettings(image="crb-builder:test"),
+        BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         sealed,
         executor=executor,  # type: ignore[arg-type]
         label="kills",
@@ -934,7 +941,7 @@ def test_session_reports_the_tools_executors_unconfirmed_kills_too(
     fake.write_text("#!/bin/sh\nexit 0\n")
     fake.chmod(0o755)
     session = ContainerSession(
-        BuilderContainerSettings(image="crb-builder:test", docker_binary=str(fake)),
+        BuilderContainerSettings(image="crb-builder:test", docker_binary=str(fake), user=NON_ROOT),
         sealed,
         executor=_ExecutorStub([False]),  # type: ignore[arg-type]
         label="tools",
@@ -955,5 +962,6 @@ def test_container_settings_from_env_is_the_worker_hook(monkeypatch: pytest.Monk
     assert adapter.container_settings_from_env() is None
     monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:local")
+    monkeypatch.setenv("CRB_BUILDER__USER", NON_ROOT)
     s = adapter.container_settings_from_env()
     assert s is not None and s.image == "crb-builder:local"

@@ -25,9 +25,11 @@ What it does: Pins that a keychain login is ok, that no login and no key is degr
               skip`` in text and the ``/health`` vocabulary in JSON, failing on a store
               stamped behind head and on one whose append-only triggers are missing.
 How:          A fake ``claude`` on PATH and a throwaway ``CRB_HOME`` (the persistent case is a
-              unique, never-created path under ``/srv`` — host state cannot reach it); an RSA key pair from
-              ``cryptography`` and an ``httpx.MockTransport`` standing in for GitHub; a
-              ``ui/dist`` made of one-line chunk files.
+              unique, never-created path under ``/srv`` — host state cannot reach it); a
+              ``sandbox`` probe that never asks the host's docker daemon, so a report reads the
+              same with or without one; an RSA key pair from ``cryptography`` and an
+              ``httpx.MockTransport`` standing in for GitHub; a ``ui/dist`` made of one-line
+              chunk files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/cli/commands/service.py (under test), src/crb/builders/claude_code.py
@@ -67,6 +69,7 @@ from crb.cli.commands.service import (
 )
 from crb.cli.main import main
 from crb.core.secrets_file import SecretsStore
+from crb.observability import probes
 from crb.server.settings import GitHubAppSettings, Settings
 from crb.store import migrate
 
@@ -89,11 +92,18 @@ esac
 """
 
 
+def _daemon_not_asked(timeout: int = 10, *, request_id: str = "") -> probes.ProbeResult:
+    """The ``sandbox`` line as a fixed answer: the host's docker daemon is never asked."""
+    return probes.ProbeResult("sandbox", probes.OK, "docker (test double: no daemon asked)")
+
+
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A throwaway ``CRB_HOME`` with every ``CRB_*`` and credential variable cleared, so the probe
-    never sees the operator's login.
+    never sees the operator's login — and a ``sandbox`` probe that never asks the host's docker
+    daemon, so a report reads the same on a laptop and in a container with no daemon.
     """
+    monkeypatch.setattr(probes, "probe_docker", _daemon_not_asked)
     for key in list(os.environ):
         if key.startswith("CRB_") or key in {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}:
             monkeypatch.delenv(key, raising=False)

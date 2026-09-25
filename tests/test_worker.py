@@ -535,6 +535,7 @@ def sealed_unconfirmed(
     monkeypatch.setattr(os, "getuid", lambda: 0)
     monkeypatch.setattr(os, "getgid", lambda: 0)
     monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    monkeypatch.setenv("CRB_BUILDER__USER", "10001:10001")
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
     monkeypatch.setattr(adapter_mod, "SEALABLE_BUILDERS", frozenset({"fake"}))
     real = worker_mod.build_fn_for
