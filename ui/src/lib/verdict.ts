@@ -269,6 +269,10 @@ export const ACTION_HELP: Record<string, string> = {
   'builder.preflight.repaired': 'The patch was repaired by a bounded repair turn before grading.',
   'builder.preflight.rejected': 'The patch was rejected before grading; the payload names why.',
   'builder.preflight.error': 'The preflight step itself failed.',
+  'builder.format_step': "The repository's own formatter ran over the changed source files before grading; the payload names the files it changed or why it was skipped.",
+  'builder.finish_gate': "The repository's own checks were re-run after the build; the payload says whether they passed and how many repair turns it took.",
+  'builder.finish_gate.error': "The finish gate could not read the repository's checks, so the brief carried only the declared commands.",
+  'builder.checks.error': 'The format step or the finish gate failed; the grade still judged the worktree as it was.',
   // grade — the belts
   'grade.belt': 'One belt was evaluated; the value says whether it held.',
   'grade.tamper': 'A test file was changed; the row is disqualified, not counted.',

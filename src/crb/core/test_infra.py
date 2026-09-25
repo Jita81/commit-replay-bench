@@ -102,7 +102,8 @@ Works with:   src/crb/core/grade.py (``infra_tampered`` calls both questions bef
               the test files themselves), src/crb/core/oracle/controls.py (the
               ``env_poison`` control that measures this belt), src/crb/core/runners/base.py
               (the runner names the narrowing keys on)
-Tested by:    tests/test_test_infra.py, tests/test_grade.py, tests/test_oracle_controls.py
+Tested by:    tests/test_test_infra.py, tests/test_grade.py, tests/test_oracle_controls.py,
+              tests/test_runner_audit.py
 Touch when:   onboarding a repository whose test runner reads a config file not in the
               table (a builder editing it would go unnoticed — a belt-1 gap) or whose
               honest commits keep tripping a rule (narrow it by runner, or make the file
@@ -290,8 +291,12 @@ INFRA_RULES: tuple[InfraRule, ...] = (
             "prettier.config.*",
             ".prettierignore",
             ".editorconfig",
+            "stylelint.config.*",
+            ".stylelintrc",
+            ".stylelintrc.*",
+            ".stylelintignore",
         ),
-        "eslint and prettier read their config (and ignore files) from the tree; "
+        "eslint, prettier and stylelint read their config (and ignore files) from the tree; "
         "prettier also resolves .editorconfig (indent_size, max_line_length). Belt 5's "
         "definition of acceptable is the repository's, never the builder's (ADR-0011)",
     ),
@@ -523,6 +528,7 @@ _TOML_SECTIONS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("tool", "pytest"),
         ("project", "entry-points", "pytest11"),
         ("tool", "ruff"),  # belt 5 (ADR-0011): the whole [tool.ruff*] tree
+        ("tool", "black"),  # belt 5: black's check mode reads [tool.black] (ADR-0021 audit)
     ),
     "cargo.toml": (
         ("dev-dependencies",),
@@ -559,7 +565,14 @@ _PACKAGE_JSON_SECTIONS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("scripts", "posttest"), ()),
     (("eslintConfig",), ()),
     (("prettier",), ()),
+    (("stylelint",), ()),
     (("scripts", "lint"), ()),
+    # the scripts belt 5 reads its flags and the type checker from (``--max-warnings``,
+    # ``lint:types`` — the runner-command audit, 2026-09-25)
+    (("scripts", "lint:js"), ()),
+    (("scripts", "lint:css"), ()),
+    (("scripts", "lint:types"), ()),
+    (("scripts", "lint:prettier"), ()),
 )
 
 #: go.mod directives that alter what gets built and how it runs.

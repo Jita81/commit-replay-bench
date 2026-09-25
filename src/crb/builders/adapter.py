@@ -73,7 +73,8 @@ Works with:   src/crb/core/run.py (defines ``BuildFn``/``BuildAttempt`` and call
               src/crb/builders/budget.py (per-rung budget), src/crb/core/ledger.py (why an
               errored attempt must not carry a patch), src/crb/server/worker.py (the caller
               that supplies ``container`` from the environment)
-Tested by:    tests/test_builders_adapter.py, tests/test_builders_container.py, tests/test_run.py
+Tested by:    tests/test_builders_adapter.py, tests/test_builders_container.py, tests/test_run.py,
+              tests/test_builders_finish_gate.py
 Touch when:   never for a new repository (the sighted test command comes from the runner);
               a new builder that must run sealed is added to ``SEALABLE_BUILDERS`` in
               src/crb/builders/container.py; a new attempt error kind must keep its prefix on
@@ -113,11 +114,23 @@ from crb.builders.container import (
     SessionFactory,
     UnconfirmedKill,
 )
+from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
 from crb.core.evidence import BuilderRef
 from crb.core.execution import Command, Executor, SandboxUnavailable
+from crb.core.finish_gate import (
+    GateRun,
+    OracleLeak,
+    assert_no_oracle,
+    checklist,
+    command_baseline,
+    derived_commands,
+    merge_commands,
+    verify,
+)
+from crb.core.formatting import FormatRun, formatters_for, run_formatters
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import GradeRow, JsonlLedger
-from crb.core.lint import fix_commands, run_plan
+from crb.core.lint import LintPlan, fix_commands, run_plan
 from crb.core.redact import redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
 from crb.core.runners.base import BaseRunner
@@ -458,6 +471,29 @@ class Preflight:
         return None
 
 
+@dataclass(frozen=True)
+class _Gate:
+    """The finish gate for one attempt, set up before the build: the plan and declared
+    commands it re-runs, the checklist the brief carries, the commands' parent verdicts."""
+
+    plan: LintPlan | None
+    commands: tuple[CheckCommand, ...]
+    lines: tuple[str, ...]
+    baseline: Mapping[str, bool | None]
+
+
+def _repair_budget(rung_budget: Budget) -> Budget:
+    """A repair call's budget: the rung's, capped at the pre-flight repair's caps."""
+    caps = Preflight()
+    return Budget(
+        max_turns=min(rung_budget.max_turns, caps.repair_max_turns),
+        max_tool_calls=min(rung_budget.max_tool_calls, caps.repair_max_tool_calls),
+        max_tokens=rung_budget.max_tokens,
+        max_cost_usd=rung_budget.max_cost_usd,
+        wall_clock_s=min(rung_budget.wall_clock_s, caps.repair_wall_clock_s),
+    )
+
+
 def _changed_source_files(ws: Workspace, config: RepoConfig) -> list[str]:
     return [f for f in ws.touched_files() if not config.is_test(f) and (ws.root / f).is_file()]
 
@@ -477,6 +513,7 @@ def build_fn_for(
     session_factory: SessionFactory = ContainerSession,
     preflight: Preflight | None = None,
     on_kill_unconfirmed: KillUnconfirmedFn | None = None,
+    checks: ResolvedChecks | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -511,6 +548,13 @@ def build_fn_for(
         enforced kill the daemon did not confirm — after the attempt, whether the
         builder returned or raised. Without it the kill is still on the outcome and
         the pack, and logged; the container is nobody's to reap.
+    checks:
+        The resolved "clean means working" switches (ADR-0021; run > repository >
+        OFF): the format step and the finish gate run here, around the build; belt 6
+        runs in the grader. Every attempt's row carries ``labels.checks`` (the switches,
+        their sources and the configuration version) and, when a step ran, its record
+        (``labels.format_step`` / ``labels.finish_gate``). ``None`` — nothing runs and
+        nothing is stamped (the rows are byte-identical to before the switchboard).
     """
     index = rung_index(ladder)
     overrides = dict(builder_overrides or {})
@@ -653,6 +697,9 @@ def build_fn_for(
         harness_command = sighted_test_command(
             runner, executor, ws.root, (), authored=task.authored
         )
+        gate = _gate_setup(ws, task, mode, test_command or harness_command)
+        if isinstance(gate, str):
+            return _failed_attempt(rung_label, mode, gate)
         brief = BuildBrief.from_task(
             task,
             mode=mode,
@@ -660,6 +707,7 @@ def build_fn_for(
             test_command=test_command,
             harness_command=harness_command,
             config=config,
+            finish_checks=gate.lines if gate is not None else (),
         )
         rung_budget = budget_for_rung(rung, budget)
         try:
@@ -682,19 +730,212 @@ def build_fn_for(
             )
             return discard(ws, task, failed)
         labels: dict[str, str] = {}
+        notes: dict[str, Any] = {}
+        if checks is not None:
+            outcome = run_checks(
+                ws,
+                task,
+                brief,
+                builder,
+                rung,
+                rung_budget,
+                outcome,
+                gate,
+                labels,
+                notes,
+                sealed=sealed,
+            )
         if preflight is not None and not outcome.violated and not attempt_error(outcome):
-            outcome, labels = run_preflight(
+            outcome, pf_labels = run_preflight(
                 ws, task, brief, builder, rung, rung_budget, outcome, sealed=sealed
             )
+            labels.update(pf_labels)
         ref = _write_transcript(tdir, task, rung, outcome) if tdir is not None else ""
         attempt = BuildAttempt(
             outcome.builder_ref(transcript_ref=ref),
             error=attempt_error(outcome),
             transcript_ref=ref,
             labels=labels,
-            notes=attempt_notes(outcome),
+            notes={**attempt_notes(outcome), **notes},
         )
         return discard(ws, task, attempt)
+
+    def _gate_setup(
+        ws: Workspace, task: TaskSpec, mode: str, test_command: str
+    ) -> _Gate | str | None:
+        """The finish gate's pre-build half: the checklist the brief carries and the
+        declared commands' verdicts on the untouched worktree. ``None`` — the gate is off;
+        a ``str`` — the checklist would name the oracle (refused before any spend)."""
+        if checks is None or not checks.finish_gate:
+            return None
+        try:
+            plan = runner.lint_plan(ws.root, executor)
+        except Exception as exc:  # detection failed: the gate carries the commands only
+            emit(on_event, BUILDER_EVENT_PREFIX + "finish_gate.error", error=str(exc)[:200])
+            plan = None
+        blind = mode != MODE_SIGHTED
+        every = merge_commands(derived_commands(ws.root), checks.repo.commands)
+        commands = tuple(c for c in every if blind or not c.blind_only)
+        lines = checklist(plan, commands, test_command=test_command)
+        if blind:
+            try:
+                assert_no_oracle(lines, (*task.test_files, *task.target_tests))
+            except OracleLeak as exc:
+                return f"finish gate refused: {exc}"
+        baseline = command_baseline(commands, executor, ws.root) if commands else {}
+        return _Gate(plan, commands, lines, baseline)
+
+    def run_checks(  # noqa: PLR0917 — one step of the build, many collaborators
+        ws: Workspace,
+        task: TaskSpec,
+        brief: BuildBrief,
+        builder: Builder,
+        rung: Rung,
+        rung_budget: Budget,
+        outcome: BuildOutcome,
+        gate: _Gate | None,
+        labels: dict[str, str],
+        notes: dict[str, Any],
+        *,
+        sealed: bool,
+    ) -> BuildOutcome:
+        """The format step and the finish gate (ADR-0021) after an honest build; the
+        labels say what ran, what it changed, or why it was skipped. Never raises into
+        the grade (a ``SandboxUnavailable`` excepted)."""
+        assert checks is not None
+        labels[LABEL_CHECKS] = checks.label()
+        honest = not outcome.violated and not attempt_error(outcome)
+        if not honest:
+            for on, key in (
+                (checks.format_step, "format_step"),
+                (checks.finish_gate, "finish_gate"),
+            ):
+                if on:
+                    labels[key] = "skipped=attempt_not_admissible"
+            return outcome
+        try:
+            if checks.format_step:
+                fr = format_once(ws)
+                labels["format_step"] = fr.label()
+                notes["format_step"] = fr.to_dict()
+            if gate is not None:
+                outcome = finish_gate(
+                    ws,
+                    task,
+                    brief,
+                    builder,
+                    rung,
+                    rung_budget,
+                    outcome,
+                    gate,
+                    labels,
+                    notes,
+                    sealed=sealed,
+                )
+        except SandboxUnavailable:
+            raise
+        except Exception as exc:  # the grade still runs on whatever is in the worktree
+            labels["checks_error"] = f"{type(exc).__name__}: {exc}"[:200]
+            emit(
+                on_event,
+                BUILDER_EVENT_PREFIX + "checks.error",
+                task=task.task_id,
+                error=labels["checks_error"],
+            )
+        return outcome
+
+    def format_once(ws: Workspace) -> FormatRun:
+        """The repository's own formatter over the changed non-test files."""
+        assert checks is not None
+        files = _changed_source_files(ws, config)
+        plan = runner.lint_plan(ws.root, executor) if files else None
+        formatters, skipped = formatters_for(plan, ws.root, checks.repo.formatter)
+        fr = run_formatters(formatters, executor, ws.root, files, skipped=skipped)
+        emit(on_event, BUILDER_EVENT_PREFIX + "format_step", **fr.to_dict())
+        return fr
+
+    def finish_gate(  # noqa: PLR0917 — one step of the build, many collaborators
+        ws: Workspace,
+        task: TaskSpec,
+        brief: BuildBrief,
+        builder: Builder,
+        rung: Rung,
+        rung_budget: Budget,
+        outcome: BuildOutcome,
+        gate: _Gate,
+        labels: dict[str, str],
+        notes: dict[str, Any],
+        *,
+        sealed: bool,
+    ) -> BuildOutcome:
+        """Verify the checklist, repair up to ``finish_repair_turns`` times with the
+        failing checks' output, and accept ``done`` only when the gate passes."""
+        assert checks is not None
+
+        def check() -> GateRun:
+            return verify(
+                gate.plan,
+                gate.commands,
+                executor,
+                ws.root,
+                _changed_source_files(ws, config),
+                baseline=gate.baseline,
+            )
+
+        run = check()
+        record = [f"before={run.label()}"]
+        repairs = 0
+        merged = outcome
+        while not run.passed and repairs < checks.repo.finish_repair_turns:
+            repairs += 1
+            second = repair_call(
+                ws,
+                task,
+                replace(brief, gate_note=run.findings()),
+                builder,
+                rung,
+                rung_budget,
+                sealed=sealed,
+            )
+            merged = _merge_outcomes(merged, second)
+            if second.violated:
+                record.append("after=violated")
+                break
+            if checks.format_step:
+                # the first run's record stays; the repair's own formatting is appended
+                again = format_once(ws).label()
+                labels["format_step"] = f"{labels.get('format_step', '')};repair:{again}"[:300]
+            run = check()
+        if repairs:
+            record += [f"repair={repairs}", f"after={run.label()}"]
+        labels["finish_gate"] = ";".join(record)[:300]
+        notes["finish_gate"] = run.to_dict()
+        emit(
+            on_event,
+            BUILDER_EVENT_PREFIX + "finish_gate",
+            task=task.task_id,
+            passed=run.passed,
+            repairs=repairs,
+        )
+        return replace(merged, done=merged.done and run.passed)
+
+    def repair_call(  # noqa: PLR0917 — the build's collaborators, as run_preflight takes them
+        ws: Workspace,
+        task: TaskSpec,
+        repair_brief: BuildBrief,
+        builder: Builder,
+        rung: Rung,
+        rung_budget: Budget,
+        *,
+        sealed: bool,
+    ) -> BuildOutcome:
+        """One bounded repair build (the pre-flight's caps) that starts from the first
+        attempt's edits."""
+        repair_budget = _repair_budget(rung_budget)
+        if sealed:
+            carry = _changed_source_files(ws, config)
+            return sealed_build(ws, task, rung, repair_brief, repair_budget, carry_files=carry)
+        return builder.build(ws, repair_brief, repair_budget, on_event=builder_on_event)
 
     def run_preflight(  # noqa: PLR0917 — one step of the build, many collaborators
         ws: Workspace,

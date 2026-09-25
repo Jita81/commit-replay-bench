@@ -355,6 +355,40 @@ dist-info (no file records, so nothing is shadowed) after the uninstall:
 The stub is a recorded setup step (`crb dist-info-stub …`) and therefore part of the
 apparatus record of every row measured under it.
 
+### 2.1b Clean means working — the `checks` switchboard
+
+A clean row says the repository's tests accept a patch. Three mechanisms make it also mean
+the repository's reviewers would (ADR-0021). Each is **off** until you switch it on, for one
+run or for the repository, and every row it touches records it.
+
+| switch | what it does | what the row records |
+|---|---|---|
+| `format_step` | runs the repository's own formatter (`gofmt`, `ruff format`, `black`, `prettier`, `standard`, `cargo fmt`, or the one you declare) over the changed source files before grading, so the graded patch is the formatted one | `labels.format_step`: `ran=gofmt;changed=1`, or `skipped=<reason>` when the repository configures no formatter |
+| `finish_gate` | puts the repository's own checks in the brief as a numbered checklist, re-runs them after the build, and gives the builder up to `finish_repair_turns` (default 1) bounded repair calls; `done` needs them to pass | `labels.finish_gate`: `before=fail:lint;repair=1;after=pass` |
+| `api_stable` | belt 6: the public API of the code the builder changed must be unchanged unless the maintainers' commit changes it the same way (Go, Python, JavaScript/TypeScript) | `labels.api_stable` (`true`/`false`/`none`) and `labels.api_findings`; failure kind `api` |
+
+Switch them on for a repository (the change lands on the repository's audit trail):
+
+```bash
+curl -X PUT "$CRB/api/v1/repos/cobra" -H 'content-type: application/json' -d '{
+  "checks": {"format_step": true, "finish_gate": true, "api_stable": true,
+             "commands": [{"name": "test", "argv": ["go", "test", "./..."], "blind_only": true}]}}'
+```
+
+or for one run: `POST /runs {…, "checks": {"finish_gate": true}}` (the run beats the
+repository; the repository beats off). `commands` are the repository's extra checks — a type
+checker, a vet, the test suite for blind attempts — run in the worktree with no network; one
+that already fails on the untouched parent is recorded `pre_existing` and never holds an
+attempt back. `go vet ./...` is added for you when `.golangci.yml` enables `govet` or the
+Makefile or CI runs it. `formatter: {"command": [...], "exts": [...]}` declares a formatter
+the detectors miss; `{"disabled": true}` switches the format step off for the repository.
+
+To see what the product derives for a checkout against what its CI runs, and the gaps:
+
+```bash
+python scripts/audit_runner_commands.py /srv/repos/cobra --language go --runner go
+```
+
 ### 2.2 Services the oracle needs
 
 Some test suites are only an oracle when a **service** is running next to them —

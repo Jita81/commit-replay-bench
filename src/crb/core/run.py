@@ -123,6 +123,9 @@ class RunSpec:
     policy_version: str = ""
     keep_worktrees: bool = False
     extra: Mapping[str, Any] = field(default_factory=dict)
+    #: belt 6 ``api_stable`` (ADR-0021): OFF unless the run or the repository's
+    #: ``checks.api_stable`` switches it on (the worker resolves it)
+    evaluate_api: bool = False
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -294,6 +297,7 @@ def run_task(
                 mode=spec.mode if spec.mode == MODE_BLIND else MODE_SIGHTED,
                 timeout=spec.timeout,
                 on_event=on_event,
+                evaluate_api=spec.evaluate_api,
             )
             pack = EvidencePack(
                 task=task,

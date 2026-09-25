@@ -51,8 +51,8 @@ import type { Tone } from '../../lib/verdict'
 // Vocabulary (crb.core.ledger.FAILURE_KINDS / crb.core.routing)
 // ---------------------------------------------------------------------------
 
-/** `crb.core.ledger.GradeRow.failure_kind` — `''` is clean; `lint` = belts 1–4 held, belt 5 rejected (ADR-0011). */
-export type FailureKind = '' | 'builder_red' | 'lint' | 'budget' | 'protocol' | 'harness' | 'outage' | 'disqualified'
+/** `crb.core.ledger.GradeRow.failure_kind` — `''` is clean; `lint` = belts 1–4 held, belt 5 rejected (ADR-0011); `api` = belts 1–4 held, belt 6 rejected (ADR-0021, opt-in). */
+export type FailureKind = '' | 'builder_red' | 'lint' | 'api' | 'budget' | 'protocol' | 'harness' | 'outage' | 'disqualified'
 
 /** `crb.core.routing.REASON_CODES`, in evaluation order. */
 export type ReasonCode =
@@ -98,6 +98,8 @@ export interface FailureSplit {
   lint_evaluated?: number
   /** Provider outages (usage limit / 429 / dead credential): the call never happened; outside n. */
   outage?: number
+  /** Belts 1–4 held; belt 6 found a public-API change the maintainers' commit did not make (opt-in). */
+  api?: number
 }
 
 export interface RoutingPolicyWithControls extends RoutingPolicy {
@@ -116,6 +118,7 @@ export interface CapabilityCellSplit extends CapabilityCell {
   n_harness: number
   n_disqualified: number
   n_lint_evaluated?: number
+  n_api?: number
   model_n: number
   /** clean / (clean + builder_red); `null` when no fair, finished attempt exists. */
   model_point: number | null
@@ -201,16 +204,17 @@ export function useFailureSplit(repo: string, runId = ''): UseQueryResult<Failur
 // ---------------------------------------------------------------------------
 
 export interface KindDisplay {
-  key: 'builder_red' | 'lint' | 'budget' | 'protocol' | 'harness' | 'outage' | 'disqualified'
+  key: 'builder_red' | 'lint' | 'api' | 'budget' | 'protocol' | 'harness' | 'outage' | 'disqualified'
   short: string
   long: string
   tone: Tone
 }
 
-/** The split in the order it is always shown: red · lint · budget · protocol · harness · DQ. */
+/** The split in the order it is always shown: red · lint · api · budget · protocol · harness · outage · DQ. */
 export const KIND_DISPLAY: readonly KindDisplay[] = [
   { key: 'builder_red', short: 'red', long: 'builder red — the model finished and the belts failed it (target not green, a regression, no source change)', tone: 'red' },
   { key: 'lint', short: 'lint', long: "lint — the code worked (belts 1–4 held) but the repository's own formatter/linter rejected the changed files (belt 5)", tone: 'amber' },
+  { key: 'api', short: 'api', long: "api — the code worked (belts 1–4 held) but it changed the public API in a way the maintainers' own commit did not (belt 6, switched on per run or repository)", tone: 'amber' },
   { key: 'budget', short: 'budget', long: 'budget — the builder hit its own cap (wall clock, turns, tool calls, tokens or cost) before it finished', tone: 'amber' },
   { key: 'protocol', short: 'protocol', long: 'protocol — a guard refused the builder (tamper / archaeology / network); an instrument decision', tone: 'violet' },
   { key: 'harness', short: 'harness', long: 'harness — executor / sandbox / parse / timeout / setup / model-API error; the instrument, not the model', tone: 'violet' },

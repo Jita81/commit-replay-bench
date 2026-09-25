@@ -249,7 +249,7 @@ def build_server(api: CrbApi) -> MCPServer[Any]:
         description=(
             "Start a run (POST /runs; operator). SPENDS the operator's model budget for replay/blind/factory kinds — say so first and keep it small "
             "(task_ids or limit). Body as docs/API.md: repo, kind (mine|replay|blind|oracle|controls|probe|label|factory), mode (sighted|blind), builder, model, provider, "
-            "ladder [{builder, model, provider, ...}], budget, task_ids, limit, pool, executor, timeout, builder_config, preflight, outage_stop, retain; factory: deliver, deliver_override (approver), max_rework."
+            "ladder [{builder, model, provider, ...}], budget, task_ids, limit, pool, executor, timeout, builder_config, preflight, checks ({format_step, finish_gate, api_stable}), outage_stop, retain; factory: deliver, deliver_override (approver), max_rework."
         ),
     )
     def crb_start_run(request: dict[str, Any]) -> Any:
