@@ -172,6 +172,8 @@ export const HINTS = {
     'The repository the tasks below are about (the most recently updated one, unless the link named another) and whether it is in trial, measuring or measured.',
   'banner.home.sandbox':
     'The sandbox probe is not OK on this host, so anything measured now is a development reading and not evidence. Deployment shows the probe and what to fix.',
+  'stat.home.value':
+    'Working changes per pound spent on blind attempts across every repository: the share of blind attempts that came out clean, times the share of clean patches a reviewer would merge (or, with too few reviews, a lint and public-interface check), over the pounds spent. It is an estimate from two rates, so its range is wide.',
   'stat.home.completed':
     'How many of the eight tasks are marked Completed. It is progress through the set-up, not a quality figure; the quality figures live on the Baseline with their n and interval.',
   'task.home.connect_github':

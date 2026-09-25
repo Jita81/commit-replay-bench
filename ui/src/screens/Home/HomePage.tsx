@@ -9,7 +9,8 @@
  *               with a status per task derived from the API, "You have completed n of 8",
  *               the instrument's health as a notification banner when it is degraded, the
  *               cost statement, "Why two people" (the operator who queues the runs is not
- *               the approver who signs) and one Continue button that names the next task.
+ *               the approver who signs), one Continue button that names the next task, and
+ *               the north star above the list (ValueTile: working changes per pound, blind).
  * What it does: Gives a tech lead trying the product in an afternoon one page that says
  *               what to do next and what it costs; nothing here spends money without a
  *               queued run they can see and cancel (tasks 1–4 cost nothing). Statuses are
@@ -41,7 +42,8 @@
  *               ui/src/screens/Connect/connection.ts (the connection state each task reads),
  *               ui/src/screens/Connect/ConnectPage.tsx, ui/src/screens/Results/ResultsPage.tsx,
  *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead),
- *               ui/src/screens/Posture/PosturePage.tsx (the health banner's target)
+ *               ui/src/screens/Posture/PosturePage.tsx (the health banner's target),
+ *               ui/src/screens/Home/ValueTile.tsx (the scorecard tile)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
  * Touch when:   a task is added to the walk (connection.ts first; its `task.home.*` hint in
@@ -57,6 +59,7 @@ import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, ty
 import { useAuth } from '../../lib/auth'
 import { kOfN } from '../../lib/format'
 import { type StageStatus, stageComplete, stagesFor } from '../Connect/connection'
+import { ValueTile } from './ValueTile'
 
 const TONE: Record<StageStatus, TagTone> = { done: 'pale', warn: 'pale', running: 'blue', todo: 'blue', failed: 'red', blocked: 'grey' }
 const LABEL: Record<StageStatus, string> = { done: 'Completed', warn: 'Completed', running: 'In progress', todo: 'Incomplete', failed: 'Failed', blocked: 'Cannot start yet' }
@@ -207,6 +210,9 @@ export function HomePage() {
           </p>
         </NotificationBanner>
       )}
+      <div className="mb-6 flex max-w-[44em] flex-wrap gap-4">
+        <ValueTile />
+      </div>
       <div className="max-w-[44em]">
         <TaskList tasks={tasks} completed={completed} summary={<Hint id="stat.home.completed">{operator ? `You have completed ${completed} of ${tasks.length} tasks.` : `The operators have completed ${completed} of ${tasks.length} tasks.`}</Hint>} />
         {approverKnown !== true && !can('admin') && (

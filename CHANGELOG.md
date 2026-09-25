@@ -8,6 +8,28 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the scorecard: working changes per pound, blind
+
+The operator asked for the product to produce working software and for its learning to get
+better the more data goes through it. This adds the number that says whether it does.
+
+- **`GET /value` and one Home tile.** `crb.core.value` computes working changes per pound on
+  blind attempts (blind clean rate × clean → working precision over every pound spent on blind
+  attempts, with the product of the two Wilson bounds as its range), clean → working precision
+  (a person's reviews first, every repository's reviews next, a labelled lint-and-interface
+  proxy last), the rows and pounds lost to budget, protocol, harness and outage, each bug
+  class's recurrence per window of attempts from prior data only, and how precise `deliver`
+  decisions were when made at the time. The register behind the curve is a stub until the
+  prevention loop is wired (`default_register`), and the response says so.
+- **The baseline, recomputed.** `scripts/value_baseline.py` runs the same report over an
+  exported ledger; `docs/reviews/2026-09-25-value-baseline.md` carries it: about 7% of blind
+  attempts would be merged, about one working change per £5 [measured — n = 94 valid blind
+  attempts × n = 13 reviewed clean patches; method: the report over the 2026-09-25 export;
+  apparatus 2.2]. The page is on the claims gate.
+- **VALUE heads the definition of done.** A new product category, first in `product.md`, whose
+  open criteria outrank every other in the order of work; the checker refuses a product
+  artefact where it is not first.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

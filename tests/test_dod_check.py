@@ -240,6 +240,7 @@ def _write_all(root: Path, *, ng_state: str = "n/a", ng_gap: str = "not applicab
     ]
     scats = [*jcats[:10], "TRIGGER", "OUTCOME", "HANDOFF", "MEASURE", "AUTOMATION"]
     pcats = [
+        "VALUE",
         *jcats[:10],
         "IDENTITY",
         "GO-LIVE",
@@ -353,6 +354,27 @@ def test_parent_and_children_must_agree_and_a_missing_category_is_a_defect(
     out = capsys.readouterr().out
     assert "parent dod.journey.read-the-map does not list it under children" in out
     assert "no criterion for category PROOF" in out
+
+
+def test_the_products_value_criteria_come_first(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The value the product exists to deliver heads its definition of done; a product
+    artefact whose table does not open with VALUE is a defect, and one without it is too."""
+    mod, root = tree
+    _write_all(root)
+    p = root / "docs/dod/product.md"
+    lines = p.read_text(encoding="utf-8").split("\n")
+    value = next(i for i, line in enumerate(lines) if "| VALUE |" in line)
+    moved = lines[:value] + lines[value + 1 :]
+    last = max(i for i, line in enumerate(moved) if line.startswith("| product."))
+    moved.insert(last + 1, lines[value])
+    p.write_text("\n".join(moved), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "the product's VALUE criteria come first" in capsys.readouterr().out
+    p.write_text("\n".join(lines[:value] + lines[value + 1 :]), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "no criterion for category VALUE" in capsys.readouterr().out
 
 
 def test_check_fails_on_a_stale_gap_analysis_or_status_line(
@@ -585,3 +607,17 @@ def test_the_rank_counts_what_a_gap_blocks_and_doubles_a_partial_in_the_honesty_
     assert truth[0] == 40 and truth[1] == 2
     mod.roll_up(arts)
     assert "## Open gaps by fan-out" in mod.render(arts)
+
+
+def test_an_open_value_criterion_outranks_every_other_open_criterion(
+    tree: tuple[ModuleType, Path],
+) -> None:
+    """The operator's refocus is the order of work: the weakest open VALUE criterion (a
+    product criterion blocking one) scores above the strongest possible other one (a product
+    criterion in a weight-5 category blocking three or more, doubled)."""
+    mod, _root = tree
+    others = max(w for c, w in mod.WEIGHT.items() if c != "VALUE")
+    strongest_other = mod.LEVEL_WEIGHT["product"] * others * 3 * 2
+    weakest_value = mod.LEVEL_WEIGHT["product"] * mod.WEIGHT["VALUE"] * 1 * 1
+    assert "VALUE" in mod.HONESTY and weakest_value * 2 > strongest_other
+    assert mod.EXTRA["product"][0] == "VALUE"

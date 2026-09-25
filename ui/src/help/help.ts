@@ -54,7 +54,7 @@ export const HELP: ScreenHelp[] = [
       approver: 'Nothing here needs you until task 7 is done and a cell reaches your Decisions. Read the baseline meanwhile.',
       admin: 'Task 1 (the GitHub App) and task 7 (an approver account) are yours; both are in Settings.',
     },
-    numbers: '“n of 8 tasks” counts tasks marked Completed. It is progress, not a quality figure; the quality figures live on the Baseline with their n and interval.',
+    numbers: '“Working changes per £ (blind)” is the product’s north star: blind attempts that came out clean, times the share of clean patches a reviewer would merge, over every pound spent on blind attempts; n is the blind attempts behind it. “n of 8 tasks” counts tasks marked Completed. It is progress, not a quality figure; the quality figures live on the Baseline with their n and interval.',
     terms: ['cell', 'apparatus', 'signoff', 'oracle_strength'],
     readMore: [
       { to: 'ONBOARDING-A-REPO', label: 'Using Commit Replay Bench on a repository, step by step' },
