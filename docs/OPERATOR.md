@@ -79,10 +79,14 @@ Run it on the API host and on the worker host after installing, after changing a
 | `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead, empty or an older unversioned schema, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
 | `worker` | the workers' check-ins (the `workers` table), the queue depth and running runs' heartbeats, as `/health` reads them | `warn` when no worker has checked in yet, one stopped checking in (named, with its age), runs are queued and no worker is alive, or a running run's heartbeat is stale (an idle queue with a live worker is `ok`) |
 | `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
+| `build` | the code this checkout holds and the UI bundle the API would serve were built from the same commit (the bundle's `build-stamp.json`, written by `npm run build`; an image carries `CRB_SOURCE_COMMIT`), and how far the checkout trails `origin/main` by the local ref (as of the last fetch — doctor never fetches) | the bundle was built from another commit, or a served bundle carries no stamp — rebuild it (`npm --prefix ui run build`) and restart; `warn` when the checkout is behind `origin/main` (pull, rebuild, restart); `skip` when neither a checkout nor `CRB_SOURCE_COMMIT` names the commit |
 
 `/health` on the running API answers the same questions from inside the process
 ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)); `crb doctor` is for the host, before
-and between runs.
+and between runs. `/health` also knows one thing doctor cannot: the commit the running server
+was **started** from. Its `served` block carries that commit, the checkout's commit now and
+the bundle's, with `stale: true` and the fix when any two disagree — a `git pull` under a
+running server reads as "restart", never as fresh code (docs/PREVENTION.md P-002).
 
 ## 2. Configure a repository
 

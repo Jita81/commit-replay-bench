@@ -15,8 +15,11 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               that a gap line must name the change and a known owner layer, that one gap id
               carries one line across the tree, and that an F-/B- id must be a row of the
               ordered backlog and is named in the ranking; that the rank counts how many
-              criteria a gap blocks and doubles a `partial` in the honesty categories; and
-              that ``--check`` fails on a stale GAP-ANALYSIS.md.
+              criteria a gap blocks and doubles a `partial` in the honesty categories; that
+              ``--check`` fails on a stale GAP-ANALYSIS.md; and that the prevention register
+              (docs/PREVENTION.md) must exist and refuses an entry closed without an
+              executable artefact that resolves, an advisory closure, a pending entry with no
+              gap, an unknown level or status, a duplicate id and a missing first-seen.
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
@@ -137,6 +140,22 @@ PRODUCT = (
 )
 
 
+#: A minimal prevention register: one closed row (an executable artefact that resolves) and one
+#: pending row (a gap with an owner).
+REGISTER = """# Prevention register
+
+## Register
+
+| id | bug | class | first seen | artefact | level | status | gap |
+|---|---|---|---|---|---|---|---|
+| P-001 | A long job name | ci-name | PR #48 | `test:tests/test_x.py::test_one` · `ci:code-map` | gate | closed | |
+| P-002 | Patches thrown away | retention | 2026-09-25 export | pending | construction | pending | G-701 |
+
+## Gaps
+- **G-701** — clean patches are not kept · store the graded patch · server
+"""
+
+
 def _rows(prefix: str, cats: list[str]) -> str:
     return "\n".join(
         f"| {prefix}.{c.lower()}.{i} | {c} | ok | `code:ui/src/App.tsx::App` | met | |"
@@ -203,6 +222,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
     (tmp_path / ".github/workflows/ci.yml").write_text(
         "jobs:\n  code-map:\n    name: code-map\n", encoding="utf-8"
     )
+    (tmp_path / "docs/PREVENTION.md").write_text(REGISTER, encoding="utf-8")
     monkeypatch.setattr(mod, "ROOT", tmp_path)
     monkeypatch.setattr(mod, "DOD", tmp_path / "docs/dod")
     monkeypatch.setattr(mod, "OUT", tmp_path / "docs/dod/GAP-ANALYSIS.md")
@@ -215,6 +235,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
     monkeypatch.setattr(mod, "DECISION_LOG", tmp_path / "docs/DECISION-LOG.md")
     monkeypatch.setattr(mod, "ADR_DIR", tmp_path / "docs/adr")
     monkeypatch.setattr(mod, "BACKLOG", tmp_path / "docs/reviews/backlog.md")
+    monkeypatch.setattr(mod, "PREVENTION", tmp_path / "docs/PREVENTION.md")
     return mod, tmp_path
 
 
@@ -585,3 +606,65 @@ def test_the_rank_counts_what_a_gap_blocks_and_doubles_a_partial_in_the_honesty_
     assert truth[0] == 40 and truth[1] == 2
     mod.roll_up(arts)
     assert "## Open gaps by fan-out" in mod.render(arts)
+
+
+def _register_row(row: str) -> str:
+    return REGISTER.replace(
+        "| P-002 | Patches thrown away | retention | 2026-09-25 export | pending | construction | pending | G-701 |",
+        row,
+    )
+
+
+@pytest.mark.parametrize(
+    ("row", "error"),
+    [
+        (
+            "| P-002 | x | c | e | `code:ui/src/App.tsx::App` | gate | closed | |",
+            "closed only by an artefact that fails when its class recurs",
+        ),
+        (
+            "| P-002 | x | c | e | `test:tests/test_x.py::test_one` | advisory | closed | |",
+            "advisory artefact cannot close a defect",
+        ),
+        ("| P-002 | x | c | e | pending | gate | pending | |", "pending needs a gap id"),
+        (
+            "| P-002 | x | c | e | `test:tests/test_x.py::test_nope` | gate | closed | |",
+            "evidence does not resolve: test:tests/test_x.py::test_nope",
+        ),
+        ("| P-002 | x | c | e | pending | wishful | pending | G-701 |", "level must be one of"),
+        ("| P-002 | x | c | e | pending | gate | parked | G-701 |", "status must be one of"),
+        ("| P-001 | x | c | e | pending | gate | pending | G-701 |", "duplicate id P-001"),
+        ("| P-002 | x | c | | pending | gate | pending | G-701 |", "needs a first-seen"),
+        ("| P-002 | x | c | e | pending | gate | pending | G-799 |", "gap G-799 is not defined"),
+    ],
+)
+def test_the_prevention_register_refuses_an_entry_without_a_working_artefact(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str], row: str, error: str
+) -> None:
+    """STANDARD.md §7: a defect is closed only with the artefact that fails if its class
+    recurs. The register is checked like the artefacts: every reference resolves, a closed
+    row carries an executable one (test / vitest / spec / ci), advisory text never closes a
+    defect, and a pending row names its gap and owner."""
+    mod, root = tree
+    _write_all(root)
+    assert mod.main([]) == 0
+    (root / "docs/PREVENTION.md").write_text(_register_row(row), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert error in capsys.readouterr().out
+
+
+def test_the_register_must_exist_and_its_counts_reach_the_gap_analysis(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod, root = tree
+    _write_all(root)
+    assert mod.main([]) == 0
+    out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
+    assert "## Our own bugs — the prevention register" in out
+    assert "**2 registered · 1 closed (gate 1) · 1 pending.**" in out
+    assert (
+        "| P-002 | Patches thrown away | construction | G-701 | clean patches are not kept" in out
+    )
+    (root / "docs/PREVENTION.md").unlink()
+    assert mod.main(["--check"]) == 1
+    assert "docs/PREVENTION.md is missing" in capsys.readouterr().out

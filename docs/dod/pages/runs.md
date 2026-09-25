@@ -8,7 +8,7 @@ children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Runs
@@ -33,6 +33,7 @@ updated: 2026-09-22
 | runs.operations.8 | OPERATIONS | The operator guide's sweep section and stop conditions are linked from the page; `/health` reports the worker and its queue depth so a list stuck on "queued" has a named cause; `crb_runs_total` and `crb_queue_depth` name runs in telemetry; the list polls only while a run is non-terminal | `doc:docs/OPERATOR.md#3-run-a-sweep` · `doc:docs/OPERATOR.md#8-stop-conditions` · `test:tests/test_server_system.py::test_worker_probe_reads_the_workers_table` · `test:tests/test_observability_metrics.py::test_checkin_sets_the_queue_depth_gauge` · `doc:docs/DEPLOYMENT.md#91-metrics--which-process-carries-which-series` | met | |
 | runs.accessibility.9 | ACCESSIBILITY | axe WCAG 2.1 AA is clean with rows present and at 375 and 1280 with a hint open; the progress bar is a labelled `progressbar`; the table has a caption; at 375 px the page does not scroll sideways (document `scrollWidth` ≤ `innerWidth`) with the columns hidden below md absent from the accessibility tree rather than clipped; the dialog traps focus and is a labelled dialog | `spec:ui/e2e/walkthrough/07-settings-and-a11y.spec.ts::"Repos and Runs have no WCAG 2.1 AA violations"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` · `code:ui/src/screens/Runs/RunsPage.tsx::Progress` | met | |
 | runs.non-goals.10 | NON-GOALS | The page says which kinds it does not start (probe, label, factory) and where they are started; the 200-run limit is stated on the page | `vitest:ui/src/screens/Runs/RunsPage.test.tsx::"the empty state names the factory too"` | partial | G-269 |
+| runs.actions.11 | ACTIONS | A run whose builder auth has no credential is refused at submit — 422 `builder_credential_missing` naming the fix, every rung checked, nothing queued, a presence check that never reads or returns a secret — and the dialog shows the refusal under its own heading with the message | `test:tests/test_server_routes_runs.py::test_api_key_auth_with_no_key_is_refused_with_the_fix_and_nothing_queued` · `test:tests/test_server_routes_runs.py::test_present_credentials_are_accepted_and_never_echoed` · `vitest:ui/src/screens/Runs/RunNewDialog.test.tsx::"a submit refused for a builder with no credential shows the refusal and its fix, and nothing is created"` · `route:POST /runs` | met | |
 
 ## Gaps
 - **G-268** — No walkthrough presses this page's "Start run": `support.ts::startRun` opens the dialog from `/repos/:name`, so the `?new=` arrival and the page's own button are unit-tested only · add one 03 or 05 step that arrives at `/runs?new=replay` and queues from here · ui

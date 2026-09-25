@@ -21,6 +21,8 @@ What it does: Pins that a keychain login is ok, that no login and no key is degr
               with no installation and is ok with installations (naming how many can
               deliver); that ``ui`` warns without a build and with an incomplete help bundle
               (an empty chunk counts as missing) and is ok with the eight chunks; and that
+              the ``build`` line fails on a UI bundle built from another commit (and
+              ``crb doctor`` exits 1) and warns on a checkout behind ``origin/main``; and that
               ``crb doctor`` on a migrated store renders every line with ``ok / warn / fail /
               skip`` in text and the ``/health`` vocabulary in JSON, failing on a store
               stamped behind head and on one whose append-only triggers are missing.
@@ -62,6 +64,7 @@ from crb.cli.commands.service import (
     probe_claude_code,
     probe_github_app,
     probe_home,
+    probe_served,
     probe_settings,
     probe_ui,
 )
@@ -242,6 +245,7 @@ DOCTOR_LINES = (
     "intake",
     "worker",
     "ui",
+    "build",
 )
 
 
@@ -499,6 +503,66 @@ class TestUiLine:
         assert r.status == "degraded"
         assert r.data["missing_guides"] == ["SECURITY", "DEPLOYMENT"]
         assert "6/8 guides, missing SECURITY, DEPLOYMENT" in r.detail
+
+
+class TestBuildLine:
+    """P-002 — the stack served code behind ``origin/main`` and a UI bundle built from an
+    older tree. ``crb doctor`` compares the code it runs with the bundle the API would serve
+    and FAILS (exit 1) on a mismatch, and warns when the checkout trails ``origin/main``."""
+
+    A, B = "a" * 40, "b" * 40
+
+    def _stamped(self, tmp_path: Path, commit: str) -> Path:
+        from crb.observability.build_stamp import BUILD_STAMP_FILE
+
+        dist = tmp_path / "dist"
+        dist.mkdir(exist_ok=True)
+        (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+        (dist / BUILD_STAMP_FILE).write_text(json.dumps({"commit": commit}), encoding="utf-8")
+        return dist
+
+    def _commits(self, monkeypatch: pytest.MonkeyPatch, *, behind: int | None = 0) -> None:
+        from crb.observability import build_stamp
+
+        monkeypatch.setattr(build_stamp, "process_commit", lambda: self.A)
+        monkeypatch.setattr(build_stamp, "checkout_commit", lambda root=None: self.A)
+        monkeypatch.setattr(build_stamp, "commits_behind", lambda root=None: behind)
+
+    def test_a_bundle_from_another_commit_fails_and_a_matching_one_is_ok(
+        self, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._commits(monkeypatch)
+        r = probe_served(_dev_settings(home, ui_dist=str(self._stamped(tmp_path, self.B))))
+        assert r.status == "down" and r.detail.startswith("STALE: the UI bundle was built from")
+        r = probe_served(_dev_settings(home, ui_dist=str(self._stamped(tmp_path, self.A))))
+        assert r.status == "ok" and r.data["stale"] is False
+
+    def test_a_checkout_behind_origin_main_warns_with_the_count(
+        self, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._commits(monkeypatch, behind=3)
+        r = probe_served(_dev_settings(home, ui_dist=str(self._stamped(tmp_path, self.A))))
+        assert r.status == "degraded" and r.data["behind"] == 3
+        assert "3 commit(s) behind origin/main as of the last fetch" in r.detail
+
+    def test_crb_doctor_exits_1_on_a_stale_bundle(
+        self,
+        home: Path,
+        tmp_path: Path,
+        fake_cli: Callable[[bool], None],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        fake_cli(True)
+        monkeypatch.setenv("CRB_ENV", "dev")
+        self._commits(monkeypatch)
+        monkeypatch.setenv("CRB_UI_DIST", str(self._stamped(tmp_path, self.B)))
+        home.mkdir()
+        migrate.upgrade(f"sqlite:///{home / 'crb.db'}")
+        code = main(["doctor"])
+        rows = _lines(capsys.readouterr().out)
+        assert code == 1 and rows["build"][0] == "fail"
+        assert "npm --prefix ui run build" in rows["build"][1]
 
 
 class TestDoctorReport:

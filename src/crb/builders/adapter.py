@@ -48,15 +48,17 @@ Navigation
 ----------
 What it is:   The seam between the stdlib orchestrator and the builder registry — rung labels
               ⇄ ``EscalationLadder``, and ``build_fn_for``, the ``BuildFn`` the run calls.
-What it does: Per attempt: resolves the rung, derives the brief (never ``src_files``; nothing
-              test-shaped in blind mode), runs one ``builder.build`` — on the host or against
-              a sealed checkout in a container — writes the redacted transcript to a file,
-              maps the outcome to a ``BuildAttempt`` and discards the source edits of any
-              errored attempt so it can never grade clean-with-error. A sealed attempt whose
-              container kill went UNCONFIRMED (cancel / wall clock; the daemon never reported
-              it stopped) is never silent: the outcome's errors and ``extra`` say so, the
-              attempt's pack notes carry ``kill_confirmed: false``, and ``on_kill_unconfirmed``
-              hands the container to the caller (the worker records it and reaps it).
+What it does: Per attempt: resolves the rung, refuses the attempt before any builder call when the
+              grader's test command cannot start (src/crb/builders/toolcheck.py — ``runner tool
+              missing: <tool>``, nothing spent), derives the brief (never ``src_files``; nothing
+              test-shaped in blind mode), runs one ``builder.build`` — on the host or against a
+              sealed checkout in a container — writes the redacted transcript to a file, maps the
+              outcome to a ``BuildAttempt`` and discards the source edits of any errored attempt so
+              it can never grade clean-with-error. A sealed attempt whose container kill went
+              UNCONFIRMED (cancel / wall clock; the daemon never reported it stopped) is never
+              silent: the outcome's errors and ``extra`` say so, the attempt's pack notes carry
+              ``kill_confirmed: false``, and ``on_kill_unconfirmed`` hands the container to the
+              caller (the worker records it and reaps it).
 How:          ``ladder_from_spec`` → ``rung_index`` → ``build``: ``sighted_test_command``
               (services up, env prefix) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
               ``builder.build`` / ``sealed_build`` (``SealedCheckout`` + ``ContainerSession``
@@ -113,6 +115,7 @@ from crb.builders.container import (
     SessionFactory,
     UnconfirmedKill,
 )
+from crb.builders.toolcheck import runner_tool_missing
 from crb.core.evidence import BuilderRef
 from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.grade import MODE_SIGHTED
@@ -635,6 +638,12 @@ def build_fn_for(
         rung = index.get(rung_label)
         if rung is None:
             return _failed_attempt(rung_label, mode, f"unknown rung {rung_label!r} (not on ladder)")
+        # the grader's own test command must be able to start, or the attempt is decided
+        # before the builder is paid (docs/PREVENTION.md P-004: jest missing, 6 paid rows)
+        missing = runner_tool_missing(runner, executor, ws.root, task.target_tests)
+        if missing:
+            emit(on_event, BUILDER_EVENT_PREFIX + "refused", task=task.task_id, error=missing)
+            return _failed_attempt(rung_label, mode, missing)
         sealed = container is not None and rung.builder in SEALABLE_BUILDERS
         try:
             builder = instantiate(rung)
