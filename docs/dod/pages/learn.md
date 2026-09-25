@@ -8,7 +8,7 @@ children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Learn (what the ledger teaches)
@@ -56,6 +56,12 @@ threshold are the served routing policy's), and never blends a rate across appar
 | learn.accessibility.16 | ACCESSIBILITY | The route is axe-clean (WCAG 2.1 AA) with the three reports rendered, and renders for every persona at 375 and 1280 with the top bar no more than two rows and a hint bubble open | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"every route renders, is captured, and carries About this screen"` | partial | G-916 |
 | learn.explanation.18 | EXPLANATION | No element on the page explains itself only through a browser tooltip | `code:ui/src/screens/Learn/LearnPage.tsx::StrengthenSection` · `vitest:ui/src/screens/Learn/LearnPage.test.tsx::"a strengthening item shows its description as text, not as a hover-only title (G-287)"` · `vitest:ui/src/help/hints-ratchet.test.tsx::"every title= sits in a file the allowlist names, within its count"` | met |  |
 | learn.non-goals.17 | NON-GOALS | The page itself states that it acts on nothing — the About block's last sentence and each report's intro name the person who decides — and the guide it links says why that is deliberate | `hint:about:/learn` · `doc:docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate` · `vitest:ui/src/screens/Learn/LearnPage.test.tsx::"names the three reports in plain phrases and defines their words inline (J-HEL-17)"` | met | |
+| learn.truth.19 | TRUTH | The register card shows each class with its first-attempt occurrences (k of n), the lever and its level, before → after with both n and the bar sentence, and the status with its qualifiers | `absent` | unmet | G-177 |
+| learn.actions.20 | ACTIONS | Each operator act on the register card — switch, revert, register an item — says what it wrote in a status line naming who and which record, and a refused act shows the server's reason | `absent` | unmet | G-178 |
+| learn.explanation.21 | EXPLANATION | Every element of the register card carries a registry hint, and the ratchet renders `/learn` with the register populated, as a viewer and as an operator | `absent` | unmet | G-179 |
+| learn.evidence.22 | EVIDENCE | A tier-1 walkthrough renders the register card on a running stack from real rows and reads one class | `absent` | unmet | G-175 |
+| learn.accessibility.23 | ACCESSIBILITY | The register card is axe-clean (WCAG 2.1 AA) at 375 and 1280 with its table and a class expanded | `absent` | unmet | G-176 |
+| learn.entry-exit.24 | ENTRY-EXIT | A Decisions `prevention` row links to `/learn?repo=&class=`, and the Learn page opens with that class shown | `absent` | unmet | G-186 |
 
 ## Gaps
 - **G-172** — The no-repository body is a bare `Pick a repository` with no action (`LearnPage.tsx:398`), unlike Capability, Routing and Oracle, which link to `/connect` · give the `EmptyState` the same `Connection` action and assert it in `LearnPage.test.tsx` · ui
@@ -66,3 +72,9 @@ threshold are the served routing policy's), and never blends a rate across appar
 - **G-914** — The Instrument nav entry for `/learn` is `role: 'operator'` (`Layout.tsx:121`) although the three routes are viewer-gated and the hint ratchet renders the page as a viewer (`hints-ratchet.instrument.tsx:473-479`), so a governance reader with API access has no path to it · set the entry's role to `viewer`, as `/ledger` already is, and pin it in `Layout.test.tsx` · ui
 - **G-915** — `docs/API.md` lists no `/learn` route and `docs/OPERATOR.md` never mentions the learning loop, so the platform team running the product has no runbook entry for the page or its three reads · add the three rows to API.md §routes with their shapes and `viewer` role, and an OPERATOR section that says when to read each report and what to do with it · docs
 - **G-916** — `/learn` is in no axe sweep: `07-settings-and-a11y.spec.ts` covers the journey screens, Capability, Ledger, Sign-off and Oracle, and the only visit to `/learn` renders the empty state · add `/learn?repo=<primary>` to the instrument axe test after the three tables are visible · ui
+- **G-175** — no walkthrough renders the register card on a running stack · add a `/learn?repo=<primary>` visit after a tick that asserts one register row · ui
+- **G-176** — the register card is in no axe sweep · add `/learn?repo=<primary>` with the register rendered to the instrument axe test at 375 and 1280 · ui
+- **G-177** — the Learn page has no register card: no class, lever, before → after or status is shown · add the card with those columns and pin them in `LearnPage.test.tsx` · ui
+- **G-178** — the Learn page offers no switch, revert or register control, so no operator act can report what it wrote · add the three controls, operator-only, each with a status line · ui
+- **G-179** — no hint explains the register's elements and the ratchet never renders a populated register · add the hint ids and a register fixture to the ratchet · ui
+- **G-186** — no Decisions row links to a bug class on the Learn page · derive a `prevention` row and link it to `/learn?repo=&class=` · ui
