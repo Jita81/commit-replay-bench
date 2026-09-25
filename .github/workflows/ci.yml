@@ -8,6 +8,9 @@
 #   dod       every page/journey/stream + the product carry a definition of done; docs/dod/GAP-ANALYSIS.md current
 #   claims    every quantified sentence on an allowlisted public page carries a permitted tag,
 #             and a [measured] one carries its n, its method and its apparatus version
+#   commit-subjects  pull requests only: every non-merge commit subject on the branch, and
+#             the title a squash merge writes on main, is Conventional Commits, imperative
+#             and at most 72 characters (scripts/check_commit_subject.py)
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
 #   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
@@ -161,6 +164,28 @@ jobs:
       # documentation is ungated and the gap analysis (G-929) says so.
       - name: Every claim on a covered page carries what its tag requires
         run: python scripts/claims_check.py --check
+
+  commit-subjects:
+    name: commit-subjects (Conventional Commits, imperative, at most 72 characters)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the range walks the pull request's own commits
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # The title is passed through the environment, never interpolated into the script:
+      # a pull request title is untrusted input.
+      - name: Every commit subject on the pull request, and its title
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python scripts/check_commit_subject.py --range "$BASE_SHA..$HEAD_SHA" --title "$PR_TITLE" --check
 
   layers:
     name: layers (import-linter)

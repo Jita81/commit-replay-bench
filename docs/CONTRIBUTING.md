@@ -121,6 +121,12 @@ imports (`sqlalchemy`, `openai`, …) are visible to the forbidden contract.
 Conventional Commits: `feat(core): …`, `fix(runners): …`, `docs: …`, `ci: …`, `test: …`,
 `refactor: …`, `chore: …`. Scope is the package or area. Subject in the imperative, ≤ 72
 characters; body explains *why*. Breaking apparatus changes use `!` and reference the ADR.
+CI's `commit-subjects` job enforces the subject rule on every non-merge commit of a pull
+request and on the pull request's title, because a squash merge writes that title as the
+subject on `main` (`scripts/check_commit_subject.py --range BASE..HEAD --title …`; run it
+locally with `--range origin/main..HEAD`). Its imperative check is a heuristic — it refuses
+a subject that starts with an article, a past tense, a gerund or a third-person verb —
+and the script's docstring says what it cannot catch.
 End commit messages with the attribution line required by the session/tooling that
 authored them, when one is in force.
 
