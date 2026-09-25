@@ -1166,6 +1166,7 @@ def preview_signoff(
                 disqualified=cell.n_disqualified,
                 lint=cell.stats.n_lint if cell.stats is not None else 0,
                 lint_evaluated=cell.stats.n_lint_evaluated if cell.stats is not None else 0,
+                api=cell.stats.n_api if cell.stats is not None else 0,
                 outage=cell.n_outage,
             ),
         ),

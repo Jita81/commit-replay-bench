@@ -198,6 +198,7 @@ def split_out(c: CapabilityCell) -> FailureSplitOut:
         disqualified=c.n_disqualified,
         lint=c.stats.n_lint if c.stats is not None else 0,
         lint_evaluated=c.stats.n_lint_evaluated if c.stats is not None else 0,
+        api=c.stats.n_api if c.stats is not None else 0,
     )
 
 
@@ -253,6 +254,7 @@ def cell_out(
         n_disqualified=s.n_disqualified,
         n_lint=s.n_lint,
         n_lint_evaluated=s.n_lint_evaluated,
+        n_api=s.n_api,
         model_n=s.model_n,
         model_point=None if c.model_point is None else round(c.model_point, 4),
         model_ci_low=None if c.model_point is None else round(s.model_ci.low, 4),

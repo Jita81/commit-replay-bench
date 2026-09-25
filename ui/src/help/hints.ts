@@ -64,6 +64,8 @@ export const HINTS = {
     'Attempts where the builder finished and the belts failed it: the target test stayed red, a regression appeared, or no source changed. These count against the builder.',
   'kind.lint':
     'Attempts where the code worked (belts 1 to 4 held) but the repository’s own formatter or linter rejected the changed files (belt 5).',
+  'kind.api':
+    'Attempts where the code worked (belts 1 to 4 held) but it changed the public API of the code it touched in a way the maintainers’ own change did not (belt 6). Only counted where belt 6 was switched on.',
   'kind.budget':
     'Attempts the builder cut short by hitting its own cap on wall clock, turns, tool calls, tokens or cost before it finished. They count in n.',
   'kind.protocol':
@@ -1503,6 +1505,7 @@ export const SHARED_IDS: readonly HintId[] = [
   'belt.repo_lint_clean',
   'kind.builder_red',
   'kind.lint',
+  'kind.api',
   'kind.budget',
   'kind.protocol',
   'kind.harness',
