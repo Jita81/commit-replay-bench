@@ -39,7 +39,17 @@ from crb.server.app import API_PREFIX
 from crb.server.routes.runs import system_trace_id
 from crb.store.models import Event, Run
 from fixtures import pyrepo as pr
-from fixtures.server_seed import ALPHA, BETA, Env, assert_rbac, envelope, login, make_env
+from fixtures.server_seed import (
+    ALPHA,
+    BETA,
+    USERS,
+    Env,
+    assert_rbac,
+    envelope,
+    login,
+    make_env,
+    user_id,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -434,3 +444,104 @@ class TestTasks:
         r = env.client.get("/repos")
         assert r.status_code == 404 or r.headers["content-type"].startswith("text/html")
         assert env.client.get(f"{API_PREFIX}/repos").status_code == 200
+
+
+class TestClonePathConfinement:
+    """D2 (assessment 2026-09-25): a registered ``clone_path`` names a directory on the API
+    host that every later run reads and profiles, so it is confined to ``<home>/repos``. A
+    path outside it is an admin's decision and is evented; an operator — through the API or
+    the MCP write tool, which rides the same route — is refused; a path written under the
+    root that resolves outside it (a symlink escape) is refused for every role."""
+
+    def _events(self, env: Env, name: str) -> list[Event]:
+        with env.factory() as s:
+            return list(
+                s.execute(
+                    select(Event)
+                    .where(Event.trace_id == system_trace_id("repo", name))
+                    .order_by(Event.seq)
+                ).scalars()
+            )
+
+    def test_operator_may_register_a_path_inside_the_repos_root(self, env: Env) -> None:
+        login(env.client, "operator")
+        inside = Path(env.settings.home) / "repos" / "gamma"
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": str(inside)}
+        )
+        assert r.status_code == 201, r.text
+        assert [e.action for e in self._events(env, "gamma")] == ["repo.created"]
+
+    def test_operator_is_refused_a_path_outside_the_repos_root(self, env: Env) -> None:
+        login(env.client, "operator")
+        for outside in ("/etc", "/srv/gamma", str(Path(env.settings.home) / "secrets")):
+            r = env.post(
+                "/repos", json={"name": "gamma", "language": "python", "clone_path": outside}
+            )
+            assert r.status_code == 403, (outside, r.text)
+            assert envelope(r)["code"] == "clone_path_outside_home"
+        assert env.get("/repos/gamma").status_code == 404
+
+    def test_dot_dot_out_of_the_root_is_outside(self, env: Env) -> None:
+        login(env.client, "operator")
+        sneaky = str(Path(env.settings.home) / "repos" / ".." / ".." / "etc")
+        r = env.post("/repos", json={"name": "gamma", "language": "python", "clone_path": sneaky})
+        assert r.status_code == 403 and envelope(r)["code"] == "clone_path_outside_home"
+
+    def test_relative_path_is_refused(self, env: Env) -> None:
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": "repos/gamma"}
+        )
+        assert r.status_code == 422 and envelope(r)["code"] == "clone_path_not_absolute"
+
+    def test_symlink_escape_is_refused_even_for_an_admin(self, env: Env, tmp_path: Path) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        root = Path(env.settings.home) / "repos"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "link").symlink_to(elsewhere, target_is_directory=True)
+        for role in ("operator", "admin"):
+            login(env.client, role)
+            r = env.post(
+                "/repos",
+                json={"name": "gamma", "language": "python", "clone_path": str(root / "link")},
+            )
+            assert r.status_code == 422, (role, r.text)
+            assert envelope(r)["code"] == "clone_path_escapes"
+        assert env.get("/repos/gamma").status_code == 404
+
+    def test_admin_may_register_outside_and_it_is_evented(self, env: Env) -> None:
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"}
+        )
+        assert r.status_code == 201, r.text
+        events = self._events(env, "gamma")
+        assert [e.action for e in events] == ["repo.created", "repo.clone_path.outside_home"]
+        payload = events[-1].payload_json
+        assert payload["path"] == "/srv/gamma"
+        assert payload["clone_root"] == str((Path(env.settings.home) / "repos").resolve())
+        assert events[-1].actor == user_id(USERS["admin"])
+
+    def test_update_is_confined_the_same_way(self, env: Env) -> None:
+        login(env.client, "operator")
+        r = env.put(f"/repos/{ALPHA}", json={"clone_path": "/etc"})
+        assert r.status_code == 403 and envelope(r)["code"] == "clone_path_outside_home"
+        inside = str(Path(env.settings.home) / "repos" / ALPHA)
+        r = env.put(f"/repos/{ALPHA}", json={"clone_path": inside})
+        assert r.status_code == 200, r.text
+        assert r.json()["clone_path"] == inside
+
+    def test_an_unchanged_legacy_path_does_not_block_other_edits(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        # a repository an admin registered outside the root stays editable by an operator,
+        # as long as the edit does not move the path
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"}
+        )
+        assert r.status_code == 201, r.text
+        login(env.client, "operator")
+        r = env.put("/repos/gamma", json={"probe": "tests/"})
+        assert r.status_code == 200, r.text
+        r = env.put("/repos/gamma", json={"clone_path": "/srv/other"})
+        assert r.status_code == 403 and envelope(r)["code"] == "clone_path_outside_home"
