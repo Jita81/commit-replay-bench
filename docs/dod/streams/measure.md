@@ -8,7 +8,7 @@ children: [dod.journey.measure, dod.journey.read-the-map-and-decide]
 persons: [operator, viewer, approver, admin]
 owner: server
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Measure — mine / replay / blind → ledger → capability map & routing
@@ -57,6 +57,7 @@ UX or source-only change.
 | measure.operations.24 | OPERATIONS | One per-repository surface switches the format step, the finish gate and belt 6 — `RepoConfig.checks`, written through `PUT /repos/{name}` onto the repository's audit trail and overridden per run — and every row records each switch, where it came from and the configuration version | `route:PUT /repos/{name}` · `code:src/crb/core/checks.py::RepoChecks` · `test:tests/test_checks.py::test_put_repo_checks_is_stored_validated_and_on_the_audit_trail` · `test:tests/test_checks.py::test_run_beats_repository_beats_default_and_names_the_source` · `test:tests/test_worker.py::test_repository_checks_and_run_overrides_reach_the_row_and_belt_six` · `doc:docs/OPERATOR.md#21b-clean-means-working--the-checks-switchboard` | met | |
 | measure.truth.25 | TRUTH | For every repository the stack measures, each check its CI runs on a pull request is either derived by the runner or declared in its configuration, and the audit that compares the two names nothing uncovered | `test:tests/test_runner_audit.py::test_the_audit_names_a_tool_the_evidence_runs_and_nothing_derives` · `test:tests/test_runner_audit.py::test_nhs_lint_inherits_max_warnings_and_judges_stylesheets` · `test:tests/test_runner_audit.py::test_a_host_ruff_outside_the_repositorys_pin_is_refused_never_a_verdict` · `doc:docs/reviews/2026-09-25-runner-commands-audit.md#the-findings` | partial | G-571 |
 | measure.measure.26 | MEASURE | The paired blind campaign shows whether the format step, the finish gate and belt 6 each raise working changes per pound, and each becomes a default only when it does | `absent` | unmet | G-572 |
+| measure.truth.27 | TRUTH | A replay attempt whose runner's test command cannot start on the host (a runner tool missing, such as `jest`) is refused before any builder call with `runner tool missing: <tool>` and the fix — an instrument (`harness`) row with nothing spent, never a paid attempt graded afterwards | `test:tests/test_builders_toolcheck.py::test_a_missing_runner_tool_refuses_the_attempt_before_any_builder_call` · `test:tests/test_builders_toolcheck.py::test_jest_missing_from_the_repository_is_named` · `code:src/crb/builders/toolcheck.py::runner_tool_missing` | met | |
 
 ## Gaps
 - **G-564** — the "Delivery halted" stop-condition banner is rendered by no test: no walkthrough produces a false-Q1 row and no unit test asserts the banner · assert it in a unit test with a stubbed health probe reporting `false_q1 > 0` · ui

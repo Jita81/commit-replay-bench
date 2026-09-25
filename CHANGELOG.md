@@ -104,6 +104,31 @@ better the more data goes through it. This adds the number that says whether it 
 - **VALUE heads the definition of done.** A new product category, first in `product.md`, whose
   open criteria outrank every other in the order of work; the checker refuses a product
   artefact where it is not first.
+### 2026-09-25 — our own bugs are closed by prevention, not by a fix alone
+
+The product's loop now has one rule — learn from a bug, then change the process or the context
+so its class cannot recur — and we build the product by the same rule (`docs/dod/STANDARD.md`
+§7). `docs/PREVENTION.md` is our own bug register: each bug's class, when it bit us, and the
+artefact that FAILS if the class comes back; `scripts/dod_check.py` refuses a row closed by
+prose or by a reference that cannot fail, and the new pull-request template asks for the row.
+Each artefact below was proved by breaking it and watching its test fail.
+
+- **A CI job name can no longer outgrow a required check** (P-001):
+  `tests/test_ci_job_names.py` renders every job name in every workflow, matrix values
+  expanded, and fails at 100 characters.
+- **The stack says when it serves stale code** (P-002): `/health` serves the commit the server
+  was started from, the checkout's and the UI bundle's (`ui/vite.config.ts` now writes
+  `build-stamp.json`; an image carries `CRB_SOURCE_COMMIT`) as `served` with `stale`, and a
+  degraded `build` probe; `crb doctor` fails when the bundle is not the code and warns when the
+  checkout trails `origin/main`.
+- **A run that can only fail is refused at submit** (P-003): `POST /runs` answers 422
+  `builder_credential_missing` with the fix when a `claude_code` rung's auth has no credential
+  — a presence check that never reads a secret — and the Runs dialog shows it.
+- **A missing runner tool is caught before the builder is paid** (P-004): an attempt whose
+  test command cannot start (`jest` missing) is refused with `runner tool missing: <tool>`
+  before any builder call.
+- Two bugs this wave made in its own work are registered with their artefacts (P-011, a
+  namespace package's `__file__`; P-012, header lines over 100 columns — a ratchet).
 
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 

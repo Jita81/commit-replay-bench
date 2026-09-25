@@ -8,7 +8,9 @@ What it does: Pins the list shape and order, filters and pagination, the queue l
               present, counts / progress / cost (derived when the worker wrote none), 404; create
               RBAC, the enqueued fields, blind kind implies blind mode, non-build kinds need no
               builder, 422 validation, unknown repo 404 and queue unavailable 503, the
-              ``JobQueue`` class adapter; the budget ladder (forwarded only as set, object rungs
+              ``JobQueue`` class adapter; a ``claude_code`` auth with no credential refused
+              at submit (422 ``builder_credential_missing``, presence only, nothing queued —
+              docs/PREVENTION.md P-003); the budget ladder (forwarded only as set, object rungs
               stored as sent, mixed ladders, bounds and rung shape 422, repeated rungs refused
               unless the budget differs, ``labels.budget_tier`` on task rows); cancel RBAC /
               queue call / terminal 409 / 404; the task table and error rows; the paginated,
@@ -66,6 +68,10 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
         if key.startswith("CRB_"):
             monkeypatch.delenv(key, raising=False)
+    # POST /runs refuses a claude_code run whose auth has no credential (P-003). These
+    # cases are about everything else, so the worker's key is PRESENT — a placeholder, never
+    # a real key; TestCredentialPresence removes it on purpose.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-placeholder-not-a-key")
 
 
 @pytest.fixture
@@ -532,6 +538,73 @@ class TestCreate:
         r = env.post(f"/runs/{seen[0].id}/cancel")
         assert r.status_code == 200 and r.json()["cancel_requested"] is True
         assert env.get("/runs?limit=2").json()["total"] == 9
+
+
+# --- a builder auth with no credential is refused at submit (P-003) -----------------------
+
+
+class TestCredentialPresence:
+    """Run 8d9c5e55 was queued for ``claude_code`` with no ``builder_config.auth``: the
+    served default ``api_key`` met a deployment with no key, and all nine attempts failed at
+    $0 in 5.4 s. ``POST /runs`` now refuses that at submit — a PRESENCE check only (the
+    variable is set, the token file exists): no secret is read, returned or logged."""
+
+    def _post(self, env: Env, **over: Any) -> Any:
+        login(env.client, "operator")
+        return env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, **over})
+
+    def test_api_key_auth_with_no_key_is_refused_with_the_fix_and_nothing_queued(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        r = self._post(env)
+        assert r.status_code == 422, r.text
+        err = envelope(r)
+        assert err["code"] == "builder_credential_missing"
+        assert "ANTHROPIC_API_KEY" in err["message"] and '{"auth": "cli"}' in err["message"]
+        assert err["detail"] == {"builder": "claude_code", "auth": "api_key"}
+        assert jobs.enqueued == []  # refused at submit: nothing reached the queue
+
+    def test_a_rung_further_up_the_ladder_is_checked_too(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        r = self._post(
+            env,
+            builder="openai_agent",
+            model="gpt-oss-120b",
+            ladder=["r1", "claude_code:claude-opus-5"],
+        )
+        assert r.status_code == 422 and envelope(r)["code"] == "builder_credential_missing"
+        assert jobs.enqueued == []
+
+    def test_present_credentials_are_accepted_and_never_echoed(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        r = self._post(env)  # the placeholder key is present
+        assert r.status_code == 201 and "sk-ant-test-placeholder" not in r.text
+        # cli auth: a stored token file is enough — presence, not content
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))  # no `claude` on PATH either
+        monkeypatch.setenv("CRB_SECRETS_DIR", str(tmp_path / "secrets"))
+        r = self._post(env, builder_config={"auth": "cli"})
+        assert r.status_code == 422 and envelope(r)["detail"]["auth"] == "cli"
+        assert "claude setup-token" in envelope(r)["message"]
+        (tmp_path / "secrets").mkdir(mode=0o700)
+        token = tmp_path / "secrets" / "claude_code_oauth_token"
+        token.write_text("x" * 80, encoding="utf-8")
+        token.chmod(0o600)
+        r = self._post(env, builder_config={"auth": "cli"})
+        assert r.status_code == 201, r.text
+        assert "x" * 20 not in r.text
+
+    def test_a_build_free_kind_is_never_checked(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        login(env.client, "operator")
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "mine"})
+        assert r.status_code == 201, r.text
 
 
 # --- budget + object rungs (C8) ------------------------------------------------------------

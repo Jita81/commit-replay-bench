@@ -34,6 +34,10 @@ ARG DOCKER_CLI_IMAGE=docker:28.4.0-cli
 # Stage 1 — UI build (tolerant: the UI directory may not exist yet)
 # ---------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS ui-builder
+# The commit the image is built from (the build context carries no .git): ui/vite.config.ts
+# writes it into ui/dist/build-stamp.json, and the runtime stage exports it so /health and
+# `crb doctor` can compare the served code with the served bundle (docs/PREVENTION.md P-002).
+ARG CRB_SOURCE_COMMIT=""
 WORKDIR /src
 # The whole (dockerignored) context is copied because `COPY ui/ …` would fail the build when
 # ui/ is absent; the runtime stage copies only ui/dist out of this stage.
@@ -109,13 +113,16 @@ RUN set -eu; \
     chown "${CRB_UID}:${CRB_GID}" /srv/crb; \
     chmod 0750 /srv/crb
 
+# Declared here, after every RUN, so a new commit never invalidates the dependency layers.
+ARG CRB_SOURCE_COMMIT=""
 ENV PATH="/app/.venv/bin:${PATH}" \
     HOME=/home/crb \
     CRB_HOME=/srv/crb \
     CRB_UI_DIST=/app/ui/dist \
     CRB_BIND_HOST=0.0.0.0 \
     CRB_BIND_PORT=8000 \
-    CRB_LOG_FORMAT=json
+    CRB_LOG_FORMAT=json \
+    CRB_SOURCE_COMMIT=${CRB_SOURCE_COMMIT}
 
 USER ${CRB_UID}:${CRB_GID}
 EXPOSE 8000

@@ -8,7 +8,7 @@ children: [dod.stream.run-the-platform, dod.stream.connect-and-prove, dod.stream
 persons: [viewer, operator, approver, admin]
 owner: docs
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Commit Replay Bench
@@ -67,6 +67,7 @@ and never moves code or identifiers between tenants — only abstract cells.
 | product.posture.23 | POSTURE | Every limitation SECURITY §5 declines to claim is tagged, and no tagged gap hides a number the product shows: in particular, the numbers a deployment reads were produced under the posture that deployment runs | `doc:docs/SECURITY.md#5-what-this-document-does-not-claim` · `adr:0012` · `code:src/crb/builders/container.py::"SEALABLE_BUILDERS"` | partial | F42 |
 | product.support.24 | SUPPORT | The guides a person needs are inside the deployment, not on the internet: eight guides are bundled with the UI at build time, every `readMore` anchor the product offers into them names a bundled guide and a real heading, and `crb doctor` names any guide missing from a build | `vitest:ui/src/help/docs.test.ts::"bundles exactly the eight guides and no ADR"` · `vitest:ui/src/help/help.test.ts::"every readMore anchor (screens and terms) names a bundled guide and a real heading"` · `code:src/crb/cli/commands/service.py::probe_ui` · `test:tests/test_cli_doctor.py::test_incomplete_help_bundle_names_the_missing_guides` · `test:tests/test_cli_doctor.py::test_an_empty_or_non_file_chunk_is_a_missing_guide` | met | |
 | product.extensibility.25 | EXTENSIBILITY | Each seam DL-044 names — builders, runners, belts, controls, review probes, the readiness catalogue, policies, learn verbs, and the trackers work arrives from — is a registry with a written contract, a way for a using team to add one, and a test that exercises an addition | `dl:DL-044` · `code:src/crb/builders/__init__.py::builder_names` · `code:src/crb/core/runners/__init__.py::get_runner` · `code:src/crb/factory/readiness.py::slots_for` · `doc:docs/CONTRIBUTING.md#how-to-add-a-builder-p3` · `doc:docs/CONTRIBUTING.md#how-to-add-a-runner` · `test:tests/test_builders_base.py::test_registry_names_and_unknown` · `test:tests/test_builders_fixture_gold.py::test_registered_with_the_switch_and_identity_is_forced` · `adr:0011` | partial | F21 |
+| product.evidence.26 | EVIDENCE | Every bug we hit building the product is a row in `docs/PREVENTION.md` with its class, its first-seen evidence, its prevention level and the artefact that fails if the class recurs (or `pending` with a gap and an owner); the `dod` check refuses a row closed by prose or by an artefact that cannot fail, and the pull-request template asks for the row | `test:tests/test_dod_check.py::test_the_prevention_register_refuses_an_entry_without_a_working_artefact` · `test:tests/test_dod_check.py::test_the_register_must_exist_and_its_counts_reach_the_gap_analysis` · `ci:dod` · `doc:docs/dod/STANDARD.md#7-a-defect-is-closed-only-with-the-artefact-that-fails-if-its-class-recurs` | met | |
 
 ## Gaps
 - **G-650** — the learning curve's register is a stub that classes rows by failure kind and closes nothing, so the share of classes closed and the share removed by process are always nil · wire the prevention loop's register behind `crb.core.value.default_register` and pin its statuses in the value tests · server

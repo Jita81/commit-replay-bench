@@ -130,8 +130,9 @@ jobs:
         run: python scripts/code_map.py --check
 
   # GitHub truncates a check-run name at 100 characters, and branch protection matches the
-  # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Keep
-  # every `name:` in this file under 100 characters.
+  # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Every
+  # job name in every workflow stays under 100 characters: tests/test_ci_job_names.py fails
+  # the `test` job otherwise (docs/PREVENTION.md P-001).
   dod:
     name: dod (every route, journey and stream has its definition of done; evidence resolves)
     runs-on: ubuntu-latest
@@ -462,6 +463,8 @@ jobs:
           push: false
           load: true
           tags: crb:ci
+          # the served-commit stamp (src/crb/observability/build_stamp.py): the context has no .git
+          build-args: CRB_SOURCE_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true
       - name: Smoke the image — non-root, read-only root, migrate on SQLite, UI + tools present

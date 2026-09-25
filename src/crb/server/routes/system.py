@@ -40,6 +40,13 @@ store-level checks:
   is the intended posture, not a fault, and must not fail the API's health. The
   role is read from ``CRB_ROLE`` (:func:`process_role`; ``api`` | ``worker`` |
   ``all``, default ``all`` = one process does both, so everything is probed).
+* ``build``       — the served commits agree (:mod:`crb.observability.build_stamp`): the
+  commit this process was started from, the checkout's commit now and the commit the
+  served UI bundle was built from. Any disagreement — or a served bundle with no stamp —
+  is ``degraded`` (never ``down``: stale code still serves) with the fix in the sentence,
+  and the body's top-level ``served`` carries the three commits and ``stale``
+  (docs/PREVENTION.md P-002: the stack once served code behind ``origin/main`` and a UI
+  built from an older tree, and nothing said so).
 
 **A probe whose read raises never serves the exception.** Every read — the five store
 probes here and the observability probes — runs under :func:`probes.run_probe`: the
@@ -65,7 +72,7 @@ What it is:   The ``/health``, ``/health/live``, ``/metrics`` and ``/version`` r
               unauthenticated operational surface.
 What it does: Readiness aggregates the store probes (db, migrations at head, append-only
               triggers proven live, ledger false-Q1 = 0, worker check-ins from the ``workers``
-              table) with the
+              table) and the served-commit ``build`` probe (``served`` + ``stale``) with the
               observability probes
               (sandbox — skipped for the ``api`` role — toolchains, builders) and answers
               503 when any is ``down``; a read that raises is ``down`` with the fixed
@@ -83,7 +90,8 @@ Layer:        server — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate)
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
-              ``failure_detail`` and ``aggregate``),
+              ``failure_detail`` and ``aggregate``), src/crb/observability/build_stamp.py
+              (the ``build`` probe and the ``served`` block),
               src/crb/store/migrate.py (``head_status_on`` — the one head check),
               src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``
               and ``probe_worker``),
@@ -121,7 +129,7 @@ from crb.core.routing import POLICY_VERSION
 from crb.core.secrets_file import SecretsError
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
-from crb.observability import metrics, probes
+from crb.observability import build_stamp, metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
@@ -640,6 +648,18 @@ def probe_intake(
     return probes.run_probe("intake", _read, request_id=request_id)
 
 
+def probe_served(settings: Settings, *, request_id: str = "") -> ProbeResult:
+    """``build``: the commit this process runs, the checkout's and the served UI bundle's
+    agree (``degraded`` when not — see :func:`crb.observability.build_stamp.probe_build`)."""
+
+    def _read() -> ProbeResult:
+        from crb.server.app import resolve_ui_dist  # noqa: PLC0415 — the app imports this module
+
+        return build_stamp.probe_build(resolve_ui_dist(settings))
+
+    return probes.run_probe("build", _read, request_id=request_id)
+
+
 def _stamp(out: dict[str, Any], role: str) -> dict[str, Any]:
     """Add version, apparatus, role and time to an aggregated probe result."""
     out["version"] = __version__
@@ -674,8 +694,13 @@ def collect_health(
         probes.run_probe("builders", probes.probe_builders, request_id=rid),
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
         probe_intake(factory, settings, request_id=rid),
+        probe_served(settings, request_id=rid),
     ]
-    return _stamp(probes.aggregate(results), role)
+    out = _stamp(probes.aggregate(results), role)
+    # the served commits and `stale` at the top level, so a reader need not find the probe
+    # (``{}`` when the read itself failed — the probe then says so with the request id)
+    out["served"] = next((p["data"] for p in out["probes"] if p["name"] == "build"), {})
+    return out
 
 
 def collect_liveness(

@@ -38,7 +38,10 @@ while the `users` table is empty), then configure OIDC and set
 buildx plugin (some Homebrew / colima set-ups) `docker build` falls back to the legacy
 builder and fails at the first `RUN --mount` — install `docker-buildx` and run
 `docker buildx build --load -f deploy/Dockerfile -t crb:local .` instead. Most
-installations should not build at all: use the released image (§1.1).
+installations should not build at all: use the released image (§1.1). A local build should pass
+`--build-arg CRB_SOURCE_COMMIT=$(git rev-parse HEAD)`: the build context carries no `.git`, and
+without the commit `/health`'s `build` probe cannot say whether the image serves the code and
+the UI it was built from (it reads `skipped`; CI and the release workflow pass it).
 
 ## 1.1 Use the released image instead of building
 
