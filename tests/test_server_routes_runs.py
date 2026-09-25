@@ -576,6 +576,24 @@ class TestBudgetLadder:
         assert r.status_code == 201 and "budget" not in jobs.enqueued[-1].params_json
         assert r.json()["budget"] == {}
 
+    def test_spend_switches_are_stored_only_when_set_and_validated(
+        self, env: Env, jobs: FakeJobs
+    ) -> None:
+        """Stream K: ``budget_profile`` (opt-in) and ``escalation`` reach the worker as
+        ``params``; absent = the repository's setting, else the default."""
+        login(env.client, "operator")
+        body = {"repo": ALPHA, "kind": "blind", **SONNET}
+        r = env.post("/runs", json={**body, "budget_profile": "calibrated", "escalation": "always"})
+        assert r.status_code == 201, r.text
+        params = jobs.enqueued[-1].params_json
+        assert params["budget_profile"] == "calibrated" and params["escalation"] == "always"
+        r = env.post("/runs", json=body)
+        assert r.status_code == 201
+        assert {"budget_profile", "escalation"}.isdisjoint(jobs.enqueued[-1].params_json)
+        for bad in ({"budget_profile": "generous"}, {"escalation": "sometimes"}):
+            r = env.post("/runs", json={**body, **bad})
+            assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
+
     def test_object_rungs_stored_as_sent_and_echoed(self, env: Env, jobs: FakeJobs) -> None:
         """The blind budget sweep: one model, 25 → 50 → 100 tool calls, one attempt per
         rung until clean. ``ladder_json`` is the declaration; the response echoes it."""

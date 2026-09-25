@@ -238,10 +238,14 @@ class BootstrapAdmin(BaseModel):
 
 
 class RetentionSettings(BaseModel):
-    """Zero-raw-retention defaults (ADR-0006); only transcripts have a knob today."""
+    """Raw-retention defaults (ADR-0006 and its 2026-09-25 amendment)."""
 
     #: Days to keep builder transcripts referenced from evidence packs. 0 = keep none (default).
     transcripts_days: int = Field(default=0, ge=0)
+    #: Keep every graded attempt's patch — redacted, capped at 1 MiB, content-addressed under
+    #: ``<home>/evidence/patches`` and anchored by its evidence pack (crb.core.patches) — for
+    #: as long as its row. ``false`` for a deployment that must keep no code.
+    patches: bool = True
 
 
 class SandboxSettings(BaseModel):
@@ -664,7 +668,10 @@ class Settings(BaseSettings):
             },
             "cors_origins": list(self.cors_origins),
             "trusted_proxies": list(self.trusted_proxies),
-            "retention": {"transcripts_days": self.retention.transcripts_days},
+            "retention": {
+                "transcripts_days": self.retention.transcripts_days,
+                "patches": self.retention.patches,
+            },
             "sandbox": {"executor": self.sandbox.executor, "image": self.sandbox.image},
             "builder": self.builder.redacted(),
             "factory": self.factory.redacted(),

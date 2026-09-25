@@ -8,6 +8,28 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — keep what we make, stop paying for nothing (value programme, stream K)
+
+- **Every graded attempt keeps its patch** (`crb.core.patches`, ADR-0006 amended): the
+  grader's own text, redacted, capped at 1 MiB, content-addressed under
+  `CRB_HOME/evidence/patches/` and named in the evidence pack; `GET /grades/{row_hash}/patch`
+  serves it with no retained worktree. The 2026-09-25 export had 0 of 190 clean patches
+  retrievable [measured — n = 618 exported rows, apparatus 2.0–2.2, method: each clean row's
+  retention reason]. `CRB_RETENTION__PATCHES=false` keeps none.
+- **A review's mergeable answer must agree with its words**: both review ledgers refuse
+  `mergeable_contradicts_statement` at append; `POST /reviews/corrections/mergeable` (admin)
+  appends a correction for a stored contradiction — the two found are never edited.
+- **Escalation stops where it does not pay** (default `escalation: measured`): a failed
+  attempt climbs only when that rung's earlier escalations in the cell came back clean at
+  least 1 in 10 times (n ≥ 10); the rule is on the row; `always` per run or per repository. On the
+  export, escalated retries returned 2 clean of 40 for $20.70 [measured — n = 40 valid r2/r3
+  rows, apparatus 2.0–2.2, method: the product's failure rule, `scripts/spend_from_export.py`].
+- **Opt-in calibrated budget** (`budget_profile: calibrated`, per run or per repository):
+  caps from the cell's clean completions (p90 × 1.5, floor the run's caps, ceiling twice
+  them, n ≥ 8), recorded on the row. Off until a paired comparison measures it.
+- `scripts/spend_from_export.py` recomputes the budget-stop and escalation numbers from a
+  ledger export with the product's own failure rule.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

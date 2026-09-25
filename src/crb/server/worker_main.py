@@ -77,7 +77,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from crb.core.execution import DockerSettings, SandboxUnavailable
 from crb.observability import metrics
 from crb.observability.logging import configure_logging
-from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
+from crb.server.settings import (
+    FactorySettings,
+    GitHubAppSettings,
+    IntakeSettings,
+    RetentionSettings,
+)
 from crb.server.worker import Worker, WorkerSettings
 from crb.store.jobs import RUN_KINDS
 
@@ -211,6 +216,7 @@ def settings_from_args(
         metrics_enabled=shared.metrics_enabled,
         metrics_host=host,
         metrics_port=int(port),
+        store_patches=shared.retention.patches,
     )
 
 
@@ -241,6 +247,9 @@ class _SharedWithApi(BaseSettings):
     #: on its HTTP port).
     metrics_host: str = DEFAULT_METRICS_HOST
     metrics_port: int = DEFAULT_METRICS_PORT
+    #: ``CRB_RETENTION__*`` — the worker reads ``patches`` (keep every graded attempt's
+    #: patch; crb.core.patches), the same block the API's settings carry.
+    retention: RetentionSettings = RetentionSettings()
 
 
 def _shared_settings(env: dict[str, str] | None = None) -> _SharedWithApi:
