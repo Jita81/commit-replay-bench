@@ -49,6 +49,7 @@ from crb.core.ledger import (
 )
 from crb.core.spec import TaskSpec
 from crb.factory.backlog import Backlog
+from fixtures.posture import posture_row
 
 Run = Callable[[Sequence[str]], tuple[int, str, str]]
 
@@ -90,7 +91,7 @@ def _row(**kw: Any) -> GradeRow:
     base.update(kw)
     # the belt set is what the stamped apparatus recorded (ledger invariant, review finding 4)
     base.setdefault("belt_set", expected_belt_sets(base["apparatus_version"], "measured")[0])
-    return GradeRow(**base)
+    return posture_row(**base)
 
 
 def _protocol(err: str, **kw: Any) -> GradeRow:

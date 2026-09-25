@@ -93,6 +93,7 @@ from crb.core.run import RunSpec, run
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.workspace import HARNESS_SYMLINK, Workspace, sha256_bytes
 from fixtures import pyrepo as pr
+from fixtures.posture import witnessed_context_for
 
 
 def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -703,6 +704,13 @@ def _spec(
         ledger=ledger,
         evidence_dir=tmp_path / "evidence",
         ladder=adapter.ladder_labels(ladder),
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=PytestRunner(pyrepo.config),
+            executor=LocalExecutor(),
+            scratch=tmp_path / "scratch",
+        ),
     )
     return spec, ledger
 

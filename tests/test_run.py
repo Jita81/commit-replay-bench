@@ -27,6 +27,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from crb.core.evidence import BuilderRef
 from crb.core.execution import LocalExecutor
 from crb.core.ledger import JsonlLedger, verify_chain
@@ -35,6 +37,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.posture import witnessed_context_for
 
 _POISON = 'import calc as _m\nexec("def subtract(a, b):\\n    return a - b\\n", _m.__dict__)\n'
 
@@ -49,6 +52,9 @@ def _spec(pyrepo: pr.PyRepo, runner: PytestRunner, executor: LocalExecutor, tmp:
         ledger=JsonlLedger(tmp / "ledger.jsonl"),
         evidence_dir=tmp / "evidence",
         ladder=("r1", "r2"),
+        context_for=witnessed_context_for(
+            pyrepo.repo, pyrepo.config, runner=runner, executor=executor, scratch=tmp / "scratch"
+        ),
     )
 
 
@@ -131,3 +137,76 @@ def test_run_task_honest_gold_is_clean_under_the_pre_flight(
     assert outcome.clean is True and outcome.attempts == 1
     (row,) = outcome.rows
     assert row.clean and row.evidence_pack_hash and row.failure_kind == ""
+
+
+# ---------------------------------------------------------------------------
+# ADR-0019: the context before the builder; the environment stops the ladder
+# ---------------------------------------------------------------------------
+
+
+def test_unqualified_task_never_reaches_build_fn(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from crb.core.posture import PostureMismatch
+    from crb.core.run import run
+
+    calls: list[str] = []
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        calls.append(task.task_id)
+        return _attempt()
+
+    def unqualified(task: TaskSpec) -> Any:
+        raise PostureMismatch(f"{task.task_id[:10]} is unqualified in pst_x (QUAL_NOT_RED)")
+
+    spec = replace(_spec(pyrepo, runner, executor, tmp_path), context_for=unqualified)
+    summary = run(spec, pyrepo.repo, [feat_task], build_fn)
+    assert calls == []  # the builder was never called: nothing was spent
+    assert summary.rows == 0 and "QUAL_NOT_RED" in summary.stopped_reason
+    assert list(spec.ledger.rows()) == []
+    with pytest.raises(ValueError, match="context_for"):
+        replace(spec, context_for=None)
+
+
+def test_an_environment_row_stops_the_ladder_and_reports_it(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from crb.core.grade import BLAME_GOLD_GREEN, ControlRun
+    from crb.core.ledger import GradeRow
+    from fixtures.posture import context
+
+    class _RedGold:
+        def control(self, scope: Any, *, why: str, allow_failing: Any = None) -> ControlRun:
+            return ControlRun(
+                BLAME_GOLD_GREEN, tuple(scope), False, rc=1, tail="network is unreachable"
+            )
+
+    reported: list[tuple[str, GradeRow]] = []
+    builds: list[str] = []
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        builds.append(rung)
+        return _attempt()  # does nothing: the target stays red
+
+    spec = replace(
+        _spec(pyrepo, runner, executor, tmp_path),
+        context_for=lambda t: context(t, executor, witness=_RedGold())[1],
+        on_environment=lambda t, row: reported.append((t.task_id, row)),
+    )
+    outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+    assert builds == ["r1"]  # the ladder has r1 and r2: the second rung was never paid for
+    (row,) = outcome.rows
+    assert row.error.startswith("environment: gold control red") and row.failure_kind == "harness"
+    assert reported == [(feat_task.task_id, row)]

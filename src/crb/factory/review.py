@@ -299,9 +299,13 @@ class BeltRerunProbe:
         try:
             ws.overlay_tests([ctx.build.oracle.test_path])
             replay_edits(ctx.build, ws)
+            gctx = ctx.build.grade_context
+            if gctx is None:
+                raise ValueError("the build carries no grade context (ADR-0019)")
             result = grade(
                 ws,
                 ctx.build.task,
+                ctx=gctx,
                 config=ctx.config,
                 runner=ctx.runner,
                 executor=ctx.executor,

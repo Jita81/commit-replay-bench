@@ -193,6 +193,15 @@ export function ResultsPage() {
                 data-testid="tile-oracle-strength"
               />
               <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />
+              <StatTile
+                label="Posture"
+                value={map.data.summary.posture_class || '—'}
+                n={map.data.summary.n_total}
+                apparatus={`every rate here was graded in this posture · ${map.data.summary.unqualified_posture ?? 0} unqualified-posture rows excluded`}
+                hint="stat.results.posture"
+                footer={map.data.summary.excluded_posture_divergent ? `${map.data.summary.excluded_posture_divergent} rows left out: their tests differ between postures` : undefined}
+                data-testid="tile-posture"
+              />
             </div>
           </Card>
 

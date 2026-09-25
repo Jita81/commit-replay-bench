@@ -89,7 +89,10 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:  # a type only: crb.core.deps imports nothing from here
+    from crb.core.deps import BundleMount
 
 _LOG = logging.getLogger(__name__)
 
@@ -157,6 +160,11 @@ class ExecResult:
     #: ``None`` — no kill was issued (or not a container).
     kill_confirmed: bool | None = None
     container: str = ""
+    #: Non-empty when the executor could not prepare the ground the command runs on
+    #: (ADR-0019: the throwaway copy of the tree failed — ``tree_copy_failed: …``). The
+    #: command's own exit code then says nothing about the tests; a runner carries this
+    #: into ``TestRun.env_error`` and the grader records an environment failure.
+    env_error: str = ""
 
     @property
     def ok(self) -> bool:
@@ -208,10 +216,15 @@ class Command:
     writable_paths: tuple[str, ...] = ()
     network: bool = False
     exec_tmp: bool = False
+    #: Sealed dependency sets bound read-only into the container (ADR-0019 §6). Only the
+    #: dependency store constructs a :class:`~crb.core.deps.BundleMount`; a runner copies
+    #: them here from the binding it was given (``BaseRunner.run_for(deps=…)``).
+    ro_mounts: tuple[BundleMount, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.argv:
             raise ValueError("argv must not be empty")
+        object.__setattr__(self, "ro_mounts", tuple(self.ro_mounts))
         object.__setattr__(self, "argv", tuple(str(a) for a in self.argv))
         object.__setattr__(self, "root", Path(self.root).resolve())
         object.__setattr__(self, "env", dict(self.env))
@@ -233,6 +246,11 @@ class Executor(Protocol):
 
     def describe(self) -> dict[str, Any]:
         """Apparatus-stamp description (no secrets)."""
+        ...
+
+    def posture_facts(self) -> dict[str, str]:
+        """The facts about WHERE a command runs that can change a test's outcome — the
+        keys :func:`crb.core.posture.resolve_posture` hashes (ADR-0019 §1)."""
         ...
 
 
@@ -277,6 +295,10 @@ class LocalExecutor:
     def describe(self) -> dict[str, Any]:
         return {"executor": self.name}
 
+    def posture_facts(self) -> dict[str, str]:
+        """The host posture: the tree is the worktree itself and the network is the host's."""
+        return {"executor": self.name, "tree": "inplace", "network": "host"}
+
     @property
     def cancel_fn(self) -> CancelFn | None:
         """The run's cancel token, so a builder's own processes can follow it."""
@@ -286,6 +308,10 @@ class LocalExecutor:
         """Run ``cmd`` on the host under its wall clock and the cancel token. Never
         raises for what the command did; a timeout or cancellation kills the whole
         process group (``start_new_session``) so no test child outlives the run."""
+        if cmd.ro_mounts:
+            # a mount is a container concept; on the host a binding's local_env points the
+            # toolchain at its set instead, so a mount here is a caller's mistake
+            raise ValueError("the local executor cannot bind-mount a dependency set")
         env = dict(self._base_env)
         env.update(cmd.env)
         cwd = cmd.root / cmd.cwd_rel
@@ -351,6 +377,12 @@ class LocalExecutor:
 # ---------------------------------------------------------------------------
 
 
+#: The sandbox tree modes (``DockerSettings.tree``).
+TREE_READONLY = "readonly"
+TREE_COPY = "copy"
+SANDBOX_TREES: tuple[str, ...] = (TREE_READONLY, TREE_COPY)
+
+
 @dataclass(frozen=True)
 class DockerSettings:
     """The sandbox's shape. Construction itself fails closed: no image, a root user or
@@ -367,10 +399,26 @@ class DockerSettings:
     #: ``node_modules`` or a Go module cache. Never a docker socket, never $HOME.
     extra_ro_mounts: Mapping[str, str] = field(default_factory=dict)
     docker_binary: str = ""
+    #: How the tests see the tree (ADR-0019 §7): ``readonly`` — the worktree mounted
+    #: read-only (a test that writes into its package fails); ``copy`` — a throwaway,
+    #: size-capped tmpfs copy of the read-only tree. A different tree is a different
+    #: posture, qualified separately.
+    tree: str = "readonly"
+    #: The size cap of the throwaway copy (``tree="copy"``).
+    work_size: str = "2g"
 
     def __post_init__(self) -> None:
         if not self.image:
             raise SandboxUnavailable("docker sandbox requested without an image")
+        if self.tree not in SANDBOX_TREES:
+            raise SandboxUnavailable(
+                f"sandbox tree must be one of {SANDBOX_TREES}, got {self.tree!r}"
+            )
+        if self.tree == TREE_COPY:
+            raise SandboxUnavailable(
+                "sandbox tree 'copy' (the throwaway copy of the tree) arrives with ADR-0019 "
+                "stream D; use 'readonly' until it lands"
+            )
         uid = self.user.split(":", 1)[0].strip().lower()
         if uid in {"", "0", "root"}:
             raise SandboxUnavailable(
@@ -417,6 +465,7 @@ class DockerExecutor:
         #: Every container this executor's :meth:`run` killed WITHOUT confirmation, in
         #: order — what a session reads after an attempt (``unconfirmed_kills``).
         self.unconfirmed_kills: list[UnconfirmedKill] = []
+        self._image_id = ""
         resolved = settings.docker_binary or shutil.which("docker")
         if not resolved:
             raise SandboxUnavailable(
@@ -467,9 +516,57 @@ class DockerExecutor:
             "network": "none",
         }
 
+    def image_id(self) -> str:
+        """The image's content id (``docker image inspect --format {{.Id}}``) — never the
+        tag, which a re-push moves. Cached per executor; an absent image is
+        :class:`SandboxUnavailable` (the worker never pulls)."""
+        if self._image_id:
+            return self._image_id
+        image = self.settings.image
+        try:
+            r = self._runner(
+                [self.docker, "image", "inspect", "--format", "{{.Id}}", image],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.SubprocessError) as e:
+            raise SandboxUnavailable(f"docker image probe failed for {image!r}: {e}") from e
+        ident = (r.stdout or "").strip()
+        if r.returncode != 0 or not ident:
+            raise SandboxUnavailable(
+                f"docker image {image!r} is not present in the daemon's store (the worker never "
+                f"pulls): {(r.stderr or r.stdout).strip()[:300]}"
+            )
+        self._image_id = ident
+        return ident
+
+    def posture_facts(self) -> dict[str, str]:
+        """The sandbox posture: the image by content id, how the tree is presented, the
+        network, the user and every limit that can change a test's outcome."""
+        s = self.settings
+        return {
+            "executor": self.name,
+            "image_ref": s.image,
+            "image_id": self.image_id(),
+            "tree": s.tree,
+            "network": "none",
+            "user": s.user,
+            "limits": (
+                f"mem={s.memory},cpus={s.cpus},pids={s.pids_limit},"
+                f"tmp={s.tmp_size},work={s.work_size}"
+            ),
+        }
+
     def build_argv(self, cmd: Command) -> list[str]:
         """The hardened ``docker run`` argv. Tests assert on this directly."""
         s = self.settings
+        if cmd.ro_mounts:
+            raise SandboxUnavailable(
+                "bundle mounts arrive with ADR-0019 stream D (dependency provisioning); "
+                "this build cannot bind a sealed dependency set"
+            )
         argv: list[str] = [
             self.docker,
             "run",
@@ -994,6 +1091,9 @@ __all__: Sequence[str] = (
     "DOCKER_KILL_TIMEOUT_S",
     "KILL_CONFIRM_S",
     "KILL_CONFIRM_STEP_S",
+    "SANDBOX_TREES",
+    "TREE_COPY",
+    "TREE_READONLY",
     "Command",
     "DockerExecutor",
     "DockerSettings",

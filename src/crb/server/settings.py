@@ -253,6 +253,21 @@ class SandboxSettings(BaseModel):
     image: str = ""
 
 
+class ProvisionSettings(BaseModel):
+    """Dependency provisioning for the sealed posture (``CRB_PROVISION__*``, ADR-0019 §6).
+
+    Off by default — an external fetch is the operator's consent gate. While it is off a
+    sealed deployment provisions nothing: a task whose parent cannot load its dependencies
+    offline is refused ``QUAL_ENV_UNLOADABLE`` at qualification, never charged to a model.
+    """
+
+    enabled: bool = False
+
+    def view(self) -> dict[str, Any]:
+        """The ``/settings`` view (nothing here is secret)."""
+        return {"enabled": self.enabled}
+
+
 class FactorySettings(BaseModel):
     """The served factory's deployment defaults (``CRB_FACTORY__*``).
 
@@ -480,6 +495,8 @@ class Settings(BaseSettings):
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     builder: BuilderSettings = Field(default_factory=BuilderSettings)
     factory: FactorySettings = Field(default_factory=FactorySettings)
+    #: Dependency provisioning for the sealed posture (ADR-0019); off until switched on.
+    provision: ProvisionSettings = Field(default_factory=ProvisionSettings)
     #: Where work arrives from (ADR-0017). ``tracker: none`` by default: no column is
     #: watched until an admin configures one AND an operator switches a listener on.
     intake: IntakeSettings = Field(default_factory=IntakeSettings)

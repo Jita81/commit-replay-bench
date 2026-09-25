@@ -17,7 +17,8 @@ What it does: Stamps every grade row and evidence pack so a number is traceable 
               ``/version`` and the Helm chart report and must agree with pyproject.toml.
 How:          Two module constants; nothing else.
 Layer:        core — docs/ARCHITECTURE.md#74-versioning
-ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/core/ledger.py (``expected_belt_sets`` reads the apparatus stamp to
               admit a belt set), src/crb/core/evidence.py (the apparatus stamp on packs),
               src/crb/core/learn.py (``remeasure_plan`` compares stamps), pyproject.toml
@@ -46,4 +47,10 @@ __version__ = "2.0.0a1"
 #: formatter/linter on the changed files, ``belt_set="v5"``, failure kind ``lint``
 #: [ADR-0011]). Rows stamped 2.1 (``v4``) keep their four-belt meaning; belt 5 is
 #: unrecorded for them, never re-derived.
-APPARATUS_VERSION = "2.2"
+#: 2.2 → 2.3 (2026-09-25, ADR-0019: qualification is posture-relative — belt 3 subtracts the
+#: baseline measured in the posture that graded the trial; a ``builder_red`` / ``lint`` row
+#: needs a witness from that posture (``labels.blame_control``); every measured row carries
+#: its posture labels; in a provisioned posture belt 1b covers the dependency closure).
+#: Rows stamped 2.2 keep their meaning and are never re-derived; a 2.2 row graded by the
+#: docker executor is excluded from rates and counted ``unqualified_posture``.
+APPARATUS_VERSION = "2.3"
