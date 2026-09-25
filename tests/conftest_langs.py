@@ -38,8 +38,8 @@ What it does: Answers "is go/node/mvn/cargo/docker available" and "can this host
               a skip.
 How:          Memoised probes (``docker info``; an HTTPS ``HEAD`` per registry host, where any
               HTTP status is an answer) → on-disk caches under ``tests/.cache`` → ``docker
-              build`` from stdin or from a Dockerfile + context → ``iter_candidates`` + ``Workspace.create``
-              + ``overlay_tests`` through the real runner and executor.
+              build`` from stdin or from a Dockerfile + context → ``iter_candidates`` +
+              ``Workspace.create`` + ``overlay_tests`` through the real runner and executor.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/langs/__init__.py (the two-commit fixture shape these steps rely
