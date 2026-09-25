@@ -8,6 +8,16 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the builder is not told where the answer is, and production runs sealed
+
+Assessment items B1 and B2, each reproduced against `main` with a failing test first.
+Worktrees are named by a random token instead of the held-out commit's sha, so `pwd`, the
+`.git` pointer and the prompt no longer give the builder the answer key's address; a source
+ratchet stops the pattern returning (DL-053). Production refuses the host builder and the
+local test executor unless `CRB_ALLOW_UNSEALED_PROD=1`; the builder defaults to docker in
+prod, compose and Helm set it on the worker, and the override shows on `/health`, the
+Posture page and every run's apparatus (ADR-0023, DL-054). No apparatus bump.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

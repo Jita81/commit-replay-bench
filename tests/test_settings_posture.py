@@ -24,7 +24,8 @@ How:          ``Settings(**kwargs)`` and ``Settings()`` over a monkeypatched env
               ``collect_health`` over a real SQLite store; ``worker_main.settings_from_args``
               with an explicit environment; the deploy files and docs read as text.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
-ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
+ADRs:         docs/adr/0023-production-refuses-the-unsealed-posture.md,
+              docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/server/settings.py (the rule), src/crb/server/worker_main.py (the
               worker's reading of it), src/crb/server/routes/system.py (``/health``),

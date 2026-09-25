@@ -123,6 +123,14 @@ api:
 worker:
   enabled: true
   replicaCount: 1
+  # Where the builder runs (CRB_BUILDER__EXECUTOR on the worker only). docker = the sealed
+  # container (ADR-0012): an exported checkout that cannot contain the gold commit and one
+  # allowlisting egress sidecar; the worker needs a daemon (sandbox.mode below) and the
+  # builder image pre-pulled — without `image` a build fails CLOSED, never on the host.
+  # host is refused in prod unless CRB_ALLOW_UNSEALED_PROD=1 (ADR-0023).
+  builder:
+    executor: docker
+    image: ""
   # The worker's own Prometheus exposition (docs/DEPLOYMENT.md §9): the build / grade /
   # cost / delivery / token-mint series are recorded in the worker process, so the api's
   # /metrics never carries them. A headless Service exposes the port to the scraper;

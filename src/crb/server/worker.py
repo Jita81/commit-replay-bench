@@ -185,6 +185,7 @@ from crb.builders.adapter import (
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
+from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
@@ -252,7 +253,12 @@ from crb.server.intake import (
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
-from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
+from crb.server.settings import (
+    ALLOW_UNSEALED_PROD_ENV,
+    FactorySettings,
+    GitHubAppSettings,
+    IntakeSettings,
+)
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -470,6 +476,15 @@ class WorkerSettings:
     #: pass that starts without one stops with ``no_public_url`` rather than writing a
     #: relative path a reader on the tracker's site cannot open.
     public_url: str = ""
+    #: The builder's executor as the entrypoint resolved it for ``CRB_ENV`` (``docker`` in
+    #: prod, ADR-0023); ``""`` = read ``CRB_BUILDER__EXECUTOR`` as it stands (unset = host).
+    builder_executor: str = ""
+    #: ADR-0023: in prod without ``CRB_ALLOW_UNSEALED_PROD`` a run may not ask for the local
+    #: executor in its own parameters (the entrypoint already refused it as the default).
+    refuse_unsealed: bool = False
+    #: ADR-0023: a prod worker running unsealed under the override — stamped into every
+    #: run's apparatus and every pack; empty when sealed or in dev.
+    unsealed_override: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -1406,6 +1421,11 @@ class Worker:
         if ctx._executor is not None:
             return ctx._executor
         kind = str(ctx.params.get("executor") or self.settings.executor or "local")
+        if kind != "docker" and self.settings.refuse_unsealed:
+            raise SandboxUnavailable(
+                f"production refuses the {kind} executor (ADR-0023): this run asks for it; use "
+                f"docker, or start the worker with {ALLOW_UNSEALED_PROD_ENV}=1"
+            )
         docker: DockerSettings | None = None
         if kind == "docker":
             docker = docker_settings_for(ctx.config, self.settings.docker, ctx.params)
@@ -1427,9 +1447,16 @@ class Worker:
             "runner": self._runner(ctx).name,
             "executor": self._executor(ctx).describe(),
             "worker": self.worker_id,
+            **self._override_stamp(),
             **extra,
         }
         self.queue.set_apparatus(ctx.run.id, apparatus, worker_id=self.worker_id)
+
+    def _override_stamp(self) -> dict[str, Any]:
+        """ADR-0023: a prod worker running unsealed under the override says so on every
+        apparatus it writes (and so in every pack); nothing when sealed or in dev."""
+        o = dict(self.settings.unsealed_override)
+        return {"unsealed_prod_override": o} if o else {}
 
     def _progress(self, ctx: RunContext, done: int, total: int) -> None:
         self.queue.progress(ctx.run.id, done, total, ctx.counts, worker_id=self.worker_id)
@@ -1824,6 +1851,7 @@ class Worker:
             ),
             extra={
                 "worker": self.worker_id,
+                **self._override_stamp(),
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
                 **(
@@ -1858,7 +1886,12 @@ class Worker:
                 else None
             ),
             builder_overrides=dict(p.get("builder_config") or {}),
-            container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
+            # CRB_BUILDER__EXECUTOR=docker (ADR-0012), defaulted per env (ADR-0023)
+            container=container_settings_from_env(
+                {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
+                if self.settings.builder_executor
+                else None
+            ),
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
         )

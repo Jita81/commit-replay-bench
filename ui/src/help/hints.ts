@@ -690,6 +690,8 @@ export const HINTS = {
     'Whether tests run in a sealed docker sandbox (rows count as evidence) or locally (a development reading, not evidence).',
   'summary.posture.builder':
     'Where the builder runs and what network it may reach. Shown to admins.',
+  'summary.posture.production':
+    'Whether tests and the builder both run sealed in docker. Production refuses anything else unless CRB_ALLOW_UNSEALED_PROD=1 is set, and then every run records that it ran unsealed.',
   'summary.posture.toolchains':
     'The toolchains the worker host can run, from the health probe.',
   'summary.posture.worker':
@@ -1542,7 +1544,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/signoff': 30,
   '/factory': 28,
   '/factory/intake': 14,
-  '/posture': 22,
+  '/posture': 23,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants
   '/repos/:name': 14,

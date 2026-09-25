@@ -1389,7 +1389,8 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     assert s.home == tmp_path / "h" and s.executor == "docker"
     assert s.docker is not None and s.docker.image == "img:1" and s.worker_id == "env-w"
     # the deployment's keys — what compose / Helm set and the API reads — are honoured and
-    # win over the short forms; without either the worker is `local` with no image
+    # win over the short forms; without either the worker takes the env's default: docker
+    # in prod (CRB_ENV unset reads prod, as the API reads it) and local in dev (ADR-0023)
     deployed = worker_main.settings_from_args(
         args,
         {
@@ -1407,7 +1408,11 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     )
     assert only_deployed.executor == "docker" and only_deployed.docker is None
     bare = worker_main.settings_from_args(args, {"CRB_HOME": str(tmp_path / "h")})
-    assert bare.executor == "local" and bare.docker is None
+    assert bare.executor == "docker" and bare.docker is None
+    bare_dev = worker_main.settings_from_args(
+        args, {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "dev"}
+    )
+    assert bare_dev.executor == "local" and bare_dev.docker is None
     # J-TEL-1: the worker's own /metrics port — CRB_METRICS_PORT (default 9464; 0 = off),
     # gated by the same CRB_METRICS_ENABLED the API reads; the bind is loopback unless the
     # deployment says otherwise (the series name repositories, builders and installations)
@@ -1431,7 +1436,8 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     args = parser.parse_args(
         ["--home", str(tmp_path / "flag"), "--executor", "local", "--kinds", "mine, probe"]
     )
-    s2 = worker_main.settings_from_args(args, env)
+    # the local executor is a development worker (prod refuses it: tests/test_settings_posture.py)
+    s2 = worker_main.settings_from_args(args, {**env, "CRB_ENV": "dev"})
     assert s2.home == tmp_path / "flag" and s2.executor == "local" and s2.kinds == ("mine", "probe")
 
 

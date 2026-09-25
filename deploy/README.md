@@ -276,8 +276,8 @@ of your provisioning, and rotate by editing `.env` and `docker compose up -d wor
 
 ## 9. Builder in a sealed container (`CRB_BUILDER__EXECUTOR=docker`)
 
-By default a builder attempt runs **on the worker host** in a `git worktree` of the main
-clone — fine for development, but that worktree shares the clone's object store, which
+In `CRB_ENV=dev` a builder attempt runs **on the worker host** in a `git worktree` of the
+main clone by default — fine for development, but that worktree shares the clone's object store, which
 contains the commit being replayed, and the agent runs with the worker's network. The
 sealed-container mode ([ADR-0012](../docs/adr/0012-builder-in-a-sealed-container.md),
 [SECURITY.md §3.2.1](../docs/SECURITY.md)) closes both by construction:
@@ -322,8 +322,11 @@ CRB_BUILDER__USER=                                 # uid:gid; default = the work
 ```
 
 Add these to `deploy/.env` next to the sandbox settings; the worker needs the daemon
-socket exactly as in §3. `/settings` (admin) shows the posture under `builder`, and the
-API warns at start-up when `CRB_ENV=prod` and the executor is still `host`. For an
+socket exactly as in §3. `/settings` (admin) shows the posture under `builder`. In
+`CRB_ENV=prod` the builder defaults to `docker` (the compose worker sets it), and the API and
+the worker refuse to start with `host` — or with `CRB_SANDBOX__EXECUTOR=local` — unless
+`CRB_ALLOW_UNSEALED_PROD=1` is set; that override is shown on `/health` and the Posture page
+and stamped into every run's apparatus ([ADR-0023](../docs/adr/0023-production-refuses-the-unsealed-posture.md)). For an
 Azure OpenAI endpoint set `CRB_BUILDER__ALLOW_HOSTS=<resource>.privatelink.openai.azure.com`
 (the sidecar resolves it through the host's DNS, so the private zone applies).
 
