@@ -29,6 +29,31 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   them, n ≥ 8), recorded on the row. Off until a paired comparison measures it.
 - `scripts/spend_from_export.py` recomputes the budget-stop and escalation numbers from a
   ledger export with the product's own failure rule.
+### 2026-09-25 — "clean" means working, by construction (opt-in, ADR-0021)
+
+Of the clean patches a person has reviewed, 4 of 13 would have been merged **[measured —
+n = 13 reviewed clean patches, method: the review records and the cobra critical-friend
+review, apparatus 2.2]**; two of the reasons are mechanical. Three mechanisms, each OFF by
+default and recorded on every row it touches:
+
+- **The format step.** The repository's own formatter rewrites the changed source files
+  before grading, so the graded patch is the formatted one; skipped with a named reason when
+  the repository configures none (`labels.format_step`).
+- **The finish gate.** The repository's own checks go in the brief as a numbered checklist,
+  are re-run after the build, and one bounded repair call follows a failure; `done` needs them
+  to pass; a blind checklist that names the held-out oracle is refused before any spend
+  (`labels.finish_gate`).
+- **Belt 6 `api_stable`.** A patch that changes the public API of the code it touched (Go,
+  Python, JavaScript/TypeScript) in a way the maintainers' commit did not is not clean;
+  failure kind `api`; recorded as the hashed `api_stable` label, which the ledger checks.
+- **One switchboard.** `RepoConfig.checks` (written by `PUT /repos/{name}`, on the audit
+  trail) and `params.checks` per run; every row records the switches, their sources and the
+  configuration version (`labels.checks`). The prevention loop writes this surface.
+- **The runner-command audit** of the six live repositories fixed five detector gaps: a frozen
+  pre-commit ruff `rev` (click), a ruff outside the repository's pin now refuses instead of
+  judging (mesh-client), black check mode (mesh-client), eslint/stylelint `--max-warnings`
+  and stylelint itself (the NHS repositories), prettier on the files it formats
+  (`docs/reviews/2026-09-25-runner-commands-audit.md`).
 
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 

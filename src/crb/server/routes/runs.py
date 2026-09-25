@@ -580,6 +580,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["budget_profile"] = body.budget_profile
     if body.escalation is not None:
         params["escalation"] = body.escalation
+    if body.checks is not None and body.checks.overrides():
+        params["checks"] = body.checks.overrides()
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,

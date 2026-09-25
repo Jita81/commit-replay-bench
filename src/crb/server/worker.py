@@ -189,6 +189,8 @@ from crb.builders.budget import budget_for_rung
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
+from crb.core.checks import RepoChecks
+from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
@@ -1847,6 +1849,9 @@ class Worker:
         # a different arm (builder '<name>+preflight') and the apparatus stamp says so
         preflight = Preflight.from_params(p.get("preflight"))
         spend = self._spend_hooks(ctx, ladder, mode=mode)
+        # "clean means working" (ADR-0021): the run's switches over the repository's
+        # ``checks`` block — each OFF unless one of them says otherwise; stamped below
+        checks = resolve_checks(RepoChecks.from_config(ctx.config.checks), p.get("checks"))
         spec = RunSpec(
             run_id=run.id,
             config=ctx.config,
@@ -1861,6 +1866,7 @@ class Worker:
             timeout=ctx.timeout,
             corpus_sha=str(p.get("corpus_sha") or ""),
             policy_version=str(p.get("policy_version") or ""),
+            evaluate_api=checks.api_stable,
             keep_worktrees=bool(
                 p.get("keep_worktrees", retain.get("worktrees", self.settings.keep_worktrees))
             ),
@@ -1874,6 +1880,7 @@ class Worker:
                     else {}
                 ),
                 "spend": spend.apparatus(),
+                **({"checks": checks.to_dict()} if checks.any_on else {}),
                 # one entry per rung, in order: what climbed, under which tier
                 "ladder": [
                     {
@@ -1909,6 +1916,8 @@ class Worker:
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
             budget_for_task=spend.budget_for_task,
+            # absent label = every switch OFF under the default block (rows as before)
+            checks=checks if checks.any_on or not checks.repo.is_default else None,
         )
         self._progress(ctx, 0, total)
 

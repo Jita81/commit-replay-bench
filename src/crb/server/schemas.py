@@ -58,6 +58,7 @@ from pydantic import (
 
 from crb.builders.base import Budget
 from crb.core.capability import TIERS
+from crb.core.checks import RepoChecks
 from crb.core.git import CloneUrlError, validate_clone_url
 from crb.core.grade import MODES
 from crb.core.ledger import CELL_FIELDS
@@ -238,6 +239,18 @@ class _RepoConfigFields(BaseModel):
     @classmethod
     def _spend_known(cls, v: dict[str, str] | None) -> dict[str, str] | None:
         return None if v is None else validate_spend_config(v)
+    #: "Clean means working" switches for the repository (ADR-0021) — the one surface the
+    #: prevention loop writes: ``format_step``, ``finish_gate``, ``api_stable``, declared
+    #: ``commands`` / ``formatter``. Validated by ``crb.core.checks.RepoChecks``; a
+    #: change is a ``repo.updated`` event with its diff, like every config change.
+    checks: dict[str, Any] | None = None
+
+    @field_validator("checks")
+    @classmethod
+    def _checks_shape(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        if v is not None:
+            RepoChecks.from_config(v)  # ValueError → 422 with the reason
+        return v
 
     @field_validator("runner")
     @classmethod
@@ -543,6 +556,20 @@ class RunRetention(BaseModel):
     transcripts: bool = False
 
 
+class RunChecksIn(BaseModel):
+    """``params.checks`` — this run's override of the repository's switches (ADR-0021).
+    ``null`` / absent = the repository's value (itself OFF by default)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format_step: bool | None = None
+    finish_gate: bool | None = None
+    api_stable: bool | None = None
+
+    def overrides(self) -> dict[str, bool]:
+        return {k: v for k, v in self.model_dump().items() if v is not None}
+
+
 class PreflightIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -605,6 +632,12 @@ class RunCreateRequest(BaseModel):
     #: ``always`` climbs every rung. The decision and the rule are on the row.
     #: ``None`` = the repository's ``spend`` setting, else ``measured``.
     escalation: str | None = None
+    #: "Clean means working" for THIS run (ADR-0021): ``format_step`` (the repository's own
+    #: formatter before grading), ``finish_gate`` (the repository's checks as the brief's
+    #: checklist, verified, one repair turn) and ``api_stable`` (belt 6). Each overrides the
+    #: repository's ``checks`` block; absent = the repository's (OFF by default). Stored as
+    #: ``params.checks`` and every row records the resolved switches (``labels.checks``).
+    checks: RunChecksIn | None = None
     #: ``factory`` runs only: the frozen backlog this run is meant to work. When set it
     #: must equal the repo's ACTIVE backlog hash or the request is refused (409
     #: ``backlog_hash_mismatch``); the active hash is always stamped into

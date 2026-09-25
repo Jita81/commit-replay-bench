@@ -63,6 +63,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from crb.core.checks import RepoChecks
 from crb.core.classify import IntentLabel, resolve
 from crb.core.lint import plan_from_config
 from crb.core.spend import validate_spend_config
@@ -352,6 +353,11 @@ class RepoConfig:
         (``default`` | ``calibrated``) and ``escalation`` (``measured`` | ``always``). Empty
         = the defaults; a run's own parameter wins. The surface the prevention loop writes
         to apply a budget or an escalation change to one repository.
+    checks:
+        "Clean means working" switches for this repository (ADR-0021): ``format_step``,
+        ``finish_gate``, ``api_stable`` (belt 6), declared ``commands`` and ``formatter``.
+        Empty (the default) ⇒ every switch OFF. The ONE surface the prevention loop writes;
+        validated by :meth:`crb.core.checks.RepoChecks.from_config`.
     path:
         Local clone path (host). Optional in the config; the CLI and server fill it.
     sandbox_image:
@@ -379,6 +385,7 @@ class RepoConfig:
     mining: Mapping[str, int] = field(default_factory=dict)
     lint: Mapping[str, Any] = field(default_factory=dict)
     spend: Mapping[str, Any] = field(default_factory=dict)
+    checks: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # the name is a ledger key, a directory name and a URL segment: one safe charset
@@ -409,6 +416,8 @@ class RepoConfig:
         object.__setattr__(self, "lint", dict(self.lint))
         plan_from_config(self.lint)  # validates the declared shape (raises ValueError)
         object.__setattr__(self, "spend", validate_spend_config(self.spend))
+        object.__setattr__(self, "checks", dict(self.checks))
+        RepoChecks.from_config(self.checks)  # validates the checks block (raises ValueError)
 
     # --- source / test discrimination (exact for the configured layout) -------
     @property
@@ -533,6 +542,7 @@ class RepoConfig:
             mining=mining,
             lint=dict(d.get("lint") or {}),
             spend=dict(d.get("spend") or {}),
+            checks=dict(d.get("checks") or {}),
         )
 
 

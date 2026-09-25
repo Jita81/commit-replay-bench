@@ -136,6 +136,9 @@ class RunSpec:
     #: Asked before a non-clean, non-disqualified attempt climbs to the next rung
     #: (:func:`crb.core.spend.escalation_decision`); ``None`` climbs every rung (the old rule).
     escalation_gate: EscalationGate | None = None
+    #: belt 6 ``api_stable`` (ADR-0021): OFF unless the run or the repository's
+    #: ``checks.api_stable`` switches it on (the worker resolves it)
+    evaluate_api: bool = False
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -307,6 +310,7 @@ def run_task(
                 mode=spec.mode if spec.mode == MODE_BLIND else MODE_SIGHTED,
                 timeout=spec.timeout,
                 on_event=on_event,
+                evaluate_api=spec.evaluate_api,
             )
             # keep the patch before the pack: the pack's hash then commits to the kept bytes
             kept = (

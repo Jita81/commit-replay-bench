@@ -1427,7 +1427,9 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     assert s2.home == tmp_path / "flag" and s2.executor == "local" and s2.kinds == ("mine", "probe")
 
 
-def test_run_where_every_attempt_errors_is_failed_not_succeeded(h: Harness) -> None:
+def test_run_where_every_attempt_errors_is_failed_not_succeeded(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A provider 402 / missing credential on every task must not read as a success:
     the rows stay honest (never clean) and the run is `failed` with the first error."""
     from crb.builders.base import STOP_MODEL_ERROR, BuildOutcome
@@ -1454,7 +1456,9 @@ def test_run_where_every_attempt_errors_is_failed_not_succeeded(h: Harness) -> N
         def describe(self) -> dict[str, Any]:
             return {"builder": "broken"}
 
-    builders_pkg._REGISTRY["broken"] = _Broken
+    # through monkeypatch: a bare write leaked "broken" into the registry for every later
+    # test (test_builders_base's registry test failed whenever it ran after this file)
+    monkeypatch.setitem(builders_pkg._REGISTRY, "broken", _Broken)
     run = h.enqueue("replay", ladder_json=["broken:m@p"])
     done = h.run_one()
     assert done.id == run.id
@@ -1710,3 +1714,26 @@ def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> N
     assert worker._delivery_credentials(linked, "http://github.com/acme/cobra.git") is None
     # a row with no link (a URL-only registration) gets no credentials at all
     assert worker._delivery_credentials({"url": linked["url"]}, linked["url"]) is None
+
+
+# --- the "clean means working" switchboard (ADR-0021) ----------------------------------------
+
+
+def test_repository_checks_and_run_overrides_reach_the_row_and_belt_six(
+    tmp_path: Path, pyrepo: pr.PyRepo
+) -> None:
+    """The one surface the prevention loop writes (``RepoConfig.checks``) reaches the grader
+    (belt 6) and every row, with the run's override named as such."""
+    harness = Harness(tmp_path, pyrepo)
+    harness.add_repo(checks={"api_stable": True})
+    harness.add_task(pyrepo.feat_task())
+    run = harness.enqueue("replay", params_json={"checks": {"format_step": True}})
+    done = harness.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    (row,) = harness.worker.ledger.rows(run_id=run.id)
+    assert row.labels["checks"].startswith("fmt=1:run;gate=0:default;api=1:repo;cfg=")
+    assert row.labels["api_stable"] == "true" and row.clean  # the gold's own API change
+    assert row.labels["format_step"] == "skipped=no_formatter_configured"
+    assert done.apparatus_json["extra"]["checks"]["sources"]["api_stable"] == "repo"
+    belts = [e for e in harness.events(run.id) if e.action == "grade.belt"]
+    assert [e.payload["belt"] for e in belts][-1] == "api_stable"
