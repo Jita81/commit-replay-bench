@@ -196,6 +196,40 @@ describe('stepsFor — an item the factory has not touched', () => {
   })
 })
 
+describe('stepsFor — the review comes before the delivery (ADR-0021)', () => {
+  it('the strip reads assess → RED → build → review → delivery → outcome', () => {
+    expect(stepsFor(task({ id: 'T-1' })).map((x) => x.id)).toEqual(['readiness', 'red', 'build', 'review', 'delivery', 'outcome'])
+  })
+
+  it('a clean build waiting on its review has no delivery step in progress yet', () => {
+    const steps = stepsFor(task({ route_hint: 'build', red_proof: true, build_status: 'clean', last_event: 'build.graded', cell_route: DELIVER }))
+    const review = steps.find((x) => x.id === 'review')!
+    const delivery = steps.find((x) => x.id === 'delivery')!
+    expect(review.status).toBe('current')
+    expect(delivery.status).toBe('todo')
+    expect(delivery.detail).toBe('after the review accepts the build')
+  })
+
+  it('a verdict other than accept says no pull request was opened, and why', () => {
+    const steps = stepsFor(task({ status: 'oracle_needs_strengthening', route_hint: 'human', red_proof: true, build_status: 'clean', review_verdict: 'accept_with_edit', last_event: 'item.outcome', cell_route: DELIVER }))
+    const delivery = steps.find((x) => x.id === 'delivery')!
+    expect(delivery.status).toBe('skipped')
+    expect(delivery.detail).toBe('No pull request — the review did not accept this build (accept with edit), so nothing was pushed.')
+  })
+
+  it('an accepted build that was delivered reads as done after the review', () => {
+    const steps = stepsFor(task({ status: 'accepted', route_hint: 'build', red_proof: true, build_status: 'clean', review_verdict: 'accept', pr_url: 'https://github.invalid/acme/calc/pull/7', last_event: 'item.outcome', cell_route: DELIVER }))
+    expect(steps.map((x) => [x.id, x.status])).toEqual([
+      ['readiness', 'done'],
+      ['red', 'done'],
+      ['build', 'done'],
+      ['review', 'done'],
+      ['delivery', 'done'],
+      ['outcome', 'done'],
+    ])
+  })
+})
+
 describe('stepsFor — every refusal carries its reason (J-FAC-4)', () => {
   it('the route gate withholding delivery names the measured route and the reason code', () => {
     const t = task({ status: 'accepted', route_hint: 'build', red_proof: true, build_status: 'clean', review_verdict: 'accept', last_event: 'item.outcome', cell_route: CALIBRATE, refusal: { step: 'delivery', reason: 'route gate: the cell routes calibrate (ci_low_below_bar)', reason_code: 'ci_low_below_bar', measured_route: 'calibrate' } })

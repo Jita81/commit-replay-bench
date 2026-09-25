@@ -763,3 +763,106 @@ def test_github_comment_pr_uses_stdlib_urllib(monkeypatch: pytest.MonkeyPatch) -
     assert seen["headers"]["Authorization"] == f"Bearer {TOKEN}"
     with pytest.raises(dv.DeliveryError, match="cannot comment"):
         dv.github_comment_pr_fn(remote=REMOTE, pr_number=0, body="x", credentials=_creds())
+
+
+# --- C1: nothing but an accepted build is delivered; a weak one is closed ----------
+
+
+def test_deliver_refuses_any_verdict_but_accept_before_touching_creds(harness: Harness) -> None:
+    """The delivery boundary itself refuses a build the review did not accept, before a
+    credential is read or a branch committed: the loop cannot hand it one by mistake."""
+
+    class Exploding:
+        def resolve(self, repo: str) -> dv.GitCredentials:
+            raise AssertionError("credentials were read for an unaccepted build")
+
+    build = _clean_build(harness)
+    seams = Seams()
+    try:
+        for verdict in ("accept_with_edit", "reject", ""):
+            with pytest.raises(dv.DeliveryRefused, match="review"):
+                dv.deliver(
+                    harness.repo.repo,
+                    multiply_item(),
+                    build,
+                    creds=Exploding(),
+                    push_fn=seams.push,
+                    open_pr_fn=seams.open_pr,
+                    target_default_branch="main",
+                    verdict=verdict,
+                )
+        assert not seams.pushes and not seams.prs
+        branches = harness.repo.repo.run("for-each-ref", "refs/heads/crb").stdout
+        assert branches.strip() == ""
+    finally:
+        build.close()
+
+
+def test_close_pull_request_comments_the_verdict_then_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``close_pull_request`` — the rework path for a pull request an earlier run opened
+    and a later review did not accept: one comment naming the verdict and why, then the
+    pull request is closed through the seam; with no credentials it fails closed."""
+    import urllib.request
+
+    calls: list[dict[str, Any]] = []
+
+    class _Resp:
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"id": 1, "state": "closed"}).encode()
+
+    def fake_urlopen(req: Any, timeout: int = 0) -> _Resp:
+        calls.append(
+            {
+                "url": req.full_url,
+                "method": req.get_method(),
+                "data": json.loads(req.data),
+                "auth": dict(req.header_items())["Authorization"],
+            }
+        )
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    previous = dv.DeliveryResult(
+        item_id="I-1",
+        branch="crb/i-1-add-multiply-to-calc",
+        base="main",
+        commit_sha="c" * 40,
+        pr_url="https://github.com/acme/calc/pull/5",
+        pr_number=5,
+        pack_hash="p" * 64,
+        body_sha256="",
+    )
+    body = dv.close_pull_request(
+        previous,
+        verdict="accept_with_edit",
+        reason="the oracle is weak: 3 escaped mutants",
+        creds=dv.StaticProvider(_creds()),
+        close_pr_fn=dv.github_close_pr_fn,
+    )
+    assert [c["method"] for c in calls] == ["POST", "PATCH"]
+    assert calls[0]["url"] == "https://api.github.com/repos/acme/calc/issues/5/comments"
+    assert "accept_with_edit" in calls[0]["data"]["body"] and "escaped" in calls[0]["data"]["body"]
+    assert calls[1]["url"] == "https://api.github.com/repos/acme/calc/pulls/5"
+    assert calls[1]["data"] == {"state": "closed"}
+    assert all(c["auth"] == f"Bearer {TOKEN}" for c in calls)
+    assert body == calls[0]["data"]["body"] and TOKEN not in body
+    with pytest.raises(dv.NoGitCredentialsError):
+        dv.close_pull_request(
+            previous, verdict="reject", reason="x", creds=None, close_pr_fn=dv.github_close_pr_fn
+        )
+    with pytest.raises(dv.DeliveryError, match="accept"):
+        dv.close_pull_request(
+            previous,
+            verdict="accept",
+            reason="x",
+            creds=dv.StaticProvider(_creds()),
+            close_pr_fn=dv.github_close_pr_fn,
+        )

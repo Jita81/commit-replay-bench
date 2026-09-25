@@ -1043,3 +1043,211 @@ def test_horizon_checkpoint_is_ledgered(pyrepo: pr.PyRepo, tmp_path: Path) -> No
     assert ev.payload["verification_mode"] == fe.VERIFICATION_MODES["L1"]
     with pytest.raises(ValueError):
         rig.loop().checkpoint("L4", observations=0, issues_minted=[], signed_off_by="x")
+
+
+# --- C1: review before delivery; the PR never opens on an unreviewed build ----------
+
+
+class MajorProbe:
+    """A probe whose only finding is a ``major`` weak-oracle one — the mutation-strength
+    probe's verdict on a weak test, without spending mutants."""
+
+    name = "major_only"
+
+    def run(self, ctx: rv.ReviewContext) -> rv.ProbeResult:
+        return rv.ProbeResult(
+            self.name,
+            False,
+            "weak",
+            required=False,
+            findings=(
+                rv.ReviewFinding(
+                    rv.FINDING_WEAK_ORACLE, rv.SEVERITY_MAJOR, "strengthen the test", self.name
+                ),
+            ),
+        )
+
+
+class RejectingReviewer(rv.MechanicalReviewer):
+    name = "rejecting"
+
+    def assess(self, ctx: Any, probes: Any) -> rv.ReviewOpinion:
+        return rv.ReviewOpinion(rv.VERDICT_REJECT, summary="not this change")
+
+
+def _crb_branches(pyrepo: pr.PyRepo) -> list[str]:
+    """Every ``crb/…`` branch in the repository — a delivery commits on one before it pushes."""
+    out = pyrepo.repo.run("for-each-ref", "--format=%(refname)", "refs/heads/crb").stdout
+    return [ln for ln in out.splitlines() if ln.strip()]
+
+
+def test_a_weak_oracle_verdict_never_reaches_delivery(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """C1 (assessment 2026-09-25): the loop delivered BEFORE it reviewed, so a pull request
+    was public on a build whose test the review then found weak — and nothing closed it.
+    Review comes first now: with ``MajorProbe`` no delivery call is made, the outcome is
+    ``oracle_needs_strengthening``, no branch was pushed and none was even committed."""
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds(), probes=(MajorProbe(),))
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ORACLE_NEEDS_STRENGTHENING
+    assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT]
+    assert out.delivery is None and rig.pushes == [] and rig.prs == [] and rig.comments == []
+    assert _crb_branches(pyrepo) == []
+    kinds = rig.kinds("I-1")
+    assert fe.EV_DELIVERY not in kinds and fe.EV_DELIVERY_UPDATED not in kinds
+    # the review ran on a build nobody outside the factory has seen: no pull-request ref
+    assert out.verdicts[0].pr_ref == ""
+    assert not [e for e in rig.sink.events if e.action.startswith("delivery.")]
+
+
+def test_a_rejected_build_is_never_delivered(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds(), reviewer=RejectingReviewer())
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_REJECTED and out.delivery is None
+    assert rig.pushes == [] and rig.prs == [] and _crb_branches(pyrepo) == []
+
+
+def test_review_precedes_delivery_and_the_pull_request_carries_the_accepted_build(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The order on the chain is readiness → route → RED proof → build → verdict →
+    delivery → outcome; the verdict that licenses the pull request is ``accept`` and its
+    pack is the delivered one."""
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds())
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+    assert rig.kinds("I-1") == [
+        fe.EV_READINESS,
+        fe.EV_ROUTE,
+        fe.EV_RED_PROOF,
+        fe.EV_BUILD,
+        fe.EV_VERDICT,
+        fe.EV_DELIVERY,
+        fe.EV_ITEM_OUTCOME,
+    ]
+    (verdict,) = out.verdicts
+    assert verdict.accepted and verdict.pack_hash == out.delivery.pack_hash
+    actions = [e.action for e in rig.sink.events]
+    assert actions.index("review.recorded") < actions.index("delivery.opened")
+
+
+def test_a_rework_delivers_once_after_the_final_accept(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """accept_with_edit → rework → accept: ONE push, ONE pull request, opened after the
+    second verdict on the reworked build — never a first PR on the build the review asked
+    to change, then an update."""
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        builder=MultiBuilder(first_edit=MULTIPLY_HARDCODED),
+        rework_test=lambda item, verdict, previous: STRONGER_MULTIPLY,
+        deliver=True,
+        creds=_creds(),
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.reworks == 1
+    assert [v.verdict for v in out.verdicts] == [rv.VERDICT_ACCEPT_WITH_EDIT, rv.VERDICT_ACCEPT]
+    assert [p["expected"] for p in rig.pushes] == [None] and len(rig.prs) == 1
+    assert out.delivery is not None and not out.delivery.updated
+    assert out.delivery.pack_hash == out.verdicts[-1].pack_hash
+    kinds = rig.kinds("I-1")
+    assert fe.EV_DELIVERY_UPDATED not in kinds
+    assert kinds.count(fe.EV_DELIVERY) == 1
+    last_verdict = len(kinds) - 1 - kinds[::-1].index(fe.EV_VERDICT)
+    assert kinds.index(fe.EV_DELIVERY) > last_verdict
+
+
+def test_rework_exhausted_opens_no_pull_request(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    class Opinionated(rv.MechanicalReviewer):
+        name = "opinionated"
+
+        def assess(self, ctx: Any, probes: Any) -> rv.ReviewOpinion:
+            return rv.ReviewOpinion(
+                rv.VERDICT_ACCEPT_WITH_EDIT,
+                findings=(rv.ReviewFinding("naming", rv.SEVERITY_MAJOR, "rename the helper"),),
+            )
+
+    rig = _rig(pyrepo, tmp_path, reviewer=Opinionated(), deliver=True, creds=_creds())
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_REWORK_EXHAUSTED and out.reworks == 1
+    assert rig.pushes == [] and rig.prs == [] and out.delivery is None
+
+
+def _seed_open_delivery(rig: Rig, *, pr_number: int = 5) -> dict[str, Any]:
+    """An earlier run's delivery of ``I-1`` on the chain, its pull request still open."""
+    from crb.factory.delivery import delivery_branch_name
+
+    d = {
+        "item_id": "I-1",
+        "branch": delivery_branch_name(multiply_item()),
+        "base": "main",
+        "commit_sha": "c" * 40,
+        "pr_url": f"https://github.invalid/pr/{pr_number}",
+        "pr_number": pr_number,
+        "pack_hash": "p" * 64,
+        "body_sha256": "",
+        "created": "2026-09-20T00:00:00+00:00",
+        "previous_commit_sha": "",
+        "updated": False,
+        "comment_error": "",
+    }
+    rig.evidence.record_delivery(d)
+    return d
+
+
+def test_an_open_pull_request_later_found_weak_is_closed_naming_the_verdict(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The rework path for a pull request an earlier run opened: when this run's review
+    does not accept the item, the open pull request is CLOSED — with a comment naming the
+    verdict and the finding — and the chain says the factory closed it; nothing is pushed."""
+    closed: list[dict[str, Any]] = []
+
+    def close_pr(**kw: Any) -> None:
+        closed.append(kw)
+
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        probes=(MajorProbe(),),
+        close_pr_fn=close_pr,
+    )
+    _seed_open_delivery(rig)
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ORACLE_NEEDS_STRENGTHENING
+    assert rig.pushes == [] and rig.prs == []
+    (call,) = closed
+    assert call["pr_number"] == 5 and call["remote"] == "https://github.com/acme/calc.git"
+    assert "accept_with_edit" in call["body"] and rv.FINDING_WEAK_ORACLE in call["body"]
+    (ev,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_CLOSED)
+    assert ev.payload["pr_number"] == 5 and ev.payload["state"] == "closed"
+    assert ev.payload["closed_by"] == "factory"
+    assert ev.payload["verdict"] == rv.VERDICT_ACCEPT_WITH_EDIT
+    # the close follows the verdict on the chain, and the item's outcome follows the close
+    kinds = rig.kinds("I-1")
+    assert kinds.index(fe.EV_VERDICT) < kinds.index(fe.EV_DELIVERY_CLOSED)
+    assert kinds[-1] == fe.EV_ITEM_OUTCOME
+
+
+def test_an_open_pull_request_re_accepted_is_updated_not_duplicated(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The other half: this run's build is accepted and the item already has an open pull
+    request — the same PR is updated (lease against its commit), no second one opened."""
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds())
+    seeded = _seed_open_delivery(rig)
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+    assert out.delivery.updated and out.delivery.pr_number == 5
+    assert [p["expected"] for p in rig.pushes] == [seeded["commit_sha"]] and rig.prs == []
+
+
+def test_a_closed_or_merged_pull_request_is_not_reopened_by_a_new_run(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds())
+    _seed_open_delivery(rig)
+    rig.evidence.record_delivery_outcome("I-1", state="merged", pr_number=5)
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+    assert not out.delivery.updated and len(rig.prs) == 1
