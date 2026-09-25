@@ -233,9 +233,11 @@ mechanisms and add checklist lines to the brief, and nothing else:
 It never writes a belt or its switch (`checks.api_stable` included), the lint plan, a runner,
 the guards or their corpus, the oracle, a routing threshold or the failure rule —
 `check_writable` refuses each by name — and it never switches anything off. A fix that needs
-one of those keys, or needs code, becomes a *filed item* for a person. On this branch none of
-the three mechanisms ships yet (streams W and K build them), so the loop can file items and
-apply lines, and the register says which switch it is waiting for.
+one of those keys, or needs code, becomes a *filed item* for a person. All three mechanisms
+ship (streams W and K); none is on by default, so a repository runs under one only when an
+operator sets it or the loop applies it with the switch at `config`. The loop applies the
+calibrated budget only where K's rule can set it — a cell with at least 8 clean completions —
+and otherwise passes it over as "cannot calibrate" and files the budget hand-off instead.
 
 ### 7.2 The switch
 
@@ -306,20 +308,20 @@ the export's family-level resolution, the register for the three Phase B reposit
 as below [measured — n = the comparable first attempts of each class's stratum, shown as
 k of n; method: `scripts/prevention_from_export.py` over the 618-row export, the product's
 failure rule, first attempts only, outage rows excluded; apparatus 2.2]. The levers are what
-the loop would choose on this branch, where no process mechanism ships yet [hypothesis — the
-lever changes to the finish gate or the calibrated budget once streams W and K merge].
+the loop would choose with the mechanisms this build ships and the switch at `config`; the
+switch is off on every repository, so none is applied yet.
 
 | repository | class | first attempts | decisive n | what the loop would do |
 |---|---|---|---|---|
-| cobra | `protocol:network`, blind | 3 of 19 | 22 | file the refused-call item; apply the network line (the finish gate once it ships) |
-| cobra | `builder_red:target_red`, blind | 6 of 19 | 10 | nothing it may apply yet: a capability class, judged by value, held by routing |
+| cobra | `protocol:network`, blind | 3 of 19 | 22 | file the refused-call item; apply the finish gate (mistake-proofing) |
+| cobra | `builder_red:target_red`, blind | 6 of 19 | 10 | the finish gate, judged by value in the paired campaign: a capability class, held by routing |
 | cobra | `harness:no-credential`, sighted | 9 of 80 | 31 | file the credential link (stream D's submit-time refusal, measured from its link) |
 | cobra | `budget`, sighted | 4 of 80 | — | dormant: quiet in the last 20 sighted first attempts, never credited |
-| click | `budget`, sighted | 7 of 43 | 21 | file the budget hand-off (the calibrated budget once it ships) |
-| click | `lint`, sighted | 2 of 39 | 71 | apply the lint line (the finish gate once it ships) |
+| click | `budget`, sighted | 7 of 43 | 21 | file the budget hand-off; the calibrated budget is passed over — the sighted L cell has 7 clean completions, one short of 8 |
+| click | `lint`, sighted | 2 of 39 | 71 | apply the finish gate (gate) |
 | click | `builder_red:target_red`, blind | 3 of 11 | 12 | a capability class, held by routing |
 | koa | `builder_red:target_red`, blind | 4 of 10 | 10 | a capability class, held by routing |
-| koa | `budget`, sighted | 3 of 29 | 34 | file the budget hand-off (the calibrated budget once it ships) |
+| koa | `budget`, sighted | 3 of 29 | 34 | file the budget hand-off; apply the calibrated budget (mistake-proofing) |
 
 The largest blind class by first attempts is the red target on cobra and koa and the network
 refusal on click; counted over every rung, click's is the budget stop [measured — n = 22, 17

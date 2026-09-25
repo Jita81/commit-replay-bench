@@ -239,6 +239,7 @@ class _RepoConfigFields(BaseModel):
     @classmethod
     def _spend_known(cls, v: dict[str, str] | None) -> dict[str, str] | None:
         return None if v is None else validate_spend_config(v)
+
     #: "Clean means working" switches for the repository (ADR-0021) — the one surface the
     #: prevention loop writes: ``format_step``, ``finish_gate``, ``api_stable``, declared
     #: ``commands`` / ``formatter``. Validated by ``crb.core.checks.RepoChecks``; a

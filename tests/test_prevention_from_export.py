@@ -105,12 +105,17 @@ def test_the_script_reads_a_fixture_export_and_prints_the_register(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = _export(tmp_path)
-    assert pfe.main([str(path)]) == 0
+    assert pfe.main([str(path), "--assume-shipped", "none"]) == 0
     out = capsys.readouterr().out
     assert "alpha: 12 first attempts (12 blind, 0 sighted)" in out  # the outages are not attempts
     assert "protocol:network:-: 3 first attempts" in out
     assert "lever line:T-NET (advisory); would file item:refused-call" in out
     assert "outage" not in out
+    # by default the register uses what this build ships: a process lever beats the line
+    assert pfe.main([str(path)]) == 0
+    merged = capsys.readouterr().out
+    assert "Mechanisms shipped: budget_calibrated, finish_gate, format_step." in merged
+    assert "lever finish_gate (mistake-proofing); would file item:refused-call" in merged
     assert pfe.main([str(path), "--json", "--assume-shipped", "finish_gate"]) == 0
     body = json.loads(capsys.readouterr().out)
     beta = next(r for r in body["repositories"] if r["repo"] == "beta")

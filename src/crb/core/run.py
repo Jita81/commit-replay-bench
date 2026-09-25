@@ -34,8 +34,9 @@ What it does: Creates a fresh worktree per attempt, overlays the tests in sighte
               the escalation ladder only while the grade is neither clean nor disqualified
               (and, when a gate is set, only where the measured escalation rule says the
               next rung pays — the decision is stamped on the row), keeps every attempt's
-              patch before its pack is written, and skips tasks whose gold is known-bad. A builder crash is recorded and graded
-              anyway; only a sandbox failure or cancellation stops the run.
+              patch before its pack is written, and skips tasks whose gold is known-bad. A
+              builder crash is recorded and graded anyway; only a sandbox failure or
+              cancellation stops the run.
 How:          ``run`` iterates tasks (checking ``stop`` and ``gold_clean``) → ``run_task``
               loops the ladder: ``Workspace.create`` → ``build_fn`` → ``grade`` →
               ``keep_patch`` → ``escalation_gate`` (not clean) → ``EvidencePack`` →
@@ -50,9 +51,10 @@ Works with:   src/crb/core/grade.py (the belts), src/crb/core/ledger.py (the row
               chain), src/crb/core/evidence.py (the pack and the apparatus stamp),
               src/crb/core/workspace.py (one worktree per attempt), src/crb/builders/adapter.py
               (turns a Builder into a BuildFn), src/crb/core/patches.py (the kept patch),
-              src/crb/core/spend.py (the escalation gate), src/crb/server/worker.py (the server's caller
-              — a replay run's ``counts_json`` is the RunSummary), src/crb/cli/commands/grade.py
-              (``crb grade``: the same ``grade()`` over a worktree the operator supplies)
+              src/crb/core/spend.py (the escalation gate), src/crb/server/worker.py (the
+              server's caller — a replay run's ``counts_json`` is the RunSummary),
+              src/crb/cli/commands/grade.py (``crb grade``: the same ``grade()`` over a
+              worktree the operator supplies)
 Tested by:    tests/test_run.py, tests/test_builders_adapter.py, tests/test_worker.py,
               tests/test_worker_budget_ladder.py, tests/test_patches.py, tests/test_worker_spend.py
 Touch when:   never for a new repository (mode, ladder and budget are run settings); adding a

@@ -6,8 +6,9 @@ One read-only route over the store: the ledger rows (out of the store as
 :func:`crb.core.value.value_report`. ``repo`` scopes it to one repository (404 when unknown);
 without it the report covers every repository and lists each one's north star. ``apparatus``
 defaults to the current version — pooling is ``apparatus=all`` and the response says it pooled.
-The bug register behind the learning curve is :func:`crb.core.value.default_register` (a stub
-until the prevention loop is wired; the response names it).
+The bug register behind the learning curve is the prevention loop's
+(:func:`crb.core.value.default_register` over every repository's verified chain); the response
+names it.
 
 Navigation
 ----------
@@ -18,11 +19,13 @@ What it does: Serves ``ValueReport.to_dict()`` for one repository or all of them
               prospective routing precision. Never writes and never calls a model.
 How:          ``DbLedger.rows`` (every repository — the pooled-review fallback needs them) →
               ``value_row_from_grade``; ``DbReviewLedger.records`` → ``verdicts_from_reviews``
-              (latest per row, joined to its row) → ``value_report`` scoped to ``repo``.
+              (latest per row, joined to its row); ``all_prevention_records`` → the register →
+              ``value_report`` scoped to ``repo``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/core/value.py (the report), src/crb/store/ledger.py (the rows and the
               reviews), src/crb/server/routes/repos.py (``get_repo_or_404``),
+              src/crb/server/prevention_state.py (the loop's chain and mechanisms),
               ui/src/screens/Home/ValueTile.tsx (the tile that reads it), docs/API.md (the row)
 Tested by:    tests/test_server_routes_value.py
 Touch when:   never for a new repository; a scorecard field is added in src/crb/core/value.py
@@ -35,15 +38,18 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
+from crb.core.ledger import LedgerIntegrityError
 from crb.core.value import (
     DEFAULT_USD_PER_GBP,
     DEFAULT_WINDOW,
+    default_register,
     value_report,
     value_row_from_grade,
     verdicts_from_reviews,
 )
 from crb.server.auth import ViewerDep
-from crb.server.deps import DbDep, ErrorEnvelope, SessionFactoryDep
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
+from crb.server.prevention_state import all_prevention_records, mechanisms
 from crb.server.routes.repos import get_repo_or_404
 from crb.store.ledger import DbLedger, DbReviewLedger
 
@@ -70,9 +76,28 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
         get_repo_or_404(db, repo)
     # every repository is read even for one: a repository with too few reviews borrows every
     # repository's before it falls back to the proxy, and a false-Q1 row anywhere refuses
-    rows = [value_row_from_grade(r) for r in DbLedger(factory).rows()]
+    grades = list(DbLedger(factory).rows())
+    rows = [value_row_from_grade(r) for r in grades]
     by_hash = {r.row_hash: r for r in rows if r.row_hash}
-    verdicts = verdicts_from_reviews(DbReviewLedger(factory).records(), by_hash)
+    reviews = list(DbReviewLedger(factory).records())
+    verdicts = verdicts_from_reviews(reviews, by_hash)
+    # the learning curve reads the prevention loop's register: its chain (every repository's,
+    # each verified) and the reviews that class review defects. A chain that does not verify
+    # is a 409 that says so — never a curve served as if nothing were wrong
+    try:
+        records = all_prevention_records(db)
+    except LedgerIntegrityError as exc:
+        raise ApiError(
+            409,
+            "prevention_chain_broken",
+            f"a prevention chain does not verify: {exc} — the learning curve is not served "
+            "until an operator restores it from the database backup",
+        ) from exc
+    register = default_register(
+        records,
+        reviews=reviews,
+        mechanisms=mechanisms(rows=grades, repo=repo or ""),
+    )
     return value_report(
         rows,
         verdicts,
@@ -80,6 +105,7 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
         apparatus=apparatus,
         window=window,
         usd_per_gbp=usd_per_gbp,
+        register=register,
     ).to_dict()
 
 

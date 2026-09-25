@@ -24,10 +24,10 @@ Two ledger shapes are read:
 
 Reviews come from the review store's projection (``repo|task|grade_clean|verdict|
 mergeable_flag|finding_kinds|statement_head``). Two records in the 2026-09-25 store say
-"Mergeable" in the statement and store ``mergeable=false`` (stream K fixes the source); the
-operator's export marks them ``(FLAG DEFECT`` and this reader corrects them and counts the
-corrections. The three cobra patches the 2026-09-13 critical-friend review read are added
-from ``docs/reviews/2026-09-13-critical-friend.md`` §3 unless ``--no-critical-friend``.
+"Mergeable" in the statement and store ``mergeable=false``; stream K fixed the source and this
+reader applies K's rule (``statement_mergeable``) to correct them and count the corrections.
+The three cobra patches the 2026-09-13 critical-friend review read are added from
+``docs/reviews/2026-09-13-critical-friend.md`` §3 unless ``--no-critical-friend``.
 
 Navigation
 ----------
@@ -62,6 +62,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from crb.core.ledger import BUDGET_STOP_REASONS, GradeRow, derive_failure_kind
+from crb.core.review import statement_mergeable
 from crb.core.value import (
     DEFAULT_USD_PER_GBP,
     DEFAULT_WINDOW,
@@ -71,7 +72,7 @@ from crb.core.value import (
     value_row_from_grade,
 )
 
-#: errclass → (the error text the product's rule reads, the sub-class the stub register names).
+#: errclass → (the error text the product's rule reads, the sub-class the register names).
 #: The texts are chosen to hit the rule's branch the class belongs to: ``model_error: … usage
 #: limit`` is an outage, ``protocol violation: …`` a protocol refusal, anything else harness.
 ERRCLASS: dict[str, tuple[str, str]] = {
@@ -160,14 +161,18 @@ def read_reviews(
     path: Path | None, *, critical_friend: bool = True
 ) -> tuple[list[ReviewVerdict], int]:
     """Verdicts from the review projection (+ the three critical-friend cobra verdicts) and
-    how many stored ``mergeable`` flags the reader corrected from a ``(FLAG DEFECT`` mark."""
+    how many stored ``mergeable`` flags the reader corrected: a flag the statement's own words
+    contradict (``crb.core.review.statement_mergeable``, stream K's rule) takes the words."""
     out: list[ReviewVerdict] = []
     corrected = 0
     if path is not None:
         for d in csv.DictReader(path.read_text(encoding="utf-8").splitlines(), delimiter="|"):
             flag = _b(d.get("mergeable_flag", ""))
-            if flag is False and "(FLAG DEFECT" in d.get("statement_head", ""):
-                flag = True
+            # stream K's rule, the one the review ledgers now refuse at append with: a flag
+            # the statement's own words contradict is corrected, and counted
+            says = statement_mergeable(d.get("statement_head", ""))
+            if says is not None and flag is not None and says != flag:
+                flag = says
                 corrected += 1
             kinds = tuple(k for k in (d.get("finding_kinds") or "").split(",") if k)
             out.append(
@@ -244,7 +249,7 @@ def render_markdown(
         f"| **working rate, blind** (clean x precision) | {_pct(ns['working_rate'])} ({_pct(ns['working_rate_low'])}-{_pct(ns['working_rate_high'])}) | n = {ns['n_valid']} blind valid x n = {ns['precision']['n']} {ns['precision_basis']} verdicts; method: product of two rates and of their Wilson bounds — an estimate |",
         f"| **working changes per pound, blind** | {ns['per_pound'] if ns['per_pound'] is not None else '—'} per £ ({ns['per_pound_low']}-{ns['per_pound_high']}); ≈ {ns['working_estimate']} working of {ns['n_valid']} valid for £{ns['spend_gbp']:.2f} | n = {ns['n_attempts']} blind attempts (all spend counted); £ at {usd_per_gbp} USD per GBP (fixed) |",
         f"| deliver decisions made prospectively, clean | {_rate(rt['deliver'])} | n = {rt['rows_scored']} rows routed from prior rows only (`routing.v1`, controls not evaluated) |",
-        f"| bug classes closed (register: `{lc['register']['source']}`) | {lc['register']['closed']} of {lc['register']['n_classes']} | n = {lc['register']['n_classes']} classes; the register is a stub until stream L is wired |",
+        f"| bug classes closed (register: `{lc['register']['source']}`) | {lc['register']['closed']} of {lc['register']['n_classes']} | n = {lc['register']['n_classes']} classes; the prevention loop's register at family level (an export carries no error text); a class closes only after an applied change the attempts prove, and none has been applied |",
     ]
     lines += [
         "",

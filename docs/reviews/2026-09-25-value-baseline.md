@@ -44,7 +44,7 @@ review sample is small. The figures under apparatus 2.2 are:
 | **working rate, blind** (clean x precision) | 7.2% (2.0%-19.0%) | n = 94 blind valid x n = 13 review verdicts; method: product of two rates and of their Wilson bounds — an estimate |
 | **working changes per pound, blind** | 0.2063 per £ (0.0581-0.5433); ≈ 6.77 working of 94 valid for £32.81 | n = 260 blind attempts (all spend counted); £ at 1.35 USD per GBP (fixed) |
 | deliver decisions made prospectively, clean | 17 / 20 = 85.0% (Wilson 95% 64.0%-94.8%) | n = 274 rows routed from prior rows only (`routing.v1`, controls not evaluated) |
-| bug classes closed (register: `stub:failure-kind`) | 0 of 29 | n = 29 classes; the register is a stub until stream L is wired |
+| bug classes closed (register: `crb.prevention.register.v1`) | 0 of 29 | n = 29 classes; the prevention loop's register at family level (an export carries no error text); a class closes only after an applied change the attempts prove, and none has been applied |
 
 Recurrence of previously-seen bug classes per window of 50 attempts (n = 278 attempts, time-ordered, prior data only; apparatus 2.2):
 
@@ -81,7 +81,7 @@ pooled, which the product never does by default].**
 | **working rate, blind** (clean x precision) | 6.8% (2.0%-17.5%) | n = 118 blind valid x n = 13 review verdicts; method: product of two rates and of their Wilson bounds — an estimate |
 | **working changes per pound, blind** | 0.1903 per £ (0.0552-0.4907); ≈ 8.0 working of 118 valid for £42.03 | n = 303 blind attempts (all spend counted); £ at 1.35 USD per GBP (fixed) |
 | deliver decisions made prospectively, clean | 21 / 24 = 87.5% (Wilson 95% 69.0%-95.7%) | n = 348 rows routed from prior rows only (`routing.v1`, controls not evaluated) |
-| bug classes closed (register: `stub:failure-kind`) | 0 of 39 | n = 39 classes; the register is a stub until stream L is wired |
+| bug classes closed (register: `crb.prevention.register.v1`) | 0 of 39 | n = 39 classes; the prevention loop's register at family level (an export carries no error text); a class closes only after an applied change the attempts prove, and none has been applied |
 
 Recurrence of previously-seen bug classes per window of 50 attempts (n = 352 attempts, time-ordered, prior data only; apparatus 2.0, 2.1, 2.2 (pooled)):
 
@@ -111,9 +111,9 @@ patches; by each review's headline verdict it is style 3, defect 4 and public in
    [measured — n = 13 reviews; method: each review's headline verdict; apparatus 2.0–2.2].
    The deterministic proxy — clean, lint-clean, no interface break — called 153 of 155 clean
    patches working under apparatus 2.2 [measured — n = 155 clean valid rows; method: the
-   proxy in `crb.core.value.proxy_working`; apparatus 2.2], so until the formatter step and the
-   interface belt exist the proxy is optimistic. That is why the scorecard prefers any
-   repository's reviews to the proxy.
+   proxy in `crb.core.value.proxy_working`; apparatus 2.2], so the proxy is optimistic until
+   the formatter step and the interface belt (belt 6), built in this wave and off by default,
+   are switched on. That is why the scorecard prefers any repository's reviews to the proxy.
 2. **Process losses dominate the failures.** Budget stops and protocol refusals are 74 of the
    131 valid failures, and 14 budget-stopped attempts ran into the 900-second wall clock
    [measured — n = 131 valid non-clean rows and n = 47 budget rows; method: the product's
@@ -126,12 +126,15 @@ patches; by each review's headline verdict it is style 3, defect 4 and public in
 4. **The product throws away what it makes, and nothing learns yet.** The brief found none of
    the clean patches still retrievable **[measured by the brief from the store, not
    recomputable from the export — n = 190 clean rows; method: the retained-patch route;
-   apparatus 2.0–2.2]**. The learning curve does not fall: under apparatus 2.2 the share of
-   attempts that repeat a class already seen was 16% in the first window of fifty attempts and
-   54% in the last, partial one [measured — n = 278 attempts; method: `learning_curve`, each
-   attempt's class judged against earlier attempts only; apparatus 2.2]. No class is closed
-   because the register behind the curve is still the stub that applies nothing **[gap — the
-   prevention loop's register is not wired; `docs/dod/product.md` G-650]**.
+   apparatus 2.0–2.2]**. From this wave on, every graded attempt keeps its patch. The
+   learning curve does not fall: under apparatus 2.2 the share of attempts that repeat a
+   class already seen was 14% in the first window of fifty attempts and 50% in the last,
+   partial one [measured — n = 278 attempts; method: `learning_curve` with the prevention
+   loop's register (`crb.prevention.register.v1`), each attempt's class judged against
+   earlier attempts only; apparatus 2.2]. The register is now the one behind the curve, but
+   no class is closed: the loop's switch is off by default and no change has been applied on
+   the operator's stack, so nothing has yet been measured after a change **[gap — the Phase B
+   paired campaign with the loop off and on; `docs/dod/streams/learn.md` G-537]**.
 
 **What routing already gets right.** Of the rows the routing rule would have let in under
 `deliver` at the time — each cell routed from the rows before it only — 17 of 20 came out
@@ -139,6 +142,69 @@ clean [measured — n = 20 prospective deliver decisions over n = 274 routed row
 `prospective_routing`, numeric clauses only, negative controls not evaluated; apparatus 2.2].
 Clean is not working, so this is an upper bound on the share that would merge **[hypothesis —
 confirmed or refuted by reviewing the patches those rows produced, once they are kept]**.
+
+## Today's prevention register — cobra, click and koa
+
+**What the loop would do today, class by class [measured — n = 618 exported rows, of which the
+loop reads each repository's first attempts (cobra 107, click 70, koa 47); method:
+`scripts/prevention_from_export.py` running `crb.core.prevention.build_register` with the
+mechanisms this build ships (`finish_gate`, `format_step`, `budget_calibrated`) and stream K's
+calibration check, every row's kind from the product's failure rule; apparatus 2.0–2.2, each
+class's stratum the latest comparable key, apparatus 2.2].** The export carries no error text,
+stop reason or lint pack, so every class is read at family level (`protocol:network:-`,
+`budget:unrecorded`, `lint:*`). The switch is off on every repository, so every class is
+`open`: *suspended* means the loop would act if an operator switched it on, *watch* that there
+are too few occurrences yet, *dormant* that the class has gone quiet with no change on record
+(never credited to the loop), and *capability* that the class is judged by value in the paired
+campaign and is never closed by recurrence.
+
+**cobra** — 107 first attempts (22 blind, 85 sighted); the largest blind class is `builder_red:target_red` (7 first attempts) [measured — n = 107 first attempts; method: the register over the export; apparatus 2.0–2.2].
+
+| class | first attempts (blind / sighted) | stratum | tasks | spend | actionable | lever the loop would apply | would file | status |
+|---|---|---|---|---|---|---|---|---|
+| `builder_red:target_red` | 12 (7 / 5) | 6 of 19 blind (apparatus 2.2) | 8 | $6.20 | yes | `finish_gate` (gate) | — | open (capability, suspended) |
+| `harness:no-credential` | 9 (0 / 9) | 9 of 80 sighted (apparatus 2.2) | 9 | $0.00 | yes | none the loop may apply | `item:credential-link` | open |
+| `budget:unrecorded` | 5 (1 / 4) | 4 of 80 sighted (apparatus 2.2) | 3 | $4.91 | no | `budget_calibrated` (mistake-proofing) | `item:budget-handoff` | open (dormant) |
+| `protocol:network:-` | 3 (3 / 0) | 3 of 19 blind (apparatus 2.2) | 3 | $4.40 | yes | `finish_gate` (mistake-proofing) | `item:refused-call` | open (suspended) |
+| `lint:*` | 1 (0 / 1) | 1 of 63 sighted (apparatus 2.2) | 1 | $0.46 | no | `finish_gate` (gate) | — | open (watch) |
+| `harness:other` | 0 (0 / 0) | 0 of 19 blind (apparatus 2.2) | 1 | $0.44 | no | none the loop may apply | — | open (watch) |
+
+**click** — 70 first attempts (17 blind, 53 sighted); the largest blind class is `protocol:network:-` (5 first attempts) [measured — n = 70 first attempts; method: the register over the export; apparatus 2.0–2.2].
+
+| class | first attempts (blind / sighted) | stratum | tasks | spend | actionable | lever the loop would apply | would file | status |
+|---|---|---|---|---|---|---|---|---|
+| `budget:unrecorded` | 10 (3 / 7) | 7 of 43 sighted (apparatus 2.2) | 5 | $13.07 | yes | none the loop may apply | `item:budget-handoff` | open |
+| `protocol:network:-` | 6 (5 / 1) | 1 of 11 blind (apparatus 2.2) | 3 | $2.06 | no | `finish_gate` (mistake-proofing) | `item:refused-call` | open (watch) |
+| `harness:env-network:pip` | 5 (1 / 4) | 0 of 43 sighted (apparatus 2.2) | 4 | $2.67 | no | none the loop may apply | `item:env-provision` | open (watch) |
+| `builder_red:target_red` | 4 (4 / 0) | 3 of 11 blind (apparatus 2.2) | 2 | $2.47 | yes | `finish_gate` (gate) | — | open (capability, suspended) |
+| `lint:*` | 2 (0 / 2) | 2 of 39 sighted (apparatus 2.2) | 2 | $0.32 | yes | `finish_gate` (gate) | — | open (suspended) |
+| `harness:other` | 1 (0 / 1) | 0 of 43 sighted (apparatus 2.2) | 1 | $0.31 | no | none the loop may apply | — | open (watch) |
+| `protocol:archaeology:-` | 0 (0 / 0) | 0 of 11 blind (apparatus 2.2) | 1 | $1.52 | no | `finish_gate` (mistake-proofing) | `item:refused-call` | open (watch) |
+
+**koa** — 47 first attempts (13 blind, 34 sighted); the largest blind class is `builder_red:target_red` (4 first attempts) [measured — n = 47 first attempts; method: the register over the export; apparatus 2.0–2.2].
+
+| class | first attempts (blind / sighted) | stratum | tasks | spend | actionable | lever the loop would apply | would file | status |
+|---|---|---|---|---|---|---|---|---|
+| `builder_red:target_red` | 4 (4 / 0) | 4 of 10 blind (apparatus 2.2) | 4 | $3.90 | yes | `finish_gate` (gate) | — | open (capability, suspended) |
+| `protocol:archaeology:-` | 4 (2 / 2) | 1 of 10 blind (apparatus 2.2) | 3 | $1.07 | no | `finish_gate` (mistake-proofing) | `item:refused-call` | open (watch) |
+| `budget:unrecorded` | 3 (0 / 3) | 3 of 29 sighted (apparatus 2.2) | 4 | $1.53 | yes | `budget_calibrated` (mistake-proofing) | `item:budget-handoff` | open (suspended) |
+| `builder_red:regression` | 1 (0 / 1) | 1 of 29 sighted (apparatus 2.2) | 1 | $0.13 | no | `finish_gate` (gate) | — | open (watch) |
+| `protocol:network:-` | 1 (1 / 0) | 0 of 10 blind (apparatus 2.2) | 1 | $0.23 | no | `finish_gate` (mistake-proofing) | `item:refused-call` | open (watch) |
+
+**What this says.** Every protocol refusal and every red target test would be answered with
+stream W's finish gate, a process lever; no class needs a playbook line [measured — n = 224
+first attempts in cobra, click and koa; method: the register over the export; apparatus 2.2
+strata]. Budget stops would get stream K's calibrated budget in koa, but not in click: the
+loop checks click's budget class against the sighted L cell, where the export holds only 7
+clean completions, one below the 8 the calibration needs, so the loop would file the
+budget-handoff item instead of applying a budget it cannot set from data [measured — n = 43
+sighted first attempts in click; method: the register over the export with K's calibration
+check, minimum `crb.core.spend.CALIBRATION_MIN_CLEAN`; apparatus 2.2]. The nine cobra rows
+refused for a missing credential are now stopped at submit (`docs/PREVENTION.md` P-003), so
+the loop would file a link to that fix rather than make a change of its own [measured — n = 9
+of 80 sighted first attempts in cobra; method: the register over the export; apparatus 2.2].
+Whether any of these changes lowers its class's recurrence is not known until the paired
+campaign runs **[gap — `docs/dod/streams/learn.md` G-537]**.
 
 ## What this does not say
 
@@ -163,6 +229,8 @@ PYTHONPATH=src python scripts/value_baseline.py \
   --ledger ledger-2026-09-25.psv --reviews reviews-2026-09-25.psv --apparatus 2.2
 PYTHONPATH=src python scripts/value_baseline.py \
   --ledger ledger-2026-09-25.psv --reviews reviews-2026-09-25.psv --apparatus all
+PYTHONPATH=src python scripts/prevention_from_export.py ledger-2026-09-25.psv \
+  --repos cobra,click,koa
 ```
 
 On a running deployment the same report is `GET /value` (docs/API.md, Value), and Home shows

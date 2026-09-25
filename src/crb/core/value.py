@@ -36,8 +36,7 @@ What is measured, and the rule for each
   prior data decides it, so appending rows can never change an earlier window. The class of a
   row, and each class's status (open / applied / closed / retired / escalated) and lever
   (process or context), come from the bug register behind :func:`default_register` — stream
-  L's register; until it is wired a stub classes by failure kind and closes nothing, and says
-  so (``source``).
+  L's prevention register over the loop's own chain; ``source`` names it.
 * **Prospective routing precision** — walk the rows in time order; before each row, route its
   cell (repository × mode × cell key) with the ONE routing rule from the rows before it only;
   of the rows attempted under a ``deliver`` decision, how many were clean (and working).
@@ -63,10 +62,11 @@ Works with:   src/crb/core/ledger.py (the rows, the failure kinds, ``CellStats``
               src/crb/core/review.py (the verdicts precision reads), src/crb/core/stats.py (the
               Wilson interval), src/crb/core/routing.py (the rule the prospective decisions
               replay), src/crb/server/routes/value.py (``GET /value``),
-              scripts/value_baseline.py (the same report over an exported ledger)
+              scripts/value_baseline.py (the same report over an exported ledger),
+              src/crb/core/prevention.py (the register behind the learning curve)
 Tested by:    tests/test_value.py, tests/test_server_routes_value.py,
               tests/test_value_baseline_script.py
-Touch when:   never for a new repository; stream L's register replaces the stub — change
+Touch when:   never for a new repository; the register's inputs change — change
               ``default_register`` only; a new belt that decides "working" joins
               ``proxy_working`` (and the docstring above); a new failure kind that is a process
               loss joins ``LOSS_KINDS``.
@@ -93,6 +93,7 @@ from crb.core.ledger import (
     CellStats,
     GradeRow,
 )
+from crb.core.prevention import Mechanisms, PreventionRecord, PreventionRegister
 from crb.core.review import ReviewRecord, latest_reviews
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DELIVER, ROUTES, RoutingPolicy, route
 from crb.core.stats import Interval, mean, wilson_interval
@@ -403,10 +404,41 @@ class KindRegister:
         return [seen[k] for k in sorted(seen)]
 
 
-def default_register() -> BugRegister:
-    """The register the server and the scripts use. Stream L's merge returns its register
-    here — the only line that changes when the prevention loop is wired."""
-    return KindRegister()
+def default_register(
+    records: Iterable[PreventionRecord] = (),
+    *,
+    reviews: Iterable[ReviewRecord] = (),
+    factory_events: Iterable[Mapping[str, Any]] = (),
+    mechanisms: Mechanisms | None = None,
+) -> BugRegister:
+    """The register the server and the scripts use: stream L's prevention register
+    (``crb.prevention.register.v1``) over the loop's chain ``records``, the standing
+    ``reviews`` and the factory's outcome events. With no records every class is ``open``
+    — nothing was applied, so nothing is closed. :class:`KindRegister` stays as the
+    reference stub the tests compare against."""
+    return LoopRegister(
+        PreventionRegister(
+            records, reviews=reviews, factory_events=factory_events, mechanisms=mechanisms
+        )
+    )
+
+
+class LoopRegister:
+    """Stream L's register behind the seam. Each standing it reports is re-made as a
+    :class:`ClassStatus`, so a status or lever outside the scorecard's vocabulary fails
+    loudly here instead of skewing the closed or process shares."""
+
+    def __init__(self, inner: PreventionRegister) -> None:
+        self.inner = inner
+        self.source = inner.source
+
+    def class_of(self, row: ValueRow) -> str | None:
+        return self.inner.class_of(row)
+
+    def statuses(self, rows: Sequence[ValueRow]) -> Sequence[ClassStatus]:
+        return [
+            ClassStatus(s.signature, s.repo, s.status, s.lever) for s in self.inner.statuses(rows)
+        ]
 
 
 # --- precision and the north star -------------------------------------------------------
@@ -1029,6 +1061,7 @@ __all__ = [
     "BugRegister",
     "ClassStatus",
     "KindRegister",
+    "LoopRegister",
     "Rate",
     "ReviewVerdict",
     "ValueReport",

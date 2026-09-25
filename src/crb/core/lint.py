@@ -80,8 +80,8 @@ Works with:   src/crb/core/grade.py (folds ``LintRun.ok`` into belt 5),
               resolution), src/crb/core/execution.py (Command / ExecResult), src/crb/core/spec.py
               (validates the declared ``lint`` block at config time), src/crb/core/ledger.py
               (the ``lint`` failure kind)
-Tested by:    tests/test_lint.py, tests/test_grade.py, tests/test_mine.py, tests/test_runners_node.py,
-              tests/test_runner_audit.py
+Tested by:    tests/test_lint.py, tests/test_grade.py, tests/test_mine.py,
+              tests/test_runners_node.py, tests/test_runner_audit.py
 Touch when:   onboarding a repository whose linter detection is wrong or missing — declare it
               in the repo config (``lint: {command, paths, exts, findings_rc, findings_re,
               timeout}`` or ``{disabled: true}``, the shape under ``plan_from_config``;

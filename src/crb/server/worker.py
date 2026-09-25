@@ -220,7 +220,7 @@ from crb.core.oracle.mutation import (
     score_task,
 )
 from crb.core.patches import PatchStore
-from crb.core.prevention import LearningSnapshot, empty_snapshot
+from crb.core.prevention import K_SECTION, W_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.redact import redact_and_cap
 from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
@@ -1794,13 +1794,22 @@ class Worker:
                 raise ValueError(f"rung {i} ({rung.label}) has an invalid budget: {exc}") from exc
         return ladder
 
-    def _spend_hooks(self, ctx: RunContext, ladder: EscalationLadder, *, mode: str) -> SpendHooks:
+    def _spend_hooks(
+        self,
+        ctx: RunContext,
+        ladder: EscalationLadder,
+        *,
+        mode: str,
+        repo_spend: Mapping[str, Any] | None = None,
+    ) -> SpendHooks:
         """The spend rules bound to this run from the ledger as it stands now (prior rows
         only): the escalation gate and, when the run or the repository asks for
         ``budget_profile: calibrated``, the per-attempt budget (crb.server.spend). A ledger
         that cannot be read (a tampered row the core refuses to construct) measures
         nothing: the rules then see no history — the ladder climbs as before and a
-        calibrated attempt keeps its floor — and the trace says why."""
+        calibrated attempt keeps its floor — and the trace says why. ``repo_spend`` is the
+        repository's ``spend`` block under the prevention loop's overlay (the team's keys
+        win); ``None`` reads the configuration as stored."""
         try:
             rows = list(self.ledger.rows())
         except Exception as exc:  # the rules are advisory spend, never a reason to fail a run
@@ -1817,7 +1826,7 @@ class Worker:
             mode=mode,
             ladder=ladder,
             params=ctx.params,
-            repo_spend=dict(ctx.config.spend),
+            repo_spend=dict(ctx.config.spend if repo_spend is None else repo_spend),
             tier_fn=budget_tier,
             turns_for=lambda hashes: pack_turns(self.factory, hashes),
         )
@@ -1855,10 +1864,17 @@ class Worker:
         # belt-5 pre-flight (adapter.Preflight): OFF unless the run asks; a run with it on is
         # a different arm (builder '<name>+preflight') and the apparatus stamp says so
         preflight = Preflight.from_params(p.get("preflight"))
-        spend = self._spend_hooks(ctx, ladder, mode=mode)
+        # the loop's configuration levers (ADR-0020) reach the run through the same two
+        # surfaces a person writes — K's ``spend`` and W's ``checks`` — under the team's keys
+        spend = self._spend_hooks(
+            ctx, ladder, mode=mode, repo_spend=learning.config_section(K_SECTION, ctx.config.spend)
+        )
         # "clean means working" (ADR-0021): the run's switches over the repository's
         # ``checks`` block — each OFF unless one of them says otherwise; stamped below
-        checks = resolve_checks(RepoChecks.from_config(ctx.config.checks), p.get("checks"))
+        checks = resolve_checks(
+            RepoChecks.from_config(learning.config_section(W_SECTION, ctx.config.checks)),
+            p.get("checks"),
+        )
         spec = RunSpec(
             run_id=run.id,
             config=ctx.config,

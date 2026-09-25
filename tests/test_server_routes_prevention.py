@@ -155,7 +155,11 @@ def test_register_is_viewer_readable_and_404s_an_unknown_repo(env: Env) -> None:
     assert body["switch"]["auto_apply"] == "off" and body["decisions_verified"] == []
     entry = next(e for e in body["entries"] if e["signature"] == SIG)
     assert (entry["first_attempts"], entry["tasks"], entry["status"]) == (4, 4, "open")
-    assert entry["recommendation"]["lever_id"] == "line:T-NET"
+    # this build ships W's finish gate: a process lever outranks the advisory line
+    assert (entry["recommendation"]["lever_id"], entry["recommendation"]["level"]) == (
+        "finish_gate",
+        "mistake-proofing",
+    )
     assert set(body["counts"]) == {"open", "applied", "closed", "retired", "escalated"}
 
 

@@ -24,8 +24,8 @@ Works with:   src/crb/core/value.py (under test), src/crb/core/stats.py (the int
               src/crb/core/routing.py (the rule the prospective decisions replay),
               src/crb/core/ledger.py (the failure kinds and the row the adapter reads)
 Tested by:    tests/test_value.py
-Touch when:   a measure is added to the scorecard, the valid denominator changes, or stream L's
-              register replaces the stub behind ``default_register`` (pin its statuses here).
+Touch when:   a measure is added to the scorecard, the valid denominator changes, or the
+              register behind ``default_register`` changes (pin its statuses here).
 """
 
 from __future__ import annotations
@@ -36,7 +36,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from crb.core.grade import FalseQ1Violation
 from crb.core.ledger import (
+    FAILURE_API,
     FAILURE_BUDGET,
     FAILURE_BUILDER_RED,
     FAILURE_CLEAN,
@@ -159,13 +161,30 @@ def test_the_adapter_reads_a_grade_row_and_its_optional_api_belt() -> None:
         mode="blind",
         cost_usd=0.5,
         evidence_pack_hash="p" * 64,
-        labels={"api_stable": "false"},
+        labels={"api_stable": "true"},
     ).chained("0" * 64)
     v = value_row_from_grade(row)
     assert v.row_hash == row.row_hash and v.clean and v.failure_kind == FAILURE_CLEAN
-    assert v.repo_lint_clean is True and v.api_stable is False and v.mode == "blind"
-    assert proxy_working(v) is False  # a public-API break is never working
+    assert v.repo_lint_clean is True and v.api_stable is True and v.mode == "blind"
+    assert proxy_working(v) is True
     assert v.grade is row  # stream L's register reads the full row behind the seam
+    # stream W's ledger refuses a CLEAN row whose belt 6 failed (a false Q1), so a public-API
+    # break reaches the scorecard as a non-clean ``api`` row — never working, never clean
+    broke = dataclasses.replace(v, clean=False, api_stable=False, failure_kind=FAILURE_API)
+    assert proxy_working(broke) is False
+    with pytest.raises(FalseQ1Violation, match="api_stable"):
+        GradeRow(
+            repo="alpha",
+            task_id="a" * 40,
+            clean=True,
+            tests_unmodified=True,
+            target_green=True,
+            no_new_failures=True,
+            source_changed=True,
+            repo_lint_clean=True,
+            evidence_pack_hash="p" * 64,
+            labels={"api_stable": "false"},
+        )
 
 
 def test_the_adapter_names_the_protocol_guard_and_the_budget_stop() -> None:
@@ -408,10 +427,16 @@ def test_the_register_seam_gives_the_closed_and_process_shares() -> None:
     assert (reg["removed_by_process"], reg["removed_by_process_share"]) == (1, 0.5)
 
 
-def test_the_stub_register_says_it_is_a_stub_and_closes_nothing() -> None:
+def test_the_default_register_is_the_prevention_loops_and_closes_nothing_without_a_chain() -> None:
+    """Stream L's register is wired behind the seam: with no applied change on the chain,
+    every class is open — nothing was applied, so nothing is closed. The stub stays as the
+    reference and still says it is one."""
     reg = learning_curve(_curve_rows(), window=4, register=default_register()).to_dict()["register"]
-    assert reg["source"].startswith("stub")
+    assert reg["source"] == "crb.prevention.register.v1"
+    assert reg["n_classes"] > 0 and reg["by_status"]["open"] == reg["n_classes"]
     assert reg["closed"] == 0 and reg["removed_by_process_share"] is None
+    stub = learning_curve(_curve_rows(), window=4, register=KindRegister()).to_dict()["register"]
+    assert stub["source"].startswith("stub") and stub["closed"] == 0
     with pytest.raises(ValueError, match="status"):
         ClassStatus("x", "alpha", "fixed", "")
     with pytest.raises(ValueError, match="lever"):

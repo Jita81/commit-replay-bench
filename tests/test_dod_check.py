@@ -704,3 +704,20 @@ def test_the_register_must_exist_and_its_counts_reach_the_gap_analysis(
     (root / "docs/PREVENTION.md").unlink()
     assert mod.main(["--check"]) == 1
     assert "docs/PREVENTION.md is missing" in capsys.readouterr().out
+
+
+def test_two_streams_numbering_the_same_criterion_id_are_refused(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-016: three parallel streams each added ``measure.truth.16`` to
+    the same file; the merge had to renumber them. A duplicate id must fail the gate, never
+    silently shadow the other criterion."""
+    mod, root = tree
+    _write_all(root)
+    stream = root / "docs/dod/streams/measure.md"
+    lines = stream.read_text(encoding="utf-8").splitlines()
+    first = next(i for i, ln in enumerate(lines) if ln.startswith("| measure."))
+    lines.insert(first + 1, lines[first])
+    stream.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "duplicate criterion id measure." in capsys.readouterr().out

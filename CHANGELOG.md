@@ -8,6 +8,27 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the value wave wired: a bug class meets a process lever, and the curve shows it
+
+- **The loop's configuration levers now reach a run.** `crb.server.prevention_state.mechanisms`
+  ships stream W's format step and finish gate and stream K's calibrated budget; the worker
+  resolves `RepoConfig.checks` and `RepoConfig.spend` under the loop's overlay (the team's own
+  keys still win, and a run may opt out with `learning: "off"`), so the row records the switch
+  it ran under (`labels.checks`, `labels.budget_profile`). None is on by default.
+- **The loop never applies a calibrated budget K's rule cannot set.** A budget class in a cell
+  with fewer than 8 clean completions is passed over as "cannot calibrate"; on the 2026-09-25
+  export that is click's sighted L cell [measured — n = 43 sighted first attempts in click;
+  method: `scripts/prevention_from_export.py` with K's calibration check; apparatus 2.2].
+- **The scorecard's learning curve reads the loop's register** (`crb.prevention.register.v1`,
+  behind `crb.core.value.default_register`); `GET /value` reads every repository's verified
+  chain and answers `409 prevention_chain_broken` when one does not verify.
+- **One definition each.** The loop's first attempt is the complement of K's escalated trial,
+  the formatter names cover every formatter W writes, and the five statuses are shared — each
+  pinned by `tests/test_value_wiring.py`.
+- The baseline page is recomputed with the merged code and gains today's register for cobra,
+  click and koa; its prose is now held to its own tables by a test (`docs/PREVENTION.md`
+  P-015).
+
 ### 2026-09-25 — keep what we make, stop paying for nothing (value programme, stream K)
 
 - **Every graded attempt keeps its patch** (`crb.core.patches`, ADR-0006 amended): the

@@ -107,7 +107,7 @@ const VALUE = {
   rows: 518,
   usd_per_gbp: 1.35,
   north_star: { label: 'working changes per pound, blind', per_pound: 0.21, per_pound_low: 0.06, per_pound_high: 0.54, pounds_per_working: 4.85, pounds_per_working_low: 1.84, pounds_per_working_high: 17.2, working_rate: 0.072, working_rate_low: 0.02, working_rate_high: 0.19, working_estimate: 6.77, n_attempts: 260, n_valid: 94, clean: 22, clean_rate: { k: 22, n: 94, point: 0.234, ci_low: 0.16, ci_high: 0.329 }, precision_basis: 'review', precision: { k: 4, n: 13, point: 0.308, ci_low: 0.127, ci_high: 0.576 }, spend_usd: 44.3, spend_gbp: 32.81, usd_per_gbp: 1.35, method: 'estimate' },
-  learning_curve: { source: 'stub:failure-kind', attempts: 278, register: { source: 'stub:failure-kind', n_classes: 29, closed: 0, closed_share: 0 } },
+  learning_curve: { source: 'crb.prevention.register.v1', attempts: 278, register: { source: 'crb.prevention.register.v1', n_classes: 29, closed: 0, closed_share: 0 } },
 }
 const HEALTH = { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: 'docker not reachable', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: 'configured: claude_code_cli', data: { anthropic: false, claude_code_cli: true } }] }
 

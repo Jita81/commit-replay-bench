@@ -249,7 +249,7 @@ describe('HomePage', () => {
     const { calls } = mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
-      'GET /value': { schema: 'crb.value.v1', repo: null, apparatus: '2.2', apparatus_versions: ['2.2'], pooled: false, rows: 518, usd_per_gbp: 1.35, north_star: ns, learning_curve: { source: 'stub:failure-kind', attempts: 278, register: { source: 'stub:failure-kind', n_classes: 29, closed: 0, closed_share: 0 } } },
+      'GET /value': { schema: 'crb.value.v1', repo: null, apparatus: '2.2', apparatus_versions: ['2.2'], pooled: false, rows: 518, usd_per_gbp: 1.35, north_star: ns, learning_curve: { source: 'crb.prevention.register.v1', attempts: 278, register: { source: 'crb.prevention.register.v1', n_classes: 29, closed: 0, closed_share: 0 } } },
     })
     renderApp(<HomePage />, { route: '/home' })
     const tile = await screen.findByTestId('tile-value')

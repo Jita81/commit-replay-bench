@@ -127,6 +127,7 @@ from crb.core.playbook import (
 )
 from crb.core.redact import redact
 from crb.core.review import SEVERITY, ReviewRecord, latest_reviews
+from crb.core.spend import is_escalated_trial
 from crb.core.stats import wilson_interval
 from crb.core.version import APPARATUS_VERSION
 
@@ -179,7 +180,16 @@ CAPABILITY_CLASSES: frozenset[str] = frozenset(
     {"builder_red:target_red", "review:defect", "review:regression"}
 )
 #: A belt-5 rejection whose every rejecting step is one of these is ``format:<tool>``.
-FORMATTER_TOOLS: tuple[str, ...] = ("gofmt", "ruff-format", "prettier", "spotless", "cargo-fmt")
+#: Every formatter stream W's format step can write (``crb.core.formatting.FORMATTER_WRITE``
+#: less ``standard``, a linter with a fix mode) is here; tests/test_value_wiring.py pins it.
+FORMATTER_TOOLS: tuple[str, ...] = (
+    "gofmt",
+    "ruff-format",
+    "prettier",
+    "spotless",
+    "cargo-fmt",
+    "black",
+)
 #: The closed vocabulary of tools a ``harness:`` signature may name; anything else is
 #: ``other`` (a signature never carries free text).
 HARNESS_TOOLS: frozenset[str] = frozenset(
@@ -659,13 +669,10 @@ def factory_signatures(events: Iterable[Mapping[str, Any]]) -> list[tuple[str, s
 
 def is_first_attempt(trial: str) -> bool:
     """``r1`` (and ``""``, ``w1r1`` — anything that is not ``r2`` or later) is a first
-    attempt. Mirrors ``crb.core.spend.is_escalated_trial`` (stream K; the merge pins the
-    agreement): a retry exists only after a failure, so counting it would credit the loop
-    with K's escalation rule."""
-    t = trial.strip().lower()
-    if t.startswith("r") and t[1:].isdigit():
-        return int(t[1:]) < 2
-    return True
+    attempt: the complement of ``crb.core.spend.is_escalated_trial`` (stream K), so the loop
+    and the escalation rule never disagree on what a retry is. A retry exists only after a
+    failure, so counting it would credit the loop with K's escalation rule."""
+    return not is_escalated_trial(trial)
 
 
 def observable(row: GradeRow, family: str, *, reviewed: bool = False) -> bool:
@@ -2061,7 +2068,8 @@ def decision_state(done: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 class Mechanisms:
     """THE merge seam for streams W and K: which process mechanisms this build ships, which
     are on by default, whether a budget cell can be calibrated, and the repository's own
-    check commands. Empty on this branch — nothing ships until W and K merge."""
+    check commands. The empty default ships nothing; the server binds what this build ships
+    (``crb.server.prevention_state.mechanisms``)."""
 
     shipped: frozenset[str] = frozenset()
     calibratable: Callable[[str, str], tuple[bool, str]] | None = None

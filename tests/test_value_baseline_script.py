@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -34,6 +35,7 @@ from types import ModuleType
 import pytest
 
 from crb.core.ledger import GradeRow
+from crb.core.value import default_register
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = (
@@ -135,6 +137,18 @@ def test_reviews_correct_the_flag_defect_and_can_drop_the_critical_friend_three(
     verdicts, corrected = vb.read_reviews(p, critical_friend=False)
     assert corrected == 1
     assert [v.mergeable for v in verdicts] == [True, True, False]
+    # the words decide, not an export's hand-written mark: stream K's rule corrects an
+    # unmarked contradiction too, in either direction, and leaves a silent statement alone
+    q = tmp_path / "unmarked.psv"
+    q.write_text(
+        "repo|task|grade_clean|verdict|mergeable_flag|finding_kinds|statement_head\n"
+        "a|t1|true|ok|false||XS sighted. Byte-identical to the gold. Mergeable.\n"
+        "a|t2|true|defect|true|defect|S blind. Not mergeable: the loop never ends.\n"
+        "a|t3|true|style|false|style|L sighted. Clean, but the feature is not delivered.\n",
+        encoding="utf-8",
+    )
+    unmarked, fixed = vb.read_reviews(q, critical_friend=False)
+    assert fixed == 2 and [v.mergeable for v in unmarked] == [True, False, False]
     assert verdicts[2].finding_kinds == ("style",) and verdicts[0].grade_row_hash == ""
     with_cf, _ = vb.read_reviews(p, critical_friend=True)
     assert len(with_cf) == 6 and all(v.mergeable is False for v in with_cf[3:])
@@ -167,3 +181,25 @@ def test_the_markdown_carries_n_method_and_apparatus_on_every_figure(
     )
     out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
     assert "| measure |" in out and "n = 2" in out and "apparatus" in out
+
+
+def test_the_baseline_page_quotes_its_own_tables_and_names_the_live_register() -> None:
+    """docs/PREVENTION.md P-015: the page's prose once quoted a learning curve (16% → 54%)
+    its own generated table did not show (14% → 50%), and its tables named a stub register
+    after the prevention loop was wired. The prose must quote the table the script printed,
+    and every register the tables name must be the one ``default_register`` returns."""
+    page = (ROOT / "docs/reviews/2026-09-25-value-baseline.md").read_text(encoding="utf-8")
+    head, _sep, _rest = page.partition("**The same figures pooled")
+    rates = [
+        float(m.group(1))
+        for m in re.finditer(r"^\| \d+ \| [^|]+ \| \d+ \| \d+ \| \d+ / \d+ = ([\d.]+)%", head, re.M)
+    ]
+    assert len(rates) >= 2, "the apparatus 2.2 curve table is missing"
+    prose = " ".join(page.split())
+    said = re.search(
+        r"was (\d+)% in the first window of fifty attempts and (\d+)% in the last", prose
+    )
+    assert said is not None, "the page no longer quotes the curve's first and last windows"
+    assert (int(said.group(1)), int(said.group(2))) == (round(rates[0]), round(rates[-1]))
+    named = set(re.findall(r"bug classes closed \(register: `([^`]+)`\)", page))
+    assert named == {default_register().source}

@@ -2,8 +2,7 @@
 """The prevention register over an exported ledger — what the loop would see, from a file.
 
     python scripts/prevention_from_export.py LEDGER.psv [--reviews REVIEWS.psv]
-        [--repos cobra,click,koa] [--assume-shipped finish_gate,format_step,budget_calibrated]
-        [--json]
+        [--repos cobra,click,koa] [--assume-shipped merged|none|finish_gate,...] [--json]
 
 The operator's stack exports its ledger (``GET /ledger/export``) as one row per graded attempt;
 this script rebuilds each row as a ``GradeRow`` the product's own rules can read and prints the
@@ -60,6 +59,7 @@ from typing import Any
 
 from crb.core.ledger import GradeRow, parse_apparatus_version
 from crb.core.prevention import Mechanisms, Register, build_register, is_first_attempt
+from crb.server.prevention_state import SHIPPED, mechanisms
 
 #: The export's columns (``GET /ledger/export`` as the operator pulled it on 2026-09-25).
 COLUMNS = [
@@ -178,13 +178,20 @@ def row_from_export(d: Mapping[str, str], index: int) -> GradeRow:
 
 
 def registers(
-    rows: Iterable[GradeRow], *, repos: Iterable[str] = (), shipped: Iterable[str] = ()
+    rows: Iterable[GradeRow], *, repos: Iterable[str] = (), shipped: Iterable[str] | None = None
 ) -> dict[str, Register]:
-    """One register per repository (all of them, or the ones named)."""
+    """One register per repository (all of them, or the ones named). ``shipped=None`` uses
+    the mechanisms this build ships (``crb.server.prevention_state.mechanisms``, with K's
+    calibration check over the export's rows); a list assumes exactly those."""
     rs = list(rows)
     names = sorted({r.repo for r in rs}) if not repos else list(repos)
-    mech = Mechanisms(shipped=frozenset(shipped))
-    return {name: build_register(rs, repo=name, mechanisms=mech) for name in names}
+
+    def mech(name: str) -> Mechanisms:
+        if shipped is None:
+            return mechanisms(rows=rs, repo=name)
+        return Mechanisms(shipped=frozenset(shipped))
+
+    return {name: build_register(rs, repo=name, mechanisms=mech(name)) for name in names}
 
 
 def largest_blind_class(reg: Register, *, first_only: bool = True) -> tuple[str, int]:
@@ -262,7 +269,7 @@ def render(summaries: list[dict[str, Any]], shipped: list[str]) -> list[str]:
     lines = [
         "The prevention register over the export (family level: the export carries no error "
         "text, stop reason or lint pack).",
-        f"Mechanisms assumed shipped: {', '.join(shipped) if shipped else 'none (this branch)'}.",
+        f"Mechanisms shipped: {', '.join(shipped) if shipped else 'none'}.",
     ]
     for s in summaries:
         lines.append("")
@@ -294,16 +301,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repos", default="", help="comma-separated (default: every repository)")
     ap.add_argument(
         "--assume-shipped",
-        default="",
-        help="mechanisms to treat as shipped (finish_gate, format_step, budget_calibrated)",
+        default="merged",
+        help="'merged' (default: what this build ships), 'none', or a comma-separated list "
+        "(finish_gate, format_step, budget_calibrated)",
     )
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     raw = read_export(args.ledger)
     rows = [row_from_export(d, i) for i, d in enumerate(raw)]
     repos = [r for r in args.repos.split(",") if r]
-    shipped = [s for s in args.assume_shipped.split(",") if s]
-    regs = registers(rows, repos=repos, shipped=shipped)
+    if args.assume_shipped == "merged":
+        shipped = sorted(SHIPPED)
+        regs = registers(rows, repos=repos)
+    else:
+        shipped = [s for s in args.assume_shipped.split(",") if s and s != "none"]
+        regs = registers(rows, repos=repos, shipped=shipped)
     summaries = [summarise(regs[name]) for name in regs]
     reviews = review_counts(args.reviews) if args.reviews else {}
     if args.json:

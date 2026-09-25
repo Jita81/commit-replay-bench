@@ -51,7 +51,8 @@ Touch when:   never for a new repository; a new template needs an ADR-0020 amend
               leakage test that plants a canary in its slots, and a template id the catalogue
               in src/crb/core/prevention.py names.
 Claims:       A line is an operating fact, never evidence that a class stopped; only the
-              prevention rule's measurement can say that (docs/LEARNING-LOOP.md#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring).
+              prevention rule's measurement can say that (docs/LEARNING-LOOP.md §7,
+              "Prevention — a bug is closed by a change that stops it recurring").
 """
 
 from __future__ import annotations

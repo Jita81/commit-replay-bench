@@ -34,17 +34,18 @@ Works with:   src/crb/core/prevention.py (the engine: register, rule, tick, snap
               src/crb/server/worker.py (takes the snapshot when a run starts and ticks when it
               ends), src/crb/server/routes/prevention.py (the routes that read and write the
               chain), src/crb/store/ledger.py (the rows, reviews and packs), src/crb/server/
-              factory_state.py (the factory's outcome events)
+              factory_state.py (the factory's outcome events), src/crb/core/spend.py and
+              src/crb/core/checks.py (the K and W mechanisms the loop may switch on)
 Tested by:    tests/test_worker_learning.py, tests/test_server_routes_prevention.py
-Touch when:   never for a new repository; stream W or K merges (``mechanisms`` is THE seam —
-              add their shipped mechanisms, the calibration check and the repository's
-              commands); a new source of classes (bind it into ``register_for``).
+Touch when:   never for a new repository; a new process mechanism ships (``mechanisms`` is
+              THE seam — add it to ``SHIPPED`` and a ``WRITABLE`` row); a new source of
+              classes (bind it into ``register_for``).
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +53,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from crb.core.ledger import GENESIS_HASH
+from crb.builders.base import Budget
+from crb.core.checks import RepoChecks
+from crb.core.ledger import GENESIS_HASH, GradeRow
 from crb.core.playbook import RepoFacts
 from crb.core.prevention import (
     AUTO_OFF,
@@ -69,8 +72,10 @@ from crb.core.prevention import (
     tick,
     verify_records,
 )
+from crb.core.spend import calibrate
 from crb.server.factory_state import FactoryHome
 from crb.server.routes.runs import append_system_event, system_trace_id
+from crb.server.spend import observations
 from crb.store.ledger import DbLedger, DbReviewLedger
 from crb.store.models import Event, Repo
 
@@ -160,12 +165,52 @@ def all_prevention_records(session: Session) -> list[PreventionRecord]:
     return out
 
 
-def mechanisms(settings: Any = None, *, rows: Any = (), repo: str = "") -> Mechanisms:
-    """THE merge seam for streams W and K: which process mechanisms this build ships. Nothing
-    ships on this branch, so the loop can only file items and apply lines until W's formatter
-    step and finish gate and K's calibrated budget merge (docs/LEARNING-LOOP.md §7)."""
-    del settings, rows, repo
-    return Mechanisms()
+#: The process mechanisms this build ships (streams W and K, merged): the loop may switch
+#: each on for a repository through ``RepoConfig.checks`` / ``RepoConfig.spend``. None is on
+#: by default — each changes what a builder is given and waits for the Phase B A/B.
+SHIPPED: frozenset[str] = frozenset({"format_step", "finish_gate", "budget_calibrated"})
+
+
+def calibratable_for(rows: Sequence[GradeRow], repo: str) -> Callable[[str, str], tuple[bool, str]]:
+    """Whether stream K's calibration would set caps for ``(mode, size)`` in ``repo`` from
+    the rows as they stand: the builder and model of the repository's latest valid attempt
+    in that mode, the builder's default caps as the floor, K's own levels and minimum. A
+    cell below the minimum is not a lever the loop may pull ("cannot calibrate: …")."""
+    obs = observations(list(rows))
+    floor = Budget().to_dict()
+
+    def check(mode: str, size: str) -> tuple[bool, str]:
+        mine = [o for o in obs if o.valid and o.mode == mode and (not repo or o.repo == repo)]
+        if not mine:
+            return False, f"no valid attempt in mode {mode or '-'}"
+        last = mine[-1]
+        cal = calibrate(
+            obs,
+            repo=repo,
+            mode=mode,
+            size=size,
+            builder=last.builder,
+            model=last.model,
+            floor=floor,
+        )
+        return cal.applied, (cal.level if cal.applied else cal.reason)
+
+    return check
+
+
+def mechanisms(
+    settings: Any = None, *, rows: Sequence[GradeRow] = (), repo: str = ""
+) -> Mechanisms:
+    """THE merge seam for streams W and K: the formatter step and the finish gate (W, written
+    to ``checks``) and the calibrated budget (K, written to ``spend``) ship; none is on by
+    default; a budget cell is calibratable only when K's rule would calibrate it from
+    ``rows`` (``repo`` scopes the most specific level; empty = pooled)."""
+    del settings
+    return Mechanisms(
+        shipped=SHIPPED,
+        calibratable=calibratable_for(rows, repo),
+        on_by_default=frozenset(),
+    )
 
 
 def base_config(repo_row: Repo | None) -> dict[str, dict[str, Any]]:
@@ -180,20 +225,48 @@ def base_config(repo_row: Repo | None) -> dict[str, dict[str, Any]]:
     return out
 
 
+#: A declared ``checks.commands`` entry names the kind of check it is by its name.
+_COMMAND_KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("test", ("test",)),
+    ("typecheck", ("typecheck", "types", "vet", "mypy", "tsc", "pyright")),
+    ("lint", ("lint",)),
+    ("format", ("format", "fmt")),
+)
+
+
 def repo_facts(config: Mapping[str, Any] | None) -> RepoFacts:
-    """What a line may recommend, from configuration only: before stream W merges, the
-    declared lint command and its name."""
+    """What a line may recommend, from configuration only: the declared lint command and its
+    name, stream W's declared formatter and its named ``checks.commands`` (a test, lint,
+    format or typecheck command by its name). Never read from a task."""
     cfg = dict(config or {})
     lint = cfg.get("lint")
-    lint_cmd = ""
+    found: dict[str, str] = {}
     tools: tuple[str, ...] = ()
     if isinstance(lint, Mapping):
         cmd = lint.get("command")
         if isinstance(cmd, list) and cmd and all(isinstance(c, str) for c in cmd):
-            lint_cmd = " ".join(cmd)
+            found["lint"] = " ".join(cmd)
         if isinstance(lint.get("name"), str):
             tools = (str(lint["name"]),)
-    return RepoFacts(lint_cmd=lint_cmd, tools=tools)
+    try:
+        checks = RepoChecks.from_config(cfg.get(W_SECTION) or {})
+    except ValueError:  # a bad block is refused at PUT /repos; never a reason to stop a tick
+        checks = RepoChecks.from_config({})
+    fmt = checks.formatter.get("command")
+    if isinstance(fmt, (list, tuple)) and fmt:
+        found.setdefault("format", " ".join(str(a) for a in fmt))
+    for c in checks.commands:
+        for kind, names in _COMMAND_KINDS:
+            if any(n in c.name for n in names):
+                found.setdefault(kind, " ".join(c.argv))
+                break
+    return RepoFacts(
+        test_cmd=found.get("test", ""),
+        lint_cmd=found.get("lint", ""),
+        format_cmd=found.get("format", ""),
+        typecheck_cmd=found.get("typecheck", ""),
+        tools=tools,
+    )
 
 
 def register_for(
@@ -295,11 +368,13 @@ def empty_for(repo: str) -> LearningSnapshot:
 
 __all__ = [
     "ACTION",
+    "SHIPPED",
     "TICK_RETRIES",
     "ConcurrentAppend",
     "EventsPreventionStore",
     "all_prevention_records",
     "base_config",
+    "calibratable_for",
     "empty_for",
     "learn_trace_id",
     "learning_snapshot",

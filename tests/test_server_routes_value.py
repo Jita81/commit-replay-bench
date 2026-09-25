@@ -89,7 +89,7 @@ def test_the_seed_has_no_blind_rows_so_the_north_star_is_null(env: Env) -> None:
     assert d["apparatus"] == APPARATUS_VERSION and d["pooled"] is False
     ns = d["north_star"]
     assert ns["n_valid"] == 0 and ns["per_pound"] is None and "Wilson" in ns["method"]
-    assert d["learning_curve"]["register"]["source"].startswith("stub")
+    assert d["learning_curve"]["register"]["source"] == "crb.prevention.register.v1"
     assert d["routing"]["controls"] == "not evaluated"
 
 
