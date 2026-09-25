@@ -100,6 +100,7 @@ const SEGMENT_ROUTE: Record<string, string | null> = {
   learn_refusals: '/learn',
   learn_strengthen: '/learn',
   learn_remeasure: '/learn',
+  learn_register: '/learn',
   ledger: '/ledger',
   settings: '/settings',
 }

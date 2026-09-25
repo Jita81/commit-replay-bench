@@ -3,9 +3,9 @@
  *
  * Navigation
  * ----------
- * What it is:   One hook that fetches the map, the sign-offs and the factory tasks for
- *               every connected repository and folds them through `decisionsFor`; and a
- *               count for the nav badge.
+ * What it is:   One hook that fetches the map, the sign-offs, the factory tasks and the
+ *               prevention register for every connected repository and folds them through
+ *               `decisionsFor`; and a count for the nav badge.
  * What it does: Keeps the Decisions page and the header badge on the same numbers (one
  *               query set, cached by TanStack), and adds the "signed but stale" rows the
  *               inbox lists separately — a sign-off the API marks `stale` because the
@@ -24,7 +24,7 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { api, isApiError, qs } from '../../api/client'
 import { keys, useAllRepos } from '../../api/hooks'
-import type { CapabilityMap, FactoryTask, Page, Signoff } from '../../api/types'
+import type { CapabilityMap, FactoryTask, Page, PreventionRegister, Signoff } from '../../api/types'
 import { type Decision, decisionsFor } from './decisions'
 
 export interface StaleSignoff {
@@ -70,6 +70,13 @@ export function useDecisions(): DecisionsState {
       retry: false,
     })),
   })
+  const registers = useQueries({
+    queries: names.map((repo) => ({
+      queryKey: keys.learnRegister(repo),
+      queryFn: () => api<PreventionRegister>(`/learn/register${qs({ repo })}`),
+      retry: false,
+    })),
+  })
   return useMemo(() => {
     if (!repos.data) return { ready: false, decisions: [], stale: [], byRepo: {}, connected: [], errors: repos.isError ? [String(repos.error?.message ?? 'repos')] : [] }
     const byRepo: Record<string, Decision[]> = {}
@@ -80,9 +87,10 @@ export function useDecisions(): DecisionsState {
       const m = maps[i]
       const s = signoffs[i]
       const t = tasks[i]
+      const g = registers[i]
       // a 404 is an expected absence (never measured, no backlog): the repo simply has no
       // decisions; any OTHER error means the count is incomplete — never served as ready
-      const failures = [m, s, t].flatMap((q) => (q?.isError && !notFound(q.error) ? [q.error] : []))
+      const failures = [m, s, t, g].flatMap((q) => (q?.isError && !notFound(q.error) ? [q.error] : []))
       if (failures.length > 0) {
         for (const e of failures) errors.push(`${repo}: ${e.message}`)
         ready = false
@@ -91,18 +99,18 @@ export function useDecisions(): DecisionsState {
       // each source is settled when it has data or its permitted 404; the repo counts only
       // when ALL THREE are settled — a settled 404 on one must not hide a pending other
       const settled = (q: { data?: unknown; isError: boolean; error: unknown } | undefined) => q?.data !== undefined || (q?.isError === true && notFound(q.error))
-      if (!settled(m) || !settled(s) || !settled(t)) {
+      if (!settled(m) || !settled(s) || !settled(t) || !settled(g)) {
         ready = false
         return
       }
       if (!m?.data || !s?.data) return // a permitted 404: never measured / no sign-offs — no decisions here
-      byRepo[repo] = decisionsFor({ repo, cells: m.data.cells, signoffs: s.data.items, tasks: t?.data ?? [] })
+      byRepo[repo] = decisionsFor({ repo, cells: m.data.cells, signoffs: s.data.items, tasks: t?.data ?? [], register: g?.data ?? null })
       for (const so of s.data.items) if (so.stale && !so.revoked) stale.push({ repo, signoff: so })
     })
     // `connected` is every repository on record; `byRepo` only those with a measured map — an
     // unmeasured repository is connected and has no decisions, not "no repository"
     return { ready, decisions: Object.values(byRepo).flat(), stale, byRepo, connected: names, errors }
-  }, [repos.data, repos.isError, repos.error, names, maps, signoffs, tasks])
+  }, [repos.data, repos.isError, repos.error, names, maps, signoffs, tasks, registers])
 }
 
 /** The nav badge's number: decisions + stale sign-offs; null until every repo answered. */

@@ -56,6 +56,7 @@ const KIND_TAG: Record<DecisionKind, TagTone> = {
   signoff_due: 'blue',
   rework: 'grey',
   delivery_withheld: 'grey',
+  prevention: 'amber',
   item_human: 'grey',
   routed_human: 'pale',
 }

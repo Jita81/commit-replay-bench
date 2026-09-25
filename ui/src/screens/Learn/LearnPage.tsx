@@ -1,17 +1,20 @@
 /**
- * Learn — the learning half of the loop, read-only: refusals → guard corpus, weak oracles →
+ * Learn — the learning half of the loop: the prevention register (bug class → the change that
+ * removes it, ADR-0020), then three read-only reports: refusals → guard corpus, weak oracles →
  * strengthening backlog, apparatus change → re-measurement plan (/learn).
  *
  * Navigation
  * ----------
- * What it is:   The screen at /learn: three derivations from one repo's ledger, each a card
- *               with tiles and a table.
- * What it does: Renders `GET /learn/refusals` (protocol rows grouped by guard, reason and
- *               command shape, every verdict "unsure"), `/learn/strengthen` (cells withheld
- *               from deliver for a weak oracle, as frozen-backlog-shaped items) and
- *               `/learn/remeasure` (cells whose rows predate the current apparatus, with the
- *               rows and spend still needed). Nothing here acts: each report stops where a
- *               person decides, so the page has no write affordance by design.
+ * What it is:   The screen at /learn: the prevention register card, then three derivations
+ *               from one repo's ledger, each a card with tiles and a table.
+ * What it does: Renders `GET /learn/register` (every bug class with its lever, before → after
+ *               and status; its switch, revert and register controls are operator-only —
+ *               ui/src/screens/Learn/PreventionSection.tsx), then `GET /learn/refusals`
+ *               (protocol rows grouped by guard, reason and command shape, every verdict
+ *               "unsure"), `/learn/strengthen` (cells withheld from deliver for a weak oracle,
+ *               as frozen-backlog-shaped items) and `/learn/remeasure` (cells whose rows predate
+ *               the current apparatus, with the rows and spend still needed). The three reports
+ *               act on nothing: each stops where a person decides.
  * How:          Three local hooks (the shapes mirror `crb.core.learn` `to_dict()`s) → one
  *               section component each with tiles + `DataTable`; the note the server attaches
  *               is shown verbatim under each table.
@@ -24,14 +27,15 @@
  *               their definitions inline), ui/src/screens/Oracle/OraclePage.tsx (where the
  *               strengthen report sends you)
  * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx (plain eyebrows, the intro sentences,
- *               the terms, no write affordance); the derivations are pinned in
+ *               the terms, no write affordance in the three reports, the register card and its
+ *               operator controls); the derivations are pinned in
  *               tests/test_learn.py and the routes in tests/test_server_routes_learn.py
  * Touch when:   a report gains a field (src/crb/core/learn.py — mirror the interface here)
  *               or a fourth play is added to docs/LEARNING-LOOP.md; never for a new repository.
  */
 import { useMemo } from 'react'
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { api, ApiError } from '../../api/client'
 import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
@@ -44,6 +48,7 @@ import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { Hint } from '../../components/Hint'
 import { StatTile } from '../../components/StatTile'
 import { fmtInt, fmtPct, fmtUsd } from '../../lib/format'
+import { PreventionSection } from './PreventionSection'
 
 // ---------------------------------------------------------------------------
 // Shapes (mirror crb.core.learn *.to_dict(); see docs/LEARNING-LOOP.md)
@@ -394,25 +399,30 @@ function RemeasureSection({ repo }: { repo: string }) {
 // ---------------------------------------------------------------------------
 
 /**
- * The learning half of the loop, read-only: three derivations from the ledger
- * (docs/LEARNING-LOOP.md). Each stops where a human decides — accepting a corpus
- * line, freezing a strengthening item, queuing a re-measurement — so this page
- * has no write affordance by design.
+ * The learning half of the loop (docs/LEARNING-LOOP.md): the prevention register, which acts
+ * only under an operator's switch, then three derivations from the ledger that each stop where
+ * a human decides — accepting a corpus line, freezing a strengthening item, queuing a
+ * re-measurement — so those three reports have no write affordance by design.
  */
 export function LearnPage() {
   const [repo, setRepo] = useRepoParam()
+  const [params] = useSearchParams()
+  const focus = params.get('class') ?? ''
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Instrument · Learn"
         title="Learn"
-        purpose="What the ledger teaches: refusals that should become guard tests, weak oracles that should become test work, stale evidence that should be re-measured. Nothing here acts; a person does."
+        purpose="What the ledger teaches, and what the loop does about it: every bug class with the change that should remove it and whether it worked, then refusals that should become guard tests, weak oracles that should become test work and stale evidence that should be re-measured. The three reports act on nothing; the register acts only under an operator’s switch."
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
       {!repo ? (
         <EmptyState title="Pick a repository" reason="The three reports are derived from one repository's ledger rows." />
       ) : (
         <>
+          <Card eyebrow="Prevention" title="Bug classes → the change that removes them" id="prevention">
+            <PreventionSection repo={repo} focus={focus} />
+          </Card>
           <Card eyebrow="Refusals" title="Refusals → guard corpus">
             <RefusalsSection repo={repo} />
           </Card>
