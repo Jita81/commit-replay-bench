@@ -12,7 +12,10 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               year, a leading-zero identifier — are not claims; that a count written without
               digit grouping (``1200``) and a result standing beside a confidence interval
               *are*; that a tag written inside inline code does not cover the claim around it;
-              and that ``--check`` exits non-zero while the default report exits zero.
+              that ``--check`` exits non-zero while the default report exits zero; and that
+              every numbered action in a review's Actions table has a record in
+              docs/DECISION-LOG.md that names the review, the action and its state — so an
+              action cannot disappear without one (the critical friend's #8 and #9 did).
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -205,3 +208,68 @@ def test_the_repository_itself_passes_the_gate() -> None:
     """The allowlist is not aspirational: every file on it is clean on this tree."""
     assert cc.check_tree(ROOT, cc.ALLOWLIST) == []
     assert all((ROOT / rel).exists() for rel in cc.ALLOWLIST)
+
+
+# ─── a review's actions never disappear without a record ────────────────────────────────
+
+REVIEW = (
+    "# A review\n\n## 8. Actions, in priority order\n\n"
+    "| # | Action | Kind | Owner |\n|---|---|---|---|\n"
+    "| 1 | Extend belt 1. | product | core |\n"
+    "| 2 | Rotate the token. | security | operator |\n\n"
+    "## 9. What the evidence licenses\n\n| 3 | not an action | x | y |\n"
+)
+
+
+def _review_tree(tree: Path, log_rows: str) -> None:
+    (tree / "docs" / "reviews").mkdir(parents=True, exist_ok=True)
+    _write(tree, "docs/reviews/2026-09-13-friend.md", REVIEW)
+    _write(
+        tree, "docs/DECISION-LOG.md", f"# Decision log\n\n| Id | Decision |\n|---|---|\n{log_rows}"
+    )
+
+
+def test_a_review_action_without_a_record_is_a_finding(tree: Path) -> None:
+    _review_tree(tree, "| DL-001 | Something else entirely. |\n")
+    findings = cc.check_review_actions(tree)
+    assert [(f.path, f.reason) for f in findings] == [
+        ("docs/reviews/2026-09-13-friend.md", "review action #1 has no record"),
+        ("docs/reviews/2026-09-13-friend.md", "review action #2 has no record"),
+    ]
+    # only the Actions table is read: row 3 sits under the next heading
+    assert all("#3" not in f.reason for f in findings)
+
+
+def test_a_record_names_the_review_the_action_and_its_state(tree: Path) -> None:
+    rows = (
+        "| DL-002 | `2026-09-13-friend` action #1: closed (ADR-0001); "
+        "action #2: [gap] no dated rotation is on record. |\n"
+    )
+    _review_tree(tree, rows)
+    assert cc.check_review_actions(tree) == []
+
+    # a mention without a state is not a record: "action #2" alone says nothing about it
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2 is noted. |\n")
+    assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
+
+    # the record must name the review it closes: another review's #2 is not this one's
+    _review_tree(
+        tree,
+        "| DL-002 | `2026-09-13-friend` action #1: closed. |\n"
+        "| DL-003 | `2026-09-14-other` action #2: closed. |\n",
+    )
+    assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
+
+
+def test_main_fails_on_an_unrecorded_review_action(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(tree, "README.md", "# t\n\nNothing quantified here.\n")
+    _review_tree(tree, "| DL-001 | nothing |\n")
+    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 1
+    assert "review action #1 has no record" in capsys.readouterr().err
+
+
+def test_every_review_action_in_the_repository_has_a_record() -> None:
+    """The critical friend's ten actions (2026-09-13 §8) each carry a dated state."""
+    assert cc.check_review_actions(ROOT) == []
