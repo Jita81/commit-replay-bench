@@ -124,7 +124,9 @@ characters; body explains *why*. Breaking apparatus changes use `!` and referenc
 CI's `commit-subjects` job enforces the subject rule on every non-merge commit of a pull
 request and on the pull request's title, because a squash merge writes that title as the
 subject on `main` (`scripts/check_commit_subject.py --range BASE..HEAD --title …`; run it
-locally with `--range origin/main..HEAD`). Its imperative check is a heuristic — it refuses
+locally with `--range origin/main..HEAD`). It lives in its own workflow,
+`.github/workflows/commit-subjects.yml`, which also runs when a title is edited, and on a
+push to `main` it checks the subjects that landed there. Its imperative check is a heuristic — it refuses
 a subject that starts with an article, a past tense, a gerund or a third-person verb —
 and the script's docstring says what it cannot catch.
 End commit messages with the attribution line required by the session/tooling that

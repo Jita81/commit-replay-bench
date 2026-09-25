@@ -12,15 +12,16 @@ What it does: Pins that a well-formed subject passes and that each rule refuses 
               are the class); that ``--range`` reads every non-merge commit of a pull request
               from git and skips its merge commits; that ``--title`` checks the pull request
               title that a squash merge writes as the subject on ``main``; that ``--check``
-              exits non-zero on a finding; and that CI runs the gate on pull requests under a
-              job name shorter than 100 characters.
+              exits non-zero on a finding; and that CI runs the gate on pull requests, again
+              when a title is edited, and on a push to main, under a job name shorter than
+              100 characters.
 How:          Calls ``check_subject`` directly for the rules; builds a small git repository
-              under ``tmp_path`` for ``--range``; reads ``.github/workflows/ci.yml`` as text.
+              under ``tmp_path`` for ``--range``; reads the workflow files as text.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/check_commit_subject.py (the code under test), docs/CONTRIBUTING.md
-              (the commit convention it enforces), .github/workflows/ci.yml (the
-              commit-subjects job that runs it)
+              (the commit convention it enforces), .github/workflows/commit-subjects.yml
+              (the job that runs it, re-run when a title is edited)
 Tested by:    (this is a test file)
 Touch when:   a Conventional Commits type is added to the convention, or the imperative
               heuristic changes (add the case here in the same change).
@@ -157,12 +158,14 @@ def test_title_is_checked_because_a_squash_merge_writes_it_on_main(repo: Path) -
 
 
 def test_ci_runs_the_gate_on_pull_requests_under_a_short_job_name() -> None:
-    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    # the job moved to its own workflow so an edited title re-runs it (see the next test)
+    ci = _workflow_with("commit-subjects").read_text(encoding="utf-8")
     assert "scripts/check_commit_subject.py" in ci
-    assert re.search(r"^  commit-subjects:\s*$", ci, re.M)
-    # every job's `name:` stays under 100 characters (branch protection matches on it)
-    for name in re.findall(r"^    name: (.+)$", ci, re.M):
-        assert len(name.strip().strip('"')) < 100, name
+    # every job's `name:` in every workflow stays under 100 characters (branch protection
+    # matches on it)
+    for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        for name in re.findall(r"^    name: (.+)$", wf.read_text(encoding="utf-8"), re.M):
+            assert len(name.strip().strip('"')) < 100, (wf.name, name)
 
 
 def _workflow_with(job: str) -> Path:
