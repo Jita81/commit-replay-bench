@@ -13,8 +13,10 @@
  *               that can take it; that a replay in flight is announced with its progress; that
  *               the page defaults to the most recently updated repository; that a loading map
  *               says so; that a controls/oracle 404 renders "not run" / "not scored",
- *               never an alert; and that every tile, header, cell, pill and button carries
- *               a hint, with the false-Q1 tile opening on hover with the registry copy.
+ *               never an alert; that every tile, header, cell, pill and button carries
+ *               a hint, with the false-Q1 tile opening on hover with the registry copy; and
+ *               that the oracle card shows the pool's date range and the share of the
+ *               repository's non-merge history it covers — or says why the share is unknown.
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
@@ -233,5 +235,31 @@ describe('ResultsPage', () => {
     const tile = container.querySelector('[data-hint="stat.results.false_q1"]')!
     expect(tile).toHaveAttribute('tabindex', '0')
     await expectHintOpens(tile, 'stat.results.false_q1')
+  })
+
+  // assessment 2026-09-25, B4: the miner takes the newest commits that touch source and tests,
+  // so the oracle card says which stretch of history the tasks were drawn from, and how much
+  const POOL = { repo: 'alpha', n_tasks: 8, oldest_authored: '2026-08-01T12:00:00+00:00', newest_authored: '2026-08-08T12:00:00+00:00', history_commits: 5, history_first_authored: '2026-06-01T12:00:00+00:00', window_commits: 3, share: 0.6, history_unavailable: '' }
+
+  it('the oracle card shows the pool\'s date range and the share of history it covers, hinted', async () => {
+    mockApi({ ...ROUTES, 'GET /repos/alpha/pool': POOL })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const tile = await screen.findByTestId('tile-pool-window')
+    await waitFor(() => expect(within(tile).getByText('60%')).toBeInTheDocument())
+    expect(tile).toHaveTextContent('n =8')
+    expect(tile).toHaveTextContent('authored 1 Aug 2026 – 8 Aug 2026')
+    expect(tile).toHaveTextContent('the newest 3 of 5 non-merge commits')
+    expect(tile).toHaveAttribute('data-hint', 'stat.results.pool_window')
+    await expectHintOpens(tile, 'stat.results.pool_window')
+  })
+
+  it('says the share is not known, and why, when the clone is not on this host', async () => {
+    const away = { ...POOL, history_commits: null, history_first_authored: null, window_commits: null, share: null, history_unavailable: 'no_clone_path' }
+    mockApi({ ...ROUTES, 'GET /repos/alpha/pool': away })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const tile = await screen.findByTestId('tile-pool-window')
+    await waitFor(() => expect(within(tile).getByText('not known')).toBeInTheDocument())
+    expect(tile).toHaveTextContent('authored 1 Aug 2026 – 8 Aug 2026')
+    expect(tile).toHaveTextContent('no clone of the repository on this host')
   })
 })
