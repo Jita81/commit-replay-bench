@@ -43,7 +43,8 @@ Tested by:    tests/test_server_claude_login.py (a fake ``claude`` script replay
               the environment it was given)
 Touch when:   the CLI changes its sign-in transcript (the URL host/path, the paste prompt, the
               token prefix) or needs another variable to run (add it to ``CLI_PASSTHROUGH``
-              with the reason, never the whole environment); never for a new repository.
+              or ``CLI_NETWORK_PASSTHROUGH`` with the reason, never the whole environment);
+              never for a new repository.
 """
 
 from __future__ import annotations
@@ -85,6 +86,22 @@ FAILURE_HINTS = re.compile(
 #: The only variables the CLI inherits from the helper's environment (see
 #: :func:`cli_environment`), and the ones it is given fixed values for.
 CLI_PASSTHROUGH: tuple[str, ...] = ("PATH", "HOME")
+#: How the host reaches the internet — an outbound proxy (both spellings of the convention)
+#: and a private certificate authority. The sign-in has to reach the service, so these pass
+#: through too; the allowlist limits what the CLI can READ, not where it can connect. A
+#: proxy URL may carry the proxy's own credential: that is the host's egress credential,
+#: which the CLI needs to connect at all.
+CLI_NETWORK_PASSTHROUGH: tuple[str, ...] = (
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+)
 CLI_FIXED: Mapping[str, str] = {"TERM": "dumb", "NO_COLOR": "1", "BROWSER": "/usr/bin/true"}
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[=>]|\r")
 
@@ -112,9 +129,13 @@ def cli_environment(parent: Mapping[str, str], config_dir: Path) -> dict[str, st
     ``NO_COLOR``), a browser that does nothing (it must never open one on the server), and
     ``CLAUDE_CONFIG_DIR`` pointed at ``config_dir`` — a directory used by this sign-in only
     and removed when it ends, so the CLI neither reads nor writes the host account's own
-    Claude configuration. Nothing else: the API process holds the secret key, the database
-    URL and the OIDC client secret, and none of that is the CLI's business (D3)."""
-    env = {key: parent[key] for key in CLI_PASSTHROUGH if key in parent}
+    Claude configuration. The host's proxy and certificate-authority variables
+    (:data:`CLI_NETWORK_PASSTHROUGH`) pass through so the sign-in works behind a proxy.
+    Nothing else: the API process holds the secret key, the database URL and the OIDC
+    client secret, and none of that is the CLI's business (D3)."""
+    env = {
+        key: parent[key] for key in (*CLI_PASSTHROUGH, *CLI_NETWORK_PASSTHROUGH) if key in parent
+    }
     env.update(CLI_FIXED)
     env["CLAUDE_CONFIG_DIR"] = str(config_dir)
     return env

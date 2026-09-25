@@ -105,6 +105,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import HTTPConnection
 
 from crb.server.deps import ApiError, DbDep, Principal, SettingsDep
 from crb.server.settings import (
@@ -457,6 +458,16 @@ def session_cookie_name(settings: Settings) -> str:
     return HOST_PREFIX + SESSION_COOKIE if settings.resolved_cookie_secure else SESSION_COOKIE
 
 
+def session_token_of(conn: HTTPConnection, settings: Settings) -> str:
+    """The session cookie's value as EVERY reader sees it, or ``""``.
+
+    The CSRF middleware, :func:`current_user` and logout all read the session through this,
+    over Starlette's lenient cookie parser. Two parsers disagreeing is a bypass: a strict
+    one that gives up on a header with one malformed cookie (a space, JSON, a consent date)
+    would skip the CSRF check while the lenient one still authenticated the request."""
+    return conn.cookies.get(session_cookie_name(settings), "")
+
+
 def csrf_cookie_name(settings: Settings) -> str:
     """``__Host-crb_csrf`` when cookies are secure, else ``crb_csrf``."""
     return HOST_PREFIX + CSRF_COOKIE if settings.resolved_cookie_secure else CSRF_COOKIE
@@ -572,7 +583,7 @@ def session_signature_valid(settings: Settings, session_token: str) -> bool:
 
 def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principal:
     """The logged-in principal, or 401 (``unauthenticated`` / ``session_expired``)."""
-    token = request.cookies.get(session_cookie_name(settings))
+    token = session_token_of(request, settings)
     if not token:
         raise ApiError(401, "unauthenticated", "login required")
     uid, cv = read_session_claims(settings, token)
@@ -1054,6 +1065,7 @@ __all__ = [
     "safe_next_path",
     "session_cookie_name",
     "session_signature_valid",
+    "session_token_of",
     "set_csrf_cookie",
     "set_github_setup_cookie",
     "set_oidc_cookie",

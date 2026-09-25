@@ -252,6 +252,7 @@ from crb.server.intake import (
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
+from crb.server.routes.repos import clone_path_escapes
 from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
@@ -1188,6 +1189,11 @@ class Worker:
         cfg.setdefault("runner", row.runner)
         config = RepoConfig.from_dict(row.name, cfg)
         clone = row.clone_path or config.path
+        if clone and clone_path_escapes(clone, self.home):  # D2: the rule again, at use
+            raise LookupError(
+                f"repo {name!r}: clone_path_escapes: {clone!r} is under the repositories "
+                "directory but resolves outside it (a symbolic link)"
+            )
         url = str(row.url or config.url or "").strip()
         if clone and GitRepo(clone).is_repo():
             git = GitRepo(clone)

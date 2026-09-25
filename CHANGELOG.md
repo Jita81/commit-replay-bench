@@ -26,7 +26,11 @@ reproduced with a failing test on `main` before it was changed (DL-053).
   `HMAC(secret, user id, credential version)`, recomputed by the middleware from the signed
   session cookie. When cookies are `Secure` they are named `__Host-crb_session` and
   `__Host-crb_csrf`; the UI and the MCP client read either name. On a secure deployment
-  everybody signs in once more after the upgrade.
+  everybody signs in once more after the upgrade. The check also no longer skips itself:
+  it read cookies with a stricter parser than the sign-in check, so one malformed cookie
+  from a sibling site (a space, JSON, a consent date) hid the session from it while the
+  request still authenticated, and a forged request needed no token at all (this was true
+  on `main` too). Both now read the session through one function.
 - **Guessing across many usernames is limited too.** Besides five failures a minute per
   username and address, one address may now fail twenty times a minute whatever the
   usernames. The limiter is per process, so DEPLOYMENT §8 now requires the proxy to limit
@@ -39,11 +43,15 @@ reproduced with a failing test on `main` before it was changed (DL-053).
   MCP write tools that ride them — accepted any directory on the server as a `clone_path`.
   Outside `$CRB_HOME/repos` is now admin-only and recorded (`repo.clone_path.outside_home`);
   an operator gets `403 clone_path_outside_home`; a symbolic link out of that directory is
-  refused for everyone (`422 clone_path_escapes`); a relative path is refused.
+  refused for everyone (`422 clone_path_escapes`); a relative path is refused. The
+  symbolic-link rule is checked again when the path is used — by the worker before a run
+  reads the clone, and by the profile walk — because a path that did not exist when it was
+  registered can gain a link later.
 - **`claude setup-token` gets an allowlisted environment.** The sign-in helper ran the CLI
   with the API process's whole environment — the secret key, the database URL, the OIDC
-  client secret. It now passes `PATH`, `HOME`, a plain terminal, a no-op browser and a
-  `CLAUDE_CONFIG_DIR` created for that sign-in and removed after it.
+  client secret. It now passes `PATH`, `HOME`, a plain terminal, a no-op browser, the
+  host's proxy and certificate-authority variables (so the sign-in works behind a proxy)
+  and a `CLAUDE_CONFIG_DIR` created for that sign-in and removed after it.
 
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 

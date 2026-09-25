@@ -63,7 +63,7 @@ from crb.server.auth import (
     read_oidc_cookie,
     read_session_claims,
     rotate_session_nonce,
-    session_cookie_name,
+    session_token_of,
     set_csrf_cookie,
     set_oidc_cookie,
     set_session_cookie,
@@ -152,7 +152,7 @@ def logout(request: Request, settings: SettingsDep, db: DbDep) -> Response:
     holds, here and on any other device, ends on its next request. A stale, forged or
     absent cookie rotates nothing (it cannot be used to sign somebody else out) and still
     gets the cookies cleared."""
-    token = request.cookies.get(session_cookie_name(settings))
+    token = session_token_of(request, settings)
     if token:
         try:
             uid, cv = read_session_claims(settings, token)

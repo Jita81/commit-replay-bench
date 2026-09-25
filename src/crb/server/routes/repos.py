@@ -24,8 +24,10 @@ What it does: Validates every config through ``RepoConfig.from_dict`` (an invali
               the change profile (measurement INPUT, never a verdict), and pages mined
               tasks; confines a registered ``clone_path`` to ``<home>/repos``
               (``confine_clone_path`` — elsewhere is admin-only and recorded, a symbolic-link
-              escape is refused). Also the home of ``get_repo_or_404`` and ``cached_profile``
-              that other route modules import.
+              escape is refused; ``clone_path_escapes`` re-applies the link rule where the
+              path is used — the profile walk here and the worker's ``_load_repo``). Also the
+              home of ``get_repo_or_404`` and ``cached_profile`` that other route modules
+              import.
 How:          ``_validated_config`` → ``Repo`` row + ``append_system_event`` on the repo's
               system trace; ``compute_profile`` walks the clone with ``profile_repo`` and
               stores the result under ``config_json["profile"]``.
@@ -39,10 +41,12 @@ Works with:   src/crb/core/spec.py (``RepoConfig`` — the shape stored in ``con
               src/crb/store/models.py (``Repo``, ``Task``), src/crb/server/routes/github.py
               (connect and link reuse ``get_repo_or_404`` / ``_config_of`` /
               ``_stored_config`` / ``PRESERVED_KEYS`` and write the ``github`` key this
-              module preserves), docs/OPERATOR.md#20-configuring-a-repository-from-the-ui,
+              module preserves), src/crb/server/worker.py (``clone_path_escapes`` at use),
+              docs/OPERATOR.md#20-configuring-a-repository-from-the-ui,
               ui/src/screens/Repos
 Tested by:    tests/test_server_routes_repos.py, tests/test_server_routes_w3b.py,
-              tests/test_mcp_server.py (the MCP write tools ride these routes)
+              tests/test_mcp_server.py (the MCP write tools ride these routes),
+              tests/test_worker_clone.py (the rule at use, in the worker)
 Touch when:   THIS is the route a new repository goes through — but adding one is
               configuration (docs/OPERATOR.md#2-configure-a-repository), not code; edit
               this file only when ``RepoConfig`` gains a field (the request schema, the UI
@@ -178,6 +182,31 @@ def clone_root(home: str | Path) -> Path:
     return Path(os.path.abspath(Path(home) / CLONE_ROOT)).resolve()
 
 
+def clone_path_escapes(path: str | Path, home: str | Path) -> bool:
+    """Whether ``path`` is WRITTEN under :func:`clone_root` but RESOLVES outside it — a
+    symbolic link on the way out. Checked where a clone path is written
+    (:func:`confine_clone_path`) AND where it is used (the profile walk here, the worker's
+    ``_load_repo``): a path that did not exist at registration can gain a link later, for
+    example from another repository's clone, so a check at write time alone is not enough."""
+    raw = Path(path)
+    written_root = Path(os.path.abspath(Path(home) / CLONE_ROOT))
+    root = clone_root(home)
+    written = Path(os.path.normpath(raw))
+    resolved = raw.resolve()
+    looks_inside = any(written.is_relative_to(r) and written != r for r in (written_root, root))
+    return looks_inside and not (resolved.is_relative_to(root) and resolved != root)
+
+
+def _escapes_error(root: Path) -> ApiError:
+    return ApiError(
+        422,
+        "clone_path_escapes",
+        "clone_path is under the repositories directory but resolves outside it "
+        "(a symbolic link); register the real location instead",
+        detail={"field": "clone_path", "clone_root": str(root)},
+    )
+
+
 def confine_clone_path(path: str, home: str | Path, principal: Principal) -> Path | None:
     """The clone-path rule every registration and every move of a clone goes through.
 
@@ -199,21 +228,11 @@ def confine_clone_path(path: str, home: str | Path, principal: Principal) -> Pat
             "clone_path must be an absolute path on the server",
             detail={"field": "clone_path"},
         )
-    written_root = Path(os.path.abspath(Path(home) / CLONE_ROOT))
     root = clone_root(home)
-    written = Path(os.path.normpath(raw))
+    if clone_path_escapes(raw, home):
+        raise _escapes_error(root)
     resolved = raw.resolve()
-    looks_inside = any(written.is_relative_to(r) and written != r for r in (written_root, root))
-    is_inside = resolved.is_relative_to(root) and resolved != root
-    if looks_inside and not is_inside:
-        raise ApiError(
-            422,
-            "clone_path_escapes",
-            "clone_path is under the repositories directory but resolves outside it "
-            "(a symbolic link); register the real location instead",
-            detail={"field": "clone_path", "clone_root": str(root)},
-        )
-    if is_inside:
+    if resolved.is_relative_to(root) and resolved != root:
         return None
     if ROLE_RANK.get(principal.role, -1) < ROLE_RANK["admin"]:
         raise ApiError(
@@ -550,8 +569,12 @@ def _profile_out(name: str, cached: Mapping[str, Any]) -> RepoProfile:
     )
 
 
-def compute_profile(repo: Repo, config: RepoConfig, *, log_n: int = 0) -> dict[str, Any]:
-    """Walk the clone and return the cache entry ``{"computed_at", "profile"}``."""
+def compute_profile(
+    repo: Repo, config: RepoConfig, *, home: str | Path, log_n: int = 0
+) -> dict[str, Any]:
+    """Walk the clone and return the cache entry ``{"computed_at", "profile"}``. The
+    clone-path rule is applied again here, at use: a path that gained a symbolic link off
+    the repositories directory since it was registered is refused, never walked."""
     path = config.path or repo.clone_path
     if not path:
         raise ApiError(
@@ -560,6 +583,8 @@ def compute_profile(repo: Repo, config: RepoConfig, *, log_n: int = 0) -> dict[s
             f"repo {repo.name!r} has no clone_path to profile",
             detail={"repo": repo.name},
         )
+    if clone_path_escapes(path, home):
+        raise _escapes_error(clone_root(home))
     git = GitRepo(Path(path))
     if not Path(path).is_dir() or not git.is_repo():
         raise ApiError(
@@ -589,13 +614,15 @@ def cached_profile(repo: Repo) -> dict[str, Any] | None:
 @router.get(
     "/repos/{name}/profile",
     response_model=RepoProfile,
-    responses={401: _ERR, 404: _ERR, 409: _ERR},
+    responses={401: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="Change profile (class x size histogram of recent history); cached; ?refresh=true recomputes",
 )
 def get_profile(
     name: str,
     viewer: ViewerDep,
     db: DbDep,
+    settings: SettingsDep,
+    *,
     refresh: bool = Query(default=False),
     log_n: int = Query(default=0, ge=0, le=100_000),
 ) -> RepoProfile:
@@ -608,7 +635,7 @@ def get_profile(
     cached = cached_profile(repo)
     # Computed on demand (a git walk) and cached in the config row; only ?refresh redoes it.
     if cached is None or refresh:
-        cached = compute_profile(repo, _config_of(repo), log_n=log_n)
+        cached = compute_profile(repo, _config_of(repo), home=settings.home, log_n=log_n)
         repo.config_json = {**dict(repo.config_json or {}), PROFILE_KEY: cached}
         db.commit()
     return _profile_out(name, cached)

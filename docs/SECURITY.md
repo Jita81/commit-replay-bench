@@ -207,8 +207,12 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   session**: every unsafe method must carry `X-CSRF-Token` equal to
   `HMAC(secret, user id, credential version)`, which the middleware recomputes from the
   signed session cookie — a cookie/header pair chosen by whoever can set cookies is
-  refused, and the token ends with its session. [measured]
-  `tests/test_server_auth.py::TestCsrfBoundToSession`
+  refused, and the token ends with its session. The middleware and the authentication
+  check read the session cookie through one function over the same lenient parser, so a
+  malformed neighbour cookie (a space, JSON, a consent banner's date) cannot hide the
+  session from the CSRF check while the request still authenticates. [measured]
+  `tests/test_server_auth.py::TestCsrfBoundToSession`,
+  `tests/test_server_auth.py::TestCsrfSeesTheSameCookiesAsAuth`
 - **Sessions end on a password change, on logout, on "sign out everywhere" and on
   deactivation.** The cookie carries the credential version it was issued under (a
   fingerprint of the account's argon2 hash and its `session_nonce`); setting a password
@@ -249,8 +253,10 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   event, a log line or the session directory (the helper scrubs token shapes from
   everything it reports). One session per deployment at a time; ten-minute expiry;
   admin only. The CLI runs with an allowlisted environment — `PATH`, `HOME`, `TERM=dumb`,
-  `NO_COLOR`, a no-op `BROWSER` and a `CLAUDE_CONFIG_DIR` created for that sign-in and
-  removed after it — so the secret key, the database URL and the OIDC client secret the
+  `NO_COLOR`, a no-op `BROWSER`, the host's proxy and certificate-authority variables
+  (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` in either case, `NODE_EXTRA_CA_CERTS`,
+  `SSL_CERT_FILE`, `SSL_CERT_DIR`, so the sign-in works behind a proxy) and a
+  `CLAUDE_CONFIG_DIR` created for that sign-in and removed after it — so the secret key, the database URL and the OIDC client secret the
   API process holds never reach it, and it neither reads nor writes the host account's own
   Claude configuration. [measured] `tests/test_server_claude_login.py` (a fake CLI replays
   the real transcript, including a refused code and a token-shaped run in an error line;
@@ -325,8 +331,11 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   decision and is recorded (`repo.clone_path.outside_home`); anyone else — including a model
   through the MCP write tools, which ride the same route — gets `403
   clone_path_outside_home`; a path under that directory that resolves outside it (a symbolic
-  link) is refused for every role. [measured]
-  `tests/test_server_routes_repos.py::TestClonePathConfinement`,
+  link) is refused for every role. The same check runs again where the path is used — the
+  worker before it reads a clone, and the profile walk — because a path that did not exist
+  at registration can gain a link later (for example from another repository's clone).
+  [measured] `tests/test_server_routes_repos.py::TestClonePathConfinement`,
+  `tests/test_worker_clone.py::test_a_clone_path_that_escapes_the_root_at_use_time_fails_the_run`,
   `tests/test_mcp_server.py::test_register_repo_tool_is_confined_to_the_repos_root`
 - Account lifecycle: an admin sets a password or the active flag (`PUT /users/{id}/password`,
   `PUT /users/{id}/active`); a person changes their own with the current password

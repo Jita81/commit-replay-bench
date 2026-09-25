@@ -59,7 +59,6 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +72,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from crb.core.redact import redact
@@ -85,8 +85,8 @@ from crb.server.auth import (
     OidcClient,
     bootstrap_admin_if_empty,
     csrf_valid,
-    session_cookie_name,
     session_signature_valid,
+    session_token_of,
 )
 from crb.server.deps import ApiError, client_ip, error_body
 from crb.server.settings import Settings
@@ -293,7 +293,6 @@ class CsrfMiddleware:
     ) -> None:
         self.app = app
         self.settings = settings
-        self.session_cookie = session_cookie_name(settings)
         self.exempt = frozenset(exempt_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -301,7 +300,10 @@ class CsrfMiddleware:
             path = str(scope.get("path", ""))
             if path not in self.exempt:
                 headers = Headers(scope=scope)
-                session = _parse_cookies(headers.get("cookie", "")).get(self.session_cookie)
+                # the SAME reader as the auth dependency: a stricter parser that gave up
+                # on one malformed neighbour cookie would skip this check while the
+                # request still authenticated
+                session = session_token_of(HTTPConnection(scope), self.settings)
                 if (
                     session
                     and session_signature_valid(self.settings, session)
@@ -318,16 +320,6 @@ class CsrfMiddleware:
                     await response(scope, receive, send)
                     return
         await self.app(scope, receive, send)
-
-
-def _parse_cookies(header: str) -> dict[str, str]:
-    """``Cookie`` header → ``{name: value}``; a malformed header is an empty jar."""
-    jar: SimpleCookie = SimpleCookie()
-    try:
-        jar.load(header)
-    except CookieError:  # a malformed cookie header is just "no cookies"
-        return {}
-    return {k: m.value for k, m in jar.items()}
 
 
 def _mro_names(exc: BaseException) -> set[str]:
