@@ -458,6 +458,26 @@ def _dated_repo(root: Path, dates: list[str]) -> Path:
     return root
 
 
+def _git(root: Path, *args: str, date: str = "") -> None:
+    env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else None
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, env=env)
+
+
+def _commit(root: Path, date: str) -> None:
+    """One more non-merge commit on the current branch, authored at ``date``."""
+    (root / f"c-{date[:10]}.txt").write_text(date)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"chore: {date}", date=date)
+
+
+def _merge_side_commit(root: Path, date: str) -> None:
+    """A side-branch commit brought back with a real merge commit (``--no-ff``)."""
+    _git(root, "checkout", "-q", "-b", "side")
+    _commit(root, date)
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "-m", "Merge side", "side", date=date)
+
+
 class TestPool:
     """``GET /repos/{name}/pool`` — the pool's date range and the share of history it covers
     (assessment 2026-09-25, B4: the miner's recency bias is shown where the oracle is)."""
@@ -499,6 +519,48 @@ class TestPool:
         with make_env(tmp_path, clone_path=str(tmp_path / "plain")) as env:
             body = env.get(f"/repos/{ALPHA}/pool").json()
             assert body["history_unavailable"] == "clone_unavailable" and body["share"] is None
+
+    def test_a_merge_commit_is_not_counted_as_history(self, tmp_path: Path) -> None:
+        """The miner walks non-merge commits only, so the share must too: a merge commit in
+        the window would otherwise inflate both counts and understate the recency bias."""
+        clone = _dated_repo(
+            tmp_path / "merged",
+            ["2026-07-01T12:00:00+00:00", "2026-08-01T12:00:00+00:00"],
+        )
+        _merge_side_commit(clone, "2026-08-05T12:00:00+00:00")
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            # three authored commits (two on main, one on the side branch) and one merge
+            assert body["history_commits"] == 3 and body["window_commits"] == 2
+
+    def test_the_history_walk_runs_once_per_clone_head(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Any viewer may read the pool, so the full-history walk is cached against the
+        clone's HEAD: a repeat read does not walk again, and a new commit does."""
+        from crb.core.git import GitRepo
+
+        walks: list[tuple[str, ...]] = []
+        real_run = GitRepo.run
+
+        def counting_run(self: GitRepo, *args: str, **kw: Any) -> Any:
+            if args and args[0] in ("log", "rev-list"):
+                walks.append(args)
+            return real_run(self, *args, **kw)
+
+        monkeypatch.setattr(GitRepo, "run", counting_run)
+        clone = _dated_repo(
+            tmp_path / "cached",
+            ["2026-07-01T12:00:00+00:00", "2026-08-01T12:00:00+00:00"],
+        )
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            first = env.get(f"/repos/{ALPHA}/pool").json()
+            second = env.get(f"/repos/{ALPHA}/pool").json()
+            assert first == second and first["history_commits"] == 2
+            assert len(walks) == 1, walks
+            _commit(clone, "2026-08-09T12:00:00+00:00")
+            third = env.get(f"/repos/{ALPHA}/pool").json()
+            assert third["history_commits"] == 3 and len(walks) == 2
 
     def test_viewer_reads_anonymous_401_unknown_404(self, env: Env) -> None:
         login(env.client, "viewer")

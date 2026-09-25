@@ -237,3 +237,170 @@ def test_the_moved_narrative_is_a_dated_wave_report() -> None:
     # the first and the last narrative sections the Unreleased block carried before the freeze
     assert "what the product writes on somebody else's ticket is counted" in text
     assert "the front end has a purpose: connect → results → decisions → factory" in text
+
+
+# ─── the summary says what main does, not what a branch will do ──────────────────────────
+
+#: Phrases that promise remediation. The summary describes ``main``; a fix on a branch is
+#: not evidence until it merges, and an assurance reader must not be told otherwise.
+PROGRESS_CLAIMS = (
+    "being fixed",
+    "being addressed",
+    "under way",
+    "underway",
+    "in progress",
+    "in flight",
+    "on other branches",
+    "on another branch",
+    "will be fixed",
+    "shortly",
+)
+
+
+def _flat_summary() -> str:
+    return " ".join(SUMMARY.read_text(encoding="utf-8").split())
+
+
+def test_the_summary_claims_no_fix_that_is_not_on_main() -> None:
+    flat = _flat_summary().lower()
+    found = [p for p in PROGRESS_CLAIMS if p in flat]
+    assert found == [], f"the summary promises remediation it cannot evidence: {found}"
+    # the routing gaps change what a verdict means: say what closing them takes
+    gaps = " ".join(_section(SUMMARY.read_text(encoding="utf-8"), "Open gaps").split())
+    assert re.search(r"needs? an ADR.{0,120}apparatus", gaps), "say what closing A1-A3 takes"
+
+
+def _cell(clean: int, n: int, n_tasks: int) -> Any:
+    from crb.core.ledger import CellKey, CellStats
+    from crb.core.stats import wilson_interval
+
+    return CellStats(
+        cell=CellKey("replay", "bug.fix", "XS", "python", "agentic", "m", "p"),
+        n=n,
+        clean=clean,
+        disqualified=0,
+        errors=0,
+        false_q1=0,
+        point=clean / n,
+        ci=wilson_interval(clean, n),
+        cost_usd_mean=0.01,
+        latency_s_mean=5.0,
+        oracle_strength_mean=None,
+        apparatus_versions=("2.2",),
+        n_tasks=n_tasks,
+    )
+
+
+def test_the_summary_states_the_deliver_bar_main_enforces() -> None:
+    """The bar the summary states is the one ``route`` runs. On main an unmeasured oracle,
+    an unevaluated controls verdict and repeated attempts on few tasks do not block
+    ``deliver``; while that holds the rule's sentence must say so, and the day routing.v2
+    refuses them this test fails until the sentence is rewritten."""
+    from crb.core import routing
+
+    unmeasured = routing.route(_cell(30, 30, 30)).route
+    few_tasks = routing.route(_cell(30, 30, 3), oracle_strength=0.95).route
+    measures = " ".join(_section(SUMMARY.read_text(encoding="utf-8"), "What it measures").split())
+    rule = next(s for s in re.split(r"(?<=\.) |\| ", measures) if "deliver" in s and "≥" in s)
+    qualified = re.search(r"(unmeasured|not scored|not measured).{0,120}does not block", measures)
+    if routing.ROUTE_DELIVER in (unmeasured, few_tasks):
+        assert qualified, f"main routes deliver without the full bar; the summary says: {rule}"
+        assert re.search(r"is meant to|published bar", rule), rule
+    else:
+        assert not qualified, "routing.v2 refuses the unmeasured cell: rewrite the summary"
+
+
+def test_the_summary_says_when_belt_5_counts() -> None:
+    """Belt 5 not evaluated is not a failed belt (``derive_clean``). While that holds, the
+    summary must not say every clean attempt passed the repository's linter, and must list
+    the gap that an operator's switch-off and a missing linter read the same (A3)."""
+    from crb.core.grade import CORE_BELT_NAMES, derive_clean
+
+    belts: dict[str, Any] = dict.fromkeys(CORE_BELT_NAMES, True) | {"repo_lint_clean": None}
+    assert derive_clean(belts), "belt 5 unevaluated now blocks clean: rewrite the summary"
+    text = SUMMARY.read_text(encoding="utf-8")
+    measures = " ".join(_section(text, "What it measures").split())
+    assert re.search(r"linter.{0,160}not evaluated", measures), measures
+    gaps = " ".join(_section(text, "Open gaps").split())
+    assert re.search(r"switched (it )?off.{0,160}(cannot tell|reads? the same)", gaps), gaps
+
+
+def test_the_loop_sentences_price_only_what_learn_prices() -> None:
+    """Refusals carry the money they lost and re-measurements an estimate; a strengthening
+    item carries no price. Neither page may say all three are priced."""
+    from dataclasses import fields
+
+    priced = {
+        "refusals": "cost_usd" in {f.name for f in fields(learn.RefusalGroup)},
+        "re-measurements": "est_cost_usd" in {f.name for f in fields(learn.RemeasureCell)},
+        "strengthening": any("cost" in f.name for f in fields(learn.StrengthenItem)),
+    }
+    assert priced == {"refusals": True, "re-measurements": True, "strengthening": False}
+    m = re.search(r"\*\*What the product is\*\*.*?(?=\n\n)", README, re.S)
+    assert m
+    readme = " ".join(m.group(0).split())
+    summary = " ".join(_section(SUMMARY.read_text(encoding="utf-8"), "What it is").split())
+    for where, text in (("README", readme), ("SUMMARY", summary)):
+        assert "each with its cost" not in text and "each priced" not in text, where
+        assert re.search(r"strengthen\w*.{0,80}without a (price|cost)", text), where
+
+
+# ─── the loop guard catches any name that acts, not only six verbs ───────────────────────
+
+#: Name stems of a public function that would act rather than propose.
+ACTING_STEMS = (
+    *ACTUATOR_PREFIXES,
+    "apply",
+    "run",
+    "execute",
+    "dispatch",
+    "write",
+    "append",
+    "post",
+    "create",
+    "trigger",
+    "start",
+    "launch",
+    "merge",
+    "deliver",
+)
+#: The one acting path learn has, and why it is not the loop acting on its own: it writes
+#: only the lines a named person accepted, and refuses without ``decided_by``.
+PERSON_DRIVEN = {"apply_triage"}
+
+
+def test_learn_acts_only_through_a_named_person() -> None:
+    import inspect
+
+    acting = {
+        name
+        for name, obj in vars(learn).items()
+        if not name.startswith("_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == learn.__name__
+        and name.lower().startswith(ACTING_STEMS)
+    }
+    assert acting == PERSON_DRIVEN, (
+        "crb.core.learn gained or lost an acting path — rewrite README 'What the product is' "
+        f"and this test together: {sorted(acting ^ PERSON_DRIVEN)}"
+    )
+    who = inspect.signature(learn.apply_triage).parameters["decided_by"]
+    assert who.kind is inspect.Parameter.KEYWORD_ONLY and who.default is inspect.Parameter.empty
+    with pytest.raises(learn.LearnError, match="decided_by"):
+        learn.apply_triage([], learn.triage_refusals([]), corpus_dir="/nonexistent", decided_by=" ")
+
+
+# ─── the mining sentence names the knobs the configuration really has ────────────────────
+
+
+def test_the_mining_sentence_names_only_the_numbers_configuration_moves() -> None:
+    import inspect
+
+    # the file caps are fixed per pool; only the window, the target and the cap read config
+    assert "mining" not in inspect.getsource(mine_mod.pool_caps)
+    step1 = " ".join(_section(README, "The instrument in six steps").split())
+    s6b = " ".join(_section(EVIDENCE, "6b.").split())
+    for where, text in (("README step 1", step1), ("EVIDENCE-AND-CLAIMS §6b", s6b)):
+        assert "moves each number" not in text, where
+        assert re.search(r"window, the task target and the candidate cap", text), where
+    assert "six language files" in step1

@@ -273,3 +273,49 @@ def test_main_fails_on_an_unrecorded_review_action(
 def test_every_review_action_in_the_repository_has_a_record() -> None:
     """The critical friend's ten actions (2026-09-13 §8) each carry a dated state."""
     assert cc.check_review_actions(ROOT) == []
+
+
+def test_a_state_is_a_whole_word(tree: Path) -> None:
+    """``opening`` is not ``open``: a state must stand as a word, or any prose passes."""
+    rows = "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: opening soon. |\n"
+    _review_tree(tree, rows)
+    assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
+
+
+def test_a_recorded_action_that_left_its_review_is_a_finding(tree: Path) -> None:
+    """The record and the table are checked both ways, so neither can vanish alone: an
+    action recorded in the log but gone from the review's Actions table (a deleted row, a
+    renamed heading) is a finding against the decision log."""
+    rows = (
+        "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open; "
+        "action #3: [gap] a third action. |\n"
+    )
+    _review_tree(tree, rows)
+    assert [(f.path, f.reason) for f in cc.check_review_actions(tree)] == [
+        (
+            "docs/DECISION-LOG.md",
+            "2026-09-13-friend action #3 is recorded but the review has no such action",
+        ),
+    ]
+
+    # renaming the heading empties the table as the checker reads it: every record now
+    # points at an action the review no longer lists
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n")
+    renamed = REVIEW.replace("## 8. Actions, in priority order", "## 8. Next steps")
+    _write(tree, "docs/reviews/2026-09-13-friend.md", renamed)
+    assert [f.reason for f in cc.check_review_actions(tree)] == [
+        "2026-09-13-friend action #1 is recorded but the review has no such action",
+        "2026-09-13-friend action #2 is recorded but the review has no such action",
+    ]
+
+
+#: The critical friend's Actions table (2026-09-13 §8) as it was reviewed: ten actions.
+#: Deleting a row AND its record together passes the two-way check, so the set is pinned.
+CRITICAL_FRIEND = "2026-09-13-critical-friend"
+
+
+def test_the_critical_friends_ten_actions_are_all_still_listed() -> None:
+    text = (ROOT / "docs" / "reviews" / f"{CRITICAL_FRIEND}.md").read_text(encoding="utf-8")
+    assert [n for n, _ in cc.review_actions(text)] == list(range(1, 11))
+    log = (ROOT / "docs" / "DECISION-LOG.md").read_text(encoding="utf-8")
+    assert cc.recorded_actions(log, CRITICAL_FRIEND) == set(range(1, 11))

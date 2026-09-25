@@ -163,3 +163,33 @@ def test_ci_runs_the_gate_on_pull_requests_under_a_short_job_name() -> None:
     # every job's `name:` stays under 100 characters (branch protection matches on it)
     for name in re.findall(r"^    name: (.+)$", ci, re.M):
         assert len(name.strip().strip('"')) < 100, name
+
+
+def _workflow_with(job: str) -> Path:
+    """The one workflow file under .github/workflows that defines ``job``."""
+    hits = [
+        p
+        for p in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+        if re.search(rf"^  {re.escape(job)}:\s*$", p.read_text(encoding="utf-8"), re.M)
+    ]
+    assert len(hits) == 1, hits
+    return hits[0]
+
+
+def test_an_edited_title_is_checked_again() -> None:
+    """The title is checked because a squash merge writes it on main, so a title edited
+    after CI passed must be re-checked: the gate's workflow listens for ``edited``. It sits
+    in its own workflow so that editing a description does not re-run the whole CI."""
+    wf = _workflow_with("commit-subjects")
+    text = wf.read_text(encoding="utf-8")
+    on = re.search(r"^on:\n((?:[ #].*\n|\n)+)", text, re.M)
+    assert on, f"{wf.name} has no top-level on: block"
+    pr = re.search(r"^  pull_request:\n    types: \[([^\]]*)\]", on.group(1), re.M)
+    assert pr, f"{wf.name}: pull_request must list its types"
+    types = {t.strip() for t in pr.group(1).split(",")}
+    assert {"opened", "synchronize", "reopened", "edited"} <= types, types
+    assert wf.name != "ci.yml", "an edited description must not re-run the whole CI"
+    # the squash subject that actually landed is checked on main too (detection: the merge
+    # dialog can rewrite the title after the last pull-request check)
+    assert re.search(r"^  push:\n    branches: \[main\]", on.group(1), re.M)
+    assert "github.event.before" in text and "github.event.after" in text
