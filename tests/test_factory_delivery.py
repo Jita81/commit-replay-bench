@@ -883,6 +883,7 @@ def test_close_pull_request_comments_the_verdict_then_closes(
         reason="the oracle is weak: 3 escaped mutants",
         creds=dv.StaticProvider(_creds()),
         close_pr_fn=dv.github_close_pr_fn,
+        repo_id="/repos/calc",
     )
     assert [c["method"] for c in calls] == ["POST", "PATCH"]
     assert calls[0]["url"] == "https://api.github.com/repos/acme/calc/issues/5/comments"
@@ -893,7 +894,12 @@ def test_close_pull_request_comments_the_verdict_then_closes(
     assert body == calls[0]["data"]["body"] and TOKEN not in body
     with pytest.raises(dv.NoGitCredentialsError):
         dv.close_pull_request(
-            previous, verdict="reject", reason="x", creds=None, close_pr_fn=dv.github_close_pr_fn
+            previous,
+            verdict="reject",
+            reason="x",
+            creds=None,
+            close_pr_fn=dv.github_close_pr_fn,
+            repo_id="/repos/calc",
         )
     with pytest.raises(dv.DeliveryError, match="accept"):
         dv.close_pull_request(
@@ -902,7 +908,53 @@ def test_close_pull_request_comments_the_verdict_then_closes(
             reason="x",
             creds=dv.StaticProvider(_creds()),
             close_pr_fn=dv.github_close_pr_fn,
+            repo_id="/repos/calc",
         )
+
+
+def test_a_close_resolves_credentials_for_the_repository_never_the_item() -> None:
+    """PR #55 review: a close resolved its credentials with the ITEM id (``I-1``) when the
+    caller named no repository, so a provider keyed on the repository would be asked for
+    the wrong key — a failed close, or another repository's token. The repository is now a
+    required argument, a blank one is refused before any credential is read, and the key
+    the provider sees is exactly the one given."""
+    asked: list[str] = []
+
+    class Recording:
+        def resolve(self, repo: str) -> dv.GitCredentials:
+            asked.append(repo)
+            return _creds()
+
+    previous = dv.DeliveryResult(
+        item_id="I-1",
+        branch="crb/i-1-add-multiply-to-calc",
+        base="main",
+        commit_sha="c" * 40,
+        pr_url="https://github.com/acme/calc/pull/5",
+        pr_number=5,
+        pack_hash="p" * 64,
+        body_sha256="",
+    )
+    for blank in ("", "   "):
+        with pytest.raises(dv.DeliveryError, match="repository"):
+            dv.close_pull_request(
+                previous,
+                verdict="reject",
+                reason="x",
+                creds=Recording(),
+                close_pr_fn=lambda **kw: None,
+                repo_id=blank,
+            )
+    assert asked == []
+    dv.close_pull_request(
+        previous,
+        verdict="reject",
+        reason="x",
+        creds=Recording(),
+        close_pr_fn=lambda **kw: None,
+        repo_id="/repos/calc",
+    )
+    assert asked == ["/repos/calc"]
 
 
 # --- C6(b): ticket-derived text is data, never markup; the branch is [a-z0-9-] -------

@@ -111,7 +111,8 @@ def canonical_model(model: str, table: Mapping[str, Pricing] | None = None) -> s
 
     Lower-cased; a ``@provider`` suffix, a ``[1m]``-style context suffix and a ``vendor/``
     prefix are dropped; then the LONGEST key of the pricing table (``table``, default the
-    deployment's :func:`crb.builders.budget.load_pricing`) that the id equals, or starts
+    deployment's :func:`crb.builders.budget.load_pricing`) — any key, whether its price is
+    known or a placeholder — that the id equals, or starts
     with at an id boundary (``claude-sonnet-5-20260901`` → ``claude-sonnet-5``), is the
     name — the pricing table is the one place the product already says which ids are one
     priced model. An id no key matches is its own name; a bare family alias is
@@ -128,7 +129,11 @@ def canonical_model(model: str, table: Mapping[str, Pricing] | None = None) -> s
             table = load_pricing()
         except (OSError, ValueError):  # a malformed deployment table: the shipped one
             table = DEFAULT_PRICING
-    for key in sorted((k.lower() for k, p in table.items() if p.known), key=len, reverse=True):
+    # EVERY key, priced or placeholder: whether a price is known says nothing about which
+    # model an id names (PR #55 review — a ``known: false`` key once lost its dated aliases
+    # and the C3 refusal failed open). A provider placeholder (``azure``) therefore reads
+    # every ``azure:…`` id as one model — the fail-closed direction.
+    for key in sorted((k.lower() for k in table), key=len, reverse=True):
         if m == key or (m.startswith(key) and m[len(key)] in _ID_BOUNDARY):
             return key
     return m

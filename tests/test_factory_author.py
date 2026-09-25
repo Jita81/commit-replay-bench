@@ -305,6 +305,43 @@ def test_aliases_of_one_model_are_the_same_model(
         )
 
 
+@pytest.mark.parametrize("known", [True, False])
+def test_a_dated_alias_is_its_models_identity_whatever_its_price_status(known: bool) -> None:
+    """PR #55 review: the canonicalisation read only keys with a KNOWN price, so a model a
+    deployment priced as a placeholder (``known: false`` in ``CRB_PRICING_JSON``) lost its
+    dated aliases — ``m-20260901`` stayed itself and the C3 refusal failed open. Whether a
+    price is known says nothing about which model an id names."""
+    from crb.builders.budget import DEFAULT_PRICING, Pricing
+    from crb.factory.testfirst import canonical_model, same_model
+
+    table = {**DEFAULT_PRICING, "m": Pricing(0.0, 0.0, known=known)}
+    assert canonical_model("m-20260901", table) == "m"
+    assert same_model("m", "m-20260901", table)
+    # the prevention: EVERY key the table holds, priced or placeholder, owns its aliases
+    for key in table:
+        assert canonical_model(f"{key}-20260901", table) == key.lower(), key
+
+
+def test_a_placeholder_priced_model_cannot_author_its_own_oracle(
+    pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same, end to end through ``FactorySpec``: a deployment table that prices ``m``
+    as a placeholder still refuses ``m`` authoring the test a ``m-20260901`` rung builds
+    against."""
+    import json
+
+    pricing = tmp_path / "pricing.json"
+    pricing.write_text(json.dumps({"m": {"known": False}}), encoding="utf-8")
+    monkeypatch.setenv("CRB_PRICING_JSON", str(pricing))
+    with pytest.raises(SameIdentityError, match="rung 1"):
+        _spec(
+            pyrepo,
+            tmp_path,
+            author=_model_author("m"),
+            ladder=(Rung("claude_code", "m-20260901"),),
+        )
+
+
 def test_different_models_pass_whatever_the_builder_names(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:

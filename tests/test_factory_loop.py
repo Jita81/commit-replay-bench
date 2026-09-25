@@ -1276,7 +1276,8 @@ def _closing_rig(
     def close_pr(**kw: Any) -> None:
         closed.append(kw)
 
-    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds(), close_pr_fn=close_pr, **overrides)
+    overrides.setdefault("creds", _creds())
+    rig = _rig(pyrepo, tmp_path, deliver=True, close_pr_fn=close_pr, **overrides)
     _seed_open_delivery(rig)
     return rig, closed
 
@@ -1307,6 +1308,31 @@ def test_an_open_pull_request_is_closed_when_this_runs_review_rejects_the_item(
     out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
     assert out.status == fl.STATUS_REJECTED
     _assert_closed_by_the_factory(rig, closed, out, rv.VERDICT_REJECT)
+
+
+def test_a_close_asks_for_the_same_repositorys_credentials_as_a_delivery(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """PR #55 review: the loop's close asked the credential provider for the ITEM id while
+    its delivery asked for the repository, so a provider keyed on the repository resolved
+    a close to the wrong key. Both now ask for the one repository key the loop holds."""
+    asked: list[str] = []
+
+    class Recording(StaticProvider):
+        def resolve(self, repo: str) -> GitCredentials:
+            asked.append(repo)
+            return super().resolve(repo)
+
+    creds = Recording(
+        GitCredentials(remote="https://github.com/acme/calc.git", token="ghp_" + "b" * 36)
+    )
+    rig, closed = _closing_rig(pyrepo, tmp_path, reviewer=RejectingReviewer(), creds=creds)
+    rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert len(closed) == 1
+    rig2 = _rig(pyrepo, tmp_path / "b", deliver=True, creds=creds)
+    out = rig2.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.delivery is not None
+    assert asked == [str(pyrepo.repo.path)] * 2
 
 
 def test_an_open_pull_request_is_closed_when_this_runs_rework_is_exhausted(

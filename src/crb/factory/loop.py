@@ -332,6 +332,9 @@ class FactoryLoop:
     def __init__(self, spec: FactorySpec, repo: GitRepo, *, emitter: Emitter | None = None) -> None:
         self.spec = spec
         self.repo = repo
+        #: The ONE key a delivery and a close resolve git credentials with (PR #55 review:
+        #: a close once asked for the item id, a delivery for the repository).
+        self.credentials_key = str(repo.path)
         self.emitter = emitter or Emitter(MemorySink(), actor=spec.actor, repo=spec.config.name)
 
     # --- events ---------------------------------------------------------------
@@ -593,6 +596,7 @@ class FactoryLoop:
                 rework_n=rework_n,
                 after_verdict=after_verdict,
                 verdict=verdict.verdict,
+                repo_id=self.credentials_key,
             )
         except DeliveryError as exc:
             s.evidence.record_delivery_refused(
@@ -710,6 +714,7 @@ class FactoryLoop:
                 reason=why,
                 creds=s.creds,
                 close_pr_fn=s.close_pr_fn,
+                repo_id=self.credentials_key,
             )
         except Exception as exc:  # a refused, unreachable or garbled close: never a status
             self._emit(

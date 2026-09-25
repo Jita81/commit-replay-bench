@@ -58,8 +58,10 @@ How:          ``deliver`` = invariant → verdict → credentials → deliverabi
               ``previous`` the push leases against ``previous.commit_sha``, no PR is opened
               and ``comment_pr_fn`` posts the note (``updated=True``; a failed note is
               ``comment_error`` on the result, never a refusal of the moved branch);
-              ``close_pull_request`` = refuse ``accept`` → credentials → ``close_comment``
-              → ``close_pr_fn`` (GitHub: comment, then ``PATCH …/pulls/{n}``).
+              ``close_pull_request`` = refuse ``accept`` → refuse a blank ``repo_id`` →
+              credentials for that repository (the key a delivery resolves) →
+              ``close_comment`` → ``close_pr_fn`` (GitHub: comment, then
+              ``PATCH …/pulls/{n}``).
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md (the PR body is a
               summary, never raw output), docs/adr/0021-factory-review-before-delivery.md
@@ -862,19 +864,26 @@ def close_pull_request(
     reason: str,
     creds: GitCredentialsProvider | None,
     close_pr_fn: ClosePrFn | None = None,
-    repo_id: str = "",
+    repo_id: str,
 ) -> str:
     """Close a pull request the factory opened, because a later review of the item did
     NOT accept it (ADR-0021) — the rework path for a delivered pull request later found
-    weak. Refuses ``verdict == accept`` (an accepted build is delivered, never closed) and
-    a delivery with no pull request; credentials fail closed like a delivery's. Returns the
-    comment posted (the caller records it)."""
+    weak. Refuses ``verdict == accept`` (an accepted build is delivered, never closed), a
+    delivery with no pull request, and a blank ``repo_id``; credentials fail closed like a
+    delivery's. ``repo_id`` is REQUIRED and is the key a delivery of the same repository
+    resolves its credentials with (the loop passes the one it holds) — never the item id,
+    which a provider keyed on the repository would resolve wrongly (PR #55 review).
+    Returns the comment posted (the caller records it)."""
     if verdict == VERDICT_ACCEPT:
         raise DeliveryError("an accepted build is delivered, never closed")
     if previous.pr_number <= 0:
         raise DeliveryError(f"delivery of {previous.item_id!r} has no pull request to close")
+    if not repo_id.strip():
+        raise DeliveryError(
+            f"close of {previous.item_id!r} names no repository to resolve credentials for"
+        )
     provider = creds if creds is not None else NullProvider()
-    credentials = provider.resolve(repo_id or previous.item_id)
+    credentials = provider.resolve(repo_id)
     body = close_comment(previous, verdict=verdict, reason=reason)
     close = close_pr_fn if close_pr_fn is not None else github_close_pr_fn
     close(
