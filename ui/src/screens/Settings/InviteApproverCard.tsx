@@ -141,7 +141,7 @@ export function InviteApproverCard() {
               hint="button.invitations.revoke"
               data-testid={`revoke-${i.username}`}
               disabled={revoke.isPending}
-              onClick={() => revoke.mutate({ id: i.id, reason: `withdrawn by an admin on the Settings screen` })}
+              onClick={() => revoke.mutate({ id: i.id, reason: 'withdrawn by an admin on the Settings screen' })}
             >
               Withdraw
             </Button>
