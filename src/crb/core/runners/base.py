@@ -71,11 +71,12 @@ Touch when:   never for a new repository — set ``runner``, ``belt_scope``, ``r
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import os
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -130,8 +131,9 @@ class TestRun:
     duration_s: float = 0.0
     parse_error: str = ""
     services: tuple[ServiceRecord, ...] = ()
-    #: The executor could not prepare the ground (ADR-0019: the throwaway tree copy
-    #: failed). The exit code then says nothing about the tests; the grader records an
+    #: The instrument failed around the tests (ADR-0019: ``tree_copy_failed`` — the
+    #: throwaway copy of the worktree could not be made). Such a run is red but it is NOT a
+    #: verdict about the code: no failing id is attributed, the grader records an
     #: environment failure and the qualifier refuses ``QUAL_TREE_COPY_FAILED``.
     env_error: str = ""
 
@@ -322,17 +324,18 @@ def _with_env(cmd: Command, base: dict[str, str]) -> Command:
 
 def with_deps(cmd: Command, binding: DepsBinding | None, executor_name: str) -> Command:
     """``cmd`` with a dependency binding applied (ADR-0019 §6): the binding's environment
-    for this executor OVER the runner's own (the binding is what points the toolchain at
-    the sealed set — ``GOMODCACHE``, ``GOPROXY=off``), and its sets as read-only mounts.
-    ``None`` leaves the command exactly as the runner built it."""
-    if binding is None:
+    for this executor (``env`` in a container, ``local_env`` on the host) OVER the
+    runner's own — the binding is what points the toolchain at the sealed set
+    (``GOMODCACHE``, ``GOPROXY=off``) — and, under docker only, its sets as read-only
+    mounts. Idempotent (a mount already on the command is not added twice); ``None`` or an
+    empty binding leaves the command exactly as the runner built it."""
+    if binding is None or (not binding.env and not binding.local_env and not binding.mounts):
         return cmd
-    env = binding.env_for(executor_name)
-    if not env and not binding.mounts:
-        return cmd
-    return dataclasses.replace(
-        cmd, env={**cmd.env, **env}, ro_mounts=(*cmd.ro_mounts, *binding.mounts)
-    )
+    env = {**cmd.env, **binding.env_for(executor_name)}
+    mounts = cmd.ro_mounts
+    if executor_name == "docker":
+        mounts = tuple(dict.fromkeys((*cmd.ro_mounts, *binding.mounts)))
+    return dataclasses.replace(cmd, env=env, ro_mounts=mounts)
 
 
 def host_check(argv: Sequence[str], root: Path, *, env: dict[str, str] | None = None) -> bool:
@@ -427,9 +430,37 @@ class BaseRunner:
         self.authored: str | None = None
         #: The oracle's services, once started (see :meth:`ensure_services`).
         self._services: ServiceSession | None = None
-        #: The dependency binding of the current call (ADR-0019), bound by :meth:`run_for`
-        #: like ``authored``; ``None`` runs the command as the runner built it.
+        #: The sealed dependency set the next command runs with (ADR-0019), bound by
+        #: :meth:`run_for` (like ``authored``) or :meth:`deps_bound` — the qualifier and the
+        #: grader bind the role's (or the trial's selected) set; ``None`` keeps today's
+        #: command exactly.
         self.deps: DepsBinding | None = None
+
+    # --- dependencies (ADR-0019) ---------------------------------------------------
+    def bind_deps(self, cmd: Command, executor: Executor) -> Command:
+        """``cmd`` with :attr:`deps` applied (:func:`with_deps`)."""
+        return with_deps(cmd, self.deps, executor.name)
+
+    @contextlib.contextmanager
+    def deps_bound(self, binding: DepsBinding | None) -> Iterator[None]:
+        """Bind ``binding`` for the block, restoring the previous one after."""
+        previous = self.deps
+        self.deps = binding
+        try:
+            yield
+        finally:
+            self.deps = previous
+
+    def probe_environment(
+        self, executor: Executor, root: Path, *, timeout: int = READY_CHECK_TIMEOUT_S
+    ) -> ExecResult | None:
+        """Run :meth:`env_probe_command` over the whole tree with :attr:`deps` bound;
+        ``None`` when this runner has none. The caller reads ``ok`` (a probe failure is the
+        posture's, never a verdict)."""
+        cmd = self.env_probe_command(Path(root), (), executor=executor, timeout=timeout)
+        if cmd is None:
+            return None
+        return executor.run(self.bind_deps(cmd, executor))
 
     # --- scopes ------------------------------------------------------------------
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
@@ -484,18 +515,17 @@ class BaseRunner:
         if self.has_services():
             records = self.ensure_services(executor, root, authored=self.authored)
             service_env = self.service_env()
-        cmd = self.command(root, scope, executor=executor, timeout=t)
+        cmd = self.bind_deps(self.command(root, scope, executor=executor, timeout=t), executor)
         if service_env:
             cmd = _with_env(cmd, service_env)
-        cmd = with_deps(cmd, self.deps, executor.name)
         result = executor.run(cmd)
         if result.env_error:
-            # the ground was not prepared: the exit code says nothing about the tests
+            # the instrument failed (the tree could not be copied): red, never attributed
             return TestRun(
-                result.returncode,
+                result.returncode or 1,
                 frozenset(),
                 tail_of(result.combined),
-                result.timed_out,
+                False,
                 result.duration_s,
                 parse_error=f"environment: {result.env_error}",
                 services=records,

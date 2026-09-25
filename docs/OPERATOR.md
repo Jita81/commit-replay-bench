@@ -236,8 +236,26 @@ installs the repository's test dependencies once, up front, and records every co
 ran. Nothing else ever asks for the network; if a run needs something setup did not
 install, it fails — it does not fetch.
 
+**Setup is a host phase; the sealed posture provisions instead (ADR-0019).** Under the
+docker executor `crb repo setup` refuses (a sandbox has no network, and installing into one
+would run repository code with a network). A repository's dependencies there come from
+**dependency provisioning**: with `CRB_PROVISION__ENABLED=true` each task's lockfiles at the
+parent and at the gold are read from git objects, fetched outside the test container through
+the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
+`$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
+at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
+`--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
+pin Python as `name==version` in `requirements*.txt` (or name the files in
+`runner_opts.deps_lock`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
+version does not provision is refused with its `PROVISION_*` code and the fix
+([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With
+provisioning off, a repository that declares dependencies is refused `PROVISION_DISABLED`
+under docker before any spend. `crb deps ls | verify | gc` shows, re-proves and trims the
+sealed sets; the `provision` line of `crb doctor` says whether it can work on this host.
+
 `crb repo setup <name>` (CLI) and the `setup` run kind (`POST /runs {"kind": "setup"}` —
-server) call the same runner method. Per language:
+server) call the same runner method on the host (the local posture). Per language:
 
 | Runner | What setup runs (in the clone) | Where the environment lives | "Ready" means |
 |---|---|---|---|
@@ -756,11 +774,13 @@ posture. If that control passes, the row is `builder_red` (or `lint`) and names 
 revoked. Two such rows in a row stop the run (`env_stop`, default 2).
 
 **With provisioning off** (the default), the sealed sandbox provides no third-party
-dependencies. A repository whose tests need one is refused `QUAL_ENV_UNLOADABLE` at
-qualification instead of being charged to the model on every replay **[measured — n = 1
-Go repository with one third-party module, method: `tests/test_posture_docker.py` qualifies
-it in the shipped Go sandbox image under `--network=none` and reads the refusal, 2026-09-25;
-apparatus 2.3]**.
+dependencies, so a repository that declares one is refused `PROVISION_DISABLED` before
+anything runs, with the fix. **With provisioning on**, a task whose parent still cannot load
+its dependencies offline — its sealed set damaged, or a module the lockfile does not pin — is
+refused `QUAL_ENV_UNLOADABLE` at qualification instead of being charged to the model on every
+replay **[measured — n = 1 fixture Go repository with one module and 1 task of cobra, method:
+`tests/test_posture_e2e_docker.py` and docs/reviews/2026-09-25-sealed-posture.md §3(c), in the
+shipped Go sandbox image under `--network=none`, 2026-09-25; apparatus 2.3]**.
 
 ## 8. Stop conditions
 

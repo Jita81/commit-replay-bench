@@ -573,7 +573,7 @@ def get_posture(
         repo,
         executor=ex,
         image_ref=deployment_image(settings, repo),
-        provisioning=settings.provision.view(),
+        provisioning={"enabled": settings.provision.enabled},
     )
 
 

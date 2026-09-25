@@ -53,13 +53,13 @@ from crb.cli.commands import (
     add_common,
     add_executor,
     build_executor,
+    deps_provider,
     parse_kv,
     print_json,
     print_lines,
     table,
     workdir_of,
 )
-from crb.core.deps import NullDepsProvider
 from crb.core.git import (
     DEFAULT_CLONE_TIMEOUT_S,
     CloneUrlError,
@@ -386,7 +386,16 @@ def cmd_probe(args: argparse.Namespace) -> int:
                     ]
                 )
             return EXIT_NEGATIVE
-    run = runner.run(executor, clone, (config.probe,), timeout=args.timeout)
+    # ADR-0019: the probe reads the clone's own dependencies the way a trial would — the
+    # deployment's provider binds HEAD's set (and refuses PROVISION_DISABLED in the sandbox
+    # for a repository with dependencies while provisioning is off)
+    head = GitRepo(clone).rev_parse("HEAD")
+    deps = deps_provider(executor).resolve(
+        GitRepo(clone), config, parent=head, gold=head, executor_name=executor.name
+    )
+    run = runner.run_for(
+        executor, clone, (config.probe,), timeout=args.timeout, authored=None, deps=deps.parent
+    )
     out = {
         "repo": config.name,
         "probe": config.probe,
@@ -427,7 +436,7 @@ def cmd_qualify(args: argparse.Namespace) -> int:
     repo = GitRepo(clone)
     runner = bound_runner(config, env_dir_of(wd, args.name))
     executor = build_executor(args.executor, config)
-    provider = NullDepsProvider()
+    provider = deps_provider(executor)
     posture = resolve_posture(
         executor, runner, deps_mode=provider.mode(config, executor.name), root=clone
     )

@@ -48,8 +48,9 @@ Works with:   src/crb/core/qualify.py (``qualify_task``, ``GoldWitness``),
               deploy/sandbox/Dockerfile.go (the shipped image), tests/conftest_langs.py (the
               image and the cache directory)
 Tested by:    tests/test_posture_docker.py
-Touch when:   the sealed posture's contract changes (provisioning lands: stream D adds the
-              per-task module cache — the "as shipped" half then reads provisioning off).
+Touch when:   the sealed posture's contract changes. The per-task module cache (stream D) is
+              proven end to end in tests/test_posture_e2e_docker.py; this suite keeps the
+              "nothing provisioned" and the baked-image shapes.
 """
 
 from __future__ import annotations
@@ -271,7 +272,10 @@ def rig() -> Iterator[Rig]:
 
 
 def _docker(image: str) -> DockerExecutor:
-    return DockerExecutor(DockerSettings(image=image))
+    # the READ-ONLY tree on purpose: it is the posture in which the D5 test is red, so this
+    # suite proves the baseline is measured in the posture that grades (the default copy
+    # tree, where it is green, is tests/test_posture_e2e_docker.py's)
+    return DockerExecutor(DockerSettings(image=image, tree="readonly"))
 
 
 def _qualify(

@@ -193,7 +193,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
 | `QUAL_TREE_COPY_FAILED` | task | the tree did not fit the copy: raise `work_size`, or choose `sandbox_tree: readonly` |
 | `PROVISION_DISABLED`, `PROVISION_PUBLIC_REGISTRY`, `PROVISION_FETCH_IMAGE_UNPINNED`, `PROVISION_STORE_NOT_VISIBLE`, `PROVISION_UNSUPPORTED_LANGUAGE` | run | a deployment setting; each fix names the setting (DEPLOYMENT §3.4) |
 | `PROVISION_NO_LOCK`, `PROVISION_UNPINNED`, `PROVISION_SOURCE_REFUSED`, `PROVISION_BUILD_REQUIRED`, `PROVISION_LOCK_UNSUPPORTED`, `PROVISION_PRIVATE_MODULE`, `PROVISION_TOOLCHAIN_TOO_OLD`, `PROVISION_FETCH_FAILED`, `PROVISION_TOO_LARGE` | task | a fact about that commit's lockfiles or about the registry; each fix names the file, the host or the setting |
-| `BUNDLE_INTEGRITY` | run | a sealed set no longer matches its digest: run `crb deps verify`; every qualification that cites the set is revoked |
+| `BUNDLE_INTEGRITY` | run | a sealed set no longer matches its digest: the run stops before any builder is called; `crb deps verify` names the set, and deleting it from the store makes the next run fetch and seal it again. Revoking every qualification that cites the set is decided but not built **[gap]** (G-966) |
 
 10. **Migration.** Nothing is rewritten.
     - **Grade rows** keep their stamps, and 2.2 stays readable. A row stamped before 2.3 by the docker executor (read from its run's apparatus stamp) was graded against a baseline measured somewhere else. It is excluded from every rate and counted beside the cell as `unqualified_posture`. That covers run `0c44ff24…` without editing it.

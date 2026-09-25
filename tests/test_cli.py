@@ -261,6 +261,26 @@ def test_repo_probe_green(registered: CliRepo, run: Run) -> None:
     assert code == 0 and "GREEN" in out
 
 
+def test_repo_probe_reads_the_deployments_provider_and_names_its_refusal(
+    registered: CliRepo, run: Run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0019: the probe binds HEAD's dependency set from the deployment's provider, and
+    a provisioning stop is one line with its fix (exit 2), never a traceback."""
+    from crb.cli.commands import repo as repo_cmd
+    from crb.core.deps import ProvisionRefused
+
+    class _Off:
+        def resolve(self, *a: object, **k: object) -> object:
+            raise ProvisionRefused("PROVISION_DISABLED", "demo declares python dependencies")
+
+    seen: list[str] = []
+    monkeypatch.setattr(repo_cmd, "deps_provider", lambda ex: seen.append(ex.name) or _Off())
+    code, _, err = run(["repo", "probe", "demo"])
+    assert seen == ["local"] and code == 2
+    assert "PROVISION_DISABLED: demo declares python dependencies" in err
+    assert "CRB_PROVISION__ENABLED=true" in err and "Traceback" not in err
+
+
 def test_repo_probe_without_probe_scope_is_usage_error(
     registered: CliRepo, run: Run, workdir: Path
 ) -> None:

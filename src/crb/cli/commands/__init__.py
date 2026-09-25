@@ -1,6 +1,6 @@
 """Shared plumbing for the ``crb`` subcommands: the workdir layout, output helpers,
-exit codes and the executor factory. Every command module imports from here and
-from :mod:`crb.core` only.
+exit codes, the executor factory and the dependency provider. Every command module
+imports from here, from :mod:`crb.core` and (for the provider) :mod:`crb.provision`.
 
 Workdir layout (``./.crb`` by default; ``CRB_HOME`` or ``--workdir`` override)::
 
@@ -27,7 +27,8 @@ Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/core/spec.py (``RepoConfig`` / ``TaskSpec`` — what the files hold),
               src/crb/core/execution.py (``LocalExecutor``, ``DockerSettings``,
-              ``make_executor``), src/crb/cli/commands/repo.py (``save_repo`` /
+              ``make_executor``), src/crb/provision/__init__.py (``make_deps_provider`` —
+              the same provider the worker uses), src/crb/cli/commands/repo.py (``save_repo`` /
               ``require_clone`` callers), src/crb/cli/commands/mine.py (``append_tasks``),
               src/crb/cli/commands/grade.py (``write_pack``, ``ledger_path``),
               src/crb/cli/main.py (maps ``CliError`` to exit 2)
@@ -48,8 +49,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
-from crb.core.execution import DockerSettings, Executor, LocalExecutor, make_executor
+from crb.core.deps import DepsProvider
+from crb.core.execution import (
+    TREE_COPY,
+    DockerExecutor,
+    DockerSettings,
+    Executor,
+    LocalExecutor,
+    make_executor,
+)
 from crb.core.spec import RepoConfig, TaskSpec
+from crb.provision import make_deps_provider
+from crb.provision.config import ProvisionConfig
 
 EXIT_OK = 0
 EXIT_NEGATIVE = 1
@@ -246,9 +257,29 @@ def build_executor(kind: str, config: RepoConfig) -> Executor:
     if k == "local":
         return LocalExecutor()
     if k == "docker":
-        docker = DockerSettings(image=config.sandbox_image) if config.sandbox_image else None
+        # ADR-0019 §7: the repository may choose how the tree is presented; the default is
+        # the throwaway copy, as the worker's (CRB_SANDBOX__TREE / __WORK_SIZE)
+        tree = (config.sandbox_tree or os.environ.get("CRB_SANDBOX__TREE") or TREE_COPY).strip()
+        work_size = (os.environ.get("CRB_SANDBOX__WORK_SIZE") or "1g").strip()
+        docker = (
+            DockerSettings(image=config.sandbox_image, tree=tree.lower(), work_size=work_size)
+            if config.sandbox_image
+            else None
+        )
         return make_executor("docker", docker=docker)
     raise CliError(f"unknown executor {kind!r}; expected one of {EXECUTOR_KINDS}")
+
+
+def deps_provider(executor: Executor) -> DepsProvider:
+    """The dependency provider the worker would use for ``executor`` (ADR-0019), read from
+    ``CRB_PROVISION__*``: off → the host's environment locally and ``PROVISION_DISABLED``
+    for a repository with dependencies in the sandbox; on → fetched, sealed and bound per
+    task. A production refusal (a public registry, an unpinned fetch image, a store the
+    daemon cannot see) raises before anything is qualified."""
+    probe_image = executor.settings.image if isinstance(executor, DockerExecutor) else ""
+    return make_deps_provider(
+        ProvisionConfig.from_env(), executor_kind=executor.name, probe_image=probe_image
+    )
 
 
 def executor_defaults() -> dict[str, Any]:

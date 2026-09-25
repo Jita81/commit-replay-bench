@@ -1352,7 +1352,7 @@ def test_rust_infra_edit_is_disqualified_honest_version_bump_is_clean(
 from collections.abc import Collection, Sequence  # noqa: E402
 
 from crb.core import ledger as lg  # noqa: E402
-from crb.core.deps import HOST_ENV_DEPS, ClosureViolation, DepsBinding, TaskDeps  # noqa: E402
+from crb.core.deps import HOST_ENV_DEPS, ClosureViolation, TaskDeps  # noqa: E402
 from crb.core.execution import ExecResult  # noqa: E402
 from crb.core.posture import PostureMismatch  # noqa: E402
 from crb.core.qualify import GoldWitness, Qualification  # noqa: E402
@@ -1529,15 +1529,18 @@ def test_a_spec_projected_for_another_posture_raises_before_any_run(
 def test_a_trial_outside_the_dependency_closure_is_disqualified_before_any_run(
     trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
 ) -> None:
-    def outside(root: Path) -> DepsBinding:
-        raise ClosureViolation("requirements.txt selects requests==9.9 outside the task's closure")
+    class _Outside:
+        def select(self, root: Path) -> str:
+            raise ClosureViolation(
+                "requirements.txt selects requests==9.9 outside the task's closure"
+            )
 
     counting = _Counting(pyrepo.config)
     spec, ctx = pfx.context(feat_task, executor)
     ctx = g.GradeContext(
         ctx.posture,
         ctx.qualification,
-        TaskDeps("py.site.v1", HOST_ENV_DEPS, HOST_ENV_DEPS, HOST_ENV_DEPS, selector=outside),
+        TaskDeps("host-env", "python", HOST_ENV_DEPS, HOST_ENV_DEPS, HOST_ENV_DEPS, _Outside()),
     )
     pr.apply_gold(trial)
     res = g.grade(trial, spec, ctx=ctx, config=pyrepo.config, runner=counting, executor=executor)

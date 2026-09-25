@@ -8,6 +8,33 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the sealed posture, whole: provisioned per task, qualified where it grades, proven on cobra (ADR-0019)
+
+The two halves below (stream Q: posture-relative qualification and the blame witness;
+stream D: per-task dependency provisioning and the throwaway tree) are merged into one
+seam, `crb.core.deps`, and wired end to end.
+
+- **One seam.** `DepsProvider` is `mode(config, executor)`, `resolve(…, parent, gold)` from
+  git objects, and `verify(deps)` over every sealed set a task cites. The worker, `crb mine`,
+  `crb repo qualify`, `crb repo probe` and `crb grade` all take the deployment's provider
+  (`make_deps_provider` from `CRB_PROVISION__*`): provisioning off is the host's environment
+  locally and `PROVISION_DISABLED` in the sandbox for a repository with dependencies. A
+  provisioning stop on the command line is one line with its fix. The run's gate hands the
+  builder the task's parent set (ADR-0012 as amended).
+- **The throwaway copy is the sandbox's default tree** (`CRB_SANDBOX__TREE=copy`, 1 GB);
+  `readonly` stays a separate posture.
+- **Proven end to end** by `tests/test_posture_e2e_docker.py` (a fixture repository with a
+  module, in the sandbox-images CI job) and, once, on cobra: task `746ef07` qualified in
+  `docker/copy/sealed` with its modules fetched for the task and sealed, the gold replayed
+  clean through the run's gate, and an emptied module cache refused `BUNDLE_INTEGRITY` with
+  no builder call, graded `harness` past the gate and re-qualified `QUAL_ENV_UNLOADABLE`
+  **[measured — n = 1 real repository, 1 task; method: the product's own qualify, gate and
+  run code on colima (Docker 29.5.2) against the shipped image `crb-sandbox-go:main-8ab88ad`,
+  no builder and no model; apparatus 2.3; docs/reviews/2026-09-25-sealed-posture.md]**.
+- **The integrity fix now says what is true.** `BUNDLE_INTEGRITY` stops the run, and
+  `crb deps verify` names the set; the operator deletes it and the next run fetches it again.
+  Nothing revokes the qualifications that cite it automatically yet **[gap]** (G-966).
+
 ### 2026-09-25 — qualification is posture-relative (ADR-0019, apparatus 2.3)
 
 The first replay in the sealed sandbox graded every attempt `builder_red`: with no module
@@ -45,8 +72,40 @@ grades it and blames the model only with a witness from there.
   `GET /repos/{name}/posture`; the repository page gains a Posture panel with a Qualify
   button that spends nothing.
 - **Apparatus 2.2 → 2.3**: the current map starts empty and 2.2 sign-offs go stale
-  (ADR-0015). The dependency seam (`crb.core.deps`, `crb.provision`) is in place with
-  provisioning off; per-task provisioning is ADR-0019 stream D.
+  (ADR-0015). The dependency seam (`crb.core.deps`, `crb.provision`) is in place; per-task
+  provisioning is the entry below.
+### 2026-09-25 — the sealed posture can run a repository with dependencies (ADR-0019, stream D)
+
+The first replay in the docker posture (run `0c44ff24…`, cobra) graded every attempt
+`builder_red`: the sealed test container held none of cobra's modules and could not build a
+single target **[measured — n = 4 rows, each `builder_red` with the target red; method: the
+run's grade rows in the deployment's ledger export of 2026-09-25; apparatus 2.2]**. This
+change is the dependency half of the fix (posture-relative qualification and the blame
+witness are the other half, the entry above).
+
+- **Dependencies are provisioned per task, outside the test container.** The lockfiles at
+  the parent and at the gold are read from git objects (never a worktree); a fetch container
+  on the pinned toolchain image fetches them through the allowlisting proxy (or with no
+  network from a `file://` mirror); the result is sealed, content-addressed and mounted
+  read-only while the test container keeps `--network=none`. Go keeps one module cache for
+  the parent's and the gold's modules; Python installs wheels only, with no network; Node
+  runs `npm ci --ignore-scripts`. Every refusal is a `PROVISION_*` code with its fix.
+  Provisioning is **off** by default (`CRB_PROVISION__ENABLED`); under docker a repository
+  that declares dependencies is then refused `PROVISION_DISABLED` before any spend.
+- **Tests run in a throwaway copy of the tree.** The worktree is read-only at `/src`; each
+  command runs in a size-capped tmpfs copy at `/work`, so a test that writes into its own
+  package directory reads the same as on the host (the D5 finding). `CRB_SANDBOX__TREE=readonly`
+  keeps the previous shape. `Command.network=True` is now refused under docker.
+- **Operators can see it.** `crb doctor` and the worker's `/health` gain a `provision` line;
+  `crb deps ls | verify | gc` shows, re-proves and trims the sealed sets; production refuses a
+  public registry (unless allowed) and an unpinned fetch image at start-up; Helm and Compose
+  carry the variables and a NetworkPolicy slot for the package mirror; CI pre-pulls the fetch
+  images and runs the provisioning suites against a real daemon.
+- Proven against a daemon for Go, Python and Node fixtures **[measured — n = 3 fixture
+  repositories, each parent and gold tree passing offline in the shipped sandbox image
+  against its own sealed set; method: `tests/test_provision_{go,python,node}.py` on colima,
+  Docker 29.5.2, 2026-09-25; apparatus 2.2]**. No repository has been qualified in the
+  sealed posture on the operator's live stack yet **[gap]**.
 
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 

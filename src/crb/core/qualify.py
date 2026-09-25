@@ -504,7 +504,12 @@ class EnvProbeWitness:
     ) -> ControlRun:
         t = self.timeout or int(self.runner.opts.get("timeout", self.runner.default_timeout))
         with self.make_tree() as ws:
-            probe = self.runner.env_probe_command(ws.root, (), executor=self.executor, timeout=t)
+            # the runner reads the bound set to build its probe (a Python or Node probe
+            # checks the set's own manifest), so bind it while the command is made
+            with self.runner.deps_bound(self.binding):
+                probe = self.runner.env_probe_command(
+                    ws.root, (), executor=self.executor, timeout=t
+                )
             if probe is not None:
                 res = self.executor.run(with_deps(probe, self.binding, self.executor.name))
                 out = ControlRun(
@@ -658,7 +663,8 @@ def qualify_task(
     dest = Path(scratch) / f"qual-{config.name}-{task.short_id}-{uuid.uuid4().hex[:6]}"
     with Workspace.create(repo, task.task_id, dest, config=config) as ws:
         env_probe: dict[str, Any] = {"ran": False}
-        probe = runner.env_probe_command(ws.root, (), executor=executor, timeout=t)
+        with runner.deps_bound(deps.parent):
+            probe = runner.env_probe_command(ws.root, (), executor=executor, timeout=t)
         if probe is not None:
             res = executor.run(with_deps(probe, deps.parent, executor.name))
             if res.env_error:

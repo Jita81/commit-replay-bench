@@ -171,8 +171,8 @@ class _NodeBase(BaseRunner):
         the link is re-pointed. Returns the era root used, ``None`` when the clone's
         tree already matches (or under docker, where the image ships the tree).
         """
-        if executor.name == "docker" or self.env_dir is None:
-            return None
+        if executor.name == "docker" or self.env_dir is None or self._sealed_nm() is not None:
+            return None  # a sealed set (ADR-0019) is the tree: no era is ever installed
         root = Path(root)
         link = root / "node_modules"
         if not link.is_symlink():
@@ -255,6 +255,30 @@ class _NodeBase(BaseRunner):
         self.ensure_era(root, executor)
         return super().run(executor, root, scope, timeout=timeout)
 
+    # --- a sealed dependency set (ADR-0019) -------------------------------------
+    def _sealed_nm(self) -> Path | None:
+        """The bound sealed ``node_modules`` on the host, or ``None``."""
+        b = self.deps
+        if b is None or not b.sealed:
+            return None
+        mount = next((m for m in b.mounts if m.container_path == "/work/node_modules"), None)
+        return Path(mount.host_path) if mount is not None else None
+
+    def env_probe_command(
+        self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
+    ) -> Command | None:
+        """``npm ls --all --offline``: the tree the lock names is whole in the bound set — or
+        the posture cannot run this parent."""
+        if self._sealed_nm() is None:
+            return None
+        npm = executor.tool("npm", self.opts.get("npm"))
+        return Command(
+            (npm, "ls", "--all", "--offline"),
+            Path(root),
+            env={**self._env(Path(root), executor), "npm_config_userconfig": "/dev/null"},
+            timeout=timeout,
+        )
+
     # --- environment -------------------------------------------------------------
     def environment_ready(self, root: Path, env_dir: Path) -> bool:
         """``node_modules/.bin`` exists — or ``package.json`` declares nothing to
@@ -311,14 +335,21 @@ class _NodeBase(BaseRunner):
         ``node_modules/.bin`` (the image's PATH under docker); a binary without its
         config is not evidence."""
         self.ensure_era(root, executor)
-        bin_dir = None if executor.name == "docker" else Path(root) / "node_modules" / ".bin"
+        sealed = self._sealed_nm()
+        if executor.name == "docker":
+            bin_dir = None
+        elif sealed is not None:
+            bin_dir = sealed / ".bin"
+        else:
+            bin_dir = Path(root) / "node_modules" / ".bin"
         return js_plan(root, bin_dir)
 
     def _bin(self, root: Path, executor: Executor, tool: str) -> str:
         """The repo's own ``node_modules/.bin/<tool>`` when present, else the executor's."""
         if executor.name == "docker":
             return tool
-        local = root / "node_modules" / ".bin" / tool
+        sealed = self._sealed_nm()
+        local = (sealed if sealed is not None else root / "node_modules") / ".bin" / tool
         return str(local) if local.exists() else executor.tool(tool)
 
     def _extra(self) -> list[str]:
@@ -329,7 +360,11 @@ class _NodeBase(BaseRunner):
     def _env(self, root: Path, executor: Executor) -> dict[str, str]:
         """The test command's environment: ``NODE_PATH`` at the resolved tree, ``NODE_ENV=test``,
         then ``runner_opts.env`` on top."""
-        nm = "/work/node_modules" if executor.name == "docker" else str(root / "node_modules")
+        sealed = self._sealed_nm()
+        if executor.name == "docker":
+            nm = "/work/node_modules"
+        else:
+            nm = str(sealed) if sealed is not None else str(root / "node_modules")
         env = {"NODE_PATH": nm, "NODE_ENV": "test"}
         for k, v in dict(self.opts.get("env", {})).items():
             env[str(k)] = str(v)

@@ -53,13 +53,13 @@ from crb.cli.commands import (
     add_common,
     add_executor,
     build_executor,
+    deps_provider,
     event_printer,
     print_json,
     print_lines,
     workdir_of,
 )
 from crb.cli.commands import repo as repo_cmd
-from crb.core.deps import NullDepsProvider
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import Executor
 from crb.core.git import GitRepo
@@ -221,7 +221,7 @@ def grade_context(
     there from ``<workdir>/qualifications/<repo>.jsonl``. A task with no record in this
     posture is qualified first (no builder, no model spend) and the record appended; an
     unqualified one is refused with its code and what to do."""
-    provider = NullDepsProvider()
+    provider = deps_provider(executor)
     posture = resolve_posture(
         executor, runner, deps_mode=provider.mode(config, executor.name), root=repo.path
     )

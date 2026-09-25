@@ -113,6 +113,7 @@ from crb.builders.container import (
     SessionFactory,
     UnconfirmedKill,
 )
+from crb.core.deps import TaskDeps
 from crb.core.evidence import BuilderRef
 from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.grade import MODE_SIGHTED
@@ -477,6 +478,7 @@ def build_fn_for(
     session_factory: SessionFactory = ContainerSession,
     preflight: Preflight | None = None,
     on_kill_unconfirmed: KillUnconfirmedFn | None = None,
+    deps_for: Callable[[TaskSpec], TaskDeps | None] | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -506,6 +508,10 @@ def build_fn_for(
         :class:`SealedCheckout` inside a :class:`ContainerSession`; other builders
         (the test-only gold replay) keep the real worktree. ``session_factory``
         exists for tests.
+    deps_for:
+        ``task → TaskDeps`` (ADR-0019): when it returns one, the sealed container mounts
+        the task's BUILDER set — the parent's, never the gold's — read-only. ``None`` (the
+        default) mounts nothing.
     on_kill_unconfirmed:
         Receives ``(task_id, UnconfirmedKill)`` for every sealed container whose
         enforced kill the daemon did not confirm — after the attempt, whether the
@@ -581,8 +587,10 @@ def build_fn_for(
             # follows a cancelled run instead of waiting for the wall clock
             cancel = getattr(executor, "cancel_fn", None)
             try:
+                task_deps = deps_for(task) if deps_for is not None else None
+                deps_kw = {"deps": task_deps} if task_deps is not None else {}
                 with session_factory(
-                    container, sealed, cancel=cancel, label=task.short_id
+                    container, sealed, cancel=cancel, label=task.short_id, **deps_kw
                 ) as session:
                     # the session supplies the container-bound spawn / executor; an
                     # explicit override (a test's fake binary) still wins

@@ -248,6 +248,10 @@ export const ACTION_HELP: Record<string, string> = {
   'setup.step': 'One setup step (an install, a build or a download) ran.',
   'setup.done': 'Environment setup finished.',
   'prep.start': 'The worktree for this attempt is being prepared at the task’s parent commit.',
+  'provision.fetch': 'The task’s dependencies are being fetched outside the test container, from its own lockfiles, through the allowlisting proxy or a mirror; the tests themselves never reach a network.',
+  'provision.reuse': 'The task’s dependencies were already sealed in the store, so nothing was fetched.',
+  'provision.seal': 'The fetched dependencies were sealed read-only under their digest; every test run of this task mounts exactly this set.',
+  'provision.refused': 'The dependencies could not be provisioned; the payload names the code and the fix, and nothing was graded.',
   // mine — turning commits into replayable tasks
   'mine.candidate': 'A commit is being examined as a possible task.',
   'mine.red': 'The commit’s test fails on the parent commit, so the task has a real failing test.',

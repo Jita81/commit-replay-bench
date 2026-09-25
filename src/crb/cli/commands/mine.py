@@ -35,6 +35,7 @@ from crb.cli.commands import (
     add_common,
     add_executor,
     build_executor,
+    deps_provider,
     event_printer,
     print_json,
     print_lines,
@@ -99,6 +100,8 @@ def cmd_mine(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         ref=args.ref,
         on_event=on_event,
+        # the deployment's dependency provider (CRB_PROVISION__*), as the worker's mine
+        deps=deps_provider(executor),
     ):
         examined += 1
         if outcome.qualification is not None:

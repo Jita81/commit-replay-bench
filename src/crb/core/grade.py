@@ -678,7 +678,7 @@ def grade(
         #     dependency outside the task's closure (ADR-0019 §6). A trial that moved the
         #     oracle's ground is disqualified — never credited, never charged. ----------
         try:
-            binding: DepsBinding = ctx.deps.for_tree(ws.root)
+            binding: DepsBinding = ctx.deps.binding_for(ws.root)
         except ClosureViolation as cv:
             _emit(on_event, "grade.tamper", task=task.task_id, kind="closure", detail=cv.detail)
             belts = Belts(tests_unmodified=False)

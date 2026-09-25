@@ -142,7 +142,7 @@ type = "forbidden"
 source_modules = ["crb.core"]
 forbidden_modules = [
   "crb.builders", "crb.store", "crb.server", "crb.factory", "crb.cli", "crb.mcp",
-  "crb.observability",
+  "crb.observability", "crb.provision",
   "openai", "anthropic", "claude_agent_sdk", "sqlalchemy", "alembic", "fastapi", "pydantic",
   "httpx", "requests", "yaml", "authlib", "prometheus_client", "mcp",
 ]

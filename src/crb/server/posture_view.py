@@ -68,11 +68,12 @@ def deployment_image(settings: Any, repo: Repo | None) -> str:
 def deployment_posture_class(settings: Any) -> str:
     """The posture class this deployment grades in — ``executor/tree/dependency mode`` —
     from its settings alone (the map's default filter; the worker measures the full
-    posture live before every run). Docker is the sealed mode with the read-only tree
-    until provisioning lands (ADR-0019 stream D); local is the host's own environment."""
+    posture live before every run). Docker is the sealed mode with the sandbox's tree — the
+    throwaway copy unless ``CRB_SANDBOX__TREE`` says ``readonly`` (ADR-0019 §7); local is
+    the host's own environment."""
     executor = deployment_executor(settings)
     if executor == "docker":
-        tree = str(getattr(settings.sandbox, "tree", "") or "readonly")
+        tree = str(getattr(settings.sandbox, "tree", "") or "copy")
         return f"docker/{tree}/sealed"
     return "local/inplace/host-env"
 

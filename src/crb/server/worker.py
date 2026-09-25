@@ -167,6 +167,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -189,8 +190,16 @@ from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
+from crb.core.deps import DepsProvider
 from crb.core.evidence import utc_now_iso
-from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
+from crb.core.execution import (
+    TREE_COPY,
+    DockerExecutor,
+    DockerSettings,
+    Executor,
+    SandboxUnavailable,
+    make_executor,
+)
 from crb.core.git import (
     DEFAULT_CLONE_TIMEOUT_S,
     CloneUrlError,
@@ -241,6 +250,7 @@ from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.provision import make_deps_provider
+from crb.provision.config import ProvisionConfig
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
@@ -265,7 +275,6 @@ from crb.server.settings import (
     FactorySettings,
     GitHubAppSettings,
     IntakeSettings,
-    ProvisionSettings,
 )
 from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
@@ -487,8 +496,9 @@ class WorkerSettings:
     #: relative path a reader on the tracker's site cannot open.
     public_url: str = ""
     #: Dependency provisioning for the sealed posture (``CRB_PROVISION__*``, ADR-0019):
-    #: off by default; the worker's dependency provider is chosen from it.
-    provision: ProvisionSettings = field(default_factory=ProvisionSettings)
+    #: off by default; the worker's dependency provider is chosen from it
+    #: (:meth:`crb.provision.config.ProvisionConfig.from_env`, read by the entrypoint).
+    provision: ProvisionConfig = field(default_factory=ProvisionConfig)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -1441,10 +1451,23 @@ class Worker:
         ctx.emit("system", "run.executor", **ctx._executor.describe())
         return ctx._executor
 
+    def _deps_provider(self, executor: Executor) -> DepsProvider:
+        """The deployment's dependency provider for ``executor`` (ADR-0019): provisioning
+        off → the host's environment locally and ``PROVISION_DISABLED`` for a repository
+        with dependencies in the sandbox; on → fetched, sealed and bound per task. A
+        production refusal (a public registry, an unpinned fetch image, a store the daemon
+        cannot see) raises here, before anything is qualified or built."""
+        probe_image = executor.settings.image if isinstance(executor, DockerExecutor) else ""
+        return make_deps_provider(
+            self.settings.provision,
+            executor_kind=executor.name,
+            probe_image=probe_image,
+        )
+
     def _posture_gate(self, ctx: RunContext, runner: BaseRunner, executor: Executor) -> PostureGate:
         """The run's posture gate (ADR-0019): the posture resolved live, stamped and
         announced (``run.posture``) before anything is qualified or built."""
-        provider = make_deps_provider(self.settings.provision, home=self.home)
+        provider = self._deps_provider(executor)
         posture = resolve_run_posture(
             executor, runner, ctx.config, provider, root=Path(ctx.git.path)
         )
@@ -1474,7 +1497,7 @@ class Worker:
         """This worker's posture class from its settings (the map's reading when no run
         has measured one): ``docker/<tree>/sealed`` or ``local/inplace/host-env``."""
         if self.settings.executor == "docker":
-            tree = self.settings.docker.tree if self.settings.docker is not None else "readonly"
+            tree = self.settings.docker.tree if self.settings.docker is not None else TREE_COPY
             return f"docker/{tree}/sealed"
         return "local/inplace/host-env"
 
@@ -1642,7 +1665,7 @@ class Worker:
         # ADR-0019: the probe reads the clone's own dependencies the way a trial would
         head = ctx.git.rev_parse("HEAD")
         binding = (
-            make_deps_provider(self.settings.provision, home=self.home)
+            self._deps_provider(executor)
             .resolve(ctx.git, ctx.config, parent=head, gold=head, executor_name=executor.name)
             .parent
         )
@@ -2013,6 +2036,8 @@ class Worker:
             container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
+            # ADR-0019 (amends ADR-0012): a sealed builder reads the task's PARENT set
+            deps_for=gate.deps_for,
         )
         self._progress(ctx, 0, total)
 
@@ -2737,24 +2762,13 @@ def docker_settings_for(
     (raised by ``DockerSettings``)."""
     image = str(params.get("image") or "") or config.sandbox_image or (base.image if base else "")
     # ADR-0019 §7: the repository may choose how the tree is presented (a different posture)
-    tree = config.sandbox_tree or (base.tree if base is not None else "readonly")
+    tree = config.sandbox_tree or (base.tree if base is not None else TREE_COPY)
     if base is not None and image == base.image and tree == base.tree:
         return base
     if base is None:
         return DockerSettings(image=image, tree=tree)
-    return DockerSettings(
-        image=image,
-        memory=base.memory,
-        cpus=base.cpus,
-        pids_limit=base.pids_limit,
-        user=base.user,
-        workdir=base.workdir,
-        tmp_size=base.tmp_size,
-        extra_ro_mounts=dict(base.extra_ro_mounts),
-        docker_binary=base.docker_binary,
-        tree=tree,
-        work_size=base.work_size,
-    )
+    # every other field — caps, user, the copy's size (ADR-0019) — is the worker's
+    return dataclass_replace(base, image=image, tree=tree)
 
 
 def _oracle_counts(scores: Sequence[CommitOracleScore], *, total: int) -> dict[str, Any]:

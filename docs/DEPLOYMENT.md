@@ -111,6 +111,19 @@ server and never appear in logs or `/settings`.
 | `CRB_LOG_FORMAT` / `CRB_LOG_LEVEL` | api, worker | `json` (default, one object per line) or `text`; `INFO` — every record is redacted before a handler sees it (§9) |
 | `CRB_WORKER_HEARTBEAT_STALE_S` | api | seconds after which a *running* run's heartbeat is reported stale by `/health` (default 120). Worker liveness itself is judged against each worker's own `heartbeat_s` (§9) |
 | `CRB_SANDBOX__IMAGE` | worker | default sandbox image when a repository config has none (a repository's own `sandbox_image` wins). The shipped reference images — `deploy/sandbox/Dockerfile.{python,node,go}`, built and smoked by CI — are what to push to your registry and name here (`deploy/sandbox/README.md`); the worker never pulls (`docker run --pull=never` **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag` pins the flag on the argv; `tests/test_sandbox_images_docker.py::test_an_absent_image_fails_closed_without_a_pull` proves an absent image is `SandboxUnavailable` (exit 125, `No such image`) against a daemon, colima / Docker 29.5.2; apparatus 2.2]**), so the image must be in the daemon's store |
+| `CRB_SANDBOX__TREE` | api, worker | `copy` (default): tests run in a throwaway tmpfs copy of the worktree, which is mounted read-only at `/src` (ADR-0019 §7); `readonly`: the worktree itself read-only at `/work` — a different posture, qualified separately |
+| `CRB_SANDBOX__WORK_SIZE` | api, worker | size cap of the throwaway copy (default `1g`; a tmpfs, so it counts against the sandbox's memory). A tree that does not fit is `env_error: tree_copy_failed`, never a verdict |
+| `CRB_PROVISION__ENABLED` | api, worker | dependency provisioning (ADR-0019, §3.4 below). `false` (default): under docker a repository that declares dependencies is refused `PROVISION_DISABLED` before any spend. `true`: each task's dependencies are fetched outside the test container, sealed and mounted read-only |
+| `CRB_PROVISION__STORE` | worker | where sealed sets live (default `$CRB_HOME/deps`); must be a path the docker daemon can bind-mount (`crb doctor` proves it) |
+| `CRB_PROVISION__GO_PROXY` / `__GO_SUMDB` | worker | the Go proxy (one URL, never `direct`; `file://<dir>` = an air-gapped mirror, fetched with no network) and the checksum database (`off` for a mirror) |
+| `CRB_PROVISION__PYPI_INDEX` / `__PYPI_FILES_HOST` | worker | the Python simple index (`file://<dir>` = air-gapped) and the host its files come from |
+| `CRB_PROVISION__NPM_REGISTRY` | worker | the npm registry (every lock entry's `resolved` host must be this one); `file://<dir>` = a pre-populated npm cache, air-gapped |
+| `CRB_PROVISION__EXTRA_ALLOW_HOSTS` | worker | more `host[:port]` entries for the fetch's proxy (a CDN your mirror redirects to); parsed at start-up |
+| `CRB_PROVISION__ALLOW_PUBLIC` | api, worker | `false` (default): with `CRB_ENV=prod` a public registry (proxy.golang.org, sum.golang.org, pypi.org, files.pythonhosted.org, registry.npmjs.org) is refused at start-up (`PROVISION_PUBLIC_REGISTRY`) |
+| `CRB_PROVISION__GO_IMAGE` / `__PYTHON_IMAGE` / `__NODE_IMAGE` | worker | the fetch images; default the sandbox images' own bases, pinned by digest. In prod a reference without `@sha256:` is refused (`PROVISION_FETCH_IMAGE_UNPINNED`); pre-pull them (the worker never pulls) |
+| `CRB_PROVISION__PROXY_IMAGE` / `__EGRESS_NETWORK` | worker | the image the fetch's allowlisting proxy sidecar runs on (needs `python3`; default the builder's proxy image) and the docker network it reaches the registry on (default `bridge`) |
+| `CRB_PROVISION__CA_BUNDLE` | worker | a CA bundle for a TLS-intercepting mirror, mounted read-only into the fetch |
+| `CRB_PROVISION__MAX_BUNDLE_MB` / `__MAX_TOTAL_GB` / `__FETCH_TIMEOUT_S` | worker | one set's size cap (`PROVISION_TOO_LARGE`, default 2048), the store's cap for `crb deps gc` (default 20) and a fetch's wall clock (default 900 s) |
 | `CRB_FACTORY__TEST_AUTHOR` | api, worker | the factory's test-author rung — `builder:model[:provider]`, the same spelling as a build rung, or empty / `none` (the default) for no author. With no author, an item nobody wrote a failing test for stops `no_oracle`; with one, that rung writes the test. **The author rung and the build rung are never the same rung**: a label that is also on a run's ladder is refused before anything is built. A run may override it (`POST /runs {test_author}`) |
 | `CRB_RETENTION__TRANSCRIPTS_DAYS` | | 0 = keep no builder transcripts (default) |
 | `CRB_OPENAI_BASE_URL`, `CRB_OPENAI_KEY_ENV` + the named key var | builder | OpenAI-compatible endpoint (vLLM, Cerebras, …) |
@@ -265,10 +278,50 @@ request (the `sandbox-images` job runs each language's fixture repository throug
 executor on the image it just built) **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]**. Build them, push them to your registry, pre-pull them into the
 daemon the worker talks to (the `dind` sidecar's store in that mode), and name them: the
 deployment default in `config.CRB_SANDBOX__IMAGE`, a repository's own in its
-`sandbox_image`. Everything else — build, tag, push, select, extend for a repository's
+`sandbox_image`. Everything else — build, tag, push, select, extend for a toolchain,
 dependencies, the re-pin cadence — is [deploy/sandbox/README.md](../deploy/sandbox/README.md).
 A JVM reference image is deliberately not shipped: the Maven runner's docker branch cannot
 resolve plugins offline yet (README §6).
+
+**Dependencies are provisioned per task, outside the test container (ADR-0019).** A test
+container never has a network, so a repository's dependencies cannot be installed in it —
+and an image that bakes them in serves one commit's lockfile only. Before this, the docker
+posture could not build a Go repository with a third-party module and graded every attempt
+against the model **[measured — n = 4 rows of run `0c44ff24…` (cobra), each `builder_red`
+with the target red; method: the run's grade rows in the deployment's ledger export of
+2026-09-25; apparatus 2.2]**. With `CRB_PROVISION__ENABLED=true`:
+
+- the lockfiles at the parent and at the gold are read from git objects; a fetch container
+  (the pinned toolchain image, the worker's non-root uid, read-only, no capabilities) fetches
+  them through the allowlisting proxy to your registry hosts only — or with no network at all
+  from a `file://` mirror — and never sees the source, a secret or `CRB_HOME`;
+- the result is sealed under `CRB_PROVISION__STORE` (on the work volume; the `dind` sidecar
+  sees it at the same path) and mounted **read-only** into the test container, which keeps
+  `--network=none`: Go's modules at `/deps/gomod` with `GOPROXY=off` (one cache for the
+  parent's and the gold's modules), Python's wheels installed with no network at
+  `/deps/site`, Node's `node_modules` from `npm ci --ignore-scripts` at `/work/node_modules`;
+- every stop is a code with a fix, served as `{code, message, fix, doc}`:
+
+| Code | Scope | What to do |
+|---|---|---|
+| `PROVISION_DISABLED` | run | switch provisioning on (`CRB_PROVISION__ENABLED`), or measure the repository in the local posture |
+| `PROVISION_PUBLIC_REGISTRY` | run | point `CRB_PROVISION__GO_PROXY` / `__PYPI_INDEX` / `__NPM_REGISTRY` at your mirror, or set `CRB_PROVISION__ALLOW_PUBLIC=true` |
+| `PROVISION_FETCH_IMAGE_UNPINNED` | run | pin `CRB_PROVISION__{GO,PYTHON,NODE}_IMAGE` by digest |
+| `PROVISION_STORE_NOT_VISIBLE` | run | put `CRB_PROVISION__STORE` where the daemon can bind-mount it (under colima: your home; under `dind`: the work volume) |
+| `PROVISION_UNSUPPORTED_LANGUAGE` | run | JVM and Rust: the local posture only in this version |
+| `PROVISION_NO_LOCK`, `PROVISION_UNPINNED`, `PROVISION_SOURCE_REFUSED`, `PROVISION_BUILD_REQUIRED`, `PROVISION_LOCK_UNSUPPORTED`, `PROVISION_PRIVATE_MODULE`, `PROVISION_TOOLCHAIN_TOO_OLD`, `PROVISION_FETCH_FAILED`, `PROVISION_TOO_LARGE` | task | a fact about that commit's lockfiles or the registry; the message names the file, the line, the host or the setting |
+| `BUNDLE_INTEGRITY` | run | a sealed set no longer matches its digest: `crb deps verify` names it; delete that set's directory from the store and the next run fetches and seals it again. Nothing removes the damaged set or revokes the qualifications that cite it for you yet **[gap]** (G-966) |
+
+Switch it on in this order: mirror the registries inside the tenant (or allow the public
+ones deliberately), pre-pull the three fetch images and the proxy image into the worker's
+daemon (`deploy/sandbox/README.md` §1), allow the mirror's address in
+`networkPolicy.packageMirror.cidrs` (Helm; the fetch's sidecar is the only thing that reaches
+it), set `CRB_PROVISION__ENABLED=true`, and read the `provision` line of `crb doctor` on the
+worker host and the `provision` probe of the worker's `/health`: `ok` names the store and the
+registries; `fail` names the code and the fix. How long a first fetch takes per repository
+is not measured yet **[hypothesis — about 1 to 3 minutes per cobra task with a cold Go
+build cache, extrapolated from run `0c44ff24…`'s attempt latencies; the first live qualify
+run replaces this with a measured figure]**.
 
 The `sandbox-images` job is meant to block a merge to `main` exactly as `container` does —
 it has no `continue-on-error` and fails on any skipped smoke test — but a job blocks only
@@ -498,12 +551,15 @@ Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up 
 
 crb never bundles a model and never phones home: no telemetry, no update checks, no
 run-time pulls by the worker itself. The complete outbound list is: worker → model endpoint;
-api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
-`--network=none`. To operate fully inside the tenant:
+api → OIDC issuer; (`dind` only) sidecar → your registry; (provisioning on, §3.4) worker
+fetch sidecar → your package mirror. Sandboxes run with `--network=none`; a `file://`
+mirror makes the fetch network-less too. To operate fully inside the tenant:
 
 1. point the builder at an in-tenant endpoint — Azure OpenAI with a private endpoint (§4.3)
    or a self-hosted OpenAI-compatible server (`CRB_OPENAI_BASE_URL=https://vllm.internal/v1`);
-2. mirror the images (crb, sandbox, `docker:dind`, `postgres`) into your registry;
+2. mirror the images (crb, sandbox, the three dependency fetch images, `docker:dind`,
+   `postgres`) into your registry, and the package registries your repositories use into a
+   mirror (or a `file://` directory) that `CRB_PROVISION__*` points at;
 3. enforce deny-by-default egress at the cluster/host boundary and keep the chart's
    NetworkPolicy allowlists to those CIDRs only;
 4. verify from a worker pod that a public address is unreachable while
@@ -535,6 +591,10 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
       ([OPERATOR.md §9](OPERATOR.md#9-users)).
 - [ ] Egress test from a worker pod fails to any public address.
 - [ ] `crb repo probe <repo>` is green inside the sandbox for every configured repository.
+- [ ] Provisioning points at your mirror and `crb repo qualify` is green for every
+      repository: the `provision` line of `crb doctor` on the worker host is `ok` (store
+      visible to the daemon, fetch images present, egress network present), and each
+      repository with dependencies qualifies in the sealed posture before its first replay.
 - [ ] Backups: PITR enabled; a restore has been rehearsed and verified against the chain.
 - [ ] `false_q1 == 0` and `crb_false_q1_total == 0` on the dashboards, with an alert on any
       non-zero value ([OPERATOR.md §8](OPERATOR.md#8-stop-conditions)).

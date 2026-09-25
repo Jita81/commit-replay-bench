@@ -123,6 +123,7 @@ from crb.core.version import APPARATUS_VERSION, __version__
 from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
+from crb.provision.probe import probe_provision
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
 from crb.server.secrets import SecretsFile
@@ -511,6 +512,21 @@ def probe_sandbox(settings: Settings, role: str = ROLE_ALL, *, request_id: str =
     )
 
 
+def probe_provision_role(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:
+    """Dependency provisioning (ADR-0019), as seen from a process of ``role``: the worker
+    fetches, so an ``api`` process reports ``skipped``; a worker reports ``skipped`` when
+    provisioning is off, otherwise whether the store is visible to the daemon and the fetch
+    images and the egress network are present (``crb.provision.probe``)."""
+    if role == ROLE_API:
+        return ProbeResult(
+            "provision",
+            SKIPPED,
+            f"not probed here: provisioning is the worker's ({ROLE_ENV}={ROLE_API})",
+            {"enabled": settings.provision.enabled, "role": role},
+        )
+    return probe_provision(settings.provision_config)
+
+
 def probe_intake(
     factory: sessionmaker[Session], settings: Settings, *, request_id: str = ""
 ) -> ProbeResult:
@@ -670,6 +686,7 @@ def collect_health(
         probes.run_probe(
             "sandbox", lambda: probe_sandbox(settings, role, request_id=rid), request_id=rid
         ),
+        probes.run_probe("provision", lambda: probe_provision_role(settings, role), request_id=rid),
         probes.run_probe("toolchains", probes.probe_toolchains, request_id=rid),
         probes.run_probe("builders", probes.probe_builders, request_id=rid),
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
@@ -763,6 +780,7 @@ __all__ = [
     "ledger_counts",
     "migrations_result",
     "probe_migrations",
+    "probe_provision_role",
     "probe_worker",
     "process_role",
     "refresh_ledger_gauges",
