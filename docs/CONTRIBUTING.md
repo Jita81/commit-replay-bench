@@ -19,10 +19,15 @@ cannot see the server and store code, and the suite skips it. Run tools from the
 [Known debt](ARCHITECTURE.md#93-known-debt-tracked)).
 
 `mypy` and `ruff` are pinned to exact versions in the `dev` extra, so a fresh environment and
-CI give the same verdict on the same tree. Dependabot's `dev-tooling` group moves the pins in
-a pull request of their own. The other dependencies are resolved fresh on every run, so CI
-also runs every day on `main` with nothing changed: a new upstream release that moves a
-verdict fails there first, naming the release, not on the next unrelated pull request.
+CI run the same versions of those two gate tools. Dependabot's `dev-tooling` group moves the
+pins in a pull request of their own. The pins do not make the verdict the same: every other
+dependency is resolved fresh on every run, and a new release of one can change what the same
+`mypy` reports on the same tree. SQLAlchemy 2.1 did: `mypy` 2.3.1 on `main` at `8ab88ad`
+reports no errors with SQLAlchemy 2.0.52 and 8 errors with 2.1.0 or 2.1.1 **[measured — n = 3
+fresh `uv` environments whose resolved packages differ only in SQLAlchemy; method: `mypy` over
+`src/crb` in each, 2026-09-25; apparatus 2.2]**. So CI also runs every day on `main`
+with nothing changed: a new upstream release that moves a verdict fails there first, naming
+the release, not on the next unrelated pull request.
 
 ## The gates
 
@@ -42,8 +47,13 @@ builds the reference sandbox images, and CI's `sandbox-images` job runs it on it
 CI additionally runs `gitleaks` (secrets), `pip-audit` (known vulnerabilities in the
 resolved environment) and produces a CycloneDX SBOM.
 
-The suite gives the same answer on a laptop, on the CI runner and in a root container with
-no docker daemon and no network. Tests that need something the machine may not have are
+No test may fail because of the machine it runs on: running as root, with no docker daemon or
+with no network changes which tests run, not whether the suite passes **[measured — n = 1
+whole-suite run at `b5e2b7f`, `-m "not sandbox_images"`, with uid 0 simulated by patching
+`os.getuid`, `DOCKER_HOST` pointing at nothing and HTTPS sent to a dead proxy: 3957 passed,
+97 skipped, 1 failed, and that one a wall-clock test that also passed 3 times of 3 alone under
+the same settings, on a host with a load average near 10; method: pytest, 2026-09-26;
+apparatus 2.2]**. A test that needs something the machine may not have is
 marked, and skipped with the reason when it is absent:
 
 - `docker` — a docker daemon that answers `docker info`
@@ -53,8 +63,9 @@ marked, and skipped with the reason when it is absent:
 - `live` — model credentials
 - `slow` — a long end-to-end test
 
-Set `CRB_TEST_STRICT_WARMUP=1`, as CI does, to turn an unreachable registry or a failed
-toolchain warm-up into a failure instead of a skip. A missing docker daemon is always a skip.
+Set `CRB_TEST_STRICT_WARMUP=1`, as CI does, to turn an unreachable registry or network host,
+or a failed toolchain warm-up, into a failure instead of a skip: CI has the network, so there
+an unreachable host is a defect. A missing docker daemon is always a skip.
 No test may depend on the uid it runs as: name a non-root user when you build builder
 container settings (`tests/test_builders_container.py` refuses a test that does not).
 
