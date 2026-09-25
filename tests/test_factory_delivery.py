@@ -39,7 +39,7 @@ from typing import Any
 import pytest
 
 from crb.core.evidence import sha256_text
-from crb.core.git import GitRepo, GitResult
+from crb.core.git import GitError, GitRepo, GitResult
 from crb.factory import delivery as dv
 from crb.factory.build import FACTORY_IDENTITY, BuildResult
 from fixtures import pyrepo as pr
@@ -394,6 +394,74 @@ def test_git_push_fn_builds_the_exact_lease_argv() -> None:
     with pytest.raises(dv.DeliveryError, match="needs the commit"):
         dv.force_with_lease_arg("crb/x", "  ")
     assert TOKEN not in json.dumps(repo.argv).replace(creds.basic_auth_header(), "")
+
+
+class _ArgvAndEnv(GitRepo):
+    """A ``GitRepo`` that records the argv AND the environment each call is given."""
+
+    def __init__(self) -> None:
+        super().__init__("/nonexistent")
+        self.calls: list[tuple[list[str], dict[str, str]]] = []
+
+    def run(
+        self,
+        *args: str,
+        check: bool = False,
+        cwd: str | Path | None = None,
+        env: Any = None,
+    ) -> GitResult:
+        self.calls.append((list(args), dict(env or {})))
+        return GitResult(0, "", "")
+
+
+def test_the_push_token_travels_in_the_environment_never_on_the_argv() -> None:
+    """D1 (assessment 2026-09-25): the argv of a running process is readable by every user
+    on the host (``/proc/<pid>/cmdline``, ``ps``) and ``GitError`` keeps it for the ledger,
+    so the one-shot auth header travels as ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_n`` /
+    ``GIT_CONFIG_VALUE_n`` — the same channel the worker's clone uses — and the argv carries
+    nothing a reader could replay (docs/SECURITY.md §3.3: never argv)."""
+    creds = _creds()
+    repo = _ArgvAndEnv()
+    dv.git_push_fn(repo, branch="crb/x", refspec="crb/x:crb/x", credentials=creds)
+    ((argv, env),) = repo.calls
+    flat = " ".join(argv)
+    assert "Authorization" not in flat and "extraheader" not in flat.lower()
+    assert TOKEN not in flat and creds.basic_auth_header() not in flat
+    assert argv == ["push", "--force-with-lease", REMOTE, "crb/x:crb/x"]
+    # the header is in the environment, scoped to the remote, appended after any count the
+    # process environment already carries
+    n = int(env["GIT_CONFIG_COUNT"]) - 1
+    assert env[f"GIT_CONFIG_KEY_{n}"] == f"http.{REMOTE}.extraheader"
+    assert env[f"GIT_CONFIG_VALUE_{n}"] == creds.basic_auth_header()
+
+
+def test_a_git_error_never_carries_an_auth_header_or_a_token() -> None:
+    """Whatever a caller puts on a git command line, the ``GitError`` it becomes — its
+    ``argv``, its message and its ``repr`` — carries no credential: an ``extraheader``
+    value is replaced whole, and every other element passes through the redactor."""
+    header = _creds().basic_auth_header()
+    argv = ["git", "-C", "/r", "-c", f"http.{REMOTE}.extraheader={header}", "push", TOKEN]
+    err = GitError(argv, 128, f"fatal: {header} refused for {TOKEN}")
+    for text in (str(err), repr(err), json.dumps(err.argv), err.stderr, repr(err.args)):
+        assert TOKEN not in text and header not in text
+        assert header.split()[-1] not in text  # the base64 credential itself
+    assert err.argv[4] == f"http.{REMOTE}.extraheader=[REDACTED]"
+
+
+def test_a_push_that_times_out_raises_a_git_error_without_the_token(tmp_path: Path) -> None:
+    """The forced failure: git hangs, the wrapper's wall clock fires, and the ``GitError``
+    that reaches the loop's ``item.error`` carries the push argv — which must hold no
+    credential and no header."""
+    slow = tmp_path / "slow-git"
+    slow.write_text("#!/bin/sh\nsleep 5\n", encoding="utf-8")
+    slow.chmod(0o755)
+    repo = GitRepo(tmp_path, git_binary=str(slow), timeout=1)
+    creds = _creds()
+    with pytest.raises(GitError) as exc:
+        dv.git_push_fn(repo, branch="crb/x", refspec="crb/x:crb/x", credentials=creds)
+    for text in (str(exc.value), repr(exc.value), json.dumps(exc.value.argv)):
+        assert TOKEN not in text and creds.basic_auth_header() not in text
+        assert "Authorization" not in text
 
 
 class _ToBare(GitRepo):
