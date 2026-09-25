@@ -259,8 +259,8 @@ that is not here fails the suite.
 | system | `repo.fetch.start` / `repo.fetch.done` | ok / error | `url` (redacted), `branch`, `dest`, `github_app` / `before`, `after`, `fast_forwarded`, `duration_ms` (error: the `FetchRefused` reason) | worker (before a factory run on a repository with a URL; before a replay / blind / mine on a linked one — F39) | LOG; an error `repo.fetch.done` is followed by `run.finished` `failed` with the same reason: nothing was built |
 | system | `probe.start` / `probe.done` | ok / error | `scope`, `path` / `green`, `returncode`, `failing`, `timed_out`, `duration_s` | worker | LOG; CONNECT reads the `repos.probe_status` column |
 | prep | `setup.auto` / `setup.start` / `setup.step` / `setup.done` | ok / error | `env_dir`, `runner` / `n`, `rc`, `duration_ms`, `tail` / `ok`, `note`, `steps` | worker | LOG; `counts.detail.steps` |
-| prep | `prep.start` | ok | `trial`, `rung` | core/run.py | LOG |
-| mine | `mine.candidate` / `mine.red` / `mine.skip` / `mine.gold` / `mine.done` | ok / skipped | `sha`, `pool`, `reason`, `clean`, `note`, `lint`, `found`, `examined` | core/mine.py | LOG |
+| prep | `prep.start` | ok | `trial`, `rung`, `worktree` (the trial worktree's opaque name — the only map from it to the task, DL-053) | core/run.py | LOG; the retained-patch route |
+| mine | `mine.candidate` / `mine.red` / `mine.skip` / `mine.gold` / `mine.done` | ok / skipped | `sha`, `pool`, `worktree` (candidate only), `reason`, `clean`, `note`, `lint`, `found`, `examined` | core/mine.py | LOG |
 | mine | `mine.task` | ok | `size`, `capability_class`, `gold_clean`, `duration_ms` | worker | LOG |
 | mine | `mine.cancelled` | ok | `counts` | worker | LOG |
 | mine | `label.task` | ok / error | `path_class`, `intent_class`, `confidence`, `rationale`, `labeller`, `evidence_hash`, `class_source`, `previous_class`, `changed`, `cost_usd`, `latency_ms` | worker | LOG |
@@ -276,7 +276,8 @@ that is not here fails the suite.
 | ledger | `ledger.pack_missing` / `ledger.pack_store_error` | error | `pack`, `error` | worker | LOG |
 | oracle | `oracle.mutation.mutant` / `oracle.mutation.scored` / `oracle.mutation.uncompilable` / `oracle.mutation.unscoreable` / `oracle.mutation.error` | ok / skipped / error | `task`, `mutant`, `killed`, `timed_out` / `total`, `killed`, `errors` / `returncode` / `note` / `error` | core/oracle/mutation.py | LOG |
 | oracle | `oracle.score` | ok | `CommitOracleScore.to_dict()` | worker | ORACLE (`/oracle/{repo}` aggregates the latest per task); the sign-off policy |
-| oracle | `controls.control` / `controls.row` / `controls.skip` / `controls.error` / `controls.done` | ok / skipped / error | `task`, `control` / `observed`, `verdict` / `reason` / `error` / `rows`, `violations`, `escapes` | core/oracle/controls.py | LOG |
+| oracle | `oracle.worktree` | ok | `worktree` (the scoring worktree's opaque name; `task_id` on the envelope, DL-053) | worker | LOG |
+| oracle | `controls.red_check` / `controls.control` / `controls.row` / `controls.skip` / `controls.error` / `controls.done` | ok / skipped / error | `task`, `worktree` (the opaque name, DL-053) / `control`, `worktree` / `observed`, `verdict` / `reason` / `error` / `rows`, `violations`, `escapes` | core/oracle/controls.py | LOG |
 | oracle | `controls.report` | ok | `ControlsReport.to_dict()` | worker | `/oracle/{repo}/controls`; the capability map; sign-off |
 | factory | `item.start` / `item.done` / `item.error` / `item.blocked` | ok / skipped / error | `kind`, `level`, `cls` / `outcome`, `duration_ms` / `error` / `blocked_on` | factory/loop.py | LOG (the Factory screen reads the evidence chain) |
 | factory | `readiness.assessed` / `readiness.refused` / `route.decided` | ok / skipped | `ready`, `route_hint`, `gaps` / `reason` / `route`, `reason` | factory/loop.py | LOG (the chain has the record) |
