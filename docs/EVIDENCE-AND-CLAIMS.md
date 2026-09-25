@@ -34,7 +34,10 @@ pages on its allowlist, finds the sentences that quantify something, and fails w
 carries no tag — or when a `[measured]` one carries no `n`, no method and no apparatus
 version. It checks the *shape* of the evidence, never whether a figure is sound, and it
 reads only the pages on the allowlist; the script's docstring states both limits and the
-gap analysis names the pages still ungated.
+gap analysis names the pages still ungated. The same job holds a review to its own actions:
+every numbered row of a review's *Actions* table needs a line in the
+[decision log](DECISION-LOG.md) that names the review, the action and its state (`closed`,
+`open`, `declined` or `[gap]`), so an action a reviewer set cannot quietly disappear (DL-053).
 
 A claim moves from `[hypothesis]` to `[measured]` only by a pre-registered measurement whose
 interval excludes a trivial effect and that has been replicated or independently re-run;

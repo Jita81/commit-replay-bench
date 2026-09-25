@@ -36,6 +36,17 @@ thereby tagged the sentence around it.
 - any file not on ``ALLOWLIST``: everything else in ``docs/``, the reviews and the book are
   ungated, and the gap analysis says so.
 
+**A review's actions are records, not prose.** A review under ``docs/reviews/`` that ends in
+an *Actions* table (a heading containing "Actions", then rows whose first cell is a number)
+sets work that must not disappear: every numbered action needs a line in
+``docs/DECISION-LOG.md`` that names the review's file stem, the action and its state —
+``2026-09-13-critical-friend … action #8: [gap] …`` — where the state is ``closed``,
+``open``, ``declined`` or ``[gap]``. A review action with no such record fails the gate. The
+check reads the record's *shape*, not whether the state is true; a person still reads the log.
+Two of the critical friend's ten actions (#8, an independent human review of the core; #9,
+rotating a pasted token) sat for twelve days with no record at all, which is what this rule
+stops.
+
 **How a file opts in.** Add its repository-relative path to ``ALLOWLIST`` below and make it
 pass in the same change. The list only grows: a page that has been cleaned never leaves it,
 because leaving is how a gate quietly stops gating.
@@ -45,15 +56,21 @@ Navigation
 What it is:   The claim-tag gate over the public pages (stdlib only; CI's ``claims`` job).
 What it does: Parses each allowlisted Markdown page into blocks, finds quantified sentences,
               and reports any that carry no permitted tag — and any ``[measured]`` tag
-              without an n, a method or an apparatus version; --check exits non-zero.
+              without an n, a method or an apparatus version; reports every numbered action
+              in a review's Actions table that has no stated record in the decision log;
+              --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
-              qualifying a plural noun → look for a permitted tag in the block's cover.
+              qualifying a plural noun → look for a permitted tag in the block's cover. Then
+              each docs/reviews/*.md Actions table → its action numbers → a
+              ``<stem> … action #N: <state>`` line in docs/DECISION-LOG.md.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
               README.md and docs/RELEASING.md (the pages on the allowlist),
+              docs/DECISION-LOG.md (where a review action's record lives),
+              docs/reviews/2026-09-13-critical-friend.md (the review whose actions it holds),
               .github/workflows/ci.yml (the claims job that runs --check),
               scripts/code_map.py (the same gate idiom: parse, validate, --check)
 Tested by:    tests/test_claims_check.py
@@ -76,6 +93,12 @@ ALLOWLIST: tuple[str, ...] = (
     "README.md",
     "docs/RELEASING.md",
 )
+
+#: Where reviews live, and where a review action's record must be.
+REVIEWS_DIR = "docs/reviews"
+DECISION_LOG = "docs/DECISION-LOG.md"
+#: The states a review action's record may declare.
+ACTION_STATES: tuple[str, ...] = ("closed", "open", "declined", "[gap]")
 
 #: The permitted tags — docs/EVIDENCE-AND-CLAIMS.md §1.
 TAGS: tuple[str, ...] = ("measured", "hypothesis", "aspiration", "gap")
@@ -412,6 +435,60 @@ def check_tree(root: Path, allow: tuple[str, ...]) -> list[Finding]:
     return findings
 
 
+_ACTIONS_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s.*\bActions\b")
+_ACTION_ROW_RE = re.compile(r"^\s*\|\s*(\d+)\s*\|")
+_ACTION_STATE_RE = re.compile(
+    r"\baction\s+#(\d+)\s*[:\u2014\u2013-]\s*("
+    + "|".join(re.escape(s) for s in ACTION_STATES)
+    + r")",
+    re.I,
+)
+
+
+def review_actions(text: str) -> list[tuple[int, int]]:
+    """``(action number, line)`` for every row of the review's Actions table(s)."""
+    out: list[tuple[int, int]] = []
+    inside = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if _HEADING_RE.match(line):
+            inside = bool(_ACTIONS_HEADING_RE.match(line))
+            continue
+        if inside:
+            m = _ACTION_ROW_RE.match(line)
+            if m:
+                out.append((int(m.group(1)), number))
+    return out
+
+
+def recorded_actions(log_text: str, stem: str) -> set[int]:
+    """The action numbers of review ``stem`` that a decision-log line states a state for."""
+    found: set[int] = set()
+    for line in log_text.splitlines():
+        if stem in line:
+            found.update(int(m.group(1)) for m in _ACTION_STATE_RE.finditer(line))
+    return found
+
+
+def check_review_actions(root: Path) -> list[Finding]:
+    """A finding for every numbered review action with no stated record in the decision log."""
+    reviews = root / REVIEWS_DIR
+    if not reviews.is_dir():
+        return []
+    log_path = root / DECISION_LOG
+    log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    findings: list[Finding] = []
+    for path in sorted(reviews.glob("*.md")):
+        actions = review_actions(path.read_text(encoding="utf-8"))
+        if not actions:
+            continue
+        recorded = recorded_actions(log_text, path.stem)
+        rel = path.relative_to(root).as_posix()
+        for action, line in actions:
+            if action not in recorded:
+                findings.append(Finding(rel, line, "", f"review action #{action} has no record"))
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--check", action="store_true", help="exit non-zero on any finding (CI)")
@@ -427,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     root = Path(args.root).resolve() if args.root else ROOT
     allow = tuple(args.allow) if args.allow else ALLOWLIST
-    findings = check_tree(root, allow)
+    findings = check_tree(root, allow) + check_review_actions(root)
     stream = sys.stderr if args.check else sys.stdout
     for f in findings:
         where = f"{f.path}:{f.line}" if f.line else f.path

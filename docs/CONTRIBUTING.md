@@ -170,3 +170,7 @@ reviewer cannot provide.
 - Cross-link rather than duplicate; ARCHITECTURE is the map, ADRs are the decisions.
 - `CHANGELOG.md` follows Keep a Changelog; add an entry under *Unreleased* in the PR.
 - Decisions taken by the owner/operator go in `docs/DECISION-LOG.md` (one line, dated).
+- A review that sets numbered actions (an *Actions* table under `docs/reviews/`) gets one
+  record per action in `docs/DECISION-LOG.md`, written as
+  `` `<review file stem>` action #N: <state> `` with the state `closed`, `open`, `declined`
+  or `[gap]` and the evidence; the `claims` job fails while any action has none (DL-053).
