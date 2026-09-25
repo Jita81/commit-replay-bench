@@ -12,7 +12,9 @@
  * What it does: Makes "the points where human sign-off is surfaced" one list, ordered by
  *               what is blocking what, each row naming the act, the evidence behind it and
  *               where the act happens — so an approver sees what matters when it matters and
- *               a viewer sees the same list read-only. Nothing here decides: every row is a
+ *               a viewer sees the same list read-only — including the prevention loop's filed
+ *               items, reopened classes and harm retirements (`preventionDecisions`). Nothing
+ *               here decides: every row is a
  *               fact from the ledger or the factory chain with a link to the surface that
  *               records the human's answer.
  * How:          Pure functions over the API types; no fetching. `kind` orders the rows;
@@ -35,7 +37,7 @@
  * Touch when:   a new human act is added to the product (a row kind here, its surface there).
  */
 
-import type { CapabilityCell, FactoryTask, Signoff } from '../../api/types'
+import type { CapabilityCell, FactoryTask, PreventionRegister, Signoff } from '../../api/types'
 
 export type DecisionKind =
   | 'signoff_due' // a cell routes deliver and no active sign-off exists
@@ -45,6 +47,7 @@ export type DecisionKind =
   | 'item_human' // a factory item was routed to a human
   | 'rework' // a review asked for rework
   | 'delivery_withheld' // the route gate withheld a clean build's PR
+  | 'prevention' // the prevention loop filed an item nobody owns, a class reopened, or a change was retired for harm (ADR-0020)
 
 export interface Decision {
   kind: DecisionKind
@@ -69,8 +72,9 @@ const ORDER: Record<DecisionKind, number> = {
   signoff_due: 2,
   rework: 3,
   delivery_withheld: 4,
-  item_human: 5,
-  routed_human: 6,
+  prevention: 5,
+  item_human: 6,
+  routed_human: 7,
 }
 
 function cellKeyOf(c: { capability_class: string; size: string }): string {
@@ -98,8 +102,33 @@ export function evidenceStats(d: Pick<Decision, 'evidence' | 'reasonCode'>): str
   return tail && d.evidence.endsWith(tail) ? d.evidence.slice(0, -tail.length) : d.evidence
 }
 
+/**
+ * The prevention loop's rows (ADR-0020 §9): a filed item nobody has registered ("a prevention
+ * needs an owner" — an operator's act), a class that reopened after it closed, and a change the
+ * loop retired for harm (both for anyone to read). Each links to the class on the Learn page.
+ */
+export function preventionDecisions(repo: string, register: PreventionRegister | null | undefined): Decision[] {
+  if (!register) return []
+  const out: Decision[] = []
+  const at = (sig: string) => `/learn?repo=${encodeURIComponent(repo)}&class=${encodeURIComponent(sig)}#prevention`
+  for (const e of register.entries) {
+    const ev = `${e.stratum.k} of ${e.stratum.n} ${e.stratum.mode} first attempts on ${e.tasks} tasks · ${e.status}`
+    for (const p of e.proposals) {
+      if (p.registered || p.scope === 'product') continue
+      out.push({ kind: 'prevention', repo, title: `A prevention needs an owner — ${e.signature}: ${p.title}`, evidence: `${ev} · ${p.level}`, act: 'Register', href: at(e.signature), role: 'operator' })
+    }
+    if (e.qualifiers.includes('reopened')) {
+      out.push({ kind: 'prevention', repo, title: `${e.signature} reopened after it was closed`, evidence: ev, act: 'Read why', href: at(e.signature), role: 'viewer' })
+    }
+    if (e.history.some((h) => h.kind === 'decided' && h.summary === 'harm')) {
+      out.push({ kind: 'prevention', repo, title: `A change for ${e.signature} was retired for harm`, evidence: ev, act: 'Read why', href: at(e.signature), role: 'viewer' })
+    }
+  }
+  return out
+}
+
 /** The rows for one repository, ordered by what blocks what. */
-export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; signoffs: Signoff[]; tasks: FactoryTask[] }): Decision[] {
+export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; signoffs: Signoff[]; tasks: FactoryTask[]; register?: PreventionRegister | null }): Decision[] {
   const { repo } = input
   const q = `repo=${encodeURIComponent(repo)}`
   const out: Decision[] = []
@@ -144,6 +173,8 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
     }
   }
 
+  out.push(...preventionDecisions(repo, input.register))
+
   return out.sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || a.title.localeCompare(b.title))
 }
 
@@ -155,4 +186,5 @@ export const KIND_LABEL: Record<DecisionKind, string> = {
   item_human: 'Item needs a decision',
   rework: 'Rework requested',
   delivery_withheld: 'Delivery withheld',
+  prevention: 'Prevention',
 }

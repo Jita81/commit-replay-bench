@@ -54,6 +54,35 @@ default and recorded on every row it touches:
   judging (mesh-client), black check mode (mesh-client), eslint/stylelint `--max-warnings`
   and stylelint itself (the NHS repositories), prettier on the files it formats
   (`docs/reviews/2026-09-25-runner-commands-audit.md`).
+### 2026-09-25 — a bug is closed by prevention (ADR-0020, value wave stream L)
+
+The operator: "we should be learning from a bug and then going back to update our process or
+context to remove it moving forward." Every failure class a builder shows is now registered,
+given the strongest change it admits, and kept, retired or escalated by what the next first
+attempts show. Behind one per-repository switch, `learning.auto_apply`, which is **off** until
+an operator throws it; the apparatus stays 2.2.
+
+- **The register** (`crb.core.prevention`, `GET /learn/register`, `crb learn prevention`):
+  every class of a repository with its evidence on first attempts, the lever the loop would
+  choose and every lever it passed over, the change in force and its before → after with n
+  and the bar, one of five statuses and the next step.
+- **The rule** (`crb.prevention.rule.v1`): the before window is frozen at application;
+  exposure is read from the row's own labels; decisive n = `ceil(ln 0.025 / ln(1 − p0))`;
+  two looks; harm at the tenth attempt; closed on a zero run of `max(20, n)` with no
+  displacement; a quiet class with no change on record is dormant and never credited.
+- **The one rule**: the loop may switch on the formatter step, the finish gate and the
+  calibrated budget, and add up to seven checklist lines from closed templates — never a
+  grader key (`check_writable` refuses each by name). Lines never carry task text: held out
+  by task, leak-gated at injection, capped, and tested with canaries.
+- **The chain**: the loop's acts are hash-chained records in `learn.prevention.recorded`
+  system events (no table, no migration); every row records `learn`, `learn_changes`,
+  `learn_overlay`, `learn_lines`, `learn_dropped` and `learn_playbook`.
+- **Operator acts**: `PUT /learn/switch`, `POST /learn/tick`, `POST
+  /learn/changes/{id}/revert`, `POST /learn/items/{id}/register`, `POST /learn/links`; a run
+  may opt out with `POST /runs {learning: "off"}`. The Learn page's register card and a
+  `prevention` row in the Decisions inbox.
+- `scripts/prevention_from_export.py` builds the register over an exported ledger (the
+  export itself is never committed).
 
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 

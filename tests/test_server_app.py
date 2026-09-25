@@ -210,6 +210,7 @@ class TestFactory:
             "learn",
             "ledger",
             "oracle",
+            "prevention",
             "repos",
             "reviews",
             "runs",

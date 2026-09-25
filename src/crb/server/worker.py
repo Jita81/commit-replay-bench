@@ -220,6 +220,7 @@ from crb.core.oracle.mutation import (
     score_task,
 )
 from crb.core.patches import PatchStore
+from crb.core.prevention import LearningSnapshot, empty_snapshot
 from crb.core.redact import redact_and_cap
 from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
@@ -253,6 +254,7 @@ from crb.server.intake import (
     poll_repository,
     post_outcomes_to_tickets,
 )
+from crb.server.prevention_state import learning_snapshot, learning_tick
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
@@ -1833,7 +1835,12 @@ class Worker:
         ctx.counts.update({"tasks": 0, "total": total, "rows": 0, "clean": 0})
         ladder = self._ladder(ctx)
         budget = self._budget(ctx)
-        rungs = trial_labels_for(ladder, budget)
+        # the prevention loop's snapshot (ADR-0020), taken once: every row of the run carries
+        # the switch, the changes in force and the overlay it ran under
+        learning = self._learning_snapshot(ctx)
+        rungs = {
+            k: {**v, **learning.run_labels()} for k, v in trial_labels_for(ladder, budget).items()
+        }
         retain = dict(p.get("retain") or {})
         runner = self._runner(ctx)
         executor = self._executor(ctx)
@@ -1874,6 +1881,7 @@ class Worker:
                 "worker": self.worker_id,
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
+                "learning": learning.apparatus(),
                 **(
                     {"preflight": {"fix": preflight.fix, "repair_turns": preflight.repair_turns}}
                     if preflight is not None
@@ -1918,6 +1926,7 @@ class Worker:
             budget_for_task=spend.budget_for_task,
             # absent label = every switch OFF under the default block (rows as before)
             checks=checks if checks.any_on or not checks.repo.is_default else None,
+            learning=learning,
         )
         self._progress(ctx, 0, total)
 
@@ -1962,6 +1971,7 @@ class Worker:
         ctx.counts.update(counts)
         self._progress(ctx, summary.tasks, total)
         self._ledger_health()
+        self._learning_tick(run.repo)
         if tripped() and not self._cancelled(ctx):
             reason = (
                 f"provider outage: {streak['n']} consecutive attempts refused; "
@@ -1981,6 +1991,25 @@ class Worker:
             first = next((r.error for r in self.ledger.rows(run_id=spec.run_id) if r.error), "")
             return STATUS_FAILED, counts, f"all {summary.rows} attempt(s) errored: {first}"[:1000]
         return STATUS_SUCCEEDED, counts, ""
+
+    def _learning_snapshot(self, ctx: RunContext) -> LearningSnapshot:
+        """The prevention loop's snapshot for this run; a chain that cannot be read gives
+        ``learn: off`` — which is then true — and never stops the run."""
+        try:
+            return learning_snapshot(self.factory, ctx.run.repo, ctx.params)
+        except Exception as exc:
+            _LOG.warning(
+                "prevention: snapshot for %s unreadable (%s); learn=off", ctx.run.repo, exc
+            )
+            return empty_snapshot(ctx.run.repo)
+
+    def _learning_tick(self, repo: str) -> None:
+        """One tick of the repository's prevention loop after a build run; it never fails
+        the run (``learning_tick`` logs and returns)."""
+        try:
+            learning_tick(self.factory, self.home, repo)
+        except Exception as exc:  # belt and braces: learning_tick itself never raises
+            _LOG.warning("prevention: tick for %s failed: %s", repo, exc)
 
     def _ledger_health(self) -> None:
         try:

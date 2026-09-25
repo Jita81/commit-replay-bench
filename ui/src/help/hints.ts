@@ -1348,6 +1348,51 @@ export const HINTS = {
     'The oracle page for this repository, where an oracle run is queued and scores are read.',
   'link.learn.runs':
     'The runs page for this repository, where the plan’s runs are queued.',
+  // the prevention register (screens/Learn/PreventionSection.tsx, ADR-0020)
+  'stat.learn.register_classes':
+    'Bug classes the prevention loop has registered for this repository, over the first attempts it has read. Each is a failure named the same way every time it recurs.',
+  'stat.learn.register_closed':
+    'Classes closed: a change the loop applied was kept, and none recurred in the closing window of exposed first attempts. A class that went quiet with no change on record is never counted.',
+  'stat.learn.register_by_process':
+    'Of the closed classes, the share closed by a process change (a switch or a linked fix) rather than a playbook line. A dash means none is closed yet.',
+  'tile.learn.playbook':
+    'The operating notes in force: at most seven checklist lines and 1,000 characters, from closed templates. A line reaches a task only when two other tasks taught it.',
+  'switch.learn.auto_apply':
+    'The repository’s learning switch: off (nothing reaches a builder), context (playbook lines and filed items) or config (also the process switches). Only an operator throws it, with a reason.',
+  'col.learn_register.class':
+    'The class signature: the failure kind and what exactly failed, computed the same way from every row.',
+  'col.learn_register.seen':
+    'First attempts that showed the class over the comparable first attempts of its stratum, with the tasks and the dollars spent on them.',
+  'col.learn_register.lever':
+    'The strongest change the class admits that the loop may apply, and its level: construction, gate, mistake-proofing or advisory.',
+  'col.learn_register.applied':
+    'When the change in force was applied, and on whose behalf: the loop for the person who threw the switch, or a person’s own link.',
+  'col.learn_register.before_after':
+    'Recurrence before the change (frozen when it was applied) and on the first attempts whose own labels name it since, each with its n, and the bar the rule decides at.',
+  'col.learn_register.status':
+    'Open, applied, closed, retired or escalated, with any qualifier such as watch, dormant, capability, suspended, displaced or reopened.',
+  'col.learn_register.next':
+    'What happens next for this class, in one sentence: how many more exposed attempts a decision needs, or what a person must do.',
+  'pill.learn.status':
+    'Where this class stands in the prevention loop: open, applied, closed, retired or escalated.',
+  'pill.learn.level':
+    'The lever’s level on the prevention hierarchy: construction beats a gate, a gate beats mistake-proofing, and advisory text comes last.',
+  'pill.learn.qualifier':
+    'A qualifier beside the status: watch (too few yet), dormant (quiet with no change, never credited), capability (judged by value, never closed) or suspended (the switch forbids it now).',
+  'button.learn.revert':
+    'Undo this change from the next run. The loop never re-applies it to this class, and your name and reason are recorded.',
+  'button.learn.register_item':
+    'Put this filed item on the repository’s factory backlog in one act: the first freezes a backlog, later ones evolve it. Refused while a factory run holds it.',
+  'button.learn.tick':
+    'Run the prevention loop now: take any decision that is due, retire what did not work, and apply or file the next change. The worker also runs it after every build run.',
+  'button.learn.switch':
+    'Throw the switch with the reason given. It applies from the next run, and the record names you.',
+  'field.learn.switch_mode':
+    'Off, context or config: how far the prevention loop may go on this repository.',
+  'field.learn.switch_reason':
+    'Why you are throwing the switch; it is recorded with your name on the prevention chain.',
+  'field.learn.revert_reason':
+    'Why this change is being undone; it is recorded with your name, and the loop never re-applies it.',
 
   // ── /ledger (screens/Ledger/LedgerPage.tsx)
   'button.ledger.export_jsonl':
@@ -1555,7 +1600,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/capability': 28,
   '/routing': 20,
   '/oracle': 22,
-  '/learn': 26,
+  '/learn': 44,
   '/ledger': 26,
   // a viewer's Settings (health, the login card read-only, the GitHub App); the admin's configuration and users are held by the ratchet's variants
   '/settings': 11,

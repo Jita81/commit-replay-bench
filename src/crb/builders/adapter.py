@@ -102,6 +102,7 @@ from crb.builders.base import (
     BuildOutcome,
     EscalationLadder,
     EventFn,
+    GitArchaeologyGuard,
     Rung,
     emit,
 )
@@ -131,6 +132,7 @@ from crb.core.formatting import FormatRun, formatters_for, run_formatters
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import GradeRow, JsonlLedger
 from crb.core.lint import LintPlan, fix_commands, run_plan
+from crb.core.prevention import LearningSnapshot
 from crb.core.redact import redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
 from crb.core.runners.base import BaseRunner
@@ -517,6 +519,7 @@ def build_fn_for(
     on_kill_unconfirmed: KillUnconfirmedFn | None = None,
     budget_for_task: BudgetForTaskFn | None = None,
     checks: ResolvedChecks | None = None,
+    learning: LearningSnapshot | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -563,6 +566,12 @@ def build_fn_for(
         their sources and the configuration version) and, when a step ran, its record
         (``labels.format_step`` / ``labels.finish_gate``). ``None`` — nothing runs and
         nothing is stamped (the rows are byte-identical to before the switchboard).
+    learning:
+        The prevention loop's snapshot for this run (ADR-0020). Its lines reach a brief only
+        after the held-out rule and the leak gate for that task, and only when the builder's
+        own shell guard accepts every command a line recommends; what was read and what was
+        dropped is stamped on the attempt (``learn_lines`` / ``learn_dropped`` /
+        ``learn_playbook``). ``None`` adds nothing.
     """
     index = rung_index(ladder)
     overrides = dict(builder_overrides or {})
@@ -717,6 +726,18 @@ def build_fn_for(
             config=config,
             finish_checks=gate.lines if gate is not None else (),
         )
+        learn_labels: dict[str, str] = {}
+        if learning is not None:
+            texts, ids, dropped = learning.lines_for(
+                task.task_id,
+                target_tests=task.target_tests,
+                test_files=task.test_files,
+                src_files=task.src_files,
+                refuses=GitArchaeologyGuard(ws.root).check_shell,
+            )
+            if texts:
+                brief = replace(brief, playbook=tuple(texts))
+            learn_labels = learning.task_labels(ids, dropped, texts)
         rung_budget = budget_for_rung(rung, budget)
         spend_labels: dict[str, str] = {}
         if budget_for_task is not None:
@@ -739,7 +760,7 @@ def build_fn_for(
                     budget=rung_budget.to_dict(),
                 ),
                 error=_prefixed(f"builder raised {type(exc).__name__}: ", str(exc)),
-                labels=spend_labels,
+                labels={**spend_labels, **learn_labels},
             )
             return discard(ws, task, failed)
         labels: dict[str, str] = dict(spend_labels)
@@ -768,7 +789,7 @@ def build_fn_for(
             outcome.builder_ref(transcript_ref=ref),
             error=attempt_error(outcome),
             transcript_ref=ref,
-            labels=labels,
+            labels={**labels, **learn_labels},
             notes={**attempt_notes(outcome), **notes},
         )
         return discard(ws, task, attempt)

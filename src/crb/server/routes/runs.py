@@ -582,6 +582,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["escalation"] = body.escalation
     if body.checks is not None and body.checks.overrides():
         params["checks"] = body.checks.overrides()
+    if body.learning is not None:
+        params["learning"] = body.learning
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,

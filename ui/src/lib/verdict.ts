@@ -332,6 +332,7 @@ export const ACTION_HELP: Record<string, string> = {
   'repo.github_linked': 'The repository was linked to a GitHub App installation; its clone URL changed and both URLs are recorded.',
   'github.installation.recorded': 'A GitHub App installation was recorded for this deployment.',
   'intake.listener.switched': 'An operator switched this repository’s intake listener on or off; the event names who did it, because the switch is the consent to write on that board’s tickets.',
+  'learn.prevention.recorded': 'The prevention loop recorded one act on this repository’s chain: a switch thrown, a change applied or reverted, a decision taken, an item filed or registered, or a fix linked — hash-chained and naming who did it.',
   'signoff.created': 'An approver signed off a cell; the attested row’s hash is recorded.',
   'signoff.refused': 'A sign-off was refused by the policy; the refusal names the clause.',
   'signoff.revoked': 'A sign-off was revoked.',
