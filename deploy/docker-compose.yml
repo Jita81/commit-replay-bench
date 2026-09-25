@@ -31,6 +31,16 @@ x-crb-common: &crb-common
     CRB_HOME: /srv/crb
     CRB_DATABASE_URL: postgresql+psycopg://crb:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@db:5432/crb
     CRB_LOG_FORMAT: json
+    # Where the builder runs, for BOTH the api (which serves the posture on /health) and the
+    # worker (which runs the builds): one value, or /health could say "sealed" while builds ran
+    # on the host (ADR-0023). Empty = the env's default: docker in prod — the sealed container
+    # (ADR-0012), an exported checkout that cannot contain the gold commit and one
+    # allowlisting egress sidecar; without CRB_BUILDER__IMAGE a build fails CLOSED
+    # (`sandbox unavailable`), never on the host. An explicit `docker` needs the image (the api
+    # refuses to start without it). `host` in prod is refused unless
+    # CRB_ALLOW_UNSEALED_PROD=1 (docs/DEPLOYMENT.md §2.1).
+    CRB_BUILDER__EXECUTOR: ${CRB_BUILDER__EXECUTOR:-}
+    CRB_BUILDER__IMAGE: ${CRB_BUILDER__IMAGE:-}
   user: "10001:10001"
   read_only: true
   tmpfs:
@@ -151,12 +161,6 @@ services:
       # `local` runs untrusted repository tests inside THIS container — development only.
       CRB_SANDBOX__EXECUTOR: ${CRB_SANDBOX__EXECUTOR:-docker}
       CRB_SANDBOX__IMAGE: ${CRB_SANDBOX__IMAGE:-}
-      # The builder runs in its sealed container (ADR-0012): an exported checkout that cannot
-      # contain the gold commit, one allowlisting egress sidecar. Without CRB_BUILDER__IMAGE
-      # a build fails CLOSED (`sandbox unavailable`), never on the host. `host` in prod is
-      # refused unless CRB_ALLOW_UNSEALED_PROD=1 (ADR-0023; docs/DEPLOYMENT.md §2.1).
-      CRB_BUILDER__EXECUTOR: ${CRB_BUILDER__EXECUTOR:-docker}
-      CRB_BUILDER__IMAGE: ${CRB_BUILDER__IMAGE:-}
       CRB_WORKER_ID: ${CRB_WORKER_ID:-worker-1}
       # The worker's own Prometheus exposition (docs/DEPLOYMENT.md §9). The build / grade /
       # cost / delivery series are recorded in THIS process; the api's /metrics carries the

@@ -84,12 +84,6 @@ spec:
               value: "0.0.0.0"
             - name: CRB_METRICS_PORT
               value: {{ .Values.worker.metrics.port | quote }}
-            # The sealed builder by default (ADR-0012, ADR-0023): prod refuses `host` unless
-            # CRB_ALLOW_UNSEALED_PROD=1 is set in `config`.
-            - name: CRB_BUILDER__EXECUTOR
-              value: {{ .Values.worker.builder.executor | quote }}
-            - name: CRB_BUILDER__IMAGE
-              value: {{ .Values.worker.builder.image | quote }}
             {{- if eq $mode "dind" }}
             - name: DOCKER_HOST
               value: unix:///var/run/docker/docker.sock

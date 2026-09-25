@@ -691,7 +691,7 @@ export const HINTS = {
   'summary.posture.builder':
     'Where the builder runs and what network it may reach. Shown to admins.',
   'summary.posture.production':
-    'Whether tests and the builder both run sealed in docker. Production refuses anything else unless CRB_ALLOW_UNSEALED_PROD=1 is set, and then every run records that it ran unsealed.',
+    'Whether tests and the builder both run sealed in docker. Production refuses anything else unless CRB_ALLOW_UNSEALED_PROD=1 is set, and then every run records that it ran unsealed. Factory builds always run on the host, so production refuses factory runs unless that override is set.',
   'summary.posture.toolchains':
     'The toolchains the worker host can run, from the health probe.',
   'summary.posture.worker':

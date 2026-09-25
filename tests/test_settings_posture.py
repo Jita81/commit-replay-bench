@@ -108,6 +108,7 @@ class TestSettings:
             "builder_executor": "docker",
             "sealed": True,
             "unsealed_prod_override": False,
+            "factory_builds": "refused",
         }
         d = Settings(env="dev", home=Path("/srv/crb"))
         assert d.builder.executor == "host"
@@ -135,6 +136,7 @@ class TestSettings:
             "builder_executor": "host",
             "sealed": False,
             "unsealed_prod_override": True,
+            "factory_builds": "host",
         }
         assert s.redacted_dict()["posture"] == s.posture()
         assert any(ALLOW_UNSEALED_PROD_ENV in r.getMessage() for r in caplog.records)
@@ -212,12 +214,23 @@ class TestWorker:
 
 
 class TestDeploymentDefaults:
-    def test_compose_gives_the_worker_the_sealed_builder(self) -> None:
+    def test_compose_gives_the_worker_the_sealed_builder(self, tmp_path: Path) -> None:
+        """Unset in deploy/.env, compose hands the worker an empty builder executor under
+        ``CRB_ENV=prod``, which the worker resolves to the sealed container."""
+        import yaml
+
         compose = (ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
         worker = compose.split("\n  worker:\n", 1)[1]
         assert re.search(r"CRB_SANDBOX__EXECUTOR: \$\{CRB_SANDBOX__EXECUTOR:-docker\}", worker)
-        assert re.search(r"CRB_BUILDER__EXECUTOR: \$\{CRB_BUILDER__EXECUTOR:-docker\}", worker)
-        assert re.search(r"CRB_BUILDER__IMAGE: \$\{CRB_BUILDER__IMAGE:-\}", worker)
+        env = yaml.safe_load(compose)["services"]["worker"]["environment"]
+        assert env["CRB_ENV"] == "${CRB_ENV:-prod}"
+        assert env["CRB_BUILDER__EXECUTOR"] == "${CRB_BUILDER__EXECUTOR:-}"
+        assert env["CRB_BUILDER__IMAGE"] == "${CRB_BUILDER__IMAGE:-}"
+        resolved = worker_main.settings_from_args(
+            worker_main.build_parser().parse_args(["--once"]),
+            {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "prod", "CRB_BUILDER__EXECUTOR": ""},
+        )
+        assert resolved.builder_executor == "docker"
 
     def test_compose_gives_the_api_and_the_worker_one_builder_posture(self) -> None:
         """The API serves the posture, the worker runs the builds: compose must hand both the
@@ -231,13 +244,15 @@ class TestDeploymentDefaults:
         for key in ("CRB_BUILDER__EXECUTOR", "CRB_BUILDER__IMAGE"):
             assert api.get(key) is not None and api.get(key) == worker.get(key), key
 
-    def test_helm_gives_the_worker_the_sealed_builder(self) -> None:
-        values = (ROOT / "deploy" / "helm" / "crb" / "values.yaml").read_text(encoding="utf-8")
-        worker = values.split("\nworker:\n", 1)[1]
-        assert re.search(r"\n  builder:\n(    #[^\n]*\n)*    executor: docker\n", worker)
-        tpl = ROOT / "deploy" / "helm" / "crb" / "templates" / "worker-deployment.yaml"
-        text = tpl.read_text(encoding="utf-8")
-        assert "name: CRB_BUILDER__EXECUTOR" in text and ".Values.worker.builder.executor" in text
+    def test_helm_gives_both_processes_one_builder_posture(self) -> None:
+        """The value is rendered into the shared ConfigMap (API and worker), never into one
+        Deployment; that its default resolves to the sealed builder in prod is proven by
+        rendering it (``TestHelmOneBuilderPosture``)."""
+        tpl = ROOT / "deploy" / "helm" / "crb" / "templates"
+        cm = (tpl / "configmap.yaml").read_text(encoding="utf-8")
+        assert "CRB_BUILDER__EXECUTOR: {{ .Values.worker.builder.executor" in cm
+        for dep in ("api-deployment.yaml", "worker-deployment.yaml"):
+            assert "CRB_BUILDER__EXECUTOR" not in (tpl / dep).read_text(encoding="utf-8"), dep
 
 
 class TestDocuments:
@@ -362,3 +377,5 @@ class TestHelmOneBuilderPosture:
         assert posture["builder_executor"] == resolved_worker
         if sets:
             assert posture["sealed"] is False and posture["unsealed_prod_override"] is True
+        else:  # the chart's default is the sealed builder in prod, in both processes
+            assert posture["builder_executor"] == "docker" and posture["sealed"] is True

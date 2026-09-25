@@ -64,13 +64,27 @@ function NextStep({ children, admin, doc }: { children: ReactNode; admin: boolea
 const POSTURE_DOC = <DocLink to="DEPLOYMENT#21-environment-reference">Environment reference (DEPLOYMENT)</DocLink>
 
 /**
+ * What happens to a factory run (ADR-0023), said after a sealed posture: a factory build runs
+ * the builder on the host and is never sealed, so production refuses it unless the override
+ * is set — and then every factory run's apparatus carries it.
+ */
+function factoryClause(p: DeploymentPosture): string {
+  if (p.factory_builds === 'refused')
+    return '; in production factory runs are refused, because factory builds run the builder on the host and are not sealed yet'
+  if (p.factory_builds === 'host' && p.env === 'prod')
+    return "; factory builds run on the host under CRB_ALLOW_UNSEALED_PROD=1, and every factory run's apparatus carries the override"
+  if (p.factory_builds === 'host') return '; factory builds run on the host'
+  return ''
+}
+
+/**
  * The production posture row (ADR-0023), from `/health` so every viewer sees it: sealed, a
  * development reading in dev, or production running unsealed under the override — never
  * silent about the override, because every run's apparatus carries it.
  */
 function postureValue(p: DeploymentPosture | undefined, failed: boolean, admin: boolean): ReactNode {
   if (!p) return failed ? 'the health check could not be read' : 'not reported by this deployment'
-  if (p.sealed) return 'sealed — tests and the builder run in docker'
+  if (p.sealed) return `sealed — tests and the builder run in docker${factoryClause(p)}`
   const where = `tests run ${p.sandbox_executor}, the builder runs ${p.builder_executor}`
   if (p.unsealed_prod_override) {
     return (

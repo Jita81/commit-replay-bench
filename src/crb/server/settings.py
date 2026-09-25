@@ -166,6 +166,14 @@ def unsealed_prod_refusal(
     )
 
 
+def factory_builds_posture(env: str, *, allow: bool) -> str:
+    """Where a factory run's builds happen (ADR-0023): ``refused`` in ``prod`` unless
+    ``allow``, else ``host``. A factory build runs the builder on a host worktree and is never
+    sealed, so a sealed ``prod`` posture cannot admit one without the override. The API serves
+    this on ``/health``; the worker applies the same rule (``Worker._run_factory``)."""
+    return "refused" if env == "prod" and not allow else "host"
+
+
 def temp_dir_reason(path: Path | str, environ: Mapping[str, str] | None = None) -> str | None:
     """Why ``path`` is under an OS-managed temporary directory, or ``None`` when it is not.
 
@@ -694,8 +702,14 @@ class Settings(BaseSettings):
     def posture(self) -> dict[str, Any]:
         """Where tests and the builder run, whether that is sealed, and whether production
         runs unsealed under ``CRB_ALLOW_UNSEALED_PROD`` (ADR-0023). Served on ``/health``
-        and ``/settings``; nothing here is secret. The override is reported in force only
-        when it is what lets this deployment start (an unused override is not a posture)."""
+        and ``/settings``; nothing here is secret. ``sealed`` and ``unsealed_prod_override``
+        describe replay builds and test runs; the override is reported in force there only
+        when it is what lets this deployment start (an unused override is not a posture).
+
+        ``factory_builds`` is the factory's own posture, reported apart because a factory
+        build is never sealed (the builder is handed a host worktree, no container):
+        ``refused`` in ``prod`` without the override (the worker refuses the run), ``host``
+        otherwise — and in ``prod`` every such run's apparatus carries the override."""
         sealed = (
             self.sandbox.executor == SEALED_EXECUTOR and self.builder_executor == SEALED_EXECUTOR
         )
@@ -707,6 +721,7 @@ class Settings(BaseSettings):
             "unsealed_prod_override": self.env == "prod"
             and not sealed
             and self.allow_unsealed_prod,
+            "factory_builds": factory_builds_posture(self.env, allow=self.allow_unsealed_prod),
         }
 
     @property
@@ -808,6 +823,7 @@ __all__ = [
     "SandboxSettings",
     "Settings",
     "default_builder_executor",
+    "factory_builds_posture",
     "temp_dir_reason",
     "unsealed_prod_refusal",
 ]

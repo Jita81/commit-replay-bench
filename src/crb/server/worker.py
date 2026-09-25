@@ -485,6 +485,10 @@ class WorkerSettings:
     #: ADR-0023: a prod worker running unsealed under the override — stamped into every
     #: run's apparatus and every pack; empty when sealed or in dev.
     unsealed_override: Mapping[str, Any] = field(default_factory=dict)
+    #: ``CRB_ENV`` as the entrypoint read it. A factory build is never sealed (its builder is
+    #: handed a host worktree), so in ``prod`` a factory run is refused unless the override is
+    #: set, and one run under it is stamped (ADR-0023, ``_run_factory``).
+    env: str = "dev"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -1452,6 +1456,23 @@ class Worker:
         }
         self.queue.set_apparatus(ctx.run.id, apparatus, worker_id=self.worker_id)
 
+    def _factory_override_stamp(self) -> dict[str, Any]:
+        """ADR-0023: a factory run's builder works on a host worktree, never in a container, so
+        in ``prod`` (where only the override lets it run) its apparatus always says so — even
+        on a worker whose replay posture is sealed and stamps nothing else."""
+        if self.settings.env != "prod":
+            return {}
+        stamp = {
+            "env": "prod",
+            "sandbox_executor": self.settings.executor,
+            **dict(self.settings.unsealed_override),
+            "builder_executor": "host",
+            "run_kind": "factory",
+            "override": ALLOW_UNSEALED_PROD_ENV,
+            "adr": "0023",
+        }
+        return {"unsealed_prod_override": stamp}
+
     def _override_stamp(self) -> dict[str, Any]:
         """ADR-0023: a prod worker running unsealed under the override says so on every
         apparatus it writes (and so in every pack); nothing when sealed or in dev."""
@@ -2064,6 +2085,15 @@ class Worker:
         refused when it is a rung on this run's own ladder."""
         run = ctx.run
         p = ctx.params
+        if self.settings.refuse_unsealed:
+            # ADR-0023: the factory hands its builder a host worktree and no container, so a
+            # sealed production posture cannot admit it — refused before anything is spent
+            raise SandboxUnavailable(
+                "production refuses a factory run (ADR-0023): factory builds run the builder "
+                "on the host and are not sealed yet; start the worker with "
+                f"{ALLOW_UNSEALED_PROD_ENV}=1 to run them on purpose (every factory run's "
+                "apparatus then carries the override)"
+            )
         home = FactoryHome(self.home, run.repo)
         backlog = home.load_backlog()
         if backlog is None or not backlog.frozen:
@@ -2131,6 +2161,7 @@ class Worker:
             # F39 — the base every RED proof and build of this run starts from (the
             # default branch as fetched, or the clone's head when nothing was fetched)
             base_sha=ctx.git.rev_parse("HEAD"),
+            **self._factory_override_stamp(),
         )
         # delivery through the GitHub App: the linked installation's token pushes the branch
         # and opens the pull request against the repository's default branch (ADR-0014);

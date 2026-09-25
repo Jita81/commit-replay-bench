@@ -264,6 +264,7 @@ def settings_from_args(
         builder_executor=builder,
         refuse_unsealed=shared.env == "prod" and not shared.allow_unsealed_prod,
         unsealed_override=override,
+        env=shared.env,
     )
 
 

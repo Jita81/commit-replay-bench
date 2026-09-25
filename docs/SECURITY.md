@@ -426,6 +426,16 @@ subject to a retention window.
   setting, not a measurement: no row has yet been produced on the sealed posture (below).
   [measured — `tests/test_settings_posture.py` and `tests/test_worker.py` pin the refusal,
   the override and the stamp; apparatus 2.2]
+- **Factory builds are not sealed** (ADR-0023 §5). The builder executor setting governs
+  replay builds; a factory run hands its builder a host worktree and no container. A `prod`
+  worker therefore refuses every factory run unless `CRB_ALLOW_UNSEALED_PROD=1`, and with it
+  stamps the run's apparatus (`run_kind: factory`); `/health` reports this as
+  `posture.factory_builds`. [measured — `tests/test_worker.py`,
+  `tests/test_settings_posture.py::TestFactoryBuilds`] Sealing factory builds is not done.
+  [gap — factory builds run on the host]
+- **One builder posture for both processes.** Compose and Helm hand the API (which serves
+  `/health`) and the worker (which runs the builds) the same `CRB_BUILDER__EXECUTOR`.
+  [measured — `tests/test_settings_posture.py::TestHelmOneBuilderPosture` renders the chart]
 - **Worktree names carry nothing of the commit** (DL-053). Trial, mining, control and oracle
   worktrees are named by a random token, and the mapping to the task is on the run's events,
   so `pwd`, `basename`, the `.git` pointer and the prompt no longer hand the builder a prefix

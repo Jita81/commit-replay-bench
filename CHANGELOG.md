@@ -15,8 +15,10 @@ Worktrees are named by a random token instead of the held-out commit's sha, so `
 `.git` pointer and the prompt no longer give the builder the answer key's address; a source
 ratchet stops the pattern returning (DL-053). Production refuses the host builder and the
 local test executor unless `CRB_ALLOW_UNSEALED_PROD=1`; the builder defaults to docker in
-prod, compose and Helm set it on the worker, and the override shows on `/health`, the
-Posture page and every run's apparatus (ADR-0023, DL-054). No apparatus bump.
+prod, compose and Helm hand the API and the worker one builder value, and the override shows
+on `/health`, the Posture page and every run's apparatus (ADR-0023, DL-054). Factory builds
+run on the host and are not sealed yet, so production refuses a factory run unless the
+override is set, and stamps one run under it. No apparatus bump.
 
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 

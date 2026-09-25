@@ -38,8 +38,13 @@ unless someone read the apparatus stamp's executor field.
    executor defaults to `docker` in `prod` and `local` in `dev`. An EXPLICIT
    `CRB_BUILDER__EXECUTOR=docker` still needs `CRB_BUILDER__IMAGE` at start-up (a typo fails
    early); the defaulted one does not, and the worker fails each build closed without it
-   (`SandboxUnavailable`, never a host attempt). `deploy/docker-compose.yml` and the Helm
-   chart (`worker.builder.executor: docker`) set the sealed builder on the worker.
+   (`SandboxUnavailable`, never a host attempt). `deploy/docker-compose.yml` (the shared
+   environment) and the Helm chart (the shared ConfigMap, from `worker.builder.executor`)
+   hand the API and the worker ONE builder value, empty by default, so the process that
+   serves the posture and the process that runs the builds cannot resolve different
+   executors [measured — `tests/test_settings_posture.py::TestHelmOneBuilderPosture` renders
+   the chart and resolves both processes' settings from it;
+   `::TestDeploymentDefaults::test_compose_gives_the_api_and_the_worker_one_builder_posture`].
 3. **The override is evented and visible.** With `CRB_ALLOW_UNSEALED_PROD=1` and an unsealed
    posture, the API logs a warning and `Settings.posture()` reports
    `unsealed_prod_override: true` on `/health` (`crb.server.routes.system.collect_health`),
@@ -51,6 +56,16 @@ unless someone read the apparatus stamp's executor field.
    whose own parameters ask for the `local` executor (`Worker._executor` raises
    `SandboxUnavailable`; the run fails with the reason). The builder executor was already a
    deployment posture, never a run parameter (ADR-0012).
+5. **Factory builds are not sealed, so production refuses them too.** `CRB_BUILDER__EXECUTOR`
+   governs replay builds only: a factory run (`Worker._run_factory` → `crb.factory.build`)
+   hands its builder a host worktree and no container, whatever the posture says. So a `prod`
+   worker without the override refuses every factory run before anything is spent
+   (`SandboxUnavailable`, naming the override); with the override the run builds on the host
+   and its apparatus carries `unsealed_prod_override` with `builder_executor: host` and
+   `run_kind: factory`, even on a worker whose replay posture is sealed. The posture reports
+   it apart as `factory_builds` (`refused` | `host`, `crb.server.settings.factory_builds_posture`),
+   on `/health` and on the Posture page. [measured — `tests/test_worker.py` pins the refusal
+   and the stamp; `tests/test_settings_posture.py::TestFactoryBuilds` the posture]
 
 ## Consequences
 
@@ -64,6 +79,10 @@ unless someone read the apparatus stamp's executor field.
   `unsealed_prod_override` as evidence for routing or sign-off.
 - The refusal proves a setting, not a measurement: no row has yet been produced on the sealed
   posture (assessment item B3 remains open). [gap]
+- A production deployment cannot run the factory without the override until factory builds
+  are sealed: `crb.factory.build` must hand its builder the sealed checkout the replay path
+  uses (`crb.builders.adapter.build_fn_for`, `container=`). Until then every production
+  factory run is a stamped development reading. [gap — factory builds are not sealed]
 
 ## Alternatives considered
 
@@ -75,5 +94,8 @@ unless someone read the apparatus stamp's executor field.
   builds, reads its own environment and, until now, did not know `CRB_ENV`; enforcing in one
   process would repeat the 2026-09-21 drift where `/settings` said `docker` while the worker
   ran `local`.
+- **Narrow the claims to replay builds and leave factory runs alone in production.**
+  Rejected: the Posture page would read "sealed" while factory builds — the ones that open
+  pull requests on a customer's repository — ran on the host, unmarked.
 - **Bump the apparatus.** Rejected: no verdict changes meaning; the executor was already on
   the stamp, and the override is an additional, explicit field.

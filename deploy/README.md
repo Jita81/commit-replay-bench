@@ -323,10 +323,12 @@ CRB_BUILDER__USER=                                 # uid:gid; default = the work
 
 Add these to `deploy/.env` next to the sandbox settings; the worker needs the daemon
 socket exactly as in §3. `/settings` (admin) shows the posture under `builder`. In
-`CRB_ENV=prod` the builder defaults to `docker` (the compose worker sets it), and the API and
+`CRB_ENV=prod` the builder defaults to `docker` (compose passes the one value to the API and
+the worker, so `/health` describes the builds the worker runs), and the API and
 the worker refuse to start with `host` — or with `CRB_SANDBOX__EXECUTOR=local` — unless
 `CRB_ALLOW_UNSEALED_PROD=1` is set; that override is shown on `/health` and the Posture page
-and stamped into every run's apparatus ([ADR-0023](../docs/adr/0023-production-refuses-the-unsealed-posture.md)). For an
+and stamped into every run's apparatus. Factory builds are not sealed yet (they run on the
+host), so a `prod` worker refuses a factory run unless the override is set ([ADR-0023](../docs/adr/0023-production-refuses-the-unsealed-posture.md)). For an
 Azure OpenAI endpoint set `CRB_BUILDER__ALLOW_HOSTS=<resource>.privatelink.openai.azure.com`
 (the sidecar resolves it through the host's DNS, so the private zone applies).
 

@@ -29,7 +29,7 @@ Key values (see `values.yaml` for all, every default is the secure choice):
 | `config.*` | plain `CRB_*` environment (OIDC issuer/client id, model endpoint, sandbox executor/image) |
 | `postgresql.mode` | `external` (managed server; URL in the Secret) or `embedded` (evaluation only) |
 | `worker.sandbox.mode` | `none` (fail-closed; runs `failed`, `sandbox unavailable`), `dind` (privileged sidecar, pod-scoped), `hostSocket` (node's docker.sock — dedicated node pool only) |
-| `worker.builder.executor` / `worker.builder.image` | where the builder runs: `docker` (default — the sealed container, ADR-0012; without `image` a build fails closed) or `host` (development; refused in prod unless `config.CRB_ALLOW_UNSEALED_PROD: "1"`, ADR-0023) |
+| `worker.builder.executor` / `worker.builder.image` | where the builder runs, rendered into the shared ConfigMap so the API's `/health` and the worker read one value: empty (default — the env's default, `docker` in prod: the sealed container, ADR-0012; without `image` a build fails closed), `docker` (needs `image`, or the API refuses to start) or `host` (development; refused in prod unless `config.CRB_ALLOW_UNSEALED_PROD: "1"`, ADR-0023). Factory builds always run on the host, so in prod a factory run is refused unless that override is set |
 | `worker.workDir` | PVC (default, resumable) or emptyDir |
 | `networkPolicy.*` | `apiIngress` peers, `postgres.cidrs`, `modelEndpoint.cidrs` (worker), `oidc.cidrs` (api), `extraEgress` |
 | `ingress.*` | host, class, TLS secret |

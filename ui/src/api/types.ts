@@ -162,6 +162,13 @@ export interface DeploymentPosture {
   sealed: boolean
   /** Production running unsealed under `CRB_ALLOW_UNSEALED_PROD=1`; every run's apparatus carries it. */
   unsealed_prod_override: boolean
+  /**
+   * The factory's own posture: a factory build hands the builder a host worktree, never a
+   * container. `refused` in prod without the override (the worker refuses the run); `host`
+   * otherwise (in prod every factory run's apparatus then carries the override). Absent on an
+   * older server.
+   */
+  factory_builds?: 'refused' | 'host'
 }
 
 /** `GET /health` — overall status is the worst probe. */
