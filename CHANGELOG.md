@@ -17,9 +17,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `docs/SUMMARY.md` opens README's *Start here* and joins the claims gate; the mining rule is stated
   (README step 1, EVIDENCE-AND-CLAIMS §6b) and `GET /repos/{name}/pool` puts the pool's date range
   and share of history on the Results screen; README says the learning loop proposes and a named
-  person acts; DL-053 records the critical friend's ten actions and the claims gate refuses an
-  unrecorded one; a `commit-subjects` CI job; this changelog frozen to one paragraph per pull
-  request; a ReposPage test; one timeout guard in the UI client.
+  person acts; DL-053 records the critical friend's ten actions and the claims gate checks each
+  action and its record both ways; a `commit-subjects` workflow that re-runs on an edited title;
+  this changelog frozen to one paragraph per pull request; a ReposPage test; one timeout guard
+  in the UI client.
 
 - **Work arrives from the board; the factory writes its own failing test**
   ([#48](https://github.com/Jita81/commit-replay-bench/pull/48)). A ticket moved into one watched

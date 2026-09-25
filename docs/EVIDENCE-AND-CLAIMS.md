@@ -262,7 +262,8 @@ engineering", a rate on XL work) is not licensed by anything in the ledger.
 (`crb.core.mine.iter_candidates`, then `mine`) takes the newest 3,000 non-merge commits from
 `HEAD`, keeps those that touch both source and test files within the caps (the standard pool:
 1–3 source files), and stops once 25 tasks are found or 1,000 candidates have been examined;
-the repository's `mining` configuration moves each number. The pool therefore over-represents
+the repository's `mining` configuration moves the window, the task target and the candidate
+cap; the file caps are fixed per pool. The pool therefore over-represents
 recent work and work that was tested at the time, and holds nothing older than the window
 **[hypothesis — that a recent, tested-commits-only pool is easier than the repository's other
 work is untested; a pool mined from an older window under the same builder and budget would

@@ -13,8 +13,12 @@ What it does: Pins that docs/SUMMARY.md exists, fits two pages, answers the six 
               the rule ``crb.core.mine`` runs, and is tagged ``[hypothesis]`` where it says
               what the rule leaves out; that README's "What the product is" says the loop
               proposes and a named person acts, for as long as ``crb.core.learn`` has no path
-              that accepts, registers or queues; and that the changelog's Unreleased section
-              is one paragraph per pull request with the narrative in a dated wave report.
+              that acts except ``apply_triage`` (which needs ``decided_by``); that the
+              summary claims no fix that is not on main, states the deliver bar as ``route``
+              runs it, says when belt 5 counts and prices only what learn prices; that the
+              mining sentence names only the numbers configuration moves; and that the
+              changelog's Unreleased section is one paragraph per pull request with the
+              narrative in a dated wave report.
 How:          Reads the Markdown as text; reads the mining defaults by running
               ``iter_candidates`` and ``mine`` against a fake repository and a patched
               ``qualify``, so no git, no sandbox and no model is involved.
@@ -27,7 +31,8 @@ Works with:   docs/SUMMARY.md (the customer summary), README.md (Start here, ste
               scripts/claims_check.py (the allowlist the summary joins)
 Tested by:    (this is a test file)
 Touch when:   the miner's defaults change (update README step 1 and EVIDENCE-AND-CLAIMS §6b in
-              the same change); ``crb.core.learn`` gains a path that acts (rewrite README's
+              the same change); routing.v2 or a belt-5 change lands (rewrite the summary's bar
+              and its Open gaps with the tests that fail); ``crb.core.learn`` gains a path that acts (rewrite README's
               "What the product is" and this test together); a pull request adds its
               changelog paragraph.
 """
@@ -187,7 +192,8 @@ def test_the_selection_rule_names_what_it_leaves_out() -> None:
 # ─── C7: the loop proposes; a named person acts ──────────────────────────────────────────
 
 #: The three write paths the assessment's G-532 names: accept a refusal line, register a
-#: strengthening item, queue a re-measurement. None exists in crb.core.learn today.
+#: strengthening item, queue a re-measurement. None exists in crb.core.learn today; the one
+#: acting path, apply_triage, is pinned by test_learn_acts_only_through_a_named_person.
 ACTUATOR_PREFIXES = ("accept", "register", "queue", "enqueue", "submit", "schedule")
 
 

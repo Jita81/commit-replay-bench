@@ -20,22 +20,27 @@ mechanically. No model judges another model's work.
 - **What it does with that.** For a class that routes `deliver`, its factory may open a
   branch and a pull request on your repository. It never merges; a person does.
 - **What it learns.** It proposes; a named person acts. It lists the refusals worth a guard,
-  the tests worth strengthening and the re-measurements that are due, each priced, and a
-  person decides ([Learning loop](LEARNING-LOOP.md)).
+  with what each one cost; the tests worth strengthening, without a price; and the
+  re-measurements that are due, with an estimate of their cost. A person decides
+  ([Learning loop](LEARNING-LOOP.md)).
 - **Licence.** Apache 2.0, so you can read and re-run the grader that judged your evidence.
 
 ## What it measures
 
 | It measures | How |
 |---|---|
-| Whether one attempt is `clean` | Five belts: the target tests were not edited, they now pass, nothing else broke, source code changed, and the repository's own linter accepts the change. One failed belt means not clean. |
+| Whether one attempt is `clean` | Five belts: the target tests were not edited, they now pass, nothing else broke, source code changed, and the repository's own linter accepts the change. One failed belt means not clean. The linter belt runs only when the repository has a linter configured or detected; with none, or with the belt switched off, it is not evaluated and does not count against the attempt. |
 | How often, per class and size of change | `n` attempts, the number clean, a Wilson 95% interval and the apparatus version, on every cell of the map. |
 | How good your tests are as a judge | Oracle strength: the share of small faults planted on the changed lines that the target tests catch. |
 | Whether the grader can be fooled | Negative controls: deliberate cheats (do nothing, stub the code, edit the test, and others) that must never grade clean. |
 | What it costs | Mean cost and time per attempt, shown beside the rate. |
 
-A cell routes `deliver` only when `n` ≥ 10, the rate ≥ 0.90, the interval's lower bound ≥
-0.80, there are no false passes, oracle strength ≥ 0.80 and the controls passed. A "false
+The published bar is meant to route a cell `deliver` only when `n` ≥ 10, the rate ≥ 0.90,
+the interval's lower bound ≥ 0.80, there are no false passes, oracle strength ≥ 0.80 and the
+controls passed. On `main` an unmeasured oracle strength does not block `deliver`; nor does
+a controls verdict that was never evaluated when `crb route` reads a ledger file (the
+server's map treats missing controls as `calibrate`); and `n` counts attempts, not tasks.
+See Open gaps. A "false
 pass" (false-Q1) is a row recorded clean that its own belts contradict; the product refuses
 to write one ([ADR-0001](adr/0001-four-belts-and-false-q1-at-write.md)).
 
@@ -87,8 +92,8 @@ repository, or on future work.
 
 ## Open gaps
 
-Each of these is **[gap]** — named so that nobody assumes it is closed. The last four were
-found by an external assessment on 2026-09-25 and are being fixed on other branches.
+Each of these is **[gap]** — named so that nobody assumes it is closed. None is closed on
+`main`. The last five were found by an external assessment on 2026-09-25.
 
 - **No row has been measured on the sealed posture.** Every number above was produced on
   the host posture. The sealed builder and the Docker executor are built and tested, but no
@@ -97,17 +102,21 @@ found by an external assessment on 2026-09-25 and are being fixed on other branc
   have been read by an AI reviewer only ([DL-053](DECISION-LOG.md), critical-friend
   action #8).
 - **`deliver` without a measured oracle strength.** The routing rule on `main` can route a
-  cell `deliver` without a measured oracle strength or a controls verdict, although the
-  published bar requires both. Until that is fixed, treat any `deliver` route whose oracle
-  reads "not scored" as `calibrate`.
+  cell `deliver` without a measured oracle strength, and `crb route` without a controls
+  verdict, although the published bar requires both. Until that is fixed, treat any
+  `deliver` route whose oracle reads "not scored" as `calibrate`.
 - **The route counts attempts, not tasks.** Repeated attempts on one task each add to `n`,
   so a cell can clear `n` ≥ 10 on fewer than ten distinct tasks. The map shows `n_tasks`
   beside `n`; read both.
+- **Belt 5 switched off reads the same as no linter.** The ledger records both as "not
+  evaluated", so a reader cannot tell an operator's choice from a missing toolchain, and
+  neither blocks `deliver`.
 - **The factory can open a pull request before its review.** In forward mode the pull
   request is opened before the test-strength check runs.
 - **Production does not refuse the unsealed posture.** A production deployment warns, but
   does not stop, when the builder runs on the host.
 
-What would close each gap, and who owns it: the
-[definition-of-done gap analysis](dod/GAP-ANALYSIS.md) and the
+Closing the first three of the assessment's gaps changes what a verdict means, so it needs
+an ADR, an apparatus bump and a routing-policy version bump. What would close each gap, and
+who owns it: the [definition-of-done gap analysis](dod/GAP-ANALYSIS.md) and the
 [decision log](DECISION-LOG.md).
