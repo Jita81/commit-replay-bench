@@ -41,6 +41,7 @@ from crb.cli.commands import (
     EXIT_ERROR,
     CliError,
     config,
+    deps,
     grade,
     learn,
     ledger,
@@ -82,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     learn.register(sub)
     tasks.register(sub)
     config.register(sub)
+    deps.register(sub)
     users.register(sub)
     service.register(sub)
     return parser

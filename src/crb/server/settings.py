@@ -38,7 +38,8 @@ Works with:   src/crb/server/app.py (reads ``resolved_database_url``, cookie sec
               src/crb/server/routes/system.py (serves ``redacted_dict``),
               src/crb/builders/container.py (the worker reads the same ``CRB_BUILDER__*``),
               src/crb/cli/commands/service.py (``crb doctor``'s ``home`` line reuses
-              ``temp_dir_reason``), src/crb/factory/author.py (the rung spelling
+              ``temp_dir_reason``), src/crb/provision/config.py (the worker's side of
+              ``CRB_PROVISION__*`` and its production refusals), src/crb/factory/author.py (the rung spelling
               ``CRB_FACTORY__TEST_AUTHOR`` carries and the refusal it feeds),
               docs/DEPLOYMENT.md#21-environment-reference (the operator-facing list; §1.1 the
               temporary-directory rule)
@@ -63,6 +64,13 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from crb.provision.config import (
+    DEFAULT_GO_IMAGE,
+    DEFAULT_NODE_IMAGE,
+    DEFAULT_PYTHON_IMAGE,
+    ProvisionConfig,
+)
 
 log = logging.getLogger("crb.server.settings")
 
@@ -251,6 +259,76 @@ class SandboxSettings(BaseModel):
     #: ``docker`` (default, fail-closed isolation) or ``local`` (host execution; dev only).
     executor: Literal["local", "docker"] = "docker"
     image: str = ""
+    #: ``copy`` (default): tests run in a throwaway copy of the read-only worktree;
+    #: ``readonly``: the worktree itself, read-only — a different posture (ADR-0019 §7).
+    tree: Literal["copy", "readonly"] = "copy"
+    #: The size cap of the throwaway copy (a tmpfs, so it counts against the container's memory).
+    work_size: str = "1g"
+
+
+class ProvisionSettings(BaseModel):
+    """Dependency provisioning (ADR-0019, ``CRB_PROVISION__*``): a task's dependencies are
+    fetched outside the test container, sealed and mounted read-only. OFF by default —
+    switching it on is the operator's consent to a fetch through their egress. In ``prod``
+    a public registry is refused unless ``allow_public`` is set (a mirror inside the tenant
+    is the documented shape) and every fetch image must be pinned by digest. The worker
+    reads the same variables (:meth:`crb.provision.config.ProvisionConfig.from_env`)."""
+
+    enabled: bool = False
+    #: Empty ⇒ ``<CRB_HOME>/deps``. Must be a path the docker daemon can bind-mount.
+    store: str = ""
+    go_proxy: str = "https://proxy.golang.org"
+    go_sumdb: str = "sum.golang.org"
+    pypi_index: str = "https://pypi.org/simple"
+    pypi_files_host: str = "files.pythonhosted.org"
+    npm_registry: str = "https://registry.npmjs.org"
+    #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string).
+    extra_allow_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    allow_public: bool = False
+    egress_network: str = "bridge"
+    proxy_image: str = ""
+    go_image: str = ""
+    python_image: str = ""
+    node_image: str = ""
+    ca_bundle: str = ""
+    max_bundle_mb: int = Field(default=2048, ge=1)
+    max_total_gb: float = Field(default=20.0, gt=0)
+    fetch_timeout_s: int = Field(default=900, ge=1)
+
+    @field_validator("extra_allow_hosts", mode="before")
+    @classmethod
+    def _split_hosts(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            raw = v.strip()
+            if raw.startswith("["):
+                return json.loads(raw)
+            return [p.strip() for p in raw.split(",") if p.strip()]
+        return v
+
+    def to_config(self, *, env: str, home: Path) -> ProvisionConfig:
+        """The worker-side configuration; its own validation (the allowlist parsed by the
+        egress proxy's ``parse_allow``, ``GO_PROXY`` never ``direct``) raises ``ValueError``."""
+        return ProvisionConfig(
+            enabled=self.enabled,
+            store=Path(self.store) if self.store else Path(home) / "deps",
+            go_proxy=self.go_proxy,
+            go_sumdb=self.go_sumdb,
+            pypi_index=self.pypi_index,
+            pypi_files_host=self.pypi_files_host,
+            npm_registry=self.npm_registry,
+            extra_allow_hosts=tuple(self.extra_allow_hosts),
+            allow_public=self.allow_public,
+            egress_network=self.egress_network,
+            proxy_image=self.proxy_image,
+            go_image=self.go_image or DEFAULT_GO_IMAGE,
+            python_image=self.python_image or DEFAULT_PYTHON_IMAGE,
+            node_image=self.node_image or DEFAULT_NODE_IMAGE,
+            ca_bundle=self.ca_bundle,
+            max_bundle_mb=self.max_bundle_mb,
+            max_total_gb=self.max_total_gb,
+            fetch_timeout_s=self.fetch_timeout_s,
+            env=env,
+        )
 
 
 class FactorySettings(BaseModel):
@@ -478,6 +556,8 @@ class Settings(BaseSettings):
     trusted_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
+    #: Dependency provisioning (ADR-0019) — off by default; see ``ProvisionSettings``.
+    provision: ProvisionSettings = Field(default_factory=ProvisionSettings)
     builder: BuilderSettings = Field(default_factory=BuilderSettings)
     factory: FactorySettings = Field(default_factory=FactorySettings)
     #: Where work arrives from (ADR-0017). ``tracker: none`` by default: no column is
@@ -588,6 +668,11 @@ class Settings(BaseSettings):
             log.warning("CRB_HOME %s; %s", reason, TEMP_HOME_ADVICE)
         if self.env == "prod" and self.sandbox.executor == "local":
             log.warning("CRB_SANDBOX__EXECUTOR=local in prod: test runs are NOT isolated")
+        # dependency provisioning: a typo in an allowlist, a public registry in prod without
+        # allow_public, or an unpinned fetch image fails at start-up — never at the first fetch
+        refusal = self.provision_config.production_refusal()
+        if refusal is not None:
+            raise ValueError(f"{refusal.code}: {refusal.message}; {refusal.fix}")
         if self.env == "prod" and self.builder.executor == "host":
             log.warning(
                 "CRB_BUILDER__EXECUTOR=host in prod: builder attempts run on the host with a "
@@ -596,6 +681,11 @@ class Settings(BaseSettings):
         return self
 
     # --- derived ---------------------------------------------------------------
+    @property
+    def provision_config(self) -> ProvisionConfig:
+        """The worker-side provisioning configuration these settings describe."""
+        return self.provision.to_config(env=self.env, home=self.home)
+
     @property
     def is_dev(self) -> bool:
         """``CRB_ENV=dev`` — the only mode that relaxes a secret or cookie rule."""
@@ -665,7 +755,13 @@ class Settings(BaseSettings):
             "cors_origins": list(self.cors_origins),
             "trusted_proxies": list(self.trusted_proxies),
             "retention": {"transcripts_days": self.retention.transcripts_days},
-            "sandbox": {"executor": self.sandbox.executor, "image": self.sandbox.image},
+            "sandbox": {
+                "executor": self.sandbox.executor,
+                "image": self.sandbox.image,
+                "tree": self.sandbox.tree,
+                "work_size": self.sandbox.work_size,
+            },
+            "provision": self.provision_config.view(),
             "builder": self.builder.redacted(),
             "factory": self.factory.redacted(),
             "intake": self.intake.redacted(),
@@ -687,6 +783,7 @@ __all__ = [
     "FactorySettings",
     "IntakeSettings",
     "OidcSettings",
+    "ProvisionSettings",
     "RetentionSettings",
     "Role",
     "SandboxSettings",

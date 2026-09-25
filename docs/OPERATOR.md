@@ -236,8 +236,26 @@ installs the repository's test dependencies once, up front, and records every co
 ran. Nothing else ever asks for the network; if a run needs something setup did not
 install, it fails — it does not fetch.
 
+**Setup is a host phase; the sealed posture provisions instead (ADR-0019).** Under the
+docker executor `crb repo setup` refuses (a sandbox has no network, and installing into one
+would run repository code with a network). A repository's dependencies there come from
+**dependency provisioning**: with `CRB_PROVISION__ENABLED=true` each task's lockfiles at the
+parent and at the gold are read from git objects, fetched outside the test container through
+the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
+`$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
+at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
+`--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
+pin Python as `name==version` in `requirements*.txt` (or name the files in
+`runner_opts.deps_lock`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
+version does not provision is refused with its `PROVISION_*` code and the fix
+([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With
+provisioning off, a repository that declares dependencies is refused `PROVISION_DISABLED`
+under docker before any spend. `crb deps ls | verify | gc` shows, re-proves and trims the
+sealed sets; the `provision` line of `crb doctor` says whether it can work on this host.
+
 `crb repo setup <name>` (CLI) and the `setup` run kind (`POST /runs {"kind": "setup"}` —
-server) call the same runner method. Per language:
+server) call the same runner method on the host (the local posture). Per language:
 
 | Runner | What setup runs (in the clone) | Where the environment lives | "Ready" means |
 |---|---|---|---|

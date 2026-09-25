@@ -541,6 +541,24 @@ def probe_database(engine: Engine, factory: sessionmaker[Session], url: str) -> 
     return probes.ProbeResult("database", probes.OK, f"answers · {ao.detail}", data)
 
 
+def probe_provision_line(env: dict[str, str] | None = None) -> ProbeResult:
+    """The ``provision`` line (ADR-0019): off, or whether the store is visible to the daemon,
+    the fetch images are present and the egress network exists — read from the same
+    ``CRB_PROVISION__*`` the worker reads. Never fetches."""
+    from crb.observability import probes
+    from crb.provision.config import ProvisionConfig
+    from crb.provision.probe import probe_provision
+
+    def _read() -> ProbeResult:
+        try:
+            config = ProvisionConfig.from_env(env)
+        except ValueError as exc:
+            return probes.ProbeResult("provision", probes.DOWN, f"CRB_PROVISION__*: {exc}")
+        return probe_provision(config)
+
+    return probes.run_probe("provision", _read)
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """One report over every readiness probe; exit 1 only when something is ``down``
     (``fail`` in the text form)."""
@@ -549,6 +567,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     results = [
         probes.probe_toolchains(),
         probes.probe_docker(),
+        probe_provision_line(),
         probes.probe_builders(),
         probe_claude_code(verify=bool(getattr(args, "live", False))),
     ]

@@ -198,10 +198,11 @@ class SealedProvider:
     def seal_or_reuse(self, lang: str, key: str, build: Callable[[Path], dict[str, Any]]) -> Sealed:
         """A store hit, or ``build(stage)`` (which fetches into the stage and returns the
         manifest fields) and a seal. One fetch at a time in this process."""
+        on_event = self.on_event
         with self._lock:
             hit = self.store.get(lang, key)
             if hit is not None:
-                _emit(self.on_event, "provision.reuse", lang=lang, key=key, digest=hit.digest)
+                _emit(on_event, "provision.reuse", lang=lang, key=key, digest=hit.digest)
                 return hit
             stage = self.store.stage()
             try:
@@ -211,7 +212,7 @@ class SealedProvider:
                 raise
             sealed = self.store.seal(stage, {"lang": lang, "key": key, **fields})
             _emit(
-                self.on_event,
+                on_event,
                 "provision.seal",
                 lang=lang,
                 key=key,

@@ -74,6 +74,7 @@ PROBE_NAMES = {
     "append_only",
     "ledger",
     "sandbox",
+    "provision",
     "toolchains",
     "builders",
     "worker",
@@ -474,7 +475,7 @@ class TestHealth:
     ) -> None:
         """The whole ``/health`` body, not one probe: a store that raises reaches ``db``,
         ``migrations``, ``append_only``, ``ledger`` and ``worker``; a probe module that
-        raises reaches ``sandbox``, ``toolchains`` and ``builders``. Each serves ONE fixed
+        raises reaches ``sandbox``, ``provision``, ``toolchains`` and ``builders``. Each serves ONE fixed
         sentence (``<probe> could not be read — see the API log, request id …``) with
         empty ``data``; the driver message — which for PostgreSQL carries host, user and
         DSN — appears nowhere in the body and once per probe in the log, with the id."""
@@ -491,6 +492,7 @@ class TestHealth:
 
         for fn in ("probe_docker", "probe_toolchains", "probe_builders"):
             monkeypatch.setattr(f"crb.server.routes.system.probes.{fn}", _boom)
+        monkeypatch.setattr("crb.server.routes.system.probe_provision", _boom)
         settings = make_settings(tmp_path, sandbox={"executor": "docker"})
         with caplog.at_level(logging.ERROR, logger="crb.observability.probes"):
             body = collect_health(_factory, settings, role="all", request_id="req-42")  # type: ignore[arg-type]
@@ -576,6 +578,27 @@ class TestRoleAwareSandboxProbe:
             others = [p["status"] for p in body["probes"] if p["name"] != "sandbox"]
             assert body["status"] == ("degraded" if "degraded" in others else "ok")
             assert "down" not in others
+
+    def test_the_provision_probe_is_skipped_when_off_and_on_the_api(
+        self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR-0019: the worker fetches, so an ``api`` process skips the provision probe; a
+        worker skips it while provisioning is off — and says what that means under docker."""
+        settings = make_settings(tmp_path)
+        for role, needle in (("api", "worker's"), ("worker", "CRB_PROVISION__ENABLED")):
+            monkeypatch.setenv("CRB_ROLE", role)
+            with TestClient(create_app(settings, factory)) as c:
+                body = c.get(f"{API_PREFIX}/health").json()
+            provision = _probe(body, "provision")
+            assert provision["status"] == "skipped", provision
+            assert needle in provision["detail"] and provision["data"]["enabled"] is False
+        from crb.server.routes.system import probe_provision_role
+
+        on = make_settings(tmp_path, provision={"enabled": True, "go_proxy": "file:///nowhere"})
+        monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
+        worker = probe_provision_role(on, "worker")
+        assert worker.status == "down" and "docker" in worker.detail
+        assert probe_provision_role(on, "api").status == "skipped"
 
     def test_worker_and_all_roles_probe_the_sandbox(
         self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
