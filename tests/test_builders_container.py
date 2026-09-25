@@ -474,6 +474,51 @@ def test_no_test_builds_builder_settings_on_the_hosts_uid() -> None:
     )
 
 
+_RATCHET_SAMPLE = '''\
+import os
+
+
+def test_reads_the_uid():
+    print(os.getuid())
+    BuilderContainerSettings(image="i")  # a read pins nothing
+
+
+def test_names_getuid_in_a_string():
+    assert "getuid" in "os.getuid"
+    BuilderContainerSettings(image="i")  # a string pins nothing
+
+
+def test_pins_the_uid(monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_by_its_dotted_name(monkeypatch):
+    monkeypatch.setattr("os.getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+'''
+
+
+def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a test that PINS the uid is independent of the host's: one that merely reads
+    ``os.getuid()`` (or names it in a string) and then builds settings on the default still
+    depends on the machine, and the ratchet must still see it (PR #51 review)."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    sample = tests_dir / "test_sample.py"
+    sample.write_text(_RATCHET_SAMPLE, encoding="utf-8")
+    monkeypatch.setitem(globals(), "TESTS_DIR", tests_dir)
+    unpinned = {
+        f"tests/test_sample.py:{i}"
+        for i, line in enumerate(_RATCHET_SAMPLE.splitlines(), start=1)
+        if "pins nothing" in line
+    }
+    assert len(unpinned) == 2
+    assert _settings_on_the_hosts_uid(sample) == unpinned
+
+
 def test_builder_run_args_hardening_and_secret_handling(tmp_path: Path) -> None:
     s = BuilderContainerSettings(image="crb-builder:local", user="10001:10001", memory="3g")
     env = {
