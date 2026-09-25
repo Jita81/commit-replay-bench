@@ -90,7 +90,6 @@ import stat
 import subprocess
 import tarfile
 import tempfile
-import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -98,6 +97,13 @@ from pathlib import Path
 from typing import Any
 
 from crb.builders import egress_proxy
+from crb.builders.sidecar import (
+    PROXY_ALIAS,
+    PROXY_PORT,
+    PROXY_SCRIPT_INSIDE,
+    PROXY_START_TIMEOUT_S,
+    EgressSidecar,
+)
 from crb.core.execution import (
     CancelFn,
     DockerExecutor,
@@ -111,13 +117,8 @@ from crb.core.workspace import HARNESS_SYMLINK, Workspace
 
 #: Where the sealed checkout is mounted inside the builder container.
 WORKDIR = "/work"
-#: The sidecar's name on the internal network and the port it listens on.
-PROXY_ALIAS = "proxy"
-PROXY_PORT = 3128
-#: Where the proxy script is mounted inside the sidecar.
-PROXY_SCRIPT_INSIDE = "/opt/crb/egress_proxy.py"
-#: Seconds to wait for the sidecar's ``READY`` line before failing closed.
-PROXY_START_TIMEOUT_S = 30.0
+#: The sidecar's alias and port, the script's mount point and the READY wait live with the
+#: sidecar (src/crb/builders/sidecar.py) and are re-exported here.
 DEFAULT_ALLOW_HOSTS: tuple[str, ...] = ("api.anthropic.com",)
 
 ENV_PREFIX = "CRB_BUILDER__"
@@ -786,10 +787,7 @@ class ContainerSession:
         self.network = f"crb-b-{self.id}" if settings.networked else "none"
         self.proxy_name = f"crb-proxy-{self.id}"
         self.build_name = f"crb-build-{self.id}"
-        self._script: Path | None = None
-        self._network_created = False
-        self._proxy_started = False
-        self.proxy_log = ""
+        self.sidecar: EgressSidecar | None = None
         #: Every stream :meth:`spawn` returned, for :meth:`unconfirmed_kills`.
         self.streams: list[DockerStream] = []
         #: Every executor :meth:`tools_executor` handed out (the ``openai_agent`` tool
@@ -844,99 +842,31 @@ class ContainerSession:
         return self
 
     def _start_proxy(self) -> None:
-        """Create the internal network, start the sidecar on the egress network, join it to
-        the internal one as ``proxy`` and wait for its ``READY`` line — fail closed at
-        every step."""
+        """Start the egress sidecar (src/crb/builders/sidecar.py): the internal network, the
+        proxy on the egress network joined to it as ``proxy``, its ``READY`` line — fail
+        closed at every step."""
         s = self.settings
-        script = self.checkout.root.parent / f"crb-egress-{self.id}.py"
-        script.write_bytes(Path(egress_proxy.__file__).read_bytes())
-        script.chmod(0o444)
-        self._script = script
-        self._must(
-            "network",
-            "create",
-            "--internal",
-            "--driver",
-            "bridge",
-            self.network,
-            what="builder network create failed",
+        self.sidecar = EgressSidecar(
+            self._docker,
+            network=self.network,
+            proxy_name=self.proxy_name,
+            allow_hosts=s.allow_hosts,
+            egress_network=s.egress_network,
+            proxy_image=s.proxy_image,
+            user=s.user,
+            script=self.checkout.root.parent / f"crb-egress-{self.id}.py",
         )
-        self._network_created = True
-        # a failed `docker run -d` can still leave a created container behind: mark
-        # it for removal BEFORE the attempt (rm -f on a missing name is harmless)
-        self._proxy_started = True
-        self._must(
-            "run",
-            "-d",
-            "--name",
-            self.proxy_name,
-            f"--network={s.egress_network}",
-            "--memory=256m",
-            "--cpus=1",
-            "--pids-limit=64",
-            f"--user={s.user}",
-            "--cap-drop=ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--read-only",
-            "--tmpfs",
-            "/tmp:rw,nosuid,nodev,size=16m",
-            "--mount",
-            f"type=bind,src={script},dst={PROXY_SCRIPT_INSIDE},readonly",
-            "--env",
-            "PYTHONUNBUFFERED=1",
-            s.proxy_image,
-            "python3",
-            PROXY_SCRIPT_INSIDE,
-            "--listen",
-            f"0.0.0.0:{PROXY_PORT}",  # inside the sidecar; reachable only on the internal network
-            "--allow",
-            ",".join(s.allow_hosts),
-            what="egress proxy start failed",
-        )
-        self._must(
-            "network",
-            "connect",
-            "--alias",
-            PROXY_ALIAS,
-            self.network,
-            self.proxy_name,
-            what="egress proxy could not join the builder network",
-        )
-        deadline = time.monotonic() + PROXY_START_TIMEOUT_S
-        while True:
-            logs = self._docker("logs", self.proxy_name, timeout=30)
-            text = (logs.stdout or "") + (logs.stderr or "")
-            if "READY " in text:
-                return
-            state = self._docker(
-                "inspect", "--format", "{{.State.Running}}", self.proxy_name, timeout=30
-            )
-            if state.stdout.strip() != "true" or time.monotonic() >= deadline:
-                raise SandboxUnavailable(
-                    "egress proxy unhealthy (no READY line): " + text.strip()[-400:]
-                )
-            time.sleep(0.2)
+        self.sidecar.start(what="builder")
+
+    @property
+    def proxy_log(self) -> str:
+        """The sidecar's log tail (its allow / deny decisions), kept after close."""
+        return self.sidecar.log if self.sidecar is not None else ""
 
     def close(self) -> None:
-        """Tear down; never raises (a failure to clean up is logged into ``proxy_log``)."""
-        if self._proxy_started:
-            with contextlib.suppress(OSError, subprocess.SubprocessError):
-                logs = self._docker("logs", self.proxy_name, timeout=30)
-                self.proxy_log = ((logs.stdout or "") + (logs.stderr or ""))[-4000:]
-            with contextlib.suppress(OSError, subprocess.SubprocessError):
-                self._docker("rm", "-f", self.proxy_name, timeout=60)
-            self._proxy_started = False
-        if self._network_created:
-            for _ in range(3):
-                with contextlib.suppress(OSError, subprocess.SubprocessError):
-                    if self._docker("network", "rm", self.network, timeout=60).returncode == 0:
-                        break
-                time.sleep(1.0)
-            self._network_created = False
-        if self._script is not None:
-            self._script.unlink(missing_ok=True)
-            self._script = None
+        """Tear down; never raises (the proxy's log tail stays readable as ``proxy_log``)."""
+        if self.sidecar is not None:
+            self.sidecar.close()
 
     def __exit__(self, *exc: object) -> None:
         self.close()
@@ -1067,6 +997,8 @@ __all__ = [
     "EXECUTOR_HOST",
     "PROXY_ALIAS",
     "PROXY_PORT",
+    "PROXY_SCRIPT_INSIDE",
+    "PROXY_START_TIMEOUT_S",
     "SEALABLE_BUILDERS",
     "WORKDIR",
     "BuilderContainerSettings",
