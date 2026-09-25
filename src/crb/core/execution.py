@@ -7,15 +7,20 @@ an :class:`Executor`. The executor decides *where* it runs:
 * :class:`LocalExecutor` — a plain subprocess on the host with a minimal, explicit
   environment (no inherited secrets) and process-group kill on timeout.
 * :class:`DockerExecutor` — ``docker run`` with the full hardening set:
-  ``--network=none``, read-only root and worktree, tmpfs scratch only where the
-  runner declared it (``exec`` on it only for a toolchain that declared
-  ``Command.exec_tmp``), ``--cap-drop=ALL``, ``no-new-privileges``, non-root user,
-  cpu / memory / pid caps. It **fails closed**: no docker binary, no daemon, a
-  root user, or a launch failure raise :class:`SandboxUnavailable` — we never
-  degrade to running untrusted repository tests in-process.
+  ``--network=none``, read-only root, the worktree read-only at ``/src`` and the tests
+  run in a throwaway, size-capped tmpfs copy of it at ``/work`` (ADR-0019 §7; the
+  ``readonly`` tree keeps the worktree itself at ``/work``), ``/tmp`` scratch
+  (``exec`` on it only for a toolchain that declared ``Command.exec_tmp``),
+  sealed dependency sets mounted read-only, ``--cap-drop=ALL``, ``no-new-privileges``,
+  non-root user, cpu / memory / pid caps. It **fails closed**: no docker binary, no
+  daemon, a root user, a mount outside the bundle store, or a launch failure raise
+  :class:`SandboxUnavailable` — we never degrade to running untrusted repository
+  tests in-process.
 
-Only a dep-install phase may ask for network (``Command.network=True``); the
-DockerExecutor still applies every other cap to it.
+No command gets a network under docker: ``Command.network=True`` is refused —
+dependencies are provisioned per task outside the test container (ADR-0019), never
+installed in the sandbox. A tree that cannot be copied (rc 97 with the marker) is an
+environment error on the result (``ExecResult.env_error``), never a verdict.
 
 Navigation
 ----------
@@ -29,8 +34,10 @@ What it does: Runs one command with a wall clock and a cancel token and reports 
               refuses — ``SandboxUnavailable`` — whenever the container cannot be provided
               exactly as hardened (no binary, no daemon, root user, forbidden mount, launch
               failure). It never falls back to the host.
-How:          ``Command`` (argv, root, writable paths, network flag) → ``build_argv`` (the
-              full ``docker run`` hardening set, asserted on by tests) → ``Popen`` with a
+How:          ``Command`` (argv, root, writable paths, sealed ``ro_mounts``) → ``build_argv``
+              (the full ``docker run`` hardening set, the worktree read-only at ``/src`` and a
+              throwaway tmpfs copy at ``/work`` — or the ``readonly`` tree — each bundle mount
+              re-validated, ``network=True`` refused; asserted on by tests) → ``Popen`` with a
               drain thread polled against the deadline and the cancel token → ``docker
               kill <name>`` / process-group kill → ``ExecResult``; ``make_executor`` picks
               the kind from configuration and fails closed on ``docker`` without settings.
@@ -53,7 +60,8 @@ How:          ``Command`` (argv, root, writable paths, network flag) → ``build
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0012-builder-in-a-sealed-container.md
-Works with:   src/crb/core/runners/base.py (builds the Command, parses the result),
+Works with:   src/crb/core/runners/base.py (builds the Command, binds the dependency set,
+              parses the result), src/crb/core/deps.py (``BundleMount`` and its re-validation),
               src/crb/builders/container.py (the sealed builder over ``DockerStream``; it
               reports the streams — and the tool-loop executors — whose kill went
               unconfirmed), src/crb/builders/adapter.py (hands each ``UnconfirmedKill`` to
@@ -159,6 +167,10 @@ class ExecResult:
     #: ``None`` — no kill was issued (or not a container).
     kill_confirmed: bool | None = None
     container: str = ""
+    #: The instrument failed around the command, not the command itself (``"tree_copy_failed"``:
+    #: the throwaway copy of the worktree could not be made). A reader must never turn this
+    #: into a verdict about the code under test.
+    env_error: str = ""
 
     @property
     def ok(self) -> bool:
@@ -283,6 +295,10 @@ class LocalExecutor:
     def describe(self) -> dict[str, Any]:
         return {"executor": self.name}
 
+    def posture_facts(self) -> dict[str, Any]:
+        """The host posture: the worktree itself, the host's network."""
+        return {"executor": self.name, "tree": "host", "network": "host"}
+
     @property
     def cancel_fn(self) -> CancelFn | None:
         """The run's cancel token, so a builder's own processes can follow it."""
@@ -357,6 +373,25 @@ class LocalExecutor:
 # ---------------------------------------------------------------------------
 
 
+TREE_COPY = "copy"
+TREE_READONLY = "readonly"
+
+#: The exit code and stderr marker of a failed tree copy (an environment error).
+TREE_COPY_RC = 97
+TREE_COPY_MARKER = "crb:tree-copy-failed"
+#: ``$0`` is the working directory relative to the tree; ``$@`` the command. The reading tar
+#: writes a marker on a fatal error (exit 2 or more) so a partial copy is never mistaken for
+#: a tree (``sh`` has no ``pipefail``); its exit 1 — "file changed as we read it", which a
+#: bind mount's directory times provoke under colima — is a warning, not a failure.
+_COPY_SCRIPT = (
+    "{{ tar -C /src --warning=no-file-changed {excludes}-cf - .; "
+    "[ $? -le 1 ] || : > /tmp/.crb-copy-failed; }} | tar -C {work} -xf - "
+    "&& [ ! -e /tmp/.crb-copy-failed ] "
+    "|| {{ echo " + TREE_COPY_MARKER + " >&2; exit " + str(TREE_COPY_RC) + "; }}; "
+    'cd "{work}/$0" && exec "$@"'
+)
+
+
 @dataclass(frozen=True)
 class DockerSettings:
     """The sandbox's shape. Construction itself fails closed: no image, a root user or
@@ -373,10 +408,20 @@ class DockerSettings:
     #: ``node_modules`` or a Go module cache. Never a docker socket, never $HOME.
     extra_ro_mounts: Mapping[str, str] = field(default_factory=dict)
     docker_binary: str = ""
+    #: ``copy`` (default): the worktree is mounted read-only at ``/src`` and every command runs
+    #: in a throwaway tmpfs copy at ``/work`` of at most ``work_size`` — a test may write its
+    #: own tree (the D5 finding) and nothing reaches the host. ``readonly``: today's shape,
+    #: the worktree itself read-only at ``/work`` (a different posture, qualified separately).
+    tree: str = TREE_COPY
+    work_size: str = "1g"
 
     def __post_init__(self) -> None:
         if not self.image:
             raise SandboxUnavailable("docker sandbox requested without an image")
+        if self.tree not in {TREE_COPY, TREE_READONLY}:
+            raise SandboxUnavailable(
+                f"sandbox tree must be {TREE_COPY!r} or {TREE_READONLY!r}, got {self.tree!r}"
+            )
         uid = self.user.split(":", 1)[0].strip().lower()
         if uid in {"", "0", "root"}:
             raise SandboxUnavailable(
@@ -473,16 +518,31 @@ class DockerExecutor:
             "network": "none",
         }
 
+    def posture_facts(self) -> dict[str, Any]:
+        """What about this sandbox can change a test's outcome (ADR-0019 §1): the stamp's
+        fields plus how the tree behaves — ``tree`` and, for a copy, ``work_size``."""
+        s = self.settings
+        facts = {**self.describe(), "tmp_size": s.tmp_size, "tree": s.tree}
+        if s.tree == TREE_COPY:
+            facts["work_size"] = s.work_size
+        return facts
+
     def build_argv(self, cmd: Command) -> list[str]:
         """The hardened ``docker run`` argv. Tests assert on this directly."""
         s = self.settings
+        if cmd.network:
+            raise SandboxUnavailable(
+                "a command asked for a network in the sandbox: dependencies are provisioned "
+                "per task, never installed in the sandbox (ADR-0019)"
+            )
+        copy = s.tree == TREE_COPY and "." not in cmd.writable_paths
         argv: list[str] = [
             self.docker,
             "run",
             "--rm",
             # never a registry pull at run time: an absent image is exit 125 → SandboxUnavailable
             "--pull=never",
-            "--network=bridge" if cmd.network else "--network=none",
+            "--network=none",
             f"--memory={s.memory}",
             f"--cpus={s.cpus}",
             f"--pids-limit={s.pids_limit}",
@@ -496,9 +556,24 @@ class DockerExecutor:
             # the binaries it builds there (Go) declares Command.exec_tmp; nosuid/nodev stay.
             f"/tmp:rw,{'exec' if cmd.exec_tmp else 'noexec'},nosuid,nodev,size={s.tmp_size}",
         ]
-        # the worktree is read-only inside: the builder edits it BEFORE grading, the
-        # tests only read it; a test that writes into the tree fails, never mutates it
-        argv += ["--mount", f"type=bind,src={cmd.root},dst={s.workdir},readonly"]
+        if copy:
+            # the worktree is read-only at /src and the command runs in a throwaway copy of
+            # it: a size-capped tmpfs at the workdir that dies with the container. exec, as
+            # the tree always was to its own tests (scripts, built binaries); nosuid, nodev.
+            # The tmpfs is OWNED by the container's user (uid/gid, mode 0700): tar restores
+            # the tree's own modes and times onto it, and nobody else in the container can
+            # write it.
+            uid, _, gid = s.user.partition(":")
+            argv += ["--mount", f"type=bind,src={cmd.root},dst=/src,readonly"]
+            argv += [
+                "--tmpfs",
+                f"{s.workdir}:rw,exec,nosuid,nodev,size={s.work_size},"
+                f"uid={uid},gid={gid or uid},mode=0700",
+            ]
+        else:
+            # the readonly tree: the worktree itself read-only at the workdir; a test that
+            # writes into it fails, never mutates it
+            argv += ["--mount", f"type=bind,src={cmd.root},dst={s.workdir},readonly"]
         # Writable paths are bind-mounted rw from the (disposable) worktree so the
         # runner can parse reports the toolchain writes there (surefire XML, …). The
         # container runs as `user` (nobody by default), which owns nothing on the host,
@@ -520,6 +595,14 @@ class DockerExecutor:
             argv += ["--env", f"{k}={v}"]
         argv += ["--env", "HOME=/tmp", "--env", "CI=1", "--env", "NO_COLOR=1"]
         cwd_inside = s.workdir if cmd.cwd_rel in {".", ""} else f"{s.workdir}/{cmd.cwd_rel}"
+        if copy:
+            excludes = "".join(
+                f"--exclude=./{rel.strip('/')} " for rel in ("node_modules", *cmd.writable_paths)
+            )
+            script = _COPY_SCRIPT.format(excludes=excludes, work=s.workdir)
+            argv += ["--workdir", s.workdir, f"--stop-timeout={max(1, int(cmd.timeout))}", s.image]
+            argv += ["/bin/sh", "-c", script, cmd.cwd_rel or ".", *cmd.argv]
+            return argv
         argv += ["--workdir", cwd_inside, f"--stop-timeout={max(1, int(cmd.timeout))}", s.image]
         argv += list(cmd.argv)
         return argv
@@ -580,6 +663,7 @@ class DockerExecutor:
             cancelled,
             kill_confirmed=kill_confirmed,
             container=name,
+            env_error=_env_error(rc, box.get("err", "")),
         )
 
     def _kill(self, name: str, proc: subprocess.Popen[str]) -> bool:
@@ -702,8 +786,19 @@ class DockerExecutor:
                 f"docker failed to launch the container (exit 125): {(r.stderr or r.stdout).strip()[:400]}"
             )
         return ExecResult(
-            r.returncode, r.stdout or "", r.stderr or "", False, time.monotonic() - started
+            r.returncode,
+            r.stdout or "",
+            r.stderr or "",
+            False,
+            time.monotonic() - started,
+            env_error=_env_error(r.returncode, r.stderr or ""),
         )
+
+
+def _env_error(rc: int, stderr: str) -> str:
+    """``"tree_copy_failed"`` when the copy of the worktree failed (rc 97 WITH the marker —
+    a test that happens to exit 97 is not one); else ``""``."""
+    return "tree_copy_failed" if rc == TREE_COPY_RC and TREE_COPY_MARKER in stderr else ""
 
 
 #: The most one ``docker inspect`` may take; :func:`wait_container_stopped` caps each
@@ -1016,6 +1111,10 @@ __all__: Sequence[str] = (
     "DOCKER_KILL_TIMEOUT_S",
     "KILL_CONFIRM_S",
     "KILL_CONFIRM_STEP_S",
+    "TREE_COPY",
+    "TREE_COPY_MARKER",
+    "TREE_COPY_RC",
+    "TREE_READONLY",
     "Command",
     "DockerExecutor",
     "DockerSettings",

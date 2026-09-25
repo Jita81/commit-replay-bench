@@ -131,6 +131,10 @@ class TestRun:
     duration_s: float = 0.0
     parse_error: str = ""
     services: tuple[ServiceRecord, ...] = ()
+    #: The instrument failed around the tests (``tree_copy_failed``: the throwaway copy of
+    #: the worktree could not be made). Such a run is red but it is NOT a verdict about the
+    #: code: no failing id is attributed and a reader must treat it as the environment's.
+    env_error: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "services", tuple(self.services))
@@ -159,6 +163,8 @@ class TestRun:
         # stay byte-identical (content-addressed hashes are part of the evidence).
         if self.services:
             d["services"] = [s.to_dict() for s in self.services]
+        if self.env_error:  # present only when set: existing packs stay byte-identical
+            d["env_error"] = self.env_error
         return d
 
 
@@ -517,6 +523,18 @@ class BaseRunner:
         if service_env:
             cmd = _with_env(cmd, service_env)
         result = executor.run(cmd)
+        if result.env_error:
+            # the instrument failed (the tree could not be copied): red, never attributed
+            return TestRun(
+                result.returncode or 1,
+                frozenset(),
+                tail_of(result.combined),
+                False,
+                result.duration_s,
+                f"environment: {result.env_error}",
+                records,
+                env_error=result.env_error,
+            )
         if result.timed_out:
             # 124 is coreutils `timeout`'s exit code; the grader reads timed_out, not the rc.
             return TestRun(

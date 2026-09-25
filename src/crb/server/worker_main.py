@@ -93,6 +93,10 @@ HOME_ENV = "CRB_HOME"
 #: compose / Helm worker silently ran ``local`` while ``/settings`` reported ``docker``.
 SANDBOX_EXECUTOR_ENV = "CRB_SANDBOX__EXECUTOR"
 SANDBOX_IMAGE_ENV = "CRB_SANDBOX__IMAGE"
+#: ADR-0019 §7: ``copy`` (default) runs tests in a throwaway copy of the tree; ``readonly``
+#: keeps the worktree itself read-only (a different posture). ``WORK_SIZE`` caps the copy.
+SANDBOX_TREE_ENV = "CRB_SANDBOX__TREE"
+SANDBOX_WORK_SIZE_ENV = "CRB_SANDBOX__WORK_SIZE"
 EXECUTOR_ENV = "CRB_EXECUTOR"
 IMAGE_ENV = "CRB_SANDBOX_IMAGE"
 WORKER_ID_ENV = "CRB_WORKER_ID"
@@ -179,7 +183,9 @@ def settings_from_args(
         .lower()
     )
     image = (args.image or e.get(SANDBOX_IMAGE_ENV) or e.get(IMAGE_ENV) or "").strip()
-    docker = DockerSettings(image=image) if image else None
+    tree = (e.get(SANDBOX_TREE_ENV) or "copy").strip().lower()
+    work_size = (e.get(SANDBOX_WORK_SIZE_ENV) or "1g").strip()
+    docker = DockerSettings(image=image, tree=tree, work_size=work_size) if image else None
     kinds = tuple(k.strip() for k in str(args.kinds).split(",") if k.strip())
     unknown = [k for k in kinds if k not in RUN_KINDS]
     if unknown:

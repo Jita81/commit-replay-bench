@@ -8,7 +8,8 @@ already present (CI: the reference image it just built from
 
 * ``qualify`` + ``grade`` run and parse under ``--network=none`` (gold → clean);
 * a test that opens ``https://example.com`` FAILS (the network is truly off);
-* a test that writes ``/work/hacked.txt`` FAILS (the worktree is read-only);
+* the worktree is read-only at ``/src``, and a test that writes ``/work/hacked.txt``
+  writes a throwaway copy — it passes and nothing reaches the host (ADR-0019 §7);
 * the worktree on the host is byte-identical after a sandboxed run;
 * a cancel and the wall clock on ``DockerExecutor.run`` (the non-stream path the grade
   stage uses) kill the CONTAINER, confirmed by the daemon, and ``docker ps`` no longer
@@ -28,7 +29,8 @@ What it is:   The sandbox suite — the instrument inside ``DockerExecutor`` aga
               and proof that the walls hold.
 What it does: Pins that the executor is hardened, that ``qualify`` and ``grade`` run and parse
               under ``--network=none`` (gold → clean), that a test opening ``https://example.com``
-              FAILS, that a test writing ``/work/hacked.txt`` FAILS (read-only worktree), that
+              FAILS, that the worktree is read-only at ``/src`` and a test writing
+              ``/work/hacked.txt`` writes only a throwaway copy, that
               the host worktree is byte-identical after a sandboxed run, and that a cancel /
               the wall clock on ``run()`` ends in a daemon-confirmed ``docker kill`` of the
               container (``kill_confirmed`` True, nothing reported, ``docker ps`` empty).
@@ -235,14 +237,23 @@ def test_network_is_off(trial, task, runner, executor):
     assert "URLError" in run.tail, run.tail
 
 
-def test_worktree_is_read_only(trial, task, runner, executor):
+def test_worktree_is_read_only_and_a_test_writes_only_a_throwaway_copy(
+    trial, task, runner, executor
+):
+    """ADR-0019 §7: the worktree is read-only at ``/src``; a test that writes into ``/work``
+    writes a throwaway copy (so it PASSES, as it does on the host), and nothing it writes
+    reaches the host tree."""
     trial.overlay_sources(task.src_files)
     (trial.root / pyrepo_min.WRITE_TEST).write_text(pyrepo_min.WRITE_TEST_SRC, encoding="utf-8")
+    before = _snapshot(trial.root)
     run = runner.run(executor, trial.root, (pyrepo_min.WRITE_TEST,))
-    assert run.red and not run.timed_out
-    assert run.failing == frozenset({pyrepo_min.WRITE_TEST_ID})
-    assert "Read-only file system" in run.tail, run.tail
+    assert run.green, run.tail
     assert not (trial.root / "hacked.txt").exists()
+    assert _snapshot(trial.root) == before
+    src = executor.run(
+        Command(("sh", "-c", "echo owned > /src/hacked.txt"), trial.root, timeout=60)
+    )
+    assert not src.ok and "Read-only file system" in src.combined, src.combined
 
 
 def test_host_worktree_unchanged_after_sandboxed_run(trial, task, config, runner, executor):

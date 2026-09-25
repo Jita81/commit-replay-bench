@@ -167,6 +167,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -2496,17 +2497,8 @@ def docker_settings_for(
         return base
     if base is None:
         return DockerSettings(image=image)
-    return DockerSettings(
-        image=image,
-        memory=base.memory,
-        cpus=base.cpus,
-        pids_limit=base.pids_limit,
-        user=base.user,
-        workdir=base.workdir,
-        tmp_size=base.tmp_size,
-        extra_ro_mounts=dict(base.extra_ro_mounts),
-        docker_binary=base.docker_binary,
-    )
+    # every other field — caps, user, the tree mode and its size (ADR-0019) — is the worker's
+    return dataclass_replace(base, image=image)
 
 
 def _oracle_counts(scores: Sequence[CommitOracleScore], *, total: int) -> dict[str, Any]:
