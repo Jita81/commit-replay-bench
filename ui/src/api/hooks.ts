@@ -81,6 +81,7 @@ import type {
   Principal,
   RepoCreateRequest,
   RepoDetail,
+  RepoPool,
   RepoProfile,
   RepoSummary,
   Role,
@@ -118,6 +119,7 @@ export const keys = {
   repos: ['repos'] as const,
   repo: (name: string) => ['repos', name] as const,
   repoProfile: (name: string) => ['repos', name, 'profile'] as const,
+  repoPool: (name: string) => ['repos', name, 'pool'] as const,
   repoTasks: (name: string, p?: PageParams) => ['repos', name, 'tasks', p ?? {}] as const,
   runs: (p?: RunListParams) => ['runs', p ?? {}] as const,
   run: (id: string) => ['runs', id] as const,
@@ -277,6 +279,16 @@ export function useRepoProfile(name: string): UseQueryResult<RepoProfile, ApiErr
   return useQuery({
     queryKey: keys.repoProfile(name),
     queryFn: () => api<RepoProfile>(`/repos/${enc(name)}/profile`),
+    enabled: name.length > 0,
+    retry: false,
+  })
+}
+
+/** `GET /repos/{name}/pool` — the mined tasks' date range and the share of history it covers. */
+export function useRepoPool(name: string): UseQueryResult<RepoPool, ApiError> {
+  return useQuery({
+    queryKey: keys.repoPool(name),
+    queryFn: () => api<RepoPool>(`/repos/${enc(name)}/pool`),
     enabled: name.length > 0,
     retry: false,
   })

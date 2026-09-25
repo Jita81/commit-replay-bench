@@ -22,7 +22,9 @@ What it does: Validates every config through ``RepoConfig.from_dict`` (an invali
               never stored), records each change as a ``system/repo.updated`` event
               carrying the redacted field diff, enqueues a probe run, computes and caches
               the change profile (measurement INPUT, never a verdict), and pages mined
-              tasks. Also the home of ``get_repo_or_404`` and ``cached_profile`` that
+              tasks; serves the pool window (the mined tasks' date range and the share of
+              the clone's non-merge history since the oldest — the miner's recency bias,
+              shown). Also the home of ``get_repo_or_404`` and ``cached_profile`` that
               other route modules import.
 How:          ``_validated_config`` → ``Repo`` row + ``append_system_event`` on the repo's
               system trace; ``compute_profile`` walks the clone with ``profile_repo`` and
@@ -79,6 +81,7 @@ from crb.server.schemas import (
     RepoCreateRequest,
     RepoDetail,
     RepoLastRun,
+    RepoPool,
     RepoProbe,
     RepoProfile,
     RepoSummary,
@@ -501,6 +504,76 @@ def get_profile(
         repo.config_json = {**dict(repo.config_json or {}), PROFILE_KEY: cached}
         db.commit()
     return _profile_out(name, cached)
+
+
+def _epoch(iso: str) -> float | None:
+    """An ISO-8601 author date as epoch seconds, or ``None`` when it does not parse."""
+    try:
+        d = _dt.datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=_dt.UTC)
+    return d.timestamp()
+
+
+def pool_window(session: Session, repo: Repo) -> RepoPool:
+    """The mined tasks' date range, and the share of the clone's non-merge history since the
+    oldest of them (``None`` with the reason when the clone cannot be read here)."""
+    dated = sorted(
+        (ts, iso)
+        for (iso,) in session.execute(select(Task.authored).where(Task.repo == repo.name))
+        if iso and (ts := _epoch(iso)) is not None
+    )
+    n_tasks = int(
+        session.execute(select(func.count(Task.task_id)).where(Task.repo == repo.name)).scalar_one()
+    )
+    oldest = dated[0] if dated else None
+    history: list[int] | None = None
+    unavailable = ""
+    path = _config_of(repo).path or repo.clone_path
+    if not path:
+        unavailable = "no_clone_path"
+    else:
+        git = GitRepo(Path(path), timeout=60)
+        if not Path(path).is_dir() or not git.is_repo():
+            unavailable = "clone_unavailable"
+        else:
+            try:
+                out = git.run("log", "--no-merges", "--format=%at", "HEAD", check=True).stdout
+                history = [int(x) for x in out.split()]
+            except (GitError, ValueError):
+                unavailable = "git_failed"
+    window = (
+        sum(1 for ts in history if ts >= oldest[0])
+        if history is not None and oldest is not None
+        else None
+    )
+    return RepoPool(
+        repo=repo.name,
+        n_tasks=n_tasks,
+        oldest_authored=oldest[1] if oldest else None,
+        newest_authored=dated[-1][1] if dated else None,
+        history_commits=len(history) if history is not None else None,
+        history_first_authored=(
+            _dt.datetime.fromtimestamp(min(history), _dt.UTC).isoformat() if history else None
+        ),
+        window_commits=window,
+        share=round(window / len(history), 4) if window is not None and history else None,
+        history_unavailable=unavailable,
+    )
+
+
+@router.get(
+    "/repos/{name}/pool",
+    response_model=RepoPool,
+    responses={401: _ERR, 404: _ERR},
+    summary="The mined tasks' date range and the share of non-merge history it covers",
+)
+def get_pool(name: str, viewer: ViewerDep, db: DbDep) -> RepoPool:
+    # A read of the clone's history on each request (one `git log`), not cached: the share
+    # changes as the clone moves, and a stale share would understate the recency bias.
+    return pool_window(db, get_repo_or_404(db, name))
 
 
 @router.get(

@@ -26,7 +26,8 @@
  *               `banner.results.*`, `button.results.*`, `pill.results.decision_kind`), so
  *               what a number counts and what its value means opens on hover, focus and tap.
  * How:          `useRepoParam({ defaultToLatest })` + `RepoPicker`; `useCapabilityMap`
- *               (summary + cells), `useOracleControls`, `useOracle`, `useSignoffs`,
+ *               (summary + cells), `useOracleControls`, `useOracle`, `useRepoPool` (where
+ *               the tasks come from — the miner's recency bias, shown), `useSignoffs`,
  *               `useFactoryTasks` → `decisionsFor` for the "waiting on a person" panel;
  *               `useRepo` → `last_run` + `useRun` (polling) for the in-flight banner;
  *               `StatTile`s for the headline; links to the existing detail screens.
@@ -47,9 +48,9 @@
 
 import { useMemo } from 'react'
 import { Link } from 'react-router'
-import { useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRun, useSignoffs } from '../../api/hooks'
+import { useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
 import { isApiError } from '../../api/client'
-import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell } from '../../api/types'
+import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type RepoPool } from '../../api/types'
 import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
@@ -82,6 +83,35 @@ function pct(x: number): string {
   return `${(x * 100).toFixed(0)}%`
 }
 
+/** An author date as a day, in UTC so the range reads the same in every time zone: "1 Aug 2026". */
+function day(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
+
+/** Why the share of history is unknown, in the words a reader can act on. */
+const POOL_UNAVAILABLE: Record<Exclude<RepoPool['history_unavailable'], ''>, string> = {
+  no_clone_path: 'no clone of the repository on this host, so the share of its history is not known',
+  clone_unavailable: 'the clone path is not a git repository on this host, so the share is not known',
+  git_failed: 'git could not read the clone’s history, so the share is not known',
+}
+
+/** The pool-window tile's value, method line and footer (assessment 2026-09-25, B4). */
+function poolTile(pool: RepoPool | undefined, pending: boolean): { value: string; apparatus: string; footer: string } {
+  if (!pool) return { value: pending ? '…' : 'unknown', apparatus: 'the mined tasks’ author dates against the clone’s history', footer: '' }
+  if (pool.n_tasks === 0 || !pool.oldest_authored) return { value: 'no tasks', apparatus: 'nothing mined yet', footer: 'mine the repository to see where its tasks come from' }
+  const range = `authored ${day(pool.oldest_authored)} – ${day(pool.newest_authored)}`
+  if (pool.share === null || pool.history_unavailable) {
+    return { value: 'not known', apparatus: range, footer: pool.history_unavailable ? POOL_UNAVAILABLE[pool.history_unavailable] : '' }
+  }
+  return {
+    value: pct(pool.share),
+    apparatus: `${range} · the newest ${pool.window_commits} of ${pool.history_commits} non-merge commits`,
+    footer: 'older work, merges and changes made without a test are not in the pool',
+  }
+}
+
 /** The controls report's own stamp: `apparatus 2.2 · controls.v3`; the keys the report writes (crb.core.oracle.controls). */
 function controlsApparatus(stamp: Record<string, unknown>): string {
   const v = typeof stamp.apparatus_version === 'string' ? stamp.apparatus_version : '—'
@@ -95,6 +125,7 @@ export function ResultsPage() {
   const map = useCapabilityMap(repo, ['capability_class', 'size'])
   const controls = useOracleControls(repo)
   const oracle = useOracle(repo)
+  const pool = useRepoPool(repo)
   const signoffs = useSignoffs(repo)
   const tasks = useFactoryTasks(repo)
   const repoDetail = useRepo(repo)
@@ -144,6 +175,7 @@ export function ResultsPage() {
   const oracleMean = oracle.data && oracle.data.tasks.length > 0 ? oracle.data.tasks.reduce((a, t) => a + (t.strength ?? 0), 0) / oracle.data.tasks.length : null
   // the bar is the policy in force, never a constant; the apparatus is the report's own
   const oracleBar = map.data ? map.data.policy.min_oracle_strength : null
+  const poolView = poolTile(pool.data, pool.isPending)
   const oracleApparatus = oracle.data ? `apparatus ${oracle.data.apparatus_versions.join(', ') || '—'} · mean of per-task mutation scores${oracleBar !== null ? ` · ≥ ${pct(oracleBar)} per cell to deliver` : ''}` : 'one mutation score per task, from the oracle run'
 
   return (
@@ -170,7 +202,7 @@ export function ResultsPage() {
             </NotificationBanner>
           )}
           <Card title="Is the instrument trustworthy here?" eyebrow="the gates every number below stands under">
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatTile
                 label="Negative controls"
                 value={verdict ? verdict.state : controlsNotRun ? 'not run' : controls.isPending ? '…' : 'unknown'}
@@ -191,6 +223,16 @@ export function ResultsPage() {
                 hint="stat.results.oracle_strength"
                 footer="no interval: a mean of per-task scores, not a rate"
                 data-testid="tile-oracle-strength"
+              />
+              <StatTile
+                label="Where the tasks come from"
+                value={poolView.value}
+                n={pool.data?.n_tasks ?? null}
+                apparatus={poolView.apparatus}
+                tone="muted"
+                hint="stat.results.pool_window"
+                footer={poolView.footer || undefined}
+                data-testid="tile-pool-window"
               />
               <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />
             </div>

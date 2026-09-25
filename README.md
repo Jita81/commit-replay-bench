@@ -137,7 +137,18 @@ In **neither** mode does the builder see the regression belt or the grader. See
 ## The instrument in six steps
 
 1. **Mine** — walk the repository's history for commits that couple a source change with a
-   test change within the pool's size caps (`standard` / `hard`).
+   test change within the pool's size caps (`standard` / `hard`). The selection rule, by
+   default: take the newest 3,000 non-merge commits from `HEAD`, keep those that touch both
+   source and test files within the caps (the standard pool: 1–3 source files and at most six
+   files in all, more on the JVM), and stop once 25 tasks are found or 1,000 candidates have
+   been examined (`mining` in the repository's configuration moves each number). So the pool
+   leaves out merge and root commits, anything older than that window, changes made without a
+   test, and changes larger than the caps: a rate from it describes recent, tested, small work
+   in that repository, not its history as a whole **[hypothesis — that this recency and
+   tested-commits-only selection makes a pool easier than the repository's other work is
+   untested; a pool mined from an older window, graded under the same builder and budget,
+   would confirm or refute it. The Results screen shows each pool's date range and the share
+   of history it covers]**.
 2. **Prep** — create a disposable git worktree at the commit's **parent**; overlay the
    commit's test files.
 3. **RED / baseline / GOLD check** — the target tests must **fail** at the parent (and not

@@ -241,7 +241,7 @@ describe('ResultsPage', () => {
   // so the oracle card says which stretch of history the tasks were drawn from, and how much
   const POOL = { repo: 'alpha', n_tasks: 8, oldest_authored: '2026-08-01T12:00:00+00:00', newest_authored: '2026-08-08T12:00:00+00:00', history_commits: 5, history_first_authored: '2026-06-01T12:00:00+00:00', window_commits: 3, share: 0.6, history_unavailable: '' }
 
-  it('the oracle card shows the pool\'s date range and the share of history it covers, hinted', async () => {
+  it("the oracle card shows the pool's date range and the share of history it covers, hinted", async () => {
     mockApi({ ...ROUTES, 'GET /repos/alpha/pool': POOL })
     renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     const tile = await screen.findByTestId('tile-pool-window')
