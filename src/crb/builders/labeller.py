@@ -45,7 +45,8 @@ Works with:   src/crb/core/classify.py (the protocol, the prompt, the parser and
               transport), src/crb/builders/claude_code.py (the CLI's auth/env, reused
               verbatim), src/crb/builders/budget.py (metering), src/crb/server/worker.py
               (the ``label`` run kind)
-Tested by:    tests/test_builders_labeller.py, tests/test_worker_label.py
+Tested by:    tests/test_builders_labeller.py, tests/test_worker_label.py,
+              tests/test_builders_endpoint.py (the labeller id names the endpoint it calls)
 Touch when:   never for a new repository (a label run is started per repo from the UI or
               ``crb tasks label`` — docs/OPERATOR.md); a new class in the vocabulary is a
               change to src/crb/core/taxonomy.py, not here; a new transport implements
@@ -84,6 +85,7 @@ from crb.builders.openai_client import (
     EndpointConfig,
     MissingCredential,
     make_chat,
+    resolve_endpoint,
 )
 from crb.core.classify import (
     IntentLabel,
@@ -190,7 +192,7 @@ class _Usage:
 
 
 class OpenAILabeller:
-    """Label through an OpenAI-compatible chat endpoint (Cerebras by default).
+    """Label through an OpenAI-compatible chat endpoint (the configured one; Cerebras if none).
 
     ``chat_fn`` is the test seam (``messages -> str | ChatReply``); without it the
     live client is built lazily on first use from ``endpoint`` (default:
@@ -214,8 +216,11 @@ class OpenAILabeller:
         if not model.strip():
             raise ValueError("an OpenAI-compatible labeller needs a model")
         self.model = model.strip()
-        self.endpoint = endpoint
-        self.provider = provider or (endpoint.provider if endpoint else "cerebras")
+        # the configured endpoint when none is passed, and the provider it IS: the
+        # labeller id ``…@provider`` never names a provider it does not call
+        self.endpoint, self.provider = resolve_endpoint(
+            endpoint, provider, injected=chat_fn is not None
+        )
         self._chat_fn = chat_fn
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -241,9 +246,8 @@ class OpenAILabeller:
     def _chat(self) -> ChatFn:
         """The chat callable, built lazily so construction needs no credential."""
         if self._chat_fn is None:
-            ep = self.endpoint or EndpointConfig.from_env()
             self._chat_fn = make_chat(
-                self.model, ep, max_tokens=self.max_tokens, temperature=self.temperature
+                self.model, self.endpoint, max_tokens=self.max_tokens, temperature=self.temperature
             ).text
         return self._chat_fn
 

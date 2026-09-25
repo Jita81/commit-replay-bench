@@ -560,6 +560,39 @@ schedule — the token is long-lived):
    evaluation is over — `auth: cli` is a developer/evaluation mode; production runs use
    `ANTHROPIC_API_KEY` on the worker and never read the file.
 
+#### 3.0.2 Pointing the OpenAI-compatible builders at your own endpoint
+
+`editblock`, `openai_agent` and the intent labeller all call one endpoint: the one the
+**worker's** environment names. With nothing set it is Cerebras (`CEREBRAS_API_KEY`). To use
+a self-hosted model (vLLM, llama-server) or another OpenAI-compatible provider:
+
+```bash
+export CRB_OPENAI_BASE_URL=http://gpu-box.internal:8080/v1
+export CRB_OPENAI_KEY_ENV=GPU_BOX_KEY            # the NAME of the variable holding the key
+export CRB_OPENAI_TIMEOUT_S=900                  # default 120; 1–3600
+export CRB_OPENAI_MAX_RETRIES=1                  # default 4; 0–10 — each retry regenerates
+export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
+```
+
+- **What a row says.** The provider on every row, cell and label is the endpoint's own —
+  `cerebras`, `azure`, or the URL's host (`gpu-box.internal:8080`) — so a self-hosted model is
+  its own cell, never pooled with Cerebras. Write rungs as `openai_agent:qwen3@gpu-box.internal:8080`
+  (the `@` form: a host carries a `:`) or leave the provider empty and it is filled in.
+- **What it refuses.** A rung that names a provider the endpoint is not
+  (`openai_agent:qwen3@cerebras` while the URL is your server) stops the attempt as
+  `builder unavailable: ProviderMismatch: …`, with the fix in the sentence, before any call is
+  made. A tuning value that is out of range or not a number stops it the same way and names
+  the variable.
+- **Timeouts.** A model that generates slowly needs a timeout longer than one reply takes:
+  at 15 tokens a second a 4,000-token reply takes about 270 s **[hypothesis — arithmetic from
+  a stated rate, not measured on a model]**. Keep retries low — a timed-out call is retried
+  from the start, so four retries can cost five full generations.
+- **Proof.** The request lands on the configured URL, the row carries its host, a mismatched
+  rung is refused and the timeout and retry count are the ones set **[measured — n = 17 test
+  cases in `tests/test_builders_endpoint.py` against a fake OpenAI-compatible server on
+  127.0.0.1, no model called; each fix reverted in turn made them fail; apparatus 2.2]**.
+  The factory's test author (§10) does not yet stamp the endpoint's provider **[gap — G-611]**.
+
 What you will see (the run's live log on `/runs/<id>`, and `crb` on the terminal):
 `mine.candidate` → `mine.red` / `mine.skip` → `mine.gold` → `build.*` → `grade.belt` (five
 per task with belt 5, `repo_lint_clean`; four on a repository without a lint plan) →
