@@ -219,6 +219,18 @@ class TestDeploymentDefaults:
         assert re.search(r"CRB_BUILDER__EXECUTOR: \$\{CRB_BUILDER__EXECUTOR:-docker\}", worker)
         assert re.search(r"CRB_BUILDER__IMAGE: \$\{CRB_BUILDER__IMAGE:-\}", worker)
 
+    def test_compose_gives_the_api_and_the_worker_one_builder_posture(self) -> None:
+        """The API serves the posture, the worker runs the builds: compose must hand both the
+        same ``CRB_BUILDER__EXECUTOR`` expression, or in ``dev`` (say) /health reads ``host``
+        while the worker builds in ``docker`` — the same drift as the Helm chart's."""
+        import yaml
+
+        doc = yaml.safe_load((ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8"))
+        api = doc["services"]["api"]["environment"]
+        worker = doc["services"]["worker"]["environment"]
+        for key in ("CRB_BUILDER__EXECUTOR", "CRB_BUILDER__IMAGE"):
+            assert api.get(key) is not None and api.get(key) == worker.get(key), key
+
     def test_helm_gives_the_worker_the_sealed_builder(self) -> None:
         values = (ROOT / "deploy" / "helm" / "crb" / "values.yaml").read_text(encoding="utf-8")
         worker = values.split("\nworker:\n", 1)[1]
