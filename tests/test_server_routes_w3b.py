@@ -208,6 +208,9 @@ class TestClaudeCodeModelDefault:
         self, env: Env, jobs: list[Run], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("CRB_CLAUDE_CODE_MODEL", raising=False)
+        # the default auth is api_key, and POST /runs refuses one with no key (P-003): this
+        # case is about the model default, so the key is present — a placeholder, never real
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-placeholder-not-a-key")
         r = env.post("/runs", json={"repo": ALPHA, "kind": "replay", "builder": "claude_code"})
         assert r.status_code == 201, r.text
         assert r.json()["model"] == "claude-sonnet-5" and jobs[-1].model == "claude-sonnet-5"

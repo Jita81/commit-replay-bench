@@ -8,7 +8,7 @@ children: [dod.journey.measure, dod.journey.read-the-map-and-decide]
 persons: [operator, viewer, approver, admin]
 owner: server
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Measure — mine / replay / blind → ledger → capability map & routing
@@ -46,6 +46,7 @@ UX or source-only change.
 | measure.handoff.13 | HANDOFF | The next streams start from this one's output with nothing retyped: the Decisions inbox derives its rows from the map, and the factory's route gate reads the same map once per item, excluding the run's own rows | `code:ui/src/screens/Decisions/decisions.ts::decisionsFor` · `code:src/crb/server/worker.py::_route_lookup` · `test:tests/test_factory_loop.py::test_route_is_read_once_per_item_at_readiness_before_any_build` | met | |
 | measure.measure.14 | MEASURE | The product shows this stream's own numbers: elapsed time and money spent from the first row to a cell at n ≥ 10, and the cumulative spend per repository | `absent` | unmet | G-925 |
 | measure.automation.15 | AUTOMATION | No step needs a person to do what the product could do: a cell one row short of the bar is not topped up — an operator reads n, works out how many attempts remain and queues another run by hand | `absent` | unmet | G-565 |
+| measure.truth.16 | TRUTH | A replay attempt whose runner's test command cannot start on the host (a runner tool missing, such as `jest`) is refused before any builder call with `runner tool missing: <tool>` and the fix — an instrument (`harness`) row with nothing spent, never a paid attempt graded afterwards | `test:tests/test_builders_toolcheck.py::test_a_missing_runner_tool_refuses_the_attempt_before_any_builder_call` · `test:tests/test_builders_toolcheck.py::test_jest_missing_from_the_repository_is_named` · `code:src/crb/builders/toolcheck.py::runner_tool_missing` | met | |
 
 ## Gaps
 - **G-564** — the "Delivery halted" stop-condition banner is rendered by no test: no walkthrough produces a false-Q1 row and no unit test asserts the banner · assert it in a unit test with a stubbed health probe reporting `false_q1 > 0` · ui

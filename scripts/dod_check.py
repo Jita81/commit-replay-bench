@@ -73,6 +73,7 @@ CI = ROOT / ".github" / "workflows" / "ci.yml"
 DECISION_LOG = ROOT / "docs" / "DECISION-LOG.md"
 BACKLOG = ROOT / "docs" / "reviews" / "2026-09-17-enterprise-front-end.md"
 ADR_DIR = ROOT / "docs" / "adr"
+PREVENTION = ROOT / "docs" / "PREVENTION.md"
 
 LEVELS: tuple[str, ...] = ("page", "journey", "stream", "product")
 LEVEL_DIR: dict[str, str] = {"page": "pages", "journey": "journeys", "stream": "streams"}
@@ -150,6 +151,13 @@ PREFIXES: tuple[str, ...] = (
 )
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.[a-z-]+\.\d+$")
 _GAP_RE = re.compile(r"^(G-\d{3}|F\d+[a-z]?|B-\d+[a-z]?)$")
+#: The prevention register (docs/PREVENTION.md, STANDARD.md §7): the levels of the prevention
+#: hierarchy, strongest first; the states an entry may be in; and the reference prefixes that
+#: can FAIL when the class recurs — a closed entry needs at least one of them.
+PREVENTION_LEVELS: tuple[str, ...] = ("construction", "gate", "mistake-proofing", "advisory")
+PREVENTION_STATES: tuple[str, ...] = ("closed", "pending")
+EXECUTABLE_PREFIXES: tuple[str, ...] = ("test", "vitest", "spec", "ci")
+_PREVENTION_ID_RE = re.compile(r"^P-\d{3}$")
 _ART_ID_RE = re.compile(r"^dod\.(page|journey|stream)\.[a-z0-9][a-z0-9-]*$|^dod\.product$")
 
 
@@ -511,6 +519,148 @@ def resolve(criterion: Criterion) -> None:
             criterion.unresolved.append(ref)
 
 
+# ------------------------------------------------------------------ the prevention register
+
+
+@dataclass
+class Prevention:
+    """One row of docs/PREVENTION.md: a bug of ours, its class, and what stops it recurring."""
+
+    id: str
+    bug: str
+    cls: str
+    first_seen: str
+    artefact: str
+    level: str
+    status: str
+    gap: str
+    line: int
+
+
+def parse_prevention(path: Path) -> tuple[list[Prevention], dict[str, str], list[str]]:
+    """The register's rows and its ``## Gaps`` lines (the same grammar as an artefact's)."""
+    if not path.is_file():
+        return (
+            [],
+            {},
+            ["docs/PREVENTION.md is missing — the register of our own bugs (STANDARD.md §7)"],
+        )
+    rows: list[Prevention] = []
+    gaps: dict[str, str] = {}
+    errors: list[str] = []
+    section = ""
+    for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1):
+        s = line.strip()
+        if s.startswith("## "):
+            section = s[3:].strip().lower()
+            continue
+        if section == "register" and s.startswith("|"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if cells[0] in ("id", "") or set(cells[0]) <= {"-", ":"}:
+                continue
+            if len(cells) != 8:
+                errors.append(f"PREVENTION.md:{n}: a register row has 8 cells, not {len(cells)}")
+                continue
+            pid, bug, cls, seen, art, level, status, gap = cells
+            rows.append(Prevention(pid, bug, cls, seen, art.strip("`"), level, status, gap, n))
+        elif section == "gaps" and s.startswith("- **"):
+            m = re.match("^- \\*\\*(G-\\d{3})\\*\\*\\s*\u2014\\s*(.+)$", s)
+            if not m:
+                errors.append(f"PREVENTION.md:{n}: gap line must be '- **G-nnn** — text'")
+                continue
+            body = m.group(2).strip()
+            fields = body.split(" · ")
+            if len(fields) < 3 or fields[-1].strip().rstrip(".") not in OWNERS:
+                errors.append(
+                    f"PREVENTION.md:{n}: gap {m.group(1)} must read "
+                    f"'what is missing · the smallest change that closes it · owner' ({OWNERS})"
+                )
+            gaps[m.group(1)] = body
+    if not rows and not errors:
+        errors.append("PREVENTION.md: no rows under '## Register'")
+    return rows, gaps, errors
+
+
+def validate_prevention(
+    rows: list[Prevention], gaps: dict[str, str], backlog: dict[str, tuple[str, str]]
+) -> list[str]:
+    """STANDARD.md §7: a defect is closed only with the artefact that fails if its class
+    recurs. Every reference resolves; a closed row carries at least one executable one
+    (``test:`` / ``vitest:`` / ``spec:`` / ``ci:``) and is never ``advisory``; a pending row
+    names a gap (with its owner) or a backlog id."""
+    errors: list[str] = []
+    seen: set[str] = set()
+    for r in rows:
+        where = f"docs/PREVENTION.md:{r.line}: {r.id}"
+        if not _PREVENTION_ID_RE.match(r.id):
+            errors.append(f"{where}: id must be P-nnn")
+        if r.id in seen:
+            errors.append(f"{where}: duplicate id {r.id}")
+        seen.add(r.id)
+        for name, value in (("a bug", r.bug), ("a class", r.cls), ("a first-seen", r.first_seen)):
+            if not value:
+                errors.append(f"{where}: needs {name} (the evidence of when it bit us)")
+        if r.level not in PREVENTION_LEVELS:
+            errors.append(f"{where}: level must be one of {PREVENTION_LEVELS}, got {r.level!r}")
+        if r.status not in PREVENTION_STATES:
+            errors.append(f"{where}: status must be one of {PREVENTION_STATES}, got {r.status!r}")
+        refs = [] if r.artefact in ("", "pending", "absent") else split_refs(r.artefact)
+        probe = Criterion(r.id, "", "", r.artefact, r.status, r.gap, r.line)
+        if refs:
+            resolve(probe)
+        for ref in probe.unresolved:
+            errors.append(f"{where}: evidence does not resolve: {ref}")
+        if r.status == "closed":
+            if r.level == "advisory":
+                errors.append(
+                    f"{where}: an advisory artefact cannot close a defect — text cannot fail "
+                    "when the class recurs; keep it pending with a gap toward a gate"
+                )
+            if not any(ref.split(":", 1)[0] in EXECUTABLE_PREFIXES for ref in probe.resolved):
+                errors.append(
+                    f"{where}: a defect is closed only by an artefact that fails when its class "
+                    f"recurs — cite a resolving {'/'.join(EXECUTABLE_PREFIXES)} reference"
+                )
+        if r.status == "pending":
+            if not r.gap:
+                errors.append(f"{where}: pending needs a gap id (an owner and the change)")
+            elif r.gap.startswith("G-") and r.gap not in gaps:
+                errors.append(f"{where}: gap {r.gap} is not defined under '## Gaps'")
+            elif not r.gap.startswith("G-") and r.gap not in backlog:
+                errors.append(f"{where}: gap {r.gap} is in no backlog row")
+    return errors
+
+
+def render_prevention(rows: list[Prevention], gaps: dict[str, str]) -> list[str]:
+    """The register's section of GAP-ANALYSIS.md: the counts, then every pending row."""
+    closed = [r for r in rows if r.status == "closed"]
+    pending = [r for r in rows if r.status == "pending"]
+    by_level = ", ".join(
+        f"{lvl} {sum(1 for r in closed if r.level == lvl)}"
+        for lvl in PREVENTION_LEVELS
+        if any(r.level == lvl for r in closed)
+    )
+    out = [
+        "## Our own bugs — the prevention register",
+        "",
+        f"**{len(rows)} registered · {len(closed)} closed ({by_level or 'none'}) · "
+        f"{len(pending)} pending.** A defect is closed only with the artefact that fails if its "
+        "class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.",
+        "",
+    ]
+    if pending:
+        out += [
+            "| id | bug | level | gap | what is missing |",
+            "|---|---|---|---|---|",
+            *(
+                f"| {r.id} | {r.bug} | {r.level} | {r.gap} | {gaps.get(r.gap, '')} |"
+                for r in pending
+            ),
+            "",
+        ]
+    return out
+
+
 # ------------------------------------------------------------------ validation + roll-up
 
 
@@ -700,7 +850,10 @@ def _rank(arts: list[Artefact]) -> list[tuple[int, int, Artefact, Criterion]]:
     return rows
 
 
-def render(arts: list[Artefact]) -> str:
+def render(
+    arts: list[Artefact],
+    register: tuple[list[Prevention], dict[str, str]] | None = None,
+) -> str:
     by_level: dict[str, list[Artefact]] = {lvl: [] for lvl in LEVELS}
     for a in arts:
         by_level.setdefault(a.level, []).append(a)
@@ -791,8 +944,10 @@ def render(arts: list[Artefact]) -> str:
     for gap in sorted(counts, key=lambda g: (-counts[g], g)):
         touched = ", ".join(lvl for lvl in LEVELS if lvl in levels.get(gap, set()))
         out.append(f"| {gap} | {counts[gap]} | {touched} | {owner_of(gap)} | {says(gap)} |")
+    out.append("")
+    if register is not None:
+        out += render_prevention(*register)
     out += [
-        "",
         "## Every open criterion, ranked",
         "",
         f"<details><summary>All {len(ranked)} open criteria</summary>",
@@ -849,8 +1004,16 @@ def main(argv: list[str] | None = None) -> int:
         arts.append(a)
         errors.extend(errs)
     errors.extend(validate(arts))
+    prevention, pgaps, perrs = parse_prevention(PREVENTION)
+    errors.extend(perrs)
+    errors.extend(validate_prevention(prevention, pgaps, backlog_index()))
+    # one gap id is one piece of work across the register AND the artefacts
+    art_gaps = {gid: " ".join(t.split()) for a in arts for gid, t in a.gaps.items()}
+    for gid, text in pgaps.items():
+        if gid in art_gaps and art_gaps[gid] != " ".join(text.split()):
+            errors.append(f"docs/PREVENTION.md: gap {gid} is defined differently in an artefact")
     roll_up(arts)
-    rendered = render(arts)
+    rendered = render(arts, (prevention, pgaps))
     if args.check:
         errors.extend(status_drift(arts))
         if not OUT.is_file() or OUT.read_text(encoding="utf-8") != rendered:
