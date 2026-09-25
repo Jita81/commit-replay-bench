@@ -10,13 +10,16 @@ User lifecycle (F23): an admin sets any local account's password
 changes their own password with the current one (``PUT /users/me/password``). Every
 change is one transaction with a ``system`` event on the account's trace
 (``user.created`` / ``user.role_set`` / ``user.password_set`` / ``user.activated`` /
-``user.deactivated``; actor and target ids, never a password). A password change ends
-the account's other sessions (the cookie is bound to the credential version); the
-response to a self-change carries a fresh cookie so the person is not logged out of the
-browser they changed it in. Deactivation refuses the account's requests while it is
-inactive; it does not move the credential version, so re-activating within the session
-lifetime restores the sessions issued before — to contain a compromised account, set a
-new password as well. The same primitives serve the ``crb users`` CLI on the host.
+``user.deactivated`` / ``user.sessions_revoked``; actor and target ids, never a
+password). A password change ends the account's other sessions (the cookie is bound to
+the credential version); the response to a self-change carries a fresh cookie so the
+person is not logged out of the browser they changed it in. "Sign out everywhere"
+(``POST /users/{id}/sessions/revoke``) rotates the account's session nonce, which ends
+every session it holds — the one way to end an OIDC account's sessions, which has no
+password here. Deactivation refuses the account's requests while it is inactive; it does
+not move the credential version, so re-activating within the session lifetime restores
+the sessions issued before — to contain a compromised account, sign it out everywhere as
+well. The same primitives serve the ``crb users`` CLI on the host.
 
 Secrets (``/settings/secrets/*``) go through :mod:`crb.server.secrets`: a value is
 accepted on ``PUT`` and written owner-only to disk; every response — including the
@@ -31,7 +34,7 @@ be used to burn quota.
 Navigation
 ----------
 What it is:   The admin route module — ``/users`` (list, create, role, password, active,
-              self password), ``/settings`` and ``/settings/secrets``.
+              sign out everywhere, self password), ``/settings`` and ``/settings/secrets``.
 What it does: Lists and creates local accounts, changes roles and the active flag without
               ever orphaning the last active admin (409 ``last_admin``), sets a password as
               an admin or as oneself (current password required; 409 ``not_local`` for an
@@ -85,11 +88,13 @@ from crb.server.auth import (
     CurrentUser,
     LoginRateLimiter,
     ViewerDep,
+    clear_auth_cookies,
     count_active_admins,
     create_local_user,
     credential_version,
     is_local_account,
     lock_users_table,
+    rotate_session_nonce,
     set_csrf_cookie,
     set_password,
     set_session_cookie,
@@ -428,8 +433,9 @@ def change_own_password(  # noqa: PLR0917 — FastAPI injects each dependency by
     set_password(user, body.new_password)
     record_user_event(db, action="user.password_set", actor=me.id, target=user, by="self")
     db.commit()
-    set_session_cookie(response, settings, user.id, credential_version(user))
-    set_csrf_cookie(response, settings)
+    cv = credential_version(user)
+    set_session_cookie(response, settings, user.id, cv)
+    set_csrf_cookie(response, settings, user.id, cv)
     return _user_out(user)
 
 
@@ -454,8 +460,32 @@ def set_user_password(  # noqa: PLR0917 — FastAPI injects each dependency by n
     record_user_event(db, action="user.password_set", actor=admin.id, target=user, by="admin")
     db.commit()
     if user.id == admin.id:
-        set_session_cookie(response, settings, user.id, credential_version(user))
-        set_csrf_cookie(response, settings)
+        cv = credential_version(user)
+        set_session_cookie(response, settings, user.id, cv)
+        set_csrf_cookie(response, settings, user.id, cv)
+    return _user_out(user)
+
+
+@router.post(
+    "/users/{user_id}/sessions/revoke",
+    response_model=UserOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR},
+    summary="Sign a user out everywhere (admin): every session the account holds ends",
+)
+def revoke_user_sessions(
+    user_id: str, admin: AdminDep, response: Response, settings: SettingsDep, db: DbDep
+) -> UserOut:
+    """Rotate the account's session nonce: every session it holds, on every device, ends on
+    its next request — a local account or an OIDC one (which has no password here to
+    change). The account can sign in again at once; to keep it out, deactivate it as well.
+    Recorded as ``user.sessions_revoked``. When an admin signs themself out everywhere,
+    this response clears their cookies too."""
+    user = _get_user(db, user_id)
+    rotate_session_nonce(user)
+    record_user_event(db, action="user.sessions_revoked", actor=admin.id, target=user)
+    db.commit()
+    if user.id == admin.id:
+        clear_auth_cookies(response, settings)
     return _user_out(user)
 
 

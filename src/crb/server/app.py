@@ -6,7 +6,7 @@ Responsibilities (and nothing else — domain routes live in :mod:`crb.server.ro
   live (:func:`crb.store.ledger.assert_append_only`), seed the bootstrap admin when the
   users table is empty.
 * **Middleware** (outermost first): CORS (only when origins are configured) → request id
-  → access log + HTTP metrics → security headers → CSRF double-submit → domain-error
+  → access log + HTTP metrics → security headers → session-bound CSRF → domain-error
   envelope. All are pure ASGI so SSE streams (W2-B) pass through unbuffered.
 * **Error envelope**: every non-success response is
   ``{"error": {"code", "message", "detail"}}`` (API.md). ``FalseQ1Violation`` /
@@ -79,14 +79,14 @@ from crb.core.redact import redact
 from crb.core.version import __version__
 from crb.server import http_metrics
 from crb.server.auth import (
-    CSRF_COOKIE,
     CSRF_HEADER,
-    SESSION_COOKIE,
     AuthlibOidcClient,
     LoginRateLimiter,
     OidcClient,
     bootstrap_admin_if_empty,
-    csrf_matches,
+    csrf_valid,
+    session_cookie_name,
+    session_signature_valid,
 )
 from crb.server.deps import ApiError, client_ip, error_body
 from crb.server.settings import Settings
@@ -274,14 +274,26 @@ class SecurityHeadersMiddleware:
 
 
 class CsrfMiddleware:
-    """Double-submit check on unsafe methods for requests riding a session cookie.
+    """Session-bound CSRF check on unsafe methods for requests riding a session cookie.
 
-    A request with no session cookie has no ambient credential to abuse, so it is
-    left to the auth dependency (401). Login is exempt: there is no token before it.
+    The ``X-CSRF-Token`` header must be the session's own token — ``HMAC(secret, uid, cv)``
+    recomputed from the signed session cookie (:func:`crb.server.auth.csrf_valid`) — not
+    merely equal to a cookie, which anyone able to plant cookies could choose. A request
+    with no session cookie, or with one this deployment never signed, has no ambient
+    credential to abuse, so it is left to the auth dependency (401). Login is exempt: there
+    is no session before it.
     """
 
-    def __init__(self, app: ASGIApp, *, exempt_paths: Iterable[str] = CSRF_EXEMPT_PATHS) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        settings: Settings,
+        exempt_paths: Iterable[str] = CSRF_EXEMPT_PATHS,
+    ) -> None:
         self.app = app
+        self.settings = settings
+        self.session_cookie = session_cookie_name(settings)
         self.exempt = frozenset(exempt_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -289,15 +301,18 @@ class CsrfMiddleware:
             path = str(scope.get("path", ""))
             if path not in self.exempt:
                 headers = Headers(scope=scope)
-                cookies = _parse_cookies(headers.get("cookie", ""))
-                if SESSION_COOKIE in cookies and not csrf_matches(
-                    cookies.get(CSRF_COOKIE), headers.get(CSRF_HEADER.lower())
+                session = _parse_cookies(headers.get("cookie", "")).get(self.session_cookie)
+                if (
+                    session
+                    and session_signature_valid(self.settings, session)
+                    and not csrf_valid(self.settings, session, headers.get(CSRF_HEADER.lower()))
                 ):
                     response = JSONResponse(
                         status_code=403,
                         content=error_body(
                             "csrf_failed",
-                            f"{CSRF_HEADER} header must match the {CSRF_COOKIE} cookie",
+                            f"{CSRF_HEADER} header must carry this session's CSRF token "
+                            "(GET /auth/csrf)",
                         ),
                     )
                     await response(scope, receive, send)
@@ -541,7 +556,7 @@ def create_app(
 
     # Middleware: each add_middleware wraps the previous, so the LAST added is OUTERMOST.
     app.add_middleware(DomainErrorMiddleware)
-    app.add_middleware(CsrfMiddleware)
+    app.add_middleware(CsrfMiddleware, settings=settings)
     app.add_middleware(
         SecurityHeadersMiddleware,
         hsts=settings.resolved_cookie_secure,

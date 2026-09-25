@@ -3,7 +3,8 @@
  *
  * Contract (docs/API.md, "Conventions"):
  *   - cookie session → `credentials: 'include'` on every call;
- *   - unsafe methods carry `X-CSRF-Token` equal to the `crb_csrf` cookie;
+ *   - unsafe methods carry `X-CSRF-Token` equal to the CSRF cookie — `__Host-crb_csrf` on a
+ *     TLS deployment, `crb_csrf` otherwise (the server binds the token to the session);
  *   - errors are `{"error": {"code", "message", "detail"}}` → {@link ApiError};
  *   - a stalled endpoint is bounded by {@link API_TIMEOUT_MS} → {@link ApiError}
  *     with `code: 'timeout'`, never an infinite spinner.
@@ -13,7 +14,7 @@
  * Navigation
  * ----------
  * What it is:   The single fetch wrapper (`api<T>`) behind every hook, with `ApiError`, `qs`
- *               and `readCookie`.
+ *               and `readCookie` / `readCsrfToken`.
  * What it does: Prefixes `/api/v1`, sends the cookie session, adds `X-CSRF-Token` on unsafe
  *               methods, JSON-encodes bodies, aborts after 25 s and turns every failure into
  *               one typed `ApiError {status, code, message, detail}` — a timeout, a network
@@ -41,9 +42,24 @@ import type { ApiErrorEnvelope } from './types'
 export const API_BASE = '/api/v1'
 export const API_TIMEOUT_MS = 25_000
 export const CSRF_COOKIE = 'crb_csrf'
+/** A deployment with secure cookies sets `__Host-crb_csrf`; read first, so a plain-named
+ * cookie planted beside it is never the one echoed. */
+export const CSRF_COOKIE_NAMES = [`__Host-${CSRF_COOKIE}`, CSRF_COOKIE] as const
 export const CSRF_HEADER = 'X-CSRF-Token'
 
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+/**
+ * The CSRF token the server set for this session, under whichever name the deployment
+ * uses ({@link CSRF_COOKIE_NAMES}); `null` when there is none.
+ */
+export function readCsrfToken(source?: string): string | null {
+  for (const name of CSRF_COOKIE_NAMES) {
+    const token = readCookie(name, source)
+    if (token) return token
+  }
+  return null
+}
 
 /**
  * A non-2xx response, a timeout, or a network failure. `status` is the HTTP
@@ -214,11 +230,11 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     headers['Content-Type'] = 'application/json'
     body = JSON.stringify(options.body)
   }
-  // CSRF double-submit: the server compares this header with the (JS-readable) cookie.
-  // Without the cookie the header is left off and the server answers 403 — the UI
-  // never invents a token.
+  // CSRF: echo the (JS-readable) cookie the server set for this session; the server checks
+  // it is this session's token. Without the cookie the header is left off and the server
+  // answers 403 — the UI never invents a token.
   if (UNSAFE_METHODS.has(method)) {
-    const token = readCookie(CSRF_COOKIE)
+    const token = readCsrfToken()
     if (token) headers[CSRF_HEADER] = token
   }
 

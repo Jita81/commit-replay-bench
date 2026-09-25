@@ -66,6 +66,11 @@ def env(tmp_path: Path) -> Iterator[Env]:
         yield e
 
 
+def _inside(env: Env, name: str) -> str:
+    """A clone path under ``<home>/repos`` — where an operator may register one (D2)."""
+    return str(Path(env.settings.home) / "repos" / name)
+
+
 @pytest.fixture
 def fake_jobs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
     """A stand-in ``crb.store.jobs`` that persists the run and records the call."""
@@ -167,20 +172,22 @@ class TestDetail:
 
 class TestCreate:
     def test_rbac(self, env: Env) -> None:
+        # a clone under <home>/repos: the rule for a path outside it is TestClonePathConfinement's
         assert_rbac(
             env,
             "POST",
             "/repos",
             min_role="operator",
-            json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"},
+            json={"name": "gamma", "language": "python", "clone_path": _inside(env, "gamma")},
         )
 
     def test_create_validates_and_records_event(self, env: Env) -> None:
         login(env.client, "operator")
+        gamma = _inside(env, "gamma")
         body = {
             "name": "gamma",
             "language": "py",
-            "clone_path": "/srv/gamma",
+            "clone_path": gamma,
             "src_prefix": "gamma/",
             "test_prefix": "tests/",
             "belt_scope": ["tests/unit"],
@@ -195,7 +202,7 @@ class TestCreate:
         d = r.json()
         assert d["name"] == "gamma" and d["language"] == "python" and d["runner"] == "pytest"
         assert d["config"]["belt_scope"] == ["tests/unit"]
-        assert d["config"]["path"] == "/srv/gamma" and d["clone_path"] == "/srv/gamma"
+        assert d["config"]["path"] == gamma and d["clone_path"] == gamma
         assert d["probe"]["status"] == "not_probed"
         with env.factory() as s:
             ev = s.execute(select(Event).where(Event.repo == "gamma")).scalar_one()
@@ -293,7 +300,7 @@ class TestEvents:
         login(env.client, "operator")
         r = env.post(
             "/repos",
-            json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"},
+            json={"name": "gamma", "language": "python", "clone_path": _inside(env, "gamma")},
         )
         assert r.status_code == 201, r.text
         r = env.put(

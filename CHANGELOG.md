@@ -8,6 +8,43 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — signing out ends the session; a clone lives where the worker clones; the sign-in CLI sees only what it needs
+
+The external assessment of 2026-09-25 named three security gaps (D2, D3, D4). Each was
+reproduced with a failing test on `main` before it was changed (DL-053).
+
+- **Signing out ends the session, not only the cookie.** A session cookie is signed and
+  stateless, so clearing it in one browser left any copy of it valid until it expired.
+  Each account now carries a `session_nonce` (migration `0009`) that is part of the
+  version a cookie is bound to. Signing out rotates it, and so does the new admin action
+  **sign out everywhere** (`POST /users/{id}/sessions/revoke`, `user.sessions_revoked`),
+  which is also the first way to end an identity-provider account's sessions. Because the
+  nonce is per account, signing out ends the account's sessions on every device. Existing
+  sessions survive the upgrade.
+- **The CSRF token is bound to the session.** It was a random value the header had to
+  match, so anyone who could plant a cookie could choose a pair that passed. It is now
+  `HMAC(secret, user id, credential version)`, recomputed by the middleware from the signed
+  session cookie. When cookies are `Secure` they are named `__Host-crb_session` and
+  `__Host-crb_csrf`; the UI and the MCP client read either name. On a secure deployment
+  everybody signs in once more after the upgrade.
+- **Guessing across many usernames is limited too.** Besides five failures a minute per
+  username and address, one address may now fail twenty times a minute whatever the
+  usernames. The limiter is per process, so DEPLOYMENT §8 now requires the proxy to limit
+  `POST /api/v1/auth/login` as well.
+- **An admin's role change survives the next single sign-on.** Identity-provider claims
+  used to overwrite the stored role at every sign-in, silently undoing an admin's change.
+  They now set the role on the first sign-in only; `CRB_OIDC__ROLE_FROM_CLAIMS=always`
+  restores the old behaviour and records each change as `user.role_overridden`.
+- **A registered clone must live in `$CRB_HOME/repos`.** `POST` and `PUT /repos` — and the
+  MCP write tools that ride them — accepted any directory on the server as a `clone_path`.
+  Outside `$CRB_HOME/repos` is now admin-only and recorded (`repo.clone_path.outside_home`);
+  an operator gets `403 clone_path_outside_home`; a symbolic link out of that directory is
+  refused for everyone (`422 clone_path_escapes`); a relative path is refused.
+- **`claude setup-token` gets an allowlisted environment.** The sign-in helper ran the CLI
+  with the API process's whole environment — the secret key, the database URL, the OIDC
+  client secret. It now passes `PATH`, `HOME`, a plain terminal, a no-op browser and a
+  `CLAUDE_CONFIG_DIR` created for that sign-in and removed after it.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

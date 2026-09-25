@@ -10,15 +10,20 @@ in parallel, so changes here are changes to both.
 
 ## Conventions
 
-- **Auth**: cookie session (`crb_session`, HttpOnly, SameSite=Lax, Secure in prod).
-  Login via `POST /auth/login` (local account) or `GET /auth/oidc/start` → provider →
-  `GET /auth/oidc/callback` (Entra ID / any OIDC). `GET /auth/me` returns the principal.
-  Mutating requests must carry `X-CSRF-Token` equal to the `crb_csrf` cookie.
+- **Auth**: cookie session (`crb_session`, HttpOnly, SameSite=Lax, Secure in prod; named
+  `__Host-crb_session` whenever cookies are Secure, so a sibling host can never plant or
+  shadow it). Login via `POST /auth/login` (local account) or `GET /auth/oidc/start` →
+  provider → `GET /auth/oidc/callback` (Entra ID / any OIDC). `GET /auth/me` returns the
+  principal. Mutating requests must carry `X-CSRF-Token` equal to the CSRF cookie
+  (`crb_csrf`, or `__Host-crb_csrf` when Secure) — a token the server derives from the
+  session (`HMAC(secret, user id, credential version)`), so a pair chosen by whoever can set
+  cookies is refused **403 `csrf_failed`**, and the token dies with its session.
 - **Roles** (ascending): `viewer` (read everything), `operator` (+ create/cancel runs,
   add/probe repos, mine), `approver` (+ sign-offs), `admin` (+ users, settings).
   A route lists its minimum role. 401 = not logged in (`unauthenticated`, `session_expired`,
-  `session_revoked` — the account's password changed after the cookie was issued, which is
-  what ends a session for good, or `unauthenticated` with "account unknown or disabled" —
+  `session_revoked` — the account's password changed or its sessions were ended (a logout,
+  or an admin's "sign out everywhere") after the cookie was issued, which is what ends a
+  session for good, or `unauthenticated` with "account unknown or disabled" —
   the account is deactivated: every request is refused while it is inactive, but the session
   is not revoked, so requests resume with the same cookie once an admin re-activates the
   account within the session lifetime, `CRB_SESSION_TTL`; see OPERATOR.md §9 and
@@ -60,21 +65,21 @@ its sentence and link here; `crb doctor`'s `migrations` line renders the same
 
 | Method | Path | Role | Body / Returns |
 |---|---|---|---|
-| POST | `/auth/login` | – | `{username, password}` → principal; sets cookies |
-| POST | `/auth/logout` | any | – |
+| POST | `/auth/login` | – | `{username, password}` → principal; sets cookies. **429 `rate_limited`** (`Retry-After`) after five failures per minute for one username from one address, or twenty per minute from one address whatever the usernames — per API process; production also limits `/auth/login` at the proxy ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)) |
+| POST | `/auth/logout` | any | 204; clears the cookies and, for a current session, ends **every** session of the account on every device (the account's session nonce is rotated; the next request of any of them is **401 `session_revoked`**). Idempotent: a stale or absent cookie ends nothing |
 | GET | `/auth/me` | any | `{id, display_name, email, role, issuer}` |
 | GET | `/auth/oidc/start` | – | 302 to provider (state in cookie) |
 | GET | `/auth/oidc/callback` | – | 302 to `/` after establishing session |
-| GET | `/auth/csrf` | any | `{token}` |
+| GET | `/auth/csrf` | any | `{token}` — this session's CSRF token (and the cookie re-set) |
 
 ## Repos
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | `/repos` | viewer | page of `{name, language, runner, url, clone_path, probe: {status, run_id, checked, detail}, task_counts: {total, standard, hard, gold_clean, gold_failed, unchecked}, last_run: {id, kind, status, finished} \| null, created, updated, github_full_name}` (`github_full_name` = the lower-cased `owner/name` the row is linked to through the GitHub App, `null` for a URL registration); `probe.status` is `ok\|degraded\|down` once probed, `not_probed` before, or the probe run's own status while queued/running |
-| POST | `/repos` | operator | `{name, language, clone_path|url, runner?, src_prefix?, test_prefix?, ext?, test_mode?, test_suffix?, belt_scope?, probe?, layer?, runner_opts?, sandbox_image?, mining?}` → 201 repo detail; config validated by `RepoConfig.from_dict` (422 `validation_error`), 409 `already_exists`; recorded as a `system/repo.created` event. **URL-only registration** (no `clone_path`): the URL is policy-checked at write — `https://`, `ssh://` or `user@host:path` only; `http://`, `git://`, local paths and `file://` are 422 (`file://` is accepted only on a server started with `CRB_ALLOW_LOCAL_CLONE=1`, a test/dev switch) — and the **worker clones it on the repo's first run** (`git clone --no-tags`, full history, 30-minute wall clock) into `<home>/repos/<name>`, persisting `clone_path` and `config.path`; the run's trace carries `system/repo.clone.start {url, dest}` and `system/repo.clone.done {url, dest, head, duration_ms}` (or `status: error`); credentials in the URL are never echoed. With `clone_path` the URL is informational |
+| POST | `/repos` | operator | `{name, language, clone_path|url, runner?, src_prefix?, test_prefix?, ext?, test_mode?, test_suffix?, belt_scope?, probe?, layer?, runner_opts?, sandbox_image?, mining?}` → 201 repo detail; config validated by `RepoConfig.from_dict` (422 `validation_error`), 409 `already_exists`; recorded as a `system/repo.created` event. **A `clone_path` must resolve inside `$CRB_HOME/repos`** (where the worker clones): outside it, **403 `clone_path_outside_home`** unless the caller is an admin, whose registration is recorded as `system/repo.clone_path.outside_home` `{path, resolved, clone_root}`; a path written under that directory that resolves outside it (a symbolic link) is **422 `clone_path_escapes`** for every role; a relative path is **422 `clone_path_not_absolute`**. The MCP write tools ride this route and get the same answers. **URL-only registration** (no `clone_path`): the URL is policy-checked at write — `https://`, `ssh://` or `user@host:path` only; `http://`, `git://`, local paths and `file://` are 422 (`file://` is accepted only on a server started with `CRB_ALLOW_LOCAL_CLONE=1`, a test/dev switch) — and the **worker clones it on the repo's first run** (`git clone --no-tags`, full history, 30-minute wall clock) into `<home>/repos/<name>`, persisting `clone_path` and `config.path`; the run's trace carries `system/repo.clone.start {url, dest}` and `system/repo.clone.done {url, dest, head, duration_ms}` (or `status: error`); credentials in the URL are never echoed. With `clone_path` the URL is informational |
 | GET | `/repos/{name}` | viewer | list item + `config` (`RepoConfig.to_dict()`) + `profile_computed_at` |
-| PUT | `/repos/{name}` | operator | partial config update (same fields as POST minus `name`); the REDACTED field diff is appended as a `system/repo.updated` event (trace `sha256("repo:<name>")[:32]`) |
+| PUT | `/repos/{name}` | operator | partial config update (same fields as POST minus `name`); the REDACTED field diff is appended as a `system/repo.updated` event (trace `sha256("repo:<name>")[:32]`). A **moved** `clone_path` meets the POST rule (403 / 422, `repo.clone_path.outside_home` for an admin); an unchanged one does not block an edit of any other field |
 | GET | `/repos/{name}/events` | viewer | page of `StepEventOut` for the repo's system trace (`repo.created`, `repo.updated {diff, fields}`, `repo.github_linked {github, url_before, url_after, previous_full_name, fields: ["url"], diff: {url: {from, to}}}`), newest first — the Configuration tab's audit trail (it renders `fields` / `diff`, which every change-carrying action carries) |
 | POST | `/repos/{name}/probe` | operator | enqueues a `probe` run → 201 run; 503 `queue_unavailable` when no job queue is installed |
 | GET | `/repos/{name}/profile` | viewer | change profile `{repo, ref, n_commits, examined, skipped, classes, sizes, cells: [{capability_class, size, count, share}], class_totals, size_totals, computed_at}`; cached on the repo, `?refresh=true` recomputes (operator — it is a git walk and a config write; 403 for a viewer), `?log_n=` bounds the walk; 409 `no_clone_path` / `clone_unavailable` / `profile_failed` |
@@ -189,7 +194,8 @@ Not yet: a model-backed test author (an item without an authored oracle ends `no
 | PUT | `/users/{id}/role` | admin | body `{role, active?}` — change role (and, optionally, the active flag); **409 `last_admin`** when it would leave no active admin. Writes `user.role_set` / `user.activated` / `user.deactivated` |
 | PUT | `/users/{id}/password` | admin | body `{password}` (≥ 12 characters) — set a local account's password. Every session that account holds ends on its next request (**401 `session_revoked`**: the cookie is bound to the credential it was issued under); when an admin sets their own, this response re-issues their cookie. **409 `not_local`** for an OIDC account (its password is the identity provider's); 404 unknown id; 422 too short. Writes `user.password_set` (`by: admin`) with actor and target ids — never the password |
 | PUT | `/users/me/password` | any | body `{current_password, new_password}` — change your own password. **401 `invalid_credentials`** when the current one does not verify (the session stays; five failures per minute per username + IP trip the login limiter, **429 `rate_limited`** with `Retry-After`); the response carries a fresh session + CSRF cookie so this browser stays signed in while every other session of the account ends; **409 `not_local`** for an OIDC account. Writes `user.password_set` (`by: self`) |
-| PUT | `/users/{id}/active` | admin | body `{active: bool}` — deactivate (the account is refused on its very next request and cannot sign in while inactive; re-activating within `session_ttl` restores the sessions issued before — set a password as well to end them for good) or reactivate; **409 `last_admin`** when it would leave no active admin (decided under the users lock on a re-read row, so a concurrent role change cannot slip past it); idempotent. Writes `user.deactivated` / `user.activated`. The same actions run on the host without a login as `crb users deactivate | activate | set-password` (actor `cli:<os user>`, [OPERATOR.md §9](OPERATOR.md#9-users)) |
+| POST | `/users/{id}/sessions/revoke` | admin | no body → the user — **sign out everywhere**: rotates the account's session nonce, so every session it holds (local or OIDC account) is **401 `session_revoked`** on its next request; the account may sign in again at once (deactivate it as well to keep it out). An admin revoking their own sessions gets their cookies cleared by this response. 404 unknown id. Writes `user.sessions_revoked` |
+| PUT | `/users/{id}/active` | admin | body `{active: bool}` — deactivate (the account is refused on its very next request and cannot sign in while inactive; re-activating within `session_ttl` restores the sessions issued before — sign the account out everywhere, or set a password, as well to end them for good) or reactivate; **409 `last_admin`** when it would leave no active admin (decided under the users lock on a re-read row, so a concurrent role change cannot slip past it); idempotent. Writes `user.deactivated` / `user.activated`. The same actions run on the host without a login as `crb users deactivate | activate | set-password` (actor `cli:<os user>`, [OPERATOR.md §9](OPERATOR.md#9-users)) |
 | GET | `/settings` | admin | non-secret settings (builders configured: yes/no, sandbox mode, retention) |
 | GET | `/settings/secrets` | viewer | `{items, secrets_dir}` — statuses of the operator-supplied secrets, never values. `items` is a homogeneous list: for operators and above `[SecretStatus]` (`{name, present, fingerprint, set_at, set_by}`); for a **viewer** `[SecretPresence]` — exactly `{name, present}`, no other keys. `secrets_dir` (the on-host path) is `""` unless the caller is an admin |
 | PUT | `/settings/secrets/claude-code-token` | admin | body `{token}` (a `claude setup-token` value: `sk-ant-oat01-…`, 40–512 chars, `[A-Za-z0-9_-]`); stores it owner-only under `CRB_SECRETS_DIR` / `$CRB_HOME/secrets`; returns the `SecretStatus`; `422 invalid_token` on shape, `409 secrets_insecure` when the directory is group/world accessible |
@@ -288,6 +294,7 @@ that is not here fails the suite.
 | factory | `outcomes.synced` | ok / skipped / error | `checked`, `merged`, `closed`, `open`, `errors` / `reason` / the token error | worker (`_sync_outcomes`, the start of every factory run — B-9 / F30) | LOG; the chain's `delivery.merged` / `delivery.closed` are what `/factory/{repo}/tasks` folds as `outcome` |
 | factory | `horizon.checkpoint` | ok | `level`, `observations` | factory/loop.py | stored only |
 | system (audit traces) | `repo.created` / `repo.updated` | ok | `diff`, `fields`, `github_unlinked` | routes/repos.py, routes/github.py | AUDIT |
+| system (audit traces) | `repo.clone_path.outside_home` | ok | `path`, `resolved`, `clone_root` | routes/repos.py (an admin registered or moved a clone outside `$CRB_HOME/repos`) | AUDIT |
 | system (audit traces) | `repo.github_linked` | ok | `github`, `url_before`, `url_after`, `previous_full_name`, `fields: ["url"]`, `diff: {url: {from, to}}` (the `repo.updated` shape, so the audit trail renders the change) | routes/github.py (`POST /repos/{name}/github-link`) | AUDIT |
 | system | `github.installation.recorded` | ok | `installation` | routes/github.py | stored only |
 | system (audit traces) | `intake.listener.switched` | ok | `enabled`, `column`, `tracker`, `switched_by` | routes/factory.py (`PUT /factory/{repo}/intake`) | AUDIT; the consent record — switching a listener on is what allows this product to write on a third party's tickets, and `switched_by` on the repository row is one mutable field a later switch overwrites, so every throw of the switch is an event naming the operator |

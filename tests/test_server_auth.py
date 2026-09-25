@@ -535,9 +535,12 @@ class TestOidc:
                 follow_redirects=False,
             )
             assert r.status_code == 400 and err(r)["code"] == "oidc_state_missing"
-        # Upsert by (issuer, subject): a second login with new groups updates the role.
+        # Upsert by (issuer, subject): a second login with new groups refreshes the profile
+        # but not the role — the claims set it on the FIRST sign-in only (D4; the
+        # ``always`` mode is TestOidcRoleSource's)
         fake.claims["roles"] = ["crb-approvers"]
         fake.claims["groups"] = ["grp-crb-admins"]
+        fake.claims["name"] = "Ann Renamed"
         with TestClient(app) as c:
             c.get(f"{API_PREFIX}/auth/oidc/start", follow_redirects=False)
             pending = read_oidc_cookie(settings, c.cookies[OIDC_COOKIE])
@@ -547,9 +550,11 @@ class TestOidc:
                 follow_redirects=False,
             )
             assert r.status_code == 302 and r.headers["location"] == "/"
-            assert c.get(f"{API_PREFIX}/auth/me").json()["role"] == "admin"
-            c.headers["X-CSRF-Token"] = c.cookies[CSRF_COOKIE]
-            users = c.get(f"{API_PREFIX}/users").json()
+            me = c.get(f"{API_PREFIX}/auth/me").json()
+            assert me["role"] == "operator" and me["display_name"] == "Ann Renamed"
+        with TestClient(app) as admin:
+            login(admin)
+            users = admin.get(f"{API_PREFIX}/users").json()
             oidc_users = [u for u in users["items"] if u["issuer"] == ISSUER]
             assert len(oidc_users) == 1 and oidc_users[0]["subject"] == "entra-oid-123"
 
