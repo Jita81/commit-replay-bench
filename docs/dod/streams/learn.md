@@ -8,7 +8,7 @@ children: [dod.journey.learn-and-strengthen]
 persons: [operator, viewer, approver, admin]
 owner: server
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Learn — outcomes, evolutions, oracle strengthening, cells → routing
@@ -47,6 +47,18 @@ parked until a second organisation asks.
 | stream-learn.handoff.13 | HANDOFF | The next stream starts from this one's output without retyping: the strengthening backlog is registered and the re-measurement plan queued from the report itself, and a route consumes merge outcomes and human review verdicts | `absent` | unmet | G-532 |
 | stream-learn.measure.14 | MEASURE | The product shows this stream's own numbers: the guard's false-positive rate over time, how often a defect class recurs after a prevention was accepted, and the time from a finding to its re-measurement | `absent` | unmet | G-536 |
 | stream-learn.automation.15 | AUTOMATION | No step needs a person to do what the product could do: the three decisions stay human by design, and each handoff around them is a button beside the report rather than a command on the host | `absent` | unmet | G-532 |
+| stream-learn.measure.16 | MEASURE | The register serves, for every bug class of a repository, its occurrences on first attempts, the lever chosen and its level, and its recurrence before → after on the first attempts that saw the change, with both n and the bar | `absent` | unmet | G-541 |
+| stream-learn.automation.17 | AUTOMATION | With the repository's switch on, a class that recurs gets the strongest lever it admits, and data — not a person — keeps it, retires it or escalates it from a playbook line to a configuration switch to a filed item | `absent` | unmet | G-542 |
+| stream-learn.truth.18 | TRUTH | The loop cannot game its own metric: the register and the measurement take no filter, exposure is read from the row's own hashed labels after the change, a grader key is refused by name, a lever retired or reverted is never re-applied, and a decision re-derived from a filtered ledger is refused | `absent` | unmet | G-543 |
+| stream-learn.non-goals.19 | NON-GOALS | Nothing the loop writes into a brief carries task text — no gold diff, target test, review note, error text or linter message — and a line taught only by task T never reaches a replay of T | `absent` | unmet | G-544 |
+| stream-learn.roles.20 | ROLES | Only an operator switches the loop, reverts a change, registers an item or links a fix; the signed-in session is the decider, never a field of the body, and a reason is required | `absent` | unmet | G-545 |
+| stream-learn.handoff.21 | HANDOFF | A filed prevention reaches the Decisions inbox as a row, and one operator act registers it on the repository's factory backlog (freeze or evolve), refused while a factory run holds the backlog | `absent` | unmet | G-546 |
+| stream-learn.operations.22 | OPERATIONS | The six prevention routes and the `learn.prevention.recorded` event are in `docs/API.md`, and the operator guide has a section on the switch, revert, register and link and on what the loop will never do | `absent` | unmet | G-547 |
+| stream-learn.explanation.23 | EXPLANATION | The bundled guide explains the prevention loop: the one rule, the switch, the register's columns and the three numbers (decisive n, the keep test and the closed window) | `absent` | unmet | G-550 |
+| stream-learn.evidence.24 | EVIDENCE | The Phase B paired blind campaign shows that the classes the loop applied a change to in round 1 recur less in round 2, or were retired or escalated by the loop itself | `absent` | unmet | G-537 |
+| stream-learn.automation.25 | AUTOMATION | Factory builds receive the loop's overlay and lines and record the same `learn*` labels as replay and blind rows | `absent` | unmet | G-538 |
+| stream-learn.measure.26 | MEASURE | Review classes (`review:*`) are measured on anchored reviews of retained patches for the repositories the loop acts on | `absent` | unmet | G-539 |
+| stream-learn.measure.27 | MEASURE | The capability map and `/value` can be read split by the `learn` labels, so rows with and without the loop's changes are never read pooled | `absent` | unmet | G-540 |
 
 ## Gaps
 - **G-532** — the Learn page is read-only: `refusals --apply` is CLI only, the strengthening backlog must be pasted into `POST /factory/{repo}/backlog`, and the re-measurement bodies must be posted by hand · add the three write paths behind the same named-person decision the CLI already requires (accept a line, register the items, queue the plan) · server
@@ -54,3 +66,15 @@ parked until a second organisation asks.
 - **G-534** — the `/learn` endpoints are in no guide and no series: `docs/API.md` lists none of them and nothing meters the reports · add the rows to `docs/API.md` and a counter per report · docs
 - **G-535** — nothing raises the stream's own findings to a person: a held cell, a recurring refusal shape after a prevention (F33) and a stale apparatus appear only when someone opens Learn, and merge outcomes and review verdicts feed no clause of the routing rule · make each a Decisions row and state whether outcomes may ever route · server
 - **G-536** — no measure of whether learning worked: the guard's false-positive rate over time, defect-class recurrence and finding → prevention → re-measurement time are all underived · derive them from the refusal groups and corpus provenance already stored and show them on the Learn page · server
+- **G-537** — no Phase B paired blind campaign has shown a class the loop applied a change to recur less, or be retired or escalated by the loop · run the paired campaign on cobra, click and koa with `learning.auto_apply` off and on, on the operator's stack · server
+- **G-538** — factory builds do not receive the loop's overlay or lines: `crb.factory.build` composes its own brief and stamps no `learn*` label · pass the run's learning snapshot to the factory's build and stamp the same labels · factory
+- **G-539** — review classes cannot be measured: no retained patch has an anchored review for cobra, click or koa · merge stream K's retained patches and record reviews against them · server
+- **G-540** — the capability map and `/value` read rows pooled across the `learn` labels · add the labels as a split to both, as K's budget profile will be · server
+- **G-541** — no register: no bug class has a record of its occurrences, the lever chosen or its recurrence before and after a change · build `crb.core.prevention.build_register` and serve it at `GET /learn/register` · server
+- **G-542** — nothing applies a lever to a recurring class, measures it and keeps, retires or escalates it · the prevention rule and tick (`crb.prevention.rule.v1`) behind a per-repository switch · server
+- **G-543** — nothing stops a learning loop from gaming its own metric with a filter, a forged exposure or a grader key · a register with no filter argument, exposure by the row's own labels and an allowlist of writable keys, each pinned by a test · server
+- **G-544** — nothing keeps task text out of what a learning loop would write into a brief · closed templates, checked slots, held out by task and a leak gate at injection, with canary tests · server
+- **G-545** — nobody is named when the loop is switched, a change is reverted or an item is registered · operator-only routes whose decider is the session, with a reason required · server
+- **G-546** — a filed prevention reaches no person and no backlog · a `prevention` Decisions row and one operator act that registers the item on the factory backlog · server
+- **G-547** — the prevention routes and event are in no guide · rows in `docs/API.md` and a section in `docs/OPERATOR.md` · docs
+- **G-550** — the guide does not explain the prevention loop · `docs/LEARNING-LOOP.md` §7: the one rule, the switch, the columns and the three numbers · docs
