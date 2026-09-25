@@ -284,13 +284,17 @@ def worktree_path(scratch: Path, name: str) -> Path | None:
 def worktree_name(session: Session, g: Grade) -> str:
     """The opaque name ``crb.core.run.run_task`` gave row ``g``'s worktree, read from the
     run's ``prep.start`` event for the row's task and trial (the mapping lives in the
-    events, never in the path); ``""`` when the run recorded none."""
+    events, never in the path); ``""`` when the run recorded none. The LATEST such event
+    wins: a reclaimed run re-runs its in-flight task under the same trial with a new
+    worktree, and the row was written by that later attempt."""
     payloads = session.scalars(
-        select(Event.payload_json).where(
+        select(Event.payload_json)
+        .where(
             Event.trace_id == g.run_id,
             Event.task_id == g.task_id,
             Event.action == "prep.start",
         )
+        .order_by(Event.seq.desc(), Event.id.desc())
     )
     for payload in payloads:
         body = dict(payload or {})
