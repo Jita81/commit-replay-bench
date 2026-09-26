@@ -323,7 +323,7 @@ export const HINTS = {
   'stat.results.false_q1':
     'The number of rows credited clean whose own recorded belts contradict them, across every measured cell (n = attempts on the map). It must read 0: one such row halts delivery and is refused when written.',
   'button.results.retry_tile':
-    'Asks the server for this number again. The last request failed, so the tile shows no value rather than a guess.',
+    'Asks the server again. The last request failed, so nothing is shown here rather than an old value or a guess.',
   'button.results.full_map':
     'The same cells with every number and its method, projections by language and model, and a CSV export of the rows behind them.',
   'stat.results.route_deliver':
@@ -349,7 +349,7 @@ export const HINTS = {
   'map.cell.apparatus':
     'The apparatus version that graded these rows. Rows from different versions are never averaged; a sign-off under an older version is stale.',
   'map.cell.signoff':
-    'Signed with a date means an approver attested this cell under the current apparatus; sign-off due means it routes deliver and no one has signed; sign-off stale means it was signed under an older apparatus; otherwise the reason code that decided the route.',
+    'Signed with a date means an approver attested this cell under the current apparatus; sign-off due means it routes deliver and no one has signed; sign-off stale means it was signed under an older apparatus; sign-off not loaded means the sign-offs did not load, so the state is not known; otherwise the reason code that decided the route.',
   'map.cell.not_measured':
     'No sighted attempt exists for this class and size. It says nothing, not zero.',
   'map.cell.granularize':

@@ -20,7 +20,10 @@
  *               window described as an author-date cut — or says why the share is unknown;
  *               and that a failed request on any instrument tile reads "not loaded" with a
  *               Try again that asks again, never "unknown" — also when an earlier request
- *               succeeded, so a failed refetch never leaves an old value shown as current.
+ *               succeeded, so a failed refetch never leaves an old value shown as current — the
+ *               sign-offs (no cell signed, no licence sentence), the backlog (no decision
+ *               list, never "nothing is waiting") and the repository (no in-flight banner)
+ *               included; and that the page's source reads no `<query>.data` at all.
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`; `qc.refetchQueries()` for a
  *               refetch; the page's own source as `?raw` text for the `currentData` ratchet.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -348,10 +351,70 @@ describe('ResultsPage', () => {
     expect(screen.queryByText('Is the instrument trustworthy here?')).not.toBeInTheDocument()
   })
 
-  it('the page reads the instrument reports and the map only through currentData', () => {
-    // the ratchet behind the refetch cases above: a new line that reads `map.data` (or the
-    // controls, oracle or pool report's `.data`) would show an old value after a failed
-    // refetch, so the source may not contain one
-    expect(pageSource.match(/\b(map|controls|oracle|pool)\.data\b/g) ?? []).toEqual([])
+  // the sign-off state allows delivery, so it is held to the same rule as the numbers: a
+  // refetch that fails never leaves a cell shown as signed, nor the licence sentence, nor
+  // "nothing is waiting" (PR #54 review)
+  const SIGNED = { id: 's1', repo: 'alpha', cell: { capability_class: 'bug.fix', size: 'XS' }, approver: 'a.okafor', created: '2026-09-15T10:00:00Z', revoked: false, active: true, stale: false, apparatus_current: '2.2', evidence: { n: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, apparatus_versions: ['2.2'] } }
+
+  it('sign-offs that fail on a refetch never leave a cell shown as signed, nor the licence sentence', async () => {
+    let calls = 0
+    mockApi({ ...ROUTES, 'GET /signoffs': () => (++calls === 1 ? json({ items: [SIGNED], total: 1, limit: 50, offset: 0 }) : envelope(500, 'internal', 'boom')) })
+    const { qc } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('licence-sentence')).toHaveTextContent('as signed by a.okafor on 15 September 2026'))
+    expect(screen.getByTestId('cell-bug.fix-XS')).toHaveTextContent(/signed 15 Sep/)
+    await qc.refetchQueries()
+    const failed = await screen.findByTestId('signoffs-failed')
+    expect(calls).toBe(2)
+    expect(failed).toHaveAttribute('role', 'alert')
+    expect(failed).toHaveTextContent('no cell is shown as signed')
+    expect(screen.queryByTestId('licence-sentence')).toBeNull()
+    expect(screen.queryByText(/as signed by a\.okafor/)).toBeNull()
+    const cell = screen.getByTestId('cell-bug.fix-XS')
+    expect(cell).not.toHaveTextContent(/signed 15 Sep/)
+    expect(cell).toHaveTextContent('sign-off not loaded')
+    // without the sign-offs the page cannot say what waits on a person, so it never says nothing does
+    expect(screen.queryByText('Nothing is waiting on a person here')).toBeNull()
+    expect(screen.queryByRole('list', { name: 'Decisions for alpha' })).toBeNull()
+    expect(screen.getByTestId('decisions-failed')).toHaveTextContent('the request failed')
+    // Try again asks again
+    await userEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(calls).toBe(3))
+  })
+
+  it('factory tasks that fail on a refetch never leave their decisions shown as current', async () => {
+    const TASK = { id: 'T-1', title: 'Add a retry', capability_class: 'bug.fix', size: 'XS', kind: 'feature', status: 'ready', outcome_reason: '', dor_gaps: ['acceptance'], value_gaps: [], route_hint: '', red_proof: null, build_status: '', pr_url: null, review_verdict: null, last_event: '' }
+    let calls = 0
+    mockApi({ ...ROUTES, 'GET /factory/alpha/tasks': () => (++calls === 1 ? json([TASK]) : envelope(500, 'internal', 'boom')) })
+    const { qc } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('T-1 Add a retry is blocked on 1 structural gap')).toBeInTheDocument())
+    await qc.refetchQueries()
+    await waitFor(() => expect(screen.getByTestId('decisions-failed')).toBeInTheDocument())
+    expect(calls).toBe(2)
+    expect(screen.queryByText('T-1 Add a retry is blocked on 1 structural gap')).toBeNull()
+    expect(screen.queryByText('Nothing is waiting on a person here')).toBeNull()
+  })
+
+  it('a repository that fails on a refetch never leaves an old in-flight banner shown as current', async () => {
+    let calls = 0
+    const running = { ...REPO, last_run: { id: 'run1', kind: 'replay', status: 'running', finished: null } }
+    mockApi({
+      ...ROUTES,
+      'GET /repos/alpha': () => (++calls === 1 ? json(running) : envelope(500, 'internal', 'boom')),
+      'GET /runs/run1': { id: 'run1', repo: 'alpha', kind: 'replay', status: 'running', cost_usd: 0.42, progress: { done: 3, total: 8, current_task_id: null }, counts: {} },
+    })
+    const { qc } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByRole('region', { name: 'A measurement is running' })).toBeInTheDocument())
+    await qc.refetchQueries()
+    const failed = await screen.findByTestId('repo-failed')
+    expect(calls).toBe(2)
+    expect(failed).toHaveTextContent('Could not check whether a measurement is running')
+    expect(screen.queryByRole('region', { name: 'A measurement is running' })).toBeNull()
+  })
+
+  it('the page reads every query only through currentData', () => {
+    // the ratchet behind the refetch cases above, for the whole class and not a list of
+    // names: any `<query>.data` read would show an old value after a failed refetch, so the
+    // page's source may not contain one (PR #54 review)
+    expect(pageSource.match(/\b\w+\.data\b/g) ?? []).toEqual([])
   })
 })

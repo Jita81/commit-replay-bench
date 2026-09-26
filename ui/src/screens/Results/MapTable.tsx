@@ -8,7 +8,8 @@
  *               cell shows its route as a solid tag, `n=… on … tasks`, the point and the
  *               Wilson interval, the apparatus version(s) the rows carry, and one more line
  *               — the reason code, or the sign-off state ("signed 15 Sep" / "sign-off due" /
- *               "sign-off stale"); "sign-off due" is a link to the form only for a reader
+ *               "sign-off stale", or "sign-off not loaded" when the sign-offs did not
+ *               load); "sign-off due" is a link to the form only for a reader
  *               who can sign (`canSign`), plain text for everyone else — a viewer is never
  *               shown an action they cannot take. The five size tiers are the taxonomy (`SizeTier` in
  *               core), not the API's `sizes` (which lists only measured tiers): a tier with
@@ -68,8 +69,11 @@ function shortDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
+/** A cell's sign-off line while the repository's sign-offs have not loaded (PR #54 review). */
+const SIGNOFF_NOT_LOADED = 'sign-off not loaded'
+
 /** `canSign`: the reader holds the approver role, so "sign-off due" may link to the form. Default off: a viewer-safe grid. */
-export function MapTable({ map, signoffs, repo, canSign = false }: { map: CapabilityMap; signoffs: Signoff[]; repo: string; canSign?: boolean }) {
+export function MapTable({ map, signoffs, repo, canSign = false }: { map: CapabilityMap; signoffs: Signoff[] | null; repo: string; canSign?: boolean }) {
   // every size tier, always — an absent column would hide the honest "not measured"
   const sizes = ['XS', 'S', 'M', 'L', 'XL']
   const classes = map.classes.length ? map.classes : Array.from(new Set(map.cells.map((c) => c.capability_class)))
@@ -123,9 +127,11 @@ export function MapTable({ map, signoffs, repo, canSign = false }: { map: Capabi
                     </td>
                   )
                 }
-                const sign = signStateOf(c, signoffs)
-                const last =
-                  sign.state === 'signed' && sign.signoff
+                // no sign-offs loaded: the state is not known, so no cell reads signed or due
+                const sign = signoffs === null ? null : signStateOf(c, signoffs)
+                const last = !sign
+                  ? SIGNOFF_NOT_LOADED
+                  : sign.state === 'signed' && sign.signoff
                     ? `signed ${shortDate(sign.signoff.created)}`
                     : sign.state === 'stale'
                       ? 'sign-off stale'
@@ -152,7 +158,7 @@ export function MapTable({ map, signoffs, repo, canSign = false }: { map: Capabi
                       app {c.apparatus_versions.join(', ') || '—'}
                     </Hint>
                     <Hint as="div" id="map.cell.signoff" tabStop={false} className="text-[14px] leading-[1.4] text-on-surface-muted">
-                      {sign.state === 'due' && canSign ? (
+                      {sign?.state === 'due' && canSign ? (
                         <Link to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${c.capability_class}|${c.size}`)}`}>{last}</Link>
                       ) : (
                         last

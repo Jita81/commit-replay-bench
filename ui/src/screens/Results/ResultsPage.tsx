@@ -21,7 +21,13 @@
  *               viewer reads, and sees who acts. Reached without `?repo=`, the screen chooses
  *               the most recently updated repository itself. A tile whose request failed says
  *               "not loaded" with a Try again, because a failed request is not the API saying
- *               a number is unknown (only a 404 on controls or oracle is "not run"). Every
+ *               a number is unknown (only a 404 on controls or oracle is "not run"). Every query
+ *               is read through `currentData`, so a refetch that fails never leaves an old
+ *               value shown as current: sign-offs that did not load mean no cell reads
+ *               signed and no licence sentence; sign-offs or a backlog that did not load mean
+ *               the "waiting on a person" list says so rather than "nothing is waiting"; a
+ *               repository that did not load means the page says it cannot tell whether a
+ *               measurement is running. Every
  *               element a reader meets —
  *               the in-flight banner's line, each tile, the map's headers and cells, the
  *               licence heading, the throughput callout, every door button and each
@@ -49,11 +55,11 @@
  *               means changes (EVIDENCE-AND-CLAIMS §6 first).
  */
 
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { currentData, useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
 import { isApiError } from '../../api/client'
-import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type RepoPool } from '../../api/types'
+import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryTask, type RepoPool } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
@@ -102,6 +108,8 @@ const POOL_UNAVAILABLE: Record<Exclude<RepoPool['history_unavailable'], ''>, str
 
 /** A tile's value when its request failed: said as a failure, never as "unknown" (PR #54 review). */
 const NOT_LOADED = 'not loaded'
+/** A 404 on the factory's tasks is "no backlog yet": an empty list, not a failure. */
+const NO_TASKS: FactoryTask[] = []
 
 /**
  * The line under a tile whose request failed, with the retry: a failed request is not the
@@ -115,6 +123,22 @@ function RetryLine({ onRetry }: { onRetry: () => void }) {
         Try again
       </Button>
     </span>
+  )
+}
+
+/**
+ * A section whose request failed: what did not load, what the page therefore does not show,
+ * and a Try again. A failed request is never shown as an empty answer or an old one.
+ */
+function FailedNotice({ title, children, onRetry, testId }: { title: string; children: ReactNode; onRetry: () => void; testId: string }) {
+  return (
+    <div role="alert" data-testid={testId} className="mb-4 rounded-[var(--radius-card)] border border-status-red/40 bg-status-red-soft px-4 py-3 text-sm text-on-surface">
+      <p className="m-0 font-semibold">{title}</p>
+      <p className="m-0 mt-1">{children}</p>
+      <div className="mt-1">
+        <RetryLine onRetry={onRetry} />
+      </div>
+    </div>
   )
 }
 
@@ -158,26 +182,34 @@ export function ResultsPage() {
   const controls = useOracleControls(repo)
   const oracle = useOracle(repo)
   const pool = useRepoPool(repo)
-  // a request that failed after an earlier success keeps the earlier data: every number on
-  // this page reads only what the last request returned, so an old value is never shown as
-  // current (PR #54 review)
+  const signoffs = useSignoffs(repo)
+  const tasks = useFactoryTasks(repo)
+  const repoDetail = useRepo(repo)
+  // a request that failed after an earlier success keeps the earlier data: every query on
+  // this page — the numbers, the sign-offs that allow delivery, the backlog and the run — is
+  // read only through `currentData`, so an old value is never shown as current, and a source
+  // ratchet in the page's test refuses any `<query>.data` read (PR #54 review)
   const mapData = currentData(map)
   const controlsData = currentData(controls)
   const oracleData = currentData(oracle)
   const poolData = currentData(pool)
-  const signoffs = useSignoffs(repo)
-  const tasks = useFactoryTasks(repo)
-  const repoDetail = useRepo(repo)
+  const signoffsData = currentData(signoffs)
+  const tasksNoBacklog = tasks.isError && isApiError(tasks.error) && tasks.error.status === 404
+  const tasksData = tasksNoBacklog ? NO_TASKS : currentData(tasks)
+  const repoData = currentData(repoDetail)
+  // without the sign-offs or the backlog the page cannot say what waits on a person
+  const decisionsFailed = signoffs.isError || (tasks.isError && !tasksNoBacklog)
   // a replay still queued or running: the numbers below move as each attempt is graded
-  const lastRun = repoDetail.data?.last_run
+  const lastRun = repoData?.last_run
   const activeReplayId = lastRun && lastRun.kind === 'replay' && !isRunTerminal(lastRun.status) ? lastRun.id : ''
   const run = useRun(activeReplayId)
+  const runData = currentData(run)
   // the poll sees the run finish before the repo's `last_run` is re-read: the banner goes with it
-  const replayRunning = Boolean(activeReplayId) && !(run.data && isRunTerminal(run.data.status))
+  const replayRunning = Boolean(activeReplayId) && !(runData && isRunTerminal(runData.status))
   // queued wording until the poll says `running`: a queued run has graded nothing, whatever
   // `progress` still carries (a reclaimed run keeps its old counts while it waits)
-  const replayQueued = replayRunning && (run.data ? run.data.status === 'queued' : lastRun?.status === 'queued')
-  const replayProgress = run.data && run.data.status === 'running' ? kOfN(run.data.progress.done, run.data.progress.total) : null
+  const replayQueued = replayRunning && (runData ? runData.status === 'queued' : lastRun?.status === 'queued')
+  const replayProgress = runData && runData.status === 'running' ? kOfN(runData.progress.done, runData.progress.total) : null
   const q = `repo=${encodeURIComponent(repo)}`
 
   const measured: CapabilityCell[] = useMemo(() => (mapData?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0), [mapData])
@@ -191,11 +223,13 @@ export function ResultsPage() {
     }
     return out
   }, [measured])
+  // null until the map, the sign-offs and the backlog have all loaded: "nothing is waiting"
+  // is said only when it is known
   const decisions = useMemo(
-    () => (mapData && signoffs.data ? decisionsFor({ repo, cells: mapData.cells, signoffs: signoffs.data.items, tasks: tasks.data ?? [] }) : []),
-    [repo, mapData, signoffs.data, tasks.data],
+    () => (mapData && signoffsData && tasksData ? decisionsFor({ repo, cells: mapData.cells, signoffs: signoffsData.items, tasks: tasksData }) : null),
+    [repo, mapData, signoffsData, tasksData],
   )
-  const licence = useMemo(() => (mapData ? licenseSentence(repo, mapData, signoffs.data?.items ?? []) : null), [repo, mapData, signoffs.data])
+  const licence = useMemo(() => (mapData && signoffsData ? licenseSentence(repo, mapData, signoffsData.items) : null), [repo, mapData, signoffsData])
   const economics = useMemo(() => {
     const n = measured.reduce((a, c) => a + c.n, 0)
     const clean = measured.reduce((a, c) => a + c.clean, 0)
@@ -236,12 +270,17 @@ export function ResultsPage() {
             <NotificationBanner title={replayQueued ? 'A measurement is queued' : 'A measurement is running'}>
               <Hint as="p" id="banner.results.replay_running" className="m-0">
                 {replayQueued
-                  ? `A measurement is waiting for a worker${(run.data?.progress?.done ?? 0) > 0 ? ` — ${run.data?.progress?.done} attempt(s) were graded before it went back to the queue` : '; nothing has been graded yet'}.`
-                  : `A measurement is running${replayProgress ? `: attempt ${replayProgress}, $${(run.data?.cost_usd ?? 0).toFixed(2)} spent so far` : ''}.`}{' '}
+                  ? `A measurement is waiting for a worker${(runData?.progress?.done ?? 0) > 0 ? ` — ${runData?.progress?.done} attempt(s) were graded before it went back to the queue` : '; nothing has been graded yet'}.`
+                  : `A measurement is running${replayProgress ? `: attempt ${replayProgress}, $${(runData?.cost_usd ?? 0).toFixed(2)} spent so far` : ''}.`}{' '}
                 The numbers on this page change as each attempt is graded.{' '}
                 <Link to={`/runs/${encodeURIComponent(activeReplayId)}`}>Open the run</Link>
               </Hint>
             </NotificationBanner>
+          )}
+          {repoDetail.isError && (
+            <FailedNotice testId="repo-failed" title="Could not check whether a measurement is running" onRetry={() => void repoDetail.refetch()}>
+              The repository did not load, so this page cannot say whether the numbers below are still moving.
+            </FailedNotice>
           )}
           <Card title="Is the instrument trustworthy here?" eyebrow="the gates every number below stands under">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -306,7 +345,12 @@ export function ResultsPage() {
                 <p className="m-0 mb-4 max-w-[44em] text-[16px] leading-[1.5] text-on-surface-body">
                   Each cell carries its own <code>n</code>, its point estimate and its Wilson interval. An empty cell says "not measured" — it does not say zero.
                 </p>
-                <MapTable map={mapData} signoffs={signoffs.data?.items ?? []} repo={repo} canSign={can('approver')} />
+                {signoffs.isError && (
+                  <FailedNotice testId="signoffs-failed" title="The sign-offs did not load" onRetry={() => void signoffs.refetch()}>
+                    Until they load, no cell is shown as signed and no licence sentence is shown.
+                  </FailedNotice>
+                )}
+                <MapTable map={mapData} signoffs={signoffsData?.items ?? null} repo={repo} canSign={can('approver')} />
                 {licence && (
                   <InsetText>
                     <Hint as="h3" id="banner.results.licence" className="m-0 mb-2 text-[19px] font-bold leading-[1.4]">
@@ -342,8 +386,21 @@ export function ResultsPage() {
             )}
           </Card>
 
-          <Card title="Waiting on a person" eyebrow={`${decisions.length} for this repository`} eyebrowHint="stat.results.waiting_count" actions={<LinkButton size="sm" to="/decisions" hint="button.results.all_decisions">All decisions</LinkButton>}>
-            {decisions.length === 0 ? (
+          <Card title="Waiting on a person" eyebrow={decisions ? `${decisions.length} for this repository` : decisionsFailed ? NOT_LOADED : 'loading'} eyebrowHint="stat.results.waiting_count" actions={<LinkButton size="sm" to="/decisions" hint="button.results.all_decisions">All decisions</LinkButton>}>
+            {decisionsFailed ? (
+              <FailedNotice
+                testId="decisions-failed"
+                title="What is waiting on a person did not load"
+                onRetry={() => {
+                  if (signoffs.isError) void signoffs.refetch()
+                  if (tasks.isError && !tasksNoBacklog) void tasks.refetch()
+                }}
+              >
+                The sign-offs or the factory&rsquo;s backlog did not load, so this list is not shown rather than shown out of date.
+              </FailedNotice>
+            ) : !decisions ? (
+              <p className="m-0 text-sm text-on-surface-muted">Loading what is waiting on a person…</p>
+            ) : decisions.length === 0 ? (
               <EmptyState compact glyph="✓" title="Nothing is waiting on a person here" />
             ) : (
               <ul className="m-0 list-none divide-y divide-border p-0" aria-label={`Decisions for ${repo}`}>

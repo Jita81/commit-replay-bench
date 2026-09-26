@@ -41,7 +41,9 @@
  *               ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/src/screens/Signoff/SignoffPage.test.tsx,
  *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks),
- *               ui/src/screens/Results/ResultsPage.test.tsx (`currentData`)
+ *               ui/src/screens/Results/ResultsPage.test.tsx and
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx (`currentData`, with the
+ *               source ratchet that refuses a `<query>.data` read on those pages)
  *               (every screen test exercises its hooks through `mockApi`)
  * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
  *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
