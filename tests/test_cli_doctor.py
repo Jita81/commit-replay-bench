@@ -20,14 +20,21 @@ What it does: Pins that a keychain login is ok, that no login and no key is degr
               unreadable key file, a key that does not parse and a refusing GitHub, warns
               with no installation and is ok with installations (naming how many can
               deliver); that ``ui`` warns without a build and with an incomplete help bundle
-              (an empty chunk counts as missing) and is ok with the eight chunks; and that
+              (an empty chunk counts as missing) and is ok with the eight chunks, and reads
+              the working directory's ``ui/dist`` only when ``CRB_UI_DIST`` is unset; and that
               ``crb doctor`` on a migrated store renders every line with ``ok / warn / fail /
               skip`` in text and the ``/health`` vocabulary in JSON, failing on a store
-              stamped behind head and on one whose append-only triggers are missing.
+              stamped behind head and on one whose append-only triggers are missing, and
+              renders ``ui`` ok (text and JSON) on a complete build.
 How:          A fake ``claude`` on PATH and a throwaway ``CRB_HOME`` (the persistent case is a
-              unique, never-created path under ``/srv`` — host state cannot reach it); an RSA key pair from
-              ``cryptography`` and an ``httpx.MockTransport`` standing in for GitHub; a
-              ``ui/dist`` made of one-line chunk files.
+              unique, never-created path under ``/srv`` — host state cannot reach it); a
+              ``sandbox`` probe that never asks the host's docker daemon, so a report reads the
+              same with or without one; an RSA key pair from ``cryptography`` and an
+              ``httpx.MockTransport`` standing in for GitHub; a ``ui/dist`` made of one-line
+              chunk files. The ``home`` fixture pins ``CRB_UI_DIST``
+              to a path the test owns with no build, so a ``ui/dist`` built in the checkout
+              (``scripts/walkthrough.sh``) never reaches a test; a test wanting a build makes
+              its own.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/cli/commands/service.py (under test), src/crb/builders/claude_code.py
@@ -67,6 +74,7 @@ from crb.cli.commands.service import (
 )
 from crb.cli.main import main
 from crb.core.secrets_file import SecretsStore
+from crb.observability import probes
 from crb.server.settings import GitHubAppSettings, Settings
 from crb.store import migrate
 
@@ -89,16 +97,29 @@ esac
 """
 
 
+def _daemon_not_asked(timeout: int = 10, *, request_id: str = "") -> probes.ProbeResult:
+    """The ``sandbox`` line as a fixed answer: the host's docker daemon is never asked."""
+    return probes.ProbeResult("sandbox", probes.OK, "docker (test double: no daemon asked)")
+
+
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A throwaway ``CRB_HOME`` with every ``CRB_*`` and credential variable cleared, so the probe
-    never sees the operator's login.
+    never sees the operator's login — a ``sandbox`` probe that never asks the host's docker
+    daemon, so a report reads the same on a laptop and in a container with no daemon — and
+    ``CRB_UI_DIST`` pinned to a path this test owns with no build in it. Cleared instead, the
+    ``ui`` line falls back to the working directory's ``ui/dist``, which
+    ``scripts/walkthrough.sh`` builds in the checkout: the line then flipped from ``warn`` to
+    ``ok`` on the developer's machine and stayed ``warn`` in CI. A test that wants a built UI
+    builds its own and points ``CRB_UI_DIST`` (or ``ui_dist``) at it.
     """
+    monkeypatch.setattr(probes, "probe_docker", _daemon_not_asked)
     for key in list(os.environ):
         if key.startswith("CRB_") or key in {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}:
             monkeypatch.delenv(key, raising=False)
     h = tmp_path / "crb-home"
     monkeypatch.setenv("CRB_HOME", str(h))
+    monkeypatch.setenv("CRB_UI_DIST", str(tmp_path / "no-built-ui"))
     return h
 
 
@@ -457,12 +478,36 @@ def _dev_settings(home: Path, **over: Any) -> Settings:
 CHUNK = "export default 'guide'\n"
 
 
+def _built_ui(dist: Path) -> Path:
+    """A complete build owned by the test: ``index.html`` and one chunk per help guide."""
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html></html>")
+    for name in HELP_GUIDES:
+        (dist / "assets" / f"{name}-Ab12cD3.js").write_text(CHUNK)
+    return dist
+
+
 class TestUiLine:
     def test_no_build_warns_with_the_fix(self, home: Path, tmp_path: Path) -> None:
         r = probe_ui(_dev_settings(home, ui_dist=str(tmp_path / "nowhere")))
         assert r.status == "degraded" and "no built UI" in r.detail
         assert "npm --prefix ui run build" in r.detail and r.data["dist"] is None
         assert probe_ui(None).status == "degraded"
+
+    def test_the_working_directorys_build_counts_only_when_crb_ui_dist_is_unset(
+        self, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The dev default is ``ui/dist`` under the working directory — the way a walkthrough's
+        build reached this suite. Pinned (the ``home`` fixture), a build there is not seen;
+        unset, it is found and the line is ``ok``."""
+        monkeypatch.chdir(tmp_path)
+        _built_ui(Path("ui/dist"))
+        r = probe_ui(_dev_settings(home))
+        assert r.status == "degraded" and "no built UI" in r.detail
+        monkeypatch.delenv("CRB_UI_DIST")
+        r = probe_ui(_dev_settings(home))
+        assert r.status == "ok" and r.detail == "UI at ui/dist · 8/8 help guides bundled"
+        assert r.data == {"dist": "ui/dist", "guides": 8, "missing_guides": []}
 
     def test_incomplete_help_bundle_names_the_missing_guides(
         self, home: Path, tmp_path: Path
@@ -511,10 +556,8 @@ class TestDoctorReport:
     ) -> None:
         fake_cli(True)
         monkeypatch.setenv("CRB_ENV", "dev")
-        # the `ui` line below asserts the NO-built-UI case, so this test must not read the
-        # developer's own `ui/dist`: running the walkthrough in the same worktree built one and
-        # the line flipped to `ok` — a test that depends on the machine it runs on
-        monkeypatch.setenv("CRB_UI_DIST", str(home / "no-built-ui"))
+        # the `ui` line is `warn` because the `home` fixture pins CRB_UI_DIST to a path with no
+        # build — never because nobody has built `ui/dist` in this checkout
         url = f"sqlite:///{home / 'crb.db'}"
         home.mkdir()
         migrate.upgrade(url)
@@ -549,6 +592,63 @@ class TestDoctorReport:
             f"database at 0001, code head {migrate.head_revision()} — run `crb migrate`"
         )
         assert next(p for p in body["probes"] if p["name"] == "worker")["status"] == "degraded"
+
+    def test_the_report_is_the_same_whether_or_not_the_host_has_a_docker_daemon(
+        self,
+        home: Path,
+        fake_cli: Callable[[bool], None],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """A report over test fixtures must not read the machine it runs on: the store-only
+        fixture above gave ``overall: warn`` on a developer's laptop and ``overall: fail`` in
+        a container with no docker daemon (assessment 2026-09-25 §E2). A fake ``docker`` first
+        on PATH answers, then refuses; the report is identical both times."""
+        fake_cli(True)
+        monkeypatch.setenv("CRB_ENV", "dev")
+        monkeypatch.setenv("CRB_UI_DIST", str(home / "no-built-ui"))
+        home.mkdir()
+        migrate.upgrade(f"sqlite:///{home / 'crb.db'}")
+        bindir = tmp_path / "fake-docker"
+        bindir.mkdir()
+        docker = bindir / "docker"
+        monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+        reports: list[tuple[int, str]] = []
+        for script in (
+            "#!/bin/sh\necho 99.0\n",
+            "#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2\nexit 1\n",
+        ):
+            docker.write_text(script)
+            docker.chmod(0o755)
+            code = main(["doctor"])
+            reports.append((code, capsys.readouterr().out))
+        assert reports[0] == reports[1]
+        assert reports[0][1].rstrip().endswith("overall: warn") and reports[0][0] == 0
+
+    def test_a_complete_build_renders_the_ui_line_ok_in_text_and_json(
+        self,
+        home: Path,
+        tmp_path: Path,
+        fake_cli: Callable[[bool], None],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The report's ``ok`` branch for ``ui``, asserted with a build this test owns. Only the
+        ``warn`` branch was asserted, so which one ``crb doctor`` printed depended on whether
+        somebody had built ``ui/dist`` in the checkout."""
+        fake_cli(True)
+        monkeypatch.setenv("CRB_ENV", "dev")
+        dist = _built_ui(tmp_path / "dist")
+        monkeypatch.setenv("CRB_UI_DIST", str(dist))
+        main(["doctor"])
+        rows = _lines(capsys.readouterr().out)
+        assert rows["ui"] == ("ok", f"UI at {dist} · 8/8 help guides bundled")
+        main(["doctor", "--json"])
+        body = json.loads(capsys.readouterr().out)
+        ui = next(p for p in body["probes"] if p["name"] == "ui")
+        assert ui["status"] == "ok"
+        assert ui["data"] == {"dist": str(dist), "guides": 8, "missing_guides": []}
 
     def test_uninitialised_store_fails_and_the_worker_is_not_guessed(
         self, home: Path, fake_cli: Callable[[bool], None], capsys: pytest.CaptureFixture[str]

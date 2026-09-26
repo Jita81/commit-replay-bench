@@ -10,16 +10,11 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ### 2026-09-25 — the builder is not told where the answer is, and production runs sealed
 
-Assessment items B1 and B2, each reproduced against `main` with a failing test first.
-Worktrees are named by a random token instead of the held-out commit's sha, so `pwd`, the
-`.git` pointer and the prompt no longer give the builder the answer key's address; a source
-ratchet stops the pattern returning (DL-053). Each evidence pack names the worktree its row
-graded, so a reclaimed run's two attempts at one trial each serve their own patch. Production refuses the host builder and the
-local test executor unless `CRB_ALLOW_UNSEALED_PROD=1`; the builder defaults to docker in
-prod, compose and Helm hand the API and the worker one builder value, and the override shows
-on `/health`, the Posture page and every run's apparatus (ADR-0023, DL-054). Factory builds
-run on the host and are not sealed yet, so production refuses a factory run unless the
-override is set, and stamps one run under it. No apparatus bump.
+Assessment items B1 and B2, each reproduced against `main` with a failing test first. Worktrees are named by a random token instead of the held-out commit's sha, so `pwd`, the `.git` pointer and the prompt no longer give the builder the answer key's address; a source ratchet stops the pattern returning (DL-054). Each evidence pack names the worktree its row graded, so a reclaimed run's two attempts at one trial each serve their own patch. Production refuses the host builder and the local test executor unless `CRB_ALLOW_UNSEALED_PROD=1`; the builder defaults to docker in prod, compose and Helm hand the API and the worker one builder value, and the override shows on `/health`, the Posture page and every run's apparatus (ADR-0023, DL-055). Factory builds run on the host and are not sealed yet, so production refuses a factory run unless the override is set, and stamps one run under it. No apparatus bump.
+
+### 2026-09-25 — the gate tools are pinned, and the suite no longer depends on the machine it runs on
+
+mypy and ruff are pinned exactly (Dependabot moves them) and CI runs daily on `main` because a SQLAlchemy release, not a commit, turned eight untyped query results into mypy errors; the eight are annotated. The suite no longer depends on the uid it runs as, a docker daemon or the network: tests name a non-root builder user (a ratchet refuses one that does not), the doctor tests never ask the host's daemon, and a `network` test is skipped with the host and the reason when the host is unreachable (and fails instead under `CRB_TEST_STRICT_WARMUP=1`, as in CI, where an unreachable host is a defect). The ratchet exempts only settings built after the test pins `os.getuid` in its own body, and only a pin on the `os` module itself, found through the file's imports (`Fake.os` is not `os`). The local pytest gate in `docs/CONTRIBUTING.md` now measures branch coverage as CI does, and a test fails when a documented gate command drifts from `ci.yml`. `.coverage` and `coverage.xml` are ignored. The pins fix the tools, not the verdict — every other dependency still resolves fresh, which is what the daily run is for — and `docs/CONTRIBUTING.md` now says so and has joined the claims gate's allowlist (assessment 2026-09-25 §E1–E2, DL-053).
 
 ### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
 

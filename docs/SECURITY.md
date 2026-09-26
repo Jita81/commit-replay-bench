@@ -436,7 +436,7 @@ subject to a retention window.
 - **One builder posture for both processes.** Compose and Helm hand the API (which serves
   `/health`) and the worker (which runs the builds) the same `CRB_BUILDER__EXECUTOR`.
   [measured — `tests/test_settings_posture.py::TestHelmOneBuilderPosture` renders the chart]
-- **Worktree names carry nothing of the commit** (DL-053). Trial, mining, control and oracle
+- **Worktree names carry nothing of the commit** (DL-054). Trial, mining, control and oracle
   worktrees are named by a random token, and the mapping to the task is on the run's events,
   so `pwd`, `basename`, the `.git` pointer and the prompt no longer hand the builder a prefix
   of the held-out sha. On the host posture the builder can still read anything the worker

@@ -9,12 +9,25 @@ most of them, review enforces the rest. Read [ARCHITECTURE](ARCHITECTURE.md),
 ```bash
 # Python ≥ 3.12; uv on PATH (https://docs.astral.sh/uv/); git; docker for sandbox tests.
 uv venv -q .venv --python 3.12
-uv pip install -q -e '.[dev]' --python .venv/bin/python
-# optional extras: '.[openai]' '.[claude]' '.[server]' '.[postgres]' or '.[all]'
+uv pip install -q -e '.[server,postgres,mcp,dev]' --python .venv/bin/python
+# optional extras: '.[openai]' '.[claude]' or '.[all]'
 ```
 
-Run tools from the venv (`.venv/bin/…`). Do not commit `.venv/`, `uv.lock` is not yet
-committed (see [Known debt](ARCHITECTURE.md#93-known-debt-tracked)).
+The server, postgres and mcp extras are part of what the gates check: without them `mypy`
+cannot see the server and store code, and the suite skips it. Run tools from the venv
+(`.venv/bin/…`). Do not commit `.venv/`, `uv.lock` is not yet committed (see
+[Known debt](ARCHITECTURE.md#93-known-debt-tracked)).
+
+`mypy` and `ruff` are pinned to exact versions in the `dev` extra, so a fresh environment and
+CI run the same versions of those two gate tools. Dependabot's `dev-tooling` group moves the
+pins in a pull request of their own. The pins do not make the verdict the same: every other
+dependency is resolved fresh on every run, and a new release of one can change what the same
+`mypy` reports on the same tree. SQLAlchemy 2.1 did: `mypy` 2.3.1 on `main` at `8ab88ad`
+reports no errors with SQLAlchemy 2.0.52 and 8 errors with 2.1.0 or 2.1.1 **[measured — n = 3
+fresh `uv` environments whose resolved packages differ only in SQLAlchemy; method: `mypy` over
+`src/crb` in each, 2026-09-25; apparatus 2.2]**. So CI also runs every day on `main`
+with nothing changed: a new upstream release that moves a verdict fails there first, naming
+the release, not on the next unrelated pull request.
 
 ## The gates
 
@@ -25,13 +38,47 @@ Every PR must pass all of these locally **and** in CI (`.github/workflows/ci.yml
 .venv/bin/ruff format --check src tests
 .venv/bin/mypy                       # strict, over src/crb
 .venv/bin/lint-imports               # crb.core stdlib-only + downward layers
-.venv/bin/pytest -q --cov=crb --cov-fail-under=70
+.venv/bin/pytest -q -m "not sandbox_images" --cov=crb --cov-branch --cov-fail-under=70
 ```
 
+Each line is a command CI runs, word for word apart from CI's report-only `--cov-report`
+options; `tests/test_version_consistency.py` fails when one drifts from `ci.yml`. The pytest
+line is the one CI's `test` job runs: it measures branch coverage, as CI does, so the
+coverage floor means the same thing on both. `sandbox_images` is left out because it builds the
+reference sandbox images, and CI's `sandbox-images` job runs it on its own.
+
 CI additionally runs `gitleaks` (secrets), `pip-audit` (known vulnerabilities in the
-resolved environment) and produces a CycloneDX SBOM. Tests that need infrastructure are
-marked and skipped when it is absent: `docker`, `toolchain(name)`, `live` (model
-credentials), `slow`.
+resolved environment) and produces a CycloneDX SBOM.
+
+No test may fail because of the machine it runs on **[aspiration — the rule DL-053 sets; the
+run below shows it is not yet demonstrated]**. Running as root, with no docker daemon or with
+no network is meant to change which tests run, not their results **[aspiration — DL-053]**.
+What holds the suite to it: builder settings in tests name a non-root user or pin
+`os.getuid`, the doctor tests never ask the host's daemon, and a test that needs a daemon or a
+network host is skipped with the reason when it is absent (under
+`CRB_TEST_STRICT_WARMUP=1` an unreachable host is a failure instead, below). One whole-suite
+run under all three conditions still had one failure, from timing rather than the host
+**[measured — n = 1 whole-suite run at `b5e2b7f`, `-m "not sandbox_images"`, with uid 0
+simulated by patching `os.getuid`, `DOCKER_HOST` pointing at nothing and HTTPS sent to a dead
+proxy: 3957 passed, 97 skipped, 1 failed, and that one a wall-clock test that also passed 3
+times of 3 alone under the same settings, on a host with a load average near 10; method:
+pytest, 2026-09-26; apparatus 2.2]**, so this is a rule the suite is held to, not a guarantee
+that it passes on every host. A test that needs something the machine may not have is
+marked, and skipped with the reason when it is absent:
+
+- `docker` — a docker daemon that answers `docker info`
+- `toolchain(name)` — a language toolchain on PATH (go, node, mvn, cargo)
+- `network(*hosts)` — outbound HTTPS to each named host; with no hosts named, the Python
+  package index. `tests/conftest.py` asks each host once per session before the test runs
+- `live` — model credentials
+- `slow` — a long end-to-end test
+
+Set `CRB_TEST_STRICT_WARMUP=1`, as CI does, to turn an unreachable registry or network host,
+or a failed toolchain warm-up, into a failure instead of a skip: CI has the network, so there
+an unreachable host is a defect. A missing docker daemon is always a skip.
+No test may depend on the uid it runs as: name a non-root user when you build builder
+container settings, or pin `os.getuid` before you build them (`tests/test_builders_container.py`
+refuses a test that does neither).
 
 **Run the full suite, not just your files.** A change to the core can alter a verdict
 elsewhere; the negative-controls and census-re-derivation gates (P1) exist to catch that.
@@ -131,13 +178,12 @@ PRs delete theirs. Feature branches
 `feat/<area>-<topic>` / `fix/<area>-<topic>` / `docs/<topic>`; one PR per file-disjoint
 workstream where possible. **Branch protection on `main` requires the CI jobs green and
 the branch up to date before a merge** (lint, types, layers, code-map, dod, both
-pytest matrices, PostgreSQL, security, container, walkthrough — the same commands you run
-locally:
-`pytest tests`, `ruff check`, `ruff format --check`, `mypy --strict src scripts`,
-`scripts/code_map.py --check`, `scripts/dod_check.py --check`,
-`scripts/claims_check.py --check`, `lint-imports`,
-`cd ui && npx tsc -b && npx vitest run`,
-`helm lint --strict`); the adversarial verify pass (re-run the full suite on the merged
+pytest matrices, PostgreSQL, security, container, walkthrough — commands you can run
+locally: the five in [The gates](#the-gates), exactly as written there, and
+`python scripts/code_map.py --check`, `python scripts/dod_check.py --check`,
+`python scripts/claims_check.py --check`,
+`cd ui && npm run typecheck && npx vitest run`,
+`helm lint deploy/helm/crb --strict`); the adversarial verify pass (re-run the full suite on the merged
 tree) before each release tag. The repository is public and Actions minutes are free, so
 "CI is unavailable" is no longer a reason to merge on local gates (it was, for one day —
 DL-035).
