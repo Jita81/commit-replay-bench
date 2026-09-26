@@ -45,8 +45,8 @@ Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYSIS.md (its
               output), docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog
-              a gap may cite), ui/src/App.tsx (the routes every page artefact must cover),
-              ui/src/components/Layout.tsx (JOURNEY_STEPS), ui/src/help/hints.ts and
+              a gap may cite), ui/src/App.tsx and ui/src/components/Layout.tsx (the routes
+              and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
               .github/workflows/ci.yml (the dod job that runs --check), docs/dod/PLAN.md
               (its wave items must be gap ids)

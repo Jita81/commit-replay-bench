@@ -12,14 +12,6 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **The definition of done is corrected to the north star, and its checker keeps it so**
-  (`feat/ns1-d`, north-star Wave 0). The five "trustworthy when" criteria read what landed;
-  `product.evidence.6` is met on a dated reading of branch protection; the external assessment
-  of 25 September is vendored; P-008 is closed and P-051 to P-059 are registered; `PLAN.md`
-  is rewritten as the north-star waves. `scripts/dod_check.py` now refuses a gap line nothing
-  cites and a wave item that is not a gap, and keeps a closed gap nameable (DL-063). The guides
-  name every probe `/health` serves, held by a test.
-
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile
   score working changes per pound, blind, and VALUE heads the definition of done. A bug class is
