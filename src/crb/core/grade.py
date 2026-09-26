@@ -149,7 +149,8 @@ class MisattributionViolation(AssertionError):
 #: ``gold_green`` — the gold tree passed the scope the trial failed, now, in this posture;
 #: ``env_probe`` — a factory item (no gold): the environment probe passed on a fresh base
 #: tree; ``no_source`` — no source file changed (a fact about the diff, no control);
-#: ``lint_gold_ok`` — only belt 5 failed and the gold passed belt 5 at qualification.
+#: ``lint_gold_ok`` — only belt 5 failed and the gold passed belt 5 at qualification
+#: (``gold.lint is True``; never named when that was not measured).
 BLAME_GOLD_GREEN = "gold_green"
 BLAME_ENV_PROBE = "env_probe"
 BLAME_NO_SOURCE = "no_source"
@@ -171,6 +172,9 @@ ENVIRONMENT_PREFIX = "environment:"
 ENV_CODE_GOLD_CONTROL_RED = "GOLD_CONTROL_RED"
 #: ``labels.env_code`` of a lint-only failure whose gold also failed belt 5.
 ENV_CODE_GOLD_LINT = "GOLD_LINT_RED"
+#: ``labels.env_code`` of a lint-only failure whose gold's belt 5 was never measured in
+#: the posture (a factory item; a gold tree with no lint plan): no witness exists.
+ENV_CODE_LINT_UNWITNESSED = "LINT_UNWITNESSED"
 #: ``labels.env_code`` of a trial whose test run could not be given its ground.
 ENV_CODE_TEST_RUN = "TEST_RUN_ENVIRONMENT"
 
@@ -517,7 +521,8 @@ def grade(
         the sandbox) — never a verdict about the patch. Whose fault it was is a blame
         decision like any other, so the witness runs the same scope on the gold tree
         first: a GREEN control means the posture can hold the gold's tree and it was the
-        trial's own tree that did not fit (its size or its file modes) — disqualified,
+        trial's own tree that did not fit (its size, or a path the worker could not make
+        readable to the sandbox's user) — disqualified,
         never charged, never an environment row, nothing revoked. A RED control makes it
         an environment row (``GOLD_CONTROL_RED``: the caller revokes the qualification).
         With no witness (an unwitnessed grade) it is an environment row that names no
@@ -532,7 +537,8 @@ def grade(
                     disqualified=True,
                     dq_reason=redact_and_cap(
                         f"trial tree: {run.env_error} — the gold's tree ran here, so the "
-                        "trial's own tree did not fit the sandbox (its size or its file modes)",
+                        "trial's own tree did not fit the sandbox (its size, or a path the worker could "
+                        "not make readable to the sandbox's user)",
                         max_chars=500,
                     ),
                     control=control,
@@ -546,6 +552,37 @@ def grade(
             env_code=ENV_CODE_TEST_RUN,
             **changes,
         )
+
+    def lint_blame(gold_lint: Any) -> dict[str, Any]:
+        """Whose a belt-5-only failure is. ``lint_gold_ok`` asserts that the gold passed
+        belt 5 at qualification, so it is named only when the qualification measured
+        exactly that (``True``). A gold that failed it (``False``: a qualified gold never
+        does) makes the rejection the posture's. A gold whose belt 5 was never measured
+        (``None``: a factory item has no gold; a gold tree with no lint plan) leaves the
+        rejection with no witness at all: an environment row that names no control and
+        revokes nothing (``LINT_UNWITNESSED``) — or ``unwitnessed`` in an unwitnessed grade,
+        as every other belt reads there (CodeRabbit on PR #56)."""
+        if gold_lint is True:
+            return {"blame_control": BLAME_LINT_GOLD_OK}
+        if gold_lint is False:
+            return {
+                "error": f"{ENVIRONMENT_PREFIX} the gold failed belt 5 at qualification",
+                "env_code": ENV_CODE_GOLD_LINT,
+            }
+        if gold_lint is not None:
+            raise MisattributionViolation(
+                f"the qualification's gold lint verdict must be True, False or None, "
+                f"got {gold_lint!r}"
+            )
+        if ctx.witness is None:
+            return {"blame_control": BLAME_UNWITNESSED}
+        return {
+            "error": (
+                f"{ENVIRONMENT_PREFIX} belt 5 has no witness — the gold's belt 5 was never "
+                f"measured in {ctx.posture.posture_id}"
+            ),
+            "env_code": ENV_CODE_LINT_UNWITNESSED,
+        }
 
     def witness(
         scope: Sequence[str], *, why: str, allow_failing: Collection[str] | None
@@ -855,15 +892,7 @@ def grade(
             elif source_changed is False:
                 blame = {"blame_control": BLAME_NO_SOURCE}
             elif belts.repo_lint_clean is False:
-                if ctx.qualification.gold.get("lint") is False:
-                    # a qualified gold never fails belt 5; a context that says it did cannot
-                    # make the builder's lint rejection a witnessed one
-                    blame = {
-                        "error": f"{ENVIRONMENT_PREFIX} the gold failed belt 5 at qualification",
-                        "env_code": ENV_CODE_GOLD_LINT,
-                    }
-                else:
-                    blame = {"blame_control": BLAME_LINT_GOLD_OK}
+                blame = lint_blame(ctx.qualification.gold.get("lint"))
         final: dict[str, Any] = {
             "clean": clean,
             "note": note,

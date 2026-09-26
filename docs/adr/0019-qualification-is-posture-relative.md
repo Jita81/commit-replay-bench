@@ -103,7 +103,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
 5. **The model is blamed only with a witness from the same posture.** Whenever a verdict would be `builder_red` or `lint`, `grade()` asks for a control. The control runs now, in the same posture, on a tree the builder never touched:
    - **for a replay task:** the gold tree (the parent, the tests and the commit's own sources, with the gold's dependencies) runs the scope the trial failed. That is the target for belt 2, or the belt scope for belt 3;
    - **for a factory item, which has no gold:** the environment probe runs on a fresh base tree;
-   - **for a failure of belt 5 only:** the witness is that the gold passed belt 5 at qualification;
+   - **for a failure of belt 5 only:** the witness is that the gold passed belt 5 at qualification (`gold.lint` is `true`). When the qualification never measured it (`null`: a factory item has no gold; a gold tree with no lint plan), there is no witness: the row is an `environment:` row (`env_code: LINT_UNWITNESSED`) that names no control and revokes nothing, and an unwitnessed grade reads `unwitnessed` (PR #56). A gold that failed belt 5 (`false`) makes it an `environment:` row (`GOLD_LINT_RED`);
    - **for no source change:** this is a fact about the diff and needs no control.
 
    **If the control is green,** the row is `builder_red` or `lint`, and `labels.blame_control` names the witness.

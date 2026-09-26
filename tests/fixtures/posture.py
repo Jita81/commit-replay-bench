@@ -49,9 +49,13 @@ def adhoc(task: TaskSpec, executor: Executor) -> tuple[TaskSpec, GradeContext]:
     return adhoc_context(task, executor=executor)
 
 
-def discovery_qualification(task: TaskSpec, executor: Executor) -> Qualification:
+def discovery_qualification(
+    task: TaskSpec, executor: Executor, *, gold_lint: bool | None = None
+) -> Qualification:
     """A ``qualified`` record built from the task's discovery values in an ad hoc posture
-    (tests only — a deployment measures it with ``qualify_task``)."""
+    (tests only — a deployment measures it with ``qualify_task``). ``gold_lint`` is the
+    gold's belt 5 at qualification: ``None`` (the default) = never measured, so a lint
+    rejection has no witness; ``True`` = the gold passed it."""
     posture = adhoc_posture(executor)
     return Qualification(
         qualification_id="",
@@ -62,15 +66,19 @@ def discovery_qualification(task: TaskSpec, executor: Executor) -> Qualification
         state=STATE_QUALIFIED,
         red={"kind": "tests_failed", "failing": []},
         baseline_failing=task.baseline_failing,
-        gold={"clean": True, "note": "", "lint": None},
+        gold={"clean": True, "note": "", "lint": gold_lint},
     )
 
 
 def context(
-    task: TaskSpec, executor: Executor, *, witness: Witness | None = None
+    task: TaskSpec,
+    executor: Executor,
+    *,
+    witness: Witness | None = None,
+    gold_lint: bool | None = None,
 ) -> tuple[TaskSpec, GradeContext]:
     """A qualified discovery-value context with ``witness`` (default: none)."""
-    q = discovery_qualification(task, executor)
+    q = discovery_qualification(task, executor, gold_lint=gold_lint)
     ctx = GradeContext(
         posture=Posture.from_dict(q.posture),
         qualification=q,
@@ -129,12 +137,15 @@ def grade_adhoc(
     *,
     executor: Executor,
     witness: Witness | None = None,
+    gold_lint: bool | None = None,
     **kw: Any,
 ) -> GradeResult:
     """``grade()`` with a context built here: unwitnessed ad hoc by default, or a qualified
-    discovery-value context carrying ``witness``."""
+    discovery-value context carrying ``witness`` (and the gold's belt 5, ``gold_lint``)."""
     t, ctx = (
-        context(task, executor, witness=witness) if witness is not None else adhoc(task, executor)
+        context(task, executor, witness=witness, gold_lint=gold_lint)
+        if witness is not None
+        else adhoc(task, executor)
     )
     return grade(ws, t, ctx=ctx, executor=executor, **kw)
 

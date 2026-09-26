@@ -50,6 +50,13 @@ seam, `crb.core.deps`, and wired end to end.
   - `QUAL_ENV_UNLOADABLE`'s fix covers provisioning on as well as off;
   - the count of run `0c44ff24…`'s rows (3 observed, 4 in stream D's reading of an export that
     is not committed) is marked disputed wherever it is cited **[gap]** (F42).
+- **`lint_gold_ok` is named only when the gold's belt 5 was measured** (product.posture.33;
+  CodeRabbit on PR #56). A belt-5-only failure whose qualification never measured the gold's
+  lint (`null` — every factory item, and a gold tree with no lint plan) was labelled
+  `lint_gold_ok`, a witness asserting a gold fact nobody measured, and charged to the model.
+  It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
+  lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
+  apparatus 2.3, which this change set introduces.
 - **Host file modes never hide the tree from the sandbox** (product.posture.32; CI's
   `sandbox-images` job on PR #56). The container's user owns nothing on the host, so a path
   the host's modes kept from others failed the copy (`tree_copy_failed` on Linux — first
