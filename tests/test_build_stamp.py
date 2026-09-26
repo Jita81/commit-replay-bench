@@ -12,9 +12,10 @@ What it does: Pins that three agreeing commits are not stale; that a server star
               never compared (``skipped``, not ``ok``); that the probe is ``degraded`` for
               ``/health`` and ``down`` for ``crb doctor``; that the checkout and behind-count
               readings come from a real git repository; that ``CRB_SOURCE_COMMIT`` wins and
-              the process commit is captured once; and that ``ui/vite.config.ts`` writes the
+              the process commit is captured once; that ``ui/vite.config.ts`` writes the
               stamp file this module reads and the Dockerfile carries the commit into both
-              stages.
+              stages; and that the deploy runbook names the status an unstamped image reads
+              and compose passes the commit to the build (P-044).
 How:          Real throwaway git repositories under ``tmp_path``; a dist directory with and
               without ``build-stamp.json``; the recipes are read as text.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -22,10 +23,11 @@ ADRs:         none
 Works with:   src/crb/observability/build_stamp.py (under test), ui/vite.config.ts (the stamp
               writer), deploy/Dockerfile (the image's commit), tests/test_server_system.py
               (the ``/health`` half), tests/test_cli_doctor.py (the doctor half),
-              docs/PREVENTION.md (P-002)
+              deploy/README.md (the runbook sentence it checks), deploy/docker-compose.yml
+              (the build argument it checks), docs/PREVENTION.md (P-002, P-044)
 Tested by:    (this is a test file)
 Touch when:   the stamp's file name or fields change (the plugin, the module and this file
-              change together).
+              change together); a probe status changes (the runbook's sentence changes with it).
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from crb.observability import build_stamp as bs
 from crb.observability.probes import DEGRADED, DOWN, OK, SKIPPED
@@ -140,6 +143,26 @@ def test_a_served_unstamped_bundle_is_stale_even_when_the_source_commit_is_unkno
     p = bs.probe_build(unstamped, server="", checkout="", stale_status=DOWN)
     assert p.status == DOWN and p.data["ui_stamp"] == bs.UI_UNREADABLE
     assert bs.probe_build(None, server="", checkout="").status == SKIPPED
+
+
+def test_the_deploy_runbook_says_what_an_unstamped_image_reads(tmp_path: Path) -> None:
+    """deploy/README.md told the operator that an image built without ``CRB_SOURCE_COMMIT``
+    reads ``skipped``; since the fix above it reads ``degraded`` on ``/health`` and fails
+    ``crb doctor`` (the adversarial check on PR #57, 2026-09-26; docs/PREVENTION.md P-044).
+    The runbook's sentence is checked against the probe's own answer, and the compose build
+    passes the argument through so setting it in the environment is enough."""
+    unstamped = _dist(tmp_path, None)
+    health = bs.probe_build(unstamped, server="", checkout="")
+    doctor = bs.probe_build(unstamped, server="", checkout="", stale_status=DOWN)
+    assert (health.status, doctor.status) == (DEGRADED, DOWN)
+    readme = (ROOT / "deploy" / "README.md").read_text(encoding="utf-8")
+    para = next(p for p in readme.split("\n\n") if f"--build-arg {bs.SOURCE_COMMIT_ENV}=" in p)
+    assert f"`{health.status}`" in para and "`crb doctor`" in para, para
+    assert f"`{SKIPPED}`" not in para, para
+    compose = yaml.safe_load((ROOT / "deploy" / "docker-compose.yml").read_text("utf-8"))
+    args = compose["x-crb-image"]["build"].get("args") or {}
+    assert args.get(bs.SOURCE_COMMIT_ENV) == f"${{{bs.SOURCE_COMMIT_ENV}:-}}", args
+    assert f"{bs.SOURCE_COMMIT_ENV}=$(git rev-parse HEAD) docker compose" in readme
 
 
 def test_the_probe_is_degraded_for_health_and_down_for_doctor() -> None:
