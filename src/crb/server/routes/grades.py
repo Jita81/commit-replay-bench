@@ -286,7 +286,9 @@ def worktree_name(session: Session, g: Grade) -> str:
     run's ``prep.start`` event for the row's task and trial (the mapping lives in the
     events, never in the path); ``""`` when the run recorded none. The LATEST such event
     wins: a reclaimed run re-runs its in-flight task under the same trial with a new
-    worktree, and the row was written by that later attempt."""
+    worktree, and the row was written by that later attempt. It is the ONLY event that
+    may answer: when it names no worktree the answer is ``""``, never an older attempt's
+    worktree, whose patch is not the one this row graded (PR #53 review)."""
     payloads = session.scalars(
         select(Event.payload_json)
         .where(
@@ -298,8 +300,8 @@ def worktree_name(session: Session, g: Grade) -> str:
     )
     for payload in payloads:
         body = dict(payload or {})
-        if body.get("trial") == g.trial and body.get("worktree"):
-            return str(body["worktree"])
+        if body.get("trial") == g.trial:
+            return str(body.get("worktree") or "")
     return ""
 
 
