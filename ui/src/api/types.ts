@@ -1069,6 +1069,10 @@ export interface Signoff {
   checks_arm?: string
   /** The checks arm the repository's cells are read on now; `""` for a record not tied to one repository. */
   checks_arm_current?: string
+  /** The posture class(es) the evidence was graded in (ADR-0019) — `""` for evidence from before apparatus 2.3. A record signed in another class than `posture_class_current` is stale too. */
+  posture_class?: string
+  /** The posture class the deployment grades the repository in now; `""` for a record not tied to one repository. */
+  posture_class_current?: string
   revoked_by: string | null
   revoked_by_name?: string | null
   revoked_at: string | null

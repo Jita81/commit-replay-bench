@@ -160,7 +160,8 @@ from crb.core.signoff import (
 from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep
+from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import checks_arm_in
 from crb.server.routes.grades import grade_to_dict
 from crb.server.routes.oracle import (
@@ -219,6 +220,8 @@ _ATT_AT = "attestation_at"
 _VERIFIER_KIND = "verifier_kind"
 # crb.signoff.v4 (ADR-0024): the checks arm the evidence was read on (absent before).
 _EV_CHECKS = "evidence_checks_arm"
+# crb.signoff.v4 (ADR-0019): the posture class(es) the evidence was graded in.
+_EV_POSTURE = "evidence_posture_class"
 
 #: Envelope codes: the floor keeps its historical code; every policy clause is one.
 CODE_FALSE_Q1 = "false_q1_refused"
@@ -430,6 +433,7 @@ def to_record(row: Signoff) -> SignoffRecord:
         attestation=_attestation_of(cj) if not row.revoke else None,
         verifier_kind=str(cj.get(_VERIFIER_KIND, "") or ""),
         checks_arm=str(cj.get(_EV_CHECKS, "") or ""),
+        posture_class=str(cj.get(_EV_POSTURE, "") or ""),
         schema=_schema_of(cj),
         record_id=row.signoff_id,
         prev_hash=row.prev_hash,
@@ -477,7 +481,9 @@ def cell_false_q1(session: Session, repo: str, scope: CellKey) -> tuple[int, lis
     return len(ids), ids
 
 
-def cell_rows(session: Session, repo: str, scope: CellKey, arm: str) -> list[GradeRow]:
+def cell_rows(
+    session: Session, repo: str, scope: CellKey, arm: str, posture_class: str
+) -> list[GradeRow]:
     """The scope's SIGHTED rows on the CURRENT apparatus and on the ``checks`` ``arm`` as
     :class:`GradeRow` (raises ``FalseQ1Violation`` on a bad row — call :func:`cell_false_q1`
     first so the refusal is explicit, not incidental). A sign-off is a claim about the
@@ -492,7 +498,22 @@ def cell_rows(session: Session, repo: str, scope: CellKey, arm: str) -> list[Gra
     )
     grades: Iterable[Grade] = session.execute(q).scalars()
     rows = [GradeRow.from_dict(grade_to_dict(g)) for g in grades]
-    return rows_for_checks(rows, arm)
+    # ADR-0019 §8: and in the posture class the deployment grades the repository in
+    return [r for r in rows_for_checks(rows, arm) if r.posture_class == posture_class]
+
+
+def _grade_posture(g: Grade) -> str:
+    """The posture class of a stored row (ADR-0019) — its hashed ``posture_class`` label,
+    ``""`` on a row from before apparatus 2.3."""
+    return str(dict(g.labels_json or {}).get("posture_class", "") or "")
+
+
+def posture_now(session: Session, settings: Any, repo: str) -> str:
+    """The posture class the deployment grades ``repo`` in now (the map's default filter,
+    :func:`crb.server.posture_view.deployment_posture_class`); ``""`` for the wildcard."""
+    if repo == WILDCARD:
+        return ""
+    return deployment_posture_class(settings, session.get(Repo, repo))
 
 
 def _grade_arm(g: Grade) -> str:
@@ -578,7 +599,13 @@ def _subjects(session: Session, repo: str, task_ids: Iterable[str]) -> dict[str,
 
 
 def accepted_rows(
-    session: Session, repo: str, scope: CellKey, arm: str, *, limit: int = ACCEPTED_ROWS_LIMIT
+    session: Session,
+    repo: str,
+    scope: CellKey,
+    arm: str,
+    posture_class: str,
+    *,
+    limit: int = ACCEPTED_ROWS_LIMIT,
 ) -> list[AcceptedRowOut]:
     """The cell's accepted rows — clean and not disqualified, on the ``checks`` ``arm`` the
     cell is read on — newest first, with the graded task's subject, for the attestation
@@ -589,7 +616,7 @@ def accepted_rows(
     newest_first: Iterable[Grade] = session.execute(q.order_by(Grade.seq.desc())).scalars()
     grades: list[Grade] = []
     for g in newest_first:
-        if _grade_arm(g) == arm:
+        if _grade_arm(g) == arm and _grade_posture(g) == posture_class:
             grades.append(g)
             if len(grades) >= limit:
                 break
@@ -683,7 +710,13 @@ def _attestation_422(msg: str) -> ApiError:
 
 
 def resolve_attestation(
-    session: Session, repo: str, scope: CellKey, att: AttestationIn, arm: str
+    session: Session,
+    repo: str,
+    scope: CellKey,
+    att: AttestationIn,
+    arm: str,
+    *,
+    posture_class: str,
 ) -> ResolvedAttestation:
     """The approver's attestation with ``reviewed_task_id`` resolved from the ledger,
     plus the task's subject and the actors behind the row. 422 unless the row exists, is
@@ -708,6 +741,12 @@ def resolve_attestation(
         raise _attestation_422(
             f"row {att.reviewed_row_hash[:12]}… was graded on the checks arm "
             f"{_grade_arm(g)!r}, not the arm {arm!r} this cell is read on (ADR-0024)"
+        )
+    if _grade_posture(g) != posture_class:
+        raise _attestation_422(
+            f"row {att.reviewed_row_hash[:12]}… was graded in the posture class "
+            f"{_grade_posture(g) or '(none)'!r}, not {posture_class!r}, the class this cell is "
+            "read in (ADR-0019)"
         )
     if not g.clean or g.disqualified:
         raise _attestation_422(
@@ -785,7 +824,7 @@ def _display_name(session: Session, user_id: str) -> str:
 
 
 def signoff_out(
-    session: Session, row: Signoff, all_rows: Sequence[Signoff]
+    session: Session, row: Signoff, all_rows: Sequence[Signoff], *, posture_current: str = ""
 ) -> SignoffWithPolicyOut:
     """One attestation as served: the stored snapshot plus the LIVE ``active`` /
     ``current_false_q1`` — a cell that has since acquired a false-Q1 row is shown
@@ -802,8 +841,13 @@ def signoff_out(
     # (ADR-0024); a record from before the switchboard was signed on ``off``
     signed_arm = str(cj.get(_EV_CHECKS, "") or "") or ARM_OFF
     arm_now = checks_arm_in(session, row.repo) if row.repo != WILDCARD else ""
-    stale = (bool(stamped) and APPARATUS_VERSION not in stamped) or (
-        bool(arm_now) and signed_arm != arm_now
+    # … or signed on evidence graded in another posture class than the one the deployment
+    # grades the repository in now (ADR-0019 §8)
+    signed_posture = str(cj.get(_EV_POSTURE, "") or "")
+    stale = (
+        (bool(stamped) and APPARATUS_VERSION not in stamped)
+        or (bool(arm_now) and signed_arm != arm_now)
+        or (bool(posture_current) and bool(signed_posture) and signed_posture != posture_current)
     )
     active = (
         revocation is None and not _superseded(row, all_rows) and current_fq1 == 0 and not stale
@@ -830,6 +874,8 @@ def signoff_out(
         apparatus_current=APPARATUS_VERSION,
         checks_arm=signed_arm,
         checks_arm_current=arm_now,
+        posture_class=signed_posture,
+        posture_class_current=posture_current,
         evidence=_evidence(row),
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,
@@ -1033,6 +1079,8 @@ def list_signoffs(
     viewer: ViewerDep,
     db: DbDep,
     page: PageDep,
+    *,
+    settings: SettingsDep,
     repo: str | None = Query(default=None, max_length=64),
     include_revoked: bool = Query(default=False),
 ) -> Page[SignoffWithPolicyOut]:
@@ -1048,7 +1096,10 @@ def list_signoffs(
     attestations.reverse()  # newest first
     window = attestations[page.offset : page.offset + page.limit]
     return Page[SignoffWithPolicyOut](
-        items=[signoff_out(db, r, rows) for r in window],
+        items=[
+            signoff_out(db, r, rows, posture_current=posture_now(db, settings, r.repo))
+            for r in window
+        ],
         total=len(attestations),
         limit=page.limit,
         offset=page.offset,
@@ -1076,6 +1127,7 @@ def signoff_policy(viewer: ViewerDep) -> SignoffPolicyOut:
 def preview_signoff(
     viewer: ViewerDep,
     db: DbDep,
+    settings: SettingsDep,
     *,
     repo: str = Query(min_length=1, max_length=64),
     capability_class: str = Query(min_length=1, max_length=64),
@@ -1142,7 +1194,8 @@ def preview_signoff(
             },
         )
     arm = checks_arm_in(db, repo)
-    rows = cell_rows(db, repo, scope, arm)
+    posture = posture_now(db, settings, repo)
+    rows = cell_rows(db, repo, scope, arm, posture)
     controls = latest_controls_verdict(db, repo)
     by_task = oracle_by_task(db, repo)
     cell = measured_cell(rows, scope, controls, by_task)
@@ -1157,7 +1210,7 @@ def preview_signoff(
             )
         except ValidationError as exc:
             raise _attestation_422(exc.errors()[0]["msg"] if exc.errors() else str(exc)) from exc
-        attested = resolve_attestation(db, repo, scope, att_in, arm)
+        attested = resolve_attestation(db, repo, scope, att_in, arm, posture_class=posture)
         record = replace(record, attestation=attested.attestation)
         attestation_out = AttestationOut(**attested.attestation.to_dict(), subject=attested.subject)
     # the two-person rule is judged for the viewer as the would-be approver, so the
@@ -1224,7 +1277,7 @@ def preview_signoff(
         refusals=[_refusal_out(r) for r in refusals],
         signable=not refusals,
         would_record=_would_record(stamped),
-        accepted_rows=accepted_rows(db, repo, scope, arm),
+        accepted_rows=accepted_rows(db, repo, scope, arm, posture),
         attestation=attestation_out,
     )
 
@@ -1235,7 +1288,9 @@ def preview_signoff(
     responses={401: _ERR, 404: _ERR},
     summary="One attestation with the snapshot it was made on",
 )
-def get_signoff(signoff_id: str, viewer: ViewerDep, db: DbDep) -> SignoffWithPolicyOut:
+def get_signoff(
+    signoff_id: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> SignoffWithPolicyOut:
     """One attestation (a revocation row's id is not addressable here)."""
     del viewer
     row = db.execute(
@@ -1243,7 +1298,12 @@ def get_signoff(signoff_id: str, viewer: ViewerDep, db: DbDep) -> SignoffWithPol
     ).scalar_one_or_none()
     if row is None:
         raise ApiError(404, "not_found", f"no attestation {signoff_id!r}")
-    return signoff_out(db, row, load_signoff_rows(db, row.repo))
+    return signoff_out(
+        db,
+        row,
+        load_signoff_rows(db, row.repo),
+        posture_current=posture_now(db, settings, row.repo),
+    )
 
 
 @router.post(
@@ -1254,7 +1314,10 @@ def get_signoff(signoff_id: str, viewer: ViewerDep, db: DbDep) -> SignoffWithPol
     summary="Attest a cell (approver) under signoff-policy.v2; 409 false_q1_refused / signoff_refused",
 )
 def create_signoff(
-    body: SignoffCreateWithAttestationRequest, approver: ApproverDep, db: DbDep
+    body: SignoffCreateWithAttestationRequest,
+    approver: ApproverDep,
+    db: DbDep,
+    settings: SettingsDep,
 ) -> SignoffWithPolicyOut:
     """The five-step decision of the module docstring; writes only when no clause fails."""
     if db.get(Repo, body.repo) is None:
@@ -1275,7 +1338,8 @@ def create_signoff(
     # 2. Evidence: the cell routed under the repo's latest controls verdict, and its
     #    oracle strength from the repo's task-level mutation scores.
     arm = checks_arm_in(db, body.repo)
-    rows = cell_rows(db, body.repo, scope, arm)
+    posture = posture_now(db, settings, body.repo)
+    rows = cell_rows(db, body.repo, scope, arm, posture)
     controls = latest_controls_verdict(db, body.repo)
     by_task = oracle_by_task(db, body.repo)
     cell = measured_cell(rows, scope, controls, by_task)
@@ -1284,7 +1348,9 @@ def create_signoff(
     #    actors behind it and behind every accepted row, for the two-person rule.
     attested: ResolvedAttestation | None = None
     if body.attestation is not None:
-        attested = resolve_attestation(db, body.repo, scope, body.attestation, arm)
+        attested = resolve_attestation(
+            db, body.repo, scope, body.attestation, arm, posture_class=posture
+        )
         record = replace(record, attestation=attested.attestation)
     # 4. The policy.
     refusals = evaluate_signoff(
@@ -1332,6 +1398,7 @@ def create_signoff(
         _EV_FQ1: str(cell.stats.false_q1),
         _EV_APPARATUS: ",".join(cell.stats.apparatus_versions),
         _EV_CHECKS: stamped.checks_arm,
+        _EV_POSTURE: stamped.posture_class,
         _EV_ORACLE: ""
         if stamped.oracle_strength_at_signoff is None
         else f"{stamped.oracle_strength_at_signoff:.6f}",
@@ -1393,7 +1460,12 @@ def create_signoff(
         },
     )
     db.commit()
-    return signoff_out(db, row, load_signoff_rows(db, body.repo))
+    return signoff_out(
+        db,
+        row,
+        load_signoff_rows(db, body.repo),
+        posture_current=posture_now(db, settings, body.repo),
+    )
 
 
 @router.post(
@@ -1407,6 +1479,7 @@ def revoke_signoff(
     body: SignoffRevokeRequest,
     approver: ApproverDep,
     db: DbDep,
+    settings: SettingsDep,
 ) -> SignoffWithPolicyOut:
     """Append a revocation row for the attestation's scope; the original row is untouched
     and is returned with ``revoked: true``. The body's ``note`` — the reason — is required
@@ -1454,7 +1527,12 @@ def revoke_signoff(
         },
     )
     db.commit()
-    return signoff_out(db, row, load_signoff_rows(db, row.repo))
+    return signoff_out(
+        db,
+        row,
+        load_signoff_rows(db, row.repo),
+        posture_current=posture_now(db, settings, row.repo),
+    )
 
 
 __all__ = [

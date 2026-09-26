@@ -1235,11 +1235,17 @@ class SignoffOut(BaseModel):
     #: signed on a ``checks`` arm other than the one the repository's cells are read on now
     #: is stale too (ADR-0024): ``checks_arm`` is the arm it was signed on (``off`` for a
     #: record from before the switchboard) and ``checks_arm_current`` the repository's arm
-    #: now (``""`` for a record not tied to one repository).
+    #: now (``""`` for a record not tied to one repository). A record signed on evidence
+    #: graded in another posture class than the one the deployment grades the repository in
+    #: now is stale too (ADR-0019 §8): ``posture_class`` is the class(es) it was signed on
+    #: (``""`` for evidence from before apparatus 2.3) and ``posture_class_current`` the
+    #: deployment's class for the repository now (``""`` for a record not tied to one).
     stale: bool = False
     apparatus_current: str = ""
     checks_arm: str = ""
     checks_arm_current: str = ""
+    posture_class: str = ""
+    posture_class_current: str = ""
     evidence: SignoffEvidence
     prev_hash: str
     row_hash: str

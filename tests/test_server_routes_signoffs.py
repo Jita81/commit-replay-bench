@@ -68,6 +68,7 @@ import pytest
 from sqlalchemy import select, text
 
 from crb.core.ledger import BELT_SET_V5, GENESIS_HASH, LedgerIntegrityError
+from crb.core.ledger import GradeRow as GradeRowCls
 from crb.core.signoff import is_person_actor
 from crb.core.version import APPARATUS_VERSION
 from crb.server.routes.runs import system_trace_id
@@ -114,6 +115,8 @@ OUT_KEYS = {
     "apparatus_current",
     "checks_arm",
     "checks_arm_current",
+    "posture_class",
+    "posture_class_current",
     "created",
     "revoked",
     "revoked_by",
@@ -1458,3 +1461,46 @@ class TestListAndRevoke:
             s.commit()
         with pytest.raises(LedgerIntegrityError, match="sign-off 2"):
             verify_signoff_rows(_signoffs(env))
+
+
+class TestPostureClass:
+    """``crb.signoff.v4`` carries the posture class of ADR-0019 beside the checks arm of
+    ADR-0024 (the integration of PR #56 with PR #57): the cell is measured, and the attested
+    row must sit, in the class the deployment grades the repository in; the record stamps it
+    and a listed attestation serves it with the class now."""
+
+    def _other_class_row(self, env: Env) -> str:
+        """A clean row of the deliver cell graded in ANOTHER posture class, appended through
+        the write path; returns its ``row_hash``."""
+        ledger = DbLedger(env.factory)
+        template = accepted_row(env, DELIVER)
+        d = template.to_dict()
+        d.update({"row_id": "", "prev_hash": "", "row_hash": ""})
+        d["task_id"] = "f" * 40
+        d["labels"] = {**d.get("labels", {}), "posture_class": "docker/copy/sealed"}
+        d.pop("failure_kind", None)
+        d.pop("cost_known", None)
+        return ledger.append(GradeRowCls.from_dict(d)).row_hash
+
+    def test_the_record_stamps_the_class_and_serves_it_with_the_class_now(self, env: Env) -> None:
+        clear_policy(env)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER))
+        assert r.status_code == 201, r.text
+        d = r.json()
+        assert d["posture_class"] and d["posture_class"] == d["posture_class_current"]
+        assert d["stale"] is False and d["active"] is True
+        (listed,) = [s for s in env.get("/signoffs").json()["items"] if s["id"] == d["id"]]
+        assert listed["posture_class"] == d["posture_class"]
+
+    def test_a_row_of_another_class_neither_counts_nor_can_be_attested(self, env: Env) -> None:
+        clear_policy(env)
+        before = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()
+        other = self._other_class_row(env)
+        after = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()
+        # the cell is read in the deployment's class: the sealed row is not in its n
+        assert after["evidence"]["n"] == before["evidence"]["n"]
+        body = attested_body(env, DELIVER)
+        body["attestation"]["reviewed_row_hash"] = other
+        r = env.post("/signoffs", json=body)
+        assert r.status_code == 422, r.text
+        assert "posture class" in envelope(r)["message"]
