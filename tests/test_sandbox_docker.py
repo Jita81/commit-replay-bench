@@ -357,7 +357,9 @@ def test_the_gone_check_still_catches_a_container_that_is_left_behind():
     )
     assert started.returncode == 0, started.stderr
     try:
-        assert _gone(name, within_s=1.0) is False
+        # a real docker ps under a loaded CI runner can take longer than a second; the
+        # container sleeps 30 s, so 10 s still proves "left behind reads as leaked"
+        assert _gone(name, within_s=10.0) is False
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=60)
     assert _gone(name) is True
