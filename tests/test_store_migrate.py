@@ -361,7 +361,7 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
 
     migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0008"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0011"
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -453,7 +453,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     # the refusal rolls the whole downgrade back — 0008's column, 0007's and 0005's tables, 0006's
     # column, 0004's index swap and 0003's drop of the (empty) reviews table included — so the database stays
     # exactly where it was
-    assert migrate.current(backend.url) == "0008"
+    assert migrate.current(backend.url) == "0011"
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -468,7 +468,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0008" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0011" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -609,7 +609,7 @@ def test_0004_refuses_a_database_holding_duplicate_trace_seq_pairs(backend: Back
     fresh = _reset(backend)
     migrate.upgrade(backend.url, revision="0003")
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0008" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0011" and _autogen_diff(fresh) == []
     assert "uq_events_trace_seq" in {ix["name"] for ix in inspect(fresh).get_indexes("events")}
 
 
@@ -632,7 +632,7 @@ def test_0006_backfills_the_github_identity_and_refuses_duplicate_legacy_links(
         c.execute(text(row), {"name": "calc", "cfg": linked})
         c.execute(text(row), {"name": "by-url", "cfg": '{"language": "go"}'})
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0008"
+    assert migrate.current(backend.url) == "0011"
     with backend.engine.connect() as c:
         got = dict(c.execute(text("SELECT name, github_full_name FROM repos")).all())
     assert got == {"calc": "acme/calc", "by-url": None}
@@ -685,7 +685,7 @@ def test_0007_adds_the_workers_table_and_adoption_tolerates_its_absence(backend:
         c.execute(text("DROP TABLE workers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0008" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0011" and _autogen_diff(fresh) == []
     assert "workers" in set(inspect(fresh).get_table_names())
 
 
@@ -707,7 +707,7 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
             )
         )
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0008"
+    assert migrate.current(backend.url) == "0011"
     cols = {c["name"] for c in inspect(backend.engine).get_columns("workers")}
     assert "unconfirmed_containers" in cols
     with backend.engine.connect() as c:
@@ -731,4 +731,143 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
         c.execute(text("ALTER TABLE workers DROP COLUMN unconfirmed_containers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0008" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0011" and _autogen_diff(fresh) == []
+
+
+def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
+    backend: Backend,
+) -> None:
+    """Revision 0011 (ADR-0019) adds the append-only ``task_qualifications`` and writes one
+    ``legacy`` record per existing task, for the record. A legacy record is never selected
+    by a gate; the downgrade drops the table."""
+    from crb.core.spec import TaskSpec
+    from crb.store import qualifications as sq
+    from crb.store.models import Repo, Task
+
+    migrate.upgrade(backend.url, revision="0008")
+    factory = make_session_factory(backend.engine)
+    specs = [
+        TaskSpec(
+            task_id=sha * 40,
+            repo="calc",
+            subject="s",
+            authored="2026-01-01T00:00:00Z",
+            test_files=("t_test.go",),
+            src_files=("s.go",),
+            target_tests=("./",),
+            belt_scope=("./",),
+            baseline_failing=("calc::TestDeadcode",),
+            red_checked=True,
+            gold_clean=True,
+        )
+        for sha in ("a", "b")
+    ]
+    with factory() as s:
+        s.add(Repo(name="calc", language="go", runner="go", config_json={"language": "go"}))
+        for t in specs:
+            s.add(Task(repo="calc", task_id=t.task_id, spec_json=t.to_dict(), authored=t.authored))
+        s.commit()
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == migrate.head_revision() == "0011"
+    with backend.engine.connect() as c:
+        n = c.execute(text("SELECT COUNT(*) FROM task_qualifications")).scalar_one()
+        states = {r[0] for r in c.execute(text("SELECT state FROM task_qualifications"))}
+        posture = {r[0] for r in c.execute(text("SELECT posture_id FROM task_qualifications"))}
+    assert n == len(specs) and states == {"legacy"} and posture == {"pst_legacy"}
+    with factory() as s:
+        legacy = sq.latest(s, "calc", specs[0].task_id, "pst_legacy")
+        assert legacy is not None and not legacy.is_qualified
+        assert legacy.baseline_failing == ("calc::TestDeadcode",)
+        # a legacy row is never selected — in its own posture or any other
+        assert sq.qualified_specs(s, "calc", "pst_legacy") == []
+    assert {"task_qualifications_no_update", "task_qualifications_no_delete"} <= (
+        backend.trigger_names()
+    )
+    with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
+        c.execute(text("UPDATE task_qualifications SET state = 'qualified'"))
+    # the downgrade drops the table and its triggers
+    cfg = migrate.alembic_config(backend.url)
+    with backend.engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0008")
+    assert migrate.current(backend.url) == "0008"
+    assert "task_qualifications" not in set(inspect(backend.engine).get_table_names())
+    migrate.upgrade(backend.url)  # and back up at head, equal to init_db
+    assert migrate.current(backend.url) == "0011" and _autogen_diff(backend.engine) == []
+
+
+def test_0011_downgrade_refuses_while_a_measured_qualification_exists(backend: Backend) -> None:
+    """From apparatus 2.3 every measured grade row cites its ``qualification_id``: a
+    downgrade that dropped a measured record would leave evidence citing nothing, and an
+    append-only table's rows are never dropped. So 0011's downgrade refuses while any record
+    but the back-fill's ``legacy`` ones exists (0002's pattern), and drops a table that holds
+    only the back-fill (CodeRabbit on PR #56)."""
+    from crb.core.qualify import Qualification
+    from crb.store import qualifications as sq
+
+    migrate.upgrade(backend.url)
+    factory = make_session_factory(backend.engine)
+    with factory() as s:
+        sq.append(
+            s,
+            Qualification(
+                qualification_id="",
+                repo="calc",
+                task_id="a" * 40,
+                posture_id="pst_" + "1" * 24,
+                posture={"posture_class": "docker/copy/sealed"},
+                state="qualified",
+            ),
+        )
+    cfg = migrate.alembic_config(backend.url)
+    with (
+        pytest.raises(RuntimeError, match="refusing to downgrade 0011"),
+        backend.engine.begin() as connection,
+    ):
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0008")
+    assert "task_qualifications" in set(inspect(backend.engine).get_table_names())
+    assert migrate.current(backend.url) == "0011"
+
+
+def test_no_released_revision_imports_the_application_runtime() -> None:
+    """A released revision is immutable, so what it writes must not move when the product's
+    code does: a revision imports nothing of ``crb`` but the store's one trigger helper
+    (``crb.store.migrate``) — never ``crb.core`` records, rules or version strings, whose
+    later changes would change (or break) what an old revision writes (CodeRabbit on PR
+    #56, revision 0011's back-fill)."""
+    import ast
+
+    allowed = {"crb.store.migrate"}
+    versions = Path(migrate.__file__).parent / "migrations" / "versions"
+    offenders: list[str] = []
+    for path in sorted(versions.glob("v*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names: list[str] = []
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            elif isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            offenders += [
+                f"{path.name}: {n}" for n in names if n.split(".")[0] == "crb" and n not in allowed
+            ]
+    assert offenders == []
+
+
+def test_0011_backfills_the_legacy_record_the_runtime_reads() -> None:
+    """The back-fill's frozen body is a record the product reads back unchanged, and its
+    fingerprint is the product's own rule applied to the same facts (a copy that drifted
+    would make a legacy record look like a different oracle)."""
+    import importlib
+
+    from crb.core.qualify import Qualification, fingerprint_of
+
+    m = importlib.import_module("crb.store.migrations.versions.v0011_task_qualifications")
+    body = m.legacy_body(
+        "calc", "a" * 40, {"baseline_failing": ["b", "a", "a"], "gold_clean": True}, "q1", "t"
+    )
+    q = Qualification.from_dict(body)
+    assert q.state == "legacy" and q.posture_id == "pst_legacy" and not q.is_qualified
+    assert q.baseline_failing == ("a", "b") and q.gold == {"clean": True, "note": "", "lint": None}
+    assert body["fingerprint"] == fingerprint_of(q) == q.fingerprint
+    assert body["provenance"] == "migrated_unverified" and body["apparatus_version"] == "2.3"

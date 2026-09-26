@@ -44,7 +44,7 @@ from typing import Any
 
 import pytest
 
-from crb.core.ledger import CELL_FIELDS, GradeRow
+from crb.core.ledger import CELL_FIELDS
 from crb.core.routing import DEFAULT_POLICY
 from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepEvent, StepStatus
@@ -52,6 +52,7 @@ from crb.store.events import last_seq
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures import pyrepo as pr
+from fixtures.posture import posture_row
 from fixtures.server_seed import ALPHA, BETA, RUN_IDS, Env, envelope, login, make_env, task_id
 from fixtures.signoff_seed import attested_body, clear_policy, score_oracle
 
@@ -155,7 +156,7 @@ def seed_beta_rows(env: Env, n: int = 40, clean: int = 39) -> None:
     """Rows for BETA (which has no controls report) through the write path — a cell
     that delivers on the numbers alone, on a repo whose controls were never run."""
     rows = [
-        GradeRow(
+        posture_row(
             repo=BETA,
             task_id=f"{i:040x}",
             clean=i < clean,
@@ -673,7 +674,7 @@ class TestModeFilter:
         # the seed is all sighted; one BLIND row makes the separation observable — an
         # endpoint that ignored ``mode`` would make ``n_all == n_default`` (CodeRabbit, PR #5)
         DbLedger(env.factory).append(
-            GradeRow(
+            posture_row(
                 repo=ALPHA,
                 task_id=task_id(1),
                 mode="blind",
@@ -705,3 +706,224 @@ class TestModeFilter:
         assert n_blind == 1 and n_all == n_default + 1
         r = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=other")
         assert r.status_code == 422
+
+
+# --- ADR-0019 §8: posture is a filter, never a blend -----------------------------------------
+
+
+def _posture_rows(
+    env: Env, n: int, *, cls: str, pid: str, first: int = 0, run_id: str = "c" * 32, **kw: Any
+) -> None:
+    labels = {"posture_id": pid, "posture_class": cls, "qualification_id": "q"}
+    rows = [
+        posture_row(
+            repo=BETA,
+            task_id=f"{first + i:040x}",
+            clean=True,
+            tests_unmodified=True,
+            target_green=True,
+            no_new_failures=True,
+            source_changed=True,
+            capability_class="bug.fix",
+            size="S",
+            language="go",
+            builder="editblock",
+            model="m",
+            provider="p",
+            run_id=run_id,
+            trial="r1",
+            evidence_pack_hash="e" * 64,
+            gold_clean=True,
+            labels=dict(labels),
+            **kw,
+        )
+        for i in range(n)
+    ]
+    DbLedger(env.factory).append_many(rows)
+
+
+def _beta(env: Env, query: str = "") -> dict[str, Any]:
+    r = env.get(f"/capability-map?repo={BETA}{query}")
+    assert r.status_code == 200, r.text
+    return dict(r.json())
+
+
+def test_the_map_defaults_to_the_deployment_posture_class(env: Env) -> None:
+    _posture_rows(env, 3, cls="local/inplace/host-env", pid="pst_local")
+    _posture_rows(env, 5, cls="docker/copy/sealed", pid="pst_docker", first=100)
+    body = _beta(env)  # the test deployment runs sandbox.executor=local
+    assert body["summary"]["posture_class"] == "local/inplace/host-env"
+    (cell,) = body["cells"]
+    assert cell["n"] == 3 and cell["posture_ids"] == ["pst_local"]
+    docker = _beta(env, "&posture=docker/copy/sealed")
+    assert docker["summary"]["posture_class"] == "docker/copy/sealed"
+    assert docker["cells"][0]["n"] == 5 and docker["cells"][0]["posture_ids"] == ["pst_docker"]
+
+
+def test_the_deployment_class_follows_the_workers_provider_and_the_repos_tree(env: Env) -> None:
+    """The default filter names the class the WORKER grades in (CodeRabbit on PR #56): the
+    host executor with provisioning on is ``local/inplace/sealed`` (the worker binds sealed
+    sets), and under docker a repository's own ``sandbox_tree`` overrides the deployment's
+    tree — otherwise the default map drops every row the worker measured."""
+    from crb.store.models import Repo
+
+    _posture_rows(env, 2, cls="local/inplace/sealed", pid="pst_local_sealed")
+    _posture_rows(env, 3, cls="docker/readonly/sealed", pid="pst_docker_ro", first=100)
+    env.settings.provision.enabled = True
+    body = _beta(env)
+    assert body["summary"]["posture_class"] == "local/inplace/sealed"
+    assert [c["n"] for c in body["cells"]] == [2]
+    env.settings.provision.enabled = False
+    env.settings.sandbox.executor = "docker"
+    with env.factory() as s:
+        repo = s.get(Repo, BETA)
+        assert repo is not None
+        repo.config_json = {**dict(repo.config_json or {}), "sandbox_tree": "readonly"}
+        s.commit()
+    body = _beta(env)
+    assert body["summary"]["posture_class"] == "docker/readonly/sealed"
+    assert [c["n"] for c in body["cells"]] == [3]
+
+
+def test_posture_all_pools_only_posture_invariant_tasks(env: Env) -> None:
+    from crb.core.qualify import Qualification
+    from crb.store import qualifications as sq
+
+    # tasks 0-3 graded in both classes; the oracle of tasks 2 and 3 differs between them
+    _posture_rows(env, 4, cls="local/inplace/host-env", pid="pst_local")
+    _posture_rows(env, 4, cls="docker/copy/sealed", pid="pst_docker")
+    for i in range(4):
+        tid = f"{i:040x}"
+        for pid, cls in (
+            ("pst_local", "local/inplace/host-env"),
+            ("pst_docker", "docker/copy/sealed"),
+        ):
+            base = ("pkg::TestWritesIntoItsPackage",) if (i >= 2 and pid == "pst_docker") else ()
+            q = Qualification(
+                qualification_id="",
+                repo=BETA,
+                task_id=tid,
+                posture_id=pid,
+                posture={"posture_class": cls, "executor": cls.split("/")[0]},
+                state="qualified",
+                baseline_failing=base,
+            )
+            with env.factory() as s:
+                sq.append(s, q)
+    body = _beta(env, "&posture=all")
+    (cell,) = body["cells"]
+    assert cell["n"] == 4  # tasks 0 and 1, in both classes
+    assert body["summary"]["excluded_posture_divergent"] == 4  # tasks 2 and 3, both rows each
+    assert sorted(cell["posture_ids"]) == ["pst_docker", "pst_local"]
+
+
+def test_pre_2_3_docker_rows_are_excluded_and_counted(env: Env) -> None:
+    from crb.store.models import Run
+
+    with env.factory() as s:
+        s.add(
+            Run(
+                id="0c44ff24189d4879b1254be6181ef54c",
+                repo=BETA,
+                kind="replay",
+                status="cancelled",
+                apparatus_json={"executor": {"executor": "docker", "image": "crb-sandbox-go:x"}},
+            )
+        )
+        s.add(
+            Run(
+                id="5" * 32,
+                repo=BETA,
+                kind="replay",
+                status="succeeded",
+                apparatus_json={"executor": {"executor": "local"}},
+            )
+        )
+        s.commit()
+    old = {"apparatus_version": "2.2"}
+    DbLedger(env.factory).append_many(
+        [
+            posture_row(
+                repo=BETA,
+                task_id=f"{i:040x}",
+                clean=False,
+                tests_unmodified=True,
+                target_green=False,
+                no_new_failures=None,
+                source_changed=None,
+                capability_class="bug.fix",
+                size="XS",
+                language="go",
+                builder="claude_code",
+                model="claude-sonnet-5",
+                provider="anthropic",
+                run_id="0c44ff24189d4879b1254be6181ef54c",
+                trial="r1",
+                gold_clean=True,
+                labels={"failure_kind": "builder_red"},
+                **old,
+            )
+            for i in range(4)
+        ]
+        + [
+            posture_row(
+                repo=BETA,
+                task_id=f"{100 + i:040x}",
+                clean=True,
+                tests_unmodified=True,
+                target_green=True,
+                no_new_failures=True,
+                source_changed=True,
+                capability_class="bug.fix",
+                size="XS",
+                language="go",
+                builder="claude_code",
+                model="claude-sonnet-5",
+                provider="anthropic",
+                run_id="5" * 32,
+                trial="r1",
+                evidence_pack_hash="e" * 64,
+                gold_clean=True,
+                **old,
+            )
+            for i in range(2)
+        ]
+    )
+    body = _beta(env, "&apparatus=2.2")
+    # the 4 builder_red rows of the sealed run on host-measured baselines count for nothing
+    assert body["summary"]["unqualified_posture"] == 4
+    (cell,) = body["cells"]
+    assert cell["n"] == 2 and cell["clean"] == 2 and cell["n_builder_red"] == 0
+    everything = _beta(env, "&apparatus=2.2&posture=all")
+    assert everything["summary"]["unqualified_posture"] == 4  # excluded from EVERY rate
+
+
+def test_legacy_host_rows_never_pool_with_another_class(env: Env) -> None:
+    """A pre-2.3 row the HOST graded (``legacy:local``) is a host-env measurement against the
+    discovery baseline: ``posture=all`` never pools it with a single current class that is
+    something else (``docker/copy/sealed``), and no class filter but
+    ``local/inplace/host-env`` admits it — posture is a filter, never a blend (CodeRabbit
+    on PR #56)."""
+    from crb.store.models import Run
+
+    with env.factory() as s:
+        s.add(
+            Run(
+                id="5" * 32,
+                repo=BETA,
+                kind="replay",
+                status="succeeded",
+                apparatus_json={"executor": {"executor": "local"}},
+            )
+        )
+        s.commit()
+    _posture_rows(env, 2, cls="", pid="", run_id="5" * 32, apparatus_version="2.2")
+    _posture_rows(env, 3, cls="docker/copy/sealed", pid="pst_docker", first=100)
+    pooled = _beta(env, "&apparatus=all&posture=all")
+    assert [c["n"] for c in pooled["cells"]] == [3]
+    assert pooled["summary"]["excluded_posture_divergent"] == 2
+    _posture_rows(env, 1, cls="local/inplace/sealed", pid="pst_ls", first=200)
+    sealed = _beta(env, "&apparatus=all&posture=local/inplace/sealed")
+    assert [c["n"] for c in sealed["cells"]] == [1]  # the legacy host rows stay out
+    host = _beta(env, "&apparatus=all&posture=local/inplace/host-env")
+    assert [c["n"] for c in host["cells"]] == [2]

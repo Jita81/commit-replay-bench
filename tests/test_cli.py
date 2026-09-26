@@ -261,6 +261,26 @@ def test_repo_probe_green(registered: CliRepo, run: Run) -> None:
     assert code == 0 and "GREEN" in out
 
 
+def test_repo_probe_reads_the_deployments_provider_and_names_its_refusal(
+    registered: CliRepo, run: Run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0019: the probe binds HEAD's dependency set from the deployment's provider, and
+    a provisioning stop is one line with its fix (exit 2), never a traceback."""
+    from crb.cli.commands import repo as repo_cmd
+    from crb.core.deps import ProvisionRefused
+
+    class _Off:
+        def resolve(self, *a: object, **k: object) -> object:
+            raise ProvisionRefused("PROVISION_DISABLED", "demo declares python dependencies")
+
+    seen: list[str] = []
+    monkeypatch.setattr(repo_cmd, "deps_provider", lambda ex: seen.append(ex.name) or _Off())
+    code, _, err = run(["repo", "probe", "demo"])
+    assert seen == ["local"] and code == 2
+    assert "PROVISION_DISABLED: demo declares python dependencies" in err
+    assert "CRB_PROVISION__ENABLED=true" in err and "Traceback" not in err
+
+
 def test_repo_probe_without_probe_scope_is_usage_error(
     registered: CliRepo, run: Run, workdir: Path
 ) -> None:
@@ -843,3 +863,35 @@ def test_cli_never_leaks_operator_env_into_test_runs(
     assert "SUPER_SECRET_TOKEN" in os.environ
     code, d = run_json(run, ["repo", "probe", "envrepo"])
     assert code == 0 and d["green"] is True
+
+
+# ---------------------------------------------------------------------------
+# ADR-0019: qualification in the live posture; --adhoc never ledgers
+# ---------------------------------------------------------------------------
+
+
+def test_repo_qualify_records_each_task_in_the_live_posture(
+    mined: CliRepo, run: Run, workdir: Path
+) -> None:
+    code, d = run_json(run, ["repo", "qualify", "demo", "--task", mined.sub_task])
+    assert code == 0, d
+    assert d["qualified"] == 1 and d["total"] == 1 and d["cost_usd"] == 0.0
+    assert str(d["posture_class"]).startswith("local/inplace/")
+    records = [
+        json.loads(line)
+        for line in (workdir / "qualifications" / "demo.jsonl").read_text().splitlines()
+    ]
+    assert records[-1]["task_id"] == mined.sub_task and records[-1]["state"] == "qualified"
+    assert records[-1]["posture_id"] == d["posture_id"]
+
+
+def test_grade_adhoc_never_appends_a_row(mined: CliRepo, run: Run, tmp_path: Path) -> None:
+    dest = tmp_path / "wt-adhoc"
+    assert run(["prep", "demo", mined.sub_task, "--dest", str(dest)])[0] == 0
+    code, _, err = run(
+        ["grade", "demo", mined.sub_task, "--worktree", str(dest), "--adhoc", "--ledger"]
+    )
+    assert code != 0 and "never appends a row" in err
+    code, d = run_json(run, ["grade", "demo", mined.sub_task, "--worktree", str(dest), "--adhoc"])
+    assert code == 1 and d["target_green"] is False
+    assert d["blame_control"] == "unwitnessed"  # a quick look: no witness, so no row

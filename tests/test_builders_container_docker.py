@@ -89,6 +89,7 @@ from crb.core.runners import get_runner
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from fixtures.posture import witnessed_context_for
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -286,6 +287,9 @@ def test_scripted_builder_in_container_grades_clean(
         ledger=ledger,
         evidence_dir=sandbox_root / "evidence",
         ladder=adapter.ladder_labels(ladder),
+        context_for=witnessed_context_for(
+            repo, config, runner=runner, executor=executor, scratch=sandbox_root / "scratch"
+        ),
     )
     events: list[tuple[str, dict[str, Any]]] = []
     fn = adapter.build_fn_for(

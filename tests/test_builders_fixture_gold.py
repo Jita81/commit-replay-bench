@@ -34,11 +34,11 @@ import crb.builders as builders_pkg
 from crb.builders import base
 from crb.builders import fixture_gold as fg
 from crb.core.execution import LocalExecutor
-from crb.core.grade import grade
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.posture import grade_adhoc as grade
 
 # --- the switch -----------------------------------------------------------------------
 

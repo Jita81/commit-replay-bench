@@ -81,6 +81,7 @@ import type {
   Principal,
   RepoCreateRequest,
   RepoDetail,
+  RepoPosture,
   RepoProfile,
   RepoSummary,
   Role,
@@ -118,6 +119,7 @@ export const keys = {
   repos: ['repos'] as const,
   repo: (name: string) => ['repos', name] as const,
   repoProfile: (name: string) => ['repos', name, 'profile'] as const,
+  repoPosture: (name: string) => ['repos', name, 'posture'] as const,
   repoTasks: (name: string, p?: PageParams) => ['repos', name, 'tasks', p ?? {}] as const,
   runs: (p?: RunListParams) => ['runs', p ?? {}] as const,
   run: (id: string) => ['runs', id] as const,
@@ -267,6 +269,28 @@ export function useProbeRepo(): UseMutationResult<Run, ApiError, string> {
     onSuccess: (_run, name) => {
       qc.invalidateQueries({ queryKey: keys.repo(name) })
       qc.invalidateQueries({ queryKey: keys.repos })
+      qc.invalidateQueries({ queryKey: ['runs'] })
+    },
+  })
+}
+
+/** `GET /repos/{name}/posture` — qualified N of M in the posture last recorded (ADR-0019). */
+export function useRepoPosture(name: string): UseQueryResult<RepoPosture, ApiError> {
+  return useQuery({
+    queryKey: keys.repoPosture(name),
+    queryFn: () => api<RepoPosture>(`/repos/${enc(name)}/posture`),
+    enabled: name.length > 0,
+    retry: false,
+  })
+}
+
+/** `POST /runs {kind: qualify, repo}` — measure the tasks in the posture; no builder, no model spend. */
+export function useQualifyRepo(): UseMutationResult<Run, ApiError, string> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (name) => api<Run>('/runs', { method: 'POST', body: { repo: name, kind: 'qualify' } }),
+    onSuccess: (_run, name) => {
+      qc.invalidateQueries({ queryKey: keys.repoPosture(name) })
       qc.invalidateQueries({ queryKey: ['runs'] })
     },
   })

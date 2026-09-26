@@ -22,7 +22,8 @@ Works with:   src/crb/cli/commands/__init__.py (``CliError``, the exit codes),
               src/crb/cli/commands/route.py (the pipeline verbs, in order),
               src/crb/cli/commands/service.py (``serve`` / ``worker`` / ``migrate`` /
               ``doctor``), src/crb/cli/commands/users.py (the break-glass account verbs),
-              src/crb/core/execution.py (``SandboxUnavailable`` → exit 2)
+              src/crb/core/execution.py (``SandboxUnavailable`` → exit 2),
+              src/crb/core/deps.py (``ProvisionRefused`` → exit 2 with its fix)
 Tested by:    tests/test_cli.py, tests/test_cli_doctor.py, tests/test_cli_tasks.py,
               tests/test_cli_users.py
 Touch when:   never for a new repository; adding a verb means a ``register`` in a new
@@ -41,6 +42,7 @@ from crb.cli.commands import (
     EXIT_ERROR,
     CliError,
     config,
+    deps,
     grade,
     learn,
     ledger,
@@ -51,6 +53,7 @@ from crb.cli.commands import (
     tasks,
     users,
 )
+from crb.core.deps import ProvisionRefused
 from crb.core.execution import SandboxUnavailable
 from crb.core.git import GitError
 from crb.core.grade import FalseQ1Violation
@@ -82,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     learn.register(sub)
     tasks.register(sub)
     config.register(sub)
+    deps.register(sub)
     users.register(sub)
     service.register(sub)
     return parser
@@ -108,6 +112,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _fail(str(e))
     except SandboxUnavailable as e:
         return _fail(f"sandbox unavailable (failing closed): {e}")
+    except ProvisionRefused as e:  # ADR-0019: a provisioning stop names its fix
+        return _fail(f"{e.code}: {e.message} — what to do: {e.fix}")
     except GitError as e:
         return _fail(f"git: {e}")
     except (LedgerIntegrityError, FalseQ1Violation, LegacyImportError) as e:

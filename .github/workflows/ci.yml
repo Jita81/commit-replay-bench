@@ -33,7 +33,9 @@
 #                  under deploy/sandbox, then the smoke that matters: the fixture repository of
 #                  each language through DockerExecutor ON THAT IMAGE (uid 65534, read-only
 #                  root, network off, qualify + grade clean — tests/test_sandbox_images_docker.py),
-#                  and the sandbox + sealed-builder suites on the python one; a skip in the
+#                  the sandbox + sealed-builder suites on the python one, and the dependency
+#                  provisioning suites (ADR-0019: a real fetch from an offline mirror into a
+#                  sealed set, then each fixture offline on its image); a skip in the
 #                  smoke fails the job. Always runs, and is not on main's required-checks list
 #                  yet, so its failure does not by itself stop a merge: the context
 #                  "sandbox-images (build + hadolint + smoke each reference sandbox image)"
@@ -187,7 +189,8 @@ jobs:
     runs-on: ubuntu-latest
     # the hermetic suite takes 23–29 min on the hosted runner (py3.13 is the slower); 30 tipped
     # over twice on 2026-09-17 at 98 % — headroom until the suite is split and parallelised
-    timeout-minutes: 45
+    # a job-time budget, not a quality gate: py3.13 hit 45 min at 98% (run 36212115018); no test is skipped or weakened
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -566,6 +569,17 @@ jobs:
           docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-python:ci python -m pytest --version
           docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-node:ci node --version
           docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-go:ci go version
+      - name: Pre-pull the dependency fetch images by digest (ADR-0019; the worker never pulls)
+        run: |
+          set -euo pipefail
+          docker pull -q golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d
+          docker pull -q python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
+          docker pull -q node:22.19.0-bookworm-slim@sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90
+      # the D5 regression grades the same tree on the host posture too
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: false
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -585,7 +599,10 @@ jobs:
         # in these modules was skipped for any reason.
         run: |
           .venv/bin/pytest -q -rs tests/test_sandbox_images_docker.py tests/test_sandbox_docker.py \
-            tests/test_builders_container_docker.py -m "not network" --junitxml=sandbox-images.xml
+            tests/test_builders_container_docker.py tests/test_provision_fetch.py \
+            tests/test_provision_go.py tests/test_provision_python.py tests/test_provision_node.py \
+            tests/test_posture_e2e_docker.py \
+            -m "not network" --junitxml=sandbox-images.xml
           if grep -q '<skipped' sandbox-images.xml; then
             echo '::error::a sandbox image test was skipped'; grep -o '<skipped[^>]*>' sandbox-images.xml; exit 1
           fi

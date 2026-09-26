@@ -232,6 +232,7 @@ def test_crb_doctor_reports_the_probe_in_text_and_json(
 DOCTOR_LINES = (
     "toolchains",
     "sandbox",
+    "provision",
     "builders",
     "claude_code",
     "settings",
@@ -599,3 +600,38 @@ class TestDoctorReport:
         assert db["data"]["triggers"] == expected - 2 and db["data"]["url"].startswith("sqlite")
         # the worker line is not guessed from a store that failed
         assert next(p for p in body["probes"] if p["name"] == "worker")["status"] == "degraded"
+
+
+# --- ADR-0019: the provision line ------------------------------------------------------------
+
+
+def test_the_provision_line_is_off_by_default_and_names_the_refusal_when_on(
+    home: Path,
+    fake_cli: Callable[[bool], None],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from crb.cli.commands.service import probe_provision_line
+
+    fake_cli(True)
+    for k in list(os.environ):
+        if k.startswith("CRB_PROVISION__"):
+            monkeypatch.delenv(k)
+    main(["doctor"])
+    row = _lines(capsys.readouterr().out)["provision"]
+    assert (
+        row[0] == "skip" and "CRB_PROVISION__ENABLED" in row[1] and "PROVISION_DISABLED" in row[1]
+    )
+    # switched on in production with the public registries: fail, with the code and the fix
+    on = probe_provision_line({"CRB_ENV": "prod", "CRB_PROVISION__ENABLED": "true"})
+    assert on.status == "down" and on.detail.startswith("PROVISION_PUBLIC_REGISTRY")
+    assert "CRB_PROVISION__ALLOW_PUBLIC" in on.detail
+    # a typo in the allowlist is a line, never a crash
+    bad = probe_provision_line(
+        {"CRB_PROVISION__ENABLED": "true", "CRB_PROVISION__EXTRA_ALLOW_HOSTS": "bad host"}
+    )
+    assert bad.status == "down" and bad.detail.startswith("CRB_PROVISION__*")
+    # no daemon on PATH: down, saying so — never a fetch
+    monkeypatch.setenv("PATH", str(home / "no-bin"))
+    nodocker = probe_provision_line({"CRB_ENV": "dev", "CRB_PROVISION__ENABLED": "true"})
+    assert nodocker.status == "down" and "docker" in nodocker.detail

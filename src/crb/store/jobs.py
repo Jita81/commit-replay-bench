@@ -97,6 +97,9 @@ KIND_ORACLE = "oracle"
 KIND_CONTROLS = "controls"
 KIND_LABEL = "label"
 KIND_FACTORY = "factory"
+#: ADR-0019: measure the repository's tasks in the posture that will grade them — no
+#: builder is constructed and no model is called.
+KIND_QUALIFY = "qualify"
 RUN_KINDS: tuple[str, ...] = (
     KIND_SETUP,
     KIND_PROBE,
@@ -107,6 +110,7 @@ RUN_KINDS: tuple[str, ...] = (
     KIND_CONTROLS,
     KIND_LABEL,
     KIND_FACTORY,
+    KIND_QUALIFY,
 )
 
 DEFAULT_MAX_RECLAIMS = 3
@@ -478,6 +482,7 @@ __all__ = [
     "KIND_MINE",
     "KIND_ORACLE",
     "KIND_PROBE",
+    "KIND_QUALIFY",
     "KIND_REPLAY",
     "KIND_SETUP",
     "RECLAIMS_KEY",

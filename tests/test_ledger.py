@@ -41,6 +41,13 @@ from crb.core import ledger as lg
 from crb.core.grade import FalseQ1Violation
 from crb.core.stats import wilson_interval
 from crb.core.version import APPARATUS_VERSION
+from fixtures.posture import (
+    TEST_POSTURE_CLASS,
+    TEST_POSTURE_ID,
+    TEST_QUALIFICATION_ID,
+    posture_result,
+    with_posture_labels,
+)
 
 SHA = "b7c6251293a287542ac8568cad7505b710fa3532"
 PACK = "c" * 64
@@ -74,7 +81,7 @@ def row(**kw: Any) -> lg.GradeRow:
         elif base.get("belt_set") == lg.BELT_SET_V3_LEGACY:
             base["apparatus_version"] = "1.0-census"
             base.setdefault("provenance", "imported:census")
-    return lg.GradeRow(**base)
+    return lg.GradeRow(**with_posture_labels(base))
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +267,7 @@ def test_v3_legacy_row_records_no_belt_four() -> None:
 
 def test_grade_row_from_result_stamps_the_current_apparatus_as_v5() -> None:
     """The product's own write path is consistent with the coupling by construction."""
-    from crb.core.grade import Belts, GradeResult
+    from crb.core.grade import Belts
     from crb.core.spec import TaskSpec
 
     task = TaskSpec(
@@ -273,7 +280,9 @@ def test_grade_row_from_result_stamps_the_current_apparatus_as_v5() -> None:
         target_tests=("tests/test_a.py",),
         belt_scope=("tests/",),
     )
-    res = GradeResult(SHA, "r", "sighted", clean=True, belts=Belts(True, True, True, True))
+    res = posture_result(
+        task_id=SHA, repo="r", mode="sighted", clean=True, belts=Belts(True, True, True, True)
+    )
     r = lg.grade_row_from_result(res, task, pack_hash=PACK)
     assert (r.belt_set, r.apparatus_version, r.provenance) == ("v5", APPARATUS_VERSION, "measured")
     assert lg.expected_belt_sets(APPARATUS_VERSION, "measured") == ("v5",)
@@ -343,7 +352,16 @@ def test_v5_rows_round_trip_through_jsonl_with_belt_five(tmp_path: Path) -> None
     assert led.verify() == 4
     assert lg.false_q1_total(rows) == 0
     lines = [json.loads(line) for line in led.path.read_text().splitlines()]
-    assert lines[1]["failure_kind"] == "lint" and lines[1]["labels"] == {}
+    # the whole mapping, exactly: the posture labels every 2.3 row carries, plus the
+    # witness a red row names (ADR-0019) — nothing else, and never on a clean row
+    posture = {
+        "posture_id": TEST_POSTURE_ID,
+        "posture_class": TEST_POSTURE_CLASS,
+        "qualification_id": TEST_QUALIFICATION_ID,
+    }
+    assert lines[1]["failure_kind"] == "lint"
+    assert lines[1]["labels"] == {**posture, "blame_control": "gold_green"}
+    assert lines[0]["labels"] == posture
     assert lines[3]["repo_lint_clean"] is None and lines[3]["belt_set"] == "v4"
 
 
@@ -351,7 +369,14 @@ def test_labels_are_copied_and_cell_key() -> None:
     labels = {"k": "v"}
     r = row(labels=labels)
     labels["k"] = "changed"
-    assert r.labels == {"k": "v"}
+    # the whole mapping, exactly: the copy, plus the posture labels a 2.3 row carries and
+    # nothing else — a clean row must never gain a witness (CodeRabbit on PR #56)
+    assert r.labels == {
+        "k": "v",
+        "posture_id": TEST_POSTURE_ID,
+        "posture_class": TEST_POSTURE_CLASS,
+        "qualification_id": TEST_QUALIFICATION_ID,
+    }
     assert r.cell == lg.CellKey(
         "replay", "bug.fix", "XS", "python", "agentic", "gpt-oss-120b", "cerebras"
     )
@@ -757,7 +782,7 @@ def test_cost_known_property_label_or_derivation() -> None:
 
 
 def _result(*, clean: bool, error: str = "", disqualified: bool = False) -> Any:
-    from crb.core.grade import Belts, GradeResult
+    from crb.core.grade import Belts
 
     if error:
         belts = Belts()
@@ -767,7 +792,7 @@ def _result(*, clean: bool, error: str = "", disqualified: bool = False) -> Any:
         belts = Belts(True, True, True, True)
     else:
         belts = Belts(True, False, True, True)
-    return GradeResult(
+    return posture_result(
         task_id=SHA,
         repo="r",
         mode="sighted",
@@ -880,7 +905,8 @@ def test_new_rows_hash_the_classification_old_rows_still_verify(tmp_path: Path) 
     from crb.core.evidence import BuilderRef
 
     led = lg.JsonlLedger(tmp_path / "g.jsonl")
-    old = led.append(row(clean=False, target_green=False))  # no labels: pre-change shape
+    # no labels: the pre-change shape (a 2.2 row — a 2.3 one must name its posture)
+    old = led.append(row(clean=False, target_green=False, apparatus_version="2.2"))
     new = led.append(_from_result(_result(clean=False), BuilderRef(name="b", note="wall_clock")))
     assert "failure_kind" not in old.labels and new.labels["failure_kind"] == "budget"
     assert led.verify() == 2
@@ -1074,3 +1100,100 @@ def test_jsonl_append_survives_a_last_row_longer_than_the_tail_window(tmp_path: 
     small = ledger.append(row(task_id="b" * 40))
     assert small.prev_hash == big.row_hash
     assert ledger.verify() == 2
+
+
+# ---------------------------------------------------------------------------
+# ADR-0019: a model-failure row names its posture and its witness
+# ---------------------------------------------------------------------------
+
+
+def test_a_model_failure_row_without_its_witness_is_refused(tmp_path: Path) -> None:
+    from crb.core.grade import MisattributionViolation
+
+    stamped = {
+        "posture_id": "pst_" + "7" * 24,
+        "posture_class": "docker/copy/sealed",
+        "qualification_id": "q1",
+    }
+    base = {
+        "repo": "cobra",
+        "task_id": SHA,
+        "clean": False,
+        "tests_unmodified": True,
+        "target_green": False,
+        "no_new_failures": None,
+        "source_changed": None,
+        "evidence_pack_hash": PACK,
+        "gold_clean": True,
+    }
+    # at construction: a builder_red row with no witness …
+    with pytest.raises(MisattributionViolation, match="without a witness"):
+        lg.GradeRow(**base, labels=dict(stamped))
+    # … or "unwitnessed", which is not a witness …
+    with pytest.raises(MisattributionViolation, match="without a witness"):
+        lg.GradeRow(**base, labels={**stamped, "blame_control": "unwitnessed"})
+    # … or with no posture at all
+    with pytest.raises(MisattributionViolation, match="posture labels"):
+        lg.GradeRow(**base, labels={"blame_control": "gold_green"})
+    ok = lg.GradeRow(**base, labels={**stamped, "blame_control": "gold_green"})
+    assert ok.failure_kind == lg.FAILURE_BUILDER_RED and ok.posture_class == "docker/copy/sealed"
+    # a lint row too
+    lint = {
+        **base,
+        "target_green": True,
+        "no_new_failures": True,
+        "source_changed": True,
+        "repo_lint_clean": False,
+    }
+    with pytest.raises(MisattributionViolation):
+        lg.GradeRow(**lint, labels=dict(stamped))
+    # at append: a row that was edited into a model failure after it was built
+    led = lg.JsonlLedger(tmp_path / "g.jsonl")
+    led.append(ok)
+    forged = {**ok.fields(), "labels": dict(stamped)}
+    with pytest.raises(MisattributionViolation):
+        led.append(lg.GradeRow(**forged))
+    # and on read: a stored row stripped of its witness is refused when read back
+    line = json.loads(led.path.read_text().splitlines()[0])
+    line["labels"].pop("blame_control")
+    with pytest.raises(MisattributionViolation):
+        lg.GradeRow.from_dict(line)
+
+
+def test_an_environment_error_is_harness_in_n_and_never_in_model_n() -> None:
+    env = row(
+        clean=False,
+        target_green=False,
+        error="environment: gold control red in pst_x: go: module lookup disabled by GOPROXY=off",
+        labels={"env_code": "GOLD_CONTROL_RED"},
+    )
+    assert env.failure_kind == lg.FAILURE_HARNESS  # the unchanged rule 4b
+    assert lg.is_environment_error(env.error)
+    assert "blame_control" not in env.labels  # an instrument failure names no witness
+    model = row(clean=False, target_green=False)
+    split = lg.failure_split([env, model, row()])
+    assert split.n == 3  # counted against autonomy in the fail-closed rate …
+    assert split.model_n == 2  # … and never against the model
+    assert split.harness == 1 and split.to_dict()["harness"] == 1
+
+
+def test_a_2_2_row_without_posture_labels_still_verifies(tmp_path: Path) -> None:
+    old = lg.GradeRow(
+        repo="cobra",
+        task_id=SHA,
+        clean=False,
+        tests_unmodified=True,
+        target_green=False,
+        no_new_failures=None,
+        source_changed=None,
+        evidence_pack_hash=PACK,
+        apparatus_version="2.2",
+        labels={"failure_kind": "builder_red"},
+    )
+    assert not old.carries_posture and old.failure_kind == lg.FAILURE_BUILDER_RED
+    led = lg.JsonlLedger(tmp_path / "g.jsonl")
+    led.append(old)
+    led.append(row())
+    assert led.verify() == 2
+    back = next(iter(led.rows()))
+    assert back.posture_id == "" and back.apparatus_version == "2.2"

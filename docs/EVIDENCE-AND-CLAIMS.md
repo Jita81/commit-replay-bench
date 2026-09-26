@@ -85,6 +85,8 @@ The product shows, for every cell and every aggregate:
 | `oracle_strength_mean` or "not measured" | Hygiene-adjusted mutant kill-rate (P2). | A verdict from a weak oracle certifies less. |
 | `apparatus_versions` | The set of `apparatus_version` values in the cell. | Mixed versions are visible, not blended (§4). |
 | `mode`, `builder`, `model`, `provider` | Cell key. | A sighted rate is not a blind rate; builder A's rate is not builder B's. |
+| `posture_class`, `posture_ids` | The posture labels on every row of apparatus 2.3 or later (ADR-0019); the map reads the deployment's posture class by default. | **`n` is counted per posture class.** A host rate is not a sealed-sandbox rate: the same commit can be RED in one and fail to build in the other. Two classes pool (`posture=all`) only over tasks whose qualification fingerprints match in both; the rows left out are shown as `excluded_posture_divergent`, and a docker row stamped before 2.3 (graded against a baseline measured elsewhere) as `unqualified_posture`. |
+| `blame_control` | The witness on a `builder_red` / `lint` row of apparatus 2.3 or later. | A row blames the model only when the humans' own change — or, for a factory item, a fresh tree — passed the failed scope again in the same posture. A failure the gold shared is `harness` (`error: environment: …`), never a model failure. |
 
 Aggregates across cells are shown only with their component cells reachable; an aggregate
 without a breakdown is not published. Where observations cluster by repository, the
@@ -101,20 +103,29 @@ Every grade row and every evidence pack carries an `ApparatusStamp`
 (`crb.core.evidence.ApparatusStamp`):
 
 ```
-apparatus_version:  2.2                 # grader semantics, belt set (v5), size table, taxonomy, routing rule
+apparatus_version:  2.3                 # grader semantics, belt set (v5), size table, taxonomy, routing rule, posture-relative qualification
 crb_version:        2.0.0a1
 grader:             crb.core.grade
 runner:             pytest | go | node | vitest | jest | mocha | maven | cargo (+ options)
 executor:           {executor: docker, image, user, memory, cpus, pids_limit, network: none}
+posture:            {executor, image_id, toolchain, runner, runner_env, tree, network, deps_mode, limits, posture_id, posture_class}
 corpus_sha:         <hash of the task set, when sealed>
 policy_version:     routing.v1
 ```
 
+The `posture` block (ADR-0019) names the instrument the verdict was graded in, down to the
+image's content id and the exact toolchain version probed inside it; every row carries its
+`posture_id`, `posture_class` and the `qualification_id` whose in-posture baseline belt 3
+subtracted.
+
 **Evidence expires when the conditions that produced it change.** When any stamped
 component changes — apparatus version, grader semantics, runner behaviour, executor,
+**posture** (a re-pinned image, a toolchain patch release, a changed limit or tree mode),
 corpus, routing policy, or the builder's model id — prior evidence downstream of that
 component becomes **stale**: citable as history, dead as a basis for routing until
-re-measured. A result quoted without its stamp is an anecdote.
+re-measured. A changed posture also makes every task's qualification stale: the task is
+qualified again (no model spend) before it is replayed there. A result quoted without its
+stamp is an anecdote.
 
 `APPARATUS_VERSION` bumps only with an ADR. Model changes are recorded on the cell key
 (`model`, `provider`), so a new model id is a new cell; no capability is inherited.

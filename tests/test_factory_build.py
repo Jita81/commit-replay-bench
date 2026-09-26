@@ -425,3 +425,23 @@ def test_build_ladder_escalates_until_clean(harness: Harness) -> None:
             scratch=harness.scratch,
             evidence_dir=harness.evidence_dir,
         )
+
+
+def test_a_factory_blame_needs_the_env_probe_witness(harness: Harness) -> None:
+    """ADR-0019 §5: a factory item has no gold, so a verdict that blames the builder is
+    witnessed by the environment on a fresh base tree — and the row names it."""
+    item, authored = multiply_item(), authored_multiply()
+    proof = harness.prove(item, authored)
+    events: list[tuple[str, Mapping[str, Any]]] = []
+    res = harness.build(item, authored, proof, FakeBuilder(edit=noop), events=events)
+    res.close()
+    assert res.grade.belts.target_green is False and not res.grade.error
+    assert res.grade.blame_control == "env_probe"
+    assert res.grade.control is not None and res.grade.control.green
+    assert res.row is not None and res.row.failure_kind == "builder_red"
+    assert res.row.labels["blame_control"] == "env_probe"
+    assert res.row.labels["posture_class"] == "local/inplace/host-env"
+    assert res.row.labels["qualification_id"] == res.grade.qualification_id
+    assert res.grade_context is not None and res.grade_context.qualification.is_qualified
+    assert any(a == "grade.control" and p["kind"] == "env_probe" for a, p in events)
+    assert res.pack.apparatus.posture["posture_id"] == res.row.labels["posture_id"]

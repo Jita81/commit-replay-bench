@@ -236,8 +236,26 @@ installs the repository's test dependencies once, up front, and records every co
 ran. Nothing else ever asks for the network; if a run needs something setup did not
 install, it fails — it does not fetch.
 
+**Setup is a host phase; the sealed posture provisions instead (ADR-0019).** Under the
+docker executor `crb repo setup` refuses (a sandbox has no network, and installing into one
+would run repository code with a network). A repository's dependencies there come from
+**dependency provisioning**: with `CRB_PROVISION__ENABLED=true` each task's lockfiles at the
+parent and at the gold are read from git objects, fetched outside the test container through
+the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
+`$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
+at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
+`--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
+pin Python as `name==version` in `requirements*.txt` (or name the files in
+`runner_opts.deps_lock`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
+version does not provision is refused with its `PROVISION_*` code and the fix
+([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With
+provisioning off, a repository that declares dependencies is refused `PROVISION_DISABLED`
+under docker before any spend. `crb deps ls | verify | gc` shows, re-proves and trims the
+sealed sets; the `provision` line of `crb doctor` says whether it can work on this host.
+
 `crb repo setup <name>` (CLI) and the `setup` run kind (`POST /runs {"kind": "setup"}` —
-server) call the same runner method. Per language:
+server) call the same runner method on the host (the local posture). Per language:
 
 | Runner | What setup runs (in the clone) | Where the environment lives | "Ready" means |
 |---|---|---|---|
@@ -707,6 +725,67 @@ Do **not** switch the executor to `local` for a repository you do not fully trus
 local executor exists for development and fixture repositories and is visible on every
 verdict's apparatus stamp.
 
+## 7a. When a posture is unqualified
+
+**A task is proven in the posture that grades it** (ADR-0019). A *posture* is everything
+outside the patch that can change a test's outcome: the executor, the sandbox image (by its
+content, not its tag), the exact toolchain version inside it, how the tree is presented,
+the network, where the dependencies come from, the limits and the runner's command
+environment. The same commit can be RED on the host and fail to build in the sealed
+sandbox; the same test can pass on the host and fail on a read-only tree. So the facts a
+replay rests on — the target is RED at the parent, which tests already fail there (the
+baseline), and the humans' own change passes — are measured again in each posture and kept
+as a *qualification* record per task and posture.
+
+**Qualifying spends no model money.** It runs the environment probe, RED, the baseline
+twice and the gold twice at half the wall clock, and belt 5 on the gold. No builder is
+constructed. Start it in any of three ways:
+
+- the **Qualify for this posture — no model spend** button on the repository's Posture
+  panel (`/repos/:name`, operators);
+- `POST /api/v1/runs {"kind": "qualify", "repo": "<repo>"}`;
+- `crb repo qualify <repo> [--task <sha>] [--executor docker --image <image>]` for a CLI
+  workdir.
+
+A replay, blind or controls run qualifies the tasks it needs first by default
+(`qualify_first`). With `qualify_first: false` the submit is refused
+(`409 posture_unqualified`) when nothing is qualified. Every stop below names its code; the
+Posture panel lists each with how many tasks it keeps out.
+
+| Code | Scope | What to do |
+|---|---|---|
+| `POSTURE_UNQUALIFIED` | run | qualify the repository in this posture (`crb repo qualify`, or leave `qualify_first` on); this costs no model money |
+| `POSTURE_DRIFT` | run | the image, toolchain, limits or runner environment changed after qualification: qualify again |
+| `POSTURE_CANARY_FAILED` | run | the gold did not grade clean here: read the canary's tail (the cause is usually provisioning or the image) |
+| `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify` and delete any set it names (the next run fetches it again); otherwise fix the module named |
+| `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Posture panel shows how the record differs from other postures |
+| `QUAL_GOLD_NOT_GREEN`, `QUAL_GOLD_NEW_FAILURES`, `QUAL_GOLD_LINT` | task | the humans' own patch does not pass here; the task is excluded, as a task with a dirty gold always was |
+| `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed: the test is not deterministic in this posture |
+| `QUAL_HEADROOM` | task | the gold needed more than half the wall clock: raise the repository's timeout |
+| `QUAL_TREE_COPY_FAILED` | task | the tree did not fit the copy: raise `work_size`, or choose `sandbox_tree: readonly` |
+| `QUAL_ENV_WITNESS_RED` | task | a replay found the gold failing here, so the qualification was revoked: qualify again (the cause is usually provisioning or the image) |
+| `PROVISION_*`, `BUNDLE_INTEGRITY` | run or task | a provisioning setting or a lockfile fact; each fix names the setting, the file or the host ([DEPLOYMENT §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)) |
+
+**The model is blamed only with a witness.** When a trial's belts would charge the builder,
+the grader first runs the same failing scope on the humans' own change, now, in the same
+posture. If that control passes, the row is `builder_red` (or `lint`) and names the witness
+(`labels.blame_control`). If it fails, the row is `harness` with `error: environment: …`
+— counted against autonomy, never against the model — and the task's qualification is
+revoked. Two such rows in a row stop the run (`env_stop`, default 2). When the trial's own
+tree could not be copied into the sandbox (`tree_copy_failed`), the same control decides:
+if the gold's tree runs there, the trial's tree was the problem (too big for `work_size`, a
+file the sandbox user cannot read) and the attempt is **disqualified**, never charged and
+never revoking anything; if the gold fails too, it is an environment row as above.
+
+**With provisioning off** (the default), the sealed sandbox provides no third-party
+dependencies, so a repository that declares one is refused `PROVISION_DISABLED` before
+anything runs, with the fix. **With provisioning on**, a task whose parent still cannot load
+its dependencies offline — its sealed set damaged, or a module the lockfile does not pin — is
+refused `QUAL_ENV_UNLOADABLE` at qualification instead of being charged to the model on every
+replay **[measured — n = 1 fixture Go repository with one module and 1 task of cobra, method:
+`tests/test_posture_e2e_docker.py` and docs/reviews/2026-09-25-sealed-posture.md §3(c), in the
+shipped Go sandbox image under `--network=none`, 2026-09-25; apparatus 2.3]**.
+
 ## 8. Stop conditions
 
 Stop delivery and investigate before any further sign-off if you observe any of:
@@ -715,7 +794,11 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - `crb ledger verify` fails;
 - a secret in an evidence pack, log or export;
 - a sandbox escape or unexpected network egress from a test container;
-- a builder repeatedly disqualified for test tampering (shows as a rising `disqualified` count).
+- a builder repeatedly disqualified for test tampering (shows as a rising `disqualified` count);
+- attempts recorded `harness` with `error: environment: …` — the humans' own change failed
+  the same scope in the same posture, so the posture moved under its qualification (a run
+  stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
+  before the next replay — §7a).
 
 **Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
 shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in

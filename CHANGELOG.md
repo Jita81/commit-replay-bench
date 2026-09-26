@@ -8,6 +8,221 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the sealed posture, whole: provisioned per task, qualified where it grades, proven on cobra (ADR-0019)
+
+The two halves below (stream Q: posture-relative qualification and the blame witness;
+stream D: per-task dependency provisioning and the throwaway tree) are merged into one
+seam, `crb.core.deps`, and wired end to end.
+
+- **One seam.** `DepsProvider` is `mode(config, executor)`, `resolve(…, parent, gold)` from
+  git objects, and `verify(deps)` over every sealed set a task cites. The worker, `crb mine`,
+  `crb repo qualify`, `crb repo probe` and `crb grade` all take the deployment's provider
+  (`make_deps_provider` from `CRB_PROVISION__*`): provisioning off is the host's environment
+  locally and `PROVISION_DISABLED` in the sandbox for a repository with dependencies. A
+  provisioning stop on the command line is one line with its fix. The run's gate hands the
+  builder the task's parent set (ADR-0012 as amended).
+- **The throwaway copy is the sandbox's default tree** (`CRB_SANDBOX__TREE=copy`, 1 GB);
+  `readonly` stays a separate posture.
+- **Proven end to end** by `tests/test_posture_e2e_docker.py` (a fixture repository with a
+  module, in the sandbox-images CI job) and, once, on cobra: task `746ef07` qualified in
+  `docker/copy/sealed` with its modules fetched for the task and sealed, the gold replayed
+  clean through the run's gate, and an emptied module cache refused `BUNDLE_INTEGRITY` with
+  no builder call, graded `harness` past the gate and re-qualified `QUAL_ENV_UNLOADABLE`
+  **[measured — n = 1 real repository, 1 task; method: the product's own qualify, gate and
+  run code on colima (Docker 29.5.2) against the shipped image `crb-sandbox-go:main-8ab88ad`,
+  no builder and no model; apparatus 2.3; docs/reviews/2026-09-25-sealed-posture.md]**.
+- **The integrity fix now says what is true.** `BUNDLE_INTEGRITY` stops the run, and
+  `crb deps verify` names the set; the operator deletes it and the next run fetches it again.
+  Nothing revokes the qualifications that cite it automatically yet **[gap]** (G-966).
+- **After the adversarial review of the merge** (three lenses; the surviving findings fixed, each
+  with a test that fails if the behaviour regresses — product.posture.29–31):
+  - a trial whose own tree does not fit the sandbox's copy is no longer an unwitnessed
+    environment row that revoked the task with a false reason: the gold control runs first,
+    and a green one disqualifies the trial (never charged, nothing revoked); only a row whose
+    control ran red revokes a qualification;
+  - belt 3's control rule and both of `context_for`'s refusals now have tests of their own;
+  - once the posture has resolved the image's content id, every container runs that id, not
+    the tag;
+  - the host never follows a link a fetch or rebuild container planted in its output
+    (`PROVISION_UNSAFE_OUTPUT`), removal never changes permissions through a link, and a link
+    to a directory inside a set is part of its digest;
+  - the grade-time closure selector reads nothing outside the builder's tree — a Node
+    lockfile that is a link is a `ClosureViolation` too, as Go's `go.mod` is (CodeRabbit on
+    PR #56);
+  - `QUAL_ENV_UNLOADABLE`'s fix covers provisioning on as well as off;
+  - the count of run `0c44ff24…`'s rows (3 observed, 4 in stream D's reading of an export that
+    is not committed) is marked disputed wherever it is cited **[gap]** (F42).
+- **`lint_gold_ok` is named only when the gold's belt 5 was measured** (product.posture.33;
+  CodeRabbit on PR #56). A belt-5-only failure whose qualification never measured the gold's
+  lint (`null` — every factory item, and a gold tree with no lint plan) was labelled
+  `lint_gold_ok`, a witness asserting a gold fact nobody measured, and charged to the model.
+  It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
+  lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
+  apparatus 2.3, which this change set introduces.
+- **Revision 0011 is immutable in what it writes, and its downgrade keeps cited evidence**
+  (product.posture.43; CodeRabbit on PR #56). The back-fill built each legacy record with
+  the runtime's `Qualification`, so a later change to that class would have changed, or
+  broken, what a released revision writes; it now writes a shape frozen in the revision,
+  and a ratchet test refuses any revision that imports the product's runtime. The downgrade
+  dropped the table although every 2.3 grade row cites a `qualification_id`; it now
+  refuses while any measured (non-legacy) record exists.
+- **A probe that raised always updates the repository's probe status** (product.posture.42;
+  CodeRabbit on PR #56). A provisioning stop during a probe (`PROVISION_DISABLED`, raised
+  before the probe's own error handling) failed the run but left `probe_status` at its last
+  value, so a repository that had passed read `ok`. The worker now records a probe that
+  raised in one place, whatever raised it; a provisioning stop keeps its code and its fix.
+- **The sandbox's tree holds without a default image** (product.posture.41; CodeRabbit on
+  PR #56). A worker with no `CRB_SANDBOX__IMAGE` (each repository names its own) discarded
+  `CRB_SANDBOX__TREE` and `__WORK_SIZE`, so `readonly` silently ran as `copy` with the default
+  size while `/settings` said `readonly`, and a typo was never caught. Both are now kept on
+  the worker's settings and applied to every docker run, and the tree is validated at start-up.
+- **`/health` no longer starts a container on every readiness poll** (product.posture.40;
+  CodeRabbit on PR #56). A worker's `provision` probe inspects three images and a network and
+  runs a container to prove the store is visible; `/health` now reuses its result for
+  5 minutes when `ok` and 30 seconds otherwise. `crb doctor` still probes afresh.
+- **A legacy host row is never pooled with another class** (product.posture.39; CodeRabbit
+  on PR #56). `posture=all` returned every row when exactly one current class was present,
+  so `legacy:local` rows (graded on the host against the discovery baseline) were pooled
+  with, say, `docker/copy/sealed`; and a class filter admitted them under any `local/…`
+  class, `local/inplace/sealed` included. A legacy host row now reads as
+  `local/inplace/host-env` only, and `posture=all` counts it `excluded_posture_divergent`
+  whenever another class is present.
+- **The default map reads the class the worker grades in** (product.posture.38; CodeRabbit
+  on PR #56). The API's default posture filter said `local/inplace/host-env` for the host
+  executor with provisioning on (the worker grades `local/inplace/sealed`) and ignored a
+  repository's own `sandbox_tree` under docker, so the default map, `/routes` and the
+  delivery gate dropped every row the worker had measured. One rule,
+  `expected_posture_class`, now serves the API and the worker.
+- **`crb deps gc` never removes a live stage** (product.posture.37; CodeRabbit on PR #56).
+  It removed every `.staging/<uuid>` while a worker in another process could be filling one,
+  so that fetch failed closed with a false refusal. Each stage now holds an exclusive lease
+  (`flock` on `.staging/<uuid>.lease`, taken before the directory exists) until it is sealed
+  or discarded; `gc` removes a stage only when no process holds its lease, and the kernel
+  drops the lease of a crashed one. A lease counts only once `stage()` has locked it and
+  the path is still that file (a `gc` in the moment between creating and locking it may
+  remove it; `stage()` then takes a new name), `stage()` waits for a `gc` that is probing
+  its lease instead of failing, and `gc` unlinks a lease only while it holds its lock.
+- **A Python pin its marker excludes no longer refuses the task** (product.posture.36;
+  CodeRabbit on PR #56). The sealed set's manifest listed every pin, but pip skips a line
+  whose environment marker excludes the fetch image's Python (a pip-compile backport such
+  as `tomli==… ; python_version < "3.11"`), so the environment probe reported it missing and
+  every task in such a repository was `QUAL_ENV_UNLOADABLE`. The manifest now holds what pip
+  installed and records the rest as `marker_skipped`; a pin with no marker is still required.
+  A pin with a marker counts by name AND version: a universal lock that pins one name twice
+  under opposite markers (`numpy==1.24.4 ; python_version < "3.9"` and `numpy==2.0.1 ;
+  python_version >= "3.9"`) requires only the version pip installed.
+  A set sealed before this change keeps its old manifest: delete it and the next run fetches
+  it again.
+- **A local sealed Node posture uses the sealed set** (product.posture.35; CodeRabbit on
+  PR #56). On the host executor Node resolves `./node_modules` before `NODE_PATH`, and the
+  worktree's link still pointed at the clone's install, so `local/inplace/sealed` graded
+  and probed (`npm ls`) the clone's tree under a `sealed` label. The link is now pointed at
+  the bound set before a test run, a lint plan and the environment probe. A commit whose
+  tree holds its own `node_modules` directory would shadow the set the same way, and the
+  harness never deletes what a commit holds: that task is refused
+  `PROVISION_TREE_SHADOWS_SET` (a new task-scope provisioning code), never graded, and
+  `qualify_task` now records any task-scope refusal raised while it prepares a tree as an
+  `unqualified` record rather than an exception. A worktree with no `node_modules` entry at
+  all (the clone was never set up, so the workspace planted no link) now gets the link too:
+  `npm ls` and an ES module `import` never read `NODE_PATH`, so the probe refused a parent
+  the set holds whole (reproduced with the real `npm`; CodeRabbit's second thread,
+  `node_runners.py:201`). The workspace counts a `node_modules` link at a sealed Node set
+  in a registered store as the harness's, never the builder's change; a link anywhere
+  else, a writable set or a real directory is still the builder's. Every starting state of
+  `./node_modules` is enumerated in one test and must end linked at the set or refused.
+- **The Python test job's time budget is 60 minutes** (was 45). The suite grew with this
+  branch's docker tests: py3.12 took 34 minutes and py3.13 was cancelled at 98 %
+  (run 36212115018). It is a job-time budget, not a quality gate — no test is skipped or
+  weakened, and the job name is unchanged. Parallelising the suite is queued for wave β.
+- **The toolchain probe copies nothing** (product.posture.34; CodeRabbit on PR #56). `mine`
+  resolves the posture in the clone, `.git` and all, and the version probe copied that whole
+  tree into the sandbox's tmpfs: a large clone failed the copy and was reported as "cannot
+  read the toolchain version". A command now says whether it reads the tree
+  (`Command.tree`); the probe does not, so the sandbox mounts, copies and walks nothing for it.
+- **Host file modes never hide the tree from the sandbox** (product.posture.32; CI's
+  `sandbox-images` job on PR #56). The container's user owns nothing on the host, so a path
+  the host's modes kept from others failed the copy (`tree_copy_failed` on Linux — first
+  seen on the `0733` writable path the pytest runner itself had declared for the previous
+  command) or, under colima, was silently left out of the copy. Before a container starts,
+  `grant_sandbox_read` now adds read (and search) for the owner and for others on every path
+  the worker owns — never a write bit, never git's execute bit, never through a link — and
+  the copy treats GNU tar's "removed before we read it" as fatal, so a path it still cannot
+  read stops the copy instead of vanishing from it.
+
+### 2026-09-25 — qualification is posture-relative (ADR-0019, apparatus 2.3)
+
+The first replay in the sealed sandbox graded every attempt `builder_red`: with no module
+cache and no network the targets could not build, the failure-kind rule read a red target
+with no error as the model's, and the replay trusted RED, baseline and gold facts the host
+had measured (run `0c44ff24…`, finding D1–D5). The instrument now proves each task where it
+grades it and blames the model only with a witness from there.
+
+- **Posture is an identity** (`crb.core.posture`): the executor, the image by content id,
+  the exact toolchain probed inside it, the runner's command environment, the tree, the
+  network, the dependency mode and the limits, hashed to `pst_…`; the class
+  (`executor/tree/deps-mode`) is what rates pool on.
+- **Qualification is a record per task and posture, for no model money**
+  (`crb.core.qualify.qualify_task`): an offline environment probe (Go: `go list -deps -test
+  ./...`), RED once, the baseline twice (union and flaky set), the gold twice and its belt
+  scope once at half the wall clock, belt 5 on the gold — each refusal a code with its fix.
+  Kept append-only in `task_qualifications` (revision 0011, a `legacy` back-fill that never
+  satisfies a gate). New run kind `qualify` and `crb repo qualify`; the miner qualifies in
+  its own posture.
+- **The model is blamed only with a witness** (`GradeContext`, `MisattributionViolation`):
+  a verdict that would be `builder_red` or `lint` first runs the failed scope on the gold (or,
+  for a factory item, the environment probe on a fresh base tree) in the same posture; a red
+  control makes the row `harness` with `error: environment: …`. A 2.3 model-failure row
+  without its posture labels and witness cannot be written or read back.
+- **Nothing is built for an unqualified task**: the worker resolves the posture live, admits
+  only qualified tasks (`qualify_first` on by default), and stops at $0 on
+  `POSTURE_UNQUALIFIED`, `POSTURE_DRIFT` and `POSTURE_CANARY_FAILED`; two environment rows in
+  a row stop a run (`env_stop`) and revoke the qualifications. `POST /runs` with
+  `qualify_first: false` and nothing qualified is `409 posture_unqualified`.
+- **Belt 4 reads the builder's changes before the first test ran**: a file a test writes is
+  never the builder's.
+- **Posture is a filter, never a blend**: the map, the route gate and the factory's cell
+  routes read the deployment's posture class; `posture=all` pools only posture-invariant
+  tasks; pre-2.3 docker rows are excluded and counted `unqualified_posture`. New route
+  `GET /repos/{name}/posture`; the repository page gains a Posture panel with a Qualify
+  button that spends nothing.
+- **Apparatus 2.2 → 2.3**: the current map starts empty and 2.2 sign-offs go stale
+  (ADR-0015). The dependency seam (`crb.core.deps`, `crb.provision`) is in place; per-task
+  provisioning is the entry below.
+### 2026-09-25 — the sealed posture can run a repository with dependencies (ADR-0019, stream D)
+
+The first replay in the docker posture (run `0c44ff24…`, cobra) graded every attempt
+`builder_red`: the sealed test container held none of cobra's modules and could not build a
+single target **[measured — n = 3 or 4 rows, each `builder_red` with the target red; method:
+the run's grade rows as read on 2026-09-25; apparatus 2.2. The count is disputed: 3 were
+observed when the run was cancelled, 4 in stream D's reading of the deployment's ledger export,
+which is not committed — [gap] F42]**. This
+change is the dependency half of the fix (posture-relative qualification and the blame
+witness are the other half, the entry above).
+
+- **Dependencies are provisioned per task, outside the test container.** The lockfiles at
+  the parent and at the gold are read from git objects (never a worktree); a fetch container
+  on the pinned toolchain image fetches them through the allowlisting proxy (or with no
+  network from a `file://` mirror); the result is sealed, content-addressed and mounted
+  read-only while the test container keeps `--network=none`. Go keeps one module cache for
+  the parent's and the gold's modules; Python installs wheels only, with no network; Node
+  runs `npm ci --ignore-scripts`. Every refusal is a `PROVISION_*` code with its fix.
+  Provisioning is **off** by default (`CRB_PROVISION__ENABLED`); under docker a repository
+  that declares dependencies is then refused `PROVISION_DISABLED` before any spend.
+- **Tests run in a throwaway copy of the tree.** The worktree is read-only at `/src`; each
+  command runs in a size-capped tmpfs copy at `/work`, so a test that writes into its own
+  package directory reads the same as on the host (the D5 finding). `CRB_SANDBOX__TREE=readonly`
+  keeps the previous shape. `Command.network=True` is now refused under docker.
+- **Operators can see it.** `crb doctor` and the worker's `/health` gain a `provision` line;
+  `crb deps ls | verify | gc` shows, re-proves and trims the sealed sets; production refuses a
+  public registry (unless allowed) and an unpinned fetch image at start-up; Helm and Compose
+  carry the variables and a NetworkPolicy slot for the package mirror; CI pre-pulls the fetch
+  images and runs the provisioning suites against a real daemon.
+- Proven against a daemon for Go, Python and Node fixtures **[measured — n = 3 fixture
+  repositories, each parent and gold tree passing offline in the shipped sandbox image
+  against its own sealed set; method: `tests/test_provision_{go,python,node}.py` on colima,
+  Docker 29.5.2, 2026-09-25; apparatus 2.2]**. No repository has been qualified in the
+  sealed posture on the operator's live stack yet **[gap]**.
+
 ### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
 
 SQLAlchemy 2.1.1 reached PyPI on 2026-09-25, and the `server` extra's `sqlalchemy>=2.0` has

@@ -112,6 +112,7 @@ REVISION_TABLES: tuple[tuple[str, str], ...] = (
     ("0003", "reviews"),
     ("0005", "github_installations"),
     ("0007", "workers"),
+    ("0011", "task_qualifications"),
 )
 #: ``(revision, table, index)`` — the INDEX a revision adds when it adds no column or table.
 #: Walked after :data:`REVISION_MARKERS` in the same way: a ``create_all`` schema that
@@ -276,7 +277,10 @@ def upgrade(url: str | None = None, *, revision: str = "head") -> None:
             cfg.attributes["connection"] = connection
             _adopt_unversioned_schema(connection, cfg)
             command.upgrade(cfg, revision)
-        install_append_only_triggers(engine)
+        # every append-only table that EXISTS at the revision reached (a table a later
+        # revision adds has nothing to protect yet — upgrading to an older target is legal)
+        present = set(inspect(engine).get_table_names())
+        install_append_only_triggers(engine, tuple(t for t in APPEND_ONLY_TABLES if t in present))
     finally:
         engine.dispose()
 

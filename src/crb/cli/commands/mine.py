@@ -35,6 +35,7 @@ from crb.cli.commands import (
     add_common,
     add_executor,
     build_executor,
+    deps_provider,
     event_printer,
     print_json,
     print_lines,
@@ -43,6 +44,7 @@ from crb.cli.commands import (
 from crb.cli.commands import repo as repo_cmd
 from crb.core.git import GitRepo
 from crb.core.mine import mine
+from crb.core.qualify import JsonlQualifications
 from crb.core.spec import POOL_HARD, POOL_STANDARD
 
 
@@ -81,6 +83,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
     wd.scratch_dir.mkdir(parents=True, exist_ok=True)
 
     found: list[str] = []
+    quals = JsonlQualifications(wd.qualification_file(args.name))
     skipped: Counter[str] = Counter()
     examined = 0
     for outcome in mine(
@@ -97,8 +100,13 @@ def cmd_mine(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         ref=args.ref,
         on_event=on_event,
+        # the deployment's dependency provider (CRB_PROVISION__*), as the worker's mine
+        deps=deps_provider(executor),
     ):
         examined += 1
+        if outcome.qualification is not None:
+            # the record, qualified or not, in the mine's own posture (ADR-0019)
+            quals.append(outcome.qualification)
         if outcome.task is None:
             skipped[outcome.skipped_reason or "unqualified"] += 1
             continue
