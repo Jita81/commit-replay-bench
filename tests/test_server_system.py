@@ -600,6 +600,40 @@ class TestRoleAwareSandboxProbe:
         assert worker.status == "down" and "docker" in worker.detail
         assert probe_provision_role(on, "api").status == "skipped"
 
+    def test_a_readiness_poll_reuses_the_provision_probe_for_a_bounded_time(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The provisioning probe inspects three images and a network and starts a
+        container; a readiness poll every few seconds must not do that each time
+        (CodeRabbit on PR #56). A result is reused for ``PROVISION_PROBE_TTL_S`` when it is
+        ``ok`` and ``PROVISION_PROBE_DOWN_TTL_S`` when it is not, so a fixed store is seen
+        soon; off, nothing is probed or cached."""
+        from crb.server.routes import system
+
+        calls: list[str] = []
+        answer = {"status": "ok"}
+
+        def _probe(config: Any, **_: Any) -> ProbeResult:
+            calls.append(str(config.store))
+            return ProbeResult("provision", answer["status"], "x", {"enabled": config.enabled})
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(system, "probe_provision", _probe)
+        monkeypatch.setattr(system, "_monotonic", lambda: clock["t"])
+        on = make_settings(tmp_path, provision={"enabled": True, "go_proxy": "file:///nowhere"})
+        for _ in range(3):
+            assert system.probe_provision_role(on, "worker").status == "ok"
+        assert len(calls) == 1
+        clock["t"] += system.PROVISION_PROBE_TTL_S + 1
+        answer["status"] = "down"
+        assert system.probe_provision_role(on, "all").status == "down" and len(calls) == 2
+        clock["t"] += system.PROVISION_PROBE_DOWN_TTL_S - 1
+        assert system.probe_provision_role(on, "all").status == "down" and len(calls) == 2
+        clock["t"] += 2
+        answer["status"] = "ok"
+        assert system.probe_provision_role(on, "all").status == "ok" and len(calls) == 3
+        assert system.PROVISION_PROBE_DOWN_TTL_S < system.PROVISION_PROBE_TTL_S <= 300
+
     def test_worker_and_all_roles_probe_the_sandbox(
         self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
     ) -> None:

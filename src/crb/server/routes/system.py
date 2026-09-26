@@ -107,6 +107,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import threading
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -512,11 +513,24 @@ def probe_sandbox(settings: Settings, role: str = ROLE_ALL, *, request_id: str =
     )
 
 
+#: How long ``/health`` reuses a worker's provisioning probe: it inspects three images and
+#: a network and starts a container, which a readiness poll every few seconds must not do
+#: each time (CodeRabbit on PR #56). A result that is not ``ok`` is reused for less, so a
+#: fixed store is seen soon; ``crb doctor`` always probes afresh.
+PROVISION_PROBE_TTL_S = 300.0
+PROVISION_PROBE_DOWN_TTL_S = 30.0
+_monotonic = time.monotonic
+_provision_cache: dict[str, tuple[float, ProbeResult]] = {}
+_provision_lock = threading.Lock()
+
+
 def probe_provision_role(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:
     """Dependency provisioning (ADR-0019), as seen from a process of ``role``: the worker
     fetches, so an ``api`` process reports ``skipped``; a worker reports ``skipped`` when
     provisioning is off, otherwise whether the store is visible to the daemon and the fetch
-    images and the egress network are present (``crb.provision.probe``)."""
+    images and the egress network are present (``crb.provision.probe``) — reused for
+    :data:`PROVISION_PROBE_TTL_S` (``ok``) or :data:`PROVISION_PROBE_DOWN_TTL_S` (anything
+    else) per configuration."""
     if role == ROLE_API:
         return ProbeResult(
             "provision",
@@ -524,7 +538,20 @@ def probe_provision_role(settings: Settings, role: str = ROLE_ALL) -> ProbeResul
             f"not probed here: provisioning is the worker's ({ROLE_ENV}={ROLE_API})",
             {"enabled": settings.provision.enabled, "role": role},
         )
-    return probe_provision(settings.provision_config)
+    config = settings.provision_config
+    if not config.enabled:
+        return probe_provision(config)
+    key = repr(sorted(config.view().items(), key=lambda kv: kv[0]))
+    now = _monotonic()
+    with _provision_lock:
+        hit = _provision_cache.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    result = probe_provision(config)
+    ttl = PROVISION_PROBE_TTL_S if result.status == OK else PROVISION_PROBE_DOWN_TTL_S
+    with _provision_lock:
+        _provision_cache[key] = (now + ttl, result)
+    return result
 
 
 def probe_intake(

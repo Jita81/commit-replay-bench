@@ -59,6 +59,10 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **`/health` no longer starts a container on every readiness poll** (product.posture.40;
+  CodeRabbit on PR #56). A worker's `provision` probe inspects three images and a network and
+  runs a container to prove the store is visible; `/health` now reuses its result for
+  5 minutes when `ok` and 30 seconds otherwise. `crb doctor` still probes afresh.
 - **A legacy host row is never pooled with another class** (product.posture.39; CodeRabbit
   on PR #56). `posture=all` returned every row when exactly one current class was present,
   so `legacy:local` rows (graded on the host against the discovery baseline) were pooled

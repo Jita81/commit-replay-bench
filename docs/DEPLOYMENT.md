@@ -319,7 +319,9 @@ daemon (`deploy/sandbox/README.md` §1), allow the mirror's address in
 `networkPolicy.packageMirror.cidrs` (Helm; the fetch's sidecar is the only thing that reaches
 it), set `CRB_PROVISION__ENABLED=true`, and read the `provision` line of `crb doctor` on the
 worker host and the `provision` probe of the worker's `/health`: `ok` names the store and the
-registries; `fail` names the code and the fix. How long a first fetch takes per repository
+registries; `fail` names the code and the fix. `/health` reuses that probe for 5 minutes
+when it is `ok` and for 30 seconds when it is not, so a readiness poll never starts a
+container each time; `crb doctor` always probes afresh. How long a first fetch takes per repository
 is not measured yet **[hypothesis — about 1 to 3 minutes per cobra task with a cold Go
 build cache, extrapolated from run `0c44ff24…`'s attempt latencies; the first live qualify
 run replaces this with a measured figure]**.
