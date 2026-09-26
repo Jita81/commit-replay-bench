@@ -496,6 +496,8 @@ def test_the_destination_rule_is_identity_not_containment(
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "crb"
 _CONFINERS = {"_confined_clone", "confined_clone_path"}
+#: the calls that open git on a path, and which positional argument that path is
+_OPENERS = {"GitRepo": 0, "clone_repo": 1}
 #: (module, function) → where a stored clone path is turned into a git handle
 _USE_SITES = [("server/worker.py", "_load_repo"), ("server/routes/repos.py", "compute_profile")]
 
@@ -517,13 +519,11 @@ def _is_confined(value: ast.expr) -> bool:
     return isinstance(value, ast.Call) and _call_name(value) in _CONFINERS
 
 
-@pytest.mark.parametrize(("module", "function"), _USE_SITES)
-def test_git_opens_only_the_confined_path_at_every_use_site(module: str, function: str) -> None:
-    """PR #52 review, as a class: the rule was applied to the stored path but git was
-    handed a different one (the clone destination) — and the path it opened was the
-    WRITTEN one, not the one checked. At each use site every ``GitRepo(…)`` and the
-    destination of every ``clone_repo(…)`` is a name bound to the confiner's result."""
-    fn = _func(ast.parse((_SRC / module).read_text(encoding="utf-8")), function)
+def _git_opens(source: str, function: str) -> list[tuple[int, str, bool]]:
+    """Every ``GitRepo(…)`` and ``clone_repo(…)`` in ``function``: (line, the path git is
+    given, whether that path is a name bound to the confiner's result)."""
+    tree = ast.parse(source)
+    fn = _func(tree, function)
     confined = {
         t.id
         for n in ast.walk(fn)
@@ -531,17 +531,23 @@ def test_git_opens_only_the_confined_path_at_every_use_site(module: str, functio
         for t in n.targets
         if isinstance(t, ast.Name)
     }
-    opened = [
-        (n.lineno, n.args[{"GitRepo": 0, "clone_repo": 1}[_call_name(n)]])
+    return [
+        (n.lineno, ast.unparse(arg), isinstance(arg, ast.Name) and arg.id in confined)
         for n in ast.walk(fn)
-        if isinstance(n, ast.Call) and _call_name(n) in {"GitRepo", "clone_repo"}
+        if isinstance(n, ast.Call) and _call_name(n) in _OPENERS
+        for arg in [n.args[_OPENERS[_call_name(n)]]]
     ]
+
+
+@pytest.mark.parametrize(("module", "function"), _USE_SITES)
+def test_git_opens_only_the_confined_path_at_every_use_site(module: str, function: str) -> None:
+    """PR #52 review, as a class: the rule was applied to the stored path but git was
+    handed a different one (the clone destination) — and the path it opened was the
+    WRITTEN one, not the one checked. At each use site every ``GitRepo(…)`` and the
+    destination of every ``clone_repo(…)`` is a name bound to the confiner's result."""
+    opened = _git_opens((_SRC / module).read_text(encoding="utf-8"), function)
     assert opened, f"{module}:{function} no longer opens a clone — move this ratchet"
-    bad = [
-        (line, ast.unparse(arg))
-        for line, arg in opened
-        if not (isinstance(arg, ast.Name) and arg.id in confined)
-    ]
+    bad = [(line, arg) for line, arg, ok in opened if not ok]
     assert not bad, f"{module}:{function} opens git on an unconfined path: {bad}"
 
 
@@ -579,19 +585,22 @@ def _starts_a_process(node: ast.AST) -> bool:
     )
 
 
-def _git_openers_in_server() -> set[tuple[str, str]]:
-    """Every function under ``crb.server`` that calls ``GitRepo(…)`` or ``clone_repo(…)``,
+def _git_openers_in(server: Path) -> set[tuple[str, str]]:
+    """Every function under ``server`` that calls ``GitRepo(…)`` or ``clone_repo(…)``,
     or that starts a process by any other route — a hand-built ``git`` argv included."""
     found = set()
-    for path in (_SRC / "server").rglob("*.py"):
+    for path in server.rglob("*.py"):
         for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                (isinstance(n, ast.Call) and _call_name(n) in {"GitRepo", "clone_repo"})
-                or _starts_a_process(n)
+                (isinstance(n, ast.Call) and _call_name(n) in _OPENERS) or _starts_a_process(n)
                 for n in ast.walk(fn)
             ):
-                found.add((path.relative_to(_SRC).as_posix(), fn.name))
+                found.add((path.relative_to(server.parent).as_posix(), fn.name))
     return found
+
+
+def _git_openers_in_server() -> set[tuple[str, str]]:
+    return _git_openers_in(_SRC / "server")
 
 
 def test_the_use_site_list_is_every_place_the_server_opens_git() -> None:
@@ -628,19 +637,95 @@ def test_the_server_names_process_starters_only_through_their_module() -> None:
     assert not hidden, f"a process starter is imported where the discovery cannot see it: {hidden}"
 
 
+def _link_rule_callers(src: Path) -> set[tuple[str, str]]:
+    """Every function under ``src`` that calls ``clone_path_escapes(…)``."""
+    found = set()
+    for path in src.rglob("*.py"):
+        for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+                isinstance(n, ast.Call) and _call_name(n) == "clone_path_escapes"
+                for n in ast.walk(fn)
+            ):
+                found.add((path.relative_to(src).as_posix(), fn.name))
+    return found
+
+
 def test_the_link_rule_is_called_only_inside_the_confiners() -> None:
     """``clone_path_escapes`` on its own checks a path but does not say which path git
     should open; outside the write-time rule and the use-time confiner it is a check that
     the next line can walk around."""
     allowed = {("server/routes/repos.py", f) for f in ("confine_clone_path", "confined_clone_path")}
-    found = set()
-    for path in _SRC.rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for fn in ast.walk(tree):
-            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
-                continue
-            for n in ast.walk(fn):
-                if isinstance(n, ast.Call) and _call_name(n) == "clone_path_escapes":
-                    found.add((path.relative_to(_SRC).as_posix(), fn.name))
+    found = _link_rule_callers(_SRC)
     assert found - allowed == set()
     assert found == allowed  # both confiners still apply it
+
+
+# The scans above match a call by the name it is written with. PR #52 review (fourth):
+# ``from crb.core.git import GitRepo as G`` then ``G(path)`` was invisible to all three,
+# so a new git opener could pass them by renaming the import. Each scan is run here on a
+# throwaway module that uses every import form, and must see every call.
+_ALIASED_SERVER_MODULE = """
+import crb.core.git
+import crb.core.git as g
+from crb.core import git as gm
+from crb.core.git import GitRepo
+from crb.core.git import GitRepo as G, clone_repo as cr
+from crb.server.routes.repos import clone_path_escapes as esc
+from crb.server.routes.repos import confined_clone_path as ccp
+
+
+def plain(p):
+    return GitRepo(p)
+
+
+def aliased_class(p):
+    return G(p)
+
+
+def aliased_clone(url, dest):
+    return cr(url, dest)
+
+
+def module_attribute(p):
+    return g.GitRepo(p), gm.clone_repo("u", p), crb.core.git.GitRepo(p)
+
+
+def local_alias(p):
+    from crb.core.git import GitRepo as LocalRepo
+
+    return LocalRepo(p)
+
+
+def aliased_link_rule(p, root):
+    return esc(p, root)
+
+
+def use_site(row, home):
+    ok = ccp(row.clone_path, home)
+    G(ok)
+    return cr("u", row.clone_path)
+
+
+def unrelated(p):
+    return str(p)
+"""
+
+
+def test_the_git_opener_discovery_sees_every_import_form(tmp_path: Path) -> None:
+    server = tmp_path / "server"
+    server.mkdir()
+    (server / "aliased.py").write_text(_ALIASED_SERVER_MODULE, encoding="utf-8")
+    found = {fn for _, fn in _git_openers_in(server)}
+    expected = {"plain", "aliased_class", "aliased_clone", "module_attribute", "local_alias"}
+    assert found == expected | {"use_site"}
+
+
+def test_the_use_site_ratchet_sees_aliased_openers_and_confiners() -> None:
+    opened = _git_opens(_ALIASED_SERVER_MODULE, "use_site")
+    assert [(arg, ok) for _, arg, ok in sorted(opened)] == [("ok", True), ("row.clone_path", False)]
+
+
+def test_the_link_rule_scan_sees_an_aliased_import(tmp_path: Path) -> None:
+    (tmp_path / "server").mkdir()
+    (tmp_path / "server" / "aliased.py").write_text(_ALIASED_SERVER_MODULE, encoding="utf-8")
+    assert _link_rule_callers(tmp_path) == {("server/aliased.py", "aliased_link_rule")}
