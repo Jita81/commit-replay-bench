@@ -465,6 +465,24 @@ def _own_body(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
     return out
 
 
+def _top_level_pins(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+    """The pins that are statements of ``fn``'s own body at its top level. A pin nested in a
+    ``with``, ``if``, ``try`` or loop may never run (``if False:``) or may be undone when the
+    block ends (``with monkeypatch.context() as m:``), so it pins nothing — the safe side."""
+    return [
+        stmt.value for stmt in fn.body if isinstance(stmt, ast.Expr) and _pins_the_uid(stmt.value)
+    ]
+
+
+def _undoes(node: ast.AST) -> bool:
+    """True for any ``….undo()`` call: ``monkeypatch.undo()`` reverts every pin made before it."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "undo"
+    )
+
+
 def _at(node: ast.AST) -> tuple[int, int]:
     return (getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
 
@@ -477,13 +495,18 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
     design and is docker-marked), and a function that sets ``CRB_BUILDER__EXECUTOR`` to
     ``docker`` without ``CRB_BUILDER__USER``. A PIN of the uid —
     ``setattr(os, "getuid", …)`` or ``setattr("os.getuid", …)``, through ``monkeypatch`` or
-    not — in the function's own body exempts what comes after it: a construction that follows
+    not — that is a top-level statement of the function's own body exempts what comes after
+    it, up to the next ``….undo()`` call anywhere in that body: a construction that follows
     it, and the executor shape when the pin precedes every mention of the executor and
-    ``docker``. What comes before the pin still ran on the host's uid and is reported, and so
-    is everything in a function whose only pin sits in a nested helper. A function that only
-    reads ``os.getuid()``, names it in a string, or sets ``getuid`` on some other object pins
-    nothing. Source order stands for run order; where they differ (a loop), the construction
-    that precedes the pin in the source is reported — the safe side.
+    ``docker``. What comes before the pin, or after an undo that no later pin repins, still
+    ran on the host's uid and is reported. So is everything in a function whose only pin sits
+    in a nested helper, or is nested in a ``with``, ``if``, ``try`` or loop: such a pin may
+    never run, or may be undone when its block ends. A function that only reads
+    ``os.getuid()``, names it in a string, or sets ``getuid`` on some other object pins
+    nothing. Known limits, all on the safe side: a construction inside the same
+    ``with monkeypatch.context()`` block as its pin is reported although it is pinned, and
+    a construction inside a loop is judged by its place in the source, not by the order the
+    loop runs it in.
     """
     found: set[str] = set()
     rel = path.relative_to(TESTS_DIR.parent).as_posix()
@@ -495,10 +518,16 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
         strings = {
             n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)
         }
-        pins = [_at(n) for n in _own_body(fn) if _pins_the_uid(n)]
+        pins = [_at(n) for n in _top_level_pins(fn)]
+        undos = [_at(n) for n in _own_body(fn) if _undoes(n)]
 
-        def pinned_before(node: ast.AST, pins: list[tuple[int, int]] = pins) -> bool:
-            return any(pin < _at(node) for pin in pins)
+        def pinned_before(
+            node: ast.AST,
+            pins: list[tuple[int, int]] = pins,
+            undos: list[tuple[int, int]] = undos,
+        ) -> bool:
+            at = _at(node)
+            return any(pin < at and not any(pin < u < at for u in undos) for pin in pins)
 
         for call in (n for n in nodes if isinstance(n, ast.Call)):
             callee = call.func
@@ -639,7 +668,8 @@ def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
     ``os.getuid()`` (or names it in a string) and then builds settings on the default still
     depends on the machine, and the ratchet must still see it (PR #51 review). A pin covers
     only what runs after it in the test's own body: settings built, or the executor set,
-    before the pin, and a pin inside a helper the test never calls, are still reported."""
+    before the pin or after an undo, and a pin inside a helper the test never calls or
+    nested in a block that may not run or may undo it, are still reported (PR #51 review)."""
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     sample = tests_dir / "test_sample.py"
