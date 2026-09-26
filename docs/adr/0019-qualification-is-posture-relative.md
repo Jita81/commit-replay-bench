@@ -173,6 +173,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
    - It copies the tree into a size-capped tmpfs at `/work` (`rw,exec,nosuid,nodev`), and only then runs the command. The copy is `exec` because the tree has always been executable to its own tests.
    - The copy dies with the container.
    - Declared output paths are still bound from the worktree.
+   - A command that reads nothing of the tree (the toolchain version probe, `Command.tree=False`) mounts no tree and copies nothing: it runs in an empty scratch directory, so resolving a posture in a clone never copies the clone (PR #56).
    - The whole tree reaches the tests, whatever its host modes. The container's user owns nothing on the host, so before a container starts the executor adds read (and search, on a directory) for its owner and for others on every path the worker owns. It never adds a write bit, never changes the owner's execute bit (git's mode) and never follows a link. A path it cannot make readable fails the copy (`tree_copy_failed`), and the copy never leaves a path out: GNU tar's "removed before we read it" is fatal, although tar exits 1 for it (PR #56).
    - A repository whose tree is too large to copy can choose `sandbox_tree: readonly`. That is a different posture and is qualified separately.
    - In every posture, belts 4 and 5 read the builder's changes as they stood before the first test ran. A file a test writes is therefore never counted as the builder's.

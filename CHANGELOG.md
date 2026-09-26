@@ -57,6 +57,11 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **The toolchain probe copies nothing** (product.posture.34; CodeRabbit on PR #56). `mine`
+  resolves the posture in the clone, `.git` and all, and the version probe copied that whole
+  tree into the sandbox's tmpfs: a large clone failed the copy and was reported as "cannot
+  read the toolchain version". A command now says whether it reads the tree
+  (`Command.tree`); the probe does not, so the sandbox mounts, copies and walks nothing for it.
 - **Host file modes never hide the tree from the sandbox** (product.posture.32; CI's
   `sandbox-images` job on PR #56). The container's user owns nothing on the host, so a path
   the host's modes kept from others failed the copy (`tree_copy_failed` on Linux — first

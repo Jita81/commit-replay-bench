@@ -220,7 +220,9 @@ class Command:
     ``exec``; the default mounts it ``noexec`` (``nosuid,nodev`` hold either way). A runner
     declares it for its toolchain, never per repository. ``ro_mounts`` are sealed
     dependency sets (ADR-0019) a binding adds; only a docker executor renders them, and it
-    re-validates each one first.
+    re-validates each one first. ``tree=False`` says the command reads nothing of the
+    worktree (a toolchain version probe): a sandbox then mounts no tree, copies nothing and
+    runs in an empty scratch workdir; such a command has no writable paths.
     """
 
     argv: tuple[str, ...]
@@ -235,10 +237,14 @@ class Command:
     #: dependency store constructs a :class:`~crb.core.deps.BundleMount`; a runner copies
     #: them here from the binding it was given (``BaseRunner.run_for(deps=…)``).
     ro_mounts: tuple[BundleMount, ...] = ()
+    #: False: the command reads nothing of the tree — no mount, no copy, no walk.
+    tree: bool = True
 
     def __post_init__(self) -> None:
         if not self.argv:
             raise ValueError("argv must not be empty")
+        if not self.tree and self.writable_paths:
+            raise ValueError("a command that reads no tree has no writable paths")
         object.__setattr__(self, "ro_mounts", tuple(self.ro_mounts))
         object.__setattr__(self, "argv", tuple(str(a) for a in self.argv))
         object.__setattr__(self, "root", Path(self.root).resolve())
@@ -397,6 +403,8 @@ TREE_COPY = "copy"
 TREE_READONLY = "readonly"
 SANDBOX_TREES: tuple[str, ...] = (TREE_COPY, TREE_READONLY)
 
+#: The scratch workdir of a command that reads no tree (``Command.tree=False``).
+_NO_TREE_WORK_SIZE = "16m"
 #: The exit code and stderr marker of a failed tree copy (an environment error).
 TREE_COPY_RC = 97
 TREE_COPY_MARKER = "crb:tree-copy-failed"
@@ -602,7 +610,7 @@ class DockerExecutor:
                 "a command asked for a network in the sandbox: dependencies are provisioned "
                 "per task, never installed in the sandbox (ADR-0019)"
             )
-        copy = s.tree == TREE_COPY and "." not in cmd.writable_paths
+        copy = cmd.tree and s.tree == TREE_COPY and "." not in cmd.writable_paths
         argv: list[str] = [
             self.docker,
             "run",
@@ -623,7 +631,17 @@ class DockerExecutor:
             # the binaries it builds there (Go) declares Command.exec_tmp; nosuid/nodev stay.
             f"/tmp:rw,{'exec' if cmd.exec_tmp else 'noexec'},nosuid,nodev,size={s.tmp_size}",
         ]
-        if copy:
+        if not cmd.tree:
+            # the command reads no tree (a version probe): nothing of the worktree is
+            # mounted, copied or walked; it runs in a small empty scratch dir that dies
+            # with the container
+            uid, _, gid = s.user.partition(":")
+            argv += [
+                "--tmpfs",
+                f"{s.workdir}:rw,noexec,nosuid,nodev,size={_NO_TREE_WORK_SIZE},"
+                f"uid={uid},gid={gid or uid},mode=0700",
+            ]
+        elif copy:
             # the worktree is read-only at /src and the command runs in a throwaway copy of
             # it: a size-capped tmpfs at the workdir that dies with the container. exec, as
             # the tree always was to its own tests (scripts, built binaries); nosuid, nodev.
@@ -837,10 +855,11 @@ class DockerExecutor:
         argv = self.build_argv(cmd)
         # the tree the container reads is the WHOLE worktree whatever its host modes: the
         # sandbox uid owns nothing on the host (see grant_sandbox_read)
-        copy = self.settings.tree == TREE_COPY and "." not in cmd.writable_paths
-        grant_sandbox_read(
-            cmd.root, skip=(*(("node_modules",) if copy else ()), *cmd.writable_paths)
-        )
+        if cmd.tree:
+            copy = self.settings.tree == TREE_COPY and "." not in cmd.writable_paths
+            grant_sandbox_read(
+                cmd.root, skip=(*(("node_modules",) if copy else ()), *cmd.writable_paths)
+            )
         started = time.monotonic()
         # The real daemon always takes the polled path — with or without a cancel token —
         # because it is the one that kills the CONTAINER on the wall clock and confirms

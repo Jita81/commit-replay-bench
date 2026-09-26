@@ -580,6 +580,31 @@ def test_a_bundle_mount_outside_the_store_is_refused(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("tree", ["copy", "readonly"])
+def test_a_command_that_reads_no_tree_mounts_none_copies_none_and_walks_none(
+    tmp_path: Path, tree: str
+) -> None:
+    """``Command(tree=False)`` (a toolchain version probe): the sandbox mounts no worktree,
+    runs no copy script and never walks the tree to make it readable — the probe costs a
+    container, not a copy of the clone (CodeRabbit on PR #56). A writable path makes no
+    sense without a tree and is refused."""
+    root = tmp_path / "clone"
+    (root / ".git").mkdir(parents=True)
+    (root / "private.txt").write_text("x", encoding="utf-8")
+    (root / "private.txt").chmod(0o600)
+    fr = FakeRunner(_ok(), _ok("go version go1.26.8 linux/arm64"))
+    d = DockerExecutor(_settings(tree=tree), runner=fr)
+    cmd = Command(("go", "version"), root, tree=False, timeout=30)
+    argv = d.build_argv(cmd)
+    assert not any(str(root) in a for a in argv), argv
+    assert "/bin/sh" not in argv and argv[-2:] == ["go", "version"]
+    assert "/work:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700" in argv
+    assert d.run(cmd).stdout.startswith("go version")
+    assert stat.S_IMODE(os.lstat(root / "private.txt").st_mode) == 0o600  # never walked
+    with pytest.raises(ValueError, match="writable"):
+        Command(("go", "version"), root, tree=False, writable_paths=("out",))
+
+
+@pytest.mark.parametrize("tree", ["copy", "readonly"])
 def test_docker_run_lets_the_sandbox_uid_read_the_tree_never_write_never_through_a_link(
     tmp_path: Path, tree: str
 ) -> None:

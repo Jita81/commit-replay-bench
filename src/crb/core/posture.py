@@ -147,7 +147,8 @@ def probe_toolchain(
     if not argv:
         return ""
     try:
-        res = executor.run(Command(tuple(argv), root, timeout=timeout))
+        # a version reads nothing of the tree: never a copy (or a walk) of the clone
+        res = executor.run(Command(tuple(argv), root, timeout=timeout, tree=False))
     except OSError as exc:
         raise SandboxUnavailable(f"cannot read the toolchain version ({argv[0]}): {exc}") from exc
     text = (res.stdout or "").strip() or (res.stderr or "").strip()

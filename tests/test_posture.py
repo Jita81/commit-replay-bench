@@ -157,3 +157,16 @@ def test_posture_class_survives_an_image_repin(tmp_path: Path) -> None:
 
 def test_posture_mismatch_is_a_run_stopping_sandbox_error() -> None:
     assert issubclass(PostureMismatch, SandboxUnavailable)
+
+
+def test_the_toolchain_probe_reads_no_tree(tmp_path: Path) -> None:
+    """A version probe reads nothing of the tree it is resolved in (``mine`` resolves the
+    posture in the clone, ``.git`` and all): its command says so (``tree=False``), so a
+    sandbox neither copies nor walks it — never a ``tree_copy_failed`` reported as "cannot
+    read the toolchain version" (CodeRabbit on PR #56)."""
+    ex = _Exec(DOCKER)
+    resolve_posture(
+        ex, _GoLike(RepoConfig(name="g", language=Language.GO)), deps_mode="sealed", root=tmp_path
+    )
+    assert [c.argv for c in ex.cmds] == [("go", "version")]
+    assert ex.cmds[0].tree is False

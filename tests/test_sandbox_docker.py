@@ -400,3 +400,13 @@ def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
     assert _ps(r.container) == ""
+
+
+def test_a_command_that_reads_no_tree_runs_in_an_empty_scratch(trial, executor):
+    """The toolchain probe's shape (``Command(tree=False)``): nothing of the worktree is in
+    the container — no ``/src``, an empty ``/work`` — and the command still runs, so a
+    posture is resolved without copying the clone it is resolved in (CodeRabbit on PR #56)."""
+    r = executor.run(
+        Command(("sh", "-c", "ls -A /work; test ! -e /src && echo no-src"), trial.root, tree=False)
+    )
+    assert r.ok and r.stdout.split() == ["no-src"], r.combined
