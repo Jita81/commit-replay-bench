@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -291,7 +292,7 @@ def worktree_name(session: Session, g: Grade) -> str:
     worktree, and the row was written by that later attempt. It is the ONLY event that
     may answer: when it names no worktree the answer is ``""``, never an older attempt's
     worktree, whose patch is not the one this row graded (PR #53 review)."""
-    payloads = session.scalars(
+    payloads: Iterable[dict[str, Any]] = session.scalars(
         select(Event.payload_json)
         .where(
             Event.trace_id == g.run_id,
