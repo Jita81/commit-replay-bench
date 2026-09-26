@@ -31,9 +31,9 @@ synthesis of 26 September 2026, which ranked the open work on the integration tr
 **The rule.** Nothing enters a wave that is not a gap id the record defines. If something must
 be built that no artefact names, the artefact is wrong: add the criterion and its gap first,
 then plan it. `scripts/dod_check.py` holds this file to the rule: every cell of a table's
-`gaps` column is a list of gap ids and nothing else, and each is a gap an artefact, the
-prevention register or a backlog row defines, or one the order of work has retired (closed or
-merged). A wave that closes a gap never breaks this plan; a typo does. The check reads ids, not
+`gaps` column is a list of gap ids and nothing else, and each is a gap an artefact or the
+prevention register defines, a backlog row a criterion cites, or one the order of work has
+retired (closed or merged). A wave that closes a gap never breaks this plan; a typo does. The check reads ids, not
 meaning, so a reviewer still reads each row against the lines its ids carry.
 
 **How every wave works.** One pull request per stream, merged onto one branch, attacked by

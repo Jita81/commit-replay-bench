@@ -923,11 +923,16 @@ def plan_items(path: Path) -> tuple[list[tuple[int, str]], list[str]]:
 
 
 def validate_plan(items: list[tuple[int, str]], known: set[str]) -> list[str]:
-    """PLAN.md's rule, as a gate: nothing enters a wave that is not a gap id."""
+    """PLAN.md's rule, as a gate: nothing enters a wave that is not a gap id.
+
+    ``known`` is every gap the record defines — an artefact's gap line, a register gap, a
+    backlog row a criterion or a pending row cites (a row nothing cites asks for no work) —
+    plus the ids the order of work has retired."""
     return [
-        f"docs/dod/PLAN.md:{n}: wave item {gid} is not a gap id defined under docs/dod, "
-        "docs/PREVENTION.md or the backlog, nor one the order of work has retired — fix the "
-        "artefact first (add the criterion and its gap), then plan it"
+        f"docs/dod/PLAN.md:{n}: wave item {gid} is not a gap id defined under docs/dod "
+        "(an artefact's gap line, a register gap, or a backlog row a criterion or a pending "
+        "row cites), nor one the order of work has retired — fix the artefact first (add the "
+        "criterion and its gap), then plan it"
         for n, gid in items
         if gid not in known
     ]
@@ -1167,7 +1172,9 @@ def main(argv: list[str] | None = None) -> int:
     for gid, text in pgaps.items():
         if gid in art_gaps and art_gaps[gid] != " ".join(text.split()):
             errors.append(f"docs/PREVENTION.md: gap {gid} is defined differently in an artefact")
-    defined = {g for a in arts for g in a.gaps} | set(pgaps) | set(backlog)
+    # a backlog row is a gap of the record only while a criterion or a pending row cites it
+    cited_rows = {c.gap for a in arts for c in a.criteria} | pending_gaps
+    defined = {g for a in arts for g in a.gaps} | set(pgaps) | (set(backlog) & cited_rows)
     previous = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
     retired = retired_ids(previous, defined)
     items, plan_errors = plan_items(PLAN)

@@ -199,11 +199,12 @@ evidence in the artefact in the same PR; the checker verifies the evidence resol
 
 `PLAN.md` batches the order of work into waves, and the checker holds it to this rule: every
 cell of a wave table's `gaps` column is a list of gap ids and nothing else, and each id is a gap
-an artefact, the register or a backlog row defines — or one the order of work has retired. A
-wave that closes a gap therefore never breaks the plan that named it, while an id that was
-never a gap (a typo, an id no artefact defines) fails the `dod` job. The check reads ids, not
-meaning: a real gap's id written against another gap's change still passes, so a reviewer reads
-each wave row against the lines its ids carry.
+an artefact or the register defines, a backlog row that a criterion or a pending register row
+cites, or one the order of work has retired. A wave that closes a gap therefore never breaks
+the plan that named it, while an id that was never a gap (a typo, an id no artefact defines, a
+backlog row nothing asks for) fails the `dod` job. The check reads ids, not meaning: a real
+gap's id written against another gap's change still passes, so a reviewer reads each wave row
+against the lines its ids carry.
 
 ## 7. A defect is closed only with the artefact that fails if its class recurs
 

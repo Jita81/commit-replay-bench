@@ -21,7 +21,7 @@ nothing; the register acts only under an operator's switch." (`help.ts` About co
 `/learn`; the header purpose says the same and the eyebrow reads `Instrument · Learn`.)
 
 **Entry → exit.** Arrive by the Instrument nav entry `Learn` (operator role only,
-`Layout.tsx:121`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
+the `INSTRUMENT` list in `Layout.tsx`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
 that class's details open. Pick a repository and leave with the prevention register — every
 bug class with its lever and level, before → after with n and the bar, its status and what
 happens next (an operator can throw the switch, revert a change or register a filed item from

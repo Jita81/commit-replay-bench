@@ -159,14 +159,14 @@ REGISTER = """# Prevention register
 """
 
 
-#: A minimal plan: one wave whose items are a register gap and a backlog row.
+#: A minimal plan: one wave whose item is a register gap.
 PLAN = """# The plan
 
 ## Wave 1 — the first wave
 
 | stream | gaps | what ships |
 |---|---|---|
-| A · one | G-701, F23 | the thing |
+| A · one | G-701 | the thing |
 """
 
 #: The fixture page's one gap line; ``_write_all`` keeps it only while a criterion cites it,
@@ -802,29 +802,43 @@ def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     """docs/PREVENTION.md P-051: nothing checked that PLAN.md's wave items were gaps at all, so
     the plan and the order of work drifted apart unseen. Every item in a
     wave table's ``gaps`` column must be a gap id the record defines: an artefact's gap, a
-    register gap or a backlog row. A gap the wave CLOSES stays a valid item — the generator
+    register gap, or a backlog row that a criterion or a pending row cites. A gap the wave CLOSES stays a valid item — the generator
     carries each id that leaves the order of work into GAP-ANALYSIS.md's retired list — while
     an id that was never a gap fails."""
     mod, root = tree
     plan = root / "docs/dod/PLAN.md"
     _write_all(root, ng_state="unmet", ng_gap="G-001")
-    plan.write_text(PLAN.replace("G-701, F23", "G-001, G-701, F23"), encoding="utf-8")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    capsys.readouterr()
+    # a backlog row is a gap only while a criterion cites it: F23 is a row, but nothing
+    # here asks for it (the old plan's "B-9", a backlog id no criterion cited, was this case)
+    plan.write_text(PLAN.replace("G-701", "G-001, F23"), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "PLAN.md:7: wave item F23 is not a gap id defined under docs/dod" in (
+        capsys.readouterr().out
+    )
+    _write_all(root, ng_state="unmet", ng_gap="F23")
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    capsys.readouterr()
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
     assert mod.main([]) == 0 and mod.main(["--check"]) == 0
     capsys.readouterr()
     # an id that was never a gap: a typo
-    plan.write_text(PLAN.replace("G-701, F23", "G-001, G-010"), encoding="utf-8")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-010"), encoding="utf-8")
     assert mod.main(["--check"]) == 1
     assert "PLAN.md:7: wave item G-010 is not a gap id defined under docs/dod" in (
         capsys.readouterr().out
     )
     # a wave item is gap ids and nothing else
-    plan.write_text(PLAN.replace("G-701, F23", "G-001 (and the rest)"), encoding="utf-8")
+    plan.write_text(PLAN.replace("G-701", "G-001 (and the rest)"), encoding="utf-8")
     assert mod.main(["--check"]) == 1
     assert "PLAN.md:7: a wave item is a gap id, not 'G-001 (and the rest)'" in (
         capsys.readouterr().out
     )
     # the wave closes G-001: the criterion is met, its line goes, the plan still names it
-    plan.write_text(PLAN.replace("G-701, F23", "G-001, G-701, F23"), encoding="utf-8")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701, F23"), encoding="utf-8")
     _write_all(root)
     assert mod.main([]) == 0
     out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
@@ -833,7 +847,7 @@ def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     assert mod.main([]) == 0 and mod.main(["--check"]) == 0  # the retired list is stable
     capsys.readouterr()
     # ... and a typo beside it still fails
-    plan.write_text(PLAN.replace("G-701, F23", "G-001, G-011"), encoding="utf-8")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-011"), encoding="utf-8")
     assert mod.main(["--check"]) == 1
     assert "wave item G-011 is not a gap id" in capsys.readouterr().out
     # a plan with no wave table names nothing, and a missing plan is a defect
