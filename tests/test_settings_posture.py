@@ -237,8 +237,7 @@ class TestDeploymentDefaults:
                 "CRB_HOME": str(tmp_path / "h"),
                 "CRB_ENV": "prod",
                 "CRB_BUILDER__EXECUTOR": "",
-                # a non-root builder user, as every test names one (DL-053's uid ratchet)
-                "CRB_BUILDER__USER": "65534:65534",
+                "CRB_BUILDER__USER": "10001:10001",  # never the host's uid (#51's ratchet)
             },
         )
         assert resolved.builder_executor == "docker"
@@ -396,18 +395,15 @@ class TestHelmOneBuilderPosture:
         api, worker = _rendered_env(docs, "api"), _rendered_env(docs, "worker")
         assert api.get("CRB_BUILDER__EXECUTOR") == worker.get("CRB_BUILDER__EXECUTOR")
         # and resolved the way each process resolves it
-        # a non-root builder user, as every test names one (DL-053's uid ratchet)
-        worker_env = {
-            **worker,
-            "CRB_HOME": str(tmp_path / "w"),
-            "CRB_BUILDER__USER": "65534:65534",
-        }
+        # never the host's uid (#51's ratchet): both processes name a non-root builder user
+        worker_env = {**worker, "CRB_HOME": str(tmp_path / "w"), "CRB_BUILDER__USER": "10001:10001"}
         resolved_worker = worker_main.settings_from_args(
             worker_main.build_parser().parse_args(["--once"]), worker_env
         ).builder_executor
         for k, v in api.items():
             if k.startswith("CRB_") and k != "CRB_HOME":
                 monkeypatch.setenv(k, v)
+        monkeypatch.setenv("CRB_BUILDER__USER", "10001:10001")
         posture = Settings(home=Path("/srv/crb"), secret_key=KEY).posture()
         assert posture["builder_executor"] == resolved_worker
         if sets:
