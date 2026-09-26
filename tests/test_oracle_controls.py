@@ -20,7 +20,9 @@ What it does: Pins, per control on the fixture's ``fix`` task: gold goes green w
               without a RED oracle skips every control, a bad gold is a VIOLATION that fails the
               gate, harness errors are violations never passes, deterministic poison-target
               selection, the tamper guard re-hashes the oracle, JVM / Rust refused honestly, and
-              every transform as a pure function.
+              every transform as a pure function; and that no control worktree's name carries a
+              fragment of the task's sha, each mapped on an event instead (assessment
+              2026-09-25 B1).
 How:          ``fixtures.oracle_repo`` (module-scoped) → ``make_task`` through the real miner →
               ``controls_for_task`` with a real ``PytestRunner`` + ``LocalExecutor``; no docker,
               no network, no model.
@@ -53,6 +55,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import Language, RepoConfig
 from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace
+from fixtures.leakage import leaks
 from fixtures.oracle_repo import (
     build_controls_repo,
     fixture_config,
@@ -599,3 +602,33 @@ def test_caught_and_escape_notes_name_the_belt_and_the_meaning(control_matrix):
     assert nc._caught_note(nc.OBS_RED, guard, dq).startswith("caught by belt 2")
     assert nc.CONTROLS_VERSION == "controls.v2"
     assert nc.TRANSFORM_LANGUAGES == (Language.PYTHON, Language.GO, Language.JAVASCRIPT)
+
+
+# --- B1 (assessment 2026-09-25): control worktrees are named by an opaque token -------------
+
+
+def test_control_worktrees_name_no_fragment_of_the_task_sha(
+    fixture_repo, fix_task, harness, scratch, monkeypatch
+):
+    made: list[Path] = []
+    real = Workspace.create.__func__
+
+    def spy(cls, repo, sha, dest, **kw):
+        made.append(Path(dest))
+        return real(cls, repo, sha, dest, **kw)
+
+    monkeypatch.setattr(Workspace, "create", classmethod(spy))
+    events: list[tuple[str, dict]] = []
+    nc.controls_for_task(
+        fixture_repo.git,
+        fix_task,
+        scratch=scratch,
+        controls=("noop", "gold"),
+        on_event=lambda a, p: events.append((a, dict(p))),
+        **harness,
+    )
+    assert len(made) == 3  # the RED check + one per control
+    mapped = {p.get("worktree") for _, p in events if p.get("task") == fix_task.task_id}
+    for dest in made:
+        assert leaks(fix_task.task_id, str(dest)) == [], f"control worktree {dest}"
+        assert dest.name in mapped, f"{dest.name} is not mapped to the task on any event"

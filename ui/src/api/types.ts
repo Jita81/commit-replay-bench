@@ -149,10 +149,34 @@ export interface WorkerProbeData {
   unconfirmed_containers?: number
 }
 
+/**
+ * Where tests and the builder run, as the API reads the deployment's environment (ADR-0023):
+ * production refuses an unsealed posture unless `CRB_ALLOW_UNSEALED_PROD=1`, and then says so.
+ */
+export interface DeploymentPosture {
+  env: 'dev' | 'prod'
+  /** `docker` (sealed) or `local`. */
+  sandbox_executor: string
+  /** `docker` (sealed) or `host`. */
+  builder_executor: string
+  sealed: boolean
+  /** Production running unsealed under `CRB_ALLOW_UNSEALED_PROD=1`; every run's apparatus carries it. */
+  unsealed_prod_override: boolean
+  /**
+   * The factory's own posture: a factory build hands the builder a host worktree, never a
+   * container. `refused` in prod without the override (the worker refuses the run); `host`
+   * otherwise (in prod every factory run's apparatus then carries the override). Absent on an
+   * older server.
+   */
+  factory_builds?: 'refused' | 'host'
+}
+
 /** `GET /health` — overall status is the worst probe. */
 export interface Health {
   status: ProbeStatus
   probes: Probe[]
+  /** The deployment's posture (ADR-0023). Absent on an older server. */
+  posture?: DeploymentPosture
 }
 
 /** `GET /version` — the package, the apparatus (the instrument's version, ADR-0001) and the routing policy. */

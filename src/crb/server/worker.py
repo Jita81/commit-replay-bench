@@ -187,6 +187,7 @@ from crb.builders.adapter import (
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
+from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
@@ -227,7 +228,7 @@ from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION, __version__
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 from crb.factory.author import author_from_label
 from crb.factory.backlog import BacklogItem
 from crb.factory.delivery import (
@@ -255,7 +256,12 @@ from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_ha
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
-from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
+from crb.server.settings import (
+    ALLOW_UNSEALED_PROD_ENV,
+    FactorySettings,
+    GitHubAppSettings,
+    IntakeSettings,
+)
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -473,6 +479,19 @@ class WorkerSettings:
     #: pass that starts without one stops with ``no_public_url`` rather than writing a
     #: relative path a reader on the tracker's site cannot open.
     public_url: str = ""
+    #: The builder's executor as the entrypoint resolved it for ``CRB_ENV`` (``docker`` in
+    #: prod, ADR-0023); ``""`` = read ``CRB_BUILDER__EXECUTOR`` as it stands (unset = host).
+    builder_executor: str = ""
+    #: ADR-0023: in prod without ``CRB_ALLOW_UNSEALED_PROD`` a run may not ask for the local
+    #: executor in its own parameters (the entrypoint already refused it as the default).
+    refuse_unsealed: bool = False
+    #: ADR-0023: a prod worker running unsealed under the override — stamped into every
+    #: run's apparatus and every pack; empty when sealed or in dev.
+    unsealed_override: Mapping[str, Any] = field(default_factory=dict)
+    #: ``CRB_ENV`` as the entrypoint read it. A factory build is never sealed (its builder is
+    #: handed a host worktree), so in ``prod`` a factory run is refused unless the override is
+    #: set, and one run under it is stamped (ADR-0023, ``_run_factory``).
+    env: str = "dev"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -1430,6 +1449,11 @@ class Worker:
         if ctx._executor is not None:
             return ctx._executor
         kind = str(ctx.params.get("executor") or self.settings.executor or "local")
+        if kind != "docker" and self.settings.refuse_unsealed:
+            raise SandboxUnavailable(
+                f"production refuses the {kind} executor (ADR-0023): this run asks for it; use "
+                f"docker, or start the worker with {ALLOW_UNSEALED_PROD_ENV}=1"
+            )
         docker: DockerSettings | None = None
         if kind == "docker":
             docker = docker_settings_for(ctx.config, self.settings.docker, ctx.params)
@@ -1451,9 +1475,33 @@ class Worker:
             "runner": self._runner(ctx).name,
             "executor": self._executor(ctx).describe(),
             "worker": self.worker_id,
+            **self._override_stamp(),
             **extra,
         }
         self.queue.set_apparatus(ctx.run.id, apparatus, worker_id=self.worker_id)
+
+    def _factory_override_stamp(self) -> dict[str, Any]:
+        """ADR-0023: a factory run's builder works on a host worktree, never in a container, so
+        in ``prod`` (where only the override lets it run) its apparatus always says so — even
+        on a worker whose replay posture is sealed and stamps nothing else."""
+        if self.settings.env != "prod":
+            return {}
+        stamp = {
+            "env": "prod",
+            "sandbox_executor": self.settings.executor,
+            **dict(self.settings.unsealed_override),
+            "builder_executor": "host",
+            "run_kind": "factory",
+            "override": ALLOW_UNSEALED_PROD_ENV,
+            "adr": "0023",
+        }
+        return {"unsealed_prod_override": stamp}
+
+    def _override_stamp(self) -> dict[str, Any]:
+        """ADR-0023: a prod worker running unsealed under the override says so on every
+        apparatus it writes (and so in every pack); nothing when sealed or in dev."""
+        o = dict(self.settings.unsealed_override)
+        return {"unsealed_prod_override": o} if o else {}
 
     def _progress(self, ctx: RunContext, done: int, total: int) -> None:
         self.queue.progress(ctx.run.id, done, total, ctx.counts, worker_id=self.worker_id)
@@ -1848,6 +1896,7 @@ class Worker:
             ),
             extra={
                 "worker": self.worker_id,
+                **self._override_stamp(),
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
                 **(
@@ -1882,7 +1931,12 @@ class Worker:
                 else None
             ),
             builder_overrides=dict(p.get("builder_config") or {}),
-            container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
+            # CRB_BUILDER__EXECUTOR=docker (ADR-0012), defaulted per env (ADR-0023)
+            container=container_settings_from_env(
+                {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
+                if self.settings.builder_executor
+                else None
+            ),
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
         )
@@ -1957,7 +2011,6 @@ class Worker:
             _LOG.exception("ledger health metric failed")
 
     def _run_oracle(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
-        run = ctx.run
         tasks = self._select_tasks(ctx)
         max_mutants = int(ctx.params.get("max_mutants") or DEFAULT_MAX_MUTANTS)
         runner = self._runner(ctx)
@@ -1973,7 +2026,9 @@ class Worker:
                 cancelled = True
                 break
             ctx.task_id = task.task_id
-            dest = self.scratch_dir / f"oracle-{ctx.config.name}-{task.short_id}-{run.id[:8]}"
+            # opaque, never the commit's name (B1); the event maps it back to the task
+            dest = opaque_dest(self.scratch_dir, "oracle", avoid=(task.task_id,))
+            ctx.emit("oracle", "oracle.worktree", task_id=task.task_id, worktree=dest.name)
             with Workspace.create(ctx.git, task.task_id, dest, config=ctx.config) as ws:
                 ws.overlay_tests(task.test_files)
                 ws.overlay_sources(task.src_files)  # the GOLD state: target GREEN
@@ -2054,6 +2109,15 @@ class Worker:
         refused when it is a rung on this run's own ladder."""
         run = ctx.run
         p = ctx.params
+        if self.settings.refuse_unsealed:
+            # ADR-0023: the factory hands its builder a host worktree and no container, so a
+            # sealed production posture cannot admit it — refused before anything is spent
+            raise SandboxUnavailable(
+                "production refuses a factory run (ADR-0023): factory builds run the builder "
+                "on the host and are not sealed yet; start the worker with "
+                f"{ALLOW_UNSEALED_PROD_ENV}=1 to run them on purpose (every factory run's "
+                "apparatus then carries the override)"
+            )
         home = FactoryHome(self.home, run.repo)
         backlog = home.load_backlog()
         if backlog is None or not backlog.frozen:
@@ -2121,6 +2185,7 @@ class Worker:
             # F39 — the base every RED proof and build of this run starts from (the
             # default branch as fetched, or the clone's head when nothing was fetched)
             base_sha=ctx.git.rev_parse("HEAD"),
+            **self._factory_override_stamp(),
         )
         # delivery through the GitHub App: the linked installation's token pushes the branch
         # and opens the pull request against the repository's default branch (ADR-0014);

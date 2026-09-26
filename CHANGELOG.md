@@ -8,6 +8,10 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the builder is not told where the answer is, and production runs sealed
+
+Assessment items B1 and B2, each reproduced against `main` with a failing test first. Worktrees are named by a random token instead of the held-out commit's sha, so `pwd`, the `.git` pointer and the prompt no longer give the builder the answer key's address; a source ratchet stops the pattern returning (DL-055). Each evidence pack names the worktree its row graded, so a reclaimed run's two attempts at one trial each serve their own patch. Production refuses the host builder and the local test executor unless `CRB_ALLOW_UNSEALED_PROD=1`; the builder defaults to docker in prod, compose and Helm hand the API and the worker one builder value, and the override shows on `/health`, the Posture page and every run's apparatus (ADR-0023, DL-056). Factory builds run on the host and are not sealed yet, so production refuses a factory run unless the override is set, and stamps one run under it. No apparatus bump.
+
 ### 2026-09-25 — signing out ends the session; a clone lives where the worker clones; the sign-in CLI sees only what it needs
 
 The external assessment of 2026-09-25 named three security gaps (D2, D3, D4). Each was

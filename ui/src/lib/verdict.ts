@@ -285,6 +285,8 @@ export const ACTION_HELP: Record<string, string> = {
   'oracle.mutation.unscoreable': 'No fault could be planted on this task, so it carries no strength.',
   'oracle.mutation.error': 'Mutation scoring failed for this task.',
   'oracle.score': 'The task’s oracle strength was recorded: mutants killed over mutants planted.',
+  'oracle.worktree': 'A scoring worktree was prepared for this task under an opaque name that says nothing about the commit.',
+  'controls.red_check': 'The task’s tests were checked to fail before the change, in a worktree with an opaque name.',
   'controls.control': 'One negative control (a deliberate cheat) was constructed.',
   'controls.row': 'A control was graded; a cheat that grades clean is an escape.',
   'controls.skip': 'A control could not be constructed for this task; it is counted as not constructible.',

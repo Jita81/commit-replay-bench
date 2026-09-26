@@ -53,17 +53,26 @@ Known residual: a file whose checkout differs from its blob (``eol=crlf`` /
 ``filter=lfs`` attributes) reads as touched — fail-closed, and the same rule
 belt 1a's raw hash compare already applies to the oracle files.
 
+**A worktree is named by an opaque token, never by its commit** (assessment 2026-09-25 B1).
+The task's sha is the answer key's address: on the host posture ``git worktree add`` shares
+the object store, so a builder that reads its own directory name (``pwd``, ``basename``, the
+``.git`` pointer, a test command in its prompt) could ``git show`` the future commit.
+:func:`opaque_dest` draws a fresh random name per worktree; the caller records the mapping
+from that name to the task on the run's events, never in the path. ``tests/test_run.py``
+fails any worktree destination built from a commit sha.
+
 Navigation
 ----------
 What it is:   The trial worktree — ``Workspace``, the disposable checkout of a commit's parent
               that the builder edits and the grader reads, plus the ground-truth views the
               belts need (touched files, byte-identical tests, diff stats, git integrity).
-What it does: Creates and removes a worktree from the main clone; overlays the commit's test
-              or source files; enumerates what the builder changed from the filesystem
-              against the parent tree so nothing the builder does to git's own views
-              (index bits, a moved HEAD, an exclude rule) can hide a file; proves the target
-              tests are byte-identical to the commit's; reports every git-view violation as
-              tamper evidence rather than a verdict.
+What it does: Names a worktree by an opaque per-worktree token (``opaque_dest``, never any
+              fragment of the commit's sha); creates and removes a worktree from the main
+              clone; overlays the commit's test or source files; enumerates what the builder
+              changed from the filesystem against the parent tree so nothing the builder does
+              to git's own views (index bits, a moved HEAD, an exclude rule) can hide a file;
+              proves the target tests are byte-identical to the commit's; reports every
+              git-view violation as tamper evidence rather than a verdict.
 How:          ``create`` → ``git worktree add`` at the parent + per-language fixups recorded
               in ``harness_files`` → the builder edits → ``enforce_integrity`` (HEAD, gitdir,
               index bits, ``info/exclude``) → ``touched_files`` walks the tree hashing every
@@ -78,7 +87,7 @@ Works with:   src/crb/core/grade.py (the belts that read every view here), src/c
               (RepoConfig: language fixups and ``post_create`` hooks),
               src/crb/builders/base.py (the builder is confined to ``root``)
 Tested by:    tests/test_workspace.py, tests/test_grade.py, tests/test_mine.py,
-              tests/test_test_infra.py
+              tests/test_test_infra.py, tests/test_run.py (``opaque_dest`` and the ratchet)
 Touch when:   onboarding a repository whose worktree needs a fixup before its tests run — add
               a ``post_create`` hook in the repo config (``write_if_missing`` / ``symlink``,
               docs/OPERATOR.md#2-configure-a-repository) rather than code here; a new way for a
@@ -92,6 +101,8 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import re
+import secrets
 import shutil
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
@@ -101,6 +112,32 @@ from typing import Any
 
 from crb.core.git import GitError, GitRepo
 from crb.core.spec import Language, RepoConfig
+
+#: Random bytes in a worktree's opaque name (``secrets.token_hex`` → twice as many hex digits).
+OPAQUE_TOKEN_BYTES = 6
+#: The shortest fragment of a sha a worktree name may never contain: git's default
+#: abbreviation, the prefix ``git show`` resolves in practice.
+SHA_FRAGMENT = 7
+_KIND = re.compile(r"[a-z]+")
+
+
+def opaque_dest(scratch: Path | str, kind: str, *, avoid: Iterable[str] = ()) -> Path:
+    """A fresh worktree destination ``<scratch>/<kind>-<token>`` that tells a builder nothing.
+
+    The token is random per call — never derived from a task, a run or a commit — and is
+    redrawn in the vanishing case that it contains a :data:`SHA_FRAGMENT`-character substring
+    of any ``avoid`` string (pass the task's sha), so the name can never be a usable
+    abbreviation of it. ``kind`` (``run``, ``mine``, ``ctrl``, ``oracle``) is lower-case
+    letters only. The caller records the name against its task on the run's events.
+    """
+    if not _KIND.fullmatch(kind):
+        raise ValueError(f"worktree kind must be lower-case letters, got {kind!r}")
+    keep_out = [a.lower() for a in avoid if a]
+    while True:
+        token = secrets.token_hex(OPAQUE_TOKEN_BYTES)
+        pieces = {token[i : i + SHA_FRAGMENT] for i in range(len(token) - SHA_FRAGMENT + 1)}
+        if not any(piece in a for piece in pieces for a in keep_out):
+            return Path(scratch) / f"{kind}-{token}"
 
 
 def sha256_bytes(data: bytes) -> str:

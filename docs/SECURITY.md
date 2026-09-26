@@ -151,14 +151,15 @@ TCP, or any service listening on all host interfaces, would be reachable from th
 allowlist is exact-host, so a compromised builder can still talk to the model endpoint —
 that is the intended channel, and spend is bounded by the budget.
 
-**Residual risk (host mode, `CRB_BUILDER__EXECUTOR=host`, the default for development and
-evaluation):** the builder runs in a host worktree that shares the main clone's object
+**Residual risk (host mode, `CRB_BUILDER__EXECUTOR=host`, the default for development
+only — `CRB_ENV=dev`):** the builder runs in a host worktree that shares the main clone's object
 store (the gold commit is reachable, and only the guards stand in the way) with the
 worker's privileges and egress. Run the worker as a dedicated low-privilege user on a
 dedicated node with an egress policy allowing only the model endpoint (Helm ships a
 default-deny `NetworkPolicy`); do not onboard repositories you would not run locally; and
-use container mode for any measurement that will be relied on. The API logs a warning
-when `CRB_ENV=prod` and the builder executor is `host`.
+use container mode for any measurement that will be relied on. With `CRB_ENV=prod` the
+API and the worker refuse to start in host mode unless `CRB_ALLOW_UNSEALED_PROD=1`, and a run
+made under that override carries it in its apparatus (§5, ADR-0023).
 
 ### 3.3 Credentials
 
@@ -498,8 +499,35 @@ subject to a retention window.
 - Container mode for the builder (3.2.1) is proven with a scripted builder and a mock
   endpoint plus a zero-spend TLS probe to the real endpoint; a full `claude -p` build
   through the sidecar with a live credential has not yet been run in CI (it needs a
-  credential and spend). Host mode remains the default until an operator sets
-  `CRB_BUILDER__EXECUTOR=docker`. [gap — measured on the fake-model path only]
+  credential and spend). [gap — measured on the fake-model path only]
+- **Production refuses the unsealed posture** (ADR-0023). With `CRB_ENV=prod` the builder
+  defaults to its sealed container (`CRB_BUILDER__EXECUTOR=docker`), and the API and the
+  worker both refuse to start with `CRB_BUILDER__EXECUTOR=host` or
+  `CRB_SANDBOX__EXECUTOR=local` unless `CRB_ALLOW_UNSEALED_PROD=1` is set. That override is
+  the operator's statement that what the deployment measures is a development reading: it is
+  shown on `/health`, `/settings` and the Posture page, and stamped into every run's
+  apparatus and every evidence pack as `unsealed_prod_override`, so a row produced under it
+  can always be told apart. `CRB_ENV=dev` keeps the host defaults. The refusal proves a
+  setting, not a measurement: no row has yet been produced on the sealed posture (below).
+  [measured — `tests/test_settings_posture.py` and `tests/test_worker.py` pin the refusal,
+  the override and the stamp; apparatus 2.2]
+- **Factory builds are not sealed** (ADR-0023 §5). The builder executor setting governs
+  replay builds; a factory run hands its builder a host worktree and no container. A `prod`
+  worker therefore refuses every factory run unless `CRB_ALLOW_UNSEALED_PROD=1`, and with it
+  stamps the run's apparatus (`run_kind: factory`); `/health` reports this as
+  `posture.factory_builds`. [measured — `tests/test_worker.py`,
+  `tests/test_settings_posture.py::TestFactoryBuilds`] Sealing factory builds is not done.
+  [gap — factory builds run on the host]
+- **One builder posture for both processes.** Compose and Helm hand the API (which serves
+  `/health`) and the worker (which runs the builds) the same `CRB_BUILDER__EXECUTOR`.
+  [measured — `tests/test_settings_posture.py::TestHelmOneBuilderPosture` renders the chart]
+- **Worktree names carry nothing of the commit** (DL-055). Trial, mining, control and oracle
+  worktrees are named by a random token, and the mapping to the task is on the run's events,
+  so `pwd`, `basename`, the `.git` pointer and the prompt no longer hand the builder a prefix
+  of the held-out sha. On the host posture the builder can still read anything the worker
+  user can read, including the main clone's history, which is why production refuses it.
+  [measured — `tests/test_run.py`, `tests/test_builders_guard_corpus.py` scan with the
+  fixture's real sha; apparatus 2.2]
 - Reference sandbox images ship and are proven in CI (3.1) **[measured — 10 tests × 3 images,
   `tests/test_sandbox_images_docker.py` as the `sandbox-images` job's smoke step: 44 passed /
   0 skipped on PR #44 run 35678358686, head 4a64fe3; 47 / 0 locally on images built from the
