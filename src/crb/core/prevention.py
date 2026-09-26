@@ -2783,8 +2783,8 @@ def build_register(
             else:
                 why_not = (
                     f"{len(cur_k)} of {ACTIONABLE_MIN_K} occurrences on {cur_tasks} of "
-                    f"{ACTIONABLE_MIN_TASKS} tasks in {len(cur)} of {ACTIONABLE_MIN_N} comparable "
-                    f"{stratum_mode} first attempts"
+                    f"{ACTIONABLE_MIN_TASKS} tasks in {len(cur)} comparable {stratum_mode} "
+                    f"first attempts (at least {ACTIONABLE_MIN_N} needed)"
                 )
 
         change = targeting[-1] if targeting else None

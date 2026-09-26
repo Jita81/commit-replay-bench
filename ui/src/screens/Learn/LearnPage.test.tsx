@@ -37,6 +37,24 @@ const REFUSALS: RefusalReport = { repo: 'alpha', rows_total: 0, rows_protocol: 0
 const STRENGTHEN: StrengthenReport = { repo: 'alpha', threshold: 0.8, cells_flagged: [], cells_without_scores: [], items: [], note: 'nothing held' }
 const REMEASURE: RemeasurePlan = { repo: 'alpha', current_apparatus: '2.2', min_n: 10, rows_total: 0, rows_stale: 0, cells: [], up_to_date: [], summary: { cells_stale: 0, n_needed_total: 0, est_cost_usd_total: 0, est_minutes_total: 0, cost_known_cells: 0 }, note: 'nothing stale' }
 
+describe('the register fixture', () => {
+  it('gives every entry its own counts, never those of another entry (CodeRabbit, PR #57)', () => {
+    const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
+    for (const e of REGISTER.entries) {
+      expect(sum(e.by_mode)).toBe(e.occurrences)
+      expect(sum(e.by_apparatus)).toBe(e.occurrences)
+      expect(e.refs_total).toBe(e.occurrences)
+      expect(e.refs.length).toBeLessThanOrEqual(e.refs_total)
+      expect(e.stratum.k).toBe(e.first_attempts)
+      expect(e.tasks).toBeLessThanOrEqual(e.occurrences)
+      // "41 of 10 comparable" contradicts itself: n is never read as a share of the minimum
+      for (const m of `${e.why_not} ${e.next}`.matchAll(/(\d+) of (\d+) comparable/g)) {
+        expect(Number(m[1])).toBeLessThanOrEqual(Number(m[2]))
+      }
+    }
+  })
+})
+
 describe('LearnPage', () => {
   afterEach(() => vi.unstubAllGlobals())
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -181,3 +182,41 @@ def test_keeping_a_patch_never_raises_into_the_grade(tmp_path: Path) -> None:
 @pytest.mark.parametrize("pack", [None, {}, {"notes": {}}, {"notes": {"patch": "x"}}])
 def test_a_pack_without_a_patch_note_reads_as_empty(pack: dict[str, object] | None) -> None:
     assert kept_patch_note(pack) == {}
+
+
+def test_two_writers_of_the_same_patch_never_collide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker grades trials on threads of one process. Two threads keeping the same
+    bytes at once both wrote ``.<sha>.diff.<pid>.tmp``; the second rename then found the
+    file gone (``FileNotFoundError``) and that attempt's patch was lost (CodeRabbit, PR #57).
+    Each writer has its own temporary file."""
+    import os
+    import threading
+
+    store = PatchStore(tmp_path / "patches")
+    both_written = threading.Barrier(2, timeout=10)
+    real_replace = os.replace
+
+    def after_both_wrote(src: Any, dst: Any) -> None:
+        both_written.wait()  # each writer has written its temporary file; now both rename
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", after_both_wrote)
+    shas: list[str] = []
+    errors: list[BaseException] = []
+
+    def keep() -> None:
+        try:
+            shas.append(store.put_bytes(b"diff --git a/x b/x\n"))
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=keep) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+    assert errors == [] and len(shas) == 2 and len(set(shas)) == 1
+    assert store.path_for(shas[0]).read_bytes() == b"diff --git a/x b/x\n"
+    assert [p.name for p in store.path_for(shas[0]).parent.iterdir()] == [f"{shas[0]}.diff"]

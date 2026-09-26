@@ -211,6 +211,10 @@ def test_below_two_occurrences_on_two_tasks_the_class_is_watch() -> None:
     assert e is not None and not e.actionable
     assert (e.status, e.qualifiers) == ("open", ("watch",))
     assert "2 of 2 occurrences on 1 of 2 tasks" in e.next
+    # the stratum has 14 attempts against a minimum of 10: never "14 of 10" (CodeRabbit,
+    # PR #57 — the Learn fixture copied that sentence and read as a contradiction)
+    assert "in 14 comparable blind first attempts (at least 10 needed)" in e.next
+    assert "14 of 10" not in e.next
     assert loop.tick(40) == []
     # below the stratum's ten first attempts it is watch too
     few = Loop([attempt(i=i, task_id=task(i), kind="protocol") for i in range(3)])

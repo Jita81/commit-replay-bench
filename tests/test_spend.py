@@ -268,3 +268,15 @@ def test_observation_from_row_follows_the_failure_rule() -> None:
         GradeRow(clean=False, error="model_error: usage limit reached", **base)  # type: ignore[arg-type]
     )
     assert harness.valid is False and outage.valid is False
+
+
+@pytest.mark.parametrize("cap", ["wall_clock_s", "max_turns", "max_tool_calls"])
+@pytest.mark.parametrize("value", [0, -5])
+def test_a_floor_that_is_not_positive_is_refused_by_name(cap: str, value: int) -> None:
+    """``calibrate`` is public (``scripts/spend_from_export.py`` passes its own floors): a
+    zero ``max_turns`` floor divided by zero, and any zero cap clamped every calibrated cap
+    to 0 through ``floor × ceiling`` (CodeRabbit, PR #57). The cause is named at entry."""
+    floor = {**FLOOR, cap: value}
+    rows = [obs(latency_s=100.0 + i, turns=10 + i) for i in range(12)]
+    with pytest.raises(ValueError, match=f"floor {cap}={value}"):
+        cal(rows, floor=floor)

@@ -460,10 +460,18 @@ def check_review_anchor(
 # The mergeable answer must agree with the statement (the 2026-09-25 flag defect)
 # ---------------------------------------------------------------------------
 
+#: The words that may stand between a negation and ``mergeable`` and keep it one ("not
+#: YET mergeable", "never BE mergeable", "isn't QUITE mergeable"). Any other word breaks
+#: it: "not ONLY mergeable" and "never seen MORE mergeable" affirm (CodeRabbit, PR #57).
+_NEGATION_KEEPS = (
+    "be|been|yet|really|quite|currently|entirely|fully|safely|cleanly|directly|"
+    "immediately|obviously|necessarily|straightforwardly"
+)
 #: A statement that says the change is NOT mergeable ("NOT mergeable as-is", "never
 #: mergeable", "wouldn't be mergeable", "unmergeable"). Checked first: a negation wins.
 _NOT_MERGEABLE = re.compile(
-    r"(?:\bnot|\bnever|n['\u2019]t)\s+(?:\w+\s+){0,2}?mergeable\b|\b(?:un|non-?)mergeable\b",
+    rf"(?:\bnot|\bnever|n['\u2019]t)\s+(?:(?:{_NEGATION_KEEPS})\s+){{0,2}}mergeable\b"
+    r"|\b(?:un|non-?)mergeable\b",
     re.IGNORECASE,
 )
 #: A sentence that asserts the change IS mergeable: one that opens with the word

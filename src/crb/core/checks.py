@@ -177,6 +177,33 @@ class CheckCommand:
         )
 
 
+def _str_list(value: Any, what: str, *, non_empty: bool) -> None:
+    """``value`` is a list (or tuple) of strings — never one string, which iterates as its
+    characters."""
+    if isinstance(value, str) or not isinstance(value, (list, tuple)):
+        raise ValueError(f"checks.formatter.{what} must be a list of strings, not {value!r}")
+    if non_empty and not value:
+        raise ValueError(f"checks.formatter.{what} must not be empty")
+    if not all(isinstance(v, str) and v for v in value):
+        raise ValueError(f"checks.formatter.{what} must hold non-empty strings, got {value!r}")
+
+
+def _validate_formatter(fmt: Mapping[str, Any]) -> None:
+    """The whole ``checks.formatter`` block, whatever ``disabled`` says: an unknown key and
+    every present field's type are checked; ``command`` is required only when the declared
+    formatter is on."""
+    unknown = set(fmt) - {"command", "exts", "name", "disabled"}
+    if unknown:
+        raise ValueError(f"checks.formatter: unknown key(s) {sorted(unknown)}")
+    disabled = _bool(fmt.get("disabled", False), "formatter.disabled")
+    if "command" in fmt or not disabled:
+        _str_list(fmt.get("command"), "command", non_empty=True)
+    if "exts" in fmt:
+        _str_list(fmt["exts"], "exts", non_empty=False)
+    if "name" in fmt and not isinstance(fmt["name"], str):
+        raise ValueError(f"checks.formatter.name must be a string, got {fmt['name']!r}")
+
+
 @dataclass(frozen=True)
 class RepoChecks:
     """The validated ``RepoConfig.checks`` block (every switch OFF by default)."""
@@ -198,14 +225,8 @@ class RepoChecks:
             raise ValueError("checks.commands: names must be unique")
         if not 0 <= self.finish_repair_turns <= MAX_REPAIR_TURNS:
             raise ValueError(f"checks.finish_repair_turns must be 0 to {MAX_REPAIR_TURNS}")
-        fmt = self.formatter
-        if fmt and not fmt.get("disabled"):
-            command = fmt.get("command")
-            if isinstance(command, str) or not command:
-                raise ValueError("checks.formatter.command must be a non-empty argv list")
-            unknown = set(fmt) - {"command", "exts", "name", "disabled"}
-            if unknown:
-                raise ValueError(f"checks.formatter: unknown key(s) {sorted(unknown)}")
+        if self.formatter:
+            _validate_formatter(self.formatter)
 
     @classmethod
     def from_config(cls, raw: Mapping[str, Any] | None) -> RepoChecks:

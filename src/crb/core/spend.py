@@ -269,6 +269,11 @@ def calibrate(
     record turns, not tool calls). A level with fewer than ``min_clean`` clean valid
     completions is skipped; when none qualifies the floor stands and the reason says so."""
     base = {k: int(floor[k]) for k in CAP_FIELDS}
+    for k, v in base.items():
+        if v <= 0:
+            # a zero cap divides the tool-call factor by zero and clamps every calibrated
+            # cap to 0 (floor × ceiling): refused here, where the cause can be named
+            raise ValueError(f"calibration floor {k}={v}: every cap of the floor must be > 0")
     want = {"repo": repo, "mode": mode, "size": size}
     pool = [
         o for o in observations if o.valid and o.clean and o.builder == builder and o.model == model

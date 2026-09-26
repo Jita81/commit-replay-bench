@@ -92,6 +92,32 @@ def test_a_malformed_block_is_refused_at_config_time(raw: dict[str, Any]) -> Non
         RepoConfig(name="x", language=Language.PYTHON, checks=raw)
 
 
+@pytest.mark.parametrize(
+    "formatter",
+    [
+        {"disabled": True, "comand": ["black"]},  # a typo is refused even when disabled
+        {"disabled": "yes"},
+        {"command": ["black", "-q"], "exts": ".py"},  # a string would match every "p" / "y"
+        {"command": ["black"], "exts": [".py", 3]},
+        {"command": 7},
+        {"command": ["black"], "name": ["black"]},
+    ],
+)
+def test_the_formatter_block_is_validated_in_full(formatter: dict[str, Any]) -> None:
+    """``checks.formatter`` is held to the ``from_config`` contract whatever ``disabled``
+    says: an unknown key or a wrong type is a configuration error, never a silent default.
+    ``exts: ".py"`` passed and the format step then matched every file ending in ``p`` or
+    ``y`` (CodeRabbit, PR #57)."""
+    with pytest.raises(ValueError, match=r"checks\.formatter"):
+        RepoChecks.from_config({"formatter": formatter})
+
+
+def test_a_well_formed_formatter_block_is_kept() -> None:
+    fmt = {"command": ["black", "-q"], "exts": [".py", ".pyi"], "name": "black"}
+    assert RepoChecks.from_config({"formatter": fmt}).formatter == fmt
+    assert RepoChecks.from_config({"formatter": {"disabled": True}}).formatter == {"disabled": True}
+
+
 def test_run_params_refuse_an_unknown_switch() -> None:
     with pytest.raises(ValueError, match="unknown"):
         resolve(RepoChecks(), {"lint_step": True})

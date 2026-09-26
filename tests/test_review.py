@@ -520,6 +520,34 @@ def test_statement_mergeable_reads_negation_questions_and_silence(
     assert statement_mergeable(statement) is says
 
 
+@pytest.mark.parametrize(
+    ("statement", "negated"),
+    [
+        # affirmations the negation rule read as "not mergeable" (CodeRabbit, PR #57)
+        ("Not only mergeable but clean.", False),
+        ("Not just mergeable: it is the cleanest patch of the run.", False),
+        ("Never seen more mergeable code.", False),
+        ("I have never seen anything more mergeable.", False),
+        # the negations it must still read
+        ("Not yet mergeable: the docs are missing.", True),
+        ("It is not really mergeable as-is.", True),
+        ("It will never be mergeable in this form.", True),
+        ("The change isn't quite mergeable.", True),
+        ("Not currently mergeable.", True),
+    ],
+)
+def test_a_negation_word_near_mergeable_is_not_always_a_negation(
+    statement: str, negated: bool
+) -> None:
+    """Only a negation that keeps its meaning up to ``mergeable`` (``not yet``, ``never
+    be``, ``isn't quite``) says no; a gap of any two words let "not only mergeable" refuse
+    a correct ``mergeable=True`` and file a correction to ``False``."""
+    assert (statement_mergeable(statement) is False) is negated
+    rec = record(statement=statement, mergeable=not negated)
+    check_mergeable_statement(rec)  # the flag that agrees with the words is accepted
+    assert mergeable_flag_corrections([rec], corrector="admin") == []
+
+
 def test_the_write_boundary_refuses_a_flag_that_contradicts_the_statement(tmp_path: Path) -> None:
     """The defect at its source: the flag and the words were two unrelated inputs."""
     led = JsonlReviewLedger(tmp_path / "reviews.jsonl")

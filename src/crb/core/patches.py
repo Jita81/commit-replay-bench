@@ -61,8 +61,10 @@ Claims:       ``anchored: true`` means the kept text hashes to the grade's diff 
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -161,9 +163,17 @@ class PatchStore:
         if path.is_file():
             return sha
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        tmp.write_bytes(data)
-        tmp.replace(path)
+        # a temporary file of this writer's own (mkstemp: unique per call, same directory so
+        # the rename is atomic): two threads keeping the same bytes never share one
+        fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
         return sha
 
     def put(
