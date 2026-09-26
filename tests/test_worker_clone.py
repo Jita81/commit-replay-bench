@@ -18,8 +18,9 @@ What it does: Pins that a URL-registered repo is cloned into ``<home>/repos/<nam
               fail closed without a model, and that explicit labels mix with bare ones. Also
               the use-time clone-path rule (D2): a symbolic link off ``<home>/repos`` — planted
               on the stored path, in ``config_json["path"]``, swapped in after registration, or
-              at the clone destination — is refused before any git process starts; and an AST
-              ratchet holds every use site to ``confined_clone_path``.
+              at the clone destination — is refused before any git process starts; the clone
+              destination is held to identity (exactly ``<root>/<name>``, never a link, in five
+              link shapes); and an AST ratchet holds every use site to ``confined_clone_path``.
 How:          ``fixtures.remote.bare_remote`` over ``pyrepo`` with the developer switch;
               ``RecordingBuilder`` captures its constructor kwargs; ``test_worker``'s harness;
               ``_spy_git`` records every git process ``crb.core.git`` starts.
@@ -47,6 +48,7 @@ import crb.builders as builders_pkg
 import crb.core.git as git_mod
 from crb.core.git import LOCAL_CLONE_ENV, GitRepo, clone_repo
 from crb.observability.events import StepStatus
+from crb.server.routes.repos import clone_root, confined_clone_path
 from crb.store.jobs import STATUS_FAILED, STATUS_SUCCEEDED
 from crb.store.models import Repo, Run
 from fixtures import pyrepo as pr
@@ -391,6 +393,96 @@ def test_a_link_swapped_in_after_registration_is_refused_before_any_git_command(
     done = h.run_one()
     assert done.status == STATUS_FAILED and "clone_path_escapes" in (done.error or "")
     assert not [e for e in h.events(run.id) if e.action == "probe.start"]
+
+
+def _plant_destination_link(h: Harness, remote: str, shape: str) -> None:
+    """Put a symbolic link of ``shape`` at the worker's clone destination
+    ``<home>/repos/<name>`` — every one of them a way for "the clone" to be some other
+    directory than the one the worker persists."""
+    root = h.home / "repos"
+    dest = root / pr.REPO_NAME
+    root.mkdir(parents=True)
+    if shape == "outside_repo":  # a git repository off the root
+        dest.symlink_to(h.pyrepo.path, target_is_directory=True)
+    elif shape == "inside_repo":  # ANOTHER repository's clone, inside the root
+        clone_repo(remote, root / "other")
+        dest.symlink_to(root / "other", target_is_directory=True)
+    elif shape == "inside_empty_dir":  # an empty directory inside the root
+        (root / "elsewhere").mkdir()
+        dest.symlink_to(root / "elsewhere", target_is_directory=True)
+    elif shape == "inside_dangling":  # a link to a name inside the root that is not there yet
+        dest.symlink_to(root / "not-yet", target_is_directory=True)
+    elif shape == "chained":  # a link inside the root, to a link inside the root, to a clone
+        clone_repo(remote, root / "other")
+        (root / "hop").symlink_to(root / "other", target_is_directory=True)
+        dest.symlink_to(root / "hop", target_is_directory=True)
+    else:  # pragma: no cover - a typo in the parametrisation
+        raise AssertionError(shape)
+
+
+#: Every shape of link at the clone destination. The first is the one the PR #52 review found
+#: on c179260; the rest are the class, found by the review of 7d5a619 (a target inside the
+#: root was confined as "inside the root" and then adopted as this repository's clone).
+_DESTINATION_LINKS = [
+    "outside_repo",
+    "inside_repo",
+    "inside_empty_dir",
+    "inside_dangling",
+    "chained",
+]
+
+
+@pytest.mark.parametrize("shape", _DESTINATION_LINKS)
+def test_every_link_at_the_clone_destination_is_refused_before_any_git_command(
+    h: Harness, remote: str, shape: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on PR #52 (7d5a619): the destination was confined by where it LEADS, so a
+    link to another repository's clone INSIDE ``<home>/repos`` passed, ``clone_repo`` was
+    handed the resolved directory (no longer a link) and reused it, and the worker persisted
+    ``<home>/repos/<name>`` — the link — as this repository's clone. The worker creates the
+    destination itself, so the rule for it is identity: a real directory at
+    ``<root>/<name>`` or nothing there yet, never a link, wherever the link goes."""
+    monkeypatch.setenv(LOCAL_CLONE_ENV, "1")
+    add_url_repo(h, remote)  # no clone yet: the worker will clone into repos/<name>
+    _plant_destination_link(h, remote, shape)
+    calls = _spy_git(monkeypatch)
+    with pytest.raises(LookupError, match="clone_path_escapes"):
+        h.worker._load_repo(pr.REPO_NAME)
+    assert calls == []  # refused before git ran anywhere
+    row = h.repo_row()
+    assert row.clone_path == "" and row.config_json["path"] == ""  # the link is not adopted
+
+
+def test_a_real_destination_is_still_cloned_into(
+    h: Harness, remote: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control for the case above: with no link anywhere, an existing empty directory at
+    the destination is cloned into and persisted, and git opens that directory."""
+    monkeypatch.setenv(LOCAL_CLONE_ENV, "1")
+    add_url_repo(h, remote)
+    dest = h.home / "repos" / pr.REPO_NAME
+    dest.mkdir(parents=True)
+    _config, git = h.worker._load_repo(pr.REPO_NAME)
+    assert git.path == dest.resolve() and git.is_repo()
+    assert h.repo_row().clone_path == str(dest)
+
+
+@pytest.mark.parametrize("shape", _DESTINATION_LINKS)
+def test_the_destination_rule_is_identity_not_containment(
+    h: Harness, remote: str, shape: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rule itself, without the worker: ``confined_clone_path(…, inside_root=True)``
+    returns a path only when that path IS ``<root>/<the written name>`` — the directory the
+    caller persists — so "resolves somewhere inside the root" can never again stand in for
+    "is the destination"."""
+    monkeypatch.setenv(LOCAL_CLONE_ENV, "1")
+    _plant_destination_link(h, remote, shape)
+    root = clone_root(h.home)
+    assert confined_clone_path(h.home / "repos" / pr.REPO_NAME, h.home, inside_root=True) is None
+    (h.home / "repos" / "real").mkdir()
+    assert confined_clone_path(h.home / "repos" / "real", h.home, inside_root=True) == root / "real"
+    absent = confined_clone_path(h.home / "repos" / "absent", h.home, inside_root=True)
+    assert absent == root / "absent"
 
 
 # ---------------------------------------------------------------------------

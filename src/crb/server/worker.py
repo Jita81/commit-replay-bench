@@ -1249,14 +1249,17 @@ class Worker:
     def _confined_clone(self, name: str, path: str | Path, *, inside_root: bool = False) -> Path:
         """The path git opens for ``path`` (:func:`confined_clone_path`, D2 at use): the
         resolved path, or a ``LookupError`` before any git process starts when a symbolic
-        link planted after registration — on the stored path or on the clone destination —
-        leads off ``<home>/repos``."""
+        link planted after registration leads a stored path off ``<home>/repos``, or when
+        the clone destination (``inside_root``) is a link at all, wherever it leads."""
         opened = confined_clone_path(path, self.home, inside_root=inside_root)
         if opened is None:
-            raise LookupError(
-                f"repo {name!r}: clone_path_escapes: {str(path)!r} is under the repositories "
-                "directory but resolves outside it (a symbolic link)"
+            where = (
+                "is, or passes through, a symbolic link (the worker clones only into a real "
+                "directory of its own there)"
+                if inside_root
+                else "is under the repositories directory but resolves outside it (a symbolic link)"
             )
+            raise LookupError(f"repo {name!r}: clone_path_escapes: {str(path)!r} {where}")
         return opened
 
     def _fetch_default_branch(

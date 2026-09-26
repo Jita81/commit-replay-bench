@@ -204,17 +204,24 @@ def confined_clone_path(
     """The clone-path rule where a stored path is USED — the one way the worker and the
     profile walk turn a clone path into the path git opens. ``path`` is resolved once and
     ``None`` returned (refused) when it is written under :func:`clone_root` but resolves
-    outside it (:func:`clone_path_escapes`); with ``inside_root`` (the worker's own clone
-    destination) also when the resolved path is not inside the root, whatever it looks
-    like. Otherwise the RESOLVED path is returned, and the caller opens THAT, so the path
-    git works in is the path that was checked, not whatever the written path names by the
-    time git reads it. tests/test_worker_clone.py holds every use site to this function."""
+    outside it (:func:`clone_path_escapes`). With ``inside_root`` (the worker's own clone
+    destination, a directory it creates and then persists as the clone) the rule is
+    IDENTITY, not containment: the resolved path must be exactly ``<root>/<the written
+    name>``, so any symbolic link at or below the root on the way — to somewhere outside,
+    to another repository's clone inside, dangling, or chained — is refused (PR #52
+    review: a link to a clone inside the root passed a containment check and was adopted).
+    Otherwise the RESOLVED path is returned, and the caller opens THAT, so the path git
+    works in is the path that was checked, not whatever the written path names by the time
+    git reads it. tests/test_worker_clone.py holds every use site to this function."""
     if clone_path_escapes(path, home):
         return None
     resolved = Path(path).resolve()
     if inside_root:
         root = clone_root(home)
-        if not (resolved.is_relative_to(root) and resolved != root):
+        written = Path(os.path.normpath(Path(os.path.abspath(path))))
+        bases = (Path(os.path.abspath(Path(home) / CLONE_ROOT)), root)
+        names = [written.relative_to(b) for b in bases if written.is_relative_to(b)]
+        if not names or names[0] == Path(".") or resolved != root / names[0]:
             return None
     return resolved
 

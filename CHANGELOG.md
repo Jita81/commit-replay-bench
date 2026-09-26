@@ -51,7 +51,11 @@ reproduced with a failing test on `main` before it was changed (DL-053).
   skipped that check, and the clone step reused whatever repository a link there pointed
   at. The destination is now checked too, git opens the path that was checked rather than
   the path as written, the clone step refuses a destination that is a symbolic link, and a
-  test holds every place that opens a stored clone to the one checking function.
+  test holds every place that opens a stored clone to the one checking function. A second
+  review found the destination check asked only whether a link there stayed inside
+  `$CRB_HOME/repos`, so a link to another repository's clone in that directory was still
+  reused and saved as this repository's clone. The destination must now be exactly
+  `$CRB_HOME/repos/<name>` and never a link, wherever the link leads.
 - **`claude setup-token` gets an allowlisted environment.** The sign-in helper ran the CLI
   with the API process's whole environment — the secret key, the database URL, the OIDC
   client secret. It now passes `PATH`, `HOME`, a plain terminal, a no-op browser, the
