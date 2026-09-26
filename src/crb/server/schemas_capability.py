@@ -26,8 +26,8 @@ What it is:   The response models for ``/capability-map``, ``/routes`` and
               ``/failure-split`` — the base shapes extended with the failure split, the
               model point and the controls verdict.
 What it does: Re-types the core's ``to_dict`` values (``CapabilityCell``, ``RouteDecision``,
-              ``ControlsVerdict``, ``FailureSplit``, ``Economics``) so the OpenAPI document is exact and a
-              drift between core and API is a diff; validators pin ``state`` /
+              ``ControlsVerdict``, ``FailureSplit``, ``Economics``) so the OpenAPI document
+              is exact and a drift between core and API is a diff; validators pin ``state`` /
               ``reason_code`` / failure kinds to the core's closed vocabularies.
 How:          Pydantic subclasses of the shapes in src/crb/server/schemas.py; no arithmetic.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers

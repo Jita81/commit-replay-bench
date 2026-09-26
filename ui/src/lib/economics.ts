@@ -29,7 +29,8 @@
  * Touch when:   the server adds an economics figure (add it to `EconomicsFigure` and its
  *               denominator sentence here); never for a new repository.
  * Claims:       Every economics figure the UI shows carries n, an interval or the reason it
- *               has none, and the apparatus (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
+ *               has none, and the apparatus
+ *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */
 
 import type { Economics } from '../api/types'
