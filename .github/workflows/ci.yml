@@ -189,7 +189,8 @@ jobs:
     runs-on: ubuntu-latest
     # the hermetic suite takes 23–29 min on the hosted runner (py3.13 is the slower); 30 tipped
     # over twice on 2026-09-17 at 98 % — headroom until the suite is split and parallelised
-    timeout-minutes: 45
+    # a job-time budget, not a quality gate: py3.13 hit 45 min at 98% (run 36212115018); no test is skipped or weakened
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

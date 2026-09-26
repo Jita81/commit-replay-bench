@@ -122,7 +122,18 @@ seam, `crb.core.deps`, and wired end to end.
   harness never deletes what a commit holds: that task is refused
   `PROVISION_TREE_SHADOWS_SET` (a new task-scope provisioning code), never graded, and
   `qualify_task` now records any task-scope refusal raised while it prepares a tree as an
-  `unqualified` record rather than an exception.
+  `unqualified` record rather than an exception. A worktree with no `node_modules` entry at
+  all (the clone was never set up, so the workspace planted no link) now gets the link too:
+  `npm ls` and an ES module `import` never read `NODE_PATH`, so the probe refused a parent
+  the set holds whole (reproduced with the real `npm`; CodeRabbit's second thread,
+  `node_runners.py:201`). The workspace counts a `node_modules` link at a sealed Node set
+  in a registered store as the harness's, never the builder's change; a link anywhere
+  else, a writable set or a real directory is still the builder's. Every starting state of
+  `./node_modules` is enumerated in one test and must end linked at the set or refused.
+- **The Python test job's time budget is 60 minutes** (was 45). The suite grew with this
+  branch's docker tests: py3.12 took 34 minutes and py3.13 was cancelled at 98 %
+  (run 36212115018). It is a job-time budget, not a quality gate — no test is skipped or
+  weakened, and the job name is unchanged. Parallelising the suite is queued for wave β.
 - **The toolchain probe copies nothing** (product.posture.34; CodeRabbit on PR #56). `mine`
   resolves the posture in the clone, `.git` and all, and the version probe copied that whole
   tree into the sandbox's tmpfs: a large clone failed the copy and was reported as "cannot
