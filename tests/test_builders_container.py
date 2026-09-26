@@ -740,6 +740,83 @@ def test_pins_the_uid_again_after_an_undo(monkeypatch):
     monkeypatch.undo()
     monkeypatch.setattr(os, "getuid", lambda: 10001)
     BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_through_a_local_import_of_os(monkeypatch):
+    import os as local_os
+
+    monkeypatch.setattr(local_os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_sets_getuid_on_a_local_variable_named_os(monkeypatch):
+    os = SimpleNamespace()
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a local os is not the module: pins nothing
+
+
+def test_sets_getuid_on_an_annotated_local_named_os(monkeypatch):
+    os: object = SimpleNamespace()
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a local os is not the module: pins nothing
+
+
+def test_sets_getuid_on_a_parameter_named_os(monkeypatch, os):
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a fixture named os is not the module: pins nothing
+
+
+def test_sets_getuid_on_a_loop_variable_named_os(monkeypatch):
+    for os in [SimpleNamespace()]:
+        pass
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a loop's os is not the module: pins nothing
+
+
+def test_sets_getuid_on_a_with_target_named_os(monkeypatch):
+    with nullcontext(SimpleNamespace()) as os:
+        pass
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a with's os is not the module: pins nothing
+
+
+def test_sets_getuid_on_a_walrus_named_os(monkeypatch):
+    if (os := SimpleNamespace()):
+        pass
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a walrus's os is not the module: pins nothing
+
+
+def test_sets_getuid_on_an_exception_named_os(monkeypatch):
+    try:
+        raise ValueError
+    except ValueError as os:
+        pass
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # an exception is not the module: pins nothing
+
+
+def test_sets_getuid_on_an_import_of_another_module_as_os(monkeypatch):
+    import shutil as os
+
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # shutil is not the os module: pins nothing
+
+
+def test_sets_getuid_in_a_closure_over_a_local_os(monkeypatch):
+    os = SimpleNamespace()
+
+    def inner():
+        monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+        BuilderContainerSettings(image="i")  # the enclosing os is not the module: pins nothing
+
+    inner()
+
+
+def test_pins_the_uid_on_the_global_os(monkeypatch):
+    global os
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
 """
 
 
@@ -754,7 +831,10 @@ def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
     nested in a block that may not run or may undo it, are still reported (PR #51 review).
     A pin counts only on the ``os`` module itself, found through the file's imports: ``getuid``
     set on ``Fake.os`` or on ``"Fake.os.getuid"`` is still reported, and an alias of ``os`` is
-    still a pin (PR #51 review)."""
+    still a pin (PR #51 review). A name is looked up in the scope the pin runs in, as Python
+    does: a parameter, local variable, loop, ``with``, walrus or ``except`` target, or local
+    import of another module named ``os`` hides the imported module, so a pin on it is still
+    reported; a local import of ``os`` or a ``global os`` is still a pin (PR #51 review)."""
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     sample = tests_dir / "test_sample.py"
@@ -769,8 +849,30 @@ def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
         for i, line in enumerate(_RATCHET_SAMPLE.splitlines(), start=1)
         if "pins nothing" in line
     }
-    assert len(unpinned) == 12
+    assert len(unpinned) == 21
     assert _settings_on_the_hosts_uid(sample) == unpinned
+
+
+def test_the_ratchet_sees_a_module_level_name_that_hides_the_os_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file that imports ``os`` and then rebinds the name at module level has no ``os``
+    module under that name: a pin on it pins nothing and is still reported (PR #51 review)."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    sample = tests_dir / "test_sample.py"
+    sample.write_text(
+        "import os\n"
+        "os = SimpleNamespace()\n"
+        "\n"
+        "\n"
+        "def test_sets_getuid_on_a_module_level_os(monkeypatch):\n"
+        '    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)\n'
+        '    BuilderContainerSettings(image="i")\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "TESTS_DIR", tests_dir)
+    assert _settings_on_the_hosts_uid(sample) == {"tests/test_sample.py:7"}
 
 
 def test_builder_run_args_hardening_and_secret_handling(tmp_path: Path) -> None:
