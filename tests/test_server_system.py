@@ -599,7 +599,10 @@ class TestHealth:
         settings = make_settings(tmp_path, ui_dist=str(dist))
         with TestClient(create_app(settings, factory)) as c:
             assert c.get(f"{API_PREFIX}/health").json()["served"]["stale"] is True
-            (dist / "index.html").unlink()  # a fresh lookup no longer finds this directory
+            # a fresh candidate lookup no longer finds a UI directory; the mount still serves
+            settings.ui_dist = str(tmp_path / "missing-dist")
+            ui = c.get("/")
+            assert ui.status_code == 200 and ui.text == "<html></html>"
             served = c.get(f"{API_PREFIX}/health").json()["served"]
             assert served["stale"] is True and served["ui_commit"] == b
 
