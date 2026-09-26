@@ -535,9 +535,12 @@ class TestOidc:
                 follow_redirects=False,
             )
             assert r.status_code == 400 and err(r)["code"] == "oidc_state_missing"
-        # Upsert by (issuer, subject): a second login with new groups updates the role.
+        # Upsert by (issuer, subject): a second login with new groups refreshes the profile
+        # but not the role — the claims set it on the FIRST sign-in only (D4; the
+        # ``always`` mode is TestOidcRoleSource's)
         fake.claims["roles"] = ["crb-approvers"]
         fake.claims["groups"] = ["grp-crb-admins"]
+        fake.claims["name"] = "Ann Renamed"
         with TestClient(app) as c:
             c.get(f"{API_PREFIX}/auth/oidc/start", follow_redirects=False)
             pending = read_oidc_cookie(settings, c.cookies[OIDC_COOKIE])
@@ -547,9 +550,11 @@ class TestOidc:
                 follow_redirects=False,
             )
             assert r.status_code == 302 and r.headers["location"] == "/"
-            assert c.get(f"{API_PREFIX}/auth/me").json()["role"] == "admin"
-            c.headers["X-CSRF-Token"] = c.cookies[CSRF_COOKIE]
-            users = c.get(f"{API_PREFIX}/users").json()
+            me = c.get(f"{API_PREFIX}/auth/me").json()
+            assert me["role"] == "operator" and me["display_name"] == "Ann Renamed"
+        with TestClient(app) as admin:
+            login(admin)
+            users = admin.get(f"{API_PREFIX}/users").json()
             oidc_users = [u for u in users["items"] if u["issuer"] == ISSUER]
             assert len(oidc_users) == 1 and oidc_users[0]["subject"] == "entra-oid-123"
 
@@ -612,3 +617,343 @@ class TestOidc:
         assert isinstance(app.state.oidc_client, AuthlibOidcClient)
         assert app.state.oidc_client.oidc.client_secret is not None
         assert "csecret" not in repr(app.state.oidc_client)
+
+
+# --- D4 (assessment 2026-09-25): revocable sessions, bound CSRF, per-IP limit, OIDC role ---
+
+
+def _oidc_login(app: Any, settings: Settings) -> TestClient:
+    """One OIDC sign-in through the fake provider; returns the signed-in client (open — the
+    caller closes it)."""
+    c = TestClient(app)
+    c.__enter__()
+    c.get(f"{API_PREFIX}/auth/oidc/start", follow_redirects=False)
+    pending = read_oidc_cookie(settings, c.cookies[OIDC_COOKIE])
+    r = c.get(
+        f"{API_PREFIX}/auth/oidc/callback",
+        params={"code": "good-code", "state": pending.state},
+        follow_redirects=False,
+    )
+    assert r.status_code == 302, r.text
+    c.headers["X-CSRF-Token"] = c.cookies[CSRF_COOKIE]
+    return c
+
+
+def _user_events(app: Any, action: str) -> list[Any]:
+    from sqlalchemy import select
+
+    from crb.store.models import Event
+
+    with app.state.session_factory() as s:
+        return list(
+            s.execute(select(Event).where(Event.action == action).order_by(Event.seq)).scalars()
+        )
+
+
+class TestSessionRevocation:
+    """A signed cookie is not a session the server can end — unless it carries a per-account
+    nonce the server can rotate. Logout and "sign out everywhere" rotate it."""
+
+    def test_logout_revokes_the_token_not_just_the_cookie(self, client: TestClient) -> None:
+        login(client)
+        stolen = client.cookies[SESSION_COOKIE]
+        assert client.post(f"{API_PREFIX}/auth/logout").status_code == 204
+        with TestClient(client.app) as thief:
+            thief.cookies.set(SESSION_COOKIE, stolen)
+            r = thief.get(f"{API_PREFIX}/auth/me")
+            assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+
+    def test_logout_ends_every_session_of_the_account(self, client: TestClient) -> None:
+        login(client)
+        with TestClient(client.app) as laptop:
+            login(laptop)
+            assert laptop.get(f"{API_PREFIX}/auth/me").status_code == 200
+            assert client.post(f"{API_PREFIX}/auth/logout").status_code == 204
+            r = laptop.get(f"{API_PREFIX}/auth/me")
+            assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+            login(laptop)  # signing in again is always possible
+            assert laptop.get(f"{API_PREFIX}/auth/me").status_code == 200
+
+    def test_admin_signs_a_user_out_everywhere(self, client: TestClient) -> None:
+        login(client)
+        r = client.post(
+            f"{API_PREFIX}/users", json={"username": "bob", "password": USER_PW, "role": "viewer"}
+        )
+        bob = r.json()["id"]
+        with TestClient(client.app) as bob_client:
+            login(bob_client, "bob", USER_PW)
+            # a viewer may not sign anybody out
+            r = bob_client.post(f"{API_PREFIX}/users/{bob}/sessions/revoke")
+            assert r.status_code == 403
+            r = client.post(f"{API_PREFIX}/users/{bob}/sessions/revoke")
+            assert r.status_code == 200, r.text
+            assert r.json()["id"] == bob
+            r = bob_client.get(f"{API_PREFIX}/auth/me")
+            assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+        # the admin's own session is untouched, and the act is on the account's trace
+        assert client.get(f"{API_PREFIX}/auth/me").status_code == 200
+        (ev,) = _user_events(client.app, "user.sessions_revoked")
+        assert ev.payload_json["target"] == bob
+        assert client.post(f"{API_PREFIX}/users/nope/sessions/revoke").status_code == 404
+
+    def test_an_oidc_account_can_be_signed_out_everywhere(
+        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path
+    ) -> None:
+        # an OIDC account has no password to change: before the nonce, nothing but
+        # deactivation could end its sessions
+        app, _ = oidc_app
+        settings = make_settings(tmp_path, oidc=OIDC_SETTINGS)
+        ann = _oidc_login(app, settings)
+        try:
+            ann_id = ann.get(f"{API_PREFIX}/auth/me").json()["id"]
+            with TestClient(app) as admin:
+                login(admin)
+                r = admin.post(f"{API_PREFIX}/users/{ann_id}/sessions/revoke")
+                assert r.status_code == 200, r.text
+            r = ann.get(f"{API_PREFIX}/auth/me")
+            assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+        finally:
+            ann.__exit__(None, None, None)
+
+    def test_the_upgrade_keeps_sessions_issued_before_the_nonce(self) -> None:
+        # a users row migrated in with the empty nonce keeps the version it had, so the
+        # upgrade does not sign every user out; the first rotation moves it
+        import hashlib
+
+        from crb.server.auth import credential_version, rotate_session_nonce
+        from crb.store.models import User
+
+        user = User(id="u1", subject="local:u", issuer="local", password_hash="$argon2id$x")
+        user.session_nonce = ""
+        before = hashlib.sha256(b"$argon2id$x").hexdigest()[:16]
+        assert credential_version(user) == before
+        rotate_session_nonce(user)
+        assert user.session_nonce and credential_version(user) != before
+        again = credential_version(user)
+        rotate_session_nonce(user)
+        assert credential_version(user) != again
+
+
+class TestCsrfBoundToSession:
+    """The CSRF token is HMAC(secret, uid, session version): an attacker who can plant a
+    cookie (a sibling subdomain, a proxy) cannot choose a pair that passes."""
+
+    def test_an_attacker_chosen_pair_is_refused(self, client: TestClient) -> None:
+        login(client)
+        client.cookies.set(CSRF_COOKIE, "attacker-chosen")
+        client.headers["X-CSRF-Token"] = "attacker-chosen"
+        r = client.post(
+            f"{API_PREFIX}/users", json={"username": "x9", "password": USER_PW, "role": "viewer"}
+        )
+        assert r.status_code == 403 and err(r)["code"] == "csrf_failed"
+
+    def test_the_token_is_the_session_hmac_and_dies_with_the_session(
+        self, client: TestClient, settings: Settings
+    ) -> None:
+        from crb.server.auth import csrf_token_for, read_session_claims
+
+        login(client)
+        old = client.cookies[CSRF_COOKIE]
+        uid, cv = read_session_claims(settings, client.cookies[SESSION_COOKIE])
+        assert old == csrf_token_for(settings, uid, cv)
+        assert client.get(f"{API_PREFIX}/auth/csrf").json()["token"] == old
+        # a new session after logout has a new token; the old one no longer passes
+        client.post(f"{API_PREFIX}/auth/logout")
+        login(client)
+        assert client.cookies[CSRF_COOKIE] != old
+        r = client.post(
+            f"{API_PREFIX}/users",
+            json={"username": "x8", "password": USER_PW, "role": "viewer"},
+            headers={"X-CSRF-Token": old},
+        )
+        assert r.status_code == 403 and err(r)["code"] == "csrf_failed"
+
+    def test_another_accounts_token_is_refused(self, client: TestClient) -> None:
+        login(client)
+        client.post(
+            f"{API_PREFIX}/users", json={"username": "eve", "password": USER_PW, "role": "admin"}
+        )
+        with TestClient(client.app) as eve:
+            login(eve, "eve", USER_PW)
+            eves = eve.cookies[CSRF_COOKIE]
+        # the attacker plants their own valid pair in the victim's browser
+        client.cookies.set(CSRF_COOKIE, eves)
+        r = client.post(
+            f"{API_PREFIX}/users",
+            json={"username": "x7", "password": USER_PW, "role": "viewer"},
+            headers={"X-CSRF-Token": eves},
+        )
+        assert r.status_code == 403 and err(r)["code"] == "csrf_failed"
+
+    def test_secure_deployment_uses_host_prefixed_cookie_names(self, tmp_path: Path) -> None:
+        app = create_app(make_settings(tmp_path, cookie_secure=True))
+        with TestClient(app, base_url="https://testserver") as c:
+            r = c.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
+            assert r.status_code == 200, r.text
+            set_cookies = r.headers.get_list("set-cookie")
+            names = {v.split("=", 1)[0] for v in set_cookies}
+            assert names == {"__Host-crb_session", "__Host-crb_csrf"}, names
+            for v in set_cookies:
+                low = v.lower()
+                assert "secure" in low and "path=/" in low and "domain=" not in low
+            c.headers["X-CSRF-Token"] = c.cookies["__Host-crb_csrf"]
+            r = c.post(
+                f"{API_PREFIX}/users",
+                json={"username": "x6", "password": USER_PW, "role": "viewer"},
+            )
+            assert r.status_code == 201, r.text
+            # a plain-named session cookie (plantable from a sibling host) is not a session
+            token = c.cookies["__Host-crb_session"]
+            c.cookies.clear()
+            c.cookies.set("crb_session", token)
+            assert c.get(f"{API_PREFIX}/auth/me").status_code == 401
+
+
+#: Cookies a browser really sends that a strict RFC 6265 parser rejects outright: a space,
+#: a JSON value, a backslash, a consent banner's date, a non-ASCII byte. Any one of them,
+#: planted by a sibling host with ``Domain=``, must not hide the session from the CSRF check.
+_MALFORMED_COOKIES = [
+    pytest.param(b"junk=a b", id="space"),
+    pytest.param(b'prefs={"theme": "dark"}', id="json"),
+    pytest.param(b"bs=a\\b", id="backslash"),
+    pytest.param(
+        b"OptanonConsent=isGpcEnabled=0&datestamp=Thu Sep 25 2026 10:00:00 GMT+0100",
+        id="consent-date",
+    ),
+    pytest.param("lang=café".encode("latin-1"), id="non-ascii"),
+]
+
+
+class TestCsrfSeesTheSameCookiesAsAuth:
+    """The CSRF middleware and the auth dependency must read the SAME session cookie from the
+    SAME ``Cookie`` header. If the middleware's parser gives up on a header the auth parser
+    accepts, the check is skipped while the request still authenticates — a forged POST
+    with no CSRF token then succeeds."""
+
+    @pytest.mark.parametrize("secure", [False, True], ids=["dev", "secure"])
+    @pytest.mark.parametrize("position", ["before", "after"])
+    @pytest.mark.parametrize("junk", _MALFORMED_COOKIES)
+    def test_a_malformed_neighbour_cookie_does_not_skip_the_check(
+        self, tmp_path: Path, secure: bool, position: str, junk: bytes
+    ) -> None:
+        app = create_app(make_settings(tmp_path, cookie_secure=secure))
+        base = "https://testserver" if secure else "http://testserver"
+        name = ("__Host-" if secure else "") + SESSION_COOKIE
+        with TestClient(app, base_url=base) as victim:
+            r = victim.post(
+                f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW}
+            )
+            assert r.status_code == 200, r.text
+            session = victim.cookies[name]
+            csrf = victim.cookies[("__Host-" if secure else "") + CSRF_COOKIE]
+        pair = f"{name}={session}".encode()
+        header = b"; ".join([junk, pair] if position == "before" else [pair, junk])
+        body = {"username": "forged", "password": USER_PW, "role": "admin"}
+        with TestClient(app, base_url=base) as attacker:
+            # the auth dependency still sees the session through the junk ...
+            me = attacker.get(f"{API_PREFIX}/auth/me", headers={"cookie": header})
+            assert me.status_code == 200, me.text
+            # ... so a forged POST without the token must be refused ...
+            r = attacker.post(f"{API_PREFIX}/users", json=body, headers={"cookie": header})
+            assert r.status_code == 403, r.text
+            assert err(r)["code"] == "csrf_failed"
+            # ... and the real page, which sends the token, is not locked out by the junk
+            ok = attacker.post(
+                f"{API_PREFIX}/users",
+                json=body,
+                headers={"cookie": header, "X-CSRF-Token": csrf},
+            )
+            assert ok.status_code == 201, ok.text
+
+    def test_the_server_has_one_cookie_parser(self) -> None:
+        """Prevention: a second, stricter parser anywhere in the server is how the two
+        readers diverged. Every server module reads cookies through Starlette's parser
+        (``request.cookies`` / :func:`crb.server.auth.request_cookies`), never its own."""
+        import crb.server
+
+        root = Path(crb.server.__file__).parent
+        offenders = sorted(
+            str(p.relative_to(root))
+            for p in root.rglob("*.py")
+            if "SimpleCookie" in p.read_text(encoding="utf-8")
+        )
+        assert offenders == [], f"a second cookie parser is back in: {offenders}"
+
+
+class TestLoginRateLimitPerIp:
+    """One address guessing across many usernames is bounded too, not only one username."""
+
+    def test_the_limiter_has_an_ip_bucket(self) -> None:
+        clock = {"t": 1000.0}
+        rl = LoginRateLimiter(limit=5, window_s=60, clock=lambda: clock["t"], ip_limit=20)
+        for i in range(20):
+            rl.record_failure(f"user-{i}", "ip")
+        # no single username reached 5, but the address reached 20
+        assert rl.retry_after("root", "ip") == pytest.approx(60.0)
+        assert rl.retry_after("root", "other-ip") is None
+        # a success on one account does not clear the address's bucket
+        rl.reset("user-0", "ip")
+        assert rl.retry_after("root", "ip") is not None
+        clock["t"] += 61
+        assert rl.retry_after("root", "ip") is None
+
+    def test_spraying_usernames_from_one_address_is_rate_limited(self, client: TestClient) -> None:
+        for i in range(20):
+            r = client.post(
+                f"{API_PREFIX}/auth/login", json={"username": f"guess{i}", "password": "bad-pw"}
+            )
+            assert r.status_code == 401, (i, r.text)
+        r = client.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
+        assert r.status_code == 429 and err(r)["code"] == "rate_limited"
+
+
+class TestOidcRoleSource:
+    """The IdP's claims set the role on first sign-in; afterwards an admin's change stands,
+    unless the deployment says the IdP is the source of truth (``ROLE_FROM_CLAIMS=always``),
+    in which case every override is recorded."""
+
+    def _demote(self, app: Any, user_id: str) -> None:
+        with TestClient(app) as admin:
+            login(admin)
+            r = admin.put(f"{API_PREFIX}/users/{user_id}/role", json={"role": "viewer"})
+            assert r.status_code == 200, r.text
+
+    def test_an_admins_change_survives_the_next_sign_in(
+        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path
+    ) -> None:
+        app, _ = oidc_app
+        settings = make_settings(tmp_path, oidc=OIDC_SETTINGS)
+        first = _oidc_login(app, settings)
+        me = first.get(f"{API_PREFIX}/auth/me").json()
+        first.__exit__(None, None, None)
+        assert me["role"] == "operator"  # first sign-in: the claims decide
+        self._demote(app, me["id"])
+        again = _oidc_login(app, settings)
+        try:
+            assert again.get(f"{API_PREFIX}/auth/me").json()["role"] == "viewer"
+        finally:
+            again.__exit__(None, None, None)
+        assert _user_events(app, "user.role_overridden") == []
+
+    def test_always_lets_the_claims_win_and_records_it(self, tmp_path: Path) -> None:
+        fake = FakeOidc({"sub": "entra-oid-9", "name": "Bo", "roles": ["crb-operators"]})
+        settings = make_settings(tmp_path, oidc={**OIDC_SETTINGS, "role_from_claims": "always"})
+        app = create_app(settings, oidc_client=fake)
+        first = _oidc_login(app, settings)
+        uid = first.get(f"{API_PREFIX}/auth/me").json()["id"]
+        first.__exit__(None, None, None)
+        self._demote(app, uid)
+        again = _oidc_login(app, settings)
+        try:
+            assert again.get(f"{API_PREFIX}/auth/me").json()["role"] == "operator"
+        finally:
+            again.__exit__(None, None, None)
+        (ev,) = _user_events(app, "user.role_overridden")
+        assert ev.payload_json["target"] == uid
+        assert ev.payload_json["from_role"] == "viewer" and ev.payload_json["role"] == "operator"
+
+    def test_role_from_claims_accepts_only_the_two_values(self) -> None:
+        assert OidcSettings().role_from_claims == "first_login"
+        assert OidcSettings(role_from_claims="always").role_from_claims == "always"
+        with pytest.raises(ValueError):
+            OidcSettings(role_from_claims="sometimes")

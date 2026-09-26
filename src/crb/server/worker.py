@@ -78,7 +78,9 @@ Honesty properties
 * **Clone once, by policy.** A repo registered by URL only is cloned on its first
   run (:meth:`Worker._load_repo`): https/ssh only, credentials redacted from every
   event and error, ``repo.clone.start`` / ``repo.clone.done`` on the run's trace,
-  the path persisted so no later run clones again.
+  the path persisted so no later run clones again. The stored path AND the clone
+  destination go through ``confined_clone_path`` before any git process starts (a
+  symbolic link off ``<home>/repos`` is refused), and git opens the resolved path.
 * **Fetch before a build on the base (F39).** Before a ``factory`` run on a repository
   with a URL — and before a ``replay`` / ``blind`` / ``mine`` on one linked through the
   GitHub App — the worker fetches the row's URL and fast-forwards the clone's default
@@ -252,6 +254,7 @@ from crb.server.intake import (
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
 from crb.server.routes.oracle import latest_controls_verdict
+from crb.server.routes.repos import confined_clone_path
 from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
@@ -1188,9 +1191,11 @@ class Worker:
         cfg.setdefault("runner", row.runner)
         config = RepoConfig.from_dict(row.name, cfg)
         clone = row.clone_path or config.path
+        # D2: the rule again, at use — and git is pointed at the path as checked
+        opened = self._confined_clone(name, clone) if clone else None
         url = str(row.url or config.url or "").strip()
-        if clone and GitRepo(clone).is_repo():
-            git = GitRepo(clone)
+        if opened is not None and GitRepo(opened).is_repo():
+            git = GitRepo(opened)
             if self._fetch_before(kind, cfg, url):
                 self._fetch_default_branch(name, cfg, git, url, emitter)
             return config, git
@@ -1199,6 +1204,9 @@ class Worker:
                 raise LookupError(f"repo {name!r} has no clone path")
             raise LookupError(f"repo {name!r}: {clone!r} is not a git repository")
         dest = self.home / "repos" / name
+        # the clone destination is a stored path in waiting: a link planted there would
+        # otherwise be reused as the clone (PR #52 review) — confined before git runs
+        target = self._confined_clone(name, dest, inside_root=True)
         safe_url = redact_url(url)
         started = time.monotonic()
         # a repository connected through the GitHub App clones with a short-lived
@@ -1214,7 +1222,7 @@ class Worker:
                 github_app=bool(auth_header),
             )
         try:
-            head = clone_repo(url, dest, timeout=DEFAULT_CLONE_TIMEOUT_S, auth_header=auth_header)
+            head = clone_repo(url, target, timeout=DEFAULT_CLONE_TIMEOUT_S, auth_header=auth_header)
         except (CloneUrlError, GitError) as exc:
             if emitter is not None:
                 emitter.error("system", "repo.clone.done", exc, url=safe_url, dest=str(dest))
@@ -1236,7 +1244,23 @@ class Worker:
                 dest=str(dest),
                 head=head,
             )
-        return RepoConfig.from_dict(row.name, {**cfg, "path": str(dest)}), GitRepo(dest)
+        return RepoConfig.from_dict(row.name, {**cfg, "path": str(dest)}), GitRepo(target)
+
+    def _confined_clone(self, name: str, path: str | Path, *, inside_root: bool = False) -> Path:
+        """The path git opens for ``path`` (:func:`confined_clone_path`, D2 at use): the
+        resolved path, or a ``LookupError`` before any git process starts when a symbolic
+        link planted after registration leads a stored path off ``<home>/repos``, or when
+        the clone destination (``inside_root``) is a link at all, wherever it leads."""
+        opened = confined_clone_path(path, self.home, inside_root=inside_root)
+        if opened is None:
+            where = (
+                "is, or passes through, a symbolic link (the worker clones only into a real "
+                "directory of its own there)"
+                if inside_root
+                else "is under the repositories directory but resolves outside it (a symbolic link)"
+            )
+            raise LookupError(f"repo {name!r}: clone_path_escapes: {str(path)!r} {where}")
+        return opened
 
     def _fetch_default_branch(
         self,

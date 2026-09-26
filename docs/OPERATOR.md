@@ -119,6 +119,15 @@ layout, belt scope and runner options for well-known shapes; the probe scope is 
 `CRB_ALLOW_LOCAL_CLONE=1` additionally permits `file://` sources on a test or developer
 machine — never on a server.
 
+**Where an existing clone may live.** Through the UI, the API and the MCP tools, a
+`clone_path` must be inside `$CRB_HOME/repos` (the directory the worker clones into): put
+or move the clone there and register that path. Only an admin may register a clone
+anywhere else on the server, and the product records it on the repository's trail
+(`repo.clone_path.outside_home`); an operator gets `403 clone_path_outside_home`. A path
+under `$CRB_HOME/repos` that is a symbolic link to somewhere else is refused for everyone
+(`422 clone_path_escapes`) — register the real location instead. The host CLI
+(`crb repo add --path`) is not limited: access to the host is already the credential.
+
 `crb repo probe` runs the probe scope and must be green before mining; it proves the
 toolchain and the dependencies are in place. Belt scope options:
 
@@ -528,7 +537,7 @@ sources — nothing is merged, and `api_key` mode never reads any of them:
 | Order | Source | How to supply it | When to use it |
 |---|---|---|---|
 | 1 | `CLAUDE_CODE_OAUTH_TOKEN` in the **worker's** environment | your process manager / secret injection (compose `env_file`, a Kubernetes `Secret` env var) | a worker on a different host from the API, or a platform that already injects secrets |
-| 2 | the **secrets file** on disk: `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` → `./.crb/secrets`, file `claude_code_oauth_token` | **Settings → Claude Code login** in the UI (admin): **Sign in with your Claude account** — the API host runs `claude setup-token` for you, a new tab opens on Anthropic's sign-in page, you approve, paste the code the page shows, and the minted token is stored on the API host (it never passes through the browser); then **Verify**. Or run `claude setup-token` on any machine and paste the token, **Save**, **Verify**. Or mount the file yourself (`CRB_SECRETS_DIR=/mnt/secrets`, mode `0600`, a raw value, no metadata needed). The browser sign-in needs the `claude` CLI on the **API** host (`CRB_BUILDER__CLAUDE_BINARY` when it is not on PATH; the container image ships it) | the API and worker share `CRB_HOME` (the compose and Helm deployments do), or a Key Vault / CSI mount |
+| 2 | the **secrets file** on disk: `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` → `./.crb/secrets`, file `claude_code_oauth_token` | **Settings → Claude Code login** in the UI (admin): **Sign in with your Claude account** — the API host runs `claude setup-token` for you, a new tab opens on Anthropic's sign-in page, you approve, paste the code the page shows, and the minted token is stored on the API host (it never passes through the browser); then **Verify**. Or run `claude setup-token` on any machine and paste the token, **Save**, **Verify**. Or mount the file yourself (`CRB_SECRETS_DIR=/mnt/secrets`, mode `0600`, a raw value, no metadata needed). The browser sign-in needs the `claude` CLI on the **API** host (`CRB_BUILDER__CLAUDE_BINARY` when it is not on PATH; the container image ships it); behind a proxy it uses the API process's `HTTPS_PROXY` / `NO_PROXY` and certificate-authority variables (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`), and nothing else from its environment | the API and worker share `CRB_HOME` (the compose and Helm deployments do), or a Key Vault / CSI mount |
 | 3 | nothing | `claude login` as the worker's user | a developer machine where the interactive login is fresh |
 
 The file is written `0600` inside a `0700` directory owned by the API user, atomically;
@@ -770,15 +779,32 @@ identity provider has no local password; disable it there.
 
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
-`user.deactivated`) with the actor (the admin's user id, or `cli:<os user>`) and the
-target; never the password. Setting a password ends the account's sessions on their next
-request (the cookie is bound to the credential it was issued under —
+`user.deactivated`, `user.sessions_revoked`, `user.role_overridden`) with the actor (the
+admin's user id, or `cli:<os user>`) and the target; never the password. Setting a password
+ends the account's sessions on their next request (the cookie is bound to the credential it
+was issued under —
 [SECURITY.md §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
-Deactivating refuses every request while the account is inactive, but does not move that
+
+**Signing out ends the session everywhere.** Signing out (`POST /auth/logout`, the
+**Sign out** button) ends every session of that account, on every device, not only the
+browser you clicked in. An admin can do the same for somebody else —
+`POST /users/{id}/sessions/revoke`, "sign out everywhere" — for a lost laptop or a
+leaver; it works for an identity-provider account too, which has no password here to
+change. The person can sign in again at once; deactivate the account as well to keep them
+out.
+
+Deactivating refuses every request while the account is inactive, but does not move the
 credential: re-activating within the session lifetime (`CRB_SESSION_TTL`, 8 hours by
 default) restores the sessions issued before. To contain a suspected compromise, deactivate
-**and** set a new password; the password is what ends the sessions for good. The last
-active admin can never be deactivated, by either door.
+**and** sign the account out everywhere (or set a new password); either ends the sessions
+for good. The last active admin can never be deactivated, by either door.
+
+**Roles from the identity provider.** The provider's claims set an account's role the first
+time it signs in. After that the role is yours to change on the Settings screen, and the
+next sign-in does not undo it. If your organisation manages roles in the provider instead,
+set `CRB_OIDC__ROLE_FROM_CLAIMS=always`: every sign-in then applies the claims, and each time
+that changes a role the account's trail records `user.role_overridden`
+([DEPLOYMENT §2.1](DEPLOYMENT.md#21-environment-reference)).
 
 ## 10. The factory's test author
 
