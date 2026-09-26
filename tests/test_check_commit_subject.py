@@ -113,6 +113,18 @@ def test_a_past_tense_ending_in_eed_is_refused(word: str) -> None:
     assert any("not imperative" in p for p in problems), (word, problems)
 
 
+#: Short words the suffix rules used to skip by length (review of PR #54: "fix: Led
+#: migration" passed because a word of three letters or fewer was never read as ``-ed``).
+#: No length exempts a word: a short imperative that ends in a suffix goes on its list.
+SHORT_NOT_IMPERATIVE = ("led", "fed", "has", "was", "is")
+
+
+@pytest.mark.parametrize("word", SHORT_NOT_IMPERATIVE)
+def test_a_short_word_in_another_tense_is_refused(word: str) -> None:
+    problems = ccs.check_subject(f"fix: {word.capitalize()} migration")
+    assert any("not imperative" in p for p in problems), (word, problems)
+
+
 @pytest.mark.parametrize(
     ("allowlist", "suffix"),
     [("ENDS_ED_OK", "ed"), ("ENDS_ING_OK", "ing"), ("ENDS_S_OK", "s")],

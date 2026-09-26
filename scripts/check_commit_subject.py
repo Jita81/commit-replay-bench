@@ -80,7 +80,9 @@ NOT_A_VERB: frozenset[str] = frozenset(
     {"a", "an", "the", "this", "these", "that", "those", "its", "our", "every", "each", "all"}
 )
 #: Imperatives that end in the suffixes the heuristic reads as another tense — whole words
-#: only (a word of four letters or fewer is never read as ``-ing``, so "ring" needs no entry).
+#: only. No length exempts a word from ``-ed`` or ``-s`` ("Led" and "has" are refused, PR #54
+#: review); a word of four letters or fewer is never read as ``-ing``, because those are
+#: imperatives or nouns ("ping", "ring"), never another tense.
 ENDS_ED_OK: frozenset[str] = frozenset(
     {
         "bleed",
@@ -107,17 +109,11 @@ def _not_imperative(word: str) -> bool:
     w = word.lower().strip("`'\"")
     if w in NOT_A_VERB:
         return True
-    if w.endswith("ed") and w not in ENDS_ED_OK and len(w) > 3:
+    if w.endswith("ed") and w not in ENDS_ED_OK:
         return True
     if w.endswith("ing") and w not in ENDS_ING_OK and len(w) > 4:
         return True
-    return (
-        w.endswith("s")
-        and not w.endswith(("ss", "us"))
-        and w not in ENDS_S_OK
-        and len(w) > 3
-        and w.isalpha()
-    )
+    return w.endswith("s") and not w.endswith(("ss", "us")) and w not in ENDS_S_OK and w.isalpha()
 
 
 def check_subject(subject: str) -> list[str]:
