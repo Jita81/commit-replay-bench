@@ -99,6 +99,18 @@ the only arm there was. The arm is not part of the scope: a later attestation of
 scope on another arm supersedes the earlier one (latest per scope wins), which withdraws
 trust from the old arm rather than keeping two.
 
+Where the evidence was graded — the posture class (``posture_class``, ADR-0019)
+--------------------------------------------------------------------------------
+A cell is read in one posture class (``executor/tree/deps-mode``): posture is a filter,
+never a blend. ``crb.signoff.v4`` records carry the posture class(es) of the evidence the
+approver signed as well as its checks arm, stamped from the cell (:func:`stamp_evidence`,
+``CellStats.posture_classes`` joined by ``,``), and the overlay lifts only a cell read in
+the same class (:meth:`SignoffRecord.covers_posture`) — a sign-off of rows graded on the host
+never licenses the sealed sandbox's cell, nor the other way round. A record whose evidence
+carried no posture (rows before apparatus 2.3) stamps ``""`` and is not judged by posture,
+as an unstamped record is not judged by apparatus; it is already stale by its apparatus
+(ADR-0015).
+
 Cardinal invariant, enforced in BOTH directions
 -----------------------------------------------
 * **At write** — :meth:`JsonlSignoffLedger.append` needs the live
@@ -121,7 +133,7 @@ Schema
 snapshot fields only; ``crb.signoff.v2`` records hash the policy snapshot and the
 attestation (:data:`_V2_BODY_FIELDS`, frozen); ``crb.signoff.v3`` records add
 ``verifier_kind`` (:data:`_V3_BODY_FIELDS`, frozen); ``crb.signoff.v4`` records hash
-everything, ``checks_arm`` included. :meth:`SignoffRecord.body` is schema-aware so an
+everything, ``checks_arm`` and ``posture_class`` included. :meth:`SignoffRecord.body` is schema-aware so an
 old chain still verifies after this module learned the new fields, and
 :meth:`SignoffRecord.from_dict` tolerates every shape.
 
@@ -612,6 +624,9 @@ class SignoffRecord:
     # v4 (ADR-0024) — the ``checks`` arm the evidence was read on: one of
     # ``crb.core.checks.ARMS``, ``""`` on a record from before the switchboard (= ``off``).
     checks_arm: str = ""
+    # v4 (ADR-0019) — the posture class(es) the evidence was graded in, ``,``-joined as
+    # stamped from the cell; ``""`` when its rows carried none (before apparatus 2.3).
+    posture_class: str = ""
     schema: str = SIGNOFF_SCHEMA
     record_id: str = ""
     prev_hash: str = ""
@@ -700,9 +715,22 @@ class SignoffRecord:
         the instrument that replaced it. A cell with no rows is not judged here."""
         return cell.stats is None or cell.stats.checks_arm == self.arm
 
+    def covers_posture(self, cell: CapabilityCell) -> bool:
+        """True when the attestation was made on evidence graded in the posture class(es) the
+        cell is read in (ADR-0019 §8): a sign-off never lifts a cell of another posture. As
+        with :meth:`covers_apparatus`, a record with no stamp (its evidence carried no
+        posture — before apparatus 2.3, and so stale by its apparatus already) or a cell with
+        no rows is not judged here."""
+        if not self.posture_class or cell.stats is None:
+            return True
+        return ",".join(cell.stats.posture_classes) == self.posture_class
+
     def is_stale(self, cell: CapabilityCell) -> bool:
-        """The inbox's word for :meth:`covers_apparatus` or :meth:`covers_arm` being false."""
-        return not (self.covers_apparatus(cell) and self.covers_arm(cell))
+        """The inbox's word for :meth:`covers_apparatus`, :meth:`covers_arm` or
+        :meth:`covers_posture` being false."""
+        return not (
+            self.covers_apparatus(cell) and self.covers_arm(cell) and self.covers_posture(cell)
+        )
 
     # --- hashing ------------------------------------------------------------------
     def body(self) -> dict[str, Any]:
@@ -810,6 +838,7 @@ def stamp_evidence(
         false_q1_at_signoff=cell.stats.false_q1,
         apparatus_version=",".join(cell.stats.apparatus_versions) or record.apparatus_version,
         checks_arm=cell.stats.checks_arm,
+        posture_class=",".join(cell.stats.posture_classes),
         oracle_strength_at_signoff=strength,
         policy_version=policy.policy_version,
         policy_thresholds=policy.thresholds(),
@@ -1251,7 +1280,9 @@ def apply_signoffs(
     repo's attestation) **on the apparatus the cell is read at** — a sign-off made
     under an earlier apparatus is stale and lifts nothing (ADR-0015, 2026-09-17; evidence
     expires when the apparatus changes) — **and on the ``checks`` arm the cell is read on**
-    (ADR-0024: a sign-off of the rows graded with belt 6 off never lifts the belt-6 cell).
+    (ADR-0024: a sign-off of the rows graded with belt 6 off never lifts the belt-6 cell)
+    **and in the posture class the cell is read in** (ADR-0019 §8: posture is a filter,
+    never a blend, for a sign-off as for a rate).
     The highest matching earned tier wins.
     Everything else passes through unchanged.
     """
@@ -1266,7 +1297,10 @@ def apply_signoffs(
         tiers = [
             r.tier
             for r in active
-            if r.matches(cell, repo=repo) and r.covers_apparatus(cell) and r.covers_arm(cell)
+            if r.matches(cell, repo=repo)
+            and r.covers_apparatus(cell)
+            and r.covers_arm(cell)
+            and r.covers_posture(cell)
         ]
         if not tiers:
             out.append(cell)

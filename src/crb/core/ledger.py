@@ -1271,6 +1271,9 @@ class CellStats:
     #: The postures the cell's rows were graded in (ADR-0019 §8) — listed like the
     #: apparatus versions, so a reader sees what a number pools.
     posture_ids: tuple[str, ...] = ()
+    #: The posture classes those rows pool under (ADR-0019 §8) — one for a map read in one
+    #: class; what a sign-off stamps and must match to lift the cell (``crb.signoff.v4``).
+    posture_classes: tuple[str, ...] = ()
     #: belt 6 (opt-in, ADR-0024): working code that changed the public API unlike the gold
     n_api: int = 0
     #: The ``checks`` arm every row of the cell was graded under (ADR-0024) — one, always.
@@ -1362,6 +1365,7 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         oracle_strength_mean=mean(strengths) if strengths else None,
         apparatus_versions=tuple(sorted({r.apparatus_version for r in rs})),
         posture_ids=tuple(sorted({r.posture_id for r in rs if r.posture_id})),
+        posture_classes=tuple(sorted({r.posture_class for r in rs if r.posture_class})),
         n_builder_red=split.builder_red,
         n_budget=split.budget,
         n_protocol=split.protocol,

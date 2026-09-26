@@ -280,11 +280,13 @@ def test_v2_record_still_verifies_and_reads_as_v2_with_no_verifier_kind() -> Non
         prev_hash="0" * 64,
     )
     # the hash a v2 writer produced: canonical JSON of exactly the v2 fields
-    later = ("row_hash", "verifier_kind", "checks_arm")  # v3 and v4 added the last two
+    # v3 added the kind; v4 the checks arm and the posture class (the #56 x #57 integration)
+    later = ("row_hash", "verifier_kind", "checks_arm", "posture_class")
     body = {k: v for k, v in v2.to_dict().items() if k not in later}
     assert set(body) == set(so._V2_BODY_FIELDS)
     stored = {**v2.to_dict(), "row_hash": sha256_text(canonical_json(body))}
-    del stored["verifier_kind"], stored["checks_arm"]  # a v2 writer never wrote the keys
+    # a v2 writer never wrote the keys
+    del stored["verifier_kind"], stored["checks_arm"], stored["posture_class"]
     rec = so.SignoffRecord.from_dict(json.loads(json.dumps(stored)))
     assert rec.schema == "crb.signoff.v2" and rec.verifier_kind == ""
     assert rec.verify_hash() and so.verify_signoff_chain([rec]) == 1
@@ -1215,3 +1217,48 @@ def test_load_and_apply_is_noop_without_ledger(tmp_path: Path) -> None:
     assert list(led.records()) == [] and led.verify() == 0
     m = cap.build_capability_map(_rows(12, 12))
     assert so.apply_signoffs_to_map(m, led.records(), repo="todo") == m
+
+
+# --- the posture class (ADR-0019) beside the checks arm (ADR-0024): crb.signoff.v4 ----------
+
+
+def _in_class(rows: list[GradeRow], posture_class: str) -> list[GradeRow]:
+    """The same rows re-stamped as graded in ``posture_class`` (a hashed label)."""
+    return [replace(r, labels={**r.labels, "posture_class": posture_class}) for r in rows]
+
+
+def test_a_signoff_lifts_only_the_cell_of_the_posture_class_it_was_made_in() -> None:
+    """The integration of PR #56 with PR #57: a sign-off of rows graded on the host never
+    licenses the sealed sandbox's cell (posture is a filter, never a blend), exactly as a
+    sign-off on one checks arm never lifts another arm's cell."""
+    host = _in_class(_rows(12, 12), "local/inplace/host-env")
+    sealed = _in_class(_rows(12, 12), "docker/copy/sealed")
+    host_cell = _cell(host, capability_class="frontend.component.add", size="S")
+    sealed_cell = _cell(sealed, capability_class="frontend.component.add", size="S")
+    assert host_cell.stats is not None and host_cell.stats.posture_classes == (
+        "local/inplace/host-env",
+    )
+    signed = so.stamp_evidence(_signoff(), host_cell)
+    assert signed.posture_class == "local/inplace/host-env" and signed.checks_arm == "off"
+    (lifted,) = so.apply_signoffs([host_cell], [signed], repo="todo")
+    (kept,) = so.apply_signoffs([sealed_cell], [signed], repo="todo")
+    assert lifted.verification_tier == "human-verified"
+    assert kept.verification_tier != "human-verified"
+    assert signed.covers_posture(host_cell) and not signed.covers_posture(sealed_cell)
+    assert signed.is_stale(sealed_cell) and not signed.is_stale(host_cell)
+    # a pooled (posture=all) cell is two classes: a one-class sign-off never lifts it
+    pooled = _cell(host + sealed, capability_class="frontend.component.add", size="S")
+    assert not signed.covers_posture(pooled)
+    # an unstamped record (evidence before apparatus 2.3) is not judged by posture
+    assert replace(signed, posture_class="").covers_posture(sealed_cell)
+
+
+def test_the_v4_body_hashes_the_posture_class_beside_the_checks_arm() -> None:
+    rec = _signoff()
+    body = rec.body()
+    assert rec.schema == "crb.signoff.v4" and {"checks_arm", "posture_class"} <= set(body)
+    moved = replace(rec, posture_class="docker/copy/sealed")
+    assert moved.body() != body  # the class is hash-covered
+    # a v3 record's frozen body never learned either field
+    v3 = replace(rec, schema=so.SIGNOFF_SCHEMA_V3)
+    assert not {"checks_arm", "posture_class"} & set(v3.body())
