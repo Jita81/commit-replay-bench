@@ -33,6 +33,7 @@ Touch when:   a tag is added to the policy, the heuristic changes, or a file joi
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -213,6 +214,20 @@ def test_the_repository_itself_passes_the_gate() -> None:
     """The allowlist is not aspirational: every file on it is clean on this tree."""
     assert cc.check_tree(ROOT, cc.ALLOWLIST) == []
     assert all((ROOT / rel).exists() for rel in cc.ALLOWLIST)
+
+
+def test_every_page_that_counts_the_allowlist_states_its_current_length() -> None:
+    """A page that measures the allowlist ("n = 3 entries on `ALLOWLIST`") goes stale the day
+    a page joins it: docs/dod/PLAN.md still said two after docs/SUMMARY.md made it three
+    (second review of PR #54). Every such count under docs/ must equal ``len(ALLOWLIST)``."""
+    count = re.compile(r"n = (\d+) entries on `ALLOWLIST`")
+    stated = {
+        (page.relative_to(ROOT).as_posix(), int(n))
+        for page in (ROOT / "docs").rglob("*.md")
+        for n in count.findall(page.read_text(encoding="utf-8"))
+    }
+    assert stated, "no page counts the allowlist; the pattern above no longer matches"
+    assert {(page, n) for page, n in stated if n != len(cc.ALLOWLIST)} == set()
 
 
 # ─── a review's actions never disappear without a record ────────────────────────────────
