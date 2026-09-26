@@ -341,8 +341,10 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   `clone_repo` refuses a destination that is a symbolic link; and a structural test holds
   every place that opens a stored clone to the one use-time function
   (`confined_clone_path`), with a second test that fails when a function in `crb.server`
-  opens git and is not on that test's list.
-  **[measured — n = 27 tests, all passing on this change (PR #52); method: pytest on the
+  calls `GitRepo(…)` or `clone_repo(…)`, or starts any process (through `subprocess`, `os`,
+  `asyncio` or `pty`), and is not on one of that test's lists, and a third that refuses an
+  import of a process starter the second test could not see.
+  **[measured — n = 28 tests, all passing on this change (PR #52); method: pytest on the
   node ids below, which include a link at the destination in five shapes (outside the
   directory, to another clone inside it, to an empty directory, dangling, and chained). The
   tests that pin a fix were written before it: 8 of the 9 clone-path tests added first
@@ -355,6 +357,7 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   `tests/test_worker_clone.py::test_the_destination_rule_is_identity_not_containment`,
   `tests/test_worker_clone.py::test_git_opens_only_the_confined_path_at_every_use_site`,
   `tests/test_worker_clone.py::test_the_use_site_list_is_every_place_the_server_opens_git`,
+  `tests/test_worker_clone.py::test_the_server_names_process_starters_only_through_their_module`,
   `tests/test_git_clone.py::test_clone_refuses_a_destination_that_is_a_symbolic_link`,
   `tests/test_mcp_server.py::test_register_repo_tool_is_confined_to_the_repos_root`
 - Account lifecycle: an admin sets a password or the active flag (`PUT /users/{id}/password`,

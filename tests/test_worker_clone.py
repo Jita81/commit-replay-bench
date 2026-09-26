@@ -21,8 +21,9 @@ What it does: Pins that a URL-registered repo is cloned into ``<home>/repos/<nam
               at the clone destination — is refused before any git process starts; the clone
               destination is held to identity (exactly ``<root>/<name>``, never a link, in five
               link shapes); an AST ratchet holds every use site to ``confined_clone_path``; and
-              a discovery test keeps that list equal to every function in ``crb.server`` that
-              opens git.
+              a discovery test keeps that list, and the lists of git on other paths and of
+              processes that are not git, equal to every function in ``crb.server`` that
+              calls ``GitRepo`` / ``clone_repo`` or starts a process (no aliased imports).
 How:          ``fixtures.remote.bare_remote`` over ``pyrepo`` with the developer switch;
               ``RecordingBuilder`` captures its constructor kwargs; ``test_worker``'s harness;
               ``_spy_git`` records every git process ``crb.core.git`` starts.
@@ -35,7 +36,8 @@ Tested by:    tests/test_worker_clone.py
 Touch when:   the clone destination or the URL policy changes (mirror the route and CLI suites);
               a builder gains a config key the worker must pass through; a new place opens a
               stored clone path (add it to ``_USE_SITES``; any other git opener in
-              ``crb.server`` goes on ``_NOT_A_STORED_CLONE`` with its reason).
+              ``crb.server`` goes on ``_NOT_A_STORED_CLONE``, and a process that is not git
+              on ``_NOT_GIT``, each with its reason).
 """
 
 from __future__ import annotations
@@ -546,16 +548,46 @@ def test_git_opens_only_the_confined_path_at_every_use_site(module: str, functio
 #: server functions that open git on something that is NOT a stored clone path, and why
 _NOT_A_STORED_CLONE = {
     ("server/routes/grades.py", "retained_patch_text"): "a retained worktree under scratch",
+    ("server/worker.py", "_fetch_default_branch"): (
+        "runs git fetch in the GitRepo that _load_repo already confined (git.path)"
+    ),
+}
+#: server functions that start a process that is not git, and what they start
+_NOT_GIT = {
+    ("server/claude_login.py", "start"): "the sign-in driver (python -m …)",
+    ("server/claude_login_driver.py", "run"): "the claude CLI (setup-token), under a pty",
+    ("server/reaper.py", "__init__"): "docker rm, through the reaper's runner",
+}
+#: every way the standard library starts a process, by module
+_PROCESS_STARTERS = {
+    "subprocess": {"run", "Popen", "call", "check_call", "check_output"}
+    | {"getoutput", "getstatusoutput"},
+    "os": {"system", "popen", "fork", "forkpty", "posix_spawn", "posix_spawnp"}
+    | {f"exec{s}" for s in ("l", "le", "lp", "lpe", "v", "ve", "vp", "vpe")}
+    | {f"spawn{s}" for s in ("l", "le", "lp", "lpe", "v", "ve", "vp", "vpe")},
+    "asyncio": {"create_subprocess_exec", "create_subprocess_shell"},
+    "pty": {"spawn", "fork"},
 }
 
 
+def _starts_a_process(node: ast.AST) -> bool:
+    """A reference (called or passed on, e.g. as a default runner) to a process starter."""
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.attr in _PROCESS_STARTERS.get(node.value.id, set())
+    )
+
+
 def _git_openers_in_server() -> set[tuple[str, str]]:
-    """Every function under ``crb.server`` that calls ``GitRepo(…)`` or ``clone_repo(…)``."""
+    """Every function under ``crb.server`` that calls ``GitRepo(…)`` or ``clone_repo(…)``,
+    or that starts a process by any other route — a hand-built ``git`` argv included."""
     found = set()
     for path in (_SRC / "server").rglob("*.py"):
         for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                isinstance(n, ast.Call) and _call_name(n) in {"GitRepo", "clone_repo"}
+                (isinstance(n, ast.Call) and _call_name(n) in {"GitRepo", "clone_repo"})
+                or _starts_a_process(n)
                 for n in ast.walk(fn)
             ):
                 found.add((path.relative_to(_SRC).as_posix(), fn.name))
@@ -565,12 +597,35 @@ def _git_openers_in_server() -> set[tuple[str, str]]:
 def test_the_use_site_list_is_every_place_the_server_opens_git() -> None:
     """PR #52 review (DL-053's "every use site"): ``_USE_SITES`` is a hand-kept list, so the
     ratchet above is only as complete as the list. Every function in ``crb.server`` that
-    opens git is on it or named here as not a stored clone — a new one fails until someone
-    decides which it is."""
-    unlisted = _git_openers_in_server() - set(_USE_SITES) - set(_NOT_A_STORED_CLONE)
-    assert not unlisted, f"a server function opens git and is on neither list: {unlisted}"
-    stale = (set(_USE_SITES) | set(_NOT_A_STORED_CLONE)) - _git_openers_in_server()
-    assert not stale, f"listed but no longer opens git: {stale}"
+    opens git — through ``GitRepo(…)`` / ``clone_repo(…)``, or by starting a process itself
+    (the third review: ``subprocess.run([git, "-C", row.clone_path, …])`` walked round a
+    check that looked only for the two names) — is on it, or named here as git on
+    something that is not a stored clone, or as a process that is not git. A new one
+    fails until someone decides which it is."""
+    listed = [set(_USE_SITES), set(_NOT_A_STORED_CLONE), set(_NOT_GIT)]
+    assert sum(map(len, listed)) == len(set().union(*listed)), "a function is on two lists"
+    unlisted = _git_openers_in_server() - set().union(*listed)
+    assert not unlisted, f"a server function opens git or starts a process, unlisted: {unlisted}"
+    stale = set().union(*listed) - _git_openers_in_server()
+    assert not stale, f"listed but no longer opens git or starts a process: {stale}"
+
+
+def test_the_server_names_process_starters_only_through_their_module() -> None:
+    """The discovery above sees ``subprocess.run``, not ``run``: an aliased import
+    (``import subprocess as sp``) or a bare one (``from subprocess import run``) would
+    start a process it cannot see, so ``crb.server`` does neither."""
+    hidden = []
+    for path in (_SRC / "server").rglob("*.py"):
+        for n in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(n, ast.ImportFrom) and n.module in _PROCESS_STARTERS:
+                hidden += [(path.name, n.module, a.name) for a in n.names]
+            if isinstance(n, ast.Import):
+                hidden += [
+                    (path.name, a.name, a.asname)
+                    for a in n.names
+                    if a.name in _PROCESS_STARTERS and a.asname not in (None, a.name)
+                ]
+    assert not hidden, f"a process starter is imported where the discovery cannot see it: {hidden}"
 
 
 def test_the_link_rule_is_called_only_inside_the_confiners() -> None:

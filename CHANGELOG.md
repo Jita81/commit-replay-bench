@@ -57,7 +57,11 @@ reproduced with a failing test on `main` before it was changed (DL-053).
   reused and saved as this repository's clone. The destination must now be exactly
   `$CRB_HOME/repos/<name>` and never a link, wherever the link leads. A test now also fails
   when a new function in the server opens git without being on the list of places that
-  must use the checking function, so that list cannot quietly fall behind.
+  must use the checking function, so that list cannot quietly fall behind. A third review found
+  that test looked only for the two ways the server opens a repository, so a function that
+  ran `git` as a command of its own passed it. It now also fails on any new function in
+  the server that starts a process, until someone records whether it is git and, if so,
+  on what.
 - **`claude setup-token` gets an allowlisted environment.** The sign-in helper ran the CLI
   with the API process's whole environment — the secret key, the database URL, the OIDC
   client secret. It now passes `PATH`, `HOME`, a plain terminal, a no-op browser, the
