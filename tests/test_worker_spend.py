@@ -47,6 +47,7 @@ from crb.core.spend import (
 from crb.store.jobs import STATUS_SUCCEEDED
 from crb.store.models import EvidencePackRow
 from fixtures import pyrepo as pr
+from fixtures.posture import posture_row
 from test_worker import FakeBuilder, Harness
 
 SONNET = {"builder": "fake", "model": "sonnet"}
@@ -79,7 +80,7 @@ def _prior(h: Harness, *, n: int, trial: str, clean: bool, latency_s: float = 10
         pack = uuid.uuid4().hex * 2
         hashes.append(pack)
         h.worker.ledger.append(
-            GradeRow(
+            posture_row(
                 repo=pr.REPO_NAME,
                 task_id="b" * 40,
                 clean=clean,

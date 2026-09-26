@@ -34,8 +34,8 @@ from types import ModuleType
 
 import pytest
 
-from crb.core.ledger import GradeRow
 from crb.core.value import default_register
+from fixtures.posture import posture_row
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = (
@@ -155,7 +155,7 @@ def test_reviews_correct_the_flag_defect_and_can_drop_the_critical_friend_three(
 
 
 def test_a_jsonl_export_reads_through_the_grade_row(vb: ModuleType, tmp_path: Path) -> None:
-    row = GradeRow(
+    row = posture_row(
         repo="alpha",
         task_id="a" * 40,
         clean=False,

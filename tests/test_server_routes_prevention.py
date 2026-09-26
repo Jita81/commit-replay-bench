@@ -45,6 +45,7 @@ from crb.server.prevention_state import (
 from crb.server.routes.runs import append_system_event
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run
+from fixtures.posture import with_posture_labels
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, make_env, user_id
 
 NET = (
@@ -94,7 +95,7 @@ def _add_blind_rows(env: Env, n: int = 12, protocol: tuple[int, ...] = (0, 3, 6,
                 error=NET,
                 labels={LABEL_FAILURE_KIND: FAILURE_PROTOCOL},
             )
-        ledger.append(GradeRow.from_dict(d))
+        ledger.append(GradeRow.from_dict(with_posture_labels(d)))
 
 
 def _seed(env: Env, *records: PreventionRecord) -> list[PreventionRecord]:

@@ -47,7 +47,6 @@ from crb.core.ledger import (
     FAILURE_LINT,
     FAILURE_OUTAGE,
     FAILURE_PROTOCOL,
-    GradeRow,
 )
 from crb.core.review import ReviewRecord
 from crb.core.routing import ROUTE_CALIBRATE, ROUTE_DELIVER
@@ -72,6 +71,8 @@ from crb.core.value import (
     value_row_from_grade,
     verdicts_from_reviews,
 )
+from crb.core.version import APPARATUS_VERSION
+from fixtures.posture import posture_row
 
 T0 = datetime(2026, 9, 14, tzinfo=UTC)
 
@@ -87,7 +88,7 @@ def vr(
     size: str = "XS",
     lint: bool | None = True,
     api: bool | None = None,
-    app: str = "2.2",
+    app: str = APPARATUS_VERSION,  # the current apparatus (2.3 since PR #56)
     gold: bool | None = True,
     detail: str = "",
     row_hash: str = "",
@@ -147,7 +148,7 @@ def test_valid_excludes_outage_harness_disqualified_and_a_bad_oracle() -> None:
 
 
 def test_the_adapter_reads_a_grade_row_and_its_optional_api_belt() -> None:
-    row = GradeRow(
+    row = posture_row(
         repo="alpha",
         task_id="a" * 40,
         clean=True,
@@ -173,7 +174,7 @@ def test_the_adapter_reads_a_grade_row_and_its_optional_api_belt() -> None:
     broke = dataclasses.replace(v, clean=False, api_stable=False, failure_kind=FAILURE_API)
     assert proxy_working(broke) is False
     with pytest.raises(FalseQ1Violation, match="api_stable"):
-        GradeRow(
+        posture_row(
             repo="alpha",
             task_id="a" * 40,
             clean=True,
@@ -197,9 +198,9 @@ def test_the_adapter_names_the_protocol_guard_and_the_budget_stop() -> None:
         "no_new_failures": None,
         "source_changed": None,
     }
-    prot = GradeRow(**base, error="protocol violation: network: 'pip' is not allowed")
+    prot = posture_row(**base, error="protocol violation: network: 'pip' is not allowed")
     assert value_row_from_grade(prot).detail == "network"
-    budget = GradeRow(**base, labels={"stop_reason": "max_turns"})
+    budget = posture_row(**base, labels={"stop_reason": "max_turns"})
     v = value_row_from_grade(budget)
     assert v.failure_kind == FAILURE_BUDGET and v.detail == "max_turns"
     assert stub_signature(v) == "budget:max_turns"
@@ -261,7 +262,7 @@ def test_a_joined_review_is_scoped_by_its_row_and_proxy_agreement_is_counted() -
     vs = [
         verdict(0, mergeable=False, row_hash=f"{0:064x}"),
         verdict(1, mergeable=True, row_hash=f"{1:064x}"),
-        verdict(9, mergeable=True, row_hash="9" * 64),  # its row is outside apparatus 2.2
+        verdict(9, mergeable=True, row_hash="9" * 64),  # its row is outside the current apparatus
     ]
     rep = value_report([*rows, other], vs).to_dict()
     assert rep["precision"]["review"]["n"] == 2
@@ -321,12 +322,12 @@ def test_an_unmeasured_north_star_is_null_never_zero() -> None:
 
 
 def test_the_default_scope_is_the_current_apparatus_and_pooling_is_flagged() -> None:
-    rows = [vr(1, kind=FAILURE_CLEAN, app="2.2"), vr(2, kind=FAILURE_CLEAN, app="2.1")]
+    rows = [vr(1, kind=FAILURE_CLEAN, app=APPARATUS_VERSION), vr(2, kind=FAILURE_CLEAN, app="2.1")]
     cur = value_report(rows, []).to_dict()
-    assert cur["apparatus"] == "2.2" and cur["rows"] == 1 and cur["pooled"] is False
+    assert cur["apparatus"] == APPARATUS_VERSION and cur["rows"] == 1 and cur["pooled"] is False
     pooled = value_report(rows, [], apparatus="all").to_dict()
     assert pooled["rows"] == 2 and pooled["pooled"] is True
-    assert pooled["apparatus_versions"] == ["2.1", "2.2"]
+    assert pooled["apparatus_versions"] == ["2.1", APPARATUS_VERSION]
     assert len(select_rows(rows, repo="beta", apparatus="all")) == 0
 
 

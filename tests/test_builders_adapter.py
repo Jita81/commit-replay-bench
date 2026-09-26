@@ -813,6 +813,10 @@ def _preflight_run(
             runner=runner,
             executor=LocalExecutor(),
             scratch=tmp_path / "scratch",
+            # the gold passes the fake linter, so a belt-5 rejection is the model's (the
+            # ADR-0019 witness #57's repair-merge case needs to see a lint row, not an
+            # environment one)
+            gold_lint=True,
         ),
     )
     events: list[tuple[str, dict[str, Any]]] = []

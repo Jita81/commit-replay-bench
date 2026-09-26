@@ -33,6 +33,7 @@ from crb.core.ledger import FAILURE_BUDGET, LABEL_FAILURE_KIND, GradeRow
 from crb.core.version import APPARATUS_VERSION
 from crb.store.ledger import DbLedger
 from crb.store.models import Grade
+from fixtures.posture import with_posture_labels
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
 from test_server_routes_reviews import Retained
 
@@ -69,7 +70,7 @@ def _add_blind(env: Env, *, clean: bool, n: int = 1) -> None:
             )
         d.pop("failure_kind", None)
         d.pop("cost_known", None)
-        ledger.append(GradeRow.from_dict(d))
+        ledger.append(GradeRow.from_dict(with_posture_labels(d)))
 
 
 def test_rbac(env: Env) -> None:
@@ -187,7 +188,7 @@ def test_the_curve_classes_a_belt_5_row_from_its_evidence_pack(env: Env) -> None
     )
     d.pop("failure_kind", None)
     d.pop("cost_known", None)
-    ledger.append(GradeRow.from_dict(d))
+    ledger.append(GradeRow.from_dict(with_posture_labels(d)))
     r = env.get(f"/value?repo={ALPHA}")
     assert r.status_code == 200, r.text
     sigs = {c["signature"] for c in r.json()["learning_curve"]["classes"]}

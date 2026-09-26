@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import pytest
 
-from crb.core.ledger import GradeRow
 from crb.core.spec import Language, RepoConfig
 from crb.core.spend import (
     ESCALATION_ALWAYS,
@@ -44,6 +43,7 @@ from crb.core.spend import (
     resolve_policy,
     validate_spend_config,
 )
+from fixtures.posture import posture_row
 
 FLOOR = {"wall_clock_s": 900, "max_turns": 25, "max_tool_calls": 25}
 
@@ -261,11 +261,11 @@ def test_observation_from_row_follows_the_failure_rule() -> None:
         "trial": "r2",
         "latency_s": 12.5,
     }
-    red = observation_from_row(GradeRow(clean=False, **base), turns=7)  # type: ignore[arg-type]
+    red = observation_from_row(posture_row(clean=False, **base), turns=7)  # type: ignore[arg-type]
     assert red.valid and red.escalated and red.turns == 7 and red.latency_s == 12.5
-    harness = observation_from_row(GradeRow(clean=False, error="sandbox died", **base))  # type: ignore[arg-type]
+    harness = observation_from_row(posture_row(clean=False, error="sandbox died", **base))  # type: ignore[arg-type]
     outage = observation_from_row(
-        GradeRow(clean=False, error="model_error: usage limit reached", **base)  # type: ignore[arg-type]
+        posture_row(clean=False, error="model_error: usage limit reached", **base)  # type: ignore[arg-type]
     )
     assert harness.valid is False and outage.valid is False
 
