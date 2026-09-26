@@ -39,6 +39,7 @@ from sqlalchemy import text
 from crb.core.federated import ABSTRACT_ALLOWLIST
 from crb.core.ledger import GENESIS_HASH, GradeRow, verify_chain
 from crb.server.app import API_PREFIX
+from fixtures.posture import TEST_POSTURE_CLASS, TEST_POSTURE_ID, TEST_QUALIFICATION_ID
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
 
 
@@ -153,7 +154,13 @@ class TestExport:
         assert len(body) == 50
         first = dict(zip(header, body[0], strict=True))
         assert first["clean"] == "true" and first["source_changed"] == "true"
-        assert json.loads(first["labels"])["rung"] == "r1"
+        # the whole mapping, exactly: the seed's rung plus the posture labels (ADR-0019)
+        assert json.loads(first["labels"]) == {
+            "rung": "r1",
+            "posture_id": TEST_POSTURE_ID,
+            "posture_class": TEST_POSTURE_CLASS,
+            "qualification_id": TEST_QUALIFICATION_ID,
+        }
         legacy = [
             dict(zip(header, b, strict=True))
             for b in body

@@ -352,8 +352,16 @@ def test_v5_rows_round_trip_through_jsonl_with_belt_five(tmp_path: Path) -> None
     assert led.verify() == 4
     assert lg.false_q1_total(rows) == 0
     lines = [json.loads(line) for line in led.path.read_text().splitlines()]
-    assert lines[1]["failure_kind"] == "lint" and "failure_kind" not in lines[1]["labels"]
-    assert lines[1]["labels"]["blame_control"] == "gold_green"  # ADR-0019: its witness
+    # the whole mapping, exactly: the posture labels every 2.3 row carries, plus the
+    # witness a red row names (ADR-0019) — nothing else, and never on a clean row
+    posture = {
+        "posture_id": TEST_POSTURE_ID,
+        "posture_class": TEST_POSTURE_CLASS,
+        "qualification_id": TEST_QUALIFICATION_ID,
+    }
+    assert lines[1]["failure_kind"] == "lint"
+    assert lines[1]["labels"] == {**posture, "blame_control": "gold_green"}
+    assert lines[0]["labels"] == posture
     assert lines[3]["repo_lint_clean"] is None and lines[3]["belt_set"] == "v4"
 
 
