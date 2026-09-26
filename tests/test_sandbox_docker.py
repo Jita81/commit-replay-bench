@@ -272,6 +272,24 @@ def _ps(name: str) -> str:
     ).stdout.strip()
 
 
+#: How long a confirmed-killed container may take to disappear from ``docker ps -a``.
+#: ``--rm`` removal runs in the daemon after the kill returns, so an instant check races
+#: it (it failed CI on PRs #49 and #53); a container still listed after this is a leak.
+GONE_WITHIN_S = 15.0
+
+
+def _gone(name: str, within_s: float = GONE_WITHIN_S) -> bool:
+    """``True`` once ``docker ps -a`` no longer lists ``name``; ``False`` if it is still
+    listed after ``within_s`` seconds — a leaked container, which the tests refuse."""
+    deadline = time.monotonic() + within_s
+    while True:
+        if _ps(name) == "":
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
+
+
 def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
     """``run()`` under a cancel token flipped mid-command: rc 130, ``cancelled``,
     ``kill_confirmed`` True (the daemon reported the container not running), the container
@@ -292,7 +310,7 @@ def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.cancelled and r.returncode == 130 and not r.timed_out and not r.ok
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
-    assert _ps(r.container) == ""
+    assert _gone(r.container), f"container {r.container} still listed: leaked"
 
 
 def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
@@ -308,4 +326,23 @@ def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.timed_out and not r.cancelled and r.returncode == 124
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
-    assert _ps(r.container) == ""
+    assert _gone(r.container), f"container {r.container} still listed: leaked"
+
+
+def test_the_gone_check_still_catches_a_container_that_is_left_behind():
+    """The bounded wait tolerates ``--rm``'s background removal and nothing more: a
+    container that stays behind is still reported as leaked."""
+    name = f"crb-leak-probe-{uuid.uuid4().hex[:10]}"
+    started = subprocess.run(
+        ["docker", "run", "-d", "--name", name, "--pull=never", IMAGE, "sleep", "30"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert started.returncode == 0, started.stderr
+    try:
+        assert _gone(name, within_s=1.0) is False
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=60)
+    assert _gone(name) is True
