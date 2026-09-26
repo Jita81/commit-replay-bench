@@ -19,8 +19,10 @@
  *               repository's non-merge history it covers, with the commits as its n and the
  *               window described as an author-date cut — or says why the share is unknown;
  *               and that a failed request on any instrument tile reads "not loaded" with a
- *               Try again that asks again, never "unknown".
- * How:          `mockApi` + `renderApp` at `/results?repo=alpha`.
+ *               Try again that asks again, never "unknown" — also when an earlier request
+ *               succeeded, so a failed refetch never leaves an old value shown as current.
+ * How:          `mockApi` + `renderApp` at `/results?repo=alpha`; `qc.refetchQueries()` for a
+ *               refetch; the page's own source as `?raw` text for the `currentData` ratchet.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Results/ResultsPage.tsx (under test),
@@ -38,6 +40,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { ResultsPage } from './ResultsPage'
+import pageSource from './ResultsPage.tsx?raw'
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
 const HUMAN = { ...CELL, size: 'S', n: 13, n_tasks: 11, clean: 11, point: 0.846, ci_low: 0.578, ci_high: 0.957, route: 'human', reason: 'oracle strength 0.76 < 0.80', reason_code: 'oracle_weak' }
@@ -305,5 +308,50 @@ describe('ResultsPage', () => {
       await waitFor(() => expect(within(tile).getByText('not loaded')).toBeInTheDocument())
       expect(within(tile).getByRole('button', { name: 'Try again' })).toHaveAttribute('data-hint', 'button.results.retry_tile')
     }
+  })
+
+  // a report that loaded once and then fails on a refetch: TanStack Query keeps the old data
+  // AND reports the error, so the tile must say the request failed, never show the old value
+  // as current (PR #54 review). Each case: the tile, the route, the value it showed first,
+  // the failing reply, and what the tile must read after the refetch.
+  const REFETCH_FAILS = [
+    { id: 'tile-negative-controls', route: 'GET /oracle/alpha/controls', body: CONTROLS, first: 'passed', fail: () => envelope(500, 'internal', 'boom'), then: 'not loaded', retry: true },
+    { id: 'tile-oracle-strength', route: 'GET /oracle/alpha', body: ORACLE, first: '80%', fail: () => envelope(503, 'unavailable', 'boom'), then: 'not loaded', retry: true },
+    { id: 'tile-pool-window', route: 'GET /repos/alpha/pool', body: POOL, first: '60%', fail: () => envelope(500, 'internal', 'boom'), then: 'not loaded', retry: true },
+    // a 404 on the refetch means the report is gone: it reads "not run", not the old verdict
+    { id: 'tile-negative-controls', route: 'GET /oracle/alpha/controls', body: CONTROLS, first: 'passed', fail: () => envelope(404, 'not_found', 'gone'), then: 'not run', retry: false },
+    { id: 'tile-oracle-strength', route: 'GET /oracle/alpha', body: ORACLE, first: '80%', fail: () => envelope(404, 'not_found', 'gone'), then: 'not scored', retry: false },
+  ]
+
+  it.each(REFETCH_FAILS)('$id: a refetch that fails ($then) never shows the earlier value as current', async ({ id, route, body, first, fail, then, retry }) => {
+    let calls = 0
+    mockApi({ ...ROUTES, 'GET /repos/alpha/pool': POOL, [route]: () => (++calls === 1 ? json(body) : fail()) })
+    const { qc } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const tile = await screen.findByTestId(id)
+    await waitFor(() => expect(within(tile).getByText(first)).toBeInTheDocument())
+    await qc.refetchQueries()
+    await waitFor(() => expect(within(tile).getByText(then)).toBeInTheDocument())
+    expect(calls).toBe(2)
+    expect(tile).not.toHaveTextContent(first)
+    if (retry) expect(within(tile).getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    else expect(within(tile).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  it('a map that fails on a refetch shows the error, never the earlier baseline as current', async () => {
+    let calls = 0
+    mockApi({ ...ROUTES, 'GET /capability-map': () => (++calls === 1 ? json(MAP) : envelope(500, 'internal', 'boom')) })
+    const { qc } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('Is the instrument trustworthy here?')).toBeInTheDocument())
+    await qc.refetchQueries()
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(calls).toBe(2)
+    expect(screen.queryByText('Is the instrument trustworthy here?')).not.toBeInTheDocument()
+  })
+
+  it('the page reads the instrument reports and the map only through currentData', () => {
+    // the ratchet behind the refetch cases above: a new line that reads `map.data` (or the
+    // controls, oracle or pool report's `.data`) would show an old value after a failed
+    // refetch, so the source may not contain one
+    expect(pageSource.match(/\b(map|controls|oracle|pool)\.data\b/g) ?? []).toEqual([])
   })
 })

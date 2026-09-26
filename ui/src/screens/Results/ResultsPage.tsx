@@ -51,7 +51,7 @@
 
 import { useMemo } from 'react'
 import { Link } from 'react-router'
-import { useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
+import { currentData, useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
 import { isApiError } from '../../api/client'
 import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type RepoPool } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
@@ -158,6 +158,13 @@ export function ResultsPage() {
   const controls = useOracleControls(repo)
   const oracle = useOracle(repo)
   const pool = useRepoPool(repo)
+  // a request that failed after an earlier success keeps the earlier data: every number on
+  // this page reads only what the last request returned, so an old value is never shown as
+  // current (PR #54 review)
+  const mapData = currentData(map)
+  const controlsData = currentData(controls)
+  const oracleData = currentData(oracle)
+  const poolData = currentData(pool)
   const signoffs = useSignoffs(repo)
   const tasks = useFactoryTasks(repo)
   const repoDetail = useRepo(repo)
@@ -173,7 +180,7 @@ export function ResultsPage() {
   const replayProgress = run.data && run.data.status === 'running' ? kOfN(run.data.progress.done, run.data.progress.total) : null
   const q = `repo=${encodeURIComponent(repo)}`
 
-  const measured: CapabilityCell[] = useMemo(() => (map.data?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0), [map.data])
+  const measured: CapabilityCell[] = useMemo(() => (mapData?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0), [mapData])
   const byRoute = useMemo(() => {
     const out: Record<string, { cells: number; n: number }> = {}
     for (const c of measured) {
@@ -185,10 +192,10 @@ export function ResultsPage() {
     return out
   }, [measured])
   const decisions = useMemo(
-    () => (map.data && signoffs.data ? decisionsFor({ repo, cells: map.data.cells, signoffs: signoffs.data.items, tasks: tasks.data ?? [] }) : []),
-    [repo, map.data, signoffs.data, tasks.data],
+    () => (mapData && signoffs.data ? decisionsFor({ repo, cells: mapData.cells, signoffs: signoffs.data.items, tasks: tasks.data ?? [] }) : []),
+    [repo, mapData, signoffs.data, tasks.data],
   )
-  const licence = useMemo(() => (map.data ? licenseSentence(repo, map.data, signoffs.data?.items ?? []) : null), [repo, map.data, signoffs.data])
+  const licence = useMemo(() => (mapData ? licenseSentence(repo, mapData, signoffs.data?.items ?? []) : null), [repo, mapData, signoffs.data])
   const economics = useMemo(() => {
     const n = measured.reduce((a, c) => a + c.n, 0)
     const clean = measured.reduce((a, c) => a + c.clean, 0)
@@ -202,16 +209,16 @@ export function ResultsPage() {
   }, [measured])
   const controlsNotRun = controls.isError && isApiError(controls.error) && controls.error.status === 404
   const oracleNotRun = oracle.isError && isApiError(oracle.error) && oracle.error.status === 404
-  const verdict = controls.data?.verdict
-  const apparatus = map.data ? `apparatus ${map.data.summary.apparatus_versions.join(', ') || '—'} · Wilson 95%` : '—'
-  const oracleMean = oracle.data && oracle.data.tasks.length > 0 ? oracle.data.tasks.reduce((a, t) => a + (t.strength ?? 0), 0) / oracle.data.tasks.length : null
+  const verdict = controlsData?.verdict
+  const apparatus = mapData ? `apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'} · Wilson 95%` : '—'
+  const oracleMean = oracleData && oracleData.tasks.length > 0 ? oracleData.tasks.reduce((a, t) => a + (t.strength ?? 0), 0) / oracleData.tasks.length : null
   // the bar is the policy in force, never a constant; the apparatus is the report's own
-  const oracleBar = map.data ? map.data.policy.min_oracle_strength : null
+  const oracleBar = mapData ? mapData.policy.min_oracle_strength : null
   // a failed request is not a missing report: only a 404 on controls / oracle means "not run"
   const controlsFailed = controls.isError && !controlsNotRun
   const oracleFailed = oracle.isError && !oracleNotRun
-  const poolView = poolTile(pool.data, pool.isPending, pool.isError)
-  const oracleApparatus = oracle.data ? `apparatus ${oracle.data.apparatus_versions.join(', ') || '—'} · mean of per-task mutation scores${oracleBar !== null ? ` · ≥ ${pct(oracleBar)} per cell to deliver` : ''}` : 'one mutation score per task, from the oracle run'
+  const poolView = poolTile(poolData, pool.isPending, pool.isError)
+  const oracleApparatus = oracleData ? `apparatus ${oracleData.apparatus_versions.join(', ') || '—'} · mean of per-task mutation scores${oracleBar !== null ? ` · ≥ ${pct(oracleBar)} per cell to deliver` : ''}` : 'one mutation score per task, from the oracle run'
 
   return (
     <>
@@ -223,7 +230,7 @@ export function ResultsPage() {
       {!repo && <EmptyState title="Choose a repository" reason="Results are per repository — a cell says nothing about a repository it was not measured on." action={<LinkButton to="/connect">Connect one</LinkButton>} />}
       {repo && map.isPending && <p className="text-sm text-on-surface-muted">Loading the baseline for {repo}…</p>}
       {repo && map.isError && <ErrorState error={map.error} onRetry={() => void map.refetch()} />}
-      {repo && map.data && (
+      {repo && mapData && (
         <>
           {replayRunning && (
             <NotificationBanner title={replayQueued ? 'A measurement is queued' : 'A measurement is running'}>
@@ -241,17 +248,17 @@ export function ResultsPage() {
               <StatTile
                 label="Negative controls"
                 value={verdict ? verdict.state : controlsNotRun ? 'not run' : controls.isPending ? '…' : controlsFailed ? NOT_LOADED : 'unknown'}
-                n={controls.data?.n_rows ?? null}
-                apparatus={controls.data ? controlsApparatus(controls.data.apparatus) : 'seven deliberate cheats the grader must catch'}
+                n={controlsData?.n_rows ?? null}
+                apparatus={controlsData ? controlsApparatus(controlsData.apparatus) : 'seven deliberate cheats the grader must catch'}
                 tone={verdict ? CONTROLS_TONE[verdict.state] : 'muted'}
                 hint="stat.results.controls"
-                footer={controls.data ? `${controls.data.violations} violations · ${controls.data.escapes} escapes · ${controls.data.not_constructible} not constructible` : controlsFailed ? <RetryLine onRetry={() => void controls.refetch()} /> : verdict ? undefined : 'run the controls from Connect'}
+                footer={controlsData ? `${controlsData.violations} violations · ${controlsData.escapes} escapes · ${controlsData.not_constructible} not constructible` : controlsFailed ? <RetryLine onRetry={() => void controls.refetch()} /> : verdict ? undefined : 'run the controls from Connect'}
                 data-testid="tile-negative-controls"
               />
               <StatTile
                 label="Oracle strength"
                 value={oracleMean === null ? (oracleNotRun ? 'not scored' : oracle.isPending ? '…' : oracleFailed ? NOT_LOADED : 'unknown') : pct(oracleMean)}
-                n={oracle.data?.tasks.length ?? null}
+                n={oracleData?.tasks.length ?? null}
                 ci={null}
                 apparatus={oracleApparatus}
                 tone={oracleMean === null ? 'muted' : oracleBar !== null && oracleMean >= oracleBar ? 'green' : 'amber'}
@@ -270,7 +277,7 @@ export function ResultsPage() {
                 footer={pool.isError ? <RetryLine onRetry={() => void pool.refetch()} /> : poolView.footer || undefined}
                 data-testid="tile-pool-window"
               />
-              <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />
+              <StatTile label="False-Q1" value={String(mapData.summary.false_q1_total)} n={mapData.summary.n_total} apparatus={apparatus} tone={mapData.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />
             </div>
           </Card>
 
@@ -293,13 +300,13 @@ export function ResultsPage() {
                   ))}
                 </div>
                 <p className="mt-3 max-w-[80ch] text-sm text-on-surface-body">
-                  <strong>deliver</strong> means the cell clears the published bar (n ≥ {map.data.policy.min_n}, point ≥ {pct(map.data.policy.min_point)}, Wilson-low ≥ {pct(map.data.policy.min_ci_low)}, false-Q1 = 0, oracle ≥ {pct(map.data.policy.min_oracle_strength)}, controls passed) so the factory may open a branch and a pull request for that class of change under human review. It never means a change is safe to merge or deploy.
+                  <strong>deliver</strong> means the cell clears the published bar (n ≥ {mapData.policy.min_n}, point ≥ {pct(mapData.policy.min_point)}, Wilson-low ≥ {pct(mapData.policy.min_ci_low)}, false-Q1 = 0, oracle ≥ {pct(mapData.policy.min_oracle_strength)}, controls passed) so the factory may open a branch and a pull request for that class of change under human review. It never means a change is safe to merge or deploy.
                 </p>
                 <h3 className="mb-2 mt-6 text-[24px] font-bold leading-[1.3]">What it can do, by class and size</h3>
                 <p className="m-0 mb-4 max-w-[44em] text-[16px] leading-[1.5] text-on-surface-body">
                   Each cell carries its own <code>n</code>, its point estimate and its Wilson interval. An empty cell says "not measured" — it does not say zero.
                 </p>
-                <MapTable map={map.data} signoffs={signoffs.data?.items ?? []} repo={repo} canSign={can('approver')} />
+                <MapTable map={mapData} signoffs={signoffs.data?.items ?? []} repo={repo} canSign={can('approver')} />
                 {licence && (
                   <InsetText>
                     <Hint as="h3" id="banner.results.licence" className="m-0 mb-2 text-[19px] font-bold leading-[1.4]">
