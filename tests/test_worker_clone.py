@@ -508,39 +508,44 @@ def _func(tree: ast.AST, name: str) -> ast.FunctionDef:
     return next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name)
 
 
-def _aliases(tree: ast.AST) -> dict[str, str]:
-    """``from m import name as alias`` anywhere in a module (a function-local import
-    included) → ``{alias: name}``. ``import m as a`` needs nothing: ``a.name(…)`` is
-    matched by its attribute."""
-    return {
-        a.asname: a.name
-        for n in ast.walk(tree)
-        if isinstance(n, ast.ImportFrom)
-        for a in n.names
-        if a.asname
-    }
+def _aliases(tree: ast.AST) -> dict[str, frozenset[str]]:
+    """Every ``from m import name`` and ``from m import name as alias`` anywhere in a
+    module (a function-local import included) → ``{bound name: every name imported under
+    it}``. One name can be bound by two imports (say a module-level one and a
+    function-local one); the scans see both, not whichever was found last.
+    ``import m as a`` needs nothing: ``a.name(…)`` is matched by its attribute."""
+    found: dict[str, set[str]] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            for a in n.names:
+                found.setdefault(a.asname or a.name, set()).add(a.name)
+    return {bound: frozenset(names) for bound, names in found.items()}
 
 
-def _call_name(call: ast.Call, aliases: dict[str, str]) -> str:
-    """The name a call is to, with an imported alias resolved to what it imports. The
-    aliases are required, so no scan can match a renamed import by its new name."""
+def _call_names(call: ast.Call, aliases: dict[str, frozenset[str]]) -> frozenset[str]:
+    """Every name a call may be to, with an imported alias resolved to all it imports.
+    The aliases are required, so no scan can match a renamed import by its new name. A
+    scan that looks FOR something (an opener, the link rule) matches when any name does;
+    one that TRUSTS something (a confiner) only when every name does."""
     f = call.func
     if isinstance(f, ast.Name):
-        return aliases.get(f.id, f.id)
-    return f.attr if isinstance(f, ast.Attribute) else ""
+        return aliases.get(f.id, frozenset({f.id}))
+    return frozenset({f.attr}) if isinstance(f, ast.Attribute) else frozenset()
 
 
-def _is_confined(value: ast.expr, aliases: dict[str, str]) -> bool:
+def _is_confined(value: ast.expr, aliases: dict[str, frozenset[str]]) -> bool:
     """``confiner(…)``, or ``confiner(…) if … else None`` (nothing to open)."""
     if isinstance(value, ast.IfExp):
         none = isinstance(value.orelse, ast.Constant) and value.orelse.value is None
         return none and _is_confined(value.body, aliases)
-    return isinstance(value, ast.Call) and _call_name(value, aliases) in _CONFINERS
+    return isinstance(value, ast.Call) and _call_names(value, aliases) <= _CONFINERS
 
 
 def _git_opens(source: str, function: str) -> list[tuple[int, str, bool]]:
     """Every ``GitRepo(…)`` and ``clone_repo(…)`` in ``function``: (line, the path git is
-    given, whether that path is a name bound to the confiner's result)."""
+    given, whether that path is a name bound to the confiner's result). A call that may
+    be an opener but has no positional argument where that opener's path goes is
+    reported, unconfined, with the whole call as its path."""
     tree = ast.parse(source)
     fn, aliases = _func(tree, function), _aliases(tree)
     confined = {
@@ -550,12 +555,19 @@ def _git_opens(source: str, function: str) -> list[tuple[int, str, bool]]:
         for t in n.targets
         if isinstance(t, ast.Name)
     }
-    return [
-        (n.lineno, ast.unparse(arg), isinstance(arg, ast.Name) and arg.id in confined)
-        for n in ast.walk(fn)
-        if isinstance(n, ast.Call) and _call_name(n, aliases) in _OPENERS
-        for arg in [n.args[_OPENERS[_call_name(n, aliases)]]]
-    ]
+    opens = []
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Call):
+            continue
+        for index in sorted({_OPENERS[name] for name in _call_names(n, aliases) & _OPENERS.keys()}):
+            if index >= len(n.args):
+                opens.append((n.lineno, ast.unparse(n), False))
+                continue
+            arg = n.args[index]
+            opens.append(
+                (n.lineno, ast.unparse(arg), isinstance(arg, ast.Name) and arg.id in confined)
+            )
+    return opens
 
 
 @pytest.mark.parametrize(("module", "function"), _USE_SITES)
@@ -613,7 +625,7 @@ def _git_openers_in(server: Path) -> set[tuple[str, str]]:
         aliases = _aliases(tree)
         for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                (isinstance(n, ast.Call) and _call_name(n, aliases) in _OPENERS)
+                (isinstance(n, ast.Call) and bool(_call_names(n, aliases) & _OPENERS.keys()))
                 or _starts_a_process(n)
                 for n in ast.walk(fn)
             ):
@@ -667,7 +679,7 @@ def _link_rule_callers(src: Path) -> set[tuple[str, str]]:
         aliases = _aliases(tree)
         for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                isinstance(n, ast.Call) and _call_name(n, aliases) == "clone_path_escapes"
+                isinstance(n, ast.Call) and "clone_path_escapes" in _call_names(n, aliases)
                 for n in ast.walk(fn)
             ):
                 found.add((path.relative_to(src).as_posix(), fn.name))

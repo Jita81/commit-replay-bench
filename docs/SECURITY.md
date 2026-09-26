@@ -346,13 +346,20 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   import of a process starter the second test could not see. These scans resolve an
   imported alias (`from crb.core.git import GitRepo as G`), and each is run on a
   throwaway module that uses every import form, so renaming an import does not hide a call.
-  **[measured — n = 31 tests, all passing on this change (PR #52); method: pytest on the
+  When one name is bound by two imports in a module (a module-level one and one inside a
+  function), a scan that looks for git or the link rule counts the call if either import
+  makes it one, and the use-site test counts a path as confined only if both are the
+  confiner; this can give a false alarm, which renaming the import clears, but never a
+  miss. A name bound some other way — an assignment such as `G = GitRepo` — is not
+  resolved.
+  **[measured — n = 36 tests, all passing on this change (PR #52); method: pytest on the
   node ids below, which include a link at the destination in five shapes (outside the
   directory, to another clone inside it, to an empty directory, dangling, and chained). The
   tests that pin a fix were written before it: 8 of the 9 clone-path tests added first
   failed on `main` at 8ab88ad (the ninth is the control that must pass), and 8 of the 10 destination-shape tests failed on 7d5a619 (the
   other 2, the outside shape, already passed there), and the 3 import-form tests failed on
-  ca17168, before the names were resolved; apparatus 2.2. A count of tests, not a
+  ca17168, before the names were resolved, and the 5 colliding-import tests failed on
+  e0a6fce, before every import of a name was kept; apparatus 2.2. A count of tests, not a
   rate, so no interval]** `tests/test_server_routes_repos.py::TestClonePathConfinement`,
   `tests/test_worker_clone.py::test_a_clone_path_that_escapes_the_root_at_use_time_fails_the_run`,
   `tests/test_worker_clone.py::test_a_link_at_the_clone_destination_is_refused_before_any_git_command`,
@@ -364,6 +371,10 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   `tests/test_worker_clone.py::test_the_git_opener_discovery_sees_every_import_form`,
   `tests/test_worker_clone.py::test_the_use_site_ratchet_sees_aliased_openers_and_confiners`,
   `tests/test_worker_clone.py::test_the_link_rule_scan_sees_an_aliased_import`,
+  `tests/test_worker_clone.py::test_the_git_opener_discovery_sees_every_binding_of_a_colliding_alias`,
+  `tests/test_worker_clone.py::test_the_link_rule_scan_sees_every_binding_of_a_colliding_alias`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_confines_only_when_every_binding_is_a_confiner`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_reports_an_opener_called_without_its_path`,
   `tests/test_git_clone.py::test_clone_refuses_a_destination_that_is_a_symbolic_link`,
   `tests/test_mcp_server.py::test_register_repo_tool_is_confined_to_the_repos_root`
 - Account lifecycle: an admin sets a password or the active flag (`PUT /users/{id}/password`,
