@@ -10,7 +10,9 @@ store (events, runs, graded rows, sign-offs, the factory's evidence chain) and p
   were dropped because a stamp was unreadable or the end preceded the start;
 * the **spend** — the sum of the rows whose cost is a measurement. An unknown cost is never
   counted as zero (``GradeRow.cost_known``): the sum is over priced rows only and the reading
-  says how many rows were unpriced, so a reader can see how much of the money is missing;
+  says how many rows were unpriced, so a reader can see how much of the money is missing.
+  :func:`spend_of_rows` is THE spend rule of the product — the value scorecard
+  (``crb.core.value``) sums with it too, so the two readers of money never disagree (DL-067);
 * the **figures nobody measured** — named, with why, and with the gap id that would close
   them. A number the product does not capture is stated as absent, never derived from a
   neighbouring number that happens to exist.
@@ -22,7 +24,8 @@ not $0.00.
 Navigation
 ----------
 What it is:   The pure fold behind ``GET /flow``: ``LeadTime``, ``Spend``, ``NotCaptured``,
-              ``StreamFlow``, ``FlowReading`` and the four reductions that build them.
+              ``StreamFlow``, ``FlowReading``, the reductions that build them, and the one
+              spend rule (``spend_of_rows``) every reader of graded rows' money calls.
 What it does: Reduces (start, end) timestamp pairs to a lead time with n / median / min / max,
               reduces ``(cost_usd, cost_known)`` pairs to a spend that honours an unknown cost,
               divides a known spend per unit, and names the figures the product does not
@@ -35,7 +38,7 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/server/flow.py (gathers the pairs this module reduces, one per stream),
               src/crb/server/routes/flow.py (serves the reading at ``GET /flow``),
               src/crb/core/ledger.py (``GradeRow.cost_known`` — the flag the spend honours),
-              src/crb/core/version.py (``APPARATUS_VERSION`` — the stamp a reading carries),
+              src/crb/core/value.py (the scorecard — sums its money with ``spend_of_rows``),
               ui/src/components/FlowPanel.tsx (renders one stream's figures on its own screen)
 Tested by:    tests/test_flow.py, tests/test_server_routes_flow.py
 Touch when:   a value stream is added (one entry in ``STREAM_NAMES``); never for a new
@@ -48,7 +51,7 @@ import datetime as _dt
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 #: The value streams, in the order a reader meets them, with the name each screen shows.
 STREAM_NAMES: dict[str, str] = {
@@ -159,29 +162,61 @@ class Spend:
     ``usd`` sums the rows whose cost is a measurement and is ``None`` when there are none —
     an unpriced row is never counted as zero. ``rows_unpriced`` is how many rows carried a
     cost the product cannot vouch for (``GradeRow.cost_known`` is false), so a reader knows
-    the sum is a floor.
+    the sum is a floor. ``apparatus_versions`` names the apparatus versions of the rows the
+    reading covers (priced or not), so a sum over rows of two versions says so.
     """
 
     usd: float | None = None
     rows_priced: int = 0
     rows_unpriced: int = 0
+    apparatus_versions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "usd": self.usd,
             "rows_priced": self.rows_priced,
             "rows_unpriced": self.rows_unpriced,
+            "apparatus_versions": list(self.apparatus_versions),
         }
 
 
 def spend_of(rows: Iterable[tuple[float, bool]]) -> Spend:
     """Reduce ``(cost_usd, cost_known)`` pairs to a :class:`Spend`."""
-    priced = [cost for cost, known in rows if known]
-    unpriced = sum(1 for _, known in rows if not known)
+    pairs = list(rows)
+    priced = [cost for cost, known in pairs if known]
     return Spend(
         usd=round(sum(priced), 6) if priced else None,
         rows_priced=len(priced),
-        rows_unpriced=unpriced,
+        rows_unpriced=len(pairs) - len(priced),
+    )
+
+
+class PricedRow(Protocol):
+    """What the one spend rule reads from a row: ``GradeRow`` and ``crb.core.value.ValueRow``
+    both answer it, so the flow reading and the value scorecard sum money the same way."""
+
+    @property
+    def cost_usd(self) -> float: ...
+
+    @property
+    def cost_known(self) -> bool: ...
+
+    @property
+    def apparatus_version(self) -> str: ...
+
+
+def spend_of_rows(rows: Iterable[PricedRow]) -> Spend:
+    """THE spend rule over rows: :func:`spend_of` on ``(cost_usd, cost_known)``, plus the
+    apparatus versions the rows span. Every reader of money in this product that sums
+    graded rows — ``GET /flow`` and ``GET /value`` — calls this, so an unpriced row is
+    counted the same way (not at all, and reported) wherever it is read."""
+    rs = list(rows)
+    base = spend_of((r.cost_usd, r.cost_known) for r in rs)
+    return Spend(
+        usd=base.usd,
+        rows_priced=base.rows_priced,
+        rows_unpriced=base.rows_unpriced,
+        apparatus_versions=tuple(sorted({r.apparatus_version for r in rs})),
     )
 
 
@@ -256,6 +291,9 @@ class FlowReading:
     generated: str
     method: str
     streams: tuple[StreamFlow, ...] = ()
+    #: The repository's cumulative spend: every graded row once. The streams' own spends
+    #: partition it — no row is counted in two streams — so they add up to this, never more.
+    spend: Spend = field(default_factory=Spend)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -263,5 +301,6 @@ class FlowReading:
             "apparatus": self.apparatus,
             "generated": self.generated,
             "method": self.method,
+            "spend": self.spend.to_dict(),
             "streams": [s.to_dict() for s in self.streams],
         }

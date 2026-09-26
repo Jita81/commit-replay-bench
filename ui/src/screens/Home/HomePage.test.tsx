@@ -285,6 +285,20 @@ describe('HomePage', () => {
     await waitFor(() => expect(screen.getAllByTestId('tile-value').at(-1)).toHaveTextContent('Not available: the API refused the scorecard.'))
   })
 
+  it('a north star over an unpriced blind attempt is withheld with the reason, never divided by a floor', async () => {
+    const withheld = { label: 'x', per_pound: null, per_pound_low: null, per_pound_high: null, pounds_per_working: null, pounds_per_working_low: null, pounds_per_working_high: null, working_rate: 0.18, working_rate_low: 0.05, working_rate_high: 0.4, working_estimate: 2, n_attempts: 11, n_valid: 11, clean: 4, clean_rate: { k: 4, n: 11, point: 0.36, ci_low: 0.15, ci_high: 0.65 }, precision_basis: 'proxy', precision: { k: 3, n: 4, point: 0.75, ci_low: 0.3, ci_high: 0.95 }, spend_usd: 20, spend_gbp: 14.81, spend_rows_priced: 10, spend_rows_unpriced: 1, per_pound_withheld: '1 blind attempt carried no price (the builder had none for its model), so the pounds spent are unknown and a figure per pound would overstate; the rate is served, the figure per pound is not', usd_per_gbp: 1.35, method: 'estimate' }
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
+      'GET /value': { schema: 'crb.value.v1', repo: null, apparatus: '2.3', apparatus_versions: ['2.3'], pooled: false, rows: 11, usd_per_gbp: 1.35, north_star: withheld, learning_curve: { source: 's', attempts: 11, register: { source: 's', n_classes: 0, closed: 0, closed_share: null } } },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    const tile = await screen.findByTestId('tile-value')
+    await waitFor(() => expect(tile).toHaveTextContent('1 blind attempt carried no price'))
+    expect(tile).not.toHaveTextContent('No blind attempt with a precision yet')
+    expect(tile).not.toHaveTextContent('range ')
+  })
+
   it('every task tag, the kicker, the summary, the banner and Continue carry a hint; the Measure tag opens on hover with the registry copy', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },

@@ -47,11 +47,13 @@ class LeadTimeOut(BaseModel):
 class SpendOut(BaseModel):
     """``usd`` sums only the rows whose cost is a measurement and is ``null`` when there are
     none; ``rows_unpriced`` is how many rows carried a cost the product cannot vouch for, so a
-    reader knows the sum is a floor."""
+    reader knows the sum is a floor. ``apparatus_versions`` names the versions of the rows the
+    reading covers, so a sum across two versions says so."""
 
     usd: float | None
     rows_priced: int
     rows_unpriced: int
+    apparatus_versions: list[str]
 
 
 class NotCapturedOut(BaseModel):
@@ -79,10 +81,13 @@ class StreamFlowOut(BaseModel):
 
 class FlowOut(BaseModel):
     """Every stream's numbers for one repository, with the apparatus and the method that
-    produced them (``method`` says it is a fold over stored records, not a live probe)."""
+    produced them (``method`` says it is a fold over stored records, not a live probe).
+    ``spend`` is the repository's cumulative spend — every graded row once; the streams'
+    own spends partition it, so they never add up to more."""
 
     repo: str
     apparatus: str
     generated: str
     method: str
+    spend: SpendOut
     streams: list[StreamFlowOut]

@@ -29,6 +29,10 @@ What is measured, and the rule for each
   (outage, harness and budget-stopped spend included — that money was spent). Its interval
   multiplies the two Wilson bounds (conservative; spend treated as known). The ledger records
   dollars; pounds use a fixed, stated conversion (:data:`DEFAULT_USD_PER_GBP`, a parameter).
+  Money is summed by THE spend rule, ``crb.core.flow.spend_of_rows`` (the flow reading's too,
+  DL-067): a row whose cost is not a measurement is counted apart, never as $0, and while a
+  blind attempt in scope is unpriced the per-pound figures are withheld with the reason —
+  a figure per pound over a floor would overstate.
 * **Process loss** — rows and pounds lost to ``budget`` / ``protocol`` / ``harness`` /
   ``outage``: the attempts that produced nothing because of how we ran them.
 * **The learning curve** — attempts (every row the provider did not refuse) in time order,
@@ -91,6 +95,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from crb.core.checks import ARM_OFF, ARMS
+from crb.core.flow import Spend, spend_of_rows
 from crb.core.ledger import (
     FAILURE_BUDGET,
     FAILURE_CLEAN,
@@ -166,6 +171,9 @@ class ValueRow:
     clean: bool
     failure_kind: str
     cost_usd: float = 0.0
+    #: Is ``cost_usd`` a measurement (``GradeRow.cost_known``)? An unpriced row is never
+    #: summed as zero: every money figure here goes through ``crb.core.flow.spend_of_rows``.
+    cost_known: bool = True
     apparatus_version: str = APPARATUS_VERSION
     gold_clean: bool | None = None
     repo_lint_clean: bool | None = None
@@ -257,6 +265,7 @@ def value_row_from_grade(row: GradeRow) -> ValueRow:
         clean=row.clean,
         failure_kind=kind,
         cost_usd=row.cost_usd,
+        cost_known=row.cost_known,
         apparatus_version=row.apparatus_version,
         gold_clean=row.gold_clean,
         repo_lint_clean=row.repo_lint_clean,
@@ -585,12 +594,31 @@ class NorthStar:
     n_attempts: int
     clean_rate: Rate
     precision: Precision
-    spend_usd: float
+    spend: Spend
     usd_per_gbp: float
+
+    @property
+    def spend_usd(self) -> float:
+        """The priced blind spend (0 when nothing is priced); unpriced rows are counted
+        apart in ``spend.rows_unpriced``, never here as zero."""
+        return self.spend.usd or 0.0
 
     @property
     def spend_gbp(self) -> float:
         return self.spend_usd / self.usd_per_gbp
+
+    @property
+    def per_pound_withheld(self) -> str:
+        """Why the per-pound figures are not served, or ``""``: a blind attempt with no price
+        makes the pounds spent a floor, and a rate per pound over a floor would overstate."""
+        k = self.spend.rows_unpriced
+        if not k:
+            return ""
+        return (
+            f"{k} blind attempt{'s' if k != 1 else ''} carried no price (the builder had none "
+            "for its model), so the pounds spent are unknown and a figure per pound would "
+            "overstate; the rate is served, the figure per pound is not"
+        )
 
     def _working(self) -> tuple[float, float, float] | None:
         p = self.precision.chosen
@@ -607,7 +635,7 @@ class NorthStar:
         w = self._working()
         n = self.clean_rate.n
         per_pound = None
-        if w is not None and self.spend_usd > 0:
+        if w is not None and self.spend_usd > 0 and not self.per_pound_withheld:
             per_pound = tuple(x * n / self.spend_gbp for x in w)
         return {
             "label": "working changes per pound, blind",
@@ -637,6 +665,9 @@ class NorthStar:
             "precision": self.precision.chosen.to_dict(),
             "spend_usd": round(self.spend_usd, 2),
             "spend_gbp": round(self.spend_gbp, 2),
+            "spend_rows_priced": self.spend.rows_priced,
+            "spend_rows_unpriced": self.spend.rows_unpriced,
+            "per_pound_withheld": self.per_pound_withheld,
             "usd_per_gbp": self.usd_per_gbp,
             "method": (
                 "blind clean rate (valid attempts; Wilson 95%) x clean→working precision "
@@ -662,7 +693,7 @@ def north_star(
         n_attempts=len(blind),
         clean_rate=_rate(blind),
         precision=precision(rows, verdicts, pooled),
-        spend_usd=sum(r.cost_usd for r in blind),
+        spend=spend_of_rows(blind),
         usd_per_gbp=usd_per_gbp,
     )
 
@@ -677,6 +708,8 @@ class ProcessLoss:
     usd_total: float
     valid_failures: int
     usd_per_gbp: float
+    #: Rows whose cost is not a measurement: in ``rows`` but in no dollar sum.
+    rows_unpriced: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         lost_rows = sum(k for k, _ in self.kinds.values())
@@ -695,6 +728,7 @@ class ProcessLoss:
             "all_rows": self.rows,
             "all_usd": round(self.usd_total, 2),
             "valid_failures": self.valid_failures,
+            "rows_unpriced": self.rows_unpriced,
             "budget_protocol_share_of_valid_failures": (
                 _r(bp / self.valid_failures) if self.valid_failures else None
             ),
@@ -704,18 +738,22 @@ class ProcessLoss:
 def process_loss(
     rows: Sequence[ValueRow], *, usd_per_gbp: float = DEFAULT_USD_PER_GBP
 ) -> ProcessLoss:
-    """Rows and dollars per loss kind over ALL rows in scope (every row cost something)."""
-    kinds: dict[str, tuple[int, float]] = dict.fromkeys(LOSS_KINDS, (0, 0.0))
+    """Rows and dollars per loss kind over ALL rows in scope (every row cost something). The
+    dollars are THE spend rule's (``spend_of_rows``): an unpriced row counts in ``rows`` and
+    in ``rows_unpriced``, never as $0 in a sum."""
+    by_kind: dict[str, list[ValueRow]] = {k: [] for k in LOSS_KINDS}
     for r in rows:
-        if r.failure_kind in kinds:
-            n, u = kinds[r.failure_kind]
-            kinds[r.failure_kind] = (n + 1, u + r.cost_usd)
+        if r.failure_kind in by_kind:
+            by_kind[r.failure_kind].append(r)
+    kinds = {k: (len(rs), spend_of_rows(rs).usd or 0.0) for k, rs in by_kind.items()}
+    total = spend_of_rows(rows)
     return ProcessLoss(
         kinds=kinds,
         rows=len(rows),
-        usd_total=sum(r.cost_usd for r in rows),
+        usd_total=total.usd or 0.0,
         valid_failures=sum(1 for r in rows if r.valid and not r.clean),
         usd_per_gbp=usd_per_gbp,
+        rows_unpriced=total.rows_unpriced,
     )
 
 
@@ -1034,7 +1072,8 @@ def _cells(rows: Sequence[ValueRow], usd_per_gbp: float) -> list[dict[str, Any]]
         key=lambda kv: (kv[0][0], _SIZE_ORDER.get(kv[0][1], 9), kv[0][1], kv[0][2], kv[0][3]),
     ):
         rate = _rate(rs)
-        usd = sum(r.cost_usd for r in rs)
+        cell_spend = spend_of_rows(rs)
+        usd = cell_spend.usd or 0.0
         out.append(
             {
                 "capability_class": cls,
@@ -1047,6 +1086,7 @@ def _cells(rows: Sequence[ValueRow], usd_per_gbp: float) -> list[dict[str, Any]]
                 "loss_rows": sum(1 for r in rs if r.failure_kind in LOSS_KINDS),
                 "spend_usd": round(usd, 2),
                 "spend_gbp": round(usd / usd_per_gbp, 2),
+                "spend_rows_unpriced": cell_spend.rows_unpriced,
             }
         )
     return out

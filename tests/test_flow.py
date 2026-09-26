@@ -7,7 +7,9 @@ What it does: Pins the timestamp parser (second and millisecond precision, ``Z``
               the lead-time reduction (median / min / max, a pair whose end precedes its start
               dropped and counted, an empty set unmeasured with its reason), the spend rule (an
               unknown cost is never counted as zero, and the reading says how many rows were
-              unpriced), the per-unit division and the stream registry every reading is keyed by.
+              unpriced, even from a one-pass iterable), the row form of that rule the value
+              scorecard shares, the per-unit division and the stream registry every reading is
+              keyed by.
 How:          Plain function calls over literal timestamps and ``(cost, cost_known)`` pairs; no
               database, no clock, no I/O.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -23,6 +25,8 @@ Touch when:   a stream is added to ``STREAM_NAMES``; the unmeasured contract cha
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from crb.core.flow import (
@@ -35,6 +39,7 @@ from crb.core.flow import (
     parse_ts,
     per_unit,
     spend_of,
+    spend_of_rows,
 )
 
 
@@ -133,6 +138,36 @@ class TestSpend:
 
     def test_no_rows_at_all_is_unmeasured(self) -> None:
         assert spend_of([]) == Spend(usd=None, rows_priced=0, rows_unpriced=0)
+
+    def test_a_one_pass_iterable_still_counts_its_unpriced_rows(self) -> None:
+        # the first version read ``rows`` twice, so a generator's unpriced rows were lost
+        # (the second pass saw nothing) and the sum read as whole when it was a floor
+        s = spend_of(pair for pair in [(0.5, True), (9.0, False), (9.0, False)])
+        assert s.usd == pytest.approx(0.5)
+        assert s.rows_priced == 1 and s.rows_unpriced == 2
+
+
+@dataclasses.dataclass(frozen=True)
+class _Row:
+    cost_usd: float
+    cost_known: bool
+    apparatus_version: str = "2.3"
+
+
+class TestSpendOfRows:
+    def test_reads_the_rows_own_cost_known_and_names_the_apparatus_versions(self) -> None:
+        s = spend_of_rows(
+            [_Row(0.25, True, "2.2"), _Row(0.75, True), _Row(3.0, False), _Row(0.0, True)]
+        )
+        assert s.usd == pytest.approx(1.0)
+        assert s.rows_priced == 3 and s.rows_unpriced == 1
+        assert s.apparatus_versions == ("2.2", "2.3")
+        assert s.to_dict()["apparatus_versions"] == ["2.2", "2.3"]
+
+    def test_is_the_same_rule_as_the_pairs(self) -> None:
+        rows = [_Row(0.1, True), _Row(4.0, False)]
+        a, b = spend_of_rows(rows), spend_of((r.cost_usd, r.cost_known) for r in rows)
+        assert (a.usd, a.rows_priced, a.rows_unpriced) == (b.usd, b.rows_priced, b.rows_unpriced)
 
 
 class TestPerUnit:

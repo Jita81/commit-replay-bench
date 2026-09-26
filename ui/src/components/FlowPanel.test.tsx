@@ -55,8 +55,8 @@ const MANUFACTURE: Flow['streams'][number] = {
       reason: 'no pull request of this repository has been read back as merged yet',
     },
   ],
-  spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6 },
-  spend_label: 'the graded rows of this repository’s factory runs',
+  spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.2', '2.3'] },
+  spend_label: 'the graded rows the factory built for this repository',
   per_unit: null,
   per_unit_label: 'per merged pull request',
   counts: { items_registered: 4, pull_requests_opened: 3, merged: 0 },
@@ -74,7 +74,18 @@ const FLOW: Flow = {
   apparatus: '2.2',
   generated: '2026-09-23T10:00:00+00:00',
   method: 'derived from the stored runs, graded rows, events, sign-offs and factory chain',
+  spend: { usd: 1.028, rows_priced: 45, rows_unpriced: 6, apparatus_versions: ['2.2', '2.3'] },
   streams: [MANUFACTURE],
+}
+
+const MEASURE: Flow['streams'][number] = {
+  ...MANUFACTURE,
+  stream: 'measure',
+  name: 'Measure',
+  spend: { usd: 0.5, rows_priced: 1, rows_unpriced: 0, apparatus_versions: ['2.3'] },
+  spend_label: 'the replay and blind attempts graded for this repository',
+  per_unit_label: '',
+  not_captured: [],
 }
 
 function mount(stream = 'manufacture-and-deliver', body: Flow = FLOW) {
@@ -117,8 +128,26 @@ describe('FlowPanel', () => {
     mount()
     const tile = await screen.findByTestId('flow-spend-manufacture-and-deliver')
     expect(tile.textContent).toContain('$0.5280')
-    expect(tile.textContent).toContain('factory runs')
+    expect(tile.textContent).toContain('the factory built')
     expect(tile.textContent).toContain('6 row(s) reported no price and are not counted as zero, so this is a floor.')
+    expect(tile.textContent).toContain('rows of apparatus 2.2, 2.3')
+  })
+
+  it('the measure stream shows the repository’s cumulative spend beside its own part of it', async () => {
+    mount('measure', { ...FLOW, streams: [MEASURE] })
+    const own = await screen.findByTestId('flow-spend-measure')
+    expect(own.textContent).toContain('$0.5000')
+    const total = screen.getByTestId('flow-spend-total')
+    expect(total.textContent).toContain('Cumulative spend, this repository')
+    expect(total.textContent).toContain('$1.03')
+    expect(total.textContent).toContain('every graded row counted once')
+    expect(total.textContent).toContain('6 row(s) reported no price')
+  })
+
+  it('only the measure stream carries the repository total', async () => {
+    mount()
+    await screen.findByTestId('flow-spend-manufacture-and-deliver')
+    expect(screen.queryByTestId('flow-spend-total')).toBeNull()
   })
 
   it('a cost per delivery with nothing priced is a dash that says why', async () => {

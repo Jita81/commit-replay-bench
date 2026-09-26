@@ -1779,6 +1779,11 @@ export interface ValueNorthStar {
   precision: ValueRate
   spend_usd: number
   spend_gbp: number
+  /** Blind attempts whose cost is a measurement, and those with no price (never summed as zero). */
+  spend_rows_priced?: number
+  spend_rows_unpriced?: number
+  /** Why the per-pound figures are null although the rate is measured ('' when they are served). */
+  per_pound_withheld?: string
   usd_per_gbp: number
   method: string
 }
@@ -1827,6 +1832,8 @@ export interface Spend {
   usd: number | null
   rows_priced: number
   rows_unpriced: number
+  /** The apparatus versions of the rows the reading covers, priced or not. */
+  apparatus_versions: string[]
 }
 
 /** A figure a stream's definition of done asks for that nothing in the product records. */
@@ -1858,5 +1865,7 @@ export interface Flow {
   generated: string
   /** How the figures were produced — a fold over stored records, not a live probe. */
   method: string
+  /** The repository's cumulative spend — every graded row once; the streams' spends partition it. */
+  spend: Spend
   streams: StreamFlow[]
 }

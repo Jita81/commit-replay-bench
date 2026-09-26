@@ -10,7 +10,8 @@
  *               are unpriced), its counts, and — named, never derived — the figures its
  *               definition of done asks for that nothing records, each with the gap that would
  *               close it. An unmeasured duration reads as a dash with the reason underneath,
- *               never as a zero.
+ *               never as a zero. On the measure stream it also shows the repository's
+ *               cumulative spend — every graded row once, which the streams' spends partition.
  * How:          `useFlow(repo)` once per repository (five panels, one request) → the stream's
  *               entry → a `StatTile` per lead time and one for the spend, a definition list of
  *               counts, and the not-captured list; `fmtDuration` / `fmtUsd` do the formatting
@@ -30,7 +31,7 @@
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */
 import { useFlow } from '../api/hooks'
-import type { LeadTime, StreamFlow } from '../api/types'
+import type { LeadTime, Spend, StreamFlow } from '../api/types'
 import type { HintId } from '../help/hints'
 import { fmtDuration, fmtInt, fmtUsd } from '../lib/format'
 import { Card } from './Card'
@@ -48,6 +49,19 @@ const FLOW_HINTS: Record<string, HintId> = {
   registered_to_merged: 'flow.registered_to_merged',
   refusal_to_strengthening: 'flow.refusal_to_strengthening',
   password_set_to_signed_in: 'flow.password_set_to_signed_in',
+}
+
+/** Which apparatus versions a spend's rows came from, in words ('' when it covers no row). */
+function versionsOf(spend: Spend): string {
+  const v = spend.apparatus_versions
+  return v.length === 0 ? '' : ` · rows of apparatus ${v.join(', ')}`
+}
+
+/** How much of a spend is missing, so a sum is never read as the whole bill. */
+function pricedOf(spend: Spend): string {
+  return spend.rows_unpriced > 0
+    ? `${fmtInt(spend.rows_unpriced)} row(s) reported no price and are not counted as zero, so this is a floor.`
+    : 'Every row counted here reported its own price.'
 }
 
 /** `graded_rows` → `graded rows` — the counts are read, not parsed. */
@@ -109,11 +123,22 @@ export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
           label="Spend"
           value={fmtUsd(s.spend.usd)}
           n={s.spend.rows_priced}
-          apparatus={`apparatus ${reading.apparatus} · sum of the rows whose cost is a measurement`}
+          apparatus={`apparatus ${reading.apparatus} · sum of the rows whose cost is a measurement${versionsOf(s.spend)}`}
           hint="flow.spend"
-          footer={`${s.spend_label}. ${s.spend.rows_unpriced > 0 ? `${fmtInt(s.spend.rows_unpriced)} row(s) reported no price and are not counted as zero, so this is a floor.` : 'Every row counted here reported its own price.'}`}
+          footer={`${s.spend_label}. ${pricedOf(s.spend)}`}
           data-testid={`flow-spend-${stream}`}
         />
+        {stream === 'measure' && (
+          <StatTile
+            label="Cumulative spend, this repository"
+            value={fmtUsd(reading.spend.usd)}
+            n={reading.spend.rows_priced}
+            apparatus={`apparatus ${reading.apparatus} · every graded row counted once${versionsOf(reading.spend)}`}
+            hint="flow.spend_total"
+            footer={`Measuring, the factory and every other stream together; each stream’s own spend is a part of this. ${pricedOf(reading.spend)}`}
+            data-testid="flow-spend-total"
+          />
+        )}
         {s.per_unit_label !== '' && (
           <StatTile
             label={`Cost ${s.per_unit_label}`}

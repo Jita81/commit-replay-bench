@@ -135,6 +135,8 @@ export const HINTS = {
     'From an admin setting someone else’s password to that person signing in again: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted.',
   'flow.spend':
     'What this stream spent, summing only the rows whose cost is a measurement. A row that reported no price is never counted as zero, so the figure is a floor and the line underneath says how many rows are missing from it.',
+  'flow.spend_total':
+    'Everything this repository has spent, every graded row counted once: measuring, the factory and any stream that buys attempts. Each stream’s own spend is a part of this figure, so the parts never add up to more than it.',
   'flow.per_unit':
     'The priced spend divided by what the stream delivered, so a reader can price one certified change. It is a dash whenever either side is unmeasured, because a cost per change with no change to divide by is not zero.',
   'flow.counts':
@@ -1660,6 +1662,7 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.refusal_to_strengthening',
   'flow.password_set_to_signed_in',
   'flow.spend',
+  'flow.spend_total',
   'flow.per_unit',
   'flow.counts',
   'flow.not_captured',

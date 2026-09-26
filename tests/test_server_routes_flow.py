@@ -29,6 +29,7 @@ Touch when:   a stream's milestone pair changes; a figure moves out of ``not_cap
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -49,6 +50,8 @@ from crb.factory.evidence import (
     JsonlFactoryStore,
 )
 from crb.server.factory_state import FactoryHome
+from crb.server.flow import measure
+from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, User
 from fixtures.server_seed import (
     ALPHA,
@@ -63,6 +66,9 @@ from fixtures.server_seed import (
     user_id,
 )
 from fixtures.signoff_seed import attested_body, clear_policy
+
+#: The streams that buy graded rows; their spends partition the repository's.
+STREAMS_THAT_SPEND = ("connect-and-prove", "measure", "manufacture-and-deliver")
 
 PASSING_CONTROLS = {
     "schema": "crb.negative_controls.v1",
@@ -161,8 +167,12 @@ class TestMeasure:
         s = stream(reading(env), "measure")
         # 44 native rows at $0.012 each; the 6 imported census rows report no cost and are
         # NOT counted as zero (GradeRow.cost_known)
-        assert s["spend"] == {"usd": 0.528, "rows_priced": 44, "rows_unpriced": 6}
-        assert s["spend_label"] == "every graded row recorded for this repository"
+        assert (s["spend"]["usd"], s["spend"]["rows_priced"], s["spend"]["rows_unpriced"]) == (
+            0.528,
+            44,
+            6,
+        )
+        assert s["spend_label"] == "the replay and blind attempts graded for this repository"
 
     def test_prices_one_routable_cell_from_the_priced_rows(self, env: Env) -> None:
         s = stream(reading(env), "measure")
@@ -179,6 +189,24 @@ class TestMeasure:
         assert s["counts"]["cells_at_bar"] == 1
         assert lead(s, "first_row_to_bar")["n"] == 1
 
+    def test_a_cell_never_reaches_the_bar_on_rows_the_map_would_not_pool(self, env: Env) -> None:
+        # ten rows of one class and size — but split across two apparatus versions, or across
+        # sighted and blind — are two cells of five to the map, and so to the flow reading
+        base = env.info.rows[0]
+        ten = [
+            dataclasses.replace(base, created=f"2026-09-01T10:{i:02d}:00+00:00") for i in range(10)
+        ]
+        assert measure(ten, {}, {}).counts["cells_at_bar"] == 1
+        split_version = [
+            dataclasses.replace(r, apparatus_version="2.2") if i % 2 else r
+            for i, r in enumerate(ten)
+        ]
+        assert measure(split_version, {}, {}).counts["cells_at_bar"] == 0
+        split_mode = [
+            dataclasses.replace(r, mode="blind") if i % 2 else r for i, r in enumerate(ten)
+        ]
+        assert measure(split_mode, {}, {}).counts["cells_at_bar"] == 0
+
     def test_queued_to_graded_is_timed_from_the_runs_own_created_stamp(self, env: Env) -> None:
         s = stream(reading(env), "measure")
         lt = lead(s, "queued_to_graded")
@@ -186,9 +214,64 @@ class TestMeasure:
 
     def test_a_repository_with_no_rows_reads_unmeasured_not_zero(self, env: Env) -> None:
         s = stream(reading(env, BETA), "measure")
-        assert s["spend"] == {"usd": None, "rows_priced": 0, "rows_unpriced": 0}
+        assert s["spend"] == {
+            "usd": None,
+            "rows_priced": 0,
+            "rows_unpriced": 0,
+            "apparatus_versions": [],
+        }
         assert lead(s, "queued_to_graded")["median_s"] is None
         assert lead(s, "queued_to_graded")["reason"]
+
+
+def add_factory_row(env: Env, *, cost: float) -> None:
+    """One graded row the factory built — a copy of a seeded row with ``process_step``
+    ``factory`` — appended through the ledger, so it chains like any other."""
+    base = env.info.succeeded_rows[0]
+    row = dataclasses.replace(
+        base,
+        row_id="f" * 32,
+        process_step="factory",
+        run_id="factory-run-1",
+        cost_usd=cost,
+        created="2026-09-02T12:00:00+00:00",
+        prev_hash="",
+        row_hash="",
+    )
+    DbLedger(env.factory).append(row)
+
+
+class TestSpendIsCountedOnce:
+    def test_the_streams_spends_add_up_to_the_repository_total(self, env: Env) -> None:
+        add_factory_row(env, cost=0.5)
+        body = reading(env)
+        total = body["spend"]
+        parts = [stream(body, name)["spend"] for name in STREAMS_THAT_SPEND]
+        assert sum(p["rows_priced"] for p in parts) == total["rows_priced"] == 45
+        assert sum(p["rows_unpriced"] for p in parts) == total["rows_unpriced"] == 6
+        assert sum(p["usd"] or 0.0 for p in parts) == pytest.approx(total["usd"])
+        assert total["usd"] == pytest.approx(0.528 + 0.5)
+        # the streams that buy nothing say so and add nothing
+        for name in ("decide-and-license", "learn", "run-the-platform"):
+            assert stream(body, name)["spend"]["usd"] is None
+
+    def test_a_factory_row_is_the_manufacture_streams_and_never_the_measure_streams(
+        self, env: Env
+    ) -> None:
+        add_factory_row(env, cost=0.5)
+        body = reading(env)
+        assert stream(body, "manufacture-and-deliver")["spend"]["usd"] == pytest.approx(0.5)
+        m = stream(body, "measure")
+        assert m["spend"]["usd"] == pytest.approx(0.528)
+        assert m["counts"]["graded_rows"] == 50
+        # the repository's cumulative spend is on the reading, and the measure panel names it
+        assert m["counts"]["repository_rows_priced"] == 45
+
+    def test_the_total_names_the_apparatus_versions_its_rows_span(self, env: Env) -> None:
+        body = reading(env)
+        versions = body["spend"]["apparatus_versions"]
+        assert versions and versions == sorted(versions)
+        assert set(stream(body, "measure")["spend"]["apparatus_versions"]) <= set(versions)
 
 
 class TestConnectAndProve:
@@ -339,7 +422,12 @@ class TestManufactureAndDeliver:
         # the seed has no factory run, so the factory's own rows are none: a cost per merged
         # pull request over no priced row is unmeasured, never $0.00
         assert s["per_unit"] is None and s["per_unit_label"] == "per merged pull request"
-        assert s["spend"] == {"usd": None, "rows_priced": 0, "rows_unpriced": 0}
+        assert s["spend"] == {
+            "usd": None,
+            "rows_priced": 0,
+            "rows_unpriced": 0,
+            "apparatus_versions": [],
+        }
 
     def test_a_refused_delivery_and_a_closed_pull_request_are_counted(self, env: Env) -> None:
         write_chain(

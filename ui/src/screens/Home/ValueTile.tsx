@@ -9,9 +9,10 @@
  *               under them), its range in the same unit (pounds, not a percentage) labelled as
  *               the product of two Wilson bounds — not a 95% interval — the apparatus
  *               and whether the precision came from reviews or the labelled proxy. While the
- *               number is unmeasured (no blind attempt, no precision) or the API refuses it, the
- *               tile is an honest empty tile with the reason, never a zero. The whole tile is the
- *               hint trigger (`stat.home.value`).
+ *               number is unmeasured (no blind attempt, no precision), withheld (a blind attempt
+ *               carried no price, so the pounds are a floor — `per_pound_withheld`) or the API
+ *               refuses it, the tile is an honest empty tile with the reason, never a zero.
+ *               The whole tile is the hint trigger (`stat.home.value`).
  * How:          `useValue()` → `StatTile` with `value` and `n`, the per-pound interval and the
  *               pounds-per-change reading in the footer (StatTile's CI line formats a rate as a
  *               percentage, so it is not used for a figure in pounds).
@@ -49,7 +50,9 @@ export function ValueTile() {
       ? 'Loading.'
       : measured && ns
         ? `range ${fix(ns.per_pound_low)}–${fix(ns.per_pound_high)} per £ (the product of two 95% Wilson bounds, not itself a 95% interval) · about £${fix(ns.pounds_per_working)} per working change · n = ${ns.n_valid} attempts${typeof ns.n_tasks === 'number' ? ` on ${ns.n_tasks} tasks` : ''} · precision from ${basis}`
-        : 'No blind attempt with a precision yet, so there is no number to show.'
+        : ns?.per_pound_withheld
+          ? `Withheld: ${ns.per_pound_withheld}.`
+          : 'No blind attempt with a precision yet, so there is no number to show.'
   return (
     <StatTile
       data-testid="tile-value"

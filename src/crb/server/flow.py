@@ -19,6 +19,12 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 | learn | a refusal raised → the strengthening item that supersedes it registered |
 | run-the-platform | an admin set an account's password → that account signed in again |
 
+**Money is counted once.** Every graded row belongs to exactly one stream's spend
+(:func:`partition_rows`: a factory-built row is manufacture's, a row of a £0 proving run is
+connect's, every other row is measure's); the reading also serves the repository's cumulative
+spend, which the parts add up to. The sums use the product's one spend rule
+(``crb.core.flow.spend_of_rows``), which the value scorecard also uses.
+
 **What it refuses to invent.** Four figures those criteria ask for are not recorded anywhere,
 so they are served as :class:`~crb.core.flow.NotCaptured` — named, with why and with the gap
 that would close them — and never derived from a neighbouring number: the developer hours of
@@ -70,9 +76,9 @@ from crb.core.flow import (
     lead_time,
     parse_ts,
     per_unit,
-    spend_of,
+    spend_of_rows,
 )
-from crb.core.ledger import GradeRow
+from crb.core.ledger import PROCESS_FACTORY, GradeRow
 from crb.core.routing import DEFAULT_POLICY, ControlsVerdict
 from crb.core.signoff import SignoffRecord
 from crb.core.version import APPARATUS_VERSION
@@ -96,8 +102,6 @@ from crb.store.models import Event, Repo, Review, Run, Task, User
 PROVE_KINDS: frozenset[str] = frozenset({"setup", "probe", "mine", "label", "oracle", "controls"})
 #: The run kinds the measure stream buys attempts with.
 MEASURE_KINDS: frozenset[str] = frozenset({"replay", "blind"})
-#: The run kind the factory manufactures with.
-FACTORY_KIND = "factory"
 #: The event a repository's registration writes (src/crb/server/routes/repos.py).
 REPO_CREATED = "repo.created"
 #: The event a negative-controls run writes (src/crb/server/routes/oracle.py).
@@ -165,17 +169,36 @@ def _passed(verdict: ControlsVerdict) -> bool:
 
 
 def _costs(rows: Iterable[GradeRow]) -> Spend:
-    """The spend of ``rows``, honouring :attr:`GradeRow.cost_known`."""
-    return spend_of([(r.cost_usd, r.cost_known) for r in rows])
+    """The spend of ``rows`` by THE spend rule (:func:`crb.core.flow.spend_of_rows`), which
+    honours :attr:`GradeRow.cost_known` — the same rule ``GET /value`` sums with."""
+    return spend_of_rows(rows)
 
 
-def _rows_of_kinds(
-    rows: Sequence[GradeRow], run_kinds: dict[str, str], kinds: frozenset[str] | str
-) -> list[GradeRow]:
-    """The rows graded by a run of one of ``kinds`` (a row whose run is unknown — an import —
-    belongs to no stream's own spend, and the repository total still counts it)."""
-    want = frozenset({kinds}) if isinstance(kinds, str) else kinds
-    return [r for r in rows if run_kinds.get(r.run_id, "") in want]
+#: The partition keys: which stream's spend a graded row belongs to (exactly one).
+PART_CONNECT = "connect-and-prove"
+PART_MEASURE = "measure"
+PART_MANUFACTURE = "manufacture-and-deliver"
+
+
+def partition_rows(
+    rows: Sequence[GradeRow], run_kinds: dict[str, str]
+) -> dict[str, list[GradeRow]]:
+    """Every graded row in exactly ONE stream's spend, so no row is counted twice.
+
+    A row the factory built (``process_step == factory``) is the manufacture stream's; a row
+    written by a run of one of :data:`PROVE_KINDS` is the connect stream's (none writes a
+    graded row today, and the stream says so); every other row — a replay or blind attempt,
+    including a historical or imported row whose run the runs table never had — is the
+    measure stream's. The parts add up to the repository's cumulative spend."""
+    parts: dict[str, list[GradeRow]] = {PART_CONNECT: [], PART_MEASURE: [], PART_MANUFACTURE: []}
+    for r in rows:
+        if r.process_step == PROCESS_FACTORY:
+            parts[PART_MANUFACTURE].append(r)
+        elif run_kinds.get(r.run_id, "") in PROVE_KINDS:
+            parts[PART_CONNECT].append(r)
+        else:
+            parts[PART_MEASURE].append(r)
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -183,9 +206,7 @@ def _rows_of_kinds(
 # ---------------------------------------------------------------------------
 
 
-def connect_and_prove(
-    session: Session, repo: str, rows: Sequence[GradeRow], run_kinds: dict[str, str]
-) -> StreamFlow:
+def connect_and_prove(session: Session, repo: str, rows: Sequence[GradeRow]) -> StreamFlow:
     """Registration → a passed controls report, and what proving the instrument cost."""
     registered = repo_registered(session, repo)
     passed_at = first_controls_pass(session, repo)
@@ -218,8 +239,11 @@ def connect_and_prove(
                 reason=reason,
             ),
         ),
-        spend=_costs(_rows_of_kinds(rows, run_kinds, PROVE_KINDS)),
-        spend_label="the £0 stages: setup, probe, mine, label, oracle and controls",
+        spend=_costs(rows),
+        spend_label=(
+            "the £0 stages: setup, probe, mine, label, oracle and controls write no graded "
+            "row, so nothing is spent here"
+        ),
         counts={
             "tasks_mined": mined,
             "tasks_gold_clean": gold,
@@ -230,11 +254,22 @@ def connect_and_prove(
 
 
 def measure(
-    rows: Sequence[GradeRow], run_kinds: dict[str, str], run_created: dict[str, str]
+    rows: Sequence[GradeRow],
+    run_kinds: dict[str, str],
+    run_created: dict[str, str],
+    *,
+    repository: Spend | None = None,
 ) -> StreamFlow:
-    """Run queued → last row graded, first row of a cell → its tenth, the repository's
-    cumulative spend (the criterion's own words: every row this repository has paid for) and
-    what one routable cell has cost — the priced spend over the cells that reached the bar."""
+    """Run queued → last row graded, a cell's first row → its tenth, what measuring spent (the
+    replay and blind rows — the stream's own part of the repository's spend) and what one
+    routable cell has cost — the priced spend over the cells that reached the bar.
+
+    A cell here is what the map keys a cell by before it routes: class and size WITHIN one
+    apparatus version, one mode and one checks arm. Rows of two apparatus versions, of
+    sighted and blind, or of two arms are never pooled into one cell's ten (the map would not
+    pool them either, ADR-0003 and ADR-0024). ``repository`` is the cumulative spend of every
+    graded row of the repository (the criterion's "cumulative spend per repository"); it is
+    served on the reading, and named here in a count so the two are never confused."""
     by_run: dict[str, list[GradeRow]] = {}
     for r in rows:
         if run_kinds.get(r.run_id, "") in MEASURE_KINDS:
@@ -244,15 +279,24 @@ def measure(
         for run_id, rs in by_run.items()
         if rs
     ]
-    by_cell: dict[tuple[str, str], list[GradeRow]] = {}
+    by_cell: dict[tuple[str, str, str, str, str], list[GradeRow]] = {}
     for r in rows:
-        by_cell.setdefault((r.capability_class, r.size), []).append(r)
+        key = (r.apparatus_version, r.mode, r.checks_arm, r.capability_class, r.size)
+        by_cell.setdefault(key, []).append(r)
     bar_pairs: list[tuple[str, str]] = []
     for cell_rows in by_cell.values():
         stamps = sorted(r.created for r in cell_rows)
         if len(stamps) >= CELL_N_BAR:
             bar_pairs.append((stamps[0], stamps[CELL_N_BAR - 1]))
     spend = _costs(rows)
+    counts = {
+        "graded_rows": len(rows),
+        "runs_graded": len(by_run),
+        "cells_at_bar": len(bar_pairs),
+    }
+    if repository is not None:
+        counts["repository_rows_priced"] = repository.rows_priced
+        counts["repository_rows_unpriced"] = repository.rows_unpriced
     return StreamFlow(
         stream="measure",
         name=STREAM_NAMES["measure"],
@@ -267,18 +311,17 @@ def measure(
                 "first_row_to_bar",
                 f"A cell's first row → its {CELL_N_BAR}th",
                 bar_pairs,
-                reason=f"no class and size has reached {CELL_N_BAR} graded rows yet",
+                reason=(
+                    f"no class and size has reached {CELL_N_BAR} graded rows yet within one "
+                    "apparatus version, mode and checks arm"
+                ),
             ),
         ),
         spend=spend,
-        spend_label="every graded row recorded for this repository",
+        spend_label="the replay and blind attempts graded for this repository",
         per_unit=per_unit(spend, len(bar_pairs)),
         per_unit_label=f"per cell that reached {CELL_N_BAR} rows",
-        counts={
-            "graded_rows": len(rows),
-            "runs_graded": len(by_run),
-            "cells_at_bar": len(bar_pairs),
-        },
+        counts=counts,
     )
 
 
@@ -327,9 +370,7 @@ def decide_and_license(
     )
 
 
-def manufacture_and_deliver(
-    events: Sequence[FactoryEvent], rows: Sequence[GradeRow], run_kinds: dict[str, str]
-) -> StreamFlow:
+def manufacture_and_deliver(events: Sequence[FactoryEvent], rows: Sequence[GradeRow]) -> StreamFlow:
     """Item registered → pull request opened → merged, and the cost of a certified change."""
     registered: dict[str, str] = {}
     opened: dict[str, str] = {}
@@ -354,7 +395,7 @@ def manufacture_and_deliver(
     to_pr = [(registered[i], opened[i]) for i in opened if i in registered]
     to_merge = [(opened[i], merged[i]) for i in merged if i in opened]
     end_to_end = [(registered[i], merged[i]) for i in merged if i in registered]
-    spend = _costs(_rows_of_kinds(rows, run_kinds, FACTORY_KIND))
+    spend = _costs(rows)
     return StreamFlow(
         stream="manufacture-and-deliver",
         name=STREAM_NAMES["manufacture-and-deliver"],
@@ -379,7 +420,7 @@ def manufacture_and_deliver(
             ),
         ),
         spend=spend,
-        spend_label="the graded rows of this repository's factory runs",
+        spend_label="the graded rows the factory built for this repository",
         per_unit=per_unit(spend, len(merged)),
         per_unit_label="per merged pull request",
         counts={
@@ -528,11 +569,13 @@ def build_flow(
     runs = list(session.execute(select(Run).where(Run.repo == repo)).scalars())
     run_kinds = {r.id: r.kind for r in runs}
     run_created = {r.id: r.created for r in runs}
+    parts = partition_rows(rows, run_kinds)
+    total = _costs(rows)
     streams = (
-        connect_and_prove(session, repo, rows, run_kinds),
-        measure(rows, run_kinds, run_created),
+        connect_and_prove(session, repo, parts[PART_CONNECT]),
+        measure(parts[PART_MEASURE], run_kinds, run_created, repository=total),
         decide_and_license(session, repo, signoffs, rows),
-        manufacture_and_deliver(factory_events, rows, run_kinds),
+        manufacture_and_deliver(factory_events, parts[PART_MANUFACTURE]),
         learn(factory_events),
         run_the_platform(session),
     )
@@ -542,4 +585,5 @@ def build_flow(
         generated=utc_now_iso(),
         method=METHOD,
         streams=streams,
+        spend=total,
     )
