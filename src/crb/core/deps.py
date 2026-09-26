@@ -99,6 +99,9 @@ PROVISION_TOOLCHAIN_TOO_OLD = "PROVISION_TOOLCHAIN_TOO_OLD"
 PROVISION_FETCH_FAILED = "PROVISION_FETCH_FAILED"
 PROVISION_TOO_LARGE = "PROVISION_TOO_LARGE"
 PROVISION_UNSAFE_OUTPUT = "PROVISION_UNSAFE_OUTPUT"
+#: Task scope: a fact about one commit's TREE — it holds its own dependency tree where the
+#: host would read it before the sealed set (a committed ``node_modules``).
+PROVISION_TREE_SHADOWS_SET = "PROVISION_TREE_SHADOWS_SET"
 #: A sealed set no longer matches its digest (run scope).
 BUNDLE_INTEGRITY = "BUNDLE_INTEGRITY"
 
@@ -182,6 +185,12 @@ REFUSALS: Mapping[str, tuple[str, str]] = {
         "a package's install or rebuild step wrote a link that leaves its dependency set; "
         "the set was discarded, not sealed: find the package named and leave it out of "
         "runner_opts.deps_build_scripts, or pin a version that does not do this",
+    ),
+    PROVISION_TREE_SHADOWS_SET: (
+        SCOPE_TASK,
+        "this commit's tree holds its own node_modules directory, which Node and npm read "
+        "before the sealed set on the host; measure this repository with the docker "
+        "executor (the set is mounted over it) or in the local posture",
     ),
     BUNDLE_INTEGRITY: (
         SCOPE_RUN,
@@ -651,6 +660,7 @@ __all__ = [
     "PROVISION_STORE_NOT_VISIBLE",
     "PROVISION_TOOLCHAIN_TOO_OLD",
     "PROVISION_TOO_LARGE",
+    "PROVISION_TREE_SHADOWS_SET",
     "PROVISION_UNPINNED",
     "PROVISION_UNSAFE_OUTPUT",
     "PROVISION_UNSUPPORTED_LANGUAGE",

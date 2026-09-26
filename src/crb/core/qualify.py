@@ -598,7 +598,8 @@ def qualify_task(
        ``QUAL_GOLD_NEW_FAILURES`` / ``QUAL_GOLD_LINT``.
 
     A tree the executor could not copy is ``QUAL_TREE_COPY_FAILED`` at any step. ``deps``
-    may be a provider: its task-scope refusal is an ``unqualified`` record with the code;
+    may be a provider: its task-scope refusal — or one the runner raises while it prepares
+    a tree (``PROVISION_TREE_SHADOWS_SET``) — is an ``unqualified`` record with the code;
     a run-scope one (a deployment setting) is re-raised.
     """
     started = time.monotonic()
@@ -660,170 +661,187 @@ def qualify_task(
     def copy_failed(run: TestRun) -> Qualification:
         return refuse(QUAL_TREE_COPY_FAILED, f"the tree could not be prepared: {run.env_error}")
 
-    # --- 1 + 2 + 3: the parent -------------------------------------------------
-    dest = Path(scratch) / f"qual-{config.name}-{task.short_id}-{uuid.uuid4().hex[:6]}"
-    with Workspace.create(repo, task.task_id, dest, config=config) as ws:
-        env_probe: dict[str, Any] = {"ran": False}
-        with runner.deps_bound(deps.parent):
-            probe = runner.env_probe_command(ws.root, (), executor=executor, timeout=t)
-        if probe is not None:
-            res = executor.run(with_deps(probe, deps.parent, executor.name))
-            if res.env_error:
-                return refuse(
-                    QUAL_TREE_COPY_FAILED, f"the tree could not be prepared: {res.env_error}"
-                )
-            env_probe = {
-                "ran": True,
-                "ok": res.ok,
-                "rc": res.returncode,
-                "duration_s": round(res.duration_s, 3),
-                "tail": "" if res.ok else _tail(res.combined),
-            }
+    def measure() -> Qualification:
+        # --- 1 + 2 + 3: the parent -------------------------------------------------
+        dest = Path(scratch) / f"qual-{config.name}-{task.short_id}-{uuid.uuid4().hex[:6]}"
+        with Workspace.create(repo, task.task_id, dest, config=config) as ws:
+            env_probe: dict[str, Any] = {"ran": False}
+            with runner.deps_bound(deps.parent):
+                probe = runner.env_probe_command(ws.root, (), executor=executor, timeout=t)
+            if probe is not None:
+                res = executor.run(with_deps(probe, deps.parent, executor.name))
+                if res.env_error:
+                    return refuse(
+                        QUAL_TREE_COPY_FAILED, f"the tree could not be prepared: {res.env_error}"
+                    )
+                env_probe = {
+                    "ran": True,
+                    "ok": res.ok,
+                    "rc": res.returncode,
+                    "duration_s": round(res.duration_s, 3),
+                    "tail": "" if res.ok else _tail(res.combined),
+                }
+                facts["env_probe"] = env_probe
+                if not res.ok:
+                    return refuse(
+                        QUAL_ENV_UNLOADABLE,
+                        "the parent cannot load its dependencies offline in this posture: "
+                        + _tail(res.combined, 4),
+                    )
             facts["env_probe"] = env_probe
-            if not res.ok:
-                return refuse(
-                    QUAL_ENV_UNLOADABLE,
-                    "the parent cannot load its dependencies offline in this posture: "
-                    + _tail(res.combined, 4),
-                )
-        facts["env_probe"] = env_probe
 
-        ws.overlay_tests(task.test_files)
-        red = runner.run_for(
-            executor,
-            ws.root,
-            task.target_tests,
-            timeout=t,
-            authored=task.authored,
-            deps=deps.parent,
-        )
-        if red.env_error:
-            return copy_failed(red)
-        if red.timed_out:
-            return refuse(QUAL_RED_TIMEOUT, "target timeout at parent")
-        if red.green:
-            return refuse(QUAL_NOT_RED, "target green at parent")
-        kind = RED_TESTS_FAILED if red.failing else RED_BUILD_FAILED
-        facts["red"] = {
-            "kind": kind,
-            "rc": red.returncode,
-            "failing": sorted(red.failing),
-            "duration_s": round(red.duration_s, 3),
-        }
-        # a build-failure RED needs a green probe; host-env with no probe keeps the rule
-        # this product always had (accepted)
-        if kind == RED_BUILD_FAILED and not env_probe.get("ok") and (probe is not None or sealed):
-            return refuse(
-                QUAL_ENV_UNLOADABLE,
-                "the target did not build at the parent and nothing proves this posture "
-                "can load its dependencies: " + _tail(red.tail, 4),
-            )
-
-        runs = [
-            runner.run_for(
+            ws.overlay_tests(task.test_files)
+            red = runner.run_for(
                 executor,
                 ws.root,
-                task.belt_scope,
+                task.target_tests,
                 timeout=t,
                 authored=task.authored,
                 deps=deps.parent,
             )
-            for _ in range(2)
-        ]
-        for b in runs:
-            if b.env_error:
-                return copy_failed(b)
-            if b.timed_out:
-                return refuse(QUAL_BASELINE_TIMEOUT, "baseline timeout")
-        if kind == RED_TESTS_FAILED and any(b.parse_error for b in runs):
-            bad = next(b for b in runs if b.parse_error)
-            return refuse(
-                QUAL_BASELINE_UNATTRIBUTED,
-                f"the belt scope failed at the parent without naming a test: {bad.parse_error}",
-            )
-        unattributed = next((b.parse_error for b in runs if b.parse_error), "")
-        if unattributed:
-            # explained by the build-failure RED; recorded, never a baseline id
-            facts["red"] = {**facts["red"], "baseline_parse_error": unattributed[:300]}
-        union = frozenset(runs[0].failing) | frozenset(runs[1].failing)
-        flaky = frozenset(runs[0].failing) ^ frozenset(runs[1].failing)
-        facts["baseline_failing"] = tuple(sorted(union))
-        facts["baseline_flaky"] = tuple(sorted(flaky))
+            if red.env_error:
+                return copy_failed(red)
+            if red.timed_out:
+                return refuse(QUAL_RED_TIMEOUT, "target timeout at parent")
+            if red.green:
+                return refuse(QUAL_NOT_RED, "target green at parent")
+            kind = RED_TESTS_FAILED if red.failing else RED_BUILD_FAILED
+            facts["red"] = {
+                "kind": kind,
+                "rc": red.returncode,
+                "failing": sorted(red.failing),
+                "duration_s": round(red.duration_s, 3),
+            }
+            # a build-failure RED needs a green probe; host-env with no probe keeps the rule
+            # this product always had (accepted)
+            if (
+                kind == RED_BUILD_FAILED
+                and not env_probe.get("ok")
+                and (probe is not None or sealed)
+            ):
+                return refuse(
+                    QUAL_ENV_UNLOADABLE,
+                    "the target did not build at the parent and nothing proves this posture "
+                    "can load its dependencies: " + _tail(red.tail, 4),
+                )
 
-    # --- 4: the gold, in a fresh worktree, at half the wall clock ---------------
-    gdest = Path(scratch) / f"qual-gold-{config.name}-{task.short_id}-{uuid.uuid4().hex[:6]}"
-    with Workspace.create(repo, task.task_id, gdest, config=config) as gws:
-        gws.overlay_tests(task.test_files)
-        gws.overlay_sources(task.src_files)
-        targets = [
-            runner.run_for(
+            runs = [
+                runner.run_for(
+                    executor,
+                    ws.root,
+                    task.belt_scope,
+                    timeout=t,
+                    authored=task.authored,
+                    deps=deps.parent,
+                )
+                for _ in range(2)
+            ]
+            for b in runs:
+                if b.env_error:
+                    return copy_failed(b)
+                if b.timed_out:
+                    return refuse(QUAL_BASELINE_TIMEOUT, "baseline timeout")
+            if kind == RED_TESTS_FAILED and any(b.parse_error for b in runs):
+                bad = next(b for b in runs if b.parse_error)
+                return refuse(
+                    QUAL_BASELINE_UNATTRIBUTED,
+                    f"the belt scope failed at the parent without naming a test: {bad.parse_error}",
+                )
+            unattributed = next((b.parse_error for b in runs if b.parse_error), "")
+            if unattributed:
+                # explained by the build-failure RED; recorded, never a baseline id
+                facts["red"] = {**facts["red"], "baseline_parse_error": unattributed[:300]}
+            union = frozenset(runs[0].failing) | frozenset(runs[1].failing)
+            flaky = frozenset(runs[0].failing) ^ frozenset(runs[1].failing)
+            facts["baseline_failing"] = tuple(sorted(union))
+            facts["baseline_flaky"] = tuple(sorted(flaky))
+
+        # --- 4: the gold, in a fresh worktree, at half the wall clock ---------------
+        gdest = Path(scratch) / f"qual-gold-{config.name}-{task.short_id}-{uuid.uuid4().hex[:6]}"
+        with Workspace.create(repo, task.task_id, gdest, config=config) as gws:
+            gws.overlay_tests(task.test_files)
+            gws.overlay_sources(task.src_files)
+            targets = [
+                runner.run_for(
+                    executor,
+                    gws.root,
+                    task.target_tests,
+                    timeout=half,
+                    authored=task.authored,
+                    deps=deps.gold,
+                )
+                for _ in range(2)
+            ]
+            gold: dict[str, Any] = {
+                "clean": False,
+                "note": "",
+                "lint": None,
+                "target_runs": 2,
+                "timeout_s": half,
+                "duration_s": round(sum(r.duration_s for r in targets), 3),
+            }
+            facts["gold"] = gold
+            for r in targets:
+                if r.env_error:
+                    return copy_failed(r)
+            reds = [r for r in targets if r.red]
+            if reds:
+                if all(r.timed_out for r in reds):
+                    gold["note"] = f"gold target needed more than half the wall clock ({half}s)"
+                    return refuse(QUAL_HEADROOM, gold["note"])
+                if len(reds) < len(targets):
+                    gold["note"] = "the gold's 2 target runs disagreed"
+                    return refuse(QUAL_TARGET_FLAKY, gold["note"])
+                gold["note"] = f"gold target not green (rc={reds[0].returncode})"
+                return refuse(QUAL_GOLD_NOT_GREEN, gold["note"])
+            belt = runner.run_for(
                 executor,
                 gws.root,
-                task.target_tests,
+                task.belt_scope,
                 timeout=half,
                 authored=task.authored,
                 deps=deps.gold,
             )
-            for _ in range(2)
-        ]
-        gold: dict[str, Any] = {
-            "clean": False,
-            "note": "",
-            "lint": None,
-            "target_runs": 2,
-            "timeout_s": half,
-            "duration_s": round(sum(r.duration_s for r in targets), 3),
-        }
-        facts["gold"] = gold
-        for r in targets:
-            if r.env_error:
-                return copy_failed(r)
-        reds = [r for r in targets if r.red]
-        if reds:
-            if all(r.timed_out for r in reds):
-                gold["note"] = f"gold target needed more than half the wall clock ({half}s)"
+            if belt.env_error:
+                return copy_failed(belt)
+            if belt.timed_out:
+                gold["note"] = f"gold belt scope needed more than half the wall clock ({half}s)"
                 return refuse(QUAL_HEADROOM, gold["note"])
-            if len(reds) < len(targets):
-                gold["note"] = "the gold's 2 target runs disagreed"
-                return refuse(QUAL_TARGET_FLAKY, gold["note"])
-            gold["note"] = f"gold target not green (rc={reds[0].returncode})"
-            return refuse(QUAL_GOLD_NOT_GREEN, gold["note"])
-        belt = runner.run_for(
-            executor,
-            gws.root,
-            task.belt_scope,
-            timeout=half,
-            authored=task.authored,
-            deps=deps.gold,
-        )
-        if belt.env_error:
-            return copy_failed(belt)
-        if belt.timed_out:
-            gold["note"] = f"gold belt scope needed more than half the wall clock ({half}s)"
-            return refuse(QUAL_HEADROOM, gold["note"])
-        if belt.parse_error:
-            gold["note"] = f"gold belt unattributed: {belt.parse_error}"
-            return refuse(QUAL_GOLD_NEW_FAILURES, gold["note"])
-        new = set(belt.failing) - union
-        if new:
-            gold["note"] = f"gold introduced {len(new)} belt failure(s)"
-            return refuse(QUAL_GOLD_NEW_FAILURES, gold["note"] + ": " + ", ".join(sorted(new)[:5]))
-        # belt 5 on the gold: the plan a builder's patch would face
-        plan = runner.lint_plan(gws.root, executor)
-        if plan is not None:
-            present = [f for f in task.src_files if gws.exists(f)]
-            lint_run = run_plan(plan, executor, gws.root, present)
-            gold["lint"] = lint_run.ok
-            if lint_run.error:
-                gold["note"] = f"gold lint could not run ({lint_run.detected}): {lint_run.error}"[
-                    :300
-                ]
-                return refuse(QUAL_GOLD_LINT, gold["note"])
-            if lint_run.ok is False:
-                gold["note"] = f"gold fails belt 5 ({lint_run.detected}): {lint_run.note}"[:300]
-                return refuse(QUAL_GOLD_LINT, gold["note"])
-        gold["clean"] = True
-    return finish(Qualification(**common, state=STATE_QUALIFIED, **facts))
+            if belt.parse_error:
+                gold["note"] = f"gold belt unattributed: {belt.parse_error}"
+                return refuse(QUAL_GOLD_NEW_FAILURES, gold["note"])
+            new = set(belt.failing) - union
+            if new:
+                gold["note"] = f"gold introduced {len(new)} belt failure(s)"
+                return refuse(
+                    QUAL_GOLD_NEW_FAILURES, gold["note"] + ": " + ", ".join(sorted(new)[:5])
+                )
+            # belt 5 on the gold: the plan a builder's patch would face
+            plan = runner.lint_plan(gws.root, executor)
+            if plan is not None:
+                present = [f for f in task.src_files if gws.exists(f)]
+                lint_run = run_plan(plan, executor, gws.root, present)
+                gold["lint"] = lint_run.ok
+                if lint_run.error:
+                    gold["note"] = (
+                        f"gold lint could not run ({lint_run.detected}): {lint_run.error}"[:300]
+                    )
+                    return refuse(QUAL_GOLD_LINT, gold["note"])
+                if lint_run.ok is False:
+                    gold["note"] = f"gold fails belt 5 ({lint_run.detected}): {lint_run.note}"[:300]
+                    return refuse(QUAL_GOLD_LINT, gold["note"])
+            gold["clean"] = True
+        return finish(Qualification(**common, state=STATE_QUALIFIED, **facts))
+
+    # a task-scope refusal raised while a tree is prepared (a Node tree whose own
+    # node_modules would shadow the sealed set) is an unqualified record, as the one
+    # ``resolve`` raises is; a run-scope one stops the run
+    try:
+        return measure()
+    except ProvisionRefused as exc:
+        if exc.refusal.scope == SCOPE_RUN:
+            raise
+        return refuse(exc.refusal.code, exc.refusal.message)
 
 
 def delta_against(q: Qualification, others: Sequence[Qualification]) -> dict[str, Any]:

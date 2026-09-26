@@ -389,3 +389,58 @@ def test_a_local_sealed_run_resolves_the_sealed_tree_not_the_clones(tmp_path: Pa
     runner.ensure_era(root, ex)
     assert (root / "node_modules").resolve() == clone_nm.resolve()
     sealed.chmod(0o755)
+
+
+def test_a_local_sealed_run_refuses_a_tree_whose_own_node_modules_would_shadow_the_set(
+    tmp_path: Path,
+) -> None:
+    """A commit that holds a REAL ``node_modules`` directory (a repository that commits
+    it): on the host Node and ``npm ls`` read it before the bound set, and the harness
+    must not delete what the commit holds — so a local sealed run stops with the
+    task-scope provisioning refusal ``PROVISION_TREE_SHADOWS_SET``, never a verdict under
+    a ``sealed`` label. The directory is left exactly as it was (the adversarial check on
+    the answer to CodeRabbit's thread on PR #56)."""
+    from crb.core.deps import (
+        PROVISION_TREE_SHADOWS_SET,
+        SCHEME_NODE,
+        SCOPE_TASK,
+        BundleMount,
+        DepsBinding,
+        ProvisionRefused,
+        register_store_root,
+    )
+
+    key = "dep_" + "b" * 64
+    store = register_store_root(tmp_path / "store")
+    sealed = store / "node" / key / "node_modules"
+    (sealed / ".bin").mkdir(parents=True)
+    root = tmp_path / "wt"
+    (root / "node_modules" / "leftpad").mkdir(parents=True)
+    (root / "node_modules" / "leftpad" / "index.js").write_text("module.exports=1\n")
+    (root / "package.json").write_text('{"name": "x"}', encoding="utf-8")
+    binding = DepsBinding(
+        role="parent",
+        lang="node",
+        scheme=SCHEME_NODE,
+        key=key,
+        digest="sha256:" + "e" * 64,
+        mounts=(BundleMount(sealed, "/work/node_modules", key),),
+        env={"NODE_PATH": "/work/node_modules"},
+        local_env={"NODE_PATH": str(sealed)},
+    )
+    runner = get_runner(noderepo.config("node"))
+    runner.env_dir = tmp_path / "env"
+    ex = LocalExecutor()
+    with runner.deps_bound(binding):
+        with pytest.raises(ProvisionRefused) as probe_exc:
+            runner.env_probe_command(root, (), executor=ex, timeout=30)
+        with pytest.raises(ProvisionRefused) as run_exc:
+            runner.ensure_era(root, ex)  # what run() and lint_plan() call first
+    for exc in (probe_exc.value, run_exc.value):
+        assert exc.code == PROVISION_TREE_SHADOWS_SET and exc.scope == SCOPE_TASK
+        assert "node_modules" in exc.message and exc.fix
+    nm = root / "node_modules"
+    assert nm.is_dir() and not nm.is_symlink()
+    assert (nm / "leftpad" / "index.js").read_text() == "module.exports=1\n"
+    # without a sealed set the worktree's own tree is the host-env posture's, as today
+    assert runner.ensure_era(root, ex) is None and nm.is_dir() and not nm.is_symlink()

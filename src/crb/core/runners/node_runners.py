@@ -53,6 +53,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from crb.core.deps import PROVISION_TREE_SHADOWS_SET, ProvisionRefused
 from crb.core.execution import Command, ExecResult, Executor
 from crb.core.lint import LintPlan, js_plan
 from crb.core.runners.base import (
@@ -174,7 +175,10 @@ class _NodeBase(BaseRunner):
         With a sealed set bound (ADR-0019) on the host, the link is pointed at THAT set:
         Node resolves ``./node_modules`` before ``NODE_PATH``, so a link left at the clone's
         tree would grade a ``sealed`` posture against the clone's install (CodeRabbit on PR
-        #56). No era is ever installed for a sealed set.
+        #56). No era is ever installed for a sealed set. A ``node_modules`` that is not a
+        link (the commit holds its own tree) would shadow the set the same way and is the
+        commit's, never the harness's to delete: ``PROVISION_TREE_SHADOWS_SET`` (task
+        scope), never a verdict.
         """
         if executor.name == "docker":
             return None
@@ -182,9 +186,16 @@ class _NodeBase(BaseRunner):
         link = root / "node_modules"
         sealed = self._sealed_nm()
         if sealed is not None:
-            if link.is_symlink() and link.resolve() != sealed.resolve():
-                link.unlink()
-                link.symlink_to(sealed)
+            if link.is_symlink():
+                if link.resolve() != sealed.resolve():
+                    link.unlink()
+                    link.symlink_to(sealed)
+            elif link.exists():
+                raise ProvisionRefused(
+                    PROVISION_TREE_SHADOWS_SET,
+                    "./node_modules is part of the commit's own tree, so on the host Node "
+                    "and npm would read it before the sealed set",
+                )
             return None
         if self.env_dir is None:
             return None

@@ -310,7 +310,7 @@ stream D read 4 from the deployment's ledger export, which is not committed — 
 | `PROVISION_FETCH_IMAGE_UNPINNED` | run | pin `CRB_PROVISION__{GO,PYTHON,NODE}_IMAGE` by digest |
 | `PROVISION_STORE_NOT_VISIBLE` | run | put `CRB_PROVISION__STORE` where the daemon can bind-mount it (under colima: your home; under `dind`: the work volume) |
 | `PROVISION_UNSUPPORTED_LANGUAGE` | run | JVM and Rust: the local posture only in this version |
-| `PROVISION_NO_LOCK`, `PROVISION_UNPINNED`, `PROVISION_SOURCE_REFUSED`, `PROVISION_BUILD_REQUIRED`, `PROVISION_LOCK_UNSUPPORTED`, `PROVISION_PRIVATE_MODULE`, `PROVISION_TOOLCHAIN_TOO_OLD`, `PROVISION_FETCH_FAILED`, `PROVISION_TOO_LARGE`, `PROVISION_UNSAFE_OUTPUT` | task | a fact about that commit's lockfiles or the registry; the message names the file, the line, the host or the setting |
+| `PROVISION_NO_LOCK`, `PROVISION_UNPINNED`, `PROVISION_SOURCE_REFUSED`, `PROVISION_BUILD_REQUIRED`, `PROVISION_LOCK_UNSUPPORTED`, `PROVISION_PRIVATE_MODULE`, `PROVISION_TOOLCHAIN_TOO_OLD`, `PROVISION_FETCH_FAILED`, `PROVISION_TOO_LARGE`, `PROVISION_UNSAFE_OUTPUT`, `PROVISION_TREE_SHADOWS_SET` | task | a fact about that commit's lockfiles or the registry; the message names the file, the line, the host or the setting |
 | `BUNDLE_INTEGRITY` | run | a sealed set no longer matches its digest: `crb deps verify` names it; delete that set's directory from the store and the next run fetches and seals it again. Nothing removes the damaged set or revokes the qualifications that cite it for you yet **[gap]** (G-966) |
 
 Switch it on in this order: mirror the registries inside the tenant (or allow the public

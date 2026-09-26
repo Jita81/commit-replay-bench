@@ -114,7 +114,12 @@ seam, `crb.core.deps`, and wired end to end.
   PR #56). On the host executor Node resolves `./node_modules` before `NODE_PATH`, and the
   worktree's link still pointed at the clone's install, so `local/inplace/sealed` graded
   and probed (`npm ls`) the clone's tree under a `sealed` label. The link is now pointed at
-  the bound set before a test run, a lint plan and the environment probe.
+  the bound set before a test run, a lint plan and the environment probe. A commit whose
+  tree holds its own `node_modules` directory would shadow the set the same way, and the
+  harness never deletes what a commit holds: that task is refused
+  `PROVISION_TREE_SHADOWS_SET` (a new task-scope provisioning code), never graded, and
+  `qualify_task` now records any task-scope refusal raised while it prepares a tree as an
+  `unqualified` record rather than an exception.
 - **The toolchain probe copies nothing** (product.posture.34; CodeRabbit on PR #56). `mine`
   resolves the posture in the clone, `.git` and all, and the version probe copied that whole
   tree into the sandbox's tmpfs: a large clone failed the copy and was reported as "cannot

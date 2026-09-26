@@ -384,6 +384,52 @@ def test_task_scope_refusal_skips_and_run_scope_refusal_stops(
     assert exc.value.refusal.scope == "run" and "CRB_PROVISION__ENABLED" in exc.value.refusal.fix
 
 
+class _ShadowedTree(_Scripted):
+    """A runner that stops with a provisioning refusal while it prepares the tree (the Node
+    runner on a tree whose own ``node_modules`` shadows the sealed set): at the parent's
+    environment probe (``at="probe"``) or at the gold's first run (``at="gold"``)."""
+
+    def __init__(self, config: Any, script: list[Run], *, at: str, code: str) -> None:
+        super().__init__(config, script, probe=True)
+        self.at, self.code = at, code
+
+    def _refuse(self) -> None:
+        raise ProvisionRefused(refusal(self.code, "./node_modules is the commit's own tree"))
+
+    def env_probe_command(
+        self, root: Path, scope: Any, *, executor: Executor, timeout: int
+    ) -> Command | None:
+        if self.at == "probe":
+            self._refuse()
+        return super().env_probe_command(root, scope, executor=executor, timeout=timeout)
+
+    def run(self, executor: Any, root: Path, scope: Any, *, timeout: int = 0) -> Run:
+        if self.at == "gold" and len(self.calls) == 3:  # RED + 2 baselines, then the gold
+            self._refuse()
+        return super().run(executor, root, scope, timeout=timeout)
+
+
+@pytest.mark.parametrize("at", ["probe", "gold"])
+def test_a_task_scope_refusal_while_measuring_is_an_unqualified_record(
+    pyrepo: pr.PyRepo, tmp_path: Path, at: str
+) -> None:
+    """The docstring's promise holds past ``resolve``: a task-scope provisioning refusal
+    raised while a tree is prepared (``PROVISION_TREE_SHADOWS_SET``) is an ``unqualified``
+    record with its code and fix — never an exception that stops ``mine`` — and a
+    run-scope one still stops the run."""
+    from crb.core.deps import PROVISION_TREE_SHADOWS_SET
+
+    script = [_red(pr.TEST_SUBTRACT), _green(), _green(), _green(), _green(), _green()]
+    runner = _ShadowedTree(pyrepo.config, script, at=at, code=PROVISION_TREE_SHADOWS_SET)
+    q = _qualify(pyrepo, runner, tmp_path, mode=DEPS_MODE_SEALED)
+    assert q.state == qmod.STATE_UNQUALIFIED and q.code == PROVISION_TREE_SHADOWS_SET
+    assert q.fix and "node_modules" in q.message
+    stop = _ShadowedTree(pyrepo.config, list(script), at=at, code=PROVISION_DISABLED)
+    with pytest.raises(ProvisionRefused) as exc:
+        _qualify(pyrepo, stop, tmp_path, mode=DEPS_MODE_SEALED)
+    assert exc.value.refusal.scope == "run"
+
+
 def test_delta_against_another_postures_qualification() -> None:
     host = _q(
         qualification_id="h" * 32,
