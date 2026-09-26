@@ -6,7 +6,7 @@
  * (shape-valid, fake) `claude setup-token` value through the UI — status, ≤4-char
  * fingerprint, provenance, remove — without the value ever appearing in the page;
  * then axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a Run detail (with real
- * rows), Capability, Ledger, Sign-off and the journey screens (Home, Connection,
+ * rows), a Task page (with real grade rows), Capability, Ledger, Sign-off and the journey screens (Home, Connection,
  * Measure, Results, Decisions, Factory, Deployment) — against the live data these
  * specs produced, not fixtures.
  *
@@ -19,9 +19,11 @@
  *               round-trips a shape-valid FAKE `claude setup-token` value — status, ≤ 4-char
  *               fingerprint, provenance, remove — without the value ever appearing in the
  *               page; and that axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a run
- *               detail with real rows, Capability, Ledger and Sign-off — against the live
- *               data the earlier specs produced.
- * How:          `AxeBuilder` with the WCAG tags per screen; the fake token is shape-valid and
+ *               detail with real rows, a task page with real grade rows (at 1280 and 375,
+ *               where its grade table must stay inside the phone: G-292), Capability, Ledger,
+ *               Sign-off, Oracle and the journey screens — against the live data the earlier
+ *               specs produced.
+ * How:          `axeScan` (support.ts: axe with the WCAG tags, after transitions settle) per screen; the fake token is shape-valid and
  *               deliberately not real.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -32,18 +34,16 @@
  * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a screen is added (add it to the axe sweep) or the settings fields change.
  */
-import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
-import { env, expect, primary, test } from './support'
+import { axeScan, env, expect, primary, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
-const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 //: Shape-valid (prefix, length, alphabet) and deliberately not a real token.
 const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 
 async function axeClean(page: Page, where: string): Promise<void> {
-  const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
+  const results = await axeScan(page)
   expect(results.violations, `${where}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([])
 }
 
@@ -152,6 +152,43 @@ test.describe('07 settings + accessibility', () => {
     await expect(page.getByRole('table', { name: 'Per-task outcomes' }).locator('tbody tr').first()).toBeVisible()
     await expect(page.getByTestId('live-log')).toContainText(/\d+ events/)
     await axeClean(page, '/runs/<replay>')
+  })
+
+  test('a Task page with real grade rows has no WCAG 2.1 AA violations, and at 375 px its grade table stays inside the phone (G-292)', async ({ page }) => {
+    // reached the way a reader reaches it: a graded row's task link on the Ledger, so the
+    // page carries at least one real grade row (a task picked from the mined list may have none)
+    await page.goto(`/ledger?repo=${encodeURIComponent(t.name)}`)
+    const ledgerRows = page.getByRole('table', { name: 'Ledger rows' }).locator('tbody tr')
+    await expect(ledgerRows.first()).toBeVisible()
+    await ledgerRows.first().locator('a[href^="/tasks/"]').first().click()
+    await page.waitForURL(/\/tasks\/[^/]+\/[^/]+$/)
+    const grades = page.getByRole('table', { name: 'Grade rows for this task' })
+    await expect(grades.locator('tbody tr').first()).toBeVisible()
+    await expect(grades.getByTestId('row-unreviewed').or(grades.getByTestId('row-review')).first()).toBeVisible()
+    await axeClean(page, '/tasks/<graded>')
+    // the same page at phone width: the document does not scroll sideways, the grade table's
+    // region sits inside the viewport, and the table fits that region — no sideways scroll even
+    // inside it — with the verdict (Clean) and the evidence on screen and the rest folded
+    await page.setViewportSize({ width: 375, height: 812 })
+    await expect(grades.locator('tbody tr').first()).toBeVisible()
+    await expect(page.getByTestId('grades-narrow-note')).toBeVisible()
+    await expect(grades.getByRole('columnheader', { name: /Clean/ })).toBeVisible()
+    await expect(grades.getByRole('columnheader', { name: /Evidence/ })).toBeVisible()
+    const fit = await page.evaluate(() => {
+      const region = document.querySelector<HTMLElement>('[role="region"][aria-label="Grade rows for this task"]')
+      const box = region?.getBoundingClientRect()
+      return {
+        scroll: document.documentElement.scrollWidth,
+        inner: window.innerWidth,
+        regionRight: box ? Math.round(box.right) : Infinity,
+        tableScroll: region?.scrollWidth ?? Infinity,
+        tableClient: region?.clientWidth ?? 0,
+      }
+    })
+    expect(fit.scroll, `/tasks/<graded> @ 375: the page scrolls sideways (scrollWidth ${fit.scroll} > ${fit.inner})`).toBeLessThanOrEqual(fit.inner)
+    expect(fit.regionRight, '/tasks/<graded> @ 375: the grade table\'s region runs past the viewport').toBeLessThanOrEqual(fit.inner)
+    expect(fit.tableScroll, `/tasks/<graded> @ 375: the grade table is wider than its region (${fit.tableScroll} > ${fit.tableClient}), so a phone reader must scroll it sideways`).toBeLessThanOrEqual(fit.tableClient)
+    await axeClean(page, '/tasks/<graded> @ 375')
   })
 
   test('Capability, Ledger and Sign-off have no WCAG 2.1 AA violations', async ({ page }) => {

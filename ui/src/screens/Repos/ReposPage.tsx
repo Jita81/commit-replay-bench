@@ -103,7 +103,6 @@ export function ReposPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Instrument · Repositories"
         title="Repos"
         purpose="Every repository under measurement: its probe status (can the instrument run its tests?), how many replayable commits were mined, and the last run."
         actions={

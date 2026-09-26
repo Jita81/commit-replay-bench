@@ -73,6 +73,12 @@ describe('journeyEyebrow', () => {
   it('is empty for a route that is not a journey step', () => {
     for (const p of ['/posture', '/runs', '/runs/x', '/capability', '/ledger', '/settings', '/help', '/nowhere']) expect(journeyEyebrow(p), p).toBe('')
   })
+
+  it('places Repos and the repository page in step 1, where confirming the shape happens (G-301)', () => {
+    expect(journeyEyebrow('/repos')).toBe('Journey · 1 of 4 · Connection · shape')
+    expect(journeyEyebrow('/repos/cobra')).toBe('Journey · 1 of 4 · Connection · shape')
+    expect(journeyEyebrow('/repos/cobra', 'probe')).toBe('Journey · 1 of 4 · Connection · shape · probe')
+  })
 })
 
 describe('Layout', () => {
@@ -104,6 +110,37 @@ describe('Layout', () => {
     // the About block sits under the page content
     expect(main.firstElementChild).toHaveTextContent('Baseline')
     expect(main.lastElementChild).toHaveAttribute('data-testid', 'about-this-screen')
+  })
+})
+
+describe('Layout: the instrument row by role (G-914)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  /** The labels of the Instrument nav row as `role` sees it. */
+  async function instrumentAs(role: 'viewer' | 'operator' | 'approver' | 'admin'): Promise<string[]> {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role },
+      'GET /health': { status: 'ok', probes: [] },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false },
+      'GET /decisions': { items: [] },
+    })
+    const view = renderShell('/ledger', '/ledger', <h1>Ledger</h1>)
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toBeInTheDocument())
+    const nav = screen.getByRole('navigation', { name: 'Instrument' })
+    const labels = within(nav).getAllByRole('link').map((a) => a.textContent ?? '')
+    view.unmount()
+    return labels
+  }
+
+  it('a viewer has an entry to every page whose route and API a viewer may read: Map grid, Routes, Oracle, Learn and Ledger', async () => {
+    // the four reads are `viewer` at the API (docs/API.md: /capability-map, /routes,
+    // /oracle/{repo}, /learn/*), so a governance reader gets the same doors an operator does
+    expect(await instrumentAs('viewer')).toEqual(['Map grid', 'Routes', 'Oracle', 'Learn', 'Ledger'])
+  })
+
+  it('Runs stays an operator entry and Settings an admin one', async () => {
+    expect(await instrumentAs('operator')).toEqual(['Runs', 'Map grid', 'Routes', 'Oracle', 'Learn', 'Ledger'])
+    expect(await instrumentAs('admin')).toEqual(['Runs', 'Map grid', 'Routes', 'Oracle', 'Learn', 'Ledger', 'Settings'])
   })
 })
 

@@ -297,7 +297,7 @@ export function RepoDetail() {
 
   return (
     <>
-      <PageHeader eyebrow="Instrument · Repositories" title={name} purpose="The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed." />
+      <PageHeader title={name} purpose="The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed." />
       <div role="tablist" aria-label="Repository sections" className="flex gap-1 border-b border-border">
         {tabs.map((t) => (
           <Hint

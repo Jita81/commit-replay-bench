@@ -22,7 +22,8 @@
  * ----------
  * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
  *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
- *               `signIn`, `signOut`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
+ *               `signIn`, `signOut`, `axeScan` (every axe scan, after transitions settle),
+ *               `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
  *               `expectLogAction`, `stackHealth`.
  * What it does: Makes every spec drive a REAL stack through the UI only — sign-in through the
  *               form (never cookie injection), runs queued through the dialog, completion
@@ -49,6 +50,7 @@
  *               repository in tier 2, add a `RepoTarget` to `publicTargets()`.
  */
 
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test as base, type Locator, type Page } from '@playwright/test'
 import { createHmac } from 'node:crypto'
 
@@ -262,6 +264,32 @@ export async function signOut(page: Page): Promise<void> {
  */
 export function personaPassword(username: string): string {
   return `Walk-${createHmac('sha256', env.pass).update(username).digest('base64url').slice(0, 24)}`
+}
+
+/** The WCAG 2.1 AA tags every axe scan in the walkthrough runs with. */
+export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
+
+/**
+ * Wait until no CSS transition is running, so a scan reads the colours a person sees rather
+ * than a frame in between. Found by the 07 sweep on 2026-09-26: the walk page's Baseline button
+ * turns from outlined to filled when the last stage's data arrives, `transition-colors` blends
+ * the two, and axe read the half-way frame as a 3.05:1 contrast failure (P-051). Only
+ * transitions are awaited: a looping animation (a pulsing dot) never ends and is not a state
+ * change. A transition still running after `timeoutMs` is left to axe, which then reports it.
+ */
+export async function settleTransitions(page: Page, timeoutMs = 3_000): Promise<void> {
+  await page
+    .waitForFunction(() => document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState !== 'running'), undefined, { timeout: timeoutMs })
+    .catch(() => undefined)
+}
+
+/**
+ * The one way a walkthrough spec runs axe (WCAG 2.1 AA): after the page's transitions settle
+ * (`settleTransitions`), so a scan cannot fail — or pass — on a frame between two states.
+ */
+export async function axeScan(page: Page): Promise<Awaited<ReturnType<AxeBuilder['analyze']>>> {
+  await settleTransitions(page)
+  return new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
 }
 
 /** `test` with a signed-in page: every spec but the login one uses it. */

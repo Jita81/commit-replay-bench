@@ -38,9 +38,8 @@
  * Touch when:   a `RepoConfig` field is added (assert its round-trip here) or the audit
  *               event payload changes.
  */
-import AxeBuilder from '@axe-core/playwright'
 import type { Page, Request } from '@playwright/test'
-import { env, expect, field, signIn, test } from './support'
+import { axeScan, env, expect, field, signIn, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -219,7 +218,7 @@ test.describe('repo configuration editing', () => {
 
     // the operator's own tab is accessible
     await openConfig(page)
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+    const results = await axeScan(page)
     expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([])
 
     const ctx = await browser.newContext()

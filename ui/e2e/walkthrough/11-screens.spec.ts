@@ -58,7 +58,7 @@
  *               stdout.
  * How:          Playwright; `signIn` from support.ts; the routes list is built from the
  *               primary repo, the run and the task found through the API as the admin;
- *               `AxeBuilder` with the WCAG tags; the bubble is found through the trigger's
+ *               `axeScan` (axe with the WCAG tags, after transitions settle); the bubble is found through the trigger's
  *               `aria-describedby`, never by text, so the spec needs no import from src.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -71,11 +71,10 @@
  * Tested by:    ui/e2e/walkthrough/11-screens.spec.ts (this file; run by scripts/walkthrough.sh)
  * Touch when:   a screen is added (add its route and slug to `routes()`); a persona is added.
  */
-import AxeBuilder from '@axe-core/playwright'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { env, personaPassword, primary, signIn } from './support'
+import { axeScan, env, personaPassword, primary, signIn } from './support'
 
 const OUT = join(process.env.CRB_E2E_OUTPUT_DIR ?? 'test-results-walkthrough', 'screens')
 mkdirSync(OUT, { recursive: true })
@@ -191,7 +190,6 @@ async function shot(page: Page, persona: string, slug: string, width: number): P
   await page.screenshot({ path, fullPage: true, animations: 'disabled' })
 }
 
-const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 
 /**
  * The phone top bar's ceiling: one row (brand and the Menu button, `py-3`) measures about
@@ -203,10 +201,11 @@ const TOP_BAR_ONE_ROW_PX = 90
  * How many routes in `routes()` render the journey-position eyebrow as its hinted trigger
  * (`PageHeader` → `journeyEyebrow`): /connect, /connect/:name, /results, /signoff, /factory and
  * /factory/intake [measured — n = 10 journey and review routes probed at 375 px on the tier-1
- * stack, 2026-09-25, apparatus 2.2; Home, Measure, Decisions and Deployment render none]. At
- * 375 px each must show it with the menu folded; this floor keeps that check from passing on zero.
+ * stack, 2026-09-25, apparatus 2.2; Home, Measure, Decisions and Deployment render none], and
+ * since G-301 /repos and /repos/:name, which `STEP_OF` places in step 1. At 375 px each must
+ * show it with the menu folded; this floor keeps that check from passing on zero.
  */
-const JOURNEY_EYEBROW_ROUTES = 6
+const JOURNEY_EYEBROW_ROUTES = 8
 
 /**
  * Routes that still scroll sideways at 375 px, by slug, each with the gap that tracks it.
@@ -217,10 +216,11 @@ const JOURNEY_EYEBROW_ROUTES = 6
  * The assertion that found these is new (G-905: before it, only /results and /factory were
  * checked). It found two on its first full pass: /help/docs/:name, fixed here in
  * `ui/src/index.css` (an 87-character token in inline `code` set the document's width), and
- * this one, which needs a live stack to place and belongs to the page that owns it.
+ * /tasks/:repo/:taskId (G-292), fixed in `TaskDetailPage.tsx` and measured by 07.
  */
 const SIDEWAYS_SCROLL_RATCHET: Record<string, string> = {
-  'tasks-detail': 'G-292 — the 11-column grade table is wider than a phone when the task has real grade rows (scrollWidth 981 at 375, measured 2026-09-22 and again 2026-09-23, apparatus 2.2); docs/dod/pages/tasks-repo-taskId.md',
+  // empty since G-292 closed (2026-09-26): 'tasks-detail' left when the grade table folded its
+  // secondary columns below md, measured on real grade rows at 375 by 07's task-page test
 }
 
 /**
@@ -460,7 +460,7 @@ async function loginChecks(page: Page, where: string, width: number): Promise<vo
     const submit = await page.getByRole('button', { name: 'Sign in', exact: true }).boundingBox()
     expect(submit ? submit.y + submit.height : Infinity, `${where}: the Sign in button is below a phone's first screen`).toBeLessThanOrEqual(812)
   }
-  const a11y = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
+  const a11y = await axeScan(page)
   expect(a11y.violations, `${where}: axe: ${JSON.stringify(a11y.violations, null, 2)}`).toEqual([])
   await keyboardPass(page, where)
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
@@ -497,7 +497,7 @@ async function phoneMenu(page: Page, where: string): Promise<boolean> {
   await expect(page.getByTestId('user-chip')).toBeVisible()
   await expect(page.getByRole('banner').getByRole('link', { name: 'Help' })).toBeVisible()
   await expect(page.getByRole('button', { name: /Switch theme/ })).toBeVisible()
-  const a11y = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
+  const a11y = await axeScan(page)
   expect(a11y.violations, `${where}: axe with the menu open: ${JSON.stringify(a11y.violations, null, 2)}`).toEqual([])
   await page.keyboard.press('Tab')
   expect(await page.evaluate(() => document.activeElement?.closest('#shell-menu-actions, #shell-nav-primary, #shell-nav-instrument') !== null), `${where}: Tab from the open Menu button did not move into the menu`).toBe(true)
@@ -542,7 +542,7 @@ async function hintSample(page: Page, where: string, width: number): Promise<voi
     expect(text.length, `${where}: hint ${id} is too short to explain anything`).toBeGreaterThanOrEqual(40)
     expect(text.trim().endsWith('.'), `${where}: hint ${id} is not a sentence`).toBe(true)
     expect(await tip.locator('a').count(), `${where}: hint ${id} contains a link`).toBe(0)
-    const a11y = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
+    const a11y = await axeScan(page)
     expect(a11y.violations, `${where}: axe with hint ${id} open: ${JSON.stringify(a11y.violations, null, 2)}`).toEqual([])
     await page.keyboard.press('Escape')
     await expect(tip, `${where}: hint ${id} did not close on Escape`).toBeHidden()

@@ -7,7 +7,8 @@
  * What it does: Pins that a task the factory built (`labels.process === 'factory'`) is
  *               introduced as one factory item with its backlog id and told where its id
  *               comes from (the authored test's sha), and that a replayed commit keeps the
- *               commit wording (J-FAC-18).
+ *               commit wording (J-FAC-18); and that below md the grade table keeps Created,
+ *               Clean, Review and Evidence and folds the rest into the evidence (G-292).
  * How:          `renderApp` at `/tasks/:repo/:taskId` with `mockApi` serving one task and
  *               no reviews; assertions on the spec card's copy.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -19,7 +20,7 @@
  * Touch when:   the factory writes a different label for its items, or the task page's
  *               provenance sentence changes.
  */
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TaskDetail } from '../../api/types'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
@@ -74,6 +75,25 @@ describe('TaskDetailPage', () => {
     // the header's purpose — the first sentence read — agrees with the card: no "replayable commit"
     expect(screen.getByText(/^One factory item the loop built: its authored test/)).toBeInTheDocument()
     expect(screen.queryByText(/replayable commit/)).toBeNull()
+  })
+
+  it('below md the grade table keeps the verdict columns and folds the rest into the evidence, so it fits a phone (G-292)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [], total: 0, limit: 200, offset: 0 },
+      [`GET /tasks/alpha/${TASK_ID}`]: task({}),
+      'GET /reviews': { items: [], total: 0, limit: 200, offset: 0 },
+    })
+    renderApp(<TaskDetailPage />, { route: `/tasks/alpha/${TASK_ID}`, path: '/tasks/:repo/:taskId' })
+    const table = await screen.findByRole('table', { name: 'Grade rows for this task' })
+    const headers = within(table).getAllByRole('columnheader')
+    // jsdom applies no CSS: the fold is the `hidden md:table-cell` class the 375-px walkthrough (07) measures
+    const shown = headers.filter((h) => !h.className.includes('hidden md:table-cell')).map((h) => h.textContent?.replace(/[▲▼⇅]/g, '').trim())
+    expect(shown).toEqual(['Created', 'Clean', 'Review', 'Evidence'])
+    const folded = headers.filter((h) => h.className.includes('hidden md:table-cell')).map((h) => h.textContent?.replace(/[▲▼⇅]/g, '').trim())
+    expect(folded).toEqual(['Run', 'Trial', 'Builder', 'Belts', 'Cost', 'Latency', 'Provenance'])
+    // and a phone reader is told where the folded columns went
+    expect(screen.getByTestId('grades-narrow-note')).toHaveTextContent('open a row’s evidence')
   })
 
   it('a replayed commit keeps the commit wording', async () => {

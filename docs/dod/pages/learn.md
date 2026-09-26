@@ -8,7 +8,7 @@ children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Learn (what the ledger teaches)
@@ -20,8 +20,8 @@ work, and evidence that has gone stale since the apparatus changed. The three re
 nothing; the register acts only under an operator's switch." (`help.ts` About copy for
 `/learn`; the header purpose says the same and the eyebrow reads `Instrument · Learn`.)
 
-**Entry → exit.** Arrive by the Instrument nav entry `Learn` (operator role only,
-`Layout.tsx:121`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
+**Entry → exit.** Arrive by the Instrument nav entry `Learn` (every role, like
+the three reads behind it: `INSTRUMENT` in `Layout.tsx`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
 that class's details open. Pick a repository and leave with the prevention register — every
 bug class with its lever and level, before → after with n and the bar, its status and what
 happens next (an operator can throw the switch, revert a change or register a filed item from
@@ -56,7 +56,7 @@ route in the browser, or blends a rate across apparatus versions.
 | learn.evidence.10 | EVIDENCE | Each derivation the page renders is pinned server-side: the refusal grouping and its denominator, the strengthening items against the served controls verdict and oracle scores, and the re-measurement plan's counts, cost and `POST /runs` bodies | `test:tests/test_learn.py::test_groups_by_reason_and_shape` · `test:tests/test_server_routes_learn.py::test_refusals_empty_then_one` · `test:tests/test_server_routes_learn.py::test_strengthen_uses_the_controls_verdict_and_the_oracle_scores` · `test:tests/test_learn.py::test_requests_are_valid_post_runs_bodies` | met | |
 | learn.evidence.11 | EVIDENCE | A tier-1 spec renders the three reports on a running stack from real ledger rows and reads a row of each table; the route is captured for every persona at 375 and 1280 | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"every route renders, is captured, and carries About this screen"` | partial | G-913 |
 | learn.roles.12 | ROLES | Each of the three reads needs `viewer` at the API; an anonymous read is 401 and an unknown repository 404, so neither ever renders as an empty report | `test:tests/test_server_routes_learn.py::test_rbac` · `test:tests/test_server_routes_learn.py::test_unknown_repo_404` · `code:src/crb/server/routes/learn.py::learn_refusals` · `code:src/crb/server/routes/learn.py::learn_strengthen` | met | |
-| learn.entry-exit.13 | ENTRY-EXIT | Every role the API admits can reach the page in the UI: the route is viewer-readable and the ratchet renders it as a viewer, so a viewer has a nav entry to it | `absent` | unmet | G-914 |
+| learn.entry-exit.13 | ENTRY-EXIT | Every role the API admits can reach the page in the UI: the route is viewer-readable and the ratchet renders it as a viewer, so a viewer has a nav entry to it | `vitest:ui/src/components/Layout.test.tsx::"a viewer has an entry to every page whose route and API a viewer may read: Map grid, Routes, Oracle, Learn and Ledger"` · `code:ui/src/components/Layout.tsx::INSTRUMENT` | met | |
 | learn.operations.14 | OPERATIONS | The three routes are listed in `docs/API.md` with their shapes and their role, and the operator guide has a section for the learning loop that says when to read the page and what to do with each report | `doc:docs/API.md#the-three-learning-reports` · `doc:docs/OPERATOR.md#13-the-three-learning-reports` · `route:GET /learn/refusals` · `route:GET /learn/strengthen` · `route:GET /learn/remeasure` | met | |
 | learn.operations.15 | OPERATIONS | The guide the page links is bundled in the product and says what each report means, what the CLI twin is, and why each report stops at a person | `doc:docs/LEARNING-LOOP.md#4-using-it` · `doc:docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate` · `hint:about:/learn` | met | |
 | learn.accessibility.16 | ACCESSIBILITY | The route is axe-clean (WCAG 2.1 AA) with the three reports rendered, and renders for every persona at 375 and 1280 with the top bar no more than two rows and a hint bubble open | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"every route renders, is captured, and carries About this screen"` | partial | G-916 |
@@ -75,7 +75,6 @@ route in the browser, or blends a rate across apparatus versions.
 - **G-174** — The per-report loading line (`Deriving …`) and the `ErrorState` Retry (`LearnPage.tsx:222,289,340`) are never rendered in a test, so nothing proves a failed report leaves the other two readable or that Retry refetches · add a `LearnPage.test.tsx` case with a 500 on `/learn/strengthen` only, asserting the other two cards still render and that Retry refetches that query · ui
 - **G-912** — The About block tells the operator to "copy a candidate corpus line into a decision file, freeze a strengthening item on the Factory, or queue the re-measurement runs the plan lists" (`help.ts:259`) and the page offers none of the three: the refusal row's `candidate_honest` / `candidate_refused` lines are computed and never shown or copyable, the strengthening items are served in the frozen-backlog shape with no link to the freeze form, and the plan's `POST /runs` bodies are counted but not queueable · add a copy control per refusal row, a `Freeze on the Factory` link that carries the item to `/factory`'s freeze form, and a `Queue` control on the plan that opens the Runs dialog prefilled from `requests` · ui
 - **G-913** — No spec renders any of the three reports on a running stack: `11-screens.spec.ts:130` visits `/learn` with no `?repo=`, so only the empty state is ever walked, and the single unit test uses all-empty fixtures · give the walkthrough a `/learn?repo=<primary>` visit that asserts one row of each table and the refusal tile's n and interval · ui
-- **G-914** — The Instrument nav entry for `/learn` is `role: 'operator'` (`Layout.tsx:121`) although the three routes are viewer-gated and the hint ratchet renders the page as a viewer (`hints-ratchet.instrument.tsx:473-479`), so a governance reader with API access has no path to it · set the entry's role to `viewer`, as `/ledger` already is, and pin it in `Layout.test.tsx` · ui
 - **G-916** — `/learn` is in no axe sweep: `07-settings-and-a11y.spec.ts` covers the journey screens, Capability, Ledger, Sign-off and Oracle, and the only visit to `/learn` renders the empty state · add `/learn?repo=<primary>` to the instrument axe test after the three tables are visible · ui
 - **G-175** — no walkthrough renders the register card on a running stack · add a `/learn?repo=<primary>` visit after a tick that asserts one register row · ui
 - **G-176** — the register card is in no axe sweep · add `/learn?repo=<primary>` with the register rendered to the instrument axe test at 375 and 1280 · ui

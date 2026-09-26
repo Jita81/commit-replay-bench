@@ -8,14 +8,14 @@ children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Repository detail
 
 **Purpose.** "The repository as an instrument: its toolchain probe, mined tasks, change
 profile and the configuration that governs how its commits are replayed." (About block,
-`help.ts`; eyebrow `Instrument · Repositories`; four tabs — Overview, Change profile, Tasks,
+`help.ts`; eyebrow `Journey · 1 of 4 · Connection · shape`, derived from the route (G-301); four tabs — Overview, Change profile, Tasks,
 Configuration — the tab in the URL as `?tab=`.)
 
 **Entry → exit.** Arrive from a Repos row, from Home task 3 *Confirm its shape*, from the

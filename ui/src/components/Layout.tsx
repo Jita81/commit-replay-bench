@@ -10,14 +10,18 @@
  *               instrument health pill from `GET /health`, the user chip showing the
  *               principal's ROLE (so a viewer knows why a button is missing; the display name
  *               only from `sm` up), theme cycling, Help as a compact "?" icon (the footer
- *               carries the words) and sign-out — sized so the cluster is one row at 375 px
- *               and "Sign out" never becomes a third header row. `AboutThisScreen` is mounted
+ *               carries the words) and sign-out. Below 640 px the cluster and both nav rows
+ *               fold behind one "Menu" disclosure (F26: `aria-expanded`, Escape closes it and
+ *               returns focus to the button, following a link closes it), so a phone's first
+ *               screen is the page, not three rows of chrome. The instrument row offers every
+ *               role the pages its API lets that role read (G-914). `AboutThisScreen` is mounted
  *               once after the outlet so every
  *               screen carries its help with no wiring. The footer carries crb / apparatus /
  *               policy versions — the one place internals appear, because an auditor needs
  *               the provenance of what they are reading — and links to Help and the glossary.
  *               `journeyEyebrow(pathname, sub?)` derives `Journey · 2 of 4 · Baseline` from
- *               the four steps so no screen hand-types its position. Every element of the
+ *               the four steps (and places /repos and /repos/:name in step 1, G-301) so no
+ *               screen hand-types its position. Every element of the
  *               chrome — each nav entry (`nav.*`), the health pill, the role chip, Help, the
  *               theme toggle, Sign out, the stop-condition banner, the footer's version line
  *               and links — is a `<Hint>` trigger, so the shell explains itself on hover,
@@ -35,8 +39,10 @@
  *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
  *               ui/src/lib/verdict.ts (`probeDisplay` for the health pill)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx (every element of the
- *               shell carries a hint), ui/src/components/Layout.test.tsx (the steps, the eyebrow, Help, the About
- *               block), ui/e2e/smoke.spec.ts (the shell renders the nav),
+ *               shell carries a hint), ui/src/components/Layout.test.tsx (the steps, the
+ *               eyebrow, Help, the About block, the Menu, the instrument row by role),
+ *               ui/e2e/smoke.spec.ts (the shell renders the nav),
+ *               ui/e2e/walkthrough/11-screens.spec.ts (the Menu at 375 px on every route),
  *               ui/e2e/walkthrough/01-login.spec.ts
  *               (the role chip reads the bootstrap admin's role), ui/src/test/utils.tsx
  *               (`renderApp` mounts the shell for every screen test)
@@ -63,9 +69,9 @@ export const BRAND = 'Commit Replay Bench'
  * The primary nav is the JOURNEY — connect a repository, earn its baseline, decide what is
  * waiting on a person, run the factory (DL-044: the factory and the self-improvement loop
  * are the product; the rest is the on-ramp that earns their baseline). Every role sees the
- * journey. The INSTRUMENT row beneath it is the operator's tooling — runs, the map grid,
- * routes, the oracle, the learning loop — plus the ledger for every role (an auditor's
- * screen) and Settings for admins. Nothing is removed from the URL space: the repositories
+ * journey. The INSTRUMENT row beneath it is the evidence behind the journey — the map grid,
+ * routes, the oracle, the learning loop and the ledger for every role (their APIs are all
+ * `viewer`), Runs for operators (where a run is started) and Settings for admins. Nothing is removed from the URL space: the repositories
  * list, the sign-off form and the map grid stay routable, reached from the journey (the
  * Connection page lists repositories; Decisions and the map link to the sign-off form).
  */
@@ -92,6 +98,9 @@ export const JOURNEY_STEPS: readonly { label: string; to: string }[] = [
 /** Route pattern → the step it belongs to (index into `JOURNEY_STEPS`) and its own sub-label. */
 const STEP_OF: Array<{ pattern: string; step: number; sub?: string }> = [
   { pattern: '/connect/*', step: 0 },
+  // Repos and the repository page are where step 1's "Confirm its shape" happens (Home task 3
+  // and the walk's Configuration button land there), so they say so, not "Instrument" (G-301)
+  { pattern: '/repos/*', step: 0, sub: 'shape' },
   { pattern: '/results', step: 1 },
   { pattern: '/decisions', step: 2 },
   { pattern: '/signoff', step: 2, sub: 'sign-off' },
@@ -119,10 +128,13 @@ export function journeyEyebrow(pathname: string, sub?: string): string {
 
 const INSTRUMENT: Array<{ to: string; label: string; role: 'viewer' | 'operator' | 'admin'; hint: HintId }> = [
   { to: '/runs', label: 'Runs', role: 'operator', hint: 'nav.runs' },
-  { to: '/capability', label: 'Map grid', role: 'operator', hint: 'nav.capability' },
-  { to: '/routing', label: 'Routes', role: 'operator', hint: 'nav.routing' },
-  { to: '/oracle', label: 'Oracle', role: 'operator', hint: 'nav.oracle' },
-  { to: '/learn', label: 'Learn', role: 'operator', hint: 'nav.learn' },
+  // the four reads below are `viewer` at the API and their routes are unguarded, so a viewer
+  // (the governance reader) gets the same doors an operator does (G-914): an entry whose role
+  // is stricter than its route and API only hides a page someone is allowed to read
+  { to: '/capability', label: 'Map grid', role: 'viewer', hint: 'nav.capability' },
+  { to: '/routing', label: 'Routes', role: 'viewer', hint: 'nav.routing' },
+  { to: '/oracle', label: 'Oracle', role: 'viewer', hint: 'nav.oracle' },
+  { to: '/learn', label: 'Learn', role: 'viewer', hint: 'nav.learn' },
   { to: '/ledger', label: 'Ledger', role: 'viewer', hint: 'nav.ledger' },
   { to: '/settings', label: 'Settings', role: 'admin', hint: 'nav.settings' },
 ]

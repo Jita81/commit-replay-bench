@@ -59,7 +59,8 @@
 #               src/crb/cli/main.py (``migrate`` / ``serve`` / ``worker``), .github/workflows/ci.yml
 #               (the ``walkthrough`` job)
 # Tested by:    ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
-#               (the suite it drives; the script itself has no unit test — CI runs it end to end)
+#               (the suite it drives; CI runs it end to end), tests/test_walkthrough_script.py
+#               (the stack imports this checkout's code, not a shared venv's other checkout)
 # Touch when:   a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in
 #               the README); the server or worker CLI flags change; never to inherit an existing
 #               home, database or port.
@@ -94,8 +95,20 @@ if [[ ! -x "$CRB" ]]; then
   echo "walkthrough: $CRB missing — install the [server] extra" >&2
   exit 2
 fi
+# The stack must run THIS checkout's code. A venv shared between worktrees has an editable
+# install pointing at one checkout, and without this the server, the worker and the fixture
+# would import that checkout's crb while the specs come from this one — a run can then pass
+# or fail on code that is not under test (P-052: a qualify run refused 422 by another
+# checkout's server). PYTHONPATH puts this checkout first; the check below proves it did.
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 if ! "$PY" -c "import crb.server.app" 2>/dev/null; then
   echo "walkthrough: the server layer is not installed in $PY (pip install -e '.[server,dev]')" >&2
+  exit 2
+fi
+CRB_SRC_AT="$("$PY" -c 'import crb.server.app as m; print(m.__file__)')"
+if [[ "$CRB_SRC_AT" != "$ROOT/src/"* ]]; then
+  echo "walkthrough: $PY imports crb from $CRB_SRC_AT, not from this checkout ($ROOT/src) —" >&2
+  echo "  refusing to run: the stack would serve another checkout's code." >&2
   exit 2
 fi
 command -v git >/dev/null || { echo "walkthrough: git is required" >&2; exit 2; }
@@ -166,7 +179,7 @@ fi
 # it is running, while a `limit 3` mine (03) still returns in seconds.
 FIXTURE_SRC="$WORK/fixture-src"
 FIXTURE_BARE="$WORK/pyrepo.git"
-(cd "$ROOT" && PYTHONPATH="$ROOT/tests" "$PY" - "$FIXTURE_SRC" "${CRB_E2E_PAD:-40}" <<'PYEOF'
+(cd "$ROOT" && PYTHONPATH="$ROOT/tests:$PYTHONPATH" "$PY" - "$FIXTURE_SRC" "${CRB_E2E_PAD:-40}" <<'PYEOF'
 import sys
 from pathlib import Path
 from fixtures import pyrepo

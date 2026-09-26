@@ -20,7 +20,8 @@
  *               a ceiling nothing enforces). While
  *               a factory run is active the chain polls and a banner names the run and the
  *               item in hand (J-FAC-5 / J-TEL-9), inside a polite live region that is on the
- *               page before the run starts, so its arrival is announced (G-905). A built item opens its evidence (F15); a
+ *               page before the run starts, so its arrival is announced (G-905). A built
+ *               item opens its evidence (F15); a
  *               stopped item says the way forward — an evolution that supersedes it, the
  *               route the API serves as `way_forward` (DL-049), one sentence naming what must
  *               be different, and that replacement item already drafted from the stop's own

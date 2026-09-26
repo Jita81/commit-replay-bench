@@ -8,14 +8,14 @@ children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Repos
 
 **Purpose.** "Every repository this deployment knows, with its probe status and task counts.
 The journey's Connection page is the same list with the walk beside it." (About block,
-`help.ts`; eyebrow `Instrument · Repositories`.)
+`help.ts`; eyebrow `Journey · 1 of 4 · Connection · shape`, derived from the route.)
 
 **Entry → exit.** No nav link or in-app link leads here: the route is reached by URL only
 (the walkthroughs and the GitHub-App-less onboarding guide use it). Leave by clicking a row or
