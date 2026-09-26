@@ -71,6 +71,8 @@ class ScriptedBuilder:
     briefs: ClassVar[list[BuildBrief]] = []
 
     def __init__(self, *, model: str, provider: str = "", behaviour: str = "", **_: Any) -> None:
+        if behaviour == "unavailable":
+            raise RuntimeError("no such model on this endpoint")
         self.model, self.provider, self.behaviour = model, provider, behaviour
 
     def describe(self) -> dict[str, Any]:
@@ -94,6 +96,16 @@ class ScriptedBuilder:
         src = workspace.root / pr.SRC
         if self.behaviour == "model_error":
             return BuildOutcome(**base, stop_reason=STOP_MODEL_ERROR, errors=("model_error: boom",))
+        if self.behaviour == "raise":
+            raise RuntimeError("the CLI crashed")
+        if brief.gate_note and self.behaviour == "todo_repair_error":
+            # the repair call never reached the model (a 429, a dead credential)
+            return BuildOutcome(
+                **base,
+                stop_reason=STOP_MODEL_ERROR,
+                errors=("model_error: 429 rate limited",),
+                cost_usd=0.005,
+            )
         if brief.gate_note:
             # the repair call: fix what the gate reported, nothing else
             src.write_text(
@@ -101,7 +113,7 @@ class ScriptedBuilder:
             )
         else:
             text = src.read_text(encoding="utf-8") + UGLY_SUBTRACT
-            if self.behaviour == "todo":
+            if self.behaviour.startswith("todo"):
                 text += "# TODO\n"
             src.write_text(text, encoding="utf-8")
             if self.behaviour == "newtest":
@@ -257,3 +269,93 @@ def test_an_attempt_that_errored_gets_no_step_and_says_why(
     (row,), _ = _run(pyrepo, tmp_path, "model_error", {"format_step": True, "finish_gate": True})
     assert row.labels["format_step"] == "skipped=attempt_not_admissible"
     assert row.labels["finish_gate"] == "skipped=attempt_not_admissible"
+
+
+STYLE = {"name": "style", "argv": ["sh", "-c", f"! grep -q TODO {pr.SRC}"]}
+LEAK = {"name": "peek", "argv": ["pytest", pr.TEST_SUBTRACT], "blind_only": True}
+
+
+@pytest.mark.parametrize(
+    ("behaviour", "checks", "mode"),
+    [
+        ("", {"format_step": True}, "sighted"),  # an honest build, stamped by the steps
+        ("model_error", {"format_step": True, "finish_gate": True}, "sighted"),
+        ("raise", {"format_step": True}, "sighted"),  # the builder raised
+        ("unavailable", {"api_stable": True}, "sighted"),  # the builder never built
+        ("", {"finish_gate": True, "commands": [LEAK]}, "blind"),  # refused before spend
+    ],
+)
+def test_every_attempt_of_a_checks_on_run_carries_the_checks_stamp(
+    pyrepo: pr.PyRepo, tmp_path: Path, behaviour: str, checks: dict[str, Any], mode: str
+) -> None:
+    """ADR-0024 §5 and §6: every row of a run with a switch on carries ``labels.checks``,
+    and the arm is read from that stamp. An attempt that failed before the build returned
+    (a refusal, a builder that raised or could not be built) once carried no stamp, so it
+    read as arm ``off`` and joined the other arm's cells (CodeRabbit, PR #57)."""
+    resolved = resolve(RepoChecks.from_config(checks), None)
+    (row,), _ = _run(pyrepo, tmp_path, behaviour, checks, mode=mode)
+    assert row.labels["checks"] == resolved.label()
+    assert row.checks_arm == resolved.arm
+
+
+@needs_ruff
+def test_a_repair_that_ends_in_a_model_error_keeps_the_first_attempts_patch(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A repair call that never reached the model (a 429, a dead credential) must not turn
+    the first build into an errored attempt: its patch was admissible, so it is graded, the
+    repair's spend is counted and the gate's label says the repair failed (CodeRabbit,
+    PR #57)."""
+    checks = {"finish_gate": True, "commands": [STYLE]}
+    (row,), events = _run(pyrepo, tmp_path, "todo_repair_error", checks)
+    assert len(ScriptedBuilder.briefs) == 2
+    assert row.error == "" and row.failure_kind != "outage"
+    assert row.target_green is True  # the first build's patch reached the belts
+    assert not any(a == "builder.discard" for a, _ in events)
+    assert row.labels["finish_gate"] == (
+        "before=fail:lint+style;repair_error=model_error;repair=1;after=fail:lint+style"
+    )
+    assert row.cost_usd == pytest.approx(0.015)  # both calls are one attempt's spend
+
+
+def test_the_gate_baseline_is_measured_once_per_task_and_mode(
+    pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The declared commands' verdicts at the parent depend on the task, the mode and the
+    commands, never on the rung: a ladder re-ran every command (up to 8, 600 s each) before
+    every rung's build (CodeRabbit, PR #57). Measured once, reused on each rung."""
+    calls: list[int] = []
+    real = adapter.command_baseline
+
+    def counting(*a: Any, **k: Any) -> Any:
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(adapter, "command_baseline", counting)
+    runner = _FormattedRunner(pyrepo.config)
+    ladder = EscalationLadder(
+        (Rung("scripted", "m1", config={"behaviour": ""}), Rung("scripted", "m2"))
+    )
+    checks = resolve(RepoChecks.from_config({"finish_gate": True, "commands": [STYLE]}), None)
+    fn = adapter.build_fn_for(
+        ladder,
+        budget=Budget(),
+        runner=runner,
+        executor=LocalExecutor(),
+        config=pyrepo.config,
+        checks=checks,
+    )
+    task = pyrepo.feat_task()
+    for i, label in enumerate(adapter.ladder_labels(ladder) * 2):
+        ws = pyrepo.trial(tmp_path / f"t{i}")
+        try:
+            fn(ws, task, "sighted", label)
+        finally:
+            ws.remove()
+    assert len(calls) == 1
+    ws = pyrepo.trial(tmp_path / "blind")
+    try:
+        fn(ws, task, "blind", adapter.ladder_labels(ladder)[0])  # another mode: measured again
+    finally:
+        ws.remove()
+    assert len(calls) == 2

@@ -577,6 +577,8 @@ def build_fn_for(
         ``learn_playbook``). ``None`` adds nothing.
     """
     index = rung_index(ladder)
+    #: the finish gate's parent verdicts per (task, mode, commands) — see ``baseline_for``
+    baselines: dict[tuple[str, str, tuple[CheckCommand, ...]], dict[str, bool | None]] = {}
     overrides = dict(builder_overrides or {})
     builders: dict[int, Builder] = {}
     tdir = Path(transcript_dir) if transcript_dir else None
@@ -695,7 +697,26 @@ def build_fn_for(
         return kills
 
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
-        """The ``BuildFn``: one attempt of ``task`` on ``rung_label`` in ``mode``."""
+        """The ``BuildFn``: one attempt of ``task`` on ``rung_label`` in ``mode``. The ONE
+        exit every attempt leaves by, so the ``checks`` stamp is on each of them — a
+        refusal before spend, a builder that could not be built or raised, and an error
+        the core would otherwise record unstamped (ADR-0024 §5 and §6: a row's arm is read
+        from the stamp, so an unstamped row of a checks-on run would join arm ``off``)."""
+        try:
+            attempt = attempt_of(ws, task, mode, rung_label)
+        except SandboxUnavailable:
+            raise  # the run stops (ADR-0005): no attempt, so no row to stamp
+        except Exception as exc:  # recorded exactly as crb.core.run records it, but stamped
+            attempt = BuildAttempt(
+                BuilderRef(name=rung_label, mode=mode),
+                error=f"{type(exc).__name__}: {exc}"[:500],
+            )
+        if checks is None or LABEL_CHECKS in attempt.labels:
+            return attempt
+        return replace(attempt, labels={**attempt.labels, LABEL_CHECKS: checks.label()})
+
+    def attempt_of(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
+        """One attempt, unstamped — only :func:`build` calls it."""
         rung = index.get(rung_label)
         if rung is None:
             return _failed_attempt(rung_label, mode, f"unknown rung {rung_label!r} (not on ladder)")
@@ -825,8 +846,20 @@ def build_fn_for(
                 assert_no_oracle(lines, (*task.test_files, *task.target_tests))
             except OracleLeak as exc:
                 return f"finish gate refused: {exc}"
-        baseline = command_baseline(commands, executor, ws.root) if commands else {}
-        return _Gate(plan, commands, lines, baseline)
+        return _Gate(plan, commands, lines, baseline_for(ws, task, mode, commands))
+
+    def baseline_for(
+        ws: Workspace, task: TaskSpec, mode: str, commands: tuple[CheckCommand, ...]
+    ) -> dict[str, bool | None]:
+        """The commands' verdicts at the parent, measured once per task, mode and command
+        list: every rung and retry starts from the same untouched worktree, so re-running
+        up to 8 commands before each build only spent unbudgeted time."""
+        if not commands:
+            return {}
+        key = (task.task_id, mode, commands)
+        if key not in baselines:
+            baselines[key] = command_baseline(commands, executor, ws.root)
+        return dict(baselines[key])
 
     def run_checks(  # noqa: PLR0917 — one step of the build, many collaborators
         ws: Workspace,
@@ -944,6 +977,12 @@ def build_fn_for(
             if second.violated:
                 record.append("after=violated")
                 break
+            if _repair_errored(second):
+                # the repair never reached the model: the first build's patch stands and is
+                # graded; no further repair is spent on a provider that is failing
+                record.append("repair_error=model_error")
+                run = check()
+                break
             if checks.format_step:
                 # the first run's record stays; the repair's own formatting is appended
                 again = format_once(ws).label()
@@ -1058,6 +1097,10 @@ def build_fn_for(
                 if second.violated:
                     record["after_repair"] = "violated"
                     return merged, {"preflight": _preflight_label(record)}
+                if _repair_errored(second):
+                    # the repair never reached the model: the first patch stands
+                    record["after_repair"] = "repair_error"
+                    return merged, {"preflight": _preflight_label(record)}
                 after = run_plan(plan, executor, ws.root, _changed_source_files(ws, config))
                 record["after_repair"] = _verdict(after)
                 emit(
@@ -1099,9 +1142,24 @@ def _preflight_label(record: Mapping[str, Any]) -> str:
     return ";".join(parts)[:300]
 
 
+def _repair_errored(second: BuildOutcome) -> bool:
+    """The repair call ended in a model error (a 429, a dead credential, a CLI crash) and
+    broke no rule: it changed nothing a grade should see as the attempt's own failure."""
+    return not second.violated and second.stop_reason == STOP_MODEL_ERROR
+
+
 def _merge_outcomes(first: BuildOutcome, second: BuildOutcome) -> BuildOutcome:
-    """The two calls of a pre-flight repair as ONE attempt: spend, turns and latency
-    summed, errors concatenated, the repair's stop reason kept (it ran last)."""
+    """The two calls of a repair (the pre-flight's or the finish gate's) as ONE attempt:
+    spend, turns and latency summed, errors concatenated, the repair's stop reason kept (it
+    ran last) — except a repair that only failed to reach the model (:func:`_repair_errored`):
+    then the FIRST call's stop reason, ``done`` and errors stand, so the attempt is not read
+    as a model error and its admissible patch is never discarded (CodeRabbit, PR #57)."""
+    if _repair_errored(second):
+        return replace(
+            _merge_outcomes(first, replace(second, stop_reason="", errors=())),
+            stop_reason=first.stop_reason,
+            done=first.done,
+        )
     return replace(
         first,
         attempts=first.attempts + second.attempts,
