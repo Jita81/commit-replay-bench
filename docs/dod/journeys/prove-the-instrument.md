@@ -8,7 +8,7 @@ children: [dod.page.oracle]
 persons: [operator, viewer, approver]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-23
 ---
 
 # Prove the instrument (mine, oracle, negative controls)
@@ -64,6 +64,6 @@ anything, and does not re-mine from scratch after a configuration change (re-qua
 - **G-429** — No test pins the `no model involved` wording on the mine, oracle and controls stage lines, so the £0 non-goal is stated by prose and code only · assert the three detail lines in `connection.test.ts` · ui
 - **G-430** — The guide states £0 for step 3 but no measured minutes for a mine, oracle or controls run (the stage lines say "minutes" and "minutes to an hour") · record the walkthrough's `waitForRun` durations for the primary repository in the guide's tests table (n, apparatus, date) · docs
 - **G-431** — Re-qualifying tasks after a configuration change (`kind: mine` + `task_ids`, ONBOARDING step 2) has no page control: the Runs dialog takes `task_ids` as JSON only and the Tasks tab offers no "re-qualify" action · a `Re-qualify` button on the repository's Tasks tab for the selected not-gold-clean tasks that posts `kind: mine` with `task_ids`, and a spec that asserts the note clears · ui
-- **G-432** — A controls escape or a thin set has no way forward on the product: `help.ts` says "strengthen the tests" and Learn lists the item, but Learn is read-only by design and nothing links the finding to the weak task's escaped mutants, to a Factory strengthening item, or back to a re-run · on the amber stage line and the `/oracle` gate, link to the Learn strengthen report filtered to the repository, and from that report to `/factory` with the item prefilled (the hand-off `help.ts:259` describes) · ui
+- **G-432** — A controls escape or a thin set has no way forward on the product: `help.ts` says "strengthen the tests" and Learn lists the item, but nothing links the finding to the weak task's escaped mutants, to a Factory strengthening item, or back to a re-run (Learn can register an item since G-532 closed; the Oracle screen still does not send anybody there) · on the amber stage line and the `/oracle` gate, link to the Learn strengthen report filtered to the repository, and from that report to `/factory` with the item prefilled (the hand-off `help.ts:259` describes) · ui
 - **G-942** — RED, the baseline and the gold are measured on whatever executor the mine ran with and stamped with none, so every later replay trusts facts another instrument measured (ADR-0019) · add the `task_qualifications` table, `qualify_task` in the posture, and a builder-free `qualify` run kind · server
 - **G-952** — a caught negative control is not witnessed control by control; the canary covers only the start of a controls run, so a sealed posture that cannot build would make every control look caught · run a gold control in the same posture beside each caught control and read a red one as an instrument failure · server

@@ -418,7 +418,8 @@ const REFUSALS = {
   minutes: 14,
   unparsed: 0,
   apparatus_versions: ['2.2'],
-  groups: [{ group_id: 'g1', prefix: 'network', reason: 'egress refused', shape: 'curl https://…', truncated: false, n: 3, cost_usd: 1.2, verdict: 'unsure' }],
+  groups: [{ group_id: 'g1', prefix: 'network', reason: 'egress refused', shape: 'curl https://…', truncated: false, n: 3, cost_usd: 1.2, verdict: 'unsure', candidate_honest: 'curl https://x', candidate_refused: 'curl https://x\tnetwork:' }],
+  decisions: [],
   note: '',
 }
 const STRENGTHEN = {
@@ -435,7 +436,7 @@ const REMEASURE = {
   min_n: 10,
   rows_total: 40,
   rows_stale: 12,
-  cells: [{ label: 'bug.fix · XS', capability_class: 'bug.fix', size: 'XS', n_stale: 12, stale_versions: ['2.1'], n_current: 4, n_needed: 6, est_cost_usd: 2.4, cost_known: true, requests: [{ kind: 'replay', limit: 6 }] }],
+  cells: [{ label: 'bug.fix · XS', mode: 'sighted', capability_class: 'bug.fix', size: 'XS', n_stale: 12, stale_versions: ['2.1'], n_current: 4, n_needed: 6, est_cost_usd: 2.4, cost_known: true, requests: [{ kind: 'replay', limit: 6 }] }],
   up_to_date: [],
   summary: { cells_stale: 1, n_needed_total: 6, est_cost_usd_total: 2.4, est_minutes_total: 20, cost_known_cells: 1 },
   note: '',
@@ -536,7 +537,8 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     path: '/learn',
     element: <LearnPage />,
     api: { 'GET /learn/register': REGISTER, 'GET /learn/refusals': REFUSALS, 'GET /learn/strengthen': STRENGTHEN, 'GET /learn/remeasure': REMEASURE, 'GET /repos': REPOS },
-    // a viewer sees the register and no control; an operator gets the switch, revert and register
+    // a viewer sees the register and the reports with no control; an operator gets the
+    // switch, revert and register, and the three decisions the reports hand off to (G-532)
     roles: ['viewer', 'operator'],
   },
   '/ledger': {
@@ -622,6 +624,32 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
     open: async () => {
       await screen.findByRole('dialog')
       await userEvent.click(screen.getByRole('button', { name: 'Add rung' }))
+    },
+    minHints: 30,
+  },
+  {
+    name: '/learn + decide a refusal class (operator)',
+    route: '/learn?repo=alpha',
+    path: '/learn',
+    element: <LearnPage />,
+    api: INSTRUMENT_SCREENS['/learn']!.api,
+    roles: ['operator'],
+    open: async () => {
+      await userEvent.click((await screen.findAllByRole('button', { name: 'Decide' }))[0]!)
+      await screen.findByRole('button', { name: 'Record this decision' })
+    },
+    minHints: 30,
+  },
+  {
+    name: '/learn + queue a re-measurement (operator)',
+    route: '/learn?repo=alpha',
+    path: '/learn',
+    element: <LearnPage />,
+    api: INSTRUMENT_SCREENS['/learn']!.api,
+    roles: ['operator'],
+    open: async () => {
+      await userEvent.click((await screen.findAllByRole('button', { name: 'Queue runs' }))[0]!)
+      await screen.findByRole('button', { name: 'Queue the runs' })
     },
     minHints: 30,
   },

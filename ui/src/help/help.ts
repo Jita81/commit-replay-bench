@@ -268,10 +268,10 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/learn',
-    purpose: 'What the ledger teaches, and what the loop does about it: the prevention register lists every bug class with the change that should remove it and whether it worked; three reports list refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. The three reports act on nothing; the register acts only under an operator’s switch.',
+    purpose: 'What the ledger teaches, and what the loop does about it: the prevention register lists every bug class with the change that should remove it and whether it worked; three reports list refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.',
     next: {
-      viewer: 'Read the register: each class names its lever, its before and after with n, and what happens next. The three reports carry the rows and spend behind them.',
-      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: copy a candidate corpus line, freeze a strengthening item, or queue the re-measurement runs the plan lists.',
+      viewer: 'Read the register: each class names its lever, its before and after with n, and what happens next. The three reports carry the rows and spend behind them. The decisions are an operator’s.',
+      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: decide a refusal class, register a strengthening item on this repository’s backlog, or queue a cell’s re-measurement runs. Each says what it wrote; queueing spends the budget, so it shows the estimate first.',
     },
     numbers: 'A class closes when a kept change is followed by max(20, n) exposed first attempts with no recurrence; n is ceil(ln 0.025 ÷ ln(1 − p0)) from the frozen before window. Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement spend multiplies each cell’s own mean row cost by the rows still needed; a dash means no cost is known.',
     terms: ['apparatus', 'stale', 'oracle_strength', 'wilson', 'cell'],
