@@ -643,6 +643,43 @@ def test_the_structural_ratchet_sees_other_scopes_and_other_names(src: str) -> N
 
 
 @pytest.mark.parametrize(
+    "src",
+    [
+        "W: type[Workspace] = Workspace\nW.create(repo, sha, scratch / sha)\n",
+        "(W := Workspace).create(repo, sha, scratch / sha)\n",
+        "W, x = Workspace, 1\nW.create(repo, sha, scratch / sha)\n",
+        "for W in [Workspace]:\n    W.create(repo, sha, scratch / sha)\n",
+        "import crb.core.workspace as w\nW = w.Workspace\nW.create(repo, sha, scratch / sha)\n",
+        "kinds = {'ws': Workspace}\nkinds['ws'].create(repo, sha, scratch / sha)\n",
+        "def make():\n    return Workspace\nmake().create(repo, sha, scratch / sha)\n",
+        "def build(W):\n    W.create(repo, sha, scratch / sha)\nbuild(Workspace)\n",
+    ],
+    ids=["annotated", "walrus", "tuple", "for", "module-attr", "dict", "return", "argument"],
+)
+def test_the_structural_ratchet_sees_workspace_handed_on_as_a_value(src: str) -> None:
+    """PR #53 review, third round: the alias scan followed only ``W = Workspace``, so an
+    annotated ``W: T = Workspace``, a walrus ``(W := Workspace)``, unpacking, a ``for``, a
+    container, a return value or an argument each let ``W.create(…)`` through with 0
+    offenders. Enumerating the ways to bind an alias was the gap, as it was for ``dest``;
+    ``Workspace`` used as a value at all (not as ``Workspace.<attr>``, not as a type) is
+    the class, and each spelling must give exactly one."""
+    assert len(worktree_dest_offenders(src, "x.py")) == 1
+
+
+def test_the_structural_ratchet_admits_workspace_as_a_type() -> None:
+    """An annotation or a type expression names the class without handing it on: the
+    replay-side modules annotate ``ws: Workspace`` everywhere and must stay clean."""
+    src = (
+        "from collections.abc import Callable\n"
+        "BuildFn = Callable[[Workspace, str], None]\n"
+        "held: Workspace | None = None\n"
+        "def f(ws: Workspace, repo, sha, scratch) -> Workspace:\n"
+        '    return Workspace.create(repo, sha, opaque_dest(scratch, "run"))\n'
+    )
+    assert worktree_dest_offenders(src, "x.py") == []
+
+
+@pytest.mark.parametrize(
     "body",
     [
         'Workspace.create(repo, sha, opaque_dest(scratch, "run"), config=c)',
