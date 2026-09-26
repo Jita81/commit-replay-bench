@@ -11,7 +11,7 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 ### 2026-09-25 — signing out ends the session; a clone lives where the worker clones; the sign-in CLI sees only what it needs
 
 The external assessment of 2026-09-25 named three security gaps (D2, D3, D4). Each was
-reproduced with a failing test on `main` before it was changed (DL-053).
+reproduced with a failing test on `main` before it was changed (DL-054).
 
 - **Signing out ends the session, not only the cookie.** A session cookie is signed and
   stateless, so clearing it in one browser left any copy of it valid until it expired.
@@ -67,6 +67,10 @@ reproduced with a failing test on `main` before it was changed (DL-053).
   client secret. It now passes `PATH`, `HOME`, a plain terminal, a no-op browser, the
   host's proxy and certificate-authority variables (so the sign-in works behind a proxy)
   and a `CLAUDE_CONFIG_DIR` created for that sign-in and removed after it.
+
+### 2026-09-25 — the gate tools are pinned, and the suite no longer depends on the machine it runs on
+
+mypy and ruff are pinned exactly (Dependabot moves them) and CI runs daily on `main` because a SQLAlchemy release, not a commit, turned eight untyped query results into mypy errors; the eight are annotated. The suite no longer depends on the uid it runs as, a docker daemon or the network: tests name a non-root builder user (a ratchet refuses one that does not), the doctor tests never ask the host's daemon, and a `network` test is skipped with the host and the reason when the host is unreachable (and fails instead under `CRB_TEST_STRICT_WARMUP=1`, as in CI, where an unreachable host is a defect). The ratchet exempts only settings built after the test pins `os.getuid` in its own body, and only a pin on the `os` module itself, found through the file's imports (`Fake.os` is not `os`). The local pytest gate in `docs/CONTRIBUTING.md` now measures branch coverage as CI does, and a test fails when a documented gate command drifts from `ci.yml`. `.coverage` and `coverage.xml` are ignored. The pins fix the tools, not the verdict — every other dependency still resolves fresh, which is what the daily run is for — and `docs/CONTRIBUTING.md` now says so and has joined the claims gate's allowlist (assessment 2026-09-25 §E1–E2, DL-053).
 
 ### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
 

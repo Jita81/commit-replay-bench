@@ -473,7 +473,7 @@ LIVE_TLS_PROBE = textwrap.dedent(
 )
 
 
-@pytest.mark.network
+@pytest.mark.network("api.anthropic.com")
 def test_default_allowlist_reaches_the_real_endpoint_over_tls(sealed: SealedCheckout) -> None:
     """Zero model spend: a TLS handshake with api.anthropic.com through the sidecar
     (the default allowlist), then an unauthenticated GET — any HTTP status proves

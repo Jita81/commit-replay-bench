@@ -47,8 +47,10 @@ dev = [
   "pytest>=8.3",
   "pytest-cov>=5.0",
   "pytest-timeout>=2.3",
-  "ruff>=0.6",
-  "mypy>=1.11",
+  # The gate tools are pinned exactly: a range lets a fresh environment and CI disagree
+  # about the same tree. Dependabot's dev-tooling group moves them (.github/dependabot.yml).
+  "ruff==0.16.9",
+  "mypy==2.3.1",
   "import-linter>=2.0",
   "hypothesis>=6.100",
 ]
@@ -115,7 +117,7 @@ markers = [
   "toolchain(name): needs a language toolchain on PATH (go, node, mvn, cargo)",
   "live: needs live model credentials (skipped in CI)",
   "slow: long-running end-to-end test",
-  "network: needs outbound network access (the dependency-install phase)",
+  "network(*hosts): needs outbound HTTPS to each named host (none: the Python package index); skipped with the reason when one is unreachable, a failure under CRB_TEST_STRICT_WARMUP=1 (tests/conftest.py)",
   "sandbox_images: builds and smokes the shipped reference sandbox images (deploy/sandbox); CI runs these in the sandbox-images job",
 ]
 

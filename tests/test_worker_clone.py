@@ -638,7 +638,7 @@ def _git_openers_in_server() -> set[tuple[str, str]]:
 
 
 def test_the_use_site_list_is_every_place_the_server_opens_git() -> None:
-    """PR #52 review (DL-053's "every use site"): ``_USE_SITES`` is a hand-kept list, so the
+    """PR #52 review (DL-054's "every use site"): ``_USE_SITES`` is a hand-kept list, so the
     ratchet above is only as complete as the list. Every function in ``crb.server`` that
     opens git — through ``GitRepo(…)`` / ``clone_repo(…)``, or by starting a process itself
     (the third review: ``subprocess.run([git, "-C", row.clone_path, …])`` walked round a

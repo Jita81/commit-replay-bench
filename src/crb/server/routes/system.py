@@ -240,15 +240,14 @@ def _count_triggers(s: Session) -> int:
     """How many of the expected ``<table>_no_update`` / ``_no_delete`` triggers exist."""
     dialect = s.get_bind().dialect.name
     names = [f"{t}_{kind}" for t in APPEND_ONLY_TABLES for kind in ("no_update", "no_delete")]
+    rows: Iterable[str]
     if dialect == "sqlite":
-        rows: Iterable[str] = s.execute(
-            text("SELECT name FROM sqlite_master WHERE type = 'trigger'")
-        ).scalars()
+        rows = s.execute(text("SELECT name FROM sqlite_master WHERE type = 'trigger'")).scalars()
     elif dialect == "postgresql":
         rows = s.execute(text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")).scalars()
     else:  # pragma: no cover — unsupported by policy
         return 0
-    present = set(rows)
+    present: set[str] = set(rows)
     return sum(1 for n in names if n in present)
 
 
