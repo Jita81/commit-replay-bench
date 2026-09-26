@@ -42,6 +42,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, field_validator
 
+from crb.core.checks import ARMS
 from crb.core.ledger import FAILURE_KINDS
 from crb.core.routing import CONTROLS_STATES, REASON_CODES
 from crb.server.schemas import (
@@ -127,12 +128,22 @@ class CapabilityCellSplitOut(CapabilityCellOut):
     model_ci_low: float | None
     model_ci_high: float | None
     failure_split: FailureSplitOut
+    #: The one checks arm every row of the cell was graded under (ADR-0024 §6) — the arm
+    #: ``checks=current`` resolved to, so a reader never has to guess it.
+    checks_arm: str
 
     @field_validator("reason_code")
     @classmethod
     def _reason_known(cls, v: str) -> str:
         if v not in REASON_CODES:
             raise ValueError(f"reason_code {v!r} not in {REASON_CODES}")
+        return v
+
+    @field_validator("checks_arm")
+    @classmethod
+    def _arm_known(cls, v: str) -> str:
+        if v not in ARMS:
+            raise ValueError(f"checks_arm {v!r} not in {ARMS}")
         return v
 
 

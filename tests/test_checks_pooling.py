@@ -237,6 +237,23 @@ def test_the_map_reads_the_repositorys_own_arm_and_never_a_pooled_one(env: Env) 
     assert _n(env, "&checks=off") == n_off
 
 
+def test_every_served_cell_names_the_arm_it_was_read_on(env: Env) -> None:
+    """``checks=current`` resolves to the repository's own arm, and nothing in the response
+    said which: a reader could not tell an ``off`` cell from an ``api`` one (CodeRabbit,
+    PR #57). Each cell carries ``checks_arm``, from ``CellStats`` itself."""
+
+    def arms(query: str = "") -> set[str]:
+        r = env.get(f"/capability-map?repo={ALPHA}&by=class,size&apparatus=all{query}")
+        assert r.status_code == 200, r.text
+        return {c["checks_arm"] for c in r.json()["cells"]}
+
+    assert arms() == {"off"}
+    assert env.put(f"/repos/{ALPHA}", json={"checks": {"api_stable": True}}).status_code == 200
+    assert arms("&checks=off") == {"off"}
+    rows = [r for r in DbLedger(env.factory).rows(repo=ALPHA) if r.checks_arm == "off"]
+    assert cell_stats(rows[:1]).to_dict()["checks_arm"] == "off"
+
+
 # --- sign-offs, the scorecard's headline and the failure split read one arm ------------------
 
 

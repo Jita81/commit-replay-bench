@@ -126,6 +126,8 @@ export interface CapabilityCellSplit extends CapabilityCell {
   model_ci_low: number | null
   model_ci_high: number | null
   failure_split: FailureSplit
+  /** The one checks arm every row of the cell was graded under (ADR-0024 §6): `off`, `fmt`, `api` or `fmt,api` — what `checks=current` resolved to. Optional so a server from before the field still types. */
+  checks_arm?: string
 }
 
 export interface CapabilityMapWithControls extends Omit<CapabilityMap, 'cells' | 'policy'> {

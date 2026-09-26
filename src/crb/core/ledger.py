@@ -1234,6 +1234,7 @@ class CellStats:
             "model_point": round(self.model_point, 4),
             "model_ci_low": round(self.model_ci.low, 4),
             "model_ci_high": round(self.model_ci.high, 4),
+            "checks_arm": self.checks_arm,
         }
 
 

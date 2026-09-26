@@ -281,6 +281,7 @@ def cell_out(
         model_ci_low=None if c.model_point is None else round(s.model_ci.low, 4),
         model_ci_high=None if c.model_point is None else round(s.model_ci.high, 4),
         failure_split=split_out(c),
+        checks_arm=s.checks_arm,
     )
 
 
