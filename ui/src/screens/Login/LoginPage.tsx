@@ -12,8 +12,11 @@
  *               error envelope on a wrong password (never a blank form), and returns the user
  *               to the `?next=` path — same-origin paths only, so a crafted link cannot bounce
  *               a session to another host. An already-authenticated visitor is redirected
- *               straight to `next`. While a development stack has automatic sign-in on,
- *               the banner above the form says so (`DevAutologinBanner`). Both fields and both
+ *               straight to `next`; until the session check settles (the automatic sign-in
+ *               included) a status line stands in for the form, so it never flashes before a
+ *               redirect, and a failed check is shown above the form with a retry. While a
+ *               development stack has automatic sign-in on, the banner above the form says so
+ *               (`DevAutologinBanner`). Both fields and both
  *               sign-in buttons carry a hint
  *               (`field.login.*`, `button.login.*`) so the form explains itself on hover,
  *               focus and tap before a person has any role at all. Under the form one
@@ -34,7 +37,9 @@
  * Tested by:    ui/src/screens/Login/LoginPage.test.tsx (the strapline; the hints resolve),
  *               ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
  *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
- *               the role chip)
+ *               the role chip),
+ *               ui/src/components/DevAutologinBanner.test.tsx (the status while an automatic
+ *               sign-in settles; a failed one shown above the form)
  * Touch when:   the OIDC start path or the login body changes (docs/API.md "Auth"); never for
  *               a new repository.
  */
@@ -59,7 +64,7 @@ function safeNext(raw: string | null): string {
 
 /** The screen; redirects to `next` once a session exists. */
 export function LoginPage() {
-  const { me, loading } = useAuth()
+  const { me, loading, error: authError, refetch: recheck } = useAuth()
   const [params] = useSearchParams()
   const next = safeNext(params.get('next'))
   const login = useLogin()
@@ -70,6 +75,18 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
 
   if (!loading && me) return <Navigate to={next} replace />
+  // Until the session check settles (`/auth/me`, and on a development stack the automatic
+  // sign-in), the form is not shown: a visitor about to be signed in never sees it flash.
+  if (loading) {
+    return (
+      <div className="flex min-h-screen flex-col bg-surface text-on-surface">
+        <DevAutologinBanner />
+        <div className="flex flex-1 items-center justify-center text-on-surface-muted" role="status">
+          Checking your session…
+        </div>
+      </div>
+    )
+  }
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -112,6 +129,11 @@ export function LoginPage() {
               </Button>
             </form>
 
+            {authError && (
+              <div className="mt-5">
+                <ErrorState compact error={authError} onRetry={recheck} title="Could not check your session" />
+              </div>
+            )}
             {version.isPending && <p className="mt-5 text-center text-[11px] text-on-surface-muted">Checking for an organisation sign-in…</p>}
             {version.isError && (
               <div className="mt-5">

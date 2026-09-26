@@ -9,7 +9,9 @@
  * What it does: Reads `GET /version` (unauthenticated, so the sign-in page can read it before
  *               anyone has a role) and, when it reports `dev_autologin`, renders one hinted
  *               sentence in the warning colour with `role="status"`; renders nothing otherwise,
- *               including while `/version` is loading or has failed.
+ *               including while `/version` is loading or has failed. Follows the stack, not the
+ *               page load: `useVersion` refetches when the tab regains focus and after a
+ *               minute, so an API restarted with the setting changed moves the banner too.
  * How:          `useVersion` → `dev_autologin === true` → a `Hint` with
  *               `banner.shell.dev_autologin`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -19,8 +21,9 @@
  *               mounted), ui/src/help/hints.ts (`banner.shell.dev_autologin`),
  *               src/crb/server/routes/system.py (the `dev_autologin` field on `/version`)
  * Tested by:    ui/src/components/DevAutologinBanner.test.tsx, ui/src/help/hints-ratchet.test.tsx
- * Touch when:   the sentence changes (docs/OPERATOR.md quotes it); never to hide the banner
- *               while the setting is on.
+ * Touch when:   never for a new repository (the banner reads the stack's own setting); when the
+ *               sentence changes (docs/OPERATOR.md quotes it); never to hide the banner while
+ *               the setting is on.
  */
 import { useVersion } from '../api/hooks'
 import { Hint } from './Hint'

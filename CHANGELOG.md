@@ -19,7 +19,9 @@ the one a password sign-in issues — the same cookies, the credential version w
 account's session nonce and the session-bound CSRF token — so roles, signing out and "sign
 out everywhere" work as after a typed password, and it never touches the login rate limit.
 Every sign-in is an `auth.dev_autologin` event and a warning line, and every page shows a
-banner while it is on.
+banner while it is on; an open page's banner follows an API restarted with the setting
+changed. The sign-in page shows a status, not the form, while an automatic sign-in settles,
+and one that fails for any reason but a refusal is shown above the form rather than hidden.
 A security review found that the UI's own Vite dev proxy made a request from another machine
 look local; the proxy now marks such requests with `X-Forwarded-For`, and the API refuses them.
 
