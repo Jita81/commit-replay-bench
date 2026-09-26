@@ -425,18 +425,31 @@ def test_the_default_user_is_the_workers_own_uid_and_root_is_refused(
     assert BuilderContainerSettings(image="i", user="10001:10001").user == "10001:10001"
 
 
+def _names_os(node: ast.AST) -> bool:
+    """True for the name ``os`` or an attribute chain that ends in ``.os``
+    (``container.os``): the objects whose ``getuid`` is the one the settings read."""
+    if isinstance(node, ast.Name):
+        return node.id == "os"
+    return isinstance(node, ast.Attribute) and node.attr == "os"
+
+
 def _pins_the_uid(node: ast.AST) -> bool:
     """True for a ``setattr`` call (``monkeypatch.setattr`` or the builtin) that replaces
-    ``getuid``: by attribute name (``setattr(os, "getuid", …)``) or by dotted target
-    (``setattr("os.getuid", …)``)."""
+    ``os.getuid``: on ``os`` by attribute name (``setattr(os, "getuid", …)``, also through a
+    module's ``.os``) or by a dotted target whose last two parts are ``os.getuid``
+    (``setattr("os.getuid", …)``). ``getuid`` set on any other object pins nothing: the
+    settings still read the host's uid. Keyword forms are not recognised — the safe side."""
     if not isinstance(node, ast.Call):
         return False
     callee = node.func
     name = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
-    if name != "setattr":
+    if name != "setattr" or not node.args:
         return False
-    targets = [a.value for a in node.args[:2] if isinstance(a, ast.Constant)]
-    return any(t == "getuid" or (isinstance(t, str) and t.endswith(".getuid")) for t in targets)
+    first = node.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value.split(".")[-2:] == ["os", "getuid"]
+    second = node.args[1] if len(node.args) > 1 else None
+    return _names_os(first) and isinstance(second, ast.Constant) and second.value == "getuid"
 
 
 def _settings_on_the_hosts_uid(path: Path) -> set[str]:
@@ -448,7 +461,8 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
     ``docker`` without ``CRB_BUILDER__USER``. A function that PINS the uid —
     ``setattr(os, "getuid", …)`` or ``setattr("os.getuid", …)``, through ``monkeypatch`` or
     not — tests the default on purpose and no longer depends on the host, so it is exempt. A
-    function that only reads ``os.getuid()`` or names it in a string pins nothing and is not.
+    function that only reads ``os.getuid()``, names it in a string, or sets ``getuid`` on some
+    other object pins nothing and is not.
     """
     found: set[str] = set()
     rel = path.relative_to(TESTS_DIR.parent).as_posix()
