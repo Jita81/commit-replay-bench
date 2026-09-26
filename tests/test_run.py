@@ -280,8 +280,26 @@ _DEST_EXEMPT: dict[str, str] = {
 }
 
 
-#: The ``Workspace`` constructors that create a worktree.
+#: The ``Workspace`` constructors that create a worktree. They are classmethods, so an
+#: instance reaches them too (``ws.create``, ``type(ws).at_ref``): the attribute name is the
+#: class, on any receiver but one listed in ``_NOT_A_WORKSPACE`` (PR #53 review, fourth round).
 _WS_CTORS = ("create", "at_ref")
+#: Receivers, by spelling, whose ``create`` is not a worktree constructor, each with why. A
+#: bare name is let off only while the file binds it by ``from … import`` or not at all.
+_NOT_A_WORKSPACE: dict[str, str] = {
+    "SealedCheckout": "crb.builders.container: an exported copy, never a ``git worktree``",
+    "self.client.chat.completions": "the OpenAI SDK client: a chat completion, not a worktree",
+}
+#: The generics whose subscript index is a type (``Callable[[Workspace], …]``,
+#: ``type[Workspace]``); any other subscript (``Box[Workspace]``) may hand its index on.
+_GENERICS = frozenset(
+    {
+        "Annotated", "AsyncIterator", "Awaitable", "Callable", "ClassVar", "Coroutine", "Dict",
+        "Final", "FrozenSet", "Generator", "Iterable", "Iterator", "List", "Mapping",
+        "Optional", "Sequence", "Set", "Tuple", "Type", "Union", "dict", "frozenset", "list",
+        "set", "tuple", "type",
+    }
+)  # fmt: skip
 #: What the ratchet treats as a scope of its own: a name bound in one is not bound in another.
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
@@ -300,9 +318,10 @@ def _workspace_names(tree: ast.AST) -> set[str]:
 
 
 def _type_nodes(tree: ast.AST) -> set[int]:
-    """Every node inside an annotation, a subscript's index or a ``type`` alias: where
-    ``Workspace`` names a type and is never handed on (``ws: Workspace``,
-    ``Callable[[Workspace], …]``)."""
+    """Every node inside an annotation, a known generic's subscript index or a ``type``
+    alias: where ``Workspace`` names a type and is never handed on (``ws: Workspace``,
+    ``Callable[[Workspace], …]``). Any other subscript index is a value: ``Box[Workspace]``
+    can hand it on (PR #53 review, fourth round)."""
     roots: list[ast.AST] = []
     for n in ast.walk(tree):
         if isinstance(n, ast.arg) and n.annotation is not None:
@@ -311,11 +330,42 @@ def _type_nodes(tree: ast.AST) -> set[int]:
             roots.append(n.returns)
         elif isinstance(n, ast.AnnAssign):
             roots.append(n.annotation)
-        elif isinstance(n, ast.Subscript):
+        elif isinstance(n, ast.Subscript) and _generic(n.value):
             roots.append(n.slice)
         elif isinstance(n, ast.TypeAlias):
             roots.append(n.value)
     return {id(m) for r in roots for m in ast.walk(r)}
+
+
+def _generic(expr: ast.expr) -> bool:
+    """A generic from ``_GENERICS``, by its name or as ``typing.<name>``."""
+    return (isinstance(expr, ast.Name) and expr.id in _GENERICS) or (
+        isinstance(expr, ast.Attribute) and expr.attr in _GENERICS
+    )
+
+
+def _let_off(tree: ast.AST) -> frozenset[str]:
+    """The ``_NOT_A_WORKSPACE`` spellings this file cannot have repointed: a dotted one as
+    listed, a bare name only when nothing in the file binds it but ``from … import`` (a
+    parameter, an assignment, ``import … as``, a ``def`` or ``class`` of that name each
+    make it whatever the file says it is)."""
+    bound: set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+            bound.add(n.id)
+        elif isinstance(n, ast.arg):
+            bound.add(n.arg)
+        elif isinstance(n, ast.Import):
+            bound.update(a.asname or a.name.split(".")[0] for a in n.names)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(n.name)
+        elif isinstance(n, (ast.Global, ast.Nonlocal)):
+            bound.update(n.names)
+        elif isinstance(n, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and n.name:
+            bound.add(n.name)
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            bound.add(n.rest)
+    return frozenset(k for k in _NOT_A_WORKSPACE if "." in k or k not in bound)
 
 
 def _workspace_as_values(tree: ast.AST, ws: set[str]) -> list[ast.expr]:
@@ -345,21 +395,23 @@ def _is_workspace(expr: ast.expr, names: set[str]) -> bool:
     )
 
 
-def _is_ctor(expr: ast.expr, ws: set[str]) -> bool:
-    """``Workspace.create`` / ``Workspace.at_ref`` (by any name) or any ``….worktree_add``."""
+def _is_ctor(expr: ast.expr, let_off: frozenset[str]) -> bool:
+    """``….create`` / ``….at_ref`` on any receiver the file cannot show is not a
+    ``Workspace`` (a class, an alias, an instance, ``type(ws)``), or any ``….worktree_add``."""
     return isinstance(expr, ast.Attribute) and (
-        (expr.attr in _WS_CTORS and _is_workspace(expr.value, ws)) or expr.attr == "worktree_add"
+        (expr.attr in _WS_CTORS and ast.unparse(expr.value) not in let_off)
+        or expr.attr == "worktree_add"
     )
 
 
-def _dest_arg(call: ast.Call, ws: set[str]) -> ast.expr | None:
+def _dest_arg(call: ast.Call, let_off: frozenset[str]) -> ast.expr | None:
     """The destination a worktree-creating call is handed, or ``None`` when ``call`` creates
     no worktree: ``Workspace.create(repo, sha, dest)`` / ``Workspace.at_ref(repo, ref, dest)``
     and ``<repo>.worktree_add(dest, ref)``, positional or ``dest=``. When the destination
     cannot be read — it travels in ``*args`` / ``**kwargs`` or is missing — the call itself
     is returned: not an ``opaque_dest(...)`` call, so the ratchet cannot admit it."""
     f = call.func
-    if not _is_ctor(f, ws):
+    if not _is_ctor(f, let_off):
         return None
     assert isinstance(f, ast.Attribute)
     pos = 0 if f.attr == "worktree_add" else 2
@@ -469,21 +521,25 @@ def worktree_dest_offenders(source: str, rel: str) -> list[str]:
     made into it through ``global`` / ``nonlocal``) is an ``opaque_dest(...)`` call — and
     every constructor, or ``Workspace`` itself, handed on as a value
     (``make = Workspace.create``, ``partial(repo.worktree_add, …)``, ``W = Workspace``,
-    ``return Workspace``), whose destination is out of sight. Structural, so no spelling of
-    the PATH (``/``, ``Path(a, b)``, ``joinpath``, a name built on another line) and no
-    spelling of the ALIAS gets past it. What it does not see: a constructor reached by
-    ``getattr`` or a string, a ``Workspace`` handed on by an exempt file or by code outside
-    ``crb``, and a ``git worktree add`` run as a subprocess (the lexical ratchet above
-    covers the name)."""
+    ``return Workspace``, ``Box[Workspace]``), whose destination is out of sight. A
+    ``create`` / ``at_ref`` counts on any receiver (an alias, an instance, ``type(ws)``) but
+    one listed in ``_NOT_A_WORKSPACE`` that the file has not rebound. Structural, so no
+    spelling of the PATH (``/``, ``Path(a, b)``, ``joinpath``, a name built on another line)
+    gets past it. What it does not see: a constructor reached by ``getattr`` or a string; a
+    receiver spelled as a ``_NOT_A_WORKSPACE`` entry that another module or an attribute
+    assignment has pointed at a ``Workspace``; a ``Workspace`` handed on by an exempt file or
+    by code outside ``crb``; and a ``git worktree add`` run as a subprocess (the lexical
+    ratchet above covers the name)."""
     tree = ast.parse(source)
     ws = _workspace_names(tree)
+    let_off = _let_off(tree)
     scopes: list[ast.AST] = [tree] + [n for n in ast.walk(tree) if isinstance(n, _SCOPES)]
     owns = {id(s): _own(s) for s in scopes}
     bindings = _scope_bindings(tree, scopes, owns)
     offenders: list[str] = []
     called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
     for n in ast.walk(tree):
-        if isinstance(n, ast.Attribute) and id(n) not in called and _is_ctor(n, ws):
+        if isinstance(n, ast.Attribute) and id(n) not in called and _is_ctor(n, let_off):
             offenders.append(f"{rel}:{n.lineno}: {ast.unparse(n)[:120]} (as a value)")
     for v in _workspace_as_values(tree, ws):
         offenders.append(f"{rel}:{v.lineno}: {ast.unparse(v)[:120]} (Workspace as a value)")
@@ -492,7 +548,7 @@ def worktree_dest_offenders(source: str, rel: str) -> list[str]:
         for n in owns[id(scope)]:
             if not isinstance(n, ast.Call):
                 continue
-            dest = _dest_arg(n, ws)
+            dest = _dest_arg(n, let_off)
             if dest is None:
                 continue
             ok = _is_opaque(dest) or (
@@ -637,7 +693,6 @@ def test_the_structural_ratchet_sees_async_rebinding_and_parameters() -> None:
         # the constructor reached by another name
         "from crb.core.workspace import Workspace as W\nW.create(repo, sha, scratch / sha)\n",
         "import crb.core.workspace as w\nw.Workspace.at_ref(repo, ref, scratch / ref)\n",
-        "W = Workspace\nW.create(repo, sha, scratch / sha)\n",
         # the constructor handed on as a value: its destination is out of sight
         "make = Workspace.create\nmake(repo, sha, scratch / sha)\n",
         "partial(repo.worktree_add, scratch / sha)(sha)\n",
@@ -665,7 +720,6 @@ def test_the_structural_ratchet_sees_async_rebinding_and_parameters() -> None:
         "star-only",
         "import-alias",
         "module-alias",
-        "name-alias",
         "as-value",
         "partial",
         "def-rebind",
@@ -682,6 +736,7 @@ def test_the_structural_ratchet_sees_other_scopes_and_other_names(src: str) -> N
 @pytest.mark.parametrize(
     "src",
     [
+        "W = Workspace\nW.create(repo, sha, scratch / sha)\n",
         "W: type[Workspace] = Workspace\nW.create(repo, sha, scratch / sha)\n",
         "(W := Workspace).create(repo, sha, scratch / sha)\n",
         "W, x = Workspace, 1\nW.create(repo, sha, scratch / sha)\n",
@@ -691,7 +746,17 @@ def test_the_structural_ratchet_sees_other_scopes_and_other_names(src: str) -> N
         "def make():\n    return Workspace\nmake().create(repo, sha, scratch / sha)\n",
         "def build(W):\n    W.create(repo, sha, scratch / sha)\nbuild(Workspace)\n",
     ],
-    ids=["annotated", "walrus", "tuple", "for", "module-attr", "dict", "return", "argument"],
+    ids=[
+        "name-alias",
+        "annotated",
+        "walrus",
+        "tuple",
+        "for",
+        "module-attr",
+        "dict",
+        "return",
+        "argument",
+    ],
 )
 def test_the_structural_ratchet_sees_workspace_handed_on_as_a_value(src: str) -> None:
     """PR #53 review, third round: the alias scan followed only ``W = Workspace``, so an
@@ -699,8 +764,13 @@ def test_the_structural_ratchet_sees_workspace_handed_on_as_a_value(src: str) ->
     container, a return value or an argument each let ``W.create(…)`` through with 0
     offenders. Enumerating the ways to bind an alias was the gap, as it was for ``dest``;
     ``Workspace`` used as a value at all (not as ``Workspace.<attr>``, not as a type) is
-    the class, and each spelling must give exactly one."""
-    assert len(worktree_dest_offenders(src, "x.py")) == 1
+    the class. Since the fourth round a ``create`` on any receiver counts too, so each
+    spelling is named at both ends: exactly one ``Workspace`` as a value and exactly one
+    call whose destination is not opaque."""
+    found = worktree_dest_offenders(src, "x.py")
+    values = [f for f in found if f.endswith("(Workspace as a value)")]
+    assert len(values) == 1, found
+    assert len(found) == 2 and "create(repo, sha, scratch / sha)" in "".join(found), found
 
 
 @pytest.mark.parametrize(
