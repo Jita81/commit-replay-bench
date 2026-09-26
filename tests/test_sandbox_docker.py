@@ -279,15 +279,30 @@ GONE_WITHIN_S = 15.0
 
 
 def _gone(name: str, within_s: float = GONE_WITHIN_S) -> bool:
-    """``True`` once ``docker ps -a`` no longer lists ``name``; ``False`` if it is still
-    listed after ``within_s`` seconds — a leaked container, which the tests refuse."""
+    """``True`` once a SUCCESSFUL ``docker ps -a`` no longer lists ``name``; ``False`` if it
+    is still listed at ``within_s`` seconds — a leaked container, which the tests refuse.
+    Every query is bounded by the time left, and a failed or unanswered query fails the
+    test: empty output from a daemon that did not answer is not proof of removal."""
     deadline = time.monotonic() + within_s
     while True:
-        if _ps(name) == "":
-            return True
-        if time.monotonic() >= deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             return False
-        time.sleep(0.2)
+        try:
+            q = subprocess.run(
+                ["docker", "ps", "-aq", "--filter", f"name={name}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=remaining,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"docker ps did not answer within {within_s:g}s while checking {name}")
+        if q.returncode != 0:
+            pytest.fail(f"docker ps failed (rc={q.returncode}) checking {name}: {q.stderr.strip()}")
+        if q.stdout.strip() == "":
+            return True
+        time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
 
 
 def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
@@ -374,4 +389,3 @@ def test_the_gone_check_never_waits_past_its_bound(monkeypatch):
     assert _gone("crb-any", within_s=0.6) is False
     assert time.monotonic() - started < 1.2
     assert timeouts and all(0 < t <= 0.6 for t in timeouts), timeouts
-
