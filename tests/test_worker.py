@@ -27,7 +27,10 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               (the grade stage's test run) reports an unconfirmed kill through the same seam
               (event under the task, note, reaper queue); and that a reap pass is budgeted to
               ``heartbeat_s / 2`` so a daemon that answers nothing cannot hold the loop past
-              the worker's liveness bound — the check-in still lands.
+              the worker's liveness bound — the check-in still lands. And (ADR-0023) that a
+              production worker stamps the unsealed-production override into every run's
+              apparatus and every pack, and refuses a run that asks for the local executor
+              without it.
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
               / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -1334,7 +1337,12 @@ def test_stage_routing_and_settings_validation() -> None:
 # --- entrypoint ---------------------------------------------------------------------------------
 
 
-def test_once_main(h: Harness, capsys: pytest.CaptureFixture[str]) -> None:
+def test_once_main(
+    h: Harness, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the local executor is a development worker: in prod (the default) the entrypoint
+    # refuses it without CRB_ALLOW_UNSEALED_PROD (ADR-0023; tests/test_settings_posture.py)
+    monkeypatch.setenv("CRB_ENV", "dev")
     run = h.enqueue("replay")
     argv = [
         "--database-url",
@@ -1390,7 +1398,8 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     assert s.home == tmp_path / "h" and s.executor == "docker"
     assert s.docker is not None and s.docker.image == "img:1" and s.worker_id == "env-w"
     # the deployment's keys — what compose / Helm set and the API reads — are honoured and
-    # win over the short forms; without either the worker is `local` with no image
+    # win over the short forms; without either the worker takes the env's default: docker
+    # in prod (CRB_ENV unset reads prod, as the API reads it) and local in dev (ADR-0023)
     deployed = worker_main.settings_from_args(
         args,
         {
@@ -1408,7 +1417,11 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     )
     assert only_deployed.executor == "docker" and only_deployed.docker is None
     bare = worker_main.settings_from_args(args, {"CRB_HOME": str(tmp_path / "h")})
-    assert bare.executor == "local" and bare.docker is None
+    assert bare.executor == "docker" and bare.docker is None
+    bare_dev = worker_main.settings_from_args(
+        args, {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "dev"}
+    )
+    assert bare_dev.executor == "local" and bare_dev.docker is None
     # J-TEL-1: the worker's own /metrics port — CRB_METRICS_PORT (default 9464; 0 = off),
     # gated by the same CRB_METRICS_ENABLED the API reads; the bind is loopback unless the
     # deployment says otherwise (the series name repositories, builders and installations)
@@ -1432,7 +1445,8 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     args = parser.parse_args(
         ["--home", str(tmp_path / "flag"), "--executor", "local", "--kinds", "mine, probe"]
     )
-    s2 = worker_main.settings_from_args(args, env)
+    # the local executor is a development worker (prod refuses it: tests/test_settings_posture.py)
+    s2 = worker_main.settings_from_args(args, {**env, "CRB_ENV": "dev"})
     assert s2.home == tmp_path / "flag" and s2.executor == "local" and s2.kinds == ("mine", "probe")
 
 
@@ -1719,3 +1733,100 @@ def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> N
     assert worker._delivery_credentials(linked, "http://github.com/acme/cobra.git") is None
     # a row with no link (a URL-only registration) gets no credentials at all
     assert worker._delivery_credentials({"url": linked["url"]}, linked["url"]) is None
+
+
+# --- ADR-0023: production refuses the unsealed posture ------------------------------------------
+
+OVERRIDE_STAMP = {
+    "env": "prod",
+    "sandbox_executor": "local",
+    "builder_executor": "host",
+    "override": "CRB_ALLOW_UNSEALED_PROD",
+    "adr": "0023",
+}
+
+
+def test_a_prod_worker_stamps_the_unsealed_override_into_the_run_and_every_pack(
+    h: Harness,
+) -> None:
+    h.worker.settings = replace(h.settings, unsealed_override=OVERRIDE_STAMP)
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.apparatus_json["extra"]["unsealed_prod_override"] == OVERRIDE_STAMP
+    (row,) = list(h.worker.ledger.rows(run_id=run.id))
+    pack = h.worker.evidence_dir / f"{row.evidence_pack_hash}.json"
+    body = json.loads(pack.read_text(encoding="utf-8"))
+    assert body["apparatus"]["extra"]["unsealed_prod_override"] == OVERRIDE_STAMP
+    # the other kinds carry it on their apparatus too
+    h.enqueue("probe")
+    probe = h.run_one()
+    assert probe.apparatus_json["unsealed_prod_override"] == OVERRIDE_STAMP
+
+
+def test_a_sealed_worker_stamps_nothing(h: Harness) -> None:
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.id == run.id and "unsealed_prod_override" not in done.apparatus_json["extra"]
+
+
+def test_a_prod_worker_refuses_a_run_that_asks_for_the_local_executor(h: Harness) -> None:
+    h.worker.settings = replace(h.settings, executor="docker", refuse_unsealed=True)
+    run = h.enqueue("replay", params_json={"executor": "local"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("sandbox unavailable") and "CRB_ALLOW_UNSEALED_PROD" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == [] and FakeBuilder.briefs == []
+
+
+def _sealed_sandbox_stand_in(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test executor a sealed prod worker would use, stood in by a local one: the subject
+    here is where the factory's BUILDER runs, not where the tests run."""
+    monkeypatch.setattr(h.worker, "_executor", lambda ctx: LocalExecutor())
+
+
+def test_a_prod_worker_refuses_a_factory_run_because_factory_builds_run_on_the_host(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A factory build is handed a host worktree and never a container (``_run_factory``
+    passes none to the builder), so a sealed prod posture must not run one: /health says
+    "sealed", and a factory run on the host would make that untrue (ADR-0023)."""
+    _multiply_backlog(h)
+    FakeBuilder.briefs = []
+    _sealed_sandbox_stand_in(h, monkeypatch)
+    h.worker.settings = replace(h.settings, refuse_unsealed=True, builder_executor="docker")
+    run = h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("sandbox unavailable"), done.error
+    assert "factory" in done.error and "CRB_ALLOW_UNSEALED_PROD" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == [] and FakeBuilder.briefs == []
+
+
+def test_a_prod_worker_under_the_override_stamps_every_factory_run(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the override, a factory run may build on the host, and its apparatus says so —
+    even on a worker whose replay posture is sealed and so carries no override of its own."""
+    _multiply_backlog(h)
+    _sealed_sandbox_stand_in(h, monkeypatch)
+    h.worker.settings = replace(
+        h.settings, env="prod", executor="docker", builder_executor="docker", unsealed_override={}
+    )
+    h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    stamp = done.apparatus_json["unsealed_prod_override"]
+    assert stamp["builder_executor"] == "host" and stamp["run_kind"] == "factory"
+    assert stamp["override"] == "CRB_ALLOW_UNSEALED_PROD" and stamp["adr"] == "0023"
+
+
+def test_a_dev_worker_stamps_no_override_on_a_factory_run(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _multiply_backlog(h)
+    _sealed_sandbox_stand_in(h, monkeypatch)
+    h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert "unsealed_prod_override" not in done.apparatus_json

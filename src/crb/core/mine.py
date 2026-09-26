@@ -75,7 +75,7 @@ from crb.core.spec import (
     classify_commit,
     size_tier,
 )
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -182,8 +182,8 @@ def qualify(
     """
     started = time.monotonic()
     sha = cand.sha
-    dest = Path(scratch) / f"mine-{config.name}-{sha[:10]}"
-    _emit(on_event, "mine.candidate", repo=config.name, sha=sha, pool=pool)
+    dest = opaque_dest(scratch, "mine", avoid=(sha,))  # never named after the commit (B1)
+    _emit(on_event, "mine.candidate", repo=config.name, sha=sha, pool=pool, worktree=dest.name)
     with Workspace.create(repo, sha, dest, config=config) as ws:
         ws.overlay_tests(cand.test_files)
         # a file under the test layout that defines no tests (tests/mock_server.py,

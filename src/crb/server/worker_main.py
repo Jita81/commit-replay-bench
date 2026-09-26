@@ -19,6 +19,14 @@ short forms ``CRB_EXECUTOR`` / ``CRB_SANDBOX_IMAGE`` are read when those are abs
 The image is the DEFAULT for a repository that names no ``sandbox_image`` of its own; a
 repository's image wins over it (``crb.server.worker.docker_settings_for``).
 
+**Production refuses the unsealed posture** (ADR-0023). ``CRB_ENV`` (default ``prod``, as the
+API reads it) decides the defaults: in ``prod`` the test executor defaults to ``docker`` and the
+builder (``CRB_BUILDER__EXECUTOR``) to ``docker``; in ``dev`` to ``local`` and ``host``. A
+``prod`` worker with the local executor or the host builder does not start unless
+``CRB_ALLOW_UNSEALED_PROD=1`` (the same :func:`crb.server.settings.unsealed_prod_refusal` the API
+applies); with it, every run's apparatus carries the override, and without it the worker also
+refuses a run that asks for the local executor in its own parameters.
+
 The worker serves its own Prometheus exposition on ``CRB_METRICS_HOST:CRB_METRICS_PORT``
 before it starts polling (not with ``--once``): the build / grade / cost series are
 recorded in this process and the API's ``/metrics`` never carries them (J-TEL-1). The
@@ -35,7 +43,8 @@ Navigation
 What it is:   ``crb worker`` — the argument parser and process entry point for the queue
               consumer.
 What it does: Turns flags and ``CRB_*`` fallbacks into ``WorkerSettings``, refuses unknown run
-              kinds, builds a ``Worker`` (a bad database URL is reported and exits 2), then
+              kinds and, in ``prod``, the unsealed posture without ``CRB_ALLOW_UNSEALED_PROD``
+              (ADR-0023), builds a ``Worker`` (a bad database URL is reported and exits 2), then
               either processes one run (``--once``; exit 3 when idle) or polls until a stop
               signal arrives.
 How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for the builders'
@@ -43,7 +52,8 @@ How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for
               pydantic-settings view of the same environment the API reads) → ``Worker`` →
               ``metrics.start_worker_exposition`` → ``run_once`` | ``run_forever(stop)``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0023-production-refuses-the-unsealed-posture.md
 Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — everything this
               file configures), src/crb/store/jobs.py (``RUN_KINDS`` for ``--kinds``),
               src/crb/observability/metrics.py (the worker's exposition server),
@@ -53,7 +63,7 @@ Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — ever
               expose the metrics port), src/crb/server/settings.py (``SandboxSettings`` — the
               API's reading of the same keys), src/crb/core/execution.py (``DockerSettings``
               for ``--image``), deploy/sandbox/README.md (the reference images ``--image`` names)
-Tested by:    tests/test_worker.py
+Tested by:    tests/test_worker.py, tests/test_settings_posture.py
 Touch when:   never for a new repository (the sandbox image is per repository, set in its
               config); adding a worker flag means adding it to ``WorkerSettings`` and to the
               ``crb worker`` forwarding table in src/crb/cli/commands/service.py.
@@ -77,7 +87,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from crb.core.execution import DockerSettings, SandboxUnavailable
 from crb.observability import metrics
 from crb.observability.logging import configure_logging
-from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
+from crb.server.settings import (
+    ALLOW_UNSEALED_PROD_ENV,
+    SEALED_EXECUTOR,
+    Env,
+    FactorySettings,
+    GitHubAppSettings,
+    IntakeSettings,
+    default_builder_executor,
+    unsealed_prod_refusal,
+)
 from crb.server.worker import Worker, WorkerSettings
 from crb.store.jobs import RUN_KINDS
 
@@ -100,6 +119,10 @@ METRICS_PORT_ENV = "CRB_METRICS_PORT"
 METRICS_HOST_ENV = "CRB_METRICS_HOST"
 METRICS_ENABLED_ENV = "CRB_METRICS_ENABLED"
 PUBLIC_URL_ENV = "CRB_PUBLIC_URL"
+ENV_ENV = "CRB_ENV"
+#: The builder's executor (``docker`` | ``host``; ``local`` is read as ``host``, as
+#: :meth:`crb.builders.container.BuilderContainerSettings.from_env` reads it).
+BUILDER_EXECUTOR_ENV = "CRB_BUILDER__EXECUTOR"
 DEFAULT_METRICS_PORT = 9464
 DEFAULT_METRICS_HOST = "127.0.0.1"
 
@@ -120,7 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--executor",
         choices=("local", "docker"),
         default="",
-        help="default executor kind for runs that do not name one (default: $CRB_EXECUTOR or local)",
+        help="default executor kind for runs that do not name one (default: "
+        "$CRB_SANDBOX__EXECUTOR, else $CRB_EXECUTOR, else docker in prod and local in dev)",
     )
     p.add_argument(
         "--image",
@@ -173,10 +197,37 @@ def settings_from_args(
     # object): a worker started with --home but no CRB_HOME would otherwise look under
     # ./.crb/secrets for the Claude Code token the Settings UI stored under <home>.
     os.environ.setdefault(HOME_ENV, str(home))
+    shared = _shared_settings(e)
+    # ADR-0023: the defaults follow the env (sealed in prod), then production refuses the
+    # unsealed posture unless CRB_ALLOW_UNSEALED_PROD says so on purpose
     executor = (
-        (args.executor or e.get(SANDBOX_EXECUTOR_ENV) or e.get(EXECUTOR_ENV) or "local")
+        (
+            args.executor
+            or e.get(SANDBOX_EXECUTOR_ENV)
+            or e.get(EXECUTOR_ENV)
+            or (SEALED_EXECUTOR if shared.env == "prod" else "local")
+        )
         .strip()
         .lower()
+    )
+    builder = (e.get(BUILDER_EXECUTOR_ENV) or "").strip().lower() or default_builder_executor(
+        shared.env
+    )
+    builder = "host" if builder == "local" else builder
+    refusal = unsealed_prod_refusal(shared.env, executor, builder, allow=shared.allow_unsealed_prod)
+    if refusal:
+        raise ValueError(refusal)
+    sealed = executor == SEALED_EXECUTOR and builder == SEALED_EXECUTOR
+    override = (
+        {
+            "env": shared.env,
+            "sandbox_executor": executor,
+            "builder_executor": builder,
+            "override": ALLOW_UNSEALED_PROD_ENV,
+            "adr": "0023",
+        }
+        if shared.env == "prod" and not sealed
+        else {}
     )
     image = (args.image or e.get(SANDBOX_IMAGE_ENV) or e.get(IMAGE_ENV) or "").strip()
     docker = DockerSettings(image=image) if image else None
@@ -184,7 +235,6 @@ def settings_from_args(
     unknown = [k for k in kinds if k not in RUN_KINDS]
     if unknown:
         raise ValueError(f"unknown run kind(s) {unknown!r}; expected {RUN_KINDS}")
-    shared = _shared_settings(e)
     port = args.metrics_port if args.metrics_port is not None else shared.metrics_port
     if not 0 <= int(port) <= 65535:
         raise ValueError(f"{METRICS_PORT_ENV} must be 0 (off) or a port 1-65535, got {port}")
@@ -211,6 +261,10 @@ def settings_from_args(
         metrics_enabled=shared.metrics_enabled,
         metrics_host=host,
         metrics_port=int(port),
+        builder_executor=builder,
+        refuse_unsealed=shared.env == "prod" and not shared.allow_unsealed_prod,
+        unsealed_override=override,
+        env=shared.env,
     )
 
 
@@ -226,6 +280,10 @@ class _SharedWithApi(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="CRB_", env_nested_delimiter="__", extra="ignore", case_sensitive=False
     )
+    #: ``CRB_ENV`` and ``CRB_ALLOW_UNSEALED_PROD`` — read exactly as the API reads them, so
+    #: one environment gives both processes one posture rule (ADR-0023).
+    env: Env = "prod"
+    allow_unsealed_prod: bool = False
     github: GitHubAppSettings = GitHubAppSettings()
     factory: FactorySettings = FactorySettings()
     #: The tracker this deployment takes work from (``CRB_INTAKE__*``, ADR-0017). The
@@ -258,6 +316,10 @@ def _keys_for(env: dict[str, str]) -> dict[str, Any]:
     """The subset of an explicit ``env`` mapping that ``_SharedWithApi`` reads, as its
     field values (pydantic-settings only reads ``os.environ`` on its own)."""
     out: dict[str, Any] = {}
+    if ENV_ENV in env:
+        out["env"] = env[ENV_ENV]
+    if ALLOW_UNSEALED_PROD_ENV in env:
+        out["allow_unsealed_prod"] = env[ALLOW_UNSEALED_PROD_ENV]
     if METRICS_ENABLED_ENV in env:
         out["metrics_enabled"] = env[METRICS_ENABLED_ENV]
     if METRICS_HOST_ENV in env:
