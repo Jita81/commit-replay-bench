@@ -68,7 +68,7 @@ def downgrade() -> None:
     """Refused while any ``v5`` row exists: dropping the column would erase a recorded
     belt from evidence. With no ``v5`` row the column is empty and may go."""
     bind = op.get_bind()
-    n = bind.execute(sa.text("SELECT COUNT(*) FROM grades WHERE belt_set = 'v5'")).scalar_one()
+    n: int = bind.execute(sa.text("SELECT COUNT(*) FROM grades WHERE belt_set = 'v5'")).scalar_one()
     if n:
         raise RuntimeError(
             f"refusing to downgrade 0002: {n} grade row(s) record belt 5 (belt_set='v5')"
