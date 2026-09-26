@@ -21,8 +21,9 @@
  *               page; and that axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a run
  *               detail with real rows, Capability, Ledger and Sign-off — against the live
  *               data the earlier specs produced.
- * How:          `AxeBuilder` with the WCAG tags per screen; the fake token is shape-valid and
- *               deliberately not real.
+ * How:          `AxeBuilder` with the WCAG tags per screen, after every running animation has
+ *               finished (axe scores the settled screen, never a transition frame); the fake
+ *               token is shape-valid and deliberately not real.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Settings/SettingsPage.tsx and
@@ -43,6 +44,11 @@ const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 
 async function axeClean(page: Page, where: string): Promise<void> {
+  // axe reads the SETTLED screen: a colour transition still running (a button turning from
+  // outlined to filled as the last query lands) paints intermediate colours no reader ever
+  // rests on, and axe would score that frame. Every running animation is let finish first;
+  // the steady state is checked in full.
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))))
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
   expect(results.violations, `${where}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([])
 }
@@ -180,6 +186,8 @@ test.describe('07 settings + accessibility', () => {
     // each wait is for API-backed content, not the heading: the loaded screen is what axe reads
     await page.goto(`/connect/${encodeURIComponent(t.name)}`)
     await expect(page.getByTestId('stage-measure')).toBeVisible()
+    // the connect stream's own flow reading is API-backed content on this screen too
+    await expect(page.locator('#flow-connect-and-prove')).toBeVisible()
     await axeClean(page, `/connect/${t.name}`)
     await page.goto(`/connect/${encodeURIComponent(t.name)}/measure`)
     await expect(page.getByTestId('before-you-start')).toContainText(/attempts/)

@@ -211,7 +211,9 @@ test.describe(`05 replay (${BUILDER})`, () => {
     await expect(lead).toContainText('n =')
     // the spend names which rows it covers and whether any reported no price
     const spend = page.getByTestId('flow-spend-measure')
-    await expect(spend).toContainText('every graded row recorded for this repository')
+    await expect(spend).toContainText('the replay and blind attempts graded for this repository')
+    // and the repository's cumulative spend, every graded row once, stands beside it (DL-067)
+    await expect(page.getByTestId('flow-spend-total')).toContainText('every graded row counted once')
     // and the counts are counts: the rows this repository has graded
     await expect(card).toContainText('graded rows')
   })

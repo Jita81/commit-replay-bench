@@ -230,12 +230,27 @@ def stamp_first_healthy(factory: sessionmaker[Session], status: str) -> None:
     for a green read. A failure is logged and the health answer stands."""
     if status != "ok":
         return
+    # /health is polled (the chart's readiness probe, every 10 s): once this process has seen
+    # the stamp on record, it never reads the events table for it again
+    key = _database_key(factory)
+    if key in _HEALTHY_ON_RECORD:
+        return
     try:
         with factory() as s:
             record_first_healthy(s, status=status)
             s.commit()
+        _HEALTHY_ON_RECORD.add(key)
     except Exception:
         _LOG.exception("flow: recording the first green /health failed")
+
+
+#: The databases (by URL) this process knows already hold ``deployment.first_healthy``.
+_HEALTHY_ON_RECORD: set[str] = set()
+
+
+def _database_key(factory: sessionmaker[Session]) -> str:
+    bind = factory.kw.get("bind")
+    return str(getattr(bind, "url", id(factory)))
 
 
 def install_moments(session: Session) -> tuple[str, str, str]:

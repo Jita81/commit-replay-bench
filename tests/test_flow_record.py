@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.server import flow_record
 from crb.server.app import API_PREFIX, create_app
 from crb.server.flow_record import (
     DELIVER_ROUTED,
@@ -189,6 +190,17 @@ def test_the_first_green_health_read_is_stamped_and_a_degraded_one_is_not(
         client.get(f"{API_PREFIX}/health")
         client.get(f"{API_PREFIX}/health")
     assert _actions(f).count(FIRST_HEALTHY) == 1
+    # once on record, a polled green read no longer queries the events table for it
+    calls = {"n": 0}
+    real = flow_record.record_first_healthy
+
+    def counted(*a: object, **kw: object) -> bool:
+        calls["n"] += 1
+        return real(*a, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(flow_record, "record_first_healthy", counted)
+    flow_record.stamp_first_healthy(f, "ok")
+    assert calls["n"] == 0
     with f() as s:
         at, moment, healthy = install_moments(s)
     assert moment == "observed" and healthy >= at
