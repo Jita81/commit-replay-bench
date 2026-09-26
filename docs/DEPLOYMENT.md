@@ -228,7 +228,13 @@ seccomp, no service-account token mount, default-deny NetworkPolicy for every cr
 explicit allowlists (DNS; ingress-controller → api; api/worker/migrate → PostgreSQL;
 worker → model endpoint; api → OIDC), resource requests/limits on every container, a
 `Recreate` strategy for the worker (it owns its RWO work volume), and a PVC with
-`helm.sh/resource-policy: keep` so worktrees survive an uninstall.
+`helm.sh/resource-policy: keep` so worktrees survive an uninstall. The stored credentials
+(Settings → Claude Code login, the tracker token) live in `secretsStore`: one claim that the
+API, which writes them and checks them when a run is submitted, and the worker, which reads
+them at build time, both mount at `CRB_SECRETS_DIR` (`/srv/crb-secrets/store`). The default
+ReadWriteOnce claim pins both pods to one node; name a ReadWriteMany claim of your own
+(`secretsStore.existingClaim`, `secretsStore.accessMode: ReadWriteMany`) to lift the pin.
+The claim has no `keep` policy, so a stored credential does not outlive the release.
 
 ### 3.3 PostgreSQL
 

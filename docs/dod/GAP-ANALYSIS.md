@@ -313,12 +313,13 @@ One row per gap: the change, and how much of the tree it closes.
 
 ## Our own bugs — the prevention register
 
-**42 registered · 40 closed (construction 8, gate 32) · 2 pending.** A defect is closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.
+**44 registered · 41 closed (construction 9, gate 32) · 3 pending.** A defect is closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.
 
 | id | bug | level | gap | what is missing |
 |---|---|---|---|---|
 | P-008 | Under the docker posture an environment failure (no dependencies in the sealed container) was graded `builder_red` — the model blamed for the environment | construction | G-703 | the sealed posture grades an environment failure as the model's · posture-relative qualification that refuses a replay the posture cannot grade before any builder call (the `feat/posture` workflow, ADR-0019) · server |
 | P-014 | `tests/test_server_reaper.py::test_reap_pass_budget_caps_each_call_to_the_remainder` asserts on the wall-clock latency of real subprocess spawns (0.2 s fake-docker answers inside a 1 s budget), so it fails when the machine is loaded — a red build that says nothing about the code. A second instance, `tests/test_execution.py::test_docker_run_cancel_unconfirmed_kill_is_reported_and_bounded`, failed once in the value merge's full run and passed alone in 2 of 3 repeats (that file belongs to the posture workflow, so it is registered here, not changed) | construction | G-705 | the reaper's budget test measures real subprocess latency, so load turns it red · inject a fake clock (or a fake docker that advances one) so the budget arithmetic is tested without timing the machine · server |
+| P-045 | In the Helm chart the API serves kept patches and retained transcripts from its own `CRB_HOME` (an `emptyDir`), while the worker writes them to its claim, so `/grades/{hash}/patch` and `/transcript` cannot find them on Kubernetes | advisory | G-706 | the Helm API cannot read the kept patches and transcripts the worker writes (P-045) · share the evidence and transcripts directories between the API and the worker pods the way `secretsStore` shares the secrets directory, with a chart test like tests/test_deploy_secrets_store.py · deploy |
 
 ## Every open criterion, ranked
 

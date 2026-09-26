@@ -72,6 +72,8 @@ fixed container paths. Secrets are referenced, never rendered.
 {{- define "crb.commonEnv" -}}
 - name: CRB_HOME
   value: /srv/crb
+- name: CRB_SECRETS_DIR
+  value: {{ include "crb.secretsStore.dir" . }}
 - name: CRB_BIND_HOST
   value: "0.0.0.0"
 - name: CRB_BIND_PORT
@@ -100,4 +102,63 @@ fixed container paths. Secrets are referenced, never rendered.
   mountPath: /tmp
 - name: home
   mountPath: /home/crb
+{{- end -}}
+
+
+{{/*
+The secrets store (CRB_SECRETS_DIR). The api WRITES it (Settings → Claude Code login, the
+tracker token) and checks it at submit; the worker READS it at build time. Both pods include
+these helpers, so they mount ONE claim at one path: separate volumes let a token pass the
+api's check and fail every build (docs/PREVENTION.md P-043, tests/test_deploy_secrets_store.py).
+The store is a subdirectory of the mount: the volume root carries the fsGroup's group bits,
+and the store refuses a group-accessible directory; the first write creates it 0700.
+*/}}
+{{- define "crb.secretsStore.dir" -}}
+/srv/crb-secrets/store
+{{- end -}}
+
+{{- define "crb.secretsStore.claim" -}}
+{{- default (printf "%s-secrets" (include "crb.fullname" .)) .Values.secretsStore.existingClaim -}}
+{{- end -}}
+
+{{- define "crb.secretsStore.mount" -}}
+- name: secrets-store
+  mountPath: /srv/crb-secrets
+{{- end -}}
+
+{{- define "crb.secretsStore.volume" -}}
+{{- if not (has .Values.secretsStore.accessMode (list "ReadWriteOnce" "ReadWriteMany")) }}
+{{- fail (printf "secretsStore.accessMode must be ReadWriteOnce | ReadWriteMany (got %q): the api and the worker both mount the store" .Values.secretsStore.accessMode) }}
+{{- end -}}
+- name: secrets-store
+  persistentVolumeClaim:
+    claimName: {{ include "crb.secretsStore.claim" . }}
+{{- end -}}
+
+{{/* The pod label the node pin selects: every pod that mounts the store carries it. */}}
+{{- define "crb.secretsStore.podLabel" -}}
+crb.dev/secrets-store: shared
+{{- end -}}
+
+{{/*
+A pod's affinity: the operator's (api.affinity / worker.affinity), plus — for a
+ReadWriteOnce store, which attaches to one node — a required pod affinity that puts every
+pod carrying the store label on the node of the first one scheduled. Call with
+(dict "root" $ "affinity" .Values.<component>.affinity).
+*/}}
+{{- define "crb.secretsStore.affinity" -}}
+{{- $root := .root -}}
+{{- $aff := deepCopy (.affinity | default dict) -}}
+{{- if eq $root.Values.secretsStore.accessMode "ReadWriteOnce" -}}
+{{- $match := merge (include "crb.selectorLabels" $root | fromYaml) (include "crb.secretsStore.podLabel" $root | fromYaml) -}}
+{{- $term := dict "labelSelector" (dict "matchLabels" $match) "topologyKey" "kubernetes.io/hostname" -}}
+{{- $pa := deepCopy (get $aff "podAffinity" | default dict) -}}
+{{- $req := get $pa "requiredDuringSchedulingIgnoredDuringExecution" | default list -}}
+{{- $_ := set $pa "requiredDuringSchedulingIgnoredDuringExecution" (append $req $term) -}}
+{{- $_ := set $aff "podAffinity" $pa -}}
+{{- end -}}
+{{- if $aff -}}
+affinity:
+  {{- toYaml $aff | nindent 2 }}
+{{- end -}}
 {{- end -}}

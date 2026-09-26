@@ -218,6 +218,11 @@ jobs:
           git config --global user.email "ci@crb.invalid"
           git config --global user.name "crb ci"
           git config --global init.defaultBranch main
+      # the chart suites render deploy/helm/crb (tests/test_deploy_secrets_store.py fails on
+      # CI without helm rather than skip: one secrets store for the api and worker, P-043)
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.4
       - name: pytest (coverage >= 70)
         # `sandbox_images` builds the reference sandbox images; the sandbox-images job builds
         # each once (cached) and runs exactly those tests on it — nothing is skipped in CI.
@@ -492,6 +497,10 @@ jobs:
           # the chart refuses the two silent misconfigurations (an unreachable database, two workers on one RWO volume)
           if helm template crb deploy/helm/crb > /dev/null 2>&1; then echo "expected render failure: external postgres without cidrs"; exit 1; fi
           if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set worker.replicaCount=2 > /dev/null 2>&1; then echo "expected render failure: replicaCount=2 on RWO"; exit 1; fi
+          # one secrets store for the api and the worker (P-043): an operator's claim renders; a
+          # mode two pods cannot share is refused
+          helm template crb deploy/helm/crb --set 'networkPolicy.postgres.cidrs={10.0.0.0/8}' --set secretsStore.existingClaim=kv-secrets --set secretsStore.accessMode=ReadWriteMany > /dev/null
+          if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set secretsStore.accessMode=ReadWriteOncePod > /dev/null 2>&1; then echo "expected render failure: a ReadWriteOncePod secrets store"; exit 1; fi
       - name: docker compose config
         run: |
           printf 'POSTGRES_PASSWORD=ci\nCRB_SECRET_KEY=ci\n' > deploy/.env
