@@ -56,6 +56,7 @@ const KIND_TAG: Record<DecisionKind, TagTone> = {
   signoff_due: 'blue',
   rework: 'grey',
   delivery_withheld: 'grey',
+  prevention: 'amber',
   item_human: 'grey',
   routed_human: 'pale',
 }
@@ -167,7 +168,7 @@ export function DecisionsPage() {
           <h2 id="stale-heading" className="mb-2 text-[32px] font-bold leading-[1.25]">
             Signed cells now stale
           </h2>
-          <Lede className="mb-4">Evidence expires when the apparatus changes. These cells were signed under an earlier apparatus and no longer license a claim — they lift nothing until re-signed or revoked.</Lede>
+          <Lede className="mb-4">Evidence expires when the instrument changes — the apparatus, or the checks arm a repository grades under. These cells were signed on an earlier one and no longer license a claim — they lift nothing until re-signed or revoked.</Lede>
           <ul className="m-0 max-w-[60em] list-none border-t-2 border-on-surface p-0" aria-label="Stale sign-offs">
             {d.stale.map(({ repo, signoff }) => (
               <li key={signoff.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-6 border-b border-border py-5">
@@ -176,7 +177,10 @@ export function DecisionsPage() {
                     <code>
                       {signoff.cell.capability_class} × {signoff.cell.size}
                     </code>{' '}
-                    on {repo} — signed at apparatus {signoff.evidence.apparatus_versions.join(', ') || '?'}, now reading at {signoff.apparatus_current || apparatus}
+                    on {repo} —{' '}
+                    {signoff.checks_arm && signoff.checks_arm_current && signoff.checks_arm !== signoff.checks_arm_current
+                      ? `signed on the ${signoff.checks_arm} checks arm, now reading the ${signoff.checks_arm_current} arm`
+                      : `signed at apparatus ${signoff.evidence.apparatus_versions.join(', ') || '?'}, now reading at ${signoff.apparatus_current || apparatus}`}
                   </Hint>
                   <p className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">
                     signed {signoff.created.slice(0, 10)} by {approverName(signoff)} · n={signoff.evidence.n} · {pct(signoff.evidence.point)} [{pct(signoff.evidence.ci_low)}, …]

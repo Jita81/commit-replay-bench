@@ -64,6 +64,8 @@ export const HINTS = {
     'Attempts where the builder finished and the belts failed it: the target test stayed red, a regression appeared, or no source changed. These count against the builder.',
   'kind.lint':
     'Attempts where the code worked (belts 1 to 4 held) but the repository’s own formatter or linter rejected the changed files (belt 5).',
+  'kind.api':
+    'Attempts where the code worked (belts 1 to 4 held) but it changed the public API of the code it touched in a way the maintainers’ own change did not (belt 6). Only counted where belt 6 was switched on.',
   'kind.budget':
     'Attempts the builder cut short by hitting its own cap on wall clock, turns, tool calls, tokens or cost before it finished. They count in n.',
   'kind.protocol':
@@ -172,6 +174,8 @@ export const HINTS = {
     'The repository the tasks below are about (the most recently updated one, unless the link named another) and whether it is in trial, measuring or measured.',
   'banner.home.sandbox':
     'The sandbox probe is not OK on this host, so anything measured now is a development reading and not evidence. Deployment shows the probe and what to fix.',
+  'stat.home.value':
+    'Working changes per pound spent on blind attempts across every repository: the share of blind attempts that came out clean, times the share of clean patches a reviewer would merge (or, with too few reviews, a lint and public-interface check), over the pounds spent. It is an estimate from two rates, so its range is wide.',
   'stat.home.completed':
     'How many of the eight tasks are marked Completed. It is progress through the set-up, not a quality figure; the quality figures live on the Baseline with their n and interval.',
   'task.home.connect_github':
@@ -399,7 +403,7 @@ export const HINTS = {
   'button.decisions.read':
     'Read the decision without acting. The role that can act is named under the button.',
   'tile.decisions.stale':
-    'A cell signed under an earlier apparatus. It is kept as history and licenses nothing until an approver re-signs it under the current apparatus or revokes it.',
+    'A cell signed under an earlier apparatus, or on a checks arm the repository no longer grades under (the format step or the public-API check was switched since). It is kept as history and licenses nothing until an approver re-signs it on the current instrument or revokes it.',
   'button.decisions.resign':
     'Open the sign-off form on this cell to revoke the stale attestation or sign it again under the current apparatus.',
 
@@ -1388,6 +1392,51 @@ export const HINTS = {
     'The oracle page for this repository, where an oracle run is queued and scores are read.',
   'link.learn.runs':
     'The runs page for this repository, where the plan’s runs are queued.',
+  // the prevention register (screens/Learn/PreventionSection.tsx, ADR-0020)
+  'stat.learn.register_classes':
+    'Bug classes the prevention loop has registered for this repository, over the first attempts it has read. Each is a failure named the same way every time it recurs.',
+  'stat.learn.register_closed':
+    'Classes closed: a change the loop applied was kept, and none recurred in the closing window of exposed first attempts. A class that went quiet with no change on record is never counted.',
+  'stat.learn.register_by_process':
+    'Of the closed classes, the share closed by a process change (a switch or a linked fix) rather than a playbook line. A dash means none is closed yet.',
+  'tile.learn.playbook':
+    'The operating notes in force: at most seven checklist lines and 1,000 characters, from closed templates. A line reaches a task only when two other tasks taught it.',
+  'switch.learn.auto_apply':
+    'The repository’s learning switch: off (nothing reaches a builder), context (playbook lines and filed items) or config (also the process switches). Only an operator throws it, with a reason.',
+  'col.learn_register.class':
+    'The class signature: the failure kind and what exactly failed, computed the same way from every row.',
+  'col.learn_register.seen':
+    'First attempts that showed the class over the comparable first attempts of its stratum, with the tasks and the dollars spent on them.',
+  'col.learn_register.lever':
+    'The strongest change the class admits that the loop may apply, and its level: construction, gate, mistake-proofing or advisory.',
+  'col.learn_register.applied':
+    'When the change in force was applied, and on whose behalf: the loop for the person who threw the switch, or a person’s own link.',
+  'col.learn_register.before_after':
+    'Recurrence before the change (frozen when it was applied) and on the first attempts whose own labels name it since, each with its n, and the bar the rule decides at.',
+  'col.learn_register.status':
+    'Open, applied, closed, retired or escalated, with any qualifier such as watch, dormant, capability, suspended, displaced or reopened.',
+  'col.learn_register.next':
+    'What happens next for this class, in one sentence: how many more exposed attempts a decision needs, or what a person must do.',
+  'pill.learn.status':
+    'Where this class stands in the prevention loop: open, applied, closed, retired or escalated.',
+  'pill.learn.level':
+    'The lever’s level on the prevention hierarchy: construction beats a gate, a gate beats mistake-proofing, and advisory text comes last.',
+  'pill.learn.qualifier':
+    'A qualifier beside the status: watch (too few yet), dormant (quiet with no change, never credited), capability (judged by value, never closed) or suspended (the switch forbids it now).',
+  'button.learn.revert':
+    'Undo this change from the next run. The loop never re-applies it to this class, and your name and reason are recorded.',
+  'button.learn.register_item':
+    'Put this filed item on the repository’s factory backlog in one act: the first freezes a backlog, later ones evolve it. Refused while a factory run holds it.',
+  'button.learn.tick':
+    'Run the prevention loop now: take any decision that is due, retire what did not work, and apply or file the next change. The worker also runs it after every build run.',
+  'button.learn.switch':
+    'Throw the switch with the reason given. It applies from the next run, and the record names you.',
+  'field.learn.switch_mode':
+    'Off, context or config: how far the prevention loop may go on this repository.',
+  'field.learn.switch_reason':
+    'Why you are throwing the switch; it is recorded with your name on the prevention chain.',
+  'field.learn.revert_reason':
+    'Why this change is being undone; it is recorded with your name, and the loop never re-applies it.',
 
   // ── /ledger (screens/Ledger/LedgerPage.tsx)
   'button.ledger.export_jsonl':
@@ -1545,6 +1594,7 @@ export const SHARED_IDS: readonly HintId[] = [
   'belt.repo_lint_clean',
   'kind.builder_red',
   'kind.lint',
+  'kind.api',
   'kind.budget',
   'kind.protocol',
   'kind.harness',
@@ -1594,7 +1644,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/capability': 29,
   '/routing': 20,
   '/oracle': 22,
-  '/learn': 26,
+  '/learn': 44,
   '/ledger': 26,
   // a viewer's Settings (health, the login card read-only, the GitHub App); the admin's configuration and users are held by the ratchet's variants
   '/settings': 11,

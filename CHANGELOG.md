@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Working changes per pound; a bug is closed by prevention; "clean" means working**
+  ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile
+  score working changes per pound, blind, and VALUE heads the definition of done. A bug class is
+  closed only by a prevention artefact the loop records and measures (ADR-0020, DL-061). Opt-in
+  per repository, the format step, the finish gate and belt 6 `api_stable` make "clean" mean
+  working (ADR-0024, DL-062); a row graded with either on never pools with one graded without,
+  and a sign-off (`crb.signoff.v4`) stamps and lifts only the checks arm it saw. Every graded
+  attempt keeps its patch; escalation stops where it does not pay.
+
 - **Qualification is posture-relative; the sealed posture runs a repository with dependencies**
   ([#56](https://github.com/Jita81/commit-replay-bench/pull/56)). Apparatus 2.2 → 2.3 (ADR-0019,
   DL-060): a posture is a hashed identity whose class rates pool on, a task is qualified per posture

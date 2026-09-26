@@ -8,7 +8,7 @@ children: [dod.journey.orient, dod.journey.deploy-and-go-live, dod.journey.recov
 persons: [admin, operator, approver, viewer]
 owner: deploy
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Run the platform — deploy, go live, operate, recover
@@ -44,6 +44,8 @@ and the product does not perform. It does not federate or manage more than one d
 | run-the-platform.handoff.13 | HANDOFF | The next stream starts from this one's output with nothing retyped: once the stack answers, Home's task 1 is the next action and every task's status is derived from the API, never kept on the client | `vitest:ui/src/screens/Home/HomePage.test.tsx::"derives the eight tasks from the API and counts the completed ones"` · `code:ui/src/screens/Home/HomePage.tsx::HomePage` | met | |
 | run-the-platform.measure.14 | MEASURE | The product shows this stream's own numbers: time from install to first green `/health`, how many go-live lines are proven, and how long an account recovery took | `absent` | unmet | G-925 |
 | run-the-platform.automation.15 | AUTOMATION | No step here needs a person to do by hand what the product could do: a password reset, a deactivation and a reactivation are API and CLI only — Settings offers create and role change — so a locked-out user is recovered on the host | `absent` | unmet | F23 |
+| run-the-platform.operations.16 | OPERATIONS | `/health` serves the commit the server was started from, the checkout's commit now and the commit the served UI bundle was built from, with `stale` and the fix when any two disagree (a degraded `build` probe, never a 503); `crb doctor` fails (exit 1) when the UI bundle was not built from the code it runs and warns when the checkout trails `origin/main` | `test:tests/test_server_system.py::test_health_serves_the_served_commits_and_a_stale_flag` · `test:tests/test_cli_doctor.py::test_crb_doctor_exits_1_on_a_stale_bundle` · `test:tests/test_cli_doctor.py::test_a_checkout_behind_origin_main_warns_with_the_count` · `test:tests/test_build_stamp.py::test_the_vite_build_writes_the_stamp_this_module_reads` · `route:GET /health` · `doc:docs/OPERATOR.md#11-check-the-installation-crb-doctor` | met | |
+| run-the-platform.evidence.17 | EVIDENCE | Every CI job's rendered check-run name (matrix values expanded) is under 100 characters, so any job can be made a required status check, and a test fails the build when one is not | `test:tests/test_ci_job_names.py::test_every_ci_job_name_is_under_100_characters` · `test:tests/test_ci_job_names.py::test_a_long_name_and_a_long_matrix_value_are_caught` · `ci:test` | met | |
 
 ## Gaps
 - **G-580** — the product never names this stream · give Home's task list a preceding "Set up the deployment" group (or a Deployment task list) whose rows are the go-live lines, so the work before task 1 is visible · ui

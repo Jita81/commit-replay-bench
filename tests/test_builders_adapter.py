@@ -101,9 +101,17 @@ class FakeBuilder:
             "provider": self.provider,
             "mode": brief.mode,
         }
-        if self.behaviour == "ugly_gold":
+        if self.behaviour.startswith("ugly_gold"):
             # a correct patch the repository's formatter rejects; a REPAIR call cleans it
             src = workspace.root / pr.SRC
+            if brief.repair_note and self.behaviour == "ugly_gold_repair_error":
+                # the repair call never reached the model (a 429, a dead credential)
+                return BuildOutcome(
+                    **base,
+                    stop_reason=STOP_MODEL_ERROR,
+                    errors=("model_error: 429 rate limited",),
+                    cost_usd=0.005,
+                )
             if brief.repair_note:
                 src.write_text(src.read_text().replace("UGLY = 1\n", ""), encoding="utf-8")
             else:
@@ -844,6 +852,35 @@ def test_preflight_fixers_clear_a_formatter_rejection(pyrepo: pr.PyRepo, tmp_pat
     ]
     assert len(FakeBuilder.briefs) == 1  # no repair call was needed
     assert row.cost_usd == 0.01
+
+
+def test_a_preflight_repair_that_ends_in_a_model_error_keeps_the_first_patch(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The pre-flight's repair call and the finish gate's share one merge: a repair that
+    never reached the model leaves the first build's patch to be graded, never an errored
+    attempt whose edits are thrown away (CodeRabbit, PR #57)."""
+    (row,), events = _preflight_run(
+        pyrepo, tmp_path, adapter.Preflight(fix=False, repair_turns=1), "ugly_gold_repair_error"
+    )
+    assert row.error == "" and row.target_green is True
+    assert row.repo_lint_clean is False and not row.clean  # belt 5 still judges the patch
+    assert "after_repair=repair_error" in row.labels["preflight"]
+    assert not any(a == "builder.discard" for a, _ in events)
+    assert row.cost_usd == pytest.approx(0.015)
+
+
+def test_a_repair_merge_keeps_the_first_stop_unless_the_repair_violated() -> None:
+    base = {"builder": "b", "model": "m", "provider": "p", "mode": "sighted"}
+    first = BuildOutcome(**base, done=True, stop_reason=STOP_DONE, cost_usd=0.01)
+    errored = BuildOutcome(
+        **base, stop_reason=STOP_MODEL_ERROR, errors=("model_error: 429",), cost_usd=0.005
+    )
+    merged = adapter._merge_outcomes(first, errored)
+    assert adapter.attempt_error(merged) == "" and merged.done is True
+    assert merged.stop_reason == STOP_DONE and merged.cost_usd == pytest.approx(0.015)
+    done = BuildOutcome(**base, done=False, stop_reason=STOP_DONE, cost_usd=0.02)
+    assert adapter._merge_outcomes(first, done).done is False  # a finished repair is last
 
 
 def test_preflight_repair_turn_is_one_bounded_build_with_the_findings(

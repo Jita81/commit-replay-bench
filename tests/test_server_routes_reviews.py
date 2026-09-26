@@ -54,6 +54,9 @@ from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import LocalExecutor
 from crb.core.grade import Belts
 from crb.core.ledger import GradeRow, grade_row_from_result
+from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
+from crb.core.patches import PatchStore, keep_patch
+from crb.core.review import ReviewRecord
 from crb.core.run import BuildAttempt, RunSpec, run_task
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.workspace import opaque_dest
@@ -63,6 +66,7 @@ from crb.server.routes.grades import (
     HDR_PATCH_SHA,
     HDR_REDACTED,
     HDR_SERVED_SHA,
+    HDR_SOURCE,
     HDR_TRUNCATED,
     HDR_VERIFIED,
     build_retained_patch,
@@ -123,6 +127,7 @@ class Retained:
         secret: bool = False,
         transcript: bool = True,
         named: bool = True,
+        keep: bool = False,
     ):
         self.env = env
         repo = pr.build(tmp_path / "pyrepo")
@@ -211,6 +216,9 @@ class Retained:
             notes["transcript_ref"] = tref
         if named:  # named=False: a pack that names no worktree (a run from before PR #53)
             notes["worktree"] = self.worktree
+        if keep:  # what run_task does at grade time (crb.core.patches)
+            store = PatchStore.under(Path(env.settings.home) / "evidence")
+            notes[PATCH_NOTE_KEY] = keep_patch(self.ws, store, diff_sha256=diff.diff_sha256)
         pack = EvidencePack(
             task=task,
             grade=result,
@@ -491,6 +499,157 @@ class TestRetainedPatch:
         assert env.get(f"/grades/{r.row.row_hash}/transcript").status_code == 200
         env.client.cookies.clear()
         assert r.patch().status_code == 401
+
+
+class TestKeptPatch:
+    """Stream K: the patch kept at grade time is served after the worktree is gone —
+    independent of ``retain.worktrees`` — and still hashes to the pack's anchor."""
+
+    def test_served_from_the_store_after_the_worktree_is_removed(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        r = Retained(env, tmp_path, keep=True)
+        with env.factory() as s:  # the run did NOT retain worktrees
+            run = s.get(Run, RETAINED_RUN)
+            assert run is not None
+            run.params_json = {}
+            s.commit()
+        r.ws.remove()
+        res = r.patch()
+        assert res.status_code == 200, res.text
+        assert res.headers[HDR_SOURCE] == "store"
+        assert res.headers[HDR_VERIFIED] == "true"
+        assert res.headers[HDR_DIFF_SHA] == r.diff_sha == res.headers[HDR_PATCH_SHA]
+        assert hashlib.sha256(res.content).hexdigest() == r.diff_sha
+        assert "+++ b/src/calc/extra.py" in res.text
+        status = env.get(f"/grades/{r.row.row_hash}/retained").json()
+        assert status["patch_available"] is True and status["extra"]["patch_source"] == "store"
+        # the kept bytes can be reviewed: the anchor is the same hash
+        login(env.client, "operator")
+        body = r.review_body(statement="read the kept patch", mergeable=True)
+        assert env.post("/reviews", json=body).status_code == 201
+
+    def test_a_damaged_kept_patch_is_never_served(self, env: Env, tmp_path: Path) -> None:
+        r = Retained(env, tmp_path, keep=True)
+        r.ws.remove()
+        (kept,) = (Path(env.settings.home) / "evidence" / "patches").rglob("*.diff")
+        kept.write_text("diff --git a/x b/x\n+forged\n", encoding="utf-8")
+        res = r.patch()
+        assert res.status_code == 404
+        assert "no longer hashes" in envelope(res)["detail"]["reason"]
+
+    def test_the_route_prefers_the_kept_bytes_over_a_retained_worktree(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        r = Retained(env, tmp_path, keep=True)
+        pr.write_files(r.ws, [("src/calc/late.py", "x = 1\n")])  # drift after grading
+        res = r.patch()
+        assert res.headers[HDR_SOURCE] == "store" and res.headers[HDR_VERIFIED] == "true"
+        assert "late.py" not in res.text
+
+
+class TestMergeableFlag:
+    """The 2026-09-25 flag defect: a statement saying "Mergeable." stored ``false``."""
+
+    def test_post_refuses_a_flag_that_contradicts_the_statement(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        r = Retained(env, tmp_path)
+        login(env.client, "operator")
+        res = env.post("/reviews", json=r.review_body(statement="Mergeable.", mergeable=False))
+        assert res.status_code == 422
+        e = envelope(res)
+        assert e["code"] == "review_refused"
+        assert e["detail"]["code"] == "mergeable_contradicts_statement"
+        res = env.post("/reviews", json=r.review_body(statement="Mergeable.", mergeable=True))
+        assert res.status_code == 201, res.text
+
+    def _legacy(self, env: Env, r: Retained) -> ReviewRecord:
+        """A contradicting record as the store held it before the rule: inserted below
+        the write boundary, chained like any other."""
+        from crb.store.ledger import _review_to_model
+
+        rec = ReviewRecord(
+            grade_row_hash=r.row.row_hash,
+            repo=ALPHA,
+            task_id=r.task.task_id,
+            reviewer="op1",
+            statement="XS sighted. Byte-identical to the gold. Mergeable.",
+            mergeable=False,
+            patch_sha256_reviewed=r.diff_sha,
+            evidence_pack_hash=r.pack_hash,
+        ).chained("0" * 64)
+        with env.factory() as s:
+            s.add(_review_to_model(rec))
+            s.commit()
+        return rec
+
+    def test_corrections_are_listed_then_appended_never_edited(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        r = Retained(env, tmp_path)
+        legacy = self._legacy(env, r)
+        assert_rbac(
+            env, "POST", "/reviews/corrections/mergeable", min_role="admin", json={"apply": False}
+        )
+        login(env.client, "admin")
+        res = env.post("/reviews/corrections/mergeable", json={})
+        assert res.status_code == 200, res.text
+        (planned,) = res.json()["corrections"]
+        assert res.json()["applied"] is False and planned["correction_review_id"] == ""
+        assert planned["review_id"] == legacy.review_id
+        assert planned["stored_mergeable"] is False and planned["statement_says"] is True
+        assert len(env.get("/reviews").json()["items"]) == 1  # a dry run writes nothing
+        res = env.post("/reviews/corrections/mergeable", json={"apply": True})
+        (done,) = res.json()["corrections"]
+        assert done["correction_review_id"]
+        items = env.get("/reviews").json()["items"]
+        assert len(items) == 2  # the original stays in the chain
+        by_id = {i["review_id"]: i for i in items}
+        assert by_id[legacy.review_id]["mergeable"] is False
+        fix = by_id[done["correction_review_id"]]
+        assert fix["mergeable"] is True and legacy.review_id in fix["statement"]
+        assert fix["patch_sha256_reviewed"] == r.diff_sha
+        assert env.get("/reviews/verify").json()["ok"] is True
+        again = env.post("/reviews/corrections/mergeable", json={"apply": True}).json()
+        assert again["corrections"] == []  # idempotent
+
+    def test_a_refused_correction_never_loses_the_evidence_of_the_ones_before_it(
+        self, env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Each correction commits to the review chain on its own; its ``review.corrected``
+        event was only committed after the LAST one, so a later refusal (422) dropped the
+        events of corrections already on the chain (CodeRabbit, PR #57). Every appended
+        correction keeps its event."""
+        from crb.core.review import ReviewRefused
+        from crb.server.routes import reviews as reviews_route
+        from crb.store.ledger import DbReviewLedger
+
+        r = Retained(env, tmp_path)
+        self._legacy(env, r)
+        real_plan = reviews_route.mergeable_flag_corrections
+        monkeypatch.setattr(
+            reviews_route,
+            "mergeable_flag_corrections",
+            lambda records, corrector: real_plan(records, corrector=corrector) * 2,
+        )
+        real_append = DbReviewLedger.append
+        calls: list[int] = []
+
+        def second_refused(self: Any, record: Any, **kw: Any) -> Any:
+            calls.append(1)
+            if len(calls) == 2:
+                raise ReviewRefused("refused", code="row_mismatch", expected="a", observed="b")
+            return real_append(self, record, **kw)
+
+        monkeypatch.setattr(DbReviewLedger, "append", second_refused)
+        login(env.client, "admin")
+        res = env.post("/reviews/corrections/mergeable", json={"apply": True})
+        assert res.status_code == 422, res.text
+        assert len(env.get("/reviews").json()["items"]) == 2  # the first is on the chain
+        with env.factory() as s:
+            events = s.execute(select(Event).where(Event.action == "review.corrected")).scalars()
+            assert len(list(events)) == 1  # ... and so is its evidence event
 
 
 class TestRetainedTranscript:

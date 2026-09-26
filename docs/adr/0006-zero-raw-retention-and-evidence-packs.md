@@ -1,7 +1,8 @@
 # ADR-0006 — Zero raw retention by default; evidence packs
 
 **Status:** Accepted — amended 2026-09-14 (retained patches are served, never stored twice;
-human reviews are first-class ledger rows)
+human reviews are first-class ledger rows) and 2026-09-25 (every graded attempt keeps its
+patch; a review's mergeable answer must agree with its words)
 **Date:** 2026-09-13
 **Apparatus impact:** none; `EVIDENCE_SCHEMA = "crb.evidence.v1"`; the amendment adds
 `REVIEW_SCHEMA = "crb.review.v1"` and store revision `0003` (the `reviews` table)
@@ -120,3 +121,46 @@ the customer's source; retention of the worktree remains the operator's per-run 
 follows the existing sweep. Transcripts (`GET /grades/{row_hash}/transcript`) are served
 only from inside `<home>/transcripts/` — a pack's reference is data, never a path to open.
 
+## Amendment 2026-09-25 — every graded attempt keeps its patch
+
+The value baseline of 2026-09-25 (the operator's ledger export of that day, recomputed by
+`scripts/spend_from_export.py` for the spend figures) found that the product throws away what it makes `[measured
+2026-09-25; n = 190 clean rows of 618 exported, apparatus 2.0–2.2; method: every clean
+row's retention reason over the export — 123 on runs that did not retain worktrees, 67
+removed by retention]`: 0 of 190 clean patches could be read, so none could be reviewed,
+re-graded under a stronger belt, or learned from. Rule 1 of the 2026-09-14 amendment
+("never stored twice") made the worktree the only copy, and the worktree is deleted by
+default. This amendment supersedes that rule:
+
+1. **Every graded attempt keeps its patch** (`crb.core.patches`), clean or not, on the
+   replay, blind and factory paths, independent of `retain.worktrees`. The text is the
+   grader's own (`Workspace.patch_text`, the one procedure `diff_stats` hashes), hashed in
+   full first, then redacted (`crb.core.redact`), then capped at 1 MiB, and written once to
+   `CRB_HOME/evidence/patches/<aa>/<sha256>.diff`, named by the hash of its own bytes. The
+   evidence pack's `notes.patch` records the full text's hash (the review anchor, equal to
+   `grade.diff.diff_sha256` when the grade got that far — `anchored`), the stored bytes'
+   hash, both sizes and whether redaction or the cap changed them — so the pack's own hash,
+   which the ledger row cites, commits to the kept bytes.
+2. **Retention class: evidence.** A kept patch lives as long as its row (indefinitely). A
+   deployment that must hold no code sets `CRB_RETENTION__PATCHES=false`; rows written then
+   carry no `notes.patch`, and the route says so. It is still not a copy of the customer's
+   source — it is the builder's change, redacted — and it is never written to the database.
+3. **The route serves the kept bytes first.** `GET /grades/{row_hash}/patch` answers from
+   the store when the pack names a kept patch whose bytes still hash to their name
+   (`X-CRB-Patch-Source: store`), else from a retained worktree as before (`worktree`).
+   A review anchors to the same hash either way.
+4. **A review's mergeable answer must agree with its own words.** Two of the ten stored
+   reviews say "Mergeable." over a stored `mergeable=false` `[measured 2026-09-25; n = 10
+   review records, apparatus 2.1–2.2; method: statement text against the stored flag]`:
+   the write boundary took the flag and the statement as two unrelated inputs. Both ledgers
+   now refuse, at append, a record whose statement answers the question
+   (`crb.core.review.statement_mergeable`) and whose flag says otherwise or nothing
+   (`mergeable_contradicts_statement`). Stored records are never edited: the two are
+   superseded by appended corrections (`POST /reviews/corrections/mergeable`, admin), each
+   naming and quoting the review it corrects.
+
+Consequences: the retention default moves from zero raw retention to "the builder's change
+is evidence", which DATA-RETENTION.md §2 now states with its switch; disk use grows by at
+most 1 MiB per attempt (a typical patch is a few kilobytes) and identical patches are stored
+once. Rows written before this amendment still have only their worktree, when one was
+retained.

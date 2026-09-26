@@ -191,12 +191,15 @@ def test_attestation_requires_row_task_and_statement_and_redacts() -> None:
     assert so.Attestation.from_dict(att.to_dict()) == att
 
 
-def test_record_roundtrip_and_hash_v3() -> None:
-    rec = _signoff(verifier_kind="local").chained("0" * 64)
+def test_record_roundtrip_and_hash_v4() -> None:
+    rec = _signoff(verifier_kind="local", checks_arm="api").chained("0" * 64)
     assert rec.schema == so.SIGNOFF_SCHEMA and rec.verify_hash()
     d = json.loads(json.dumps(rec.to_dict()))
     assert d["attestation"]["reviewed_row_hash"] == ROW_HASH  # nested, hashed
-    assert d["verifier_kind"] == "local" and d["schema"] == "crb.signoff.v3"
+    assert d["verifier_kind"] == "local" and d["schema"] == "crb.signoff.v4"
+    # v4 covers the checks arm (ADR-0024): flip it and the row no longer verifies
+    assert d["checks_arm"] == "api"
+    assert not so.SignoffRecord.from_dict({**d, "checks_arm": "off"}).verify_hash()
     again = so.SignoffRecord.from_dict(d)
     assert again == rec and again.verify_hash()
     assert rec.key() == ("todo", "*", "frontend.component.add", "*", "*", "*", "*", "*")
@@ -277,20 +280,22 @@ def test_v2_record_still_verifies_and_reads_as_v2_with_no_verifier_kind() -> Non
         prev_hash="0" * 64,
     )
     # the hash a v2 writer produced: canonical JSON of exactly the v2 fields
-    body = {k: v for k, v in v2.to_dict().items() if k not in ("row_hash", "verifier_kind")}
+    later = ("row_hash", "verifier_kind", "checks_arm")  # v3 and v4 added the last two
+    body = {k: v for k, v in v2.to_dict().items() if k not in later}
     assert set(body) == set(so._V2_BODY_FIELDS)
     stored = {**v2.to_dict(), "row_hash": sha256_text(canonical_json(body))}
-    del stored["verifier_kind"]  # a v2 writer never wrote the key
+    del stored["verifier_kind"], stored["checks_arm"]  # a v2 writer never wrote the keys
     rec = so.SignoffRecord.from_dict(json.loads(json.dumps(stored)))
     assert rec.schema == "crb.signoff.v2" and rec.verifier_kind == ""
     assert rec.verify_hash() and so.verify_signoff_chain([rec]) == 1
     assert "require_independent_verifier" not in rec.policy_thresholds
-    # the same fields under the v3 schema hash differently: the kind is now covered
+    # the same fields under the current schema hash differently: the kind is now covered
     assert not so.SignoffRecord.from_dict({**stored, "schema": so.SIGNOFF_SCHEMA}).verify_hash()
     nxt = so.stamp_evidence(
         _signoff(verifier_kind=so.VERIFIER_KIND_OIDC), _signable_cell(), controls=PASSED
     ).chained(rec.row_hash)
-    assert nxt.schema == "crb.signoff.v3" and nxt.verifier_kind == "oidc"
+    assert nxt.schema == "crb.signoff.v4" and nxt.verifier_kind == "oidc"
+    assert nxt.checks_arm == "off"  # stamped from the cell it signed
     assert so.verify_signoff_chain([rec, nxt]) == 2
     # v3 covers the kind: flip it and the row no longer verifies
     flipped = so.SignoffRecord.from_dict({**nxt.to_dict(), "verifier_kind": "service"})

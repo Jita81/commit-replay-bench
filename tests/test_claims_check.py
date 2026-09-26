@@ -7,7 +7,8 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               tag without an ``n``, without an apparatus version or without a method fails;
               that a list item is covered by the paragraph that introduces the list; that the
               allowlist is honoured (a file off it is never read) and that the shipped
-              allowlist is the real repository's; that the documented exemptions — headings,
+              allowlist is the real repository's, and is the count the definition of done
+              states (G-929); that the documented exemptions — headings,
               table rows, fenced code, a lead-in ending in a colon, a confidence level, a
               year, a leading-zero identifier — are not claims; that a count written without
               digit grouping (``1200``) and a result standing beside a confidence interval
@@ -26,7 +27,8 @@ ADRs:         none
 Works with:   scripts/claims_check.py (the code under test), markdown-it-py (the CommonMark
               reference the fence reader is compared with), docs/EVIDENCE-AND-CLAIMS.md
               (the claim-tag rule these tests enforce a shape for), .github/workflows/ci.yml
-              (the claims job that runs --check), docs/CONTRIBUTING.md (the DL-053 rules)
+              (the claims job that runs --check), docs/CONTRIBUTING.md (the DL-053 rules),
+              docs/dod/product.md (G-929 states the gated-page count)
 Tested by:    (this is a test file)
 Touch when:   a tag is added to the policy, the heuristic changes, or a file joins the
               allowlist (add the case here in the same change).
@@ -595,3 +597,16 @@ def test_two_reviews_with_one_stem_are_a_finding(tree: Path) -> None:
             " a record could not say which it closes",
         ),
     ]
+
+
+def test_the_measured_count_of_gated_pages_is_the_allowlist() -> None:
+    """The definition of done states how many pages the gate reads as a [measured] count
+    (G-929). Adding a page to ALLOWLIST without updating that count made the record wrong the
+    moment it merged (found 2026-09-25 while gating the value baseline); the count is now
+    held to the list."""
+    text = (ROOT / "docs" / "dod" / "product.md").read_text(encoding="utf-8")
+    m = re.search(r"n = (\d+) entries on `ALLOWLIST`", text)
+    assert m, "docs/dod/product.md no longer states the gated-page count (G-929)"
+    assert int(m.group(1)) == len(cc.ALLOWLIST)
+    for rel in cc.ALLOWLIST:
+        assert f"`{rel}`" in text, f"G-929 does not name {rel}"

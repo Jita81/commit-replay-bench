@@ -4,7 +4,8 @@ and a test that does need the network is skipped, with the reason, when it is no
 Navigation
 ----------
 What it is:   The pytest conftest of the hermetic core suite — five function-scoped fixtures
-              over the Python fixture repository, and the setup gate for network tests.
+              over the Python fixture repository, the setup gate for network tests, and one
+              autouse pin of a host fact.
 What it does: Builds a fresh ``pyrepo`` (three commits) per test and derives from it the
               ``runner`` (a real ``PytestRunner``), a ``LocalExecutor``, the mined
               ``feat_task`` and a sighted ``trial`` worktree that is removed afterwards. Nothing
@@ -15,7 +16,9 @@ What it does: Builds a fresh ``pyrepo`` (three commits) per test and derives fro
 How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``trial`` yields
               ``PyRepo.trial`` inside try/finally so a failing test never leaks a worktree;
               ``pytest_runtest_setup`` hands the ``network`` marker's hosts to
-              ``conftest_langs.require_network``.
+              ``conftest_langs.require_network``. ``_no_host_claude_cli`` pins
+              ``claude_cli_on_path`` to ``False`` for every test, so no test passes or fails on
+              whether this machine has the ``claude`` CLI (P-037).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
@@ -95,3 +98,13 @@ def trial(pyrepo: pr.PyRepo, tmp_path: Path) -> Iterator[Workspace]:
         yield ws
     finally:
         ws.remove()
+
+
+@pytest.fixture(autouse=True)
+def _no_host_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test runs as on a bare CI runner: no ``claude`` CLI on PATH. A test that needs
+    the CLI present patches ``crb.builders.claude_code.claude_cli_on_path`` itself.
+    (#57's CI: a ``cli``-auth test passed on a machine with the CLI and failed without it.)"""
+    import crb.builders.claude_code as claude_code
+
+    monkeypatch.setattr(claude_code, "claude_cli_on_path", lambda: False)

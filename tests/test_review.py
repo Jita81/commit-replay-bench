@@ -36,6 +36,7 @@ from crb.core.ledger import GENESIS_HASH, GradeRow, LedgerIntegrityError
 from crb.core.review import (
     DEFECT_VERDICTS,
     FINDING_KINDS,
+    REFUSAL_MERGEABLE_CONTRADICTS,
     REFUSAL_NO_DIFF_IN_PACK,
     REFUSAL_PACK_MISMATCH,
     REFUSAL_PACK_REQUIRED,
@@ -50,14 +51,17 @@ from crb.core.review import (
     ReviewCellStats,
     ReviewRecord,
     ReviewRefused,
+    check_mergeable_statement,
     check_patch_anchor,
     check_review_anchor,
     derive_verdict,
     is_sha256,
     latest_reviews,
+    mergeable_flag_corrections,
     pack_diff_sha256,
     pack_is_authentic,
     review_cell_stats,
+    statement_mergeable,
     verify_review_chain,
 )
 from fixtures.posture import posture_row
@@ -473,3 +477,136 @@ def test_review_cell_stats_invariants() -> None:
         ReviewCellStats(cell=key, n_rows=1, n_reviewed=1, n_review_defects=1, n_ok=1)
     s = ReviewCellStats(cell=key, n_rows=0, n_reviewed=0, n_review_defects=0)
     assert s.reviewed_share == 0.0
+
+
+# ---------------------------------------------------------------------------
+# The mergeable answer agrees with the statement (value baseline 2026-09-25: 2 of 10
+# stored reviews said "Mergeable." over a stored flag of false)
+# ---------------------------------------------------------------------------
+
+#: The statements of the ten stored reviews (abbreviated as the export printed them) and
+#: what each says about mergeability — the corpus the rule was written against.
+STORED_STATEMENTS: tuple[tuple[str, bool | None], ...] = (
+    ("XS sighted. Mergeable as-is. A different and arguably more general fix than the gold.", True),
+    ("XS sighted. Mergeable as-is; semantically identical to the gold.", True),
+    ("XS sighted. Source change byte-identical to the gold. Mergeable. Label: bug.fix.", True),
+    ("XS sighted. Functionally equivalent to the gold but NOT mergeable as-is: eslint.", False),
+    ("XS sighted. Byte-identical to the gold. Mergeable.", True),
+    ("XS BLIND. Not mergeable. The AI made $root a REQUIRED parameter.", False),
+    ("S sighted. Not mergeable, real lifecycle defect.", False),
+    ("L sighted. Clean, but the feature is NOT delivered.", None),
+    ("M sighted. Not mergeable as-is. Source edits match the gold's intent.", False),
+    ("L sighted. Closest of the large rows to mergeable: type-clean, snapshots.", None),
+)
+
+
+@pytest.mark.parametrize(("statement", "says"), STORED_STATEMENTS)
+def test_statement_mergeable_reads_the_stored_statements(statement: str, says: bool | None) -> None:
+    assert statement_mergeable(statement) is says
+
+
+@pytest.mark.parametrize(
+    ("statement", "says"),
+    [
+        ("It wouldn't be mergeable without the docs.", False),
+        ("Unmergeable as written.", False),
+        ("The change is mergeable.", True),
+        ("Mergeable? I could not tell.", None),
+        ("read the diff line by line", None),
+    ],
+)
+def test_statement_mergeable_reads_negation_questions_and_silence(
+    statement: str, says: bool | None
+) -> None:
+    assert statement_mergeable(statement) is says
+
+
+@pytest.mark.parametrize(
+    ("statement", "negated"),
+    [
+        # affirmations the negation rule read as "not mergeable" (CodeRabbit, PR #57)
+        ("Not only mergeable but clean.", False),
+        ("Not just mergeable: it is the cleanest patch of the run.", False),
+        ("Never seen more mergeable code.", False),
+        ("I have never seen anything more mergeable.", False),
+        # the negations it must still read
+        ("Not yet mergeable: the docs are missing.", True),
+        ("It is not really mergeable as-is.", True),
+        ("It will never be mergeable in this form.", True),
+        ("The change isn't quite mergeable.", True),
+        ("Not currently mergeable.", True),
+    ],
+)
+def test_a_negation_word_near_mergeable_is_not_always_a_negation(
+    statement: str, negated: bool
+) -> None:
+    """Only a negation that keeps its meaning up to ``mergeable`` (``not yet``, ``never
+    be``, ``isn't quite``) says no; a gap of any two words let "not only mergeable" refuse
+    a correct ``mergeable=True`` and file a correction to ``False``."""
+    assert (statement_mergeable(statement) is False) is negated
+    rec = record(statement=statement, mergeable=not negated)
+    check_mergeable_statement(rec)  # the flag that agrees with the words is accepted
+    assert mergeable_flag_corrections([rec], corrector="admin") == []
+
+
+def test_the_write_boundary_refuses_a_flag_that_contradicts_the_statement(tmp_path: Path) -> None:
+    """The defect at its source: the flag and the words were two unrelated inputs."""
+    led = JsonlReviewLedger(tmp_path / "reviews.jsonl")
+    for flag in (False, None):
+        with pytest.raises(ReviewRefused) as ei:
+            led.append(
+                record(statement="Byte-identical to the gold. Mergeable.", mergeable=flag),
+                pack=pack(),
+            )
+        assert ei.value.code == REFUSAL_MERGEABLE_CONTRADICTS
+        assert ei.value.expected is True and ei.value.observed is flag
+    with pytest.raises(ReviewRefused, match="not mergeable"):
+        led.append(
+            record(
+                statement="NOT mergeable as-is.",
+                verdict="style",
+                findings=(Finding("style", "s"),),
+                mergeable=True,
+            ),
+            pack=pack(),
+        )
+    assert led.verify() == 0  # nothing was written
+    ok = led.append(record(statement="Byte-identical. Mergeable.", mergeable=True), pack=pack())
+    silent = led.append(
+        record(statement="read the diff line by line", mergeable=False), pack=pack()
+    )
+    assert ok.mergeable is True and silent.mergeable is False and led.verify() == 2
+
+
+def test_a_stored_contradiction_stays_readable_and_is_corrected_by_appending(
+    tmp_path: Path,
+) -> None:
+    """Records written before the rule are evidence: never edited, still readable; the
+    correction is a new record on the same row that supersedes them."""
+    legacy = record(statement="Byte-identical to the gold. Mergeable.", mergeable=False)
+    check_mergeable_statement(record(statement="no answer here", mergeable=False))  # silent: ok
+    path = tmp_path / "reviews.jsonl"
+    path.write_text(json.dumps(legacy.chained(GENESIS_HASH).to_dict()) + "\n", encoding="utf-8")
+    led = JsonlReviewLedger(path)
+    (stored,) = list(led.records())  # construction does not refuse it
+    fixes = mergeable_flag_corrections(led.records(), corrector="admin")
+    (fix,) = fixes
+    assert fix.mergeable is True and fix.reviewer == "admin"
+    assert fix.grade_row_hash == stored.grade_row_hash
+    assert fix.patch_sha256_reviewed == stored.patch_sha256_reviewed
+    assert fix.verdict == stored.verdict and fix.findings == stored.findings
+    assert stored.review_id in fix.statement and stored.statement in fix.statement
+    led.append(fix, pack=pack())
+    assert led.verify() == 2
+    assert latest_reviews(led.records())[ROW_HASH].mergeable is True
+    assert mergeable_flag_corrections(led.records(), corrector="admin") == []  # idempotent
+
+
+def test_a_regression_is_never_corrected_to_mergeable() -> None:
+    legacy = record(
+        statement="Mergeable as-is.",
+        verdict="regression",
+        findings=(Finding("regression", "breaks the parser"),),
+        mergeable=False,
+    )
+    assert mergeable_flag_corrections([legacy], corrector="admin") == []

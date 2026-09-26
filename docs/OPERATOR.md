@@ -28,7 +28,8 @@ Contents: [1 Install](#1-install) · [1.1 Check the installation](#11-check-the-
 [5 Sign off](#5-sign-off) · [6 Export the ledger](#6-export-and-verify-the-ledger) ·
 [7 When the sandbox is unavailable](#7-when-the-sandbox-is-unavailable) · [8 Stop conditions](#8-stop-conditions) ·
 [9 Users](#9-users) · [10 The factory's test author](#10-the-factorys-test-author) ·
-[11 Intake — work arriving from a board](#11-intake--work-arriving-from-a-board)
+[11 Intake — work arriving from a board](#11-intake--work-arriving-from-a-board) ·
+[12 The prevention loop](#12-the-prevention-loop)
 
 ---
 
@@ -79,10 +80,14 @@ Run it on the API host and on the worker host after installing, after changing a
 | `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead, empty or an older unversioned schema, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
 | `worker` | the workers' check-ins (the `workers` table), the queue depth and running runs' heartbeats, as `/health` reads them | `warn` when no worker has checked in yet, one stopped checking in (named, with its age), runs are queued and no worker is alive, or a running run's heartbeat is stale (an idle queue with a live worker is `ok`) |
 | `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
+| `build` | the code this checkout holds and the UI bundle the API would serve were built from the same commit (the bundle's `build-stamp.json`, written by `npm run build`; an image carries `CRB_SOURCE_COMMIT`), and how far the checkout trails `origin/main` by the local ref (as of the last fetch — doctor never fetches) | the bundle was built from another commit, or a served bundle carries no stamp — rebuild it (`npm --prefix ui run build`) and restart; `warn` when the checkout is behind `origin/main` (pull, rebuild, restart); `skip` when neither a checkout nor `CRB_SOURCE_COMMIT` names the commit and no UI bundle is served (an image built without `CRB_SOURCE_COMMIT` serves an unstamped bundle, so it fails: rebuild with `--build-arg CRB_SOURCE_COMMIT=$(git rev-parse HEAD)`) |
 
 `/health` on the running API answers the same questions from inside the process
 ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)); `crb doctor` is for the host, before
-and between runs.
+and between runs. `/health` also knows one thing doctor cannot: the commit the running server
+was **started** from. Its `served` block carries that commit, the checkout's commit now and
+the bundle's, with `stale: true` and the fix when any two disagree — a `git pull` under a
+running server reads as "restart", never as fresh code (docs/PREVENTION.md P-002).
 
 ## 2. Configure a repository
 
@@ -382,6 +387,52 @@ dist-info (no file records, so nothing is shadowed) after the uninstall:
 The stub is a recorded setup step (`crb dist-info-stub …`) and therefore part of the
 apparatus record of every row measured under it.
 
+### 2.1b Clean means working — the `checks` switchboard
+
+A clean row says the repository's tests accept a patch. Three mechanisms make it also mean
+the repository's reviewers would (ADR-0024). Each is **off** until you switch it on, for one
+run or for the repository, and every row it touches records it.
+
+| switch | what it does | what the row records |
+|---|---|---|
+| `format_step` | runs the repository's own formatter (`gofmt`, `ruff format`, `black`, `prettier`, `standard`, `cargo fmt`, or the one you declare) over the changed source files before grading, so the graded patch is the formatted one | `labels.format_step`: `ran=gofmt;changed=1`, or `skipped=<reason>` when the repository configures no formatter |
+| `finish_gate` | puts the repository's own checks in the brief as a numbered checklist, re-runs them after the build, and gives the builder up to `finish_repair_turns` (default 1) bounded repair calls; `done` needs them to pass | `labels.finish_gate`: `before=fail:lint;repair=1;after=pass` |
+| `api_stable` | belt 6: the public API of the code the builder changed must be unchanged unless the maintainers' commit changes it the same way (Go, Python, JavaScript/TypeScript) | `labels.api_stable` (`true`/`false`/`none`) and `labels.api_findings`; failure kind `api` |
+
+Switch them on for a repository (the change lands on the repository's audit trail):
+
+```bash
+curl -X PUT "$CRB/api/v1/repos/cobra" -H 'content-type: application/json' -d '{
+  "checks": {"format_step": true, "finish_gate": true, "api_stable": true,
+             "commands": [{"name": "test", "argv": ["go", "test", "./..."], "blind_only": true}]}}'
+```
+
+or for one run: `POST /runs {…, "checks": {"finish_gate": true}}` (the run beats the
+repository; the repository beats off). `commands` are the repository's extra checks — a type
+checker, a vet, the test suite for blind attempts — run in the worktree with no network; one
+that already fails on the untouched parent is recorded `pre_existing` and never holds an
+attempt back. `go vet ./...` is added for you when `.golangci.yml` enables `govet` or the
+Makefile or CI runs it. `formatter: {"command": [...], "exts": [...]}` declares a formatter
+the detectors miss; `{"disabled": true}` switches the format step off for the repository.
+
+**Switching the format step or belt 6 on starts the repository's cells afresh.** A row graded
+with either on answers a different question from one graded without, so the two are never
+counted in one cell (ADR-0024 §6). The map, the routes and the delivery gate read the arm
+your next run grades under — `off`, `fmt`, `api` or `fmt,api` — so after the switch every
+cell calibrates until the new arm is measured, and a delivery is never licensed on rows the
+old instrument graded. The old rows stay on the ledger: `GET /capability-map?repo=…&checks=off`
+reads them, and the CLI takes `--checks`. The finish gate is not an arm (the belts, not the
+gate, decide clean): switching it changes no cell. **A sign-off is of one arm too**: one made
+before the switch goes stale (the Decisions inbox lists it with the arm it was signed on and
+the arm read now) and lifts nothing on the new arm until an approver signs it again; the
+scorecard's headline (`/value?repo=…`) and the failure split read the repository's own arm.
+
+To see what the product derives for a checkout against what its CI runs, and the gaps:
+
+```bash
+python scripts/audit_runner_commands.py /srv/repos/cobra --language go --runner go
+```
+
 ### 2.2 Services the oracle needs
 
 Some test suites are only an oracle when a **service** is running next to them —
@@ -555,7 +606,7 @@ sources — nothing is merged, and `api_key` mode never reads any of them:
 | Order | Source | How to supply it | When to use it |
 |---|---|---|---|
 | 1 | `CLAUDE_CODE_OAUTH_TOKEN` in the **worker's** environment | your process manager / secret injection (compose `env_file`, a Kubernetes `Secret` env var) | a worker on a different host from the API, or a platform that already injects secrets |
-| 2 | the **secrets file** on disk: `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` → `./.crb/secrets`, file `claude_code_oauth_token` | **Settings → Claude Code login** in the UI (admin): **Sign in with your Claude account** — the API host runs `claude setup-token` for you, a new tab opens on Anthropic's sign-in page, you approve, paste the code the page shows, and the minted token is stored on the API host (it never passes through the browser); then **Verify**. Or run `claude setup-token` on any machine and paste the token, **Save**, **Verify**. Or mount the file yourself (`CRB_SECRETS_DIR=/mnt/secrets`, mode `0600`, a raw value, no metadata needed). The browser sign-in needs the `claude` CLI on the **API** host (`CRB_BUILDER__CLAUDE_BINARY` when it is not on PATH; the container image ships it); behind a proxy it uses the API process's `HTTPS_PROXY` / `NO_PROXY` and certificate-authority variables (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`), and nothing else from its environment | the API and worker share `CRB_HOME` (the compose and Helm deployments do), or a Key Vault / CSI mount |
+| 2 | the **secrets file** on disk: `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` → `./.crb/secrets`, file `claude_code_oauth_token` | **Settings → Claude Code login** in the UI (admin): **Sign in with your Claude account** — the API host runs `claude setup-token` for you, a new tab opens on Anthropic's sign-in page, you approve, paste the code the page shows, and the minted token is stored on the API host (it never passes through the browser); then **Verify**. Or run `claude setup-token` on any machine and paste the token, **Save**, **Verify**. Or mount the file yourself (`CRB_SECRETS_DIR=/mnt/secrets`, mode `0600`, a raw value, no metadata needed). The browser sign-in needs the `claude` CLI on the **API** host (`CRB_BUILDER__CLAUDE_BINARY` when it is not on PATH; the container image ships it); behind a proxy it uses the API process's `HTTPS_PROXY` / `NO_PROXY` and certificate-authority variables (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`), and nothing else from its environment | the API and the worker read one secrets directory: compose shares `CRB_HOME` (`/srv/crb` on both services); the Helm chart mounts one `secretsStore` claim on both pods at `CRB_SECRETS_DIR` (`/srv/crb-secrets/store`) — never a volume only one of them sees (docs/PREVENTION.md P-043); or a Key Vault / CSI mount on both |
 | 3 | nothing | `claude login` as the worker's user | a developer machine where the interactive login is fresh |
 
 The file is written `0600` inside a `0700` directory owned by the API user, atomically;
@@ -597,8 +648,31 @@ excluded, not counted. A queued run shows its place in the line ("Queued — 3 r
 it"); if the health check's `worker` probe is not `ok`, no worker will take it — see §7.
 
 Every graded task produces an **evidence pack** (redacted; no raw diff, no transcript by
-default) and a **ledger row** that carries the pack's hash. A row cannot be `clean` without
-a pack.
+default), its **kept patch** (the builder's change, redacted, at most 1 MiB, under
+`CRB_HOME/evidence/patches/` — `GET /grades/{row_hash}/patch` serves it with no retained
+worktree; `CRB_RETENTION__PATCHES=false` keeps none) and a **ledger row** that carries the
+pack's hash. A row cannot be `clean` without a pack.
+
+#### 3.0.2 Spend: the calibrated budget and the measured escalation rule
+
+Two switches decide what a build run pays for (`crb.core.spend`). Each is set per run on
+`POST /runs` or per repository on `PUT /repos/{name}` as `spend: {…}`; the run wins, and
+the run's apparatus says which applied and why (`extra.spend.sources`).
+
+| switch | values | default | what it does |
+|---|---|---|---|
+| `escalation` | `measured` · `always` | `measured` | Before a failed attempt climbs to the next rung, look at that rung's earlier escalations in the cell (same builder and model; at least 10). If fewer than 1 in 10 of them came back clean, stop — the retry is not paid for. `always` climbs every rung, as before |
+| `budget_profile` | `default` · `calibrated` | `default` | `calibrated` gives each attempt the caps the ledger's own clean completions in its cell used (p90 × 1.5; at least 8 of them), never less than the run's caps and never more than twice them. It changes what the builder is given, so it stays off until a paired comparison shows it helps |
+
+Why: in the 2026-09-25 export, 40 escalated attempts (a same-model retry: a bare `r2` / `r3`
+rung is the run's own builder and model at the same budget, on a fresh worktree with the same
+brief) produced 2 clean patches for $20.70, against $1.35 per clean patch on a first blind
+attempt; and 47 attempts stopped at their budget cost $28.87 for no output `[measured
+2026-09-25; n = 322 valid of 618 rows, apparatus 2.0–2.2, builder claude_code /
+claude-sonnet-5; method: the product's failure rule over the export,
+scripts/spend_from_export.py]`. Every row a rule shaped says so: `labels.escalation` and
+`labels.escalation_rule` on the row that stopped or climbed, `labels.budget_profile`,
+`labels.budget_calibration` and `labels.budget_tier` on a calibrated attempt.
 
 ### 3.1 Oracle adequacy — mutation scoring
 
@@ -1058,3 +1132,83 @@ are in §8.
 
 **Cost.** Reading a column, drafting an item and posting the feedback call no model and
 spend nothing. Only a factory run spends, and it is still started the same way (§3).
+
+## 12. The prevention loop
+
+The prevention loop (ADR-0020, the guide's
+[§7](LEARNING-LOOP.md#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring))
+turns each failure class a builder shows into a change to the process or the context, and
+proves by the next attempts whether the change worked. It is **off** on every repository
+until you throw its switch, and it spends nothing itself: it makes no model call.
+
+**Read the register.** Open **Learn** and pick the repository: the first card lists every
+class with how often it occurred on first attempts, the lever the loop would choose and at
+what level, the change in force with its before → after, the status and what happens next.
+`GET /learn/register?repo=` serves the same (any viewer), and `crb learn prevention --repo R`
+builds it from JSONL files.
+
+**Throw the switch** (operator; `PUT /learn/switch?repo=` or the card's switch control), with
+a reason — it is recorded with your name:
+
+* `context` lets the loop add checklist lines to the brief (at most seven, from closed
+  templates) and file items for a person;
+* `config` also lets it switch on the formatter step, the finish gate and the calibrated
+  budget for the repository — as an overlay: a key your repository's configuration sets
+  itself always wins;
+* `off` suspends every change from the next run. Nothing is lost; switching back resumes them.
+
+A run that must not see the loop's changes (the Phase B off arm) is queued with
+`learning: "off"`.
+
+**Let it work.** The worker takes a snapshot of the loop when a replay or blind run starts
+(every row records the switch, the changes in force and the lines the builder read) and runs
+one tick when the run ends. `POST /learn/tick?repo=` runs one now. A tick that fails is
+logged and never fails the run.
+
+**Undo a change** (operator): **Revert** on the class, with a reason, or
+`POST /learn/changes/{change_id}/revert?repo=`. The change leaves the next run, and the loop
+never applies that lever to that class again.
+
+**Act on a filed item.** When the strongest fix is code or a grader decision, the loop files
+an item; it appears in **Decisions** as "a prevention needs an owner". **Register** puts it on
+the repository's factory backlog in one act (`POST /learn/items/{item_id}/register?repo=`):
+the first item freezes a backlog, later ones evolve it; refused while a factory run holds the
+backlog. An item for this product's own code is never put on your backlog: it is served for
+the maintainers.
+
+**Link a fix made elsewhere.** A merged pull request or a change to the environment that
+should stop a class is linked with `POST /learn/links?repo=` (the classes, a reference and a
+note). Its effect is measured from the link forward, never before.
+
+**What the loop will never do:** write a grader key, a guard-corpus line, the failure rule or
+a routing threshold; credit a class that went quiet with no change on record; call a class
+closed while it still recurs, even as a refusal before spend, or while its failures have moved
+to another class; put anything from a task's diff, tests or reviews into a brief; register an
+item or write on a board without a named person; re-apply a lever a person reverted.
+
+**If the chain does not verify**, every prevention route answers `409
+prevention_chain_broken` and nothing is written: restore the `events` table from the database
+backup (DEPLOYMENT §5). The chain lives in the database, never in `CRB_HOME`.
+
+## 13. The three learning reports
+
+The **Learn** page, beside the prevention register, shows three reports for one repository
+(any viewer; `GET /learn/refusals`, `/learn/strengthen` and `/learn/remeasure`, or `crb learn
+refusals|strengthen|remeasure` over exported files — [LEARNING-LOOP §2](LEARNING-LOOP.md#2-what-crbcorelearn-adds)).
+None of them spends anything or changes anything.
+
+**Refusals — read it when protocol rows rise.** It groups the attempts the guards refused into
+candidate lines for the guard corpus. Every verdict is `unsure` until a person writes one: if
+a group was an honest command, mark it `honest`; if it should stay refused, mark it `refused`;
+then apply the decisions with `crb learn refusals --apply` (a decision with no named decider is
+refused before anything is written).
+
+**Strengthen — read it when a cell is held back by its oracle.** Each item names a cell whose
+held-out tests are too weak to route, and the tests to strengthen. Strengthen them in the
+repository (the product never writes a customer's tests), score the oracle again
+(§3.1), re-run the controls, then re-measure the cell.
+
+**Re-measure — read it after an upgrade changes the apparatus.** Each cell stamped with an older
+apparatus shows how many rows it still needs, the estimated cost and the `POST /runs` bodies to
+queue. Queue the ones worth paying for from **Runs**; nothing is queued for you.
+

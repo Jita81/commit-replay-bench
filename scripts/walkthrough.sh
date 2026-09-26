@@ -149,7 +149,12 @@ trap cleanup EXIT INT TERM
 # Always rebuild: a stale dist (older than any source file) silently tests the wrong UI —
 # the walkthrough specs rely on data-testids that only a current build carries.
 newest_src="$(find "$UI/src" "$UI/index.html" "$UI/public" -type f -newer "$UI/dist/index.html" 2>/dev/null | head -1 || true)"
-if [[ ! -f "$UI/dist/index.html" || -n "$newest_src" || "${CRB_E2E_REBUILD_UI:-0}" == "1" ]]; then
+# …and a bundle built from another commit is stale whatever the file times say (a change to
+# vite.config.ts or a checkout switch leaves them older): the build stamp names its commit
+# (docs/PREVENTION.md P-002)
+stamp_commit="$(sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' "$UI/dist/build-stamp.json" 2>/dev/null || true)"
+head_commit="$(git -C "$UI" rev-parse HEAD 2>/dev/null || true)"
+if [[ ! -f "$UI/dist/index.html" || -n "$newest_src" || "$stamp_commit" != "$head_commit" || "${CRB_E2E_REBUILD_UI:-0}" == "1" ]]; then
   echo "walkthrough: building the UI (dist missing or stale)" >&2
   (cd "$UI" && npm run build >"$WORK/ui-build.log" 2>&1) || { cat "$WORK/ui-build.log" >&2; exit 2; }
 fi

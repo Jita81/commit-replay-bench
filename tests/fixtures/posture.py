@@ -119,14 +119,16 @@ def witnessed_context_for(
     executor: Executor,
     scratch: Path,
     timeout: int = 0,
+    gold_lint: bool | None = None,
 ) -> Callable[[TaskSpec], GradeContext]:
-    """A ``RunSpec.context_for`` with a real ``GoldWitness`` per task."""
+    """A ``RunSpec.context_for`` with a real ``GoldWitness`` per task (and the gold's belt 5
+    at qualification, ``gold_lint``: ``None`` = never measured)."""
 
     def context_for(task: TaskSpec) -> GradeContext:
         w = gold_witness(
             repo, config, task, runner=runner, executor=executor, scratch=scratch, timeout=timeout
         )
-        return context(task, executor, witness=w)[1]
+        return context(task, executor, witness=w, gold_lint=gold_lint)[1]
 
     return context_for
 
@@ -193,7 +195,12 @@ def with_posture_labels(fields: dict[str, Any]) -> dict[str, Any]:
     labels.setdefault("posture_class", TEST_POSTURE_CLASS)
     labels.setdefault("qualification_id", TEST_QUALIFICATION_ID)
     if not fields.get("clean") and not fields.get("disqualified") and not fields.get("error"):
-        labels.setdefault("blame_control", "gold_green")
+        # belt 6 alone (ADR-0024) is a fact about the diff, witnessed as ``api_diff``
+        api_only = labels.get("api_stable") == "false" and all(
+            fields.get(b) is True
+            for b in ("tests_unmodified", "target_green", "no_new_failures", "source_changed")
+        )
+        labels.setdefault("blame_control", "api_diff" if api_only else "gold_green")
     return {**fields, "labels": labels}
 
 
@@ -219,11 +226,22 @@ def posture_result(*args: Any, **kw: Any) -> GradeResult:
                 belts.no_new_failures,
                 belts.source_changed,
                 belts.repo_lint_clean,
+                belts.api_stable,
             )
         )
     )
     if blamed:
-        kw.setdefault("blame_control", "gold_green")
+        # belt 6 alone (ADR-0024) is a fact about the diff, witnessed as ``api_diff``
+        api_only = belts.api_stable is False and all(
+            v is True
+            for v in (
+                belts.tests_unmodified,
+                belts.target_green,
+                belts.no_new_failures,
+                belts.source_changed,
+            )
+        )
+        kw.setdefault("blame_control", "api_diff" if api_only else "gold_green")
     return GradeResult(**kw)
 
 

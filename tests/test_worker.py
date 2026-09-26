@@ -1529,7 +1529,9 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     assert s2.home == tmp_path / "flag" and s2.executor == "local" and s2.kinds == ("mine", "probe")
 
 
-def test_run_where_every_attempt_errors_is_failed_not_succeeded(h: Harness) -> None:
+def test_run_where_every_attempt_errors_is_failed_not_succeeded(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A provider 402 / missing credential on every task must not read as a success:
     the rows stay honest (never clean) and the run is `failed` with the first error."""
     from crb.builders.base import STOP_MODEL_ERROR, BuildOutcome
@@ -1556,7 +1558,9 @@ def test_run_where_every_attempt_errors_is_failed_not_succeeded(h: Harness) -> N
         def describe(self) -> dict[str, Any]:
             return {"builder": "broken"}
 
-    builders_pkg._REGISTRY["broken"] = _Broken
+    # through monkeypatch: a bare write leaked "broken" into the registry for every later
+    # test (test_builders_base's registry test failed whenever it ran after this file)
+    monkeypatch.setitem(builders_pkg._REGISTRY, "broken", _Broken)
     run = h.enqueue("replay", ladder_json=["broken:m@p"])
     done = h.run_one()
     assert done.id == run.id
@@ -1772,6 +1776,54 @@ def test_github_settings_read_only_their_own_keys_and_refuse_a_malformed_one(
     monkeypatch.setenv("CRB_GITHUB__API_URL", "ftp://not-https")
     with pytest.raises(pydantic.ValidationError):
         worker_main._shared_settings()
+
+
+def test_the_patch_retention_opt_out_reaches_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``settings_from_args`` reads an explicit environment through ``_keys_for``, which
+    mapped no ``CRB_RETENTION__*`` key: ``CRB_RETENTION__PATCHES=false`` handed in that way
+    was ignored and the worker kept patches in a deployment that must hold no code
+    (CodeRabbit, PR #57, CWE-1188). The process environment reached it only because
+    pydantic-settings also reads ``os.environ`` on its own."""
+    for key in [k for k in os.environ if k.startswith("CRB_")]:
+        monkeypatch.delenv(key, raising=False)
+    args = worker_main.build_parser().parse_args([])
+    off = {"CRB_RETENTION__PATCHES": "false"}
+    assert worker_main.settings_from_args(args, env=off).store_patches is False
+    assert worker_main._shared_settings(off).retention.patches is False
+    assert worker_main._shared_settings({}).retention.patches is True  # the default keeps them
+    monkeypatch.setenv("CRB_RETENTION__PATCHES", "false")
+    assert worker_main.settings_from_args(args).store_patches is False
+
+
+@pytest.mark.parametrize("name", sorted(worker_main._SharedWithApi.model_fields))
+def test_every_shared_setting_is_read_from_an_explicit_environment(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The class of that bug, ratcheted: every field the worker shares with the API is read
+    from an explicit environment — a block added to ``_SharedWithApi`` cannot be skipped by
+    ``_keys_for`` and fall back to its default."""
+    import pydantic
+    from pydantic import BaseModel
+
+    for key in [k for k in os.environ if k.startswith("CRB_")]:
+        monkeypatch.delenv(key, raising=False)
+    kind = worker_main._SharedWithApi.model_fields[name].annotation
+    if isinstance(kind, type) and issubclass(kind, BaseModel):
+        sub = next(
+            f for f, info in kind.model_fields.items() if info.annotation in (bool, int, str)
+        )
+        sub_kind = kind.model_fields[sub].annotation
+        value = "false" if sub_kind is bool else "7" if sub_kind is int else "x"
+        env = {f"CRB_{name.upper()}__{sub.upper()}": value}
+    else:
+        value = "false" if kind is bool else "7" if kind is int else "https://crb.example"
+        env = {f"CRB_{name.upper()}": value}
+    default = getattr(worker_main._shared_settings({}), name)
+    try:
+        read = getattr(worker_main._shared_settings(env), name)
+    except pydantic.ValidationError:
+        return  # the value reached the field and was judged: it was read
+    assert read != default, env
 
 
 def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> None:
@@ -2174,3 +2226,26 @@ def test_route_gate_reads_the_deployment_posture_only(h: Harness) -> None:
     assert here is not None and here["n"] == len(rows)
     assert h.worker._route_lookup(pr.REPO_NAME, "", "docker/copy/sealed")(item) is None
     del home
+
+
+# --- the "clean means working" switchboard (ADR-0024) ----------------------------------------
+
+
+def test_repository_checks_and_run_overrides_reach_the_row_and_belt_six(
+    tmp_path: Path, pyrepo: pr.PyRepo
+) -> None:
+    """The one surface the prevention loop writes (``RepoConfig.checks``) reaches the grader
+    (belt 6) and every row, with the run's override named as such."""
+    harness = Harness(tmp_path, pyrepo)
+    harness.add_repo(checks={"api_stable": True})
+    harness.add_task(pyrepo.feat_task())
+    run = harness.enqueue("replay", params_json={"checks": {"format_step": True}})
+    done = harness.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    (row,) = harness.worker.ledger.rows(run_id=run.id)
+    assert row.labels["checks"].startswith("fmt=1:run;gate=0:default;api=1:repo;cfg=")
+    assert row.labels["api_stable"] == "true" and row.clean  # the gold's own API change
+    assert row.labels["format_step"] == "skipped=no_formatter_configured"
+    assert done.apparatus_json["extra"]["checks"]["sources"]["api_stable"] == "repo"
+    belts = [e for e in harness.events(run.id) if e.action == "grade.belt"]
+    assert [e.payload["belt"] for e in belts][-1] == "api_stable"

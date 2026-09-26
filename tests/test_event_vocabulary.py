@@ -15,7 +15,10 @@ What it does: Extracts every action literal from the emit call sites in ``src/cr
               plain ``on_event("…", …)`` callbacks, ``append_event(action=…)``, the factory
               loop's ``self._emit("…", item_id)``, and the builders' ``builder.``-prefixed
               forms) and asserts each is a code span in docs/API.md#event-vocabulary; also
-              asserts the table names no action the code no longer emits.
+              asserts the table names no action the code no longer emits, and that every
+              documented action has its plain sentence in the UI's ``ACTION_HELP``
+              (ui/src/lib/verdict.ts) — so the Python half alone fails when a row is added
+              without the sentence the live log shows.
 How:          ``ast`` over ``src/crb/**/*.py``; a regex over the vocabulary section of the doc.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
@@ -169,3 +172,29 @@ def test_the_walker_sees_every_emit_shape() -> None:
     assert "builder.discard" in emitted  # emit(on_event, BUILDER_EVENT_PREFIX + "discard")
     assert "builder.build.turn" in emitted and "build.turn" in emitted  # a builder's own
     assert "grade.belt" in emitted  # core/grade.py on_event / _emit
+
+
+#: The UI's one plain sentence per action (the live log's explanation).
+VERDICT_TS = ROOT / "ui" / "src" / "lib" / "verdict.ts"
+
+
+def test_every_documented_action_has_its_ui_sentence() -> None:
+    """The UI's own check (ui/src/lib/verdict.test.ts) runs only in the UI suite; a vocabulary
+    row added with a Python change and no ``ACTION_HELP`` sentence passed every Python gate
+    and broke the UI suite (2026-09-25, value wave stream L). Mirrored here so either half
+    catches it."""
+    text = VERDICT_TS.read_text(encoding="utf-8")
+    m = re.search(
+        r"export const ACTION_HELP: Record<string, string> = \{(.*?)^\}", text, re.M | re.S
+    )
+    assert m, "ui/src/lib/verdict.ts has no ACTION_HELP table"
+    keys = set(re.findall(r"^\s*'([a-z_]+(?:\.[a-z_]+)+)':", m.group(1), re.M))
+    assert len(keys) > 60, sorted(keys)
+    missing = sorted(
+        a
+        for a in documented_actions()
+        if a not in keys and not (a.startswith("builder.build.") and a[len("builder.") :] in keys)
+    )
+    assert not missing, (
+        f"documented in docs/API.md but no ACTION_HELP sentence in verdict.ts: {missing}"
+    )

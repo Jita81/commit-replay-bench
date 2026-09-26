@@ -72,6 +72,8 @@ from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, GradeContext, GradeResult, grade
 from crb.core.ledger import BELT_SET_V5, PROCESS_FACTORY, GradeRow, JsonlLedger, posture_labels
+from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
+from crb.core.patches import PatchStore, keep_patch
 from crb.core.posture import Posture, resolve_posture
 from crb.core.qualify import STATE_QUALIFIED, EnvProbeWitness, Qualification
 from crb.core.redact import redact_and_cap
@@ -390,6 +392,7 @@ def build_item(
     on_event: EventFn | None = None,
     posture: Posture | None = None,
     deps: TaskDeps | None = None,
+    keep_patches: bool = True,
 ) -> BuildResult:
     """Stage the oracle, build at the parent with it overlaid, grade, pack, ledger.
 
@@ -543,6 +546,16 @@ def build_item(
             extra={"process_step": PROCESS_FACTORY, "oracle_branch": oracle.branch},
             posture=posture.to_dict(),
         )
+        # every graded attempt keeps its patch (crb.core.patches), before the pack cites it
+        kept = (
+            keep_patch(
+                ws,
+                PatchStore.under(evidence_dir),
+                diff_sha256=result.diff.diff_sha256 if result.diff is not None else "",
+            )
+            if keep_patches
+            else None
+        )
         pack = EvidencePack(
             task=task,
             grade=result,
@@ -558,6 +571,7 @@ def build_item(
                 "red_proof": proof.to_dict(),
                 "test_author": authored.author,
                 "builder_error": error,
+                **({PATCH_NOTE_KEY: kept} if kept is not None else {}),
             },
         )
         pack_path = write_pack(pack, evidence_dir)
@@ -638,6 +652,7 @@ def build_ladder(
     on_event: EventFn | None = None,
     posture: Posture | None = None,
     deps: TaskDeps | None = None,
+    keep_patches: bool = True,
 ) -> list[BuildResult]:
     """Climb the escalation ladder: one graded, ledgered attempt per rung until a
     rung is clean or an attempt is disqualified. Every rung's label is checked
@@ -672,6 +687,7 @@ def build_ladder(
             on_event=on_event,
             posture=posture,
             deps=deps,
+            keep_patches=keep_patches,
         )
         results.append(res)
         if res.clean or res.disqualified:

@@ -106,7 +106,11 @@ import type {
   TaskSpec,
   User,
   UserCreateRequest,
+  ValueReport,
   Version,
+  PreventionRecordOut,
+  PreventionRegister,
+  PreventionSwitch,
 } from './types'
 import { isRunTerminal } from './types'
 
@@ -163,7 +167,9 @@ export const keys = {
   users: ['users'] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
+  value: (repo: string) => ['value', repo] as const,
   githubRepos: (installation: number, q: string, page: number) => ['github', 'repos', installation, q, page] as const,
+  learnRegister: (repo: string) => ['learn', repo, 'register'] as const,
 }
 
 const enc = encodeURIComponent
@@ -599,6 +605,19 @@ export function useCapabilityMap(repo: string, by: CellField[]): UseQueryResult<
   })
 }
 
+/**
+ * `GET /value[?repo=]` — the scorecard: working changes per pound (blind) with its n, interval
+ * and apparatus. An empty `repo` reads every repository (the deployment's north star).
+ */
+export function useValue(repo = ''): UseQueryResult<ValueReport, ApiError> {
+  return useQuery({
+    queryKey: keys.value(repo),
+    queryFn: () => api<ValueReport>(`/value${qs({ repo: repo || undefined })}`),
+    retry: false,
+    staleTime: 60_000,
+  })
+}
+
 /** `GET /routes?repo=` — one `RouteDecision` per cell under the published policy. */
 export function useRoutes(repo: string): UseQueryResult<RoutesResponse, ApiError> {
   return useQuery({
@@ -927,3 +946,61 @@ export function usePollIntake(): UseMutationResult<Intake, ApiError, { repo: str
     },
   })
 }
+
+// ---------------------------------------------------------------------------
+// The prevention loop (ADR-0020) — the register and the operator acts on its chain
+// ---------------------------------------------------------------------------
+
+/** `GET /learn/register?repo=` (viewer) — every bug class, its lever, before → after and status. */
+export function useLearnRegister(repo: string): UseQueryResult<PreventionRegister, ApiError> {
+  return useQuery({
+    queryKey: keys.learnRegister(repo),
+    queryFn: () => api<PreventionRegister>(`/learn/register${qs({ repo })}`),
+    enabled: repo.length > 0,
+    retry: false,
+  })
+}
+
+/** `PUT /learn/switch?repo=` (operator) — throw the repository's learning switch, with a reason. */
+export function useLearnSwitch(): UseMutationResult<{ repo: string; switch: PreventionSwitch; record: PreventionRecordOut }, ApiError, { repo: string; auto_apply: PreventionSwitch['auto_apply']; reason: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, auto_apply, reason }) =>
+      api<{ repo: string; switch: PreventionSwitch; record: PreventionRecordOut }>(`/learn/switch${qs({ repo })}`, { method: 'PUT', body: { auto_apply, reason } }),
+    onSuccess: (_d, { repo }) => qc.invalidateQueries({ queryKey: keys.learnRegister(repo) }),
+  })
+}
+
+/** `POST /learn/tick?repo=` (operator) — run the loop now. */
+export function useLearnTick(): UseMutationResult<{ repo: string; appended: PreventionRecordOut[] }, ApiError, { repo: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo }) => api<{ repo: string; appended: PreventionRecordOut[] }>(`/learn/tick${qs({ repo })}`, { method: 'POST' }),
+    onSuccess: (_d, { repo }) => qc.invalidateQueries({ queryKey: keys.learnRegister(repo) }),
+  })
+}
+
+/** `POST /learn/changes/{id}/revert?repo=` (operator) — a person's revert: the loop never re-applies it. */
+export function useRevertPreventionChange(): UseMutationResult<{ repo: string; change_id: string; lever_id: string; targets: string[]; record: PreventionRecordOut }, ApiError, { repo: string; change_id: string; reason: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, change_id, reason }) =>
+      api<{ repo: string; change_id: string; lever_id: string; targets: string[]; record: PreventionRecordOut }>(`/learn/changes/${enc(change_id)}/revert${qs({ repo })}`, { method: 'POST', body: { reason } }),
+    onSuccess: (_d, { repo }) => qc.invalidateQueries({ queryKey: keys.learnRegister(repo) }),
+  })
+}
+
+/** `POST /learn/items/{id}/register?repo=` (operator) — a filed item onto the factory backlog in one act. */
+export function useRegisterPreventionItem(): UseMutationResult<{ repo: string; item_id: string; registered_id: string; supersedes: string; how: 'frozen' | 'evolved'; record: PreventionRecordOut }, ApiError, { repo: string; item_id: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, item_id }) =>
+      api<{ repo: string; item_id: string; registered_id: string; supersedes: string; how: 'frozen' | 'evolved'; record: PreventionRecordOut }>(`/learn/items/${enc(item_id)}/register${qs({ repo })}`, { method: 'POST' }),
+    onSuccess: (_d, { repo }) => {
+      qc.invalidateQueries({ queryKey: keys.learnRegister(repo) })
+      qc.invalidateQueries({ queryKey: keys.factoryBacklog(repo) })
+      qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
+    },
+  })
+}
+

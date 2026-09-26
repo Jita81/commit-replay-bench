@@ -87,6 +87,18 @@ write path mints it today, so a record that says ``service`` was written by some
 other than this product's API and must be read as such. A record read back from before
 F34 carries ``""`` — never a guessed kind.
 
+Which instrument was signed — the checks arm (``checks_arm``, ADR-0024)
+------------------------------------------------------------------------
+A cell is read on one ``checks`` arm (the format step and belt 6 change what a clean row
+means, so a row graded with either on never pools with one graded without). ``crb.signoff.v4``
+records carry the arm of the evidence the approver signed, stamped from the cell
+(:func:`stamp_evidence`), and the overlay lifts only a cell read on that arm
+(:meth:`SignoffRecord.covers_arm`), as it lifts only a cell read on the apparatus the record
+was signed at. A record from before the switchboard carries ``""``, which is the ``off`` arm —
+the only arm there was. The arm is not part of the scope: a later attestation of the same
+scope on another arm supersedes the earlier one (latest per scope wins), which withdraws
+trust from the old arm rather than keeping two.
+
 Cardinal invariant, enforced in BOTH directions
 -----------------------------------------------
 * **At write** — :meth:`JsonlSignoffLedger.append` needs the live
@@ -107,8 +119,9 @@ Schema
 ------
 ``crb.signoff.v1`` records (written before the policy) hash the original ten
 snapshot fields only; ``crb.signoff.v2`` records hash the policy snapshot and the
-attestation (:data:`_V2_BODY_FIELDS`, frozen); ``crb.signoff.v3`` records hash
-everything, ``verifier_kind`` included. :meth:`SignoffRecord.body` is schema-aware so an
+attestation (:data:`_V2_BODY_FIELDS`, frozen); ``crb.signoff.v3`` records add
+``verifier_kind`` (:data:`_V3_BODY_FIELDS`, frozen); ``crb.signoff.v4`` records hash
+everything, ``checks_arm`` included. :meth:`SignoffRecord.body` is schema-aware so an
 old chain still verifies after this module learned the new fields, and
 :meth:`SignoffRecord.from_dict` tolerates every shape.
 
@@ -135,7 +148,8 @@ How:          ``JsonlSignoffLedger.append`` → ``check_signable`` (first failin
 Layer:        core — docs/ARCHITECTURE.md#54-a-sign-off-refused-with-409-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0003-one-routing-rule.md,
               docs/adr/0015-signoffs-expire-with-the-apparatus.md,
-              docs/adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md
+              docs/adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md,
+              docs/adr/0024-working-by-construction.md (a sign-off lifts only the arm it saw)
 Works with:   src/crb/core/capability.py (the cell and the tiers it may reach),
               src/crb/core/routing.py (the decision and the controls verdict a sign-off is
               judged on), src/crb/server/routes/signoffs.py (the write boundary that holds
@@ -178,6 +192,7 @@ from crb.core.capability import (
     CapabilityMap,
     key_matches,
 )
+from crb.core.checks import ARM_OFF, ARMS
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import GENESIS_HASH, CellKey, LedgerIntegrityError
 from crb.core.redact import redact
@@ -186,7 +201,8 @@ from crb.core.version import APPARATUS_VERSION
 
 SIGNOFF_SCHEMA_V1 = "crb.signoff.v1"
 SIGNOFF_SCHEMA_V2 = "crb.signoff.v2"
-SIGNOFF_SCHEMA = "crb.signoff.v3"
+SIGNOFF_SCHEMA_V3 = "crb.signoff.v3"
+SIGNOFF_SCHEMA = "crb.signoff.v4"
 SIGNOFF_POLICY_VERSION_V1 = "signoff-policy.v1"
 SIGNOFF_POLICY_VERSION_V2 = "signoff-policy.v2"
 SIGNOFF_POLICY_VERSION = "signoff-policy.v3"
@@ -234,6 +250,9 @@ _V2_BODY_FIELDS: tuple[str, ...] = (
     "controls_escapes",
     "attestation",
 )
+#: The v3 hashed body: v2 plus ``verifier_kind`` (F34) — FROZEN, so a ``crb.signoff.v3``
+#: chain keeps verifying after v4 added ``checks_arm``.
+_V3_BODY_FIELDS: tuple[str, ...] = (*_V2_BODY_FIELDS, "verifier_kind")
 
 # --- who signed: the account kind (F34) ---------------------------------------------------
 VERIFIER_KIND_OIDC = "oidc"
@@ -590,6 +609,9 @@ class SignoffRecord:
     # v3 (F34) — the kind of account that signed: one of ``VERIFIER_KINDS``, ``""`` on a
     # record read back from before the field existed (never guessed).
     verifier_kind: str = ""
+    # v4 (ADR-0024) — the ``checks`` arm the evidence was read on: one of
+    # ``crb.core.checks.ARMS``, ``""`` on a record from before the switchboard (= ``off``).
+    checks_arm: str = ""
     schema: str = SIGNOFF_SCHEMA
     record_id: str = ""
     prev_hash: str = ""
@@ -609,6 +631,11 @@ class SignoffRecord:
             )
         if self.tier not in EARNED_TIERS:
             raise ValueError(f"tier must be one of {EARNED_TIERS}, got {self.tier!r}")
+        if self.checks_arm and self.checks_arm not in ARMS:
+            raise ValueError(
+                f"checks_arm must be one of {ARMS} (or '' on a pre-v4 record), "
+                f"got {self.checks_arm!r}"
+            )
         # the one clause that holds even on a record rebuilt from disk: a stored
         # attestation over false-Q1 evidence cannot be re-instantiated, let alone applied
         if self.false_q1_at_signoff > 0 and not self.revoked:
@@ -661,9 +688,21 @@ class SignoffRecord:
             return True
         return current <= stamped
 
+    @property
+    def arm(self) -> str:
+        """The ``checks`` arm the attestation was made on — ``off`` for a record from before
+        the switchboard, when every row was graded with both grader-side switches off."""
+        return self.checks_arm or ARM_OFF
+
+    def covers_arm(self, cell: CapabilityCell) -> bool:
+        """True when the attestation was made on the ``checks`` arm the cell is read on
+        (ADR-0024): a sign-off of the rows the old instrument graded never lifts the cell of
+        the instrument that replaced it. A cell with no rows is not judged here."""
+        return cell.stats is None or cell.stats.checks_arm == self.arm
+
     def is_stale(self, cell: CapabilityCell) -> bool:
-        """The inbox's word for :meth:`covers_apparatus` being false."""
-        return not self.covers_apparatus(cell)
+        """The inbox's word for :meth:`covers_apparatus` or :meth:`covers_arm` being false."""
+        return not (self.covers_apparatus(cell) and self.covers_arm(cell))
 
     # --- hashing ------------------------------------------------------------------
     def body(self) -> dict[str, Any]:
@@ -674,6 +713,8 @@ class SignoffRecord:
             names = _V1_BODY_FIELDS
         elif self.schema == SIGNOFF_SCHEMA_V2:
             names = _V2_BODY_FIELDS
+        elif self.schema == SIGNOFF_SCHEMA_V3:
+            names = _V3_BODY_FIELDS
         else:
             names = tuple(k for k in self.__dataclass_fields__ if k != "row_hash")
         out: dict[str, Any] = {}
@@ -707,7 +748,8 @@ class SignoffRecord:
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> SignoffRecord:
         """Tolerates a v1 record (no policy / attestation fields → their defaults), a v2
-        one (no ``verifier_kind`` → ``""``) and a v3 one; unknown keys are ignored."""
+        one (no ``verifier_kind`` → ``""``), a v3 one (no ``checks_arm`` → ``""``) and a v4
+        one; unknown keys are ignored."""
         kw = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         att = kw.get("attestation")
         kw["attestation"] = Attestation.from_dict(att) if isinstance(att, Mapping) else None
@@ -767,6 +809,7 @@ def stamp_evidence(
         ci_low_at_signoff=cell.stats.ci.low,
         false_q1_at_signoff=cell.stats.false_q1,
         apparatus_version=",".join(cell.stats.apparatus_versions) or record.apparatus_version,
+        checks_arm=cell.stats.checks_arm,
         oracle_strength_at_signoff=strength,
         policy_version=policy.policy_version,
         policy_thresholds=policy.thresholds(),
@@ -1207,7 +1250,9 @@ def apply_signoffs(
     that are themselves repo-agnostic — an unscoped read never borrows another
     repo's attestation) **on the apparatus the cell is read at** — a sign-off made
     under an earlier apparatus is stale and lifts nothing (ADR-0015, 2026-09-17; evidence
-    expires when the apparatus changes). The highest matching earned tier wins.
+    expires when the apparatus changes) — **and on the ``checks`` arm the cell is read on**
+    (ADR-0024: a sign-off of the rows graded with belt 6 off never lifts the belt-6 cell).
+    The highest matching earned tier wins.
     Everything else passes through unchanged.
     """
     active = list(active_signoffs(signoffs).values())
@@ -1218,7 +1263,11 @@ def apply_signoffs(
         if cell.stats is None or cell.stats.false_q1 > 0:
             out.append(cell)
             continue
-        tiers = [r.tier for r in active if r.matches(cell, repo=repo) and r.covers_apparatus(cell)]
+        tiers = [
+            r.tier
+            for r in active
+            if r.matches(cell, repo=repo) and r.covers_apparatus(cell) and r.covers_arm(cell)
+        ]
         if not tiers:
             out.append(cell)
             continue

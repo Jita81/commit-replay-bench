@@ -23,8 +23,14 @@ the trial to be credited ``clean`` — the four core belts are always evaluated:
    ``checkstyle``, ``cargo fmt``/``clippy``); otherwise ``None`` — *not evaluated*,
    which is neither a pass nor a fail. ``False`` (rejected or timed out) is never
    clean; a linter that could not run is a harness error.
+6. ``api_stable``       — the public API of the units the builder changed is unchanged
+   unless the maintainers' own commit changes it the same way (ADR-0024;
+   :mod:`crb.core.api_surface`). Evaluated only when the run or the repository switches
+   it on (``checks.api_stable``) — OFF by default, recorded on the row as the hashed
+   ``api_stable`` label rather than a column, so rows without it hash as they always did.
+   ``None`` (not evaluated) is neither a pass nor a fail; ``False`` is never clean.
 
-The clean rule, exactly: ``clean ⇔ belts 1–4 all True ∧ belt 5 is not False ∧
+The clean rule, exactly: ``clean ⇔ belts 1–4 all True ∧ belts 5 and 6 are not False ∧
 not disqualified ∧ no error``. :attr:`Belts.evaluated` records which belts a
 result carries; the ledger's ``belt_set`` records which belts the apparatus had.
 
@@ -66,7 +72,7 @@ Navigation
 ----------
 What it is:   The grader — the one function (``grade``) that turns a trial worktree into a
               ``GradeResult`` under the belts.
-What it does: Evaluates belts 1–5 mechanically against the parent tree and the overlaid oracle;
+What it does: Evaluates belts 1–6 mechanically against the parent tree and the overlaid oracle;
               credits ``clean`` only when every evaluated belt holds; records harness errors,
               tampering and malformed oracles as non-passes or disqualifications — never a
               silent pass. Grades in ONE posture (ADR-0019): belt 3 subtracts the baseline
@@ -77,15 +83,18 @@ What it does: Evaluates belts 1–5 mechanically against the parent tree and the
 How:          Posture check (spec, context, executor) → integrity check of the git view →
               tamper scan (target tests, test infrastructure, other tests) → the dependency
               closure (belt 1b) → the builder's changes and diff, read before any run →
-              target run → belt-scope run → belt 5 plan → the witness → result.
+              target run → belt-scope run → belt 5 plan → belt 6 (opt-in) → the witness →
+              result.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
-              docs/adr/0019-qualification-is-posture-relative.md
+              docs/adr/0019-qualification-is-posture-relative.md,
+              docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/workspace.py (the trial tree and its integrity), src/crb/core/lint.py
-              (belt 5), src/crb/core/ledger.py (the row a result becomes),
-              src/crb/core/runners/base.py (the test runs), src/crb/core/test_infra.py (belt 1's
-              infrastructure table)
-Tested by:    tests/test_grade.py, tests/test_oracle_controls.py, tests/test_runners_node.py
+              (belt 5), src/crb/core/api_surface.py (belt 6, opt-in), src/crb/core/ledger.py
+              (the row a result becomes), src/crb/core/runners/base.py (the test runs),
+              src/crb/core/test_infra.py (belt 1's infrastructure table)
+Tested by:    tests/test_grade.py, tests/test_grade_api_belt.py, tests/test_oracle_controls.py,
+              tests/test_runners_node.py
 Touch when:   never for a new repository — configure the runner, belt scope and lint in the
               repo config instead (docs/OPERATOR.md); adding a belt or changing what "clean"
               means needs an ADR and an apparatus bump (docs/EVIDENCE-AND-CLAIMS.md).
@@ -101,6 +110,8 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from crb.core.api_surface import ApiRun, WorkspaceTrees
+from crb.core.api_surface import evaluate as evaluate_api_surface
 from crb.core.deps import ClosureViolation, DepsBinding, TaskDeps
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.lint import LintRun, run_plan
@@ -131,6 +142,10 @@ OPTIONAL_BELT_NAMES: tuple[str, ...] = ("repo_lint_clean",)
 #: Every belt, in belt order (1–5). The ledger's ``belt_set`` says how many a row
 #: recorded: ``v3-legacy`` the first three, ``v4`` the first four, ``v5`` all five.
 BELT_NAMES: tuple[str, ...] = (*CORE_BELT_NAMES, *OPTIONAL_BELT_NAMES)
+#: Belt 6 (ADR-0024): opt-in, and recorded on the ledger row as the hashed LABEL of this
+#: name (``true`` / ``false`` / ``none``) — not a column, so it is outside ``BELT_NAMES``
+#: and every row written without it hashes byte-for-byte as before.
+BELT_API_STABLE = "api_stable"
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -155,11 +170,16 @@ BLAME_GOLD_GREEN = "gold_green"
 BLAME_ENV_PROBE = "env_probe"
 BLAME_NO_SOURCE = "no_source"
 BLAME_LINT_GOLD_OK = "lint_gold_ok"
+#: ``api_diff`` — belts 1–4 held and belt 6 (``api_stable``, opt-in, ADR-0024) failed: the
+#: public-API comparison reads the parent and the gold from git objects and the trial from
+#: its tree, statically, so like ``no_source`` it is a fact about the diff, not a control.
+BLAME_API_DIFF = "api_diff"
 BLAME_CONTROLS: tuple[str, ...] = (
     BLAME_GOLD_GREEN,
     BLAME_ENV_PROBE,
     BLAME_NO_SOURCE,
     BLAME_LINT_GOLD_OK,
+    BLAME_API_DIFF,
 )
 #: A blamed grade made with no witness at all (the negative controls, ``crb grade
 #: --adhoc``). Allowed on a ``GradeResult``; the ledger refuses it on a model-failure row.
@@ -256,13 +276,18 @@ class Belts:
     no_new_failures: bool | None = None
     source_changed: bool | None = None
     repo_lint_clean: bool | None = None
+    #: belt 6 (opt-in, ADR-0024) — ``None`` = not evaluated; never in ``to_dict``'s
+    #: ``BELT_NAMES`` keys (the grade result adds it only when evaluated)
+    api_stable: bool | None = None
 
     @property
     def all_true(self) -> bool:
         """The clean predicate over the belts: every core belt ``True`` and no
-        evaluated optional belt ``False``."""
-        return all(getattr(self, b) is True for b in CORE_BELT_NAMES) and all(
-            getattr(self, b) is not False for b in OPTIONAL_BELT_NAMES
+        evaluated optional belt (5, 6) ``False``."""
+        return (
+            all(getattr(self, b) is True for b in CORE_BELT_NAMES)
+            and all(getattr(self, b) is not False for b in OPTIONAL_BELT_NAMES)
+            and self.api_stable is not False
         )
 
     @property
@@ -275,7 +300,7 @@ class Belts:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Belts:
-        return cls(**{b: d.get(b) for b in BELT_NAMES})
+        return cls(**{b: d.get(b) for b in (*BELT_NAMES, BELT_API_STABLE)})
 
 
 @dataclass(frozen=True)
@@ -310,6 +335,8 @@ class GradeResult:
     control: ControlRun | None = None
     #: Why an ``environment:`` error was recorded (``GOLD_CONTROL_RED`` …); else empty.
     env_code: str = ""
+    #: belt 6's record when it was switched on (ADR-0024); ``None`` otherwise
+    api_run: ApiRun | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -334,7 +361,7 @@ class GradeResult:
     @property
     def blamed(self) -> bool:
         """The verdict charges the builder's patch: not clean, not disqualified, no error,
-        and belt 2, 3, 4 or 5 evaluated ``False``."""
+        and belt 2, 3, 4, 5 or 6 evaluated ``False``."""
         b = self.belts
         return (
             not self.clean
@@ -342,11 +369,25 @@ class GradeResult:
             and not self.error
             and any(
                 v is False
-                for v in (b.target_green, b.no_new_failures, b.source_changed, b.repo_lint_clean)
+                for v in (
+                    b.target_green,
+                    b.no_new_failures,
+                    b.source_changed,
+                    b.repo_lint_clean,
+                    b.api_stable,
+                )
             )
         )
 
     def to_dict(self) -> dict[str, Any]:
+        d = self._core_dict()
+        # belt 6 only when it was switched on: a pack written without it is unchanged
+        if self.api_run is not None:
+            d[BELT_API_STABLE] = self.belts.api_stable
+            d["api_run"] = self.api_run.to_dict()
+        return d
+
+    def _core_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "repo": self.repo,
@@ -383,6 +424,7 @@ def derive_clean(belts: Mapping[str, Any], *, disqualified: bool = False, error:
     return (
         all(belts.get(b) is True for b in CORE_BELT_NAMES)
         and all(belts.get(b) is not False for b in OPTIONAL_BELT_NAMES)
+        and belts.get(BELT_API_STABLE) is not False
         and not disqualified
         and not error
     )
@@ -476,6 +518,7 @@ def grade(
     timeout: int = 0,
     on_event: EventFn | None = None,
     evaluate_lint: bool = True,
+    evaluate_api: bool = False,
 ) -> GradeResult:
     """Grade the trial worktree ``ws`` for ``task``. Never raises for a test failure;
     raises :class:`SandboxUnavailable` (infrastructure) so the run can stop — and
@@ -494,6 +537,9 @@ def grade(
     oracle escape would otherwise read as a lint rejection, and a gold commit that
     predates the repo's linter as an instrument bug. Every builder trial keeps the
     default.
+
+    ``evaluate_api=True`` evaluates belt 6 (ADR-0024) once belts 1–4 have been judged;
+    OFF by default — the run or the repository's ``checks.api_stable`` switches it on.
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}")
@@ -876,13 +922,17 @@ def grade(
                 lint_error = f"lint: {lint_run.error}"
             elif lint_run.ok is False and not note:
                 note = f"lint: {lint_run.note}"
+        api_run = _belt_six(ws, task, changed, on_event) if evaluate_api else None
         belts = Belts(
             tests_unmodified=True,
             target_green=True,
             no_new_failures=no_new,
             source_changed=source_changed,
             repo_lint_clean=lint_run.ok if lint_run is not None else None,
+            api_stable=api_run.ok if api_run is not None else None,
         )
+        if api_run is not None and api_run.ok is False and not note:
+            note = f"api: {api_run.summary(200)}"
 
         clean = belts.all_true and not lint_error
         blame: dict[str, Any] = {}
@@ -891,6 +941,10 @@ def grade(
                 blame = witness(task.belt_scope, why="belt 3: new failures", allow_failing=baseline)
             elif source_changed is False:
                 blame = {"blame_control": BLAME_NO_SOURCE}
+            elif belts.api_stable is False:
+                # belt 6 outranks belt 5 (the ``api`` kind): a fact about the diff, read
+                # from git objects and the trial tree — no environment to witness
+                blame = {"blame_control": BLAME_API_DIFF}
             elif belts.repo_lint_clean is False:
                 blame = lint_blame(ctx.qualification.gold.get("lint"))
         final: dict[str, Any] = {
@@ -903,6 +957,7 @@ def grade(
             "target_run": target_run,
             "belt_run": belt_run,
             "lint_run": lint_run,
+            "api_run": api_run,
         }
         final.update(blame)
         return done(**final)
@@ -914,3 +969,22 @@ def grade(
         error = redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=2000)
         _emit(on_event, "grade.error", task=task.task_id, error=error)
         return done(error=error)
+
+
+def _belt_six(
+    ws: Workspace, task: TaskSpec, changed: Sequence[str], on_event: EventFn | None
+) -> ApiRun:
+    """Belt 6 over the changed non-test files (deleted ones included — a removed file
+    removes its API): the parent and the replayed commit read from the object store, the
+    trial from the worktree (:class:`~crb.core.api_surface.WorkspaceTrees`)."""
+    run = evaluate_api_surface(changed, WorkspaceTrees(ws))
+    _emit(
+        on_event,
+        "grade.belt",
+        task=task.task_id,
+        belt=BELT_API_STABLE,
+        value=run.ok,
+        findings=[f.label for f in run.findings][:10],
+        note=run.note,
+    )
+    return run

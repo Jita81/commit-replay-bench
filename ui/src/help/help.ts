@@ -54,7 +54,7 @@ export const HELP: ScreenHelp[] = [
       approver: 'Nothing here needs you until task 7 is done and a cell reaches your Decisions. Read the baseline meanwhile.',
       admin: 'Task 1 (the GitHub App) and task 7 (an approver account) are yours; both are in Settings.',
     },
-    numbers: '“n of 8 tasks” counts tasks marked Completed. It is progress, not a quality figure; the quality figures live on the Baseline with their n and interval.',
+    numbers: '“Working changes per £ (blind)” is the product’s north star: blind attempts that came out clean, times the share of clean patches a reviewer would merge, over every pound spent on blind attempts; n is the blind attempts behind it. “n of 8 tasks” counts tasks marked Completed. It is progress, not a quality figure; the quality figures live on the Baseline with their n and interval.',
     terms: ['cell', 'apparatus', 'signoff', 'oracle_strength'],
     readMore: [
       { to: 'ONBOARDING-A-REPO', label: 'Using Commit Replay Bench on a repository, step by step' },
@@ -268,14 +268,15 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/learn',
-    purpose: 'What the ledger teaches, as three reports: refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. Nothing here acts; a person does.',
+    purpose: 'What the ledger teaches, and what the loop does about it: the prevention register lists every bug class with the change that should remove it and whether it worked; three reports list refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. The three reports act on nothing; the register acts only under an operator’s switch.',
     next: {
-      viewer: 'Read the reports; every row carries the rows and spend behind it.',
-      operator: 'Copy a candidate corpus line into a decision file, freeze a strengthening item on the Factory, or queue the re-measurement runs the plan lists.',
+      viewer: 'Read the register: each class names its lever, its before and after with n, and what happens next. The three reports carry the rows and spend behind them.',
+      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: copy a candidate corpus line, freeze a strengthening item, or queue the re-measurement runs the plan lists.',
     },
-    numbers: 'Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement spend multiplies each cell’s own mean row cost by the rows still needed; a dash means no cost is known.',
+    numbers: 'A class closes when a kept change is followed by max(20, n) exposed first attempts with no recurrence; n is ceil(ln 0.025 ÷ ln(1 − p0)) from the frozen before window. Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement spend multiplies each cell’s own mean row cost by the rows still needed; a dash means no cost is known.',
     terms: ['apparatus', 'stale', 'oracle_strength', 'wilson', 'cell'],
     readMore: [
+      { to: 'LEARNING-LOOP#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring', label: 'Prevention: a bug is closed by a change that stops it recurring' },
       { to: 'LEARNING-LOOP', label: 'The learning loop' },
       { to: 'LEARNING-LOOP#3-what-still-needs-a-human-and-why-that-is-deliberate', label: 'What still needs a human' },
     ],
