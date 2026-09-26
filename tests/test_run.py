@@ -830,11 +830,46 @@ def test_the_structural_ratchet_reads_create_and_at_ref_on_any_receiver(src: str
     assert len(worktree_dest_offenders(src, "x.py")) == 1
 
 
-def test_the_structural_ratchet_reads_a_subscript_index_as_a_type_only_for_a_generic() -> None:
+@pytest.mark.parametrize(
+    "src",
+    [
+        "from crb.core.workspace import Workspace as SealedCheckout\n"
+        "SealedCheckout.create(repo, sha, scratch / sha)\n",
+        "def f(repo, sha, scratch):\n"
+        "    from crb.core.workspace import Workspace as SealedCheckout\n"
+        "    SealedCheckout.create(repo, sha, scratch / sha)\n",
+        "from somewhere import Other as SealedCheckout\n"
+        "SealedCheckout.create(repo, sha, scratch / sha)\n",
+    ],
+    ids=["workspace-alias", "workspace-alias-in-function", "any-rename"],
+)
+def test_the_structural_ratchet_lets_off_only_a_name_imported_as_itself(src: str) -> None:
+    """PR #53 review, fifth round: ``from … import Workspace as SealedCheckout`` bound an
+    allowlisted name by ``from … import`` alone, so the ratchet let ``SealedCheckout.create``
+    off and gave 0 offenders. A bare ``_NOT_A_WORKSPACE`` name is let off only when every
+    import of it is that name under its own spelling; a rename makes it whatever was
+    imported, so the call is read as a worktree constructor."""
+    assert len(worktree_dest_offenders(src, "x.py")) == 1
+    call = src.splitlines()[-1].strip()
+    as_itself = f"from crb.builders.container import SealedCheckout\n{call}\n"
+    assert worktree_dest_offenders(as_itself, "x.py") == []
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "Box[Workspace].create(repo, sha, scratch / sha)\n",
+        "registry[Workspace].create(repo, sha, scratch / sha)\n",
+    ],
+    ids=["generic-looking", "runtime-index"],
+)
+def test_the_structural_ratchet_reads_a_subscript_index_as_a_type_only_for_a_generic(
+    src: str,
+) -> None:
     """PR #53 review, fourth round: every subscript index counted as a type, so
     ``Box[Workspace]`` handed ``Workspace`` on unseen. Only a known generic's index is a
-    type now; here both the value and the call it reaches are named."""
-    src = "Box[Workspace].create(repo, sha, scratch / sha)\n"
+    type now; here both the value and the call it reaches are named. Runtime indexing
+    (``registry[Workspace]``) is the same case (fifth round)."""
     found = worktree_dest_offenders(src, "x.py")
     assert len(found) == 2
     assert sum("(Workspace as a value)" in f for f in found) == 1
