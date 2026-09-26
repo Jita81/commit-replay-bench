@@ -331,6 +331,11 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
     last_login: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    #: Rotated to end every session of the account (logout, "sign out everywhere"); part of
+    #: ``crb.server.auth.credential_version``. Empty until the first rotation (0009).
+    session_nonce: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default=""
+    )
 
     __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_users_issuer_subject"),)
 

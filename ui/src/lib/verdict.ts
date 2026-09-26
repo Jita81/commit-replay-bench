@@ -326,6 +326,7 @@ export const ACTION_HELP: Record<string, string> = {
   'repo.created': 'The repository was registered.',
   'repo.updated': 'The repository’s configuration was changed; the diff is recorded.',
   'repo.github_linked': 'The repository was linked to a GitHub App installation; its clone URL changed and both URLs are recorded.',
+  'repo.clone_path.outside_home': 'An admin registered or moved the clone outside the deployment’s repositories directory; the path and where it resolves are recorded.',
   'github.installation.recorded': 'A GitHub App installation was recorded for this deployment.',
   'intake.listener.switched': 'An operator switched this repository’s intake listener on or off; the event names who did it, because the switch is the consent to write on that board’s tickets.',
   'signoff.created': 'An approver signed off a cell; the attested row’s hash is recorded.',

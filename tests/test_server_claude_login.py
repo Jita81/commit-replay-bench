@@ -241,6 +241,103 @@ def test_a_token_shaped_run_in_cli_chatter_never_reaches_the_status_file(
     assert end.state in {cl.STATE_DONE, cl.STATE_FAILED}
 
 
+#: What the ``claude setup-token`` child may see (D3, assessment 2026-09-25): enough to find
+#: itself, draw a plain TUI and never open a browser on the server, and a config directory
+#: nobody else uses. ``/bin/sh`` adds its own bookkeeping variables when it runs the fake.
+#: How an enterprise host reaches the internet: an outbound proxy and a private certificate
+#: authority. ``claude setup-token`` must reach the sign-in service, so these (and only these)
+#: network variables pass through, in both spellings the proxy convention allows.
+CLI_NETWORK_ALLOWED = {
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+}
+CLI_ENV_ALLOWED = {
+    "PATH",
+    "HOME",
+    "TERM",
+    "NO_COLOR",
+    "BROWSER",
+    "CLAUDE_CONFIG_DIR",
+} | CLI_NETWORK_ALLOWED
+SHELL_BOOKKEEPING = {"PWD", "OLDPWD", "SHLVL", "_"}
+
+
+def test_the_cli_runs_with_a_minimal_environment_and_a_throwaway_config_dir(
+    tmp_path: Path, secrets_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The API process holds the secret key, the database URL and the OIDC client secret;
+    none of that reaches a third-party CLI. The driver inherits the API's environment (it
+    must import crb), the CLI it execs gets the allowlist only."""
+    for key, value in {
+        "CRB_SECRET_KEY": "k" * 40,
+        "CRB_DATABASE_URL": "postgresql://crb:hunter2@db/crb",
+        "CRB_OIDC__CLIENT_SECRET": "oidc-secret-value",
+        "AWS_SECRET_ACCESS_KEY": "aws-secret-value",
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "operators-own-claude-config"),
+    }.items():
+        monkeypatch.setenv(key, value)
+    dump = tmp_path / "cli-env.txt"
+    probe = tmp_path / "bin" / "claude"
+    probe.parent.mkdir()
+    probe.write_text(
+        FAKE_CLAUDE.replace("__TOKEN__", TOKEN).replace(
+            "printf 'Welcome",
+            f"env > '{dump}'\n[ -d \"$CLAUDE_CONFIG_DIR\" ] "
+            f"&& echo yes > '{dump}.dir'\nprintf 'Welcome",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    probe.chmod(0o755)
+    broker = cl.LoginBroker(secrets_dir, claude_binary=str(probe), ttl_s=60)
+    st = broker.start(started_by="ada")
+    broker.submit_code(st.id, "good-code-1234#STATE1")
+    assert _wait(broker, st.id, {cl.STATE_DONE, cl.STATE_FAILED}).state == cl.STATE_DONE
+    child = dict(
+        line.split("=", 1) for line in dump.read_text(encoding="utf-8").splitlines() if "=" in line
+    )
+    assert set(child) - SHELL_BOOKKEEPING <= CLI_ENV_ALLOWED, sorted(set(child) - CLI_ENV_ALLOWED)
+    assert {"PATH", "HOME", "TERM", "NO_COLOR", "BROWSER", "CLAUDE_CONFIG_DIR"} <= set(child)
+    assert child["TERM"] == "dumb" and child["NO_COLOR"] == "1"
+    assert child["BROWSER"] == "/usr/bin/true"
+    assert child["PATH"] == os.environ["PATH"] and child["HOME"] == os.environ["HOME"]
+    for leaked in ("hunter2", "oidc-secret-value", "aws-secret-value", "k" * 40):
+        assert leaked not in dump.read_text(encoding="utf-8")
+    # a throwaway config dir: not the operator's, existed while the CLI ran, gone after
+    config_dir = Path(child["CLAUDE_CONFIG_DIR"])
+    assert config_dir != tmp_path / "operators-own-claude-config"
+    assert (tmp_path / "cli-env.txt.dir").read_text(encoding="utf-8").strip() == "yes"
+    assert not config_dir.exists()
+
+
+def test_the_cli_keeps_the_hosts_proxy_and_certificate_authority(tmp_path: Path) -> None:
+    """Without these the sign-in fails on any host behind a proxy or a private certificate
+    authority: the allowlist narrows what the CLI can read, not where it can connect."""
+    from crb.server.claude_login_driver import cli_environment
+
+    parent = {name: f"value-of-{name}" for name in CLI_NETWORK_ALLOWED}
+    parent.update(
+        {
+            "PATH": "/usr/bin",
+            "HOME": "/home/crb",
+            "CRB_SECRET_KEY": "k" * 40,
+            "AWS_SECRET_ACCESS_KEY": "aws-secret-value",
+            "ALL_PROXY": "socks5://not-passed",
+        }
+    )
+    env = cli_environment(parent, tmp_path / "cfg")
+    for name in CLI_NETWORK_ALLOWED:
+        assert env.get(name) == f"value-of-{name}", name
+    assert set(env) == CLI_ENV_ALLOWED
+
+
 # --- the routes ---------------------------------------------------------------------
 
 

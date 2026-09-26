@@ -248,6 +248,10 @@ class OidcSettings(BaseModel):
     role_map: dict[str, str] = Field(default_factory=dict)
     #: Any of these values in ``role_claim`` or ``groups`` grants ``admin``.
     admin_groups: list[str] = Field(default_factory=list)
+    #: When the claims set an account's role: ``first_login`` (default) — on the account's
+    #: first sign-in only, so an admin's later change stands; ``always`` — on every sign-in
+    #: (the provider is the source of truth), each change recorded as ``user.role_overridden``.
+    role_from_claims: Literal["first_login", "always"] = "first_login"
 
     @property
     def enabled(self) -> bool:

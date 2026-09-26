@@ -1,6 +1,6 @@
 # ADR-0027 — Automatic sign-in for a development stack, on loopback only
 
-**Status:** Accepted (operator request 2026-09-26; decision DL-054, which may be renumbered at merge)
+**Status:** Accepted (operator request 2026-09-26; decision DL-055, which may be renumbered at merge)
 **Date:** 2026-09-26 (amended the same day after a security review: points 2, 3, 5 and 7)
 **Apparatus impact:** none — this changes who is signed in on a development stack, never
 what a belt means, how a cell is keyed or how a route is decided.
@@ -40,11 +40,13 @@ unauthenticated production deployment.
    cannot tell a stack with it on from one without. The reason goes to the log.
 4. **An ordinary session through the existing machinery.** `POST /auth/dev-autologin` looks
    the account up with `find_local_user`, refuses a missing or disabled one (403
-   `dev_autologin_unavailable`, the log says which), and then sets the same cookies as
-   `POST /auth/login` (`set_session_cookie` bound to the credential version,
-   `set_csrf_cookie`). Nothing downstream knows how the session began, so CSRF, roles,
-   sign-out and a password change behave as they do after a typed password. The route is
-   not exempt from the CSRF check.
+   `dev_autologin_unavailable`, the log says which), and then sets its cookies through the
+   one helper `POST /auth/login` uses (`_issue_session`: `set_session_cookie` and
+   `set_csrf_cookie` under the account's credential version, which carries the
+   `session_nonce` — DL-054). Nothing downstream knows how the session began, so the
+   session-bound CSRF token, roles, sign-out, "sign out everywhere" and a password change
+   behave as they do after a typed password. The route is not exempt from the CSRF check,
+   and it neither counts toward nor clears the login rate limit (it checks no password).
 5. **Recorded and visible.** Every sign-in appends `auth.dev_autologin` on the account's
    trace (actor = the account, `payload.client` = the peer) and logs one warning line.
    Start-up logs a warning. `GET /health` and `GET /version` carry `dev_autologin`, which
@@ -77,7 +79,7 @@ unauthenticated production deployment.
   proxy the project ships (Vite's) must keep marking off-machine requests
   (`ui/src/dev/apiProxy.test.ts` fails if it stops).
 - We must never add an override flag, a non-loopback exception or a path that issues a
-  session without `set_session_cookie`.
+  session other than through `_issue_session`, the helper a password sign-in uses.
 
 ## Alternatives considered
 

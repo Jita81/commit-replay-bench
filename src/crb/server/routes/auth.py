@@ -1,7 +1,8 @@
 """``/auth/*`` — local login, OIDC (authorization code + PKCE), session, CSRF.
 
-Local login is rate limited per ``(username, client ip)``; a failure never says
-which half was wrong. OIDC state, nonce and the PKCE verifier travel in a signed,
+Local login is rate limited per ``(username, client ip)`` and per client ip; a failure
+never says which half was wrong. Logout rotates the account's session nonce, so it ends
+every session of the account, not only this browser's cookie. OIDC state, nonce and the PKCE verifier travel in a signed,
 short-lived, HttpOnly cookie, so the callback can only complete a login this
 browser started. ``next`` is constrained to a same-origin path.
 
@@ -14,13 +15,17 @@ Navigation
 ----------
 What it is:   The ``/auth/*`` route module — local login / logout / me / csrf, the OIDC
               start + callback pair, and the development-only automatic sign-in.
-What it does: Rate-limits local login per ``(username, ip)`` and answers one indistinct
-              401 for any failure; sets the session and CSRF cookies on success; drives the
-              authorization-code + PKCE flow with the state kept in a signed short-lived
-              cookie; maps IdP claims to a role and upserts the user; refuses a disabled
-              account and any ``next`` that is not a same-origin path; on a development
-              stack signs a local browser in as the configured account (an audit event and
-              a warning each time) and answers "off" to anything not plainly local.
+What it does: Rate-limits local login per ``(username, ip)`` and per ``ip`` and answers
+              one indistinct 401 for any failure; sets the session and the session-bound
+              CSRF cookies on success; logout rotates the account's session nonce (every
+              session ends); drives the authorization-code + PKCE flow with the state kept
+              in a signed short-lived cookie; maps IdP claims to a role on first sign-in
+              (every sign-in under ``role_from_claims=always``, recorded as
+              ``user.role_overridden``) and upserts the user; refuses a disabled account and
+              any ``next`` that is not a same-origin path; on a development stack signs a
+              local browser in as the configured account (an audit event and a warning each
+              time) with exactly the session a password sign-in issues, and answers "off"
+              to anything not plainly local.
 How:          Thin handlers over src/crb/server/auth.py — ``authenticate_local`` →
               cookies; ``OidcState.fresh`` → provider URL → cookie; callback: cookie →
               ``exchange`` → ``map_role`` → ``upsert_oidc_user`` → cookies → redirect;
@@ -52,10 +57,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from crb.core.redact import redact
 from crb.server.auth import (
-    CSRF_COOKIE,
     OIDC_COOKIE,
     CurrentUser,
     LoginRateLimiter,
@@ -68,6 +74,9 @@ from crb.server.auth import (
     find_local_user,
     map_role,
     read_oidc_cookie,
+    read_session_claims,
+    rotate_session_nonce,
+    session_token_of,
     set_csrf_cookie,
     set_oidc_cookie,
     set_session_cookie,
@@ -76,6 +85,7 @@ from crb.server.auth import (
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep, client_ip
 from crb.server.routes.admin import record_user_event
 from crb.server.settings import Settings
+from crb.store.models import User
 
 log = logging.getLogger("crb.server.auth")
 
@@ -100,6 +110,19 @@ class CsrfToken(BaseModel):
     """``GET /auth/csrf`` body: the token the UI must echo as ``X-CSRF-Token``."""
 
     token: str
+
+
+def _issue_session(
+    request: Request, response: Response, settings: Settings, user: User
+) -> Principal:
+    """Set the session and its CSRF cookie for ``user`` — the ONE place a sign-in (password
+    or development automatic) turns into cookies, so both carry the same credential version
+    (the session nonce included) and the same session-bound CSRF token."""
+    request.state.user_id = user.id
+    cv = credential_version(user)
+    set_session_cookie(response, settings, user.id, cv)
+    set_csrf_cookie(response, settings, user.id, cv)
+    return Principal.model_validate(user)
 
 
 @router.post(
@@ -137,18 +160,30 @@ def login(
     limiter.reset(body.username, ip)
     user.last_login = _now()
     db.commit()
-    request.state.user_id = user.id
-    set_session_cookie(response, settings, user.id, credential_version(user))
-    set_csrf_cookie(response, settings)
-    return Principal.model_validate(user)
+    return _issue_session(request, response, settings, user)
 
 
 @router.post(
     "/auth/logout",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Clear the session (idempotent)",
+    summary="End the account's sessions on every device and clear the cookies (idempotent)",
 )
-def logout(settings: SettingsDep) -> Response:
+def logout(request: Request, settings: SettingsDep, db: DbDep) -> Response:
+    """Clearing the cookie alone would leave a copied token valid until it expires, so a
+    CURRENT session's logout rotates the account's session nonce: every session the account
+    holds, here and on any other device, ends on its next request. A stale, forged or
+    absent cookie rotates nothing (it cannot be used to sign somebody else out) and still
+    gets the cookies cleared."""
+    token = session_token_of(request, settings)
+    if token:
+        try:
+            uid, cv = read_session_claims(settings, token)
+        except ApiError:
+            uid, cv = "", ""
+        user = db.get(User, uid) if uid else None
+        if user is not None and hmac.compare_digest(cv.encode(), credential_version(user).encode()):
+            rotate_session_nonce(user)
+            db.commit()
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_auth_cookies(response, settings)
     return response
@@ -165,12 +200,14 @@ def me(user: CurrentUser) -> Principal:
     responses={401: _ERR},
     summary="Return (and if needed mint) the CSRF token for this session",
 )
-def csrf(
-    user: CurrentUser, request: Request, response: Response, settings: SettingsDep
-) -> CsrfToken:
-    del user  # authentication is the point; the principal itself is not needed
-    token = request.cookies.get(CSRF_COOKIE) or None
-    return CsrfToken(token=set_csrf_cookie(response, settings, token))
+def csrf(user: CurrentUser, response: Response, settings: SettingsDep, db: DbDep) -> CsrfToken:
+    """The session's own token (``HMAC(secret, uid, cv)``), re-set as the cookie."""
+    account = db.get(User, user.id)
+    if account is None:  # deleted between the auth dependency and here
+        raise ApiError(401, "unauthenticated", "account unknown or disabled")
+    return CsrfToken(
+        token=set_csrf_cookie(response, settings, account.id, credential_version(account))
+    )
 
 
 # --- automatic sign-in (development stacks only, ADR-0027) --------------------------
@@ -195,9 +232,11 @@ def dev_autologin(
 ) -> Principal:
     """Sign the caller in as ``CRB_AUTH__DEV_AUTOLOGIN``'s account — only when the setting is
     on (the settings refuse it outside ``CRB_ENV=dev`` and on a non-loopback bind) AND
-    :func:`dev_autologin_refusal` finds this request local. The session and CSRF cookies are
-    the ordinary ones a password sign-in sets, so the CSRF check, the role ladder, sign-out
-    and a password change behave exactly as they do for a typed password. Every sign-in
+    :func:`dev_autologin_refusal` finds this request local. The cookies come from
+    :func:`_issue_session`, the one a password sign-in uses — the credential version with the
+    session nonce, the session-bound CSRF token — so the role ladder, sign-out, "sign out
+    everywhere" and a password change end it exactly as they do a typed password's session.
+    It checks no password, so the login limiter is neither consulted nor reset. Every sign-in
     appends ``auth.dev_autologin`` on the account's trace and logs one warning line."""
     username = settings.auth.dev_autologin
     if not username:
@@ -233,13 +272,22 @@ def dev_autologin(
         username,
         peer,
     )
-    request.state.user_id = user.id
-    set_session_cookie(response, settings, user.id, credential_version(user))
-    set_csrf_cookie(response, settings)
-    return Principal.model_validate(user)
+    return _issue_session(request, response, settings, user)
 
 
 # --- OIDC --------------------------------------------------------------------------
+
+
+def _stored_role(db: Session, issuer: str, claims: dict[str, Any]) -> str | None:
+    """The role an existing OIDC account holds before this sign-in, or ``None`` for a new
+    one (the subject is checked again by ``upsert_oidc_user``)."""
+    subject = str(claims.get("sub") or "")
+    if not subject:
+        return None
+    user = db.execute(
+        select(User).where(User.issuer == issuer, User.subject == subject)
+    ).scalar_one_or_none()
+    return None if user is None else str(user.role)
 
 
 def _oidc_client(request: Request) -> OidcClient:
@@ -330,15 +378,30 @@ def oidc_callback(
         raise ApiError(502, "oidc_exchange_failed", "could not complete the OIDC login") from exc
     issuer = str(claims.get("iss") or settings.oidc.issuer)
     role = map_role(claims, settings.oidc)
-    user = upsert_oidc_user(db, issuer=issuer, claims=claims, role=role)
+    source = settings.oidc.role_from_claims
+    before = _stored_role(db, issuer, claims)
+    user = upsert_oidc_user(db, issuer=issuer, claims=claims, role=role, role_from_claims=source)
     if not user.active:
         raise ApiError(403, "account_disabled", "this account is disabled")
+    if before is not None and before != user.role:
+        # only reachable under ROLE_FROM_CLAIMS=always: the provider replaced a role an
+        # admin may have set here, and that is never silent
+        record_user_event(
+            db,
+            action="user.role_overridden",
+            actor=user.id,
+            target=user,
+            from_role=before,
+            by="oidc_claims",
+            issuer=issuer,
+        )
     user.last_login = _now()
     db.commit()
     request.state.user_id = user.id
     response = RedirectResponse(pending.next_path, status_code=status.HTTP_302_FOUND)
-    set_session_cookie(response, settings, user.id, credential_version(user))
-    set_csrf_cookie(response, settings)
+    cv = credential_version(user)
+    set_session_cookie(response, settings, user.id, cv)
+    set_csrf_cookie(response, settings, user.id, cv)
     response.delete_cookie(
         OIDC_COOKIE, path="/", secure=settings.resolved_cookie_secure, samesite="lax"
     )

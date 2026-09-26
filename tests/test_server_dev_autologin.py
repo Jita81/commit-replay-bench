@@ -6,8 +6,11 @@ that sentence: the settings refuse it outside ``CRB_ENV=dev`` and on a non-loopb
 (``crb serve --host`` included); the route signs in a loopback peer that names a loopback
 host and refuses a remote peer, a request that came through a proxy (any forwarding header),
 a page served under another host name (DNS rebinding) and a cross-site request, answering
-all of them exactly as if the setting were off; the session it issues is an ordinary one
-(the CSRF check, the role ladder, sign-out); every sign-in is an audit event and a log line;
+all of them exactly as if the setting were off; the session it issues is exactly the one a
+password sign-in issues (the same cookie names, the credential version with the account's
+session nonce, the session-bound CSRF token), so the role ladder, sign-out and "sign out
+everywhere" end it like any other, and it neither consumes nor resets the login limiter's
+buckets; every sign-in is an audit event and a log line;
 a missing or disabled account signs nobody in and the log says why; ``/health``,
 ``/version`` and ``crb doctor`` report it; and it is off by default.
 
@@ -23,7 +26,11 @@ What it does: Pins that the setting is empty by default and the route then answe
               foreign ``Origin`` and ``Sec-Fetch-Site: cross-site`` are refused like "off"
               with the reason logged; that the session is refused an unsafe method without
               the CSRF header, admitted with it, held to the account's role, and ended by
-              sign-out (the next call signs in again); that each sign-in writes one
+              sign-out (the next call signs in again); that its cookies, credential version
+              (session nonce included) and CSRF token are a password sign-in's, the token
+              valid for that session only, and that sign out everywhere or a sign-out on
+              another device ends it; that it neither fills nor empties the per-address
+              login bucket; that each sign-in writes one
               ``auth.dev_autologin`` event and one warning line; that start-up warns; that a
               missing or disabled account is 403 with the reason in the log; and that
               ``/health``, ``/version`` and the ``dev_autologin`` doctor line report it.
@@ -56,9 +63,19 @@ from pydantic import SecretStr, ValidationError
 from sqlalchemy import select
 
 from crb.server.app import API_PREFIX, create_app
-from crb.server.auth import CSRF_COOKIE, SESSION_COOKIE
+from crb.server.auth import (
+    CSRF_COOKIE,
+    SESSION_COOKIE,
+    credential_version,
+    csrf_cookie_name,
+    csrf_token_for,
+    csrf_valid,
+    find_local_user,
+    read_session_claims,
+    session_cookie_name,
+)
 from crb.server.settings import Settings
-from crb.store.models import Event
+from crb.store.models import Event, User
 
 ROOT_PW = "correct-horse-battery-staple"
 VIEWER_PW = "another-long-password"
@@ -401,6 +418,173 @@ class TestTheSession:
             assert r.status_code == 200, r.text
         r = local.get(f"{API_PREFIX}/auth/me")
         assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+
+
+def _set_cookies(r: Any) -> dict[str, str]:
+    """``{cookie name: its Set-Cookie attributes, lower-cased, value removed}`` of a response."""
+    out: dict[str, str] = {}
+    for header in r.headers.get_list("set-cookie"):
+        name, _, rest = header.partition("=")
+        attrs = sorted(a.strip().lower() for a in rest.split(";")[1:] if a.strip())
+        out[name] = "; ".join(attrs)
+    return out
+
+
+def _account(app: Any, username: str) -> User:
+    with app.state.session_factory() as s:
+        user = find_local_user(s, username)
+        assert user is not None
+        s.expunge(user)
+        return user
+
+
+def _set_nonce(app: Any, username: str, nonce: str) -> None:
+    with app.state.session_factory() as s:
+        user = find_local_user(s, username)
+        assert user is not None
+        user.session_nonce = nonce
+        s.commit()
+
+
+class TestTheSessionIsThePasswordSession:
+    """PR #52 made sessions revocable (a per-account ``session_nonce`` in the credential
+    version) and bound the CSRF token to the session. An automatic sign-in must issue EXACTLY
+    what a password sign-in issues under that model, or signing out would miss it."""
+
+    @pytest.mark.parametrize("secure", [False, True])
+    def test_it_sets_the_cookies_a_password_sign_in_sets(
+        self, tmp_path: Path, secure: bool
+    ) -> None:
+        settings = make_settings(tmp_path, cookie_secure=secure)
+        app = create_app(settings)
+        scheme = "https" if secure else "http"
+        with TestClient(app, base_url=f"{scheme}://localhost:8000", client=("127.0.0.1", 1)) as c:
+            typed = c.post(
+                f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW}
+            )
+            assert typed.status_code == 200, typed.text
+            typed_claims = read_session_claims(settings, c.cookies[session_cookie_name(settings)])
+            typed_csrf = c.cookies[csrf_cookie_name(settings)]
+            c.cookies.clear()
+            auto = c.post(AUTOLOGIN)
+            assert auto.status_code == 200, auto.text
+            auto_claims = read_session_claims(settings, c.cookies[session_cookie_name(settings)])
+            auto_csrf = c.cookies[csrf_cookie_name(settings)]
+        names = {session_cookie_name(settings), csrf_cookie_name(settings)}
+        assert set(_set_cookies(auto)) == set(_set_cookies(typed)) == names
+        assert all(n.startswith("__Host-") == secure for n in names)
+        assert _set_cookies(auto) == _set_cookies(typed)  # same Path, HttpOnly, SameSite, Secure
+        assert auto_claims == typed_claims
+        assert auto_csrf == typed_csrf
+
+    def test_it_carries_the_credential_version_with_the_session_nonce(self, app: Any) -> None:
+        with local_client(app) as c:
+            _set_nonce(app, "root", "a" * 32)
+            root = _account(app, "root")
+            without_nonce = User(password_hash=root.password_hash, session_nonce="")
+            assert credential_version(root) != credential_version(without_nonce)
+            assert c.post(AUTOLOGIN).status_code == 200
+            uid, cv = read_session_claims(app.state.settings, c.cookies[SESSION_COOKIE])
+        assert (uid, cv) == (root.id, credential_version(root))
+
+    def test_its_csrf_token_validates_only_for_that_session(self, tmp_path: Path) -> None:
+        app = create_app(make_settings(tmp_path, auth={"dev_autologin": "vera"}))
+        settings = app.state.settings
+        with TestClient(app) as admin:
+            _login_root(admin)
+            _create(admin, "vera", "admin")
+            root_session = admin.cookies[SESSION_COOKIE]
+            with local_client(app) as c:
+                assert c.post(AUTOLOGIN).status_code == 200
+                session, token = c.cookies[SESSION_COOKIE], c.cookies[CSRF_COOKIE]
+                vera = _account(app, "vera")
+                assert token == csrf_token_for(settings, vera.id, credential_version(vera))
+                assert csrf_valid(settings, session, token)
+                assert not csrf_valid(settings, root_session, token)
+                # over HTTP: vera's token does not carry root's session through the check
+                r = admin.post(
+                    f"{API_PREFIX}/users",
+                    json={"username": "ada", "password": VIEWER_PW, "role": "viewer"},
+                    headers={"X-CSRF-Token": token},
+                )
+                assert r.status_code == 403 and err(r)["code"] == "csrf_failed"
+
+    def test_sign_out_everywhere_ends_it_and_its_csrf_token(self, tmp_path: Path) -> None:
+        app = create_app(make_settings(tmp_path, auth={"dev_autologin": "vera"}))
+        settings = app.state.settings
+        with TestClient(app) as admin:
+            _login_root(admin)
+            vera_id = _create(admin, "vera", "admin")
+            with local_client(app) as c:
+                assert c.post(AUTOLOGIN).status_code == 200
+                session, token = c.cookies[SESSION_COOKIE], c.cookies[CSRF_COOKIE]
+                assert c.get(f"{API_PREFIX}/auth/me").status_code == 200
+                r = admin.post(f"{API_PREFIX}/users/{vera_id}/sessions/revoke")
+                assert r.status_code == 200, r.text
+                r = c.get(f"{API_PREFIX}/auth/me")
+                assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+                vera = _account(app, "vera")
+                assert csrf_token_for(settings, vera.id, credential_version(vera)) != token
+                # the token still matches the (signed, now revoked) session it was minted for,
+                # so the CSRF check passes — and the auth dependency then refuses the session
+                assert csrf_valid(settings, session, token)
+                r = c.post(
+                    f"{API_PREFIX}/users",
+                    json={"username": "ada", "password": VIEWER_PW, "role": "viewer"},
+                    headers={"X-CSRF-Token": token},
+                )
+                assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+                # the page's recovery: the stale pair still passes the CSRF check, so the next
+                # automatic sign-in issues a session under the rotated nonce
+                r = c.post(AUTOLOGIN, headers={"X-CSRF-Token": token})
+                assert r.status_code == 200, r.text
+                _, cv = read_session_claims(settings, c.cookies[SESSION_COOKIE])
+                assert cv == credential_version(vera) and c.cookies[CSRF_COOKIE] != token
+                assert c.get(f"{API_PREFIX}/auth/me").status_code == 200
+
+    def test_signing_out_on_another_device_ends_it(self, local: TestClient) -> None:
+        assert local.post(AUTOLOGIN).status_code == 200
+        with TestClient(local.app) as laptop:
+            _login_root(laptop)
+            assert laptop.post(f"{API_PREFIX}/auth/logout").status_code == 204
+        r = local.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+
+
+class TestTheLoginLimit:
+    """The per-address login bucket (PR #52) counts failed password sign-ins. The automatic
+    path checks no password, so it must neither add to that bucket nor empty it."""
+
+    def test_automatic_sign_ins_do_not_consume_the_bucket(self, local: TestClient) -> None:
+        limiter = local.app.state.login_limiter  # type: ignore[attr-defined]
+        for _ in range(limiter.ip_limit + 5):
+            local.cookies.clear()
+            assert local.post(AUTOLOGIN).status_code == 200
+        assert limiter.retry_after("root", "127.0.0.1") is None
+        assert limiter.retry_after("anyone", "127.0.0.1") is None
+        r = local.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
+        assert r.status_code == 200, r.text
+
+    def test_an_automatic_sign_in_does_not_reset_a_full_bucket(self, local: TestClient) -> None:
+        limiter = local.app.state.login_limiter  # type: ignore[attr-defined]
+        for i in range(limiter.ip_limit):
+            r = local.post(
+                f"{API_PREFIX}/auth/login", json={"username": f"guess{i}", "password": "wrong-pw"}
+            )
+            assert r.status_code == 401, r.text
+        assert local.post(AUTOLOGIN).status_code == 200
+        assert limiter.retry_after("root", "127.0.0.1") is not None
+        r = local.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
+        assert r.status_code == 429 and err(r)["code"] == "rate_limited"
+
+    def test_a_full_bucket_does_not_refuse_the_automatic_path(self, local: TestClient) -> None:
+        # the bucket bounds password guessing; the automatic path guesses nothing, and its
+        # own refusals (remote peer, proxy, foreign host) do not depend on the bucket
+        limiter = local.app.state.login_limiter  # type: ignore[attr-defined]
+        for i in range(limiter.ip_limit):
+            limiter.record_failure(f"guess{i}", "127.0.0.1")
+        assert local.post(AUTOLOGIN).status_code == 200
+        assert local.get(f"{API_PREFIX}/auth/me").status_code == 200
 
 
 # --- audit and reporting -------------------------------------------------------------------

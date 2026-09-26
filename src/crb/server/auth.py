@@ -3,35 +3,46 @@
 * **Local accounts** — argon2id hashes (``argon2-cffi``). Verification is constant-time
   by construction, and an unknown username still pays for one verification so the
   response time does not reveal whether the account exists.
-* **Sessions** — the ``crb_session`` cookie is an ``itsdangerous`` signed, timestamped
-  payload ``{uid, iat, cv}``; nothing server-side to leak or replicate. HttpOnly,
+* **Sessions** — the ``crb_session`` cookie (``__Host-crb_session`` when cookies are
+  secure) is an ``itsdangerous`` signed, timestamped payload ``{uid, iat, cv}``. HttpOnly,
   SameSite=Lax, Secure per settings. Expiry is checked on every request against
   ``session_ttl``. ``cv`` is the :func:`credential_version` the session was issued under —
-  a fingerprint of the account's password hash — so a password change (which re-salts the
-  hash) ends every session of that account on its next request, without a table of
-  sessions. A deactivated account is refused on every request while it is inactive;
-  ``active`` is not part of the version, so re-activating within ``session_ttl`` restores
-  the sessions issued before the deactivation — set a new password as well to end them
-  for good (a per-account revocation nonce would need a ``users`` column; follow-up).
+  a fingerprint of the account's password hash AND its ``session_nonce`` — so a password
+  change (which re-salts the hash) and a rotated nonce (:func:`rotate_session_nonce`: on
+  logout and on "sign out everywhere") each end every session of that account on its next
+  request, without a table of sessions. The nonce is per account, so signing out ends the
+  account's sessions on every device. A deactivated account is refused on every request
+  while it is inactive; ``active`` is not part of the version, so re-activating within
+  ``session_ttl`` restores the sessions issued before the deactivation — sign the account
+  out everywhere as well to end them for good.
 * **Lifecycle** — :func:`set_password` and :func:`set_user_active` are the one
   implementation the admin routes and the ``crb users`` break-glass CLI share: a password
   is hashed here and never logged; the last active admin can never be deactivated
   (``409 last_admin``); an OIDC account never gains a local password (``409 not_local``).
-* **CSRF** — double submit: the non-HttpOnly ``crb_csrf`` cookie must equal the
-  ``X-CSRF-Token`` header on every unsafe method (enforced by the app middleware).
+* **CSRF** — a token bound to the session: ``HMAC(secret, uid, cv)``
+  (:func:`csrf_token_for`), served in the non-HttpOnly ``crb_csrf`` cookie
+  (``__Host-crb_csrf`` when secure) and required as the ``X-CSRF-Token`` header on every
+  unsafe method (the app middleware recomputes it from the signed session cookie). A pair
+  planted by someone who can set cookies but not read the secret never passes, and a
+  token dies with the session it was minted for.
 * **RBAC** — one ascending ladder ``viewer < operator < approver < admin``;
   :func:`require_role` admits the named role and everything above it.
 * **OIDC** — authorization-code + PKCE via ``authlib``. The provider round-trips go
   through the :class:`OidcClient` protocol so the app can inject a fake and the tests
   never touch the network. Roles come from ``role_claim``/``groups`` via ``role_map``;
-  the default is ``viewer``. Users are upserted by ``(issuer, subject)``.
+  the default is ``viewer``. Users are upserted by ``(issuer, subject)``. The claims set
+  the role on an account's FIRST sign-in only; afterwards the role is the admin's to
+  change, unless ``CRB_OIDC__ROLE_FROM_CLAIMS=always`` makes the provider the source of
+  truth — then each sign-in whose claims move the role records ``user.role_overridden``.
 * **Automatic sign-in** (development stacks only, ADR-0027) — :func:`dev_autologin_refusal`
   decides whether a request may be signed in as ``CRB_AUTH__DEV_AUTOLOGIN``'s account: a
   loopback TCP peer, a loopback local address, no forwarding header, a loopback ``Host``, no
-  foreign ``Origin`` and not ``cross-site``. The session it leads to is an ordinary one from :func:`set_session_cookie`.
-* **Login rate limit** — 5 failures per minute per ``(username, ip)``, in memory.
-  It bounds online guessing on one node; a multi-node deployment fronts this with the
-  proxy's limiter as well.
+  foreign ``Origin`` and not ``cross-site``. The session it leads to is an ordinary one —
+  the same cookies, credential version (nonce included) and session-bound CSRF token as a
+  password sign-in, so sign-out and "sign out everywhere" end it like any other.
+* **Login rate limit** — 5 failures per minute per ``(username, ip)`` and 20 per minute
+  per ``ip``, in memory. It bounds online guessing on one process; production fronts it
+  with the proxy's limiter (docs/DEPLOYMENT.md), which sees every replica.
 
 Navigation
 ----------
@@ -40,16 +51,21 @@ What it is:   The authentication and authorisation primitives every route depend
               rate limit, and the OIDC (PKCE) client behind a protocol.
 What it does: Verifies passwords in constant time (an unknown user pays for a verification
               too), issues and reads the timestamped session cookie bound to the account's
-              credential version (a password change ends the account's other sessions),
+              credential version (a password change or a rotated session nonce — logout,
+              sign out everywhere — ends the account's sessions), derives the CSRF token
+              from the session (``HMAC(secret, uid, cv)``),
               admits a caller by role rank, maps IdP claims to a role (``admin_groups`` wins,
-              default ``viewer``), upserts OIDC users by ``(issuer, subject)``, seeds the
+              default ``viewer``; applied on first sign-in unless ``role_from_claims`` is
+              ``always``), upserts OIDC users by ``(issuer, subject)``, limits failed
+              sign-ins per ``(username, ip)`` and per ``ip``, seeds the
               bootstrap admin only while the users table is empty, and owns the account
               lifecycle primitives (``set_password``, ``set_user_active`` with the last-admin
               guard) the admin routes and the ``crb users`` CLI share, and decides whether a
               request is local enough to be signed in automatically on a development stack
               (``dev_autologin_refusal``). Never logs or returns a password or token.
 How:          argon2id via ``argon2-cffi``; ``itsdangerous`` timed serialisers with a salt
-              per cookie kind; ``credential_version`` = a SHA-256 prefix of the stored hash;
+              per cookie kind (``__Host-`` names when secure); ``credential_version`` = a
+              SHA-256 prefix of the stored hash and the ``users.session_nonce``;
               ``require_role`` is a dependency factory over ``ROLE_RANK``;
               ``AuthlibOidcClient`` does discovery → PKCE authorization URL → code exchange
               → ID-token validation against the JWKS → optional userinfo merge.
@@ -75,6 +91,7 @@ Touch when:   never for a new repository; adding a role means extending ``ROLE_L
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import logging
@@ -97,6 +114,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import HTTPConnection
 
 from crb.server.deps import ApiError, DbDep, Principal, SettingsDep
 from crb.server.settings import (
@@ -126,12 +144,17 @@ log = logging.getLogger("crb.server.auth")
 
 SESSION_COOKIE = "crb_session"
 CSRF_COOKIE = "crb_csrf"
+#: The prefix a secure deployment gives its session and CSRF cookies: the browser accepts a
+#: ``__Host-`` cookie only when it is Secure, has ``Path=/`` and no ``Domain``, so a sibling
+#: host or a plain-http response can never plant or shadow one.
+HOST_PREFIX = "__Host-"
 CSRF_HEADER = "X-CSRF-Token"
 OIDC_COOKIE = "crb_oidc"
 OIDC_STATE_TTL_S = 600
 LOCAL_ISSUER = "local"
 
 _SESSION_SALT = "crb.session.v1"
+_CSRF_KEY_LABEL = b"crb.csrf.v2"
 _OIDC_SALT = "crb.oidc.v1"
 _GITHUB_SETUP_SALT = "crb.github-setup.v1"
 #: The cookie that binds an install link's ``state`` to the browser that fetched it: the
@@ -294,10 +317,24 @@ def count_active_admins(db: Session) -> int:
 
 def credential_version(user: User) -> str:
     """The version stamp a session is bound to: a 16-hex prefix of the SHA-256 of the
-    stored password hash. argon2 salts every hash, so setting a password — even to the
-    same value — changes it and every session issued under the old one stops verifying.
-    An OIDC account (no hash) has one constant version; its sessions end by deactivation."""
-    return hashlib.sha256((user.password_hash or "").encode()).hexdigest()[:16]
+    stored password hash and the account's ``session_nonce``. argon2 salts every hash, so
+    setting a password — even to the same value — changes it; :func:`rotate_session_nonce`
+    changes it too (logout, "sign out everywhere"), which is how an OIDC account (no hash)
+    has its sessions ended. Every session issued under the old version stops verifying.
+    An account whose nonce is still empty (every row the 0009 migration added the column
+    to) keeps the version it had before the column existed, so the upgrade signs nobody
+    out."""
+    nonce = user.session_nonce or ""
+    material = user.password_hash or ""
+    if nonce:
+        material = f"{material}\x00{nonce}"
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
+def rotate_session_nonce(user: User) -> None:
+    """Give ``user`` a fresh ``session_nonce`` (128 random bits); the caller commits. Every
+    session the account holds — on every device — ends on its next request."""
+    user.session_nonce = secrets.token_hex(16)
 
 
 def is_local_account(user: User) -> bool:
@@ -426,6 +463,27 @@ def read_session(settings: Settings, token: str) -> str:
     return read_session_claims(settings, token)[0]
 
 
+def session_cookie_name(settings: Settings) -> str:
+    """``__Host-crb_session`` when cookies are secure, else ``crb_session`` (a plain-http
+    development deployment cannot set a ``__Host-`` cookie)."""
+    return HOST_PREFIX + SESSION_COOKIE if settings.resolved_cookie_secure else SESSION_COOKIE
+
+
+def session_token_of(conn: HTTPConnection, settings: Settings) -> str:
+    """The session cookie's value as EVERY reader sees it, or ``""``.
+
+    The CSRF middleware, :func:`current_user` and logout all read the session through this,
+    over Starlette's lenient cookie parser. Two parsers disagreeing is a bypass: a strict
+    one that gives up on a header with one malformed cookie (a space, JSON, a consent date)
+    would skip the CSRF check while the lenient one still authenticated the request."""
+    return conn.cookies.get(session_cookie_name(settings), "")
+
+
+def csrf_cookie_name(settings: Settings) -> str:
+    """``__Host-crb_csrf`` when cookies are secure, else ``crb_csrf``."""
+    return HOST_PREFIX + CSRF_COOKIE if settings.resolved_cookie_secure else CSRF_COOKIE
+
+
 def _set_cookie(
     response: Response,
     settings: Settings,
@@ -455,40 +513,80 @@ def set_session_cookie(
     _set_cookie(
         response,
         settings,
-        SESSION_COOKIE,
+        session_cookie_name(settings),
         issue_session(settings, user_id, credential_version),
         max_age=settings.session_ttl,
         httponly=True,
     )
 
 
-def new_csrf_token() -> str:
-    """A random double-submit token."""
-    return secrets.token_urlsafe(32)
+def csrf_token_for(settings: Settings, user_id: str, credential_version: str) -> str:
+    """The CSRF token of one session: ``HMAC-SHA256(secret, label | uid | cv)``, URL-safe.
+    Deterministic, so the middleware recomputes it from the signed session cookie with no
+    server-side state; bound to the account AND its credential version, so it cannot be
+    chosen by whoever plants cookies and it dies with the session (a rotated nonce or a new
+    password moves ``cv``)."""
+    key = hmac.new(settings.secret_key_value.encode(), _CSRF_KEY_LABEL, hashlib.sha256).digest()
+    mac = hmac.new(key, f"{user_id}\x00{credential_version}".encode(), hashlib.sha256)
+    return base64.urlsafe_b64encode(mac.digest()).decode().rstrip("=")
 
 
-def set_csrf_cookie(response: Response, settings: Settings, token: str | None = None) -> str:
-    """Set the readable (non-HttpOnly) ``crb_csrf`` cookie the UI echoes as a header."""
-    token = token or new_csrf_token()
+def set_csrf_cookie(
+    response: Response, settings: Settings, user_id: str, credential_version: str
+) -> str:
+    """Set the readable (non-HttpOnly) CSRF cookie the UI echoes as a header — the
+    :func:`csrf_token_for` of the session being issued — and return the token."""
+    token = csrf_token_for(settings, user_id, credential_version)
     _set_cookie(
-        response, settings, CSRF_COOKIE, token, max_age=settings.session_ttl, httponly=False
+        response,
+        settings,
+        csrf_cookie_name(settings),
+        token,
+        max_age=settings.session_ttl,
+        httponly=False,
     )
     return token
 
 
 def clear_auth_cookies(response: Response, settings: Settings) -> None:
-    """Logout: expire all three cookies with the same attributes they were set with."""
-    for name in (SESSION_COOKIE, CSRF_COOKIE, OIDC_COOKIE):
+    """Logout: expire the session, CSRF and OIDC cookies with the same attributes they were
+    set with."""
+    for name in (session_cookie_name(settings), csrf_cookie_name(settings), OIDC_COOKIE):
         response.delete_cookie(
             name, path="/", secure=settings.resolved_cookie_secure, samesite="lax"
         )
 
 
-def csrf_matches(cookie_token: str | None, header_token: str | None) -> bool:
-    """The double-submit check: both present and equal (constant-time compare)."""
-    if not cookie_token or not header_token:
+def csrf_valid(settings: Settings, session_token: str, header_token: str | None) -> bool:
+    """Whether ``header_token`` is the CSRF token of the session ``session_token`` carries.
+
+    The session's signature is checked but not its age: an expired session is the auth
+    dependency's to refuse (401 ``session_expired``, which the UI turns into a sign-in),
+    not a CSRF failure. Never raises; constant-time compare."""
+    if not header_token:
         return False
-    return hmac.compare_digest(cookie_token.encode(), header_token.encode())
+    try:
+        data = _serializer(settings, _SESSION_SALT).loads(session_token)
+    except BadSignature:
+        return False
+    if not isinstance(data, dict):
+        return False
+    uid, cv = data.get("uid"), data.get("cv", "")
+    if not isinstance(uid, str) or not uid or not isinstance(cv, str):
+        return False
+    expected = csrf_token_for(settings, uid, cv)
+    return hmac.compare_digest(expected.encode(), header_token.encode())
+
+
+def session_signature_valid(settings: Settings, session_token: str) -> bool:
+    """Whether ``session_token`` was signed by this deployment (age not checked). A cookie
+    that fails this carries no credential, so a request riding only it has nothing a
+    forged cross-site request could abuse."""
+    try:
+        _serializer(settings, _SESSION_SALT).loads(session_token)
+    except BadSignature:
+        return False
+    return True
 
 
 # --- automatic sign-in (development stacks only, ADR-0027) ------------------------
@@ -573,7 +671,7 @@ def dev_autologin_refusal(request: Request) -> str | None:
 
 def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principal:
     """The logged-in principal, or 401 (``unauthenticated`` / ``session_expired``)."""
-    token = request.cookies.get(SESSION_COOKIE)
+    token = session_token_of(request, settings)
     if not token:
         raise ApiError(401, "unauthenticated", "login required")
     uid, cv = read_session_claims(settings, token)
@@ -581,8 +679,9 @@ def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principa
     if user is None or not user.active:
         raise ApiError(401, "unauthenticated", "account unknown or disabled")
     if not hmac.compare_digest(cv.encode(), credential_version(user).encode()):
-        # The password changed after this session was issued (or the token predates
-        # version stamping): the session is over, whoever holds the cookie.
+        # The password changed or the nonce was rotated (logout, sign out everywhere)
+        # after this session was issued, or the token predates version stamping: the
+        # session is over, whoever holds the cookie.
         raise ApiError(401, "session_revoked", "session no longer valid; log in again")
     request.state.user_id = user.id
     return Principal.model_validate(user)
@@ -631,21 +730,38 @@ AdminDep = Annotated[Principal, Depends(require_role("admin"))]
 # --- login rate limit ------------------------------------------------------------
 
 
+#: Failed sign-ins per minute from one address, whatever the usernames: bounds a spray of
+#: guesses across many accounts, which the per-``(username, ip)`` bucket cannot see.
+LOGIN_IP_LIMIT = 20
+
+
 class LoginRateLimiter:
-    """Sliding-window failure counter keyed by ``(username, ip)``. Thread-safe, in memory."""
+    """Sliding-window failure counters: one bucket per ``(username, ip)`` (``limit``) and
+    one per ``ip`` (``ip_limit``); a caller is limited when either is full. A success
+    clears only its own ``(username, ip)`` bucket — the address's bucket drains with the
+    window, so an attacker holding one valid account cannot reset it. Thread-safe, in
+    memory, per process: production fronts it with the proxy's limiter."""
 
     def __init__(
         self,
         limit: int = 5,
         window_s: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
+        ip_limit: int = LOGIN_IP_LIMIT,
     ) -> None:
         self.limit = limit
+        self.ip_limit = ip_limit
         self.window_s = window_s
         self._clock = clock
         self._lock = threading.Lock()
         self._failures: dict[tuple[str, str], deque[float]] = {}
         self._ops = 0
+
+    @staticmethod
+    def _ip_key(ip: str) -> tuple[str, str]:
+        # "" is never a username (validate_username refuses it), so ("", ip) is the
+        # address's own bucket and cannot collide with an account's
+        return ("", ip)
 
     def _prune(self, key: tuple[str, str], now: float) -> deque[float]:
         q = self._failures.setdefault(key, deque())
@@ -666,16 +782,19 @@ class LoginRateLimiter:
         now = self._clock()
         with self._lock:
             self._sweep(now)
-            q = self._prune((username, ip), now)
-            if len(q) >= self.limit:
-                return max(0.0, self.window_s - (now - q[0]))
-            return None
+            waits = []
+            for key, limit in (((username, ip), self.limit), (self._ip_key(ip), self.ip_limit)):
+                q = self._prune(key, now)
+                if len(q) >= limit:
+                    waits.append(max(0.0, self.window_s - (now - q[-limit])))
+            return max(waits) if waits else None
 
     def record_failure(self, username: str, ip: str) -> None:
-        """Count one failed login for the key."""
+        """Count one failed login for the ``(username, ip)`` key and for the address."""
         now = self._clock()
         with self._lock:
             self._failures.setdefault((username, ip), deque()).append(now)
+            self._failures.setdefault(self._ip_key(ip), deque()).append(now)
 
     def reset(self, username: str, ip: str) -> None:
         """Forget the key's failures (a successful login)."""
@@ -851,8 +970,20 @@ def map_role(claims: Mapping[str, Any], oidc: OidcSettings) -> str:
     return best
 
 
-def upsert_oidc_user(db: Session, *, issuer: str, claims: Mapping[str, Any], role: str) -> User:
-    """Find-or-create by ``(issuer, subject)``; refresh profile fields and role from the IdP."""
+def upsert_oidc_user(
+    db: Session,
+    *,
+    issuer: str,
+    claims: Mapping[str, Any],
+    role: str,
+    role_from_claims: str = "first_login",
+) -> User:
+    """Find-or-create by ``(issuer, subject)``; refresh the profile fields from the IdP.
+
+    ``role`` (the claims' mapping) is set on a NEW account. On an existing one it replaces
+    the stored role only when ``role_from_claims == "always"`` — otherwise an admin's
+    change would be silently reverted at the account's next sign-in. The caller records
+    ``user.role_overridden`` when it compares the role before and after."""
     subject = str(claims.get("sub") or "")
     if not subject:
         raise ApiError(502, "oidc_exchange_failed", "ID token carries no subject")
@@ -874,7 +1005,8 @@ def upsert_oidc_user(db: Session, *, issuer: str, claims: Mapping[str, Any], rol
     else:
         user.email = email or user.email
         user.display_name = display or user.display_name
-        user.role = role
+        if role_from_claims == "always":
+            user.role = role
     db.flush()
     return user
 
@@ -982,7 +1114,9 @@ __all__ = [
     "FORWARDING_HEADER_PREFIX",
     "GITHUB_SETUP_COOKIE",
     "GITHUB_SETUP_STATE_TTL_S",
+    "HOST_PREFIX",
     "LOCAL_ISSUER",
+    "LOGIN_IP_LIMIT",
     "OIDC_COOKIE",
     "SESSION_COOKIE",
     "AdminDep",
@@ -1002,7 +1136,9 @@ __all__ = [
     "count_users",
     "create_local_user",
     "credential_version",
-    "csrf_matches",
+    "csrf_cookie_name",
+    "csrf_token_for",
+    "csrf_valid",
     "current_user",
     "dev_autologin_refusal",
     "find_local_user",
@@ -1011,13 +1147,16 @@ __all__ = [
     "issue_github_setup_state",
     "issue_session",
     "map_role",
-    "new_csrf_token",
     "new_github_setup_nonce",
     "read_oidc_cookie",
     "read_session",
     "read_session_claims",
     "require_role",
+    "rotate_session_nonce",
     "safe_next_path",
+    "session_cookie_name",
+    "session_signature_valid",
+    "session_token_of",
     "set_csrf_cookie",
     "set_github_setup_cookie",
     "set_oidc_cookie",
