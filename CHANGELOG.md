@@ -22,6 +22,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   this changelog frozen to one paragraph per pull request; a ReposPage test; one timeout guard
   in the UI client.
 
+- **SQLAlchemy 2.1 type-checks clean; no pin** ([#50](https://github.com/Jita81/commit-replay-bench/pull/50)).
+  SQLAlchemy 2.1.1 reached PyPI on 2026-09-25 and the `server` extra has no ceiling, so CI's fresh
+  install resolved it and `mypy --strict` reported eight `[var-annotated]` errors on an unchanged
+  `main` (in 2.1, `.scalars()` / `.scalar_one()` infer `Never` where mypy cannot see the statement);
+  each site now states the type it already had at runtime, so nothing changes at runtime and the
+  dependency is not pinned [measured — mypy clean on 2.0.52 and 2.1.1; the full suite under 2.1.1,
+  3972 passed, 72 skipped, 0 failed; apparatus 2.2].
+
 - **Work arrives from the board; the factory writes its own failing test**
   ([#48](https://github.com/Jita81/commit-replay-bench/pull/48)). A ticket moved into one watched
   Azure DevOps or Jira column becomes the backlog item (ADR-0017, DL-051), and what the product
