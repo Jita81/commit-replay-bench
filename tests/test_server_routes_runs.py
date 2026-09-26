@@ -630,10 +630,69 @@ class TestCredentialPresence:
         monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
         name = key_env()
         assert name in credential_missing()
-        with pytest.raises((MissingCredential, RuntimeError)) as caught:
+        # the key is checked before the client package is imported, so the build always
+        # fails naming the variable — never a generic error that proves nothing
+        with pytest.raises(MissingCredential) as caught:
             make_chat("gpt-oss-120b")
-        if isinstance(caught.value, MissingCredential):
-            assert name in str(caught.value)
+        assert name in str(caught.value)
+
+    @pytest.mark.parametrize("azure", [False, True])
+    def test_the_check_and_the_build_read_the_configured_endpoint(
+        self, monkeypatch: pytest.MonkeyPatch, azure: bool
+    ) -> None:
+        """``CRB_OPENAI_BASE_URL`` / ``CRB_OPENAI_KEY_ENV`` (and the Azure trio) configure
+        the OpenAI-compatible builders (docs/DEPLOYMENT.md). The submit-time check and the
+        builders both fell back to the Cerebras default instead, so an Azure or self-hosted
+        deployment was refused for a key it does not use, and built against Cerebras
+        (CodeRabbit, PR #57)."""
+        from crb.builders.editblock import EditBlockBuilder
+        from crb.builders.openai_agent import OpenAIAgentBuilder
+        from crb.builders.openai_client import (
+            MissingCredential,
+            credential_missing,
+            key_env,
+            make_chat,
+        )
+
+        for var in ("CEREBRAS_API_KEY", "VLLM_KEY", "AZ_KEY", "CRB_AZURE_ENDPOINT"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("CRB_OPENAI_BASE_URL", "https://vllm.internal/v1")
+        monkeypatch.setenv("CRB_OPENAI_KEY_ENV", "VLLM_KEY")
+        want, provider = "VLLM_KEY", "vllm.internal"
+        if azure:
+            monkeypatch.setenv("CRB_AZURE_ENDPOINT", "https://x.openai.azure.com")
+            monkeypatch.setenv("CRB_AZURE_KEY_ENV", "AZ_KEY")
+            monkeypatch.delenv("CRB_AZURE_DEPLOYMENT", raising=False)
+            # a half-configured Azure endpoint is refused by name, never a 500
+            assert "CRB_AZURE_" in credential_missing()
+            monkeypatch.setenv("CRB_AZURE_DEPLOYMENT", "gpt-oss")
+            want, provider = "AZ_KEY", "azure"
+        assert key_env() == want
+        assert want in credential_missing() and "CEREBRAS_API_KEY" not in credential_missing()
+        with pytest.raises(MissingCredential, match=want):
+            make_chat("gpt-oss-120b")
+        assert OpenAIAgentBuilder(model="gpt-oss-120b").provider == provider
+        assert EditBlockBuilder(model="gpt-oss-120b").provider == provider
+        monkeypatch.setenv(want, "present")
+        assert credential_missing() == ""
+
+    def test_no_caller_decides_the_endpoint_on_its_own(self) -> None:
+        """The class behind the endpoint bug, ratcheted: an OpenAI-compatible caller that
+        falls back to Cerebras itself (``… if endpoint else "cerebras"``, ``or
+        EndpointConfig()``) ignores the deployment's endpoint. Every caller asks
+        ``resolved_endpoint``."""
+        import re
+
+        from crb.builders import openai_client
+
+        pattern = re.compile(r'endpoint else "cerebras"|or EndpointConfig\(\)')
+        root = Path(openai_client.__file__).resolve().parents[1]  # src/crb
+        offenders = sorted(
+            str(p.relative_to(root))
+            for p in root.rglob("*.py")
+            if pattern.search(p.read_text(encoding="utf-8"))
+        )
+        assert offenders == []
 
     def test_every_registered_builder_is_checked_or_exempt_by_name(self) -> None:
         """A new builder cannot skip the submit-time check (P-003's class, ratcheted)."""
@@ -675,6 +734,40 @@ class TestCredentialPresence:
         finally:
             token.chmod(0o600)
         assert r.status_code == 201, r.text
+
+    def test_a_stored_token_others_can_read_is_refused_without_reading_it(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The build refuses a token file with group or world bits (``SecretsStore.get``:
+        ``chmod 0600 it``), so a ``0644`` token passed the submit-time check and then failed
+        every attempt as a model error — the P-003 failure the check exists to prevent
+        (CodeRabbit, PR #57). The check reads the file's mode, never its value."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
+        secrets = tmp_path / "secrets"
+        monkeypatch.setenv("CRB_SECRETS_DIR", str(secrets))
+        secrets.mkdir(mode=0o700)
+        token = secrets / "claude_code_oauth_token"
+        token.write_text("x" * 80, encoding="utf-8")
+        token.chmod(0o644)
+        real_open = Path.open
+
+        def guarded(self: Path, *a: Any, **kw: Any) -> Any:
+            if str(self).startswith(str(secrets)):
+                raise AssertionError(f"a secret was read: {self}")
+            return real_open(self, *a, **kw)
+
+        monkeypatch.setattr(Path, "open", guarded)
+        monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: guarded(self).read())
+        r = self._post(env, builder_config={"auth": "cli"})
+        assert r.status_code == 422, r.text
+        err = envelope(r)
+        assert err["code"] == "builder_credential_missing"
+        assert "chmod 0600" in err["message"] and "x" * 20 not in r.text
+        assert jobs.enqueued == []
+        token.chmod(0o600)
+        assert self._post(env, builder_config={"auth": "cli"}).status_code == 201
 
     def test_a_build_free_kind_is_never_checked(
         self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch

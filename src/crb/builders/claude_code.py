@@ -139,7 +139,7 @@ from crb.builders.base import (
 from crb.builders.budget import CostMeter, price_for
 from crb.core.execution import SandboxUnavailable
 from crb.core.redact import redact_and_cap
-from crb.core.secrets_file import SecretsError, SecretsStore, fingerprint
+from crb.core.secrets_file import SecretsError, SecretsInsecure, SecretsStore, fingerprint
 from crb.core.workspace import Workspace
 
 #: The census's measured path (quality-floor essay): Sonnet 5 through the agentic CLI.
@@ -1152,9 +1152,16 @@ def credential_missing(auth: str = "", *, secrets_dir: Path | None = None) -> st
             return ""
         store = SecretsStore(secrets_dir) if secrets_dir is not None else SecretsStore.from_env()
         try:
-            token = store.value_path(CLI_TOKEN_SECRET)
-            if token.is_file() and token.stat().st_size > 0:
+            # the same mode rule the build's read applies (SecretsStore.get), on the file's
+            # metadata only: a token the build would refuse is no credential
+            st = store.stat_for_read(CLI_TOKEN_SECRET)
+            if st is not None and st.st_size > 0:
                 return ""
+        except SecretsInsecure as exc:
+            return (
+                f"the stored Claude Code token cannot be used: {exc}. Every build would refuse "
+                "it, so the run is not queued"
+            )
         except (OSError, SecretsError):
             pass  # an unreadable store is not a credential; the message below names the fix
         if claude_cli_on_path():

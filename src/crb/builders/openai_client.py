@@ -473,8 +473,10 @@ class EndpointConfig:
 
 def resolved_endpoint(endpoint: EndpointConfig | None = None) -> EndpointConfig:
     """The endpoint a builder with ``endpoint`` talks to — the one place it is decided, so
-    the submit-time credential check and the build ask for the same variable."""
-    return endpoint or EndpointConfig()
+    the submit-time credential check, the build and the provider column agree. No explicit
+    endpoint means the deployment's (:meth:`EndpointConfig.from_env` — Cerebras when
+    nothing is set), never the Cerebras default regardless of the environment."""
+    return endpoint or EndpointConfig.from_env()
 
 
 def key_env(endpoint: EndpointConfig | None = None) -> str:
@@ -491,7 +493,14 @@ def credential_missing(
     returned, never its value. ``auth`` and ``secrets_dir`` are accepted for the shape
     ``POST /runs`` calls every check with (docs/PREVENTION.md P-003)."""
     del auth, secrets_dir
-    name = key_env(endpoint)
+    try:
+        name = key_env(endpoint)
+    except ValueError as exc:  # the deployment's endpoint variables do not make an endpoint
+        return (
+            f"the OpenAI-compatible endpoint the worker would call is misconfigured: {exc} — "
+            "fix CRB_OPENAI_BASE_URL / CRB_AZURE_ENDPOINT, CRB_AZURE_API_VERSION and "
+            "CRB_AZURE_DEPLOYMENT before queuing the run"
+        )
     if os.environ.get(name, "").strip():
         return ""
     return (

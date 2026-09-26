@@ -69,7 +69,14 @@ from crb.builders.base import (
 )
 from crb.builders.budget import BudgetTracker, CostMeter, price_for
 from crb.builders.editblock import apply_edit_blocks, compile_check
-from crb.builders.openai_client import EndpointConfig, ModelFn, ModelTurn, ToolCall, make_chat
+from crb.builders.openai_client import (
+    EndpointConfig,
+    ModelFn,
+    ModelTurn,
+    ToolCall,
+    make_chat,
+    resolved_endpoint,
+)
 from crb.core.execution import Command, Executor, LocalExecutor
 from crb.core.redact import redact_and_cap
 from crb.core.runners import get_runner
@@ -480,7 +487,9 @@ class OpenAIAgentBuilder:
     ) -> None:
         self.model = model
         self.endpoint = endpoint
-        self.provider = provider or (endpoint.provider if endpoint else "cerebras")
+        # the endpoint the build will call (resolved_endpoint: explicit, else the
+        # deployment's CRB_OPENAI_* / CRB_AZURE_*), so the provider column names it
+        self.provider = provider or resolved_endpoint(endpoint).provider
         self._model_fn = model_fn
         self.executor: Executor = executor or LocalExecutor()
         self.runner_factory = runner_factory

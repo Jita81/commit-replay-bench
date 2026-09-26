@@ -84,7 +84,13 @@ from typing import Any
 from crb.builders import builder_names
 from crb.builders.adapter import parse_rung_label
 from crb.builders.base import Rung, emit
-from crb.builders.openai_client import ChatFn, ChatReply, EndpointConfig, make_chat
+from crb.builders.openai_client import (
+    ChatFn,
+    ChatReply,
+    EndpointConfig,
+    make_chat,
+    resolved_endpoint,
+)
 from crb.core.spec import RepoConfig
 from crb.core.workspace import Workspace
 from crb.factory.backlog import BacklogItem
@@ -244,7 +250,7 @@ class RungTestAuthor:
         self.name = name.strip()
         self.model = model.strip()
         self.endpoint = endpoint
-        self.provider = provider or (endpoint.provider if endpoint else "cerebras")
+        self.provider = provider or resolved_endpoint(endpoint).provider
         self._chat_fn = chat_fn
         self.attempts = attempts
         self.max_examples = max_examples
