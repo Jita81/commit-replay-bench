@@ -224,6 +224,48 @@ def test_the_manifest_holds_what_pip_installed_never_a_pin_its_marker_skipped(
     assert "cfxdep==1.0.0" in packages and skipped == ["notonindex==9.9.9"]
 
 
+#: The universal-lock shape (``uv export``, pip-compile across Pythons): ONE name pinned
+#: twice under opposite markers. pip installs exactly one of the two on the fetch image.
+_SPLIT_LOCK = (
+    "cfxdep==1.0.0\n"
+    'numpy==1.24.4 ; python_version < "3.9"\n'
+    'numpy==2.0.1 ; python_version >= "3.9"\n'
+)
+
+
+def test_the_manifest_matches_a_marker_pin_by_version_never_by_name_alone(
+    tmp_path: Path,
+) -> None:
+    """``installed_manifest`` keeps a pin that has a marker only when THAT ``name==version``
+    is installed: with ``numpy`` pinned twice under opposite markers and ``numpy 2.0.1`` in
+    the site, ``numpy==1.24.4`` is ``marker_skipped`` — the probe compares versions, so
+    requiring it would refuse every task ``QUAL_ENV_UNLOADABLE`` (the adversarial check on
+    the answer to CodeRabbit's thread on PR #56). A marker pin whose name is installed at
+    a version NO pin names is kept, so the probe still reports it (fail closed)."""
+    root, feat = pyrepo_deps.build(tmp_path, parent_requirements=_SPLIT_LOCK)
+    repo = GitRepo(root)
+    parent = LockInputs.from_git(repo, repo.parent(feat), pyrepo_deps.config())
+    assert sum(p.norm == "numpy" for p in parent.py_pins) == 2
+    site = tmp_path / "site"
+    (site / "cfxdep-1.0.0.dist-info").mkdir(parents=True)
+    (site / "numpy-2.0.1.dist-info").mkdir()
+    packages, skipped = py_recipe.installed_manifest(parent, site)
+    assert sorted(packages) == ["cfxdep==1.0.0", "numpy==2.0.1"]
+    assert skipped == ["numpy==1.24.4"]
+    # the other interpreter: pip kept the backport line, skipped the modern one
+    (site / "numpy-2.0.1.dist-info").rmdir()
+    (site / "numpy-1.24.4.dist-info").mkdir()
+    packages, skipped = py_recipe.installed_manifest(parent, site)
+    assert sorted(packages) == ["cfxdep==1.0.0", "numpy==1.24.4"]
+    assert skipped == ["numpy==2.0.1"]
+    # an installed version no pin names: nothing is hidden, both stay for the probe
+    (site / "numpy-1.24.4.dist-info").rmdir()
+    (site / "numpy-1.26.0.dist-info").mkdir()
+    packages, skipped = py_recipe.installed_manifest(parent, site)
+    assert sorted(packages) == ["cfxdep==1.0.0", "numpy==1.24.4", "numpy==2.0.1"]
+    assert skipped == []
+
+
 @pytest.mark.docker
 @pytest.mark.slow
 @pytest.mark.sandbox_images

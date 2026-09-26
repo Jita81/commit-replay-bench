@@ -105,6 +105,9 @@ seam, `crb.core.deps`, and wired end to end.
   as `tomli==… ; python_version < "3.11"`), so the environment probe reported it missing and
   every task in such a repository was `QUAL_ENV_UNLOADABLE`. The manifest now holds what pip
   installed and records the rest as `marker_skipped`; a pin with no marker is still required.
+  A pin with a marker counts by name AND version: a universal lock that pins one name twice
+  under opposite markers (`numpy==1.24.4 ; python_version < "3.9"` and `numpy==2.0.1 ;
+  python_version >= "3.9"`) requires only the version pip installed.
   A set sealed before this change keeps its old manifest: delete it and the next run fetches
   it again.
 - **A local sealed Node posture uses the sealed set** (product.posture.35; CodeRabbit on

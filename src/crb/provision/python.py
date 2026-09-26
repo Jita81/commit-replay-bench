@@ -147,10 +147,11 @@ def install_plan(inputs: LockInputs, *, key: str, image: str) -> FetchPlan:
     )
 
 
-def _dist_name(dist_info: str) -> str:
-    """The normalised distribution name of a ``<name>-<version>.dist-info`` directory."""
-    name = dist_info[: -len(".dist-info")].rsplit("-", 1)[0]
-    return re.sub(r"[-_.]+", "-", name).lower()
+def _dist(dist_info: str) -> tuple[str, str]:
+    """``(normalised name, version)`` of a ``<name>-<version>.dist-info`` directory (pip
+    escapes a ``-`` in either part as ``_``, so the last ``-`` splits them)."""
+    name, _, version = dist_info[: -len(".dist-info")].rpartition("-")
+    return re.sub(r"[-_.]+", "-", name).lower(), version.replace("_", "-").lower()
 
 
 def installed_manifest(inputs: LockInputs, site: Path) -> tuple[dict[str, list[str]], list[str]]:
@@ -158,17 +159,24 @@ def installed_manifest(inputs: LockInputs, site: Path) -> tuple[dict[str, list[s
 
     pip ignores a pin whose environment marker excludes the fetch image's Python (a
     pip-compile backport line, ``tomli==… ; python_version < "3.11"``), at fetch and at
-    install; such a pin with no ``*.dist-info`` in the site is ``marker_skipped``, never a
-    package the set must hold — the environment probe requires every package, so recording
-    it would refuse every task ``QUAL_ENV_UNLOADABLE`` (CodeRabbit on PR #56). A pin with
-    NO marker stays in ``packages`` whether or not it is there: a set that lost it is the
-    probe's to report, never this function's to hide."""
-    present = {_dist_name(d.name) for d in Path(site).glob("*.dist-info") if d.is_dir()}
+    install. A pin with a marker is ``marker_skipped`` — never a package the set must hold,
+    since the environment probe requires every package at its version — when that exact
+    ``name==version`` is not installed and either the name is not installed at all or it
+    is installed at the version of another pin of the same name (a universal lock pins
+    ``numpy`` twice under opposite markers; pip keeps one). Otherwise it stays, so a
+    version no pin names is still the probe's to report. A pin with NO marker stays in
+    ``packages`` whether or not it is there: a set that lost it is the probe's to report,
+    never this function's to hide (CodeRabbit on PR #56, and the check on its answer)."""
+    present = {_dist(d.name) for d in Path(site).glob("*.dist-info") if d.is_dir()}
+    names = {name for name, _ in present}
+    pinned = {(p.norm, p.version.lower()) for p in inputs.py_pins}
     packages: dict[str, list[str]] = {}
     skipped: list[str] = []
     for p in inputs.py_pins:
         pin = p.norm + "==" + p.version
-        if p.marker and p.norm not in present:
+        installed = (p.norm, p.version.lower()) in present
+        sibling_won = any(n == p.norm and (n, v) in pinned for n, v in present)
+        if p.marker and not installed and (p.norm not in names or sibling_won):
             skipped.append(pin)
         else:
             packages[pin] = list(p.hashes)
