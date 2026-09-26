@@ -17,8 +17,9 @@ Retained artefacts (ADR-0006 amendment). A run queued with ``retain.worktrees`` 
 ``retain.transcripts`` leaves the graded worktree under the worker's scratch and the
 redacted transcript under ``<home>/transcripts/<run>``; nothing is stored twice. The
 worktree's name is opaque (``crb.core.workspace.opaque_dest``: it never names the commit a
-builder could look up), so the route finds it through the run's own ``prep.start`` event
-for the row's task and trial, never by rebuilding a name from the sha.
+builder could look up), so the route reads it from the row's own evidence pack
+(``notes.worktree``, written once per attempt), never from the run's events (a reclaimed
+run writes two rows under one trial) and never by rebuilding a name from the sha.
 ``/grades/{row_hash}/patch`` serves the unified diff of that worktree, COMPUTED ON DEMAND
 by the same procedure :meth:`crb.core.workspace.Workspace.diff_stats` hashed at grade
 time (``git diff HEAD`` + every untracked file against ``/dev/null``, in path order),
@@ -67,7 +68,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -94,7 +95,7 @@ from crb.server.schemas import (
     TaskSpecOut,
 )
 from crb.server.schemas_review import RetainedArtefactStatus
-from crb.store.models import Event, EvidencePackRow, Grade, Run, Task
+from crb.store.models import EvidencePackRow, Grade, Run, Task
 
 router = APIRouter(tags=["grades"])
 _ERR = {"model": ErrorEnvelope}
@@ -274,8 +275,8 @@ def get_evidence(pack_hash: str, viewer: ViewerDep, db: DbDep) -> EvidenceRespon
 # ---------------------------------------------------------------------------
 
 
-#: The only shape a trial worktree's name may have (``opaque_dest(scratch, "run")``): an event
-#: payload that says anything else is never turned into a path.
+#: The only shape a trial worktree's name may have (``opaque_dest(scratch, "run")``): a pack
+#: that says anything else is never turned into a path.
 _TRIAL_NAME = re.compile(rf"run-[0-9a-f]{{{2 * OPAQUE_TOKEN_BYTES}}}")
 
 
@@ -284,34 +285,22 @@ def worktree_path(scratch: Path, name: str) -> Path | None:
     return scratch / name if _TRIAL_NAME.fullmatch(name or "") else None
 
 
-def worktree_name(session: Session, g: Grade) -> str:
-    """The opaque name ``crb.core.run.run_task`` gave row ``g``'s worktree, read from the
-    run's ``prep.start`` event for the row's task and trial (the mapping lives in the
-    events, never in the path); ``""`` when the run recorded none. The LATEST such event
-    wins: a reclaimed run re-runs its in-flight task under the same trial with a new
-    worktree, and the row was written by that later attempt. It is the ONLY event that
-    may answer: when it names no worktree the answer is ``""``, never an older attempt's
-    worktree, whose patch is not the one this row graded (PR #53 review)."""
-    payloads: Iterable[dict[str, Any]] = session.scalars(
-        select(Event.payload_json)
-        .where(
-            Event.trace_id == g.run_id,
-            Event.task_id == g.task_id,
-            Event.action == "prep.start",
-        )
-        .order_by(Event.seq.desc(), Event.id.desc())
-    )
-    for payload in payloads:
-        body = dict(payload or {})
-        if body.get("trial") == g.trial:
-            return str(body.get("worktree") or "")
-    return ""
+def worktree_name(pack: Mapping[str, Any] | None) -> str:
+    """The opaque name ``crb.core.run.run_task`` gave the worktree a row graded, read from
+    that row's own evidence pack (``notes.worktree``); ``""`` when the pack names none.
+    The pack is written once per attempt and its hash is on the row, so the link is the
+    row's own. The run's ``prep.start`` events are never asked: a reclaimed run re-runs its
+    tasks from the start and writes a second row under the same run, task and trial, so no
+    event key names one attempt, and the latest event gave the first row the second
+    attempt's worktree (PR #53 review, fifth round)."""
+    notes = (pack or {}).get("notes")
+    return str(notes.get("worktree") or "") if isinstance(notes, dict) else ""
 
 
-def _worktree_of(session: Session, home: Path, g: Grade) -> Path | None:
-    """Where row ``g``'s retained worktree is under ``<home>/scratch``, or ``None`` when the
-    run's events name none (a run from before worktrees were named opaquely)."""
-    return worktree_path(home / "scratch", worktree_name(session, g))
+def _worktree_of(home: Path, pack: Mapping[str, Any] | None) -> Path | None:
+    """Where the retained worktree a row's ``pack`` names is under ``<home>/scratch``, or
+    ``None`` when the pack names none (a run from before worktrees were named opaquely)."""
+    return worktree_path(home / "scratch", worktree_name(pack))
 
 
 def retained_patch_text(root: Path) -> str:
@@ -442,7 +431,7 @@ def retained_status(session: Session, home: Path, g: Grade) -> RetainedArtefactS
     pack = dict(pack_row.body_json or {}) if pack_row is not None else None
     diff_sha = pack_diff_sha256(pack) if pack else ""
     wt, tr = _run_retention(session, g.run_id)
-    root = _worktree_of(session, home, g)
+    root = _worktree_of(home, pack)
     if pack is None:
         patch_ok, patch_reason = (
             False,
@@ -456,8 +445,8 @@ def retained_status(session: Session, home: Path, g: Grade) -> RetainedArtefactS
     elif root is None:
         patch_ok, patch_reason = (
             False,
-            "the run's events name no worktree for this attempt (a run from before worktrees "
-            "were named opaquely, or one that retained none)",
+            "the evidence pack names no worktree for this attempt (a run from before "
+            "worktrees were named opaquely)",
         )
     elif not root.is_dir():
         patch_ok, patch_reason = (
@@ -520,7 +509,8 @@ def get_grade_patch(row_hash: str, viewer: ViewerDep, db: DbDep, settings: Setti
             status.patch_reason,
             detail={"reason": status.patch_reason, **status.model_dump(exclude={"extra"})},
         )
-    root = _worktree_of(db, Path(settings.home), g)
+    pack_row = db.get(EvidencePackRow, g.evidence_pack_hash)
+    root = _worktree_of(Path(settings.home), dict(pack_row.body_json or {}) if pack_row else None)
     assert root is not None  # patch_available implies a resolved worktree
     try:
         patch = build_retained_patch(root, status.diff_sha256)

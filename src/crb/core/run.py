@@ -310,6 +310,10 @@ def run_task(
                         {"transcript_ref": attempt.transcript_ref} if attempt.transcript_ref else {}
                     ),
                     **dict(attempt.notes),
+                    # the row's own link to the worktree it graded: a reclaimed run writes
+                    # two rows under one trial, so no event key names one attempt (PR #53).
+                    # Last, so a builder's notes cannot point the row at another worktree.
+                    "worktree": dest.name,
                 },
             )
             # pack first, row second: a row exists only for a pack that is on disk

@@ -13,7 +13,8 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 Assessment items B1 and B2, each reproduced against `main` with a failing test first.
 Worktrees are named by a random token instead of the held-out commit's sha, so `pwd`, the
 `.git` pointer and the prompt no longer give the builder the answer key's address; a source
-ratchet stops the pattern returning (DL-053). Production refuses the host builder and the
+ratchet stops the pattern returning (DL-053). Each evidence pack names the worktree its row
+graded, so a reclaimed run's two attempts at one trial each serve their own patch. Production refuses the host builder and the
 local test executor unless `CRB_ALLOW_UNSEALED_PROD=1`; the builder defaults to docker in
 prod, compose and Helm hand the API and the worker one builder value, and the override shows
 on `/health`, the Posture page and every run's apparatus (ADR-0023, DL-054). Factory builds
