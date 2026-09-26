@@ -452,17 +452,38 @@ def _pins_the_uid(node: ast.AST) -> bool:
     return _names_os(first) and isinstance(second, ast.Constant) and second.value == "getuid"
 
 
+def _own_body(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+    """The nodes of ``fn``'s own body, not those of a function, lambda or class defined in
+    it: a pin inside a helper the test may never call runs nothing."""
+    out: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(fn))
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
+            stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def _at(node: ast.AST) -> tuple[int, int]:
+    return (getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
+
+
 def _settings_on_the_hosts_uid(path: Path) -> set[str]:
     """Sites in one test file that build builder-container settings without naming a user.
 
     Two shapes: a ``BuilderContainerSettings(...)`` call with no ``user=`` keyword (a
     ``**mapping`` is trusted: the docker suite's ``_settings`` runs as the worker's own uid by
     design and is docker-marked), and a function that sets ``CRB_BUILDER__EXECUTOR`` to
-    ``docker`` without ``CRB_BUILDER__USER``. A function that PINS the uid —
+    ``docker`` without ``CRB_BUILDER__USER``. A PIN of the uid —
     ``setattr(os, "getuid", …)`` or ``setattr("os.getuid", …)``, through ``monkeypatch`` or
-    not — tests the default on purpose and no longer depends on the host, so it is exempt. A
-    function that only reads ``os.getuid()``, names it in a string, or sets ``getuid`` on some
-    other object pins nothing and is not.
+    not — in the function's own body exempts what comes after it: a construction that follows
+    it, and the executor shape when the pin precedes every mention of the executor and
+    ``docker``. What comes before the pin still ran on the host's uid and is reported, and so
+    is everything in a function whose only pin sits in a nested helper. A function that only
+    reads ``os.getuid()``, names it in a string, or sets ``getuid`` on some other object pins
+    nothing. Source order stands for run order; where they differ (a loop), the construction
+    that precedes the pin in the source is reported — the safe side.
     """
     found: set[str] = set()
     rel = path.relative_to(TESTS_DIR.parent).as_posix()
@@ -474,17 +495,28 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
         strings = {
             n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)
         }
-        if any(_pins_the_uid(n) for n in nodes):
-            continue
+        pins = [_at(n) for n in _own_body(fn) if _pins_the_uid(n)]
+
+        def pinned_before(node: ast.AST, pins: list[tuple[int, int]] = pins) -> bool:
+            return any(pin < _at(node) for pin in pins)
+
         for call in (n for n in nodes if isinstance(n, ast.Call)):
             callee = call.func
             name = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
-            if name == "BuilderContainerSettings" and not any(
-                k.arg in {"user", None} for k in call.keywords
+            if (
+                name == "BuilderContainerSettings"
+                and not any(k.arg in {"user", None} for k in call.keywords)
+                and not pinned_before(call)
             ):
                 found.add(f"{rel}:{call.lineno}")
         if {"CRB_BUILDER__EXECUTOR", "docker"} <= strings and "CRB_BUILDER__USER" not in strings:
-            found.add(f"{rel}:{fn.lineno} ({fn.name})")
+            executor = [
+                n
+                for n in nodes
+                if isinstance(n, ast.Constant) and n.value in {"CRB_BUILDER__EXECUTOR", "docker"}
+            ]
+            if not pinned_before(min(executor, key=_at)):
+                found.add(f"{rel}:{fn.lineno} ({fn.name})")
     return found
 
 
