@@ -18,13 +18,15 @@
  *               endpoint shows an honest error, not a delayed spinner); runs poll only while
  *               non-terminal and never in a background tab; mutations invalidate the keys they
  *               change so screens refresh without ad-hoc refetches. `useMe` maps a 401 to
- *               `null` (not logged in); `normaliseEvidence` folds two server shapes into one.
+ *               `null` (not logged in) unless a development stack's automatic sign-in succeeds
+ *               first (never again in the page load after Sign out); `normaliseEvidence` folds
+ *               two server shapes into one.
  * How:          `keys` is the single source of every query key → each hook wraps
  *               `api<T>(path)` in `useQuery` / `useMutation` with the key, `enabled` guards on
  *               empty ids and the polling rule → `useRunEvents` owns a `RunEventStream` per
  *               run id and hands React its snapshot through `useSyncExternalStore`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none
+ * ADRs:         docs/adr/0027-dev-autologin-on-loopback.md (`useMe`'s automatic sign-in)
  * Works with:   ui/src/api/client.ts (the fetch wrapper every hook calls), ui/src/api/types.ts
  *               (the response types), ui/src/api/sse.ts (the stream `useRunEvents` drives),
  *               ui/src/api/repoConfig.ts (the repo-config hooks nest under `keys.repo`),
@@ -37,7 +39,8 @@
  *               ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/src/screens/Signoff/SignoffPage.test.tsx,
- *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks)
+ *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks),
+ *               ui/src/components/DevAutologinBanner.test.tsx (`useMe`'s automatic sign-in)
  *               (every screen test exercises its hooks through `mockApi`)
  * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
  *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
@@ -49,6 +52,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query'
@@ -166,15 +170,48 @@ export function useVersion(): UseQueryResult<Version, ApiError> {
 // Auth
 // ---------------------------------------------------------------------------
 
-/** `GET /auth/me`. A 401 resolves to `null` (not an error) — it means "not logged in". */
+/**
+ * Set by Sign out: for the rest of this page load the UI does not ask for an automatic sign-in,
+ * so signing out lands on the form instead of straight back in. A reload starts again — the
+ * same conditions apply to it as to the first load (ADR-0027).
+ */
+let devAutologinSuppressed = false
+
+/** A fresh page load, for tests: the next `useMe` may ask for an automatic sign-in again. */
+export function resetDevAutologin(): void {
+  devAutologinSuppressed = false
+}
+
+/**
+ * No session: when `GET /version` says a development stack has automatic sign-in on, ask
+ * `POST /auth/dev-autologin` for one. `null` whenever it is off, suppressed or refused — the
+ * server answers 404/403 to anything not plainly local, and the person then gets the form.
+ */
+async function devAutologin(qc: QueryClient): Promise<Principal | null> {
+  if (devAutologinSuppressed) return null
+  try {
+    // the same cache entry `useVersion` reads, so the check costs one request per page load
+    const v = await qc.fetchQuery({ queryKey: keys.version, queryFn: () => api<Version>('/version'), staleTime: Infinity })
+    if (v.dev_autologin !== true) return null
+    return await api<Principal>('/auth/dev-autologin', { method: 'POST' })
+  } catch (err) {
+    // a refusal (or a /version the login page will itself report) means "no session", not an outage
+    if (err instanceof ApiError) return null
+    throw err
+  }
+}
+
+/** `GET /auth/me`. A 401 resolves to `null` (not an error) — it means "not logged in" — unless an
+ * automatic sign-in on a development stack succeeds first (`devAutologin`). */
 export function useMe(): UseQueryResult<Principal | null, ApiError> {
+  const qc = useQueryClient()
   return useQuery({
     queryKey: keys.me,
     queryFn: async () => {
       try {
         return await api<Principal>('/auth/me')
       } catch (err) {
-        if (err instanceof ApiError && err.isUnauthenticated) return null
+        if (err instanceof ApiError && err.isUnauthenticated) return devAutologin(qc)
         throw err
       }
     },
@@ -196,7 +233,11 @@ export function useLogin(): UseMutationResult<Principal, ApiError, LoginRequest>
 export function useLogout(): UseMutationResult<void, ApiError, void> {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: () => api<void>('/auth/logout', { method: 'POST' }),
+    mutationFn: () => {
+      // before the request: the refetch that follows sign-out must not sign straight back in
+      devAutologinSuppressed = true
+      return api<void>('/auth/logout', { method: 'POST' })
+    },
     onSettled: () => {
       qc.setQueryData(keys.me, null)
       qc.clear()

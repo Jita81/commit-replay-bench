@@ -71,7 +71,9 @@ What it does: Readiness aggregates the store probes (db, migrations at head, app
               503 when any is ``down``; a read that raises is ``down`` with the fixed
               ``failure_detail`` naming the request id, the exception logged, never served;
               liveness checks the database only; ``/metrics``
-              refreshes the ledger gauges then renders the shared registry.
+              refreshes the ledger gauges then renders the shared registry; ``/health`` and
+              ``/version`` say whether automatic sign-in is on (never which account), and
+              ``probe_dev_autologin`` is the doctor line that warns while it is.
 How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the
               request id → ``probes.aggregate`` → stamp;
               ``migrations_result`` turns a ``HeadStatus`` into the probe (``crb doctor``
@@ -81,7 +83,8 @@ How:          ``collect_health`` = the probe list, each under ``probes.run_probe
               on the docker socket it is not meant to have.
 Layer:        server — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate)
+              docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate),
+              docs/adr/0027-dev-autologin-on-loopback.md (the ``dev_autologin`` field)
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
               ``failure_detail`` and ``aggregate``),
               src/crb/store/migrate.py (``head_status_on`` — the one head check),
@@ -95,7 +98,8 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe
               (``CRB_ROLE`` per container and the ``HEALTHCHECK`` on ``/health/live``),
               docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface (the
               ``migrations`` contract the other documents copy)
-Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py
+Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py,
+              tests/test_server_dev_autologin.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
               (``skipped`` elsewhere), whether it may fail readiness, and putting its read
               under ``probes.run_probe`` (never an exception in a ``detail``); a new belt means
@@ -642,6 +646,32 @@ def probe_intake(
     return probes.run_probe("intake", _read, request_id=request_id)
 
 
+def dev_autologin_state(settings: Settings) -> str:
+    """``on`` / ``off``: whether automatic sign-in is switched on (ADR-0027). ``/health``
+    says it at the top level — beside the probes, not as one, so a development stack's
+    readiness is not lowered by a setting the operator chose — and names no account."""
+    return "on" if settings.auth.dev_autologin else "off"
+
+
+def probe_dev_autologin(settings: Settings | None) -> ProbeResult:
+    """``crb doctor``'s ``dev_autologin`` line: ``ok`` "off", or ``degraded`` (``warn``) with
+    the account named while it is on; ``skipped`` when the settings could not be read."""
+    if settings is None:
+        return ProbeResult(
+            "dev_autologin", SKIPPED, "not checked: the settings could not be read", {}
+        )
+    name = settings.auth.dev_autologin
+    if not name:
+        return ProbeResult("dev_autologin", OK, "off", {"enabled": False})
+    return ProbeResult(
+        "dev_autologin",
+        DEGRADED,
+        f"on — a browser on this machine is signed in as {name!r} without a password "
+        "(CRB_AUTH__DEV_AUTOLOGIN); development stacks only, never use in production",
+        {"enabled": True, "username": name},
+    )
+
+
 def _stamp(out: dict[str, Any], role: str) -> dict[str, Any]:
     """Add version, apparatus, role and time to an aggregated probe result."""
     out["version"] = __version__
@@ -677,7 +707,9 @@ def collect_health(
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
         probe_intake(factory, settings, request_id=rid),
     ]
-    return _stamp(probes.aggregate(results), role)
+    out = _stamp(probes.aggregate(results), role)
+    out["dev_autologin"] = dev_autologin_state(settings)
+    return out
 
 
 def collect_liveness(
@@ -748,6 +780,9 @@ def version(request: Request) -> dict[str, Any]:
         # whether an organisation sign-in exists is a fact the login page and the posture
         # page both need before anyone is signed in; it names no provider and no secret
         "oidc_enabled": getattr(request.app.state, "oidc_client", None) is not None,
+        # the banner every page shows while automatic sign-in is on must render on the
+        # sign-in page too, before anyone has a role; it names no account (ADR-0027)
+        "dev_autologin": bool(request.app.state.settings.auth.dev_autologin),
     }
 
 
@@ -762,8 +797,10 @@ __all__ = [
     "SKIPPED",
     "collect_health",
     "collect_liveness",
+    "dev_autologin_state",
     "ledger_counts",
     "migrations_result",
+    "probe_dev_autologin",
     "probe_migrations",
     "probe_worker",
     "process_role",

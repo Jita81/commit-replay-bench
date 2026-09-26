@@ -59,6 +59,8 @@ function renderApp(route: string) {
               }
             >
               <Route path="/results" element={<h1>Baseline</h1>} />
+              {/* where the login page sends a stale session after Sign out; the guard sends it back */}
+              <Route path="/home" element={<h1>Home</h1>} />
             </Route>
           </Routes>
         </AuthProvider>
@@ -110,14 +112,14 @@ describe('the automatic sign-in', () => {
     })
     renderApp('/results')
     expect(await screen.findByRole('heading', { name: 'Baseline' })).toBeInTheDocument()
-    expect(screen.queryByLabelText('Password')).toBeNull()
+    expect(screen.queryByRole('form', { name: 'Local account sign in' })).toBeNull()
     expect(calls.filter((c) => c.method === 'POST' && c.path === '/auth/dev-autologin')).toHaveLength(1)
   })
 
   it('nothing is posted while it is off: the visitor gets the sign-in form', async () => {
     const { calls } = mockApi({ 'GET /auth/me': () => envelope(401, 'unauthenticated', 'no session'), 'GET /version': VERSION_OFF })
     renderApp('/results')
-    expect(await screen.findByLabelText('Password')).toBeInTheDocument()
+    expect(await screen.findByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
     expect(calls.some((c) => c.path === '/auth/dev-autologin')).toBe(false)
   })
 
@@ -140,8 +142,11 @@ describe('the automatic sign-in', () => {
     renderApp('/results')
     await screen.findByRole('heading', { name: 'Baseline' })
     await userEvent.click(await screen.findByRole('button', { name: /sign out/i }))
-    expect(await screen.findByLabelText('Password')).toBeInTheDocument()
+    // the shell may bounce once through the guard on its way out, so wait for the form to settle
+    await waitFor(() => {
+      expect(screen.getByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
+      expect(screen.getByTestId('dev-autologin-banner')).toBeInTheDocument()
+    })
     expect(calls.some((c) => c.path === '/auth/dev-autologin')).toBe(false)
-    expect(screen.getByTestId('dev-autologin-banner')).toBeInTheDocument()
   })
 })

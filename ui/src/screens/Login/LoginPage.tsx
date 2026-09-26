@@ -12,7 +12,9 @@
  *               error envelope on a wrong password (never a blank form), and returns the user
  *               to the `?next=` path — same-origin paths only, so a crafted link cannot bounce
  *               a session to another host. An already-authenticated visitor is redirected
- *               straight to `next`. Both fields and both sign-in buttons carry a hint
+ *               straight to `next`. While a development stack has automatic sign-in on,
+ *               the banner above the form says so (`DevAutologinBanner`). Both fields and both
+ *               sign-in buttons carry a hint
  *               (`field.login.*`, `button.login.*`) so the form explains itself on hover,
  *               focus and tap before a person has any role at all. Under the form one
  *               sentence gives the person who cannot get in a way forward and states the
@@ -27,7 +29,8 @@
  *               ui/src/api/hooks.ts (`useLogin`), ui/src/components/ErrorState.tsx (the 401
  *               envelope), ui/src/help/hints.ts (the `field.login.*` / `button.login.*`
  *               copy), src/crb/server/routes/auth.py (login and the OIDC start URL),
- *               src/crb/server/auth.py (the session and CSRF cookies the login sets)
+ *               src/crb/server/auth.py (the session and CSRF cookies the login sets),
+ *               ui/src/components/DevAutologinBanner.tsx (the automatic sign-in strip)
  * Tested by:    ui/src/screens/Login/LoginPage.test.tsx (the strapline; the hints resolve),
  *               ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
  *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
@@ -42,6 +45,7 @@ import { apiUrl } from '../../api/client'
 import { AnchorButton, Button } from '../../components/Button'
 import { ErrorState } from '../../components/ErrorState'
 import { TextField } from '../../components/Field'
+import { DevAutologinBanner } from '../../components/DevAutologinBanner'
 import { BRAND } from '../../components/Layout'
 import { useAuth } from '../../lib/auth'
 
@@ -73,70 +77,73 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface px-4 py-10 text-on-surface">
-      <main className="w-full max-w-[420px] space-y-6">
-        <header className="space-y-1 text-center">
-          <div className="label">Sign in</div>
-          <h1 className="text-[26px] leading-8">{BRAND}</h1>
-          <p className="text-sm text-on-surface-muted">Measures what an AI builder can be trusted to change in your repository, graded by your own tests.</p>
-        </header>
+    <div className="flex min-h-screen flex-col bg-surface text-on-surface">
+      <DevAutologinBanner />
+      <div className="flex flex-1 items-center justify-center px-4 py-10">
+        <main className="w-full max-w-[420px] space-y-6">
+          <header className="space-y-1 text-center">
+            <div className="label">Sign in</div>
+            <h1 className="text-[26px] leading-8">{BRAND}</h1>
+            <p className="text-sm text-on-surface-muted">Measures what an AI builder can be trusted to change in your repository, graded by your own tests.</p>
+          </header>
 
-        <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
-          <form onSubmit={submit} className="space-y-4" aria-label="Local account sign in">
-            <TextField label="Username" hint="field.login.username" name="username" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} />
-            <TextField
-              label="Password"
-              hint="field.login.password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            {login.isError && (
-              <ErrorState
-                compact
-                error={login.error}
-                title={login.error.status === 401 ? 'Wrong username or password' : undefined}
+          <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
+            <form onSubmit={submit} className="space-y-4" aria-label="Local account sign in">
+              <TextField label="Username" hint="field.login.username" name="username" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} />
+              <TextField
+                label="Password"
+                hint="field.login.password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
-            )}
-            <Button type="submit" variant="filled" hint="button.login.submit" className="w-full" disabled={login.isPending}>
-              {login.isPending ? 'Signing in…' : 'Sign in'}
-            </Button>
-          </form>
+              {login.isError && (
+                <ErrorState
+                  compact
+                  error={login.error}
+                  title={login.error.status === 401 ? 'Wrong username or password' : undefined}
+                />
+              )}
+              <Button type="submit" variant="filled" hint="button.login.submit" className="w-full" disabled={login.isPending}>
+                {login.isPending ? 'Signing in…' : 'Sign in'}
+              </Button>
+            </form>
 
-          {version.isPending && <p className="mt-5 text-center text-[11px] text-on-surface-muted">Checking for an organisation sign-in…</p>}
-          {version.isError && (
-            <div className="mt-5">
-              <ErrorState compact error={version.error} onRetry={() => void version.refetch()} title="Could not check for an organisation sign-in" />
-            </div>
-          )}
-          {oidc && (
-            <>
-              <div className="my-5 flex items-center gap-3 text-[11px] text-on-surface-muted">
-                <span className="h-px flex-1 bg-border" />
-                or
-                <span className="h-px flex-1 bg-border" />
+            {version.isPending && <p className="mt-5 text-center text-[11px] text-on-surface-muted">Checking for an organisation sign-in…</p>}
+            {version.isError && (
+              <div className="mt-5">
+                <ErrorState compact error={version.error} onRetry={() => void version.refetch()} title="Could not check for an organisation sign-in" />
               </div>
+            )}
+            {oidc && (
+              <>
+                <div className="my-5 flex items-center gap-3 text-[11px] text-on-surface-muted">
+                  <span className="h-px flex-1 bg-border" />
+                  or
+                  <span className="h-px flex-1 bg-border" />
+                </div>
 
-              <AnchorButton href={apiUrl(`/auth/oidc/start?next=${encodeURIComponent(next)}`)} hint="button.login.oidc" className="w-full">
-                Sign in with organisation account
-              </AnchorButton>
-            </>
-          )}
-        </section>
+                <AnchorButton href={apiUrl(`/auth/oidc/start?next=${encodeURIComponent(next)}`)} hint="button.login.oidc" className="w-full">
+                  Sign in with organisation account
+                </AnchorButton>
+              </>
+            )}
+          </section>
 
-        {/* The stop has a way forward. This page signs people in and does nothing else, so it
-            names who can reset a password or reactivate an account: an admin on Settings, or
-            the person who runs the deployment (`crb users`, docs/OPERATOR.md §9). The reset
-            screen itself is backlog F23. */}
-        <p className="text-center text-[13px] text-on-surface-muted">
-          Forgotten your password, or locked out? Ask an admin to reset it on the Settings screen, or ask the person who runs this deployment. Accounts are not created, reset or reactivated here.
-        </p>
+          {/* The stop has a way forward. This page signs people in and does nothing else, so it
+              names who can reset a password or reactivate an account: an admin on Settings, or
+              the person who runs the deployment (`crb users`, docs/OPERATOR.md §9). The reset
+              screen itself is backlog F23. */}
+          <p className="text-center text-[13px] text-on-surface-muted">
+            Forgotten your password, or locked out? Ask an admin to reset it on the Settings screen, or ask the person who runs this deployment. Accounts are not created, reset or reactivated here.
+          </p>
 
-        <p className="text-center text-[11px] text-on-surface-muted">Sessions are cookie-based and expire with the browser unless your organisation's policy says otherwise.</p>
-      </main>
+          <p className="text-center text-[11px] text-on-surface-muted">Sessions are cookie-based and expire with the browser unless your organisation's policy says otherwise.</p>
+        </main>
+      </div>
     </div>
   )
 }

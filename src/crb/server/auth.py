@@ -25,6 +25,10 @@
   through the :class:`OidcClient` protocol so the app can inject a fake and the tests
   never touch the network. Roles come from ``role_claim``/``groups`` via ``role_map``;
   the default is ``viewer``. Users are upserted by ``(issuer, subject)``.
+* **Automatic sign-in** (development stacks only, ADR-0027) — :func:`dev_autologin_refusal`
+  decides whether a request may be signed in as ``CRB_AUTH__DEV_AUTOLOGIN``'s account: a
+  loopback TCP peer, no forwarding header, a loopback ``Host``, no foreign ``Origin`` and not
+  ``cross-site``. The session it leads to is an ordinary one from :func:`set_session_cookie`.
 * **Login rate limit** — 5 failures per minute per ``(username, ip)``, in memory.
   It bounds online guessing on one node; a multi-node deployment fronts this with the
   proxy's limiter as well.
@@ -41,15 +45,16 @@ What it does: Verifies passwords in constant time (an unknown user pays for a ve
               default ``viewer``), upserts OIDC users by ``(issuer, subject)``, seeds the
               bootstrap admin only while the users table is empty, and owns the account
               lifecycle primitives (``set_password``, ``set_user_active`` with the last-admin
-              guard) the admin routes and the ``crb users`` CLI share. Never logs or returns
-              a password or token.
+              guard) the admin routes and the ``crb users`` CLI share, and decides whether a
+              request is local enough to be signed in automatically on a development stack
+              (``dev_autologin_refusal``). Never logs or returns a password or token.
 How:          argon2id via ``argon2-cffi``; ``itsdangerous`` timed serialisers with a salt
               per cookie kind; ``credential_version`` = a SHA-256 prefix of the stored hash;
               ``require_role`` is a dependency factory over ``ROLE_RANK``;
               ``AuthlibOidcClient`` does discovery → PKCE authorization URL → code exchange
               → ID-token validation against the JWKS → optional userinfo merge.
 Layer:        server — docs/ARCHITECTURE.md#71-security
-ADRs:         none
+ADRs:         docs/adr/0027-dev-autologin-on-loopback.md
 Works with:   src/crb/server/routes/auth.py (login / logout / OIDC start + callback — the
               HTTP surface over these primitives), src/crb/server/routes/admin.py (the
               ``/users`` lifecycle routes over ``set_password`` / ``set_user_active``),
@@ -60,7 +65,8 @@ Works with:   src/crb/server/routes/auth.py (login / logout / OIDC start + callb
               (``User``), src/crb/server/deps.py (``ApiError``, ``Principal``),
               docs/SECURITY.md#34-authentication-and-authorisation--crbserverauth
 Tested by:    tests/test_server_auth.py, tests/test_server_admin_users.py,
-              tests/test_cli_users.py, tests/test_server_app.py
+              tests/test_cli_users.py, tests/test_server_app.py,
+              tests/test_server_dev_autologin.py
 Touch when:   never for a new repository; adding a role means extending ``ROLE_LADDER`` in
               settings.py, adding a ``*Dep`` alias here, and updating docs/API.md and
               docs/SECURITY.md; changing cookie or session semantics needs a note in
@@ -81,6 +87,7 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from argon2 import PasswordHasher
@@ -96,8 +103,10 @@ from crb.server.settings import (
     MIN_PASSWORD_LENGTH,
     ROLE_LADDER,
     ROLE_RANK,
+    USERNAME_CHARS,
     OidcSettings,
     Settings,
+    is_loopback_host,
 )
 from crb.store.models import User
 
@@ -134,7 +143,7 @@ GITHUB_SETUP_COOKIE = "crb_github_setup"
 GITHUB_SETUP_STATE_TTL_S = 30 * 60
 
 USERNAME_MAX = 64
-_USERNAME_ALLOWED = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._@-")
+_USERNAME_ALLOWED = USERNAME_CHARS
 
 # --- passwords -------------------------------------------------------------------
 
@@ -480,6 +489,59 @@ def csrf_matches(cookie_token: str | None, header_token: str | None) -> bool:
     if not cookie_token or not header_token:
         return False
     return hmac.compare_digest(cookie_token.encode(), header_token.encode())
+
+
+# --- automatic sign-in (development stacks only, ADR-0027) ------------------------
+
+#: Header names a proxy adds. Any one of them on a request means it did not come straight
+#: from a browser on this machine, whatever the TCP peer says: a reverse proxy on the same
+#: host connects from loopback, and this is what tells its requests apart.
+FORWARDING_HEADERS: frozenset[str] = frozenset({"forwarded", "x-real-ip", "via"})
+FORWARDING_HEADER_PREFIX = "x-forwarded-"
+
+
+def _host_name(value: str) -> str:
+    """The host part of a ``Host`` header value (``localhost:8000``, ``[::1]:8000``)."""
+    raw = value.strip()
+    if raw.startswith("["):
+        return raw[1:].split("]", 1)[0]
+    return raw.rsplit(":", 1)[0] if raw.count(":") == 1 else raw
+
+
+def dev_autologin_refusal(request: Request) -> str | None:
+    """Why this request may NOT be signed in automatically, or ``None`` when it may.
+
+    All five must hold: the TCP peer is loopback (``127.0.0.0/8`` or ``::1``); no forwarding
+    header is present (``Forwarded``, ``X-Forwarded-*``, ``X-Real-IP``, ``Via``); the ``Host``
+    header names this machine (a page on another name whose DNS was pointed at 127.0.0.1 —
+    DNS rebinding — arrives from a loopback peer but with its own name); an ``Origin``, when
+    sent, is a loopback origin; and the browser did not mark the request ``cross-site``. The
+    sentence names the first condition that failed; it is for the log, never the response.
+    """
+    peer = request.client.host if request.client else ""
+    if not is_loopback_host(peer):
+        return f"the TCP peer {peer or 'unknown'!s} is not loopback"
+    forwarded = sorted(
+        name
+        for name in {k.lower() for k in request.headers}
+        if name in FORWARDING_HEADERS or name.startswith(FORWARDING_HEADER_PREFIX)
+    )
+    if forwarded:
+        return (
+            f"the request carries the forwarding header(s) {', '.join(forwarded)}, so it came "
+            "through a proxy"
+        )
+    host = _host_name(request.headers.get("host", ""))
+    if not is_loopback_host(host):
+        return f"the Host header names {host!r}, not this machine"
+    origin = request.headers.get("origin")
+    if origin is not None:
+        origin_host = urlsplit(origin).hostname or ""
+        if not is_loopback_host(origin_host):
+            return f"the Origin {origin[:80]!r} is not this machine"
+    if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        return "the browser marked the request cross-site"
+    return None
 
 
 # --- dependencies ----------------------------------------------------------------
@@ -892,6 +954,8 @@ class AuthlibOidcClient:
 __all__ = [
     "CSRF_COOKIE",
     "CSRF_HEADER",
+    "FORWARDING_HEADERS",
+    "FORWARDING_HEADER_PREFIX",
     "GITHUB_SETUP_COOKIE",
     "GITHUB_SETUP_STATE_TTL_S",
     "LOCAL_ISSUER",
@@ -916,6 +980,7 @@ __all__ = [
     "credential_version",
     "csrf_matches",
     "current_user",
+    "dev_autologin_refusal",
     "find_local_user",
     "hash_password",
     "is_local_account",

@@ -36,7 +36,7 @@ Works with:   src/crb/server/auth.py (``dev_autologin_refusal``, the session pri
               src/crb/server/settings.py (``AuthSettings``, ``dev_autologin_refusal_for``),
               src/crb/server/main.py (``serve``), src/crb/server/routes/system.py
               (``probe_dev_autologin``, ``/health``, ``/version``), src/crb/server/app.py
-              (the start-up warning), docs/SECURITY.md#39-automatic-sign-in-on-a-development-stack
+              (the start-up warning), docs/SECURITY.md#38-automatic-sign-in-on-a-development-stack
 Tested by:    tests/test_server_dev_autologin.py
 Touch when:   the conditions for an automatic sign-in change (a case here for each one, and
               the threat-model row in docs/SECURITY.md); never to relax a refusal.
@@ -131,8 +131,9 @@ class TestSettings:
             assert c.get(f"{API_PREFIX}/version").json()["dev_autologin"] is False
 
     def test_prod_refuses_it(self, tmp_path: Path) -> None:
-        with pytest.raises(ValidationError, match="CRB_AUTH__DEV_AUTOLOGIN"):
-            make_settings(tmp_path, env="prod")
+        # allow_temp_home: tmp_path is an OS temporary directory, which prod refuses first
+        with pytest.raises(ValidationError, match="only when CRB_ENV=dev"):
+            make_settings(tmp_path, env="prod", allow_temp_home=True)
 
     def test_prod_from_the_environment_refuses_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -193,11 +194,10 @@ class TestWhoIsSignedIn:
             assert me.status_code == 200 and me.json()["display_name"] == "root"
 
     @pytest.mark.parametrize(
-        "host", ["localhost:8000", "127.0.0.1:8000", "[::1]:8000", "localhost"]
+        "host", ["localhost:8000", "127.0.0.1:8000", "[::1]:8000", "localhost", "LOCALHOST:5173"]
     )
-    def test_every_loopback_host_name_is_admitted(self, app: Any, host: str) -> None:
-        with local_client(app, host=host) as c:
-            assert c.post(AUTOLOGIN).status_code == 200
+    def test_every_loopback_host_name_is_admitted(self, local: TestClient, host: str) -> None:
+        assert local.post(AUTOLOGIN, headers={"Host": host}).status_code == 200
 
     @pytest.mark.parametrize("peer", ["192.168.1.20", "10.0.0.5", "172.17.0.1", "testclient"])
     def test_a_remote_peer_is_refused_as_if_it_were_off(
@@ -368,7 +368,10 @@ class TestAuditAndReporting:
     ) -> None:
         with caplog.at_level(logging.WARNING, logger="crb.server.auth"):
             assert local.post(AUTOLOGIN).status_code == 200
-            assert local.post(AUTOLOGIN).status_code == 200
+            # the second call rides the first session, so it is CSRF-checked like any other
+            csrf = {"X-CSRF-Token": local.cookies[CSRF_COOKIE]}
+            assert local.post(AUTOLOGIN).status_code == 403  # no header: refused, no event
+            assert local.post(AUTOLOGIN, headers=csrf).status_code == 200
         events = _autologin_events(app)
         assert len(events) == 2
         me = local.get(f"{API_PREFIX}/auth/me").json()

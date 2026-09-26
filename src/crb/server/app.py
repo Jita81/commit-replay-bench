@@ -4,7 +4,7 @@ Responsibilities (and nothing else — domain routes live in :mod:`crb.server.ro
 
 * **Lifespan**: open the database, create tables, prove the append-only triggers are
   live (:func:`crb.store.ledger.assert_append_only`), seed the bootstrap admin when the
-  users table is empty.
+  users table is empty, and warn once, loudly, when automatic sign-in is on (ADR-0027).
 * **Middleware** (outermost first): CORS (only when origins are configured) → request id
   → access log + HTTP metrics → security headers → CSRF double-submit → domain-error
   envelope. All are pure ASGI so SSE streams (W2-B) pass through unbuffered.
@@ -34,7 +34,8 @@ How:          ``create_app`` builds the app and middleware (last added = outermo
               ``_lifespan_factory`` does the database work at startup, not import time.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md (the 409 mapping),
-              docs/adr/0005-fail-closed-docker-sandbox.md (the 503 mapping)
+              docs/adr/0005-fail-closed-docker-sandbox.md (the 503 mapping),
+              docs/adr/0027-dev-autologin-on-loopback.md (the start-up warning)
 Works with:   src/crb/server/deps.py (``ApiError`` and the envelope this renders),
               src/crb/server/auth.py (cookies, CSRF check, bootstrap admin, OIDC client),
               src/crb/server/settings.py (everything the factory reads), src/crb/store/db.py
@@ -42,7 +43,8 @@ Works with:   src/crb/server/deps.py (``ApiError`` and the envelope this renders
               src/crb/server/routes/__init__.py (the mounting contract),
               src/crb/server/http_metrics.py (the middleware's metrics sink), docs/API.md
               (the envelope and the reserved codes)
-Tested by:    tests/test_server_app.py, tests/test_server_auth.py, tests/test_server_system.py
+Tested by:    tests/test_server_app.py, tests/test_server_auth.py, tests/test_server_system.py,
+              tests/test_server_dev_autologin.py
 Touch when:   never for a new repository; adding a middleware means deciding its position in
               the stack (comment the order) and keeping it pure ASGI so SSE is not buffered;
               mapping a new engine exception to a reserved code means adding its NAME to the
@@ -489,6 +491,15 @@ def _lifespan_factory(
             app.state.ui_dist = mount_ui(app, settings)
             app.state.ui_mounted = True
         app.state.started_at = time.time()
+        if settings.auth.dev_autologin:
+            # Loud on purpose, once per start: the settings only admit it on a dev stack
+            # bound to loopback, but whoever reads this log should never be surprised by it.
+            log.warning(
+                "AUTOMATIC SIGN-IN IS ON: a browser on this machine is signed in as %r "
+                "without a password (CRB_AUTH__DEV_AUTOLOGIN). Development stacks only — "
+                "never use in production (docs/adr/0027-dev-autologin-on-loopback.md)",
+                settings.auth.dev_autologin,
+            )
         log.info(
             "crb server ready",
             extra={"version": __version__, "env": settings.env, "db": settings.database_dialect},
