@@ -12,6 +12,17 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Every cost and latency carries its n, its interval and its apparatus** (branch `feat/ns1-e`,
+  F35, DL-073). Each cell of `GET /capability-map`, and the map itself, now serves `economics`:
+  the attempts and clean attempts with a known cost or latency as denominators, the mean with a
+  Student-t 95 % interval (cost per clean attempt: a delta-method ratio interval) and its method,
+  and the apparatus and posture class. A known `$0` is `$0`; an unknown is a dash with its
+  reason, never zero; fewer than two known rows serve no interval and say why. Rows of more than
+  one apparatus version, posture class or checks arm are refused, never pooled. `cost_usd_mean`
+  now counts a known `$0`, so a cell mixing free and paid attempts can read lower. The Baseline
+  and Capability tiles show all of it, and the Baseline says merge outcomes are recorded only for
+  the pull requests the factory opened.
+
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile
   score working changes per pound, blind, and VALUE heads the definition of done. A bug class is

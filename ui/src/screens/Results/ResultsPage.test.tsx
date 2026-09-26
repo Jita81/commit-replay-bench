@@ -28,7 +28,11 @@
  *               field; that a run poll that fails shows "Could not read the measurement in
  *               progress" with a Try again, never a queued or running banner; that every
  *               query the page reads has a test for its failure state; and that the page's
- *               source reads no query's `data` directly in any form `queryDataReads` finds.
+ *               source reads no query's `data` directly in any form `queryDataReads` finds;
+ *               that the economics tiles carry the known n, the served interval, the
+ *               apparatus and the posture class (F35), the About block describes them as
+ *               served, and the throughput callout says merge outcomes are recorded for
+ *               delivered pull requests only.
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`; `qc.refetchQueries()` for a
  *               refetch; the page's own source as `?raw` text for the `currentData` ratchet.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -46,6 +50,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { helpFor } from '../../help/help'
 import { unhinted } from '../../help/hints-collector'
 import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
@@ -122,8 +127,11 @@ describe('ResultsPage', () => {
       cost_known_clean: 28,
       latency_known: 0,
       latency_known_clean: 0,
-      apparatus_versions: ['2.2'],
+      apparatus_versions: ['2.3'],
+      posture_classes: ['local/inplace/host-env'],
+      checks_arms: ['off'],
       pooled: false,
+      pooled_reason: '',
       cost_per_attempt: { n: 30, value: 0.25, ci_low: 0.2, ci_high: 0.3, method: T, reason: '' },
       cost_per_clean: { n: 28, value: 0.268, ci_low: 0.21, ci_high: 0.33, method: 'delta-method (ratio estimator) Student-t 95%', reason: '' },
       latency_per_attempt: { n: 0, value: null, ci_low: null, ci_high: null, method: T, reason: 'no attempt recorded a known latency' },
@@ -134,7 +142,7 @@ describe('ResultsPage', () => {
     expect(cost).toHaveTextContent('$0.2500')
     expect(cost).toHaveTextContent('n =30') // the attempts with a known cost, not all 35
     expect(cost).toHaveTextContent('95% CI[$0.2000, $0.3000]')
-    expect(cost).toHaveTextContent(`30 of 35 attempts with a known cost · ${T} · apparatus 2.2`)
+    expect(cost).toHaveTextContent(`30 of 35 attempts with a known cost · ${T} · apparatus 2.3 · posture local/inplace/host-env`)
     const perClean = screen.getByTestId('tile-cost-per-clean')
     expect(perClean).toHaveTextContent('n =28')
     expect(perClean).toHaveTextContent('28 clean of 30 attempts with a known cost')
@@ -149,6 +157,22 @@ describe('ResultsPage', () => {
     expect(clean).toHaveTextContent('n =35')
     expect(clean).toHaveTextContent(/95% CI\[\d/)
     expect(clean).toHaveTextContent('33 clean of 35 attempts, all cells · Wilson 95% · apparatus 2.2')
+  })
+
+  it('the About block describes the economics tiles as served: known n, an interval, the apparatus, a dash for unknown (F35)', () => {
+    const numbers = helpFor('/results')?.numbers ?? ''
+    expect(numbers).toContain('Cost and latency carry the attempts with a known value as n, a Student-t 95 % interval and the apparatus')
+    expect(numbers).toContain('an unknown is a dash, never zero')
+    expect(numbers).not.toMatch(/means only|does not yet serve an interval/)
+  })
+
+  it('the throughput callout names what is not recorded and says merge outcomes are recorded for delivered pull requests only', async () => {
+    mockApi(ROUTES)
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const callout = await screen.findByText(/cost per accepted change cannot be shown here honestly/)
+    expect(callout).toHaveTextContent('The ledger records no human hours')
+    expect(callout).toHaveTextContent('merge outcomes only for the pull requests the factory opened')
+    expect(callout).not.toHaveTextContent(/neither human hours nor merge outcomes/)
   })
 
   it('the bar in the oracle tile follows the policy in force, not a constant', async () => {

@@ -8,7 +8,9 @@
  *               per attempt, cost per clean attempt or latency per attempt.
  * What it does: Uses the server's own denominators (attempts and clean attempts with a KNOWN
  *               value), its interval and its method string, and the apparatus versions the
- *               rows came from — nothing is recomputed or averaged in the browser. An unknown
+ *               rows came from with their posture class — nothing is recomputed or averaged in
+ *               the browser; a fold the server refused to pool (apparatus, posture class or
+ *               checks arm) is the dash with the server's reason. An unknown
  *               value is the dash with the server's reason, never `$0`; a value with no
  *               interval shows "95% CI —" and says why; a response with no economics block
  *               says the server did not send one.
@@ -62,7 +64,8 @@ export function economicsTile(e: Economics | undefined, figure: EconomicsFigure)
   if (!e) return { value: DASH, n: 0, ci: null, ciFormat: format, apparatus: NO_ECONOMICS }
   const est = e[figure]
   const ci = est.value !== null && est.ci_low !== null && est.ci_high !== null ? { low: est.ci_low, high: est.ci_high } : null
-  const apparatus = `apparatus ${e.apparatus_versions.join(', ') || DASH}`
+  const posture = e.posture_classes.length ? ` · posture ${e.posture_classes.join(', ')}` : ''
+  const apparatus = `apparatus ${e.apparatus_versions.join(', ') || DASH}${posture}`
   return {
     value: est.value === null ? DASH : format(est.value),
     n: est.n,

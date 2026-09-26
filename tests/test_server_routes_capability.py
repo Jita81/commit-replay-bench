@@ -22,7 +22,7 @@ What it does: Pins that only measured cells appear, that the seed's controls ver
               following the latest verdict, the failure split per repo and run, that
               sighted and blind rows are never pooled, and that every cell and the map carry
               their economics (known counts, t intervals, apparatus) and refuse to pool
-              apparatus versions (F35).
+              apparatus versions or posture classes (F35).
 How:          ``make_env`` over the seed; newer ``controls.report`` events appended through the
               ORM where a different controls state is needed (the latest wins).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -865,6 +865,47 @@ def test_posture_all_pools_only_posture_invariant_tasks(env: Env) -> None:
     assert cell["n"] == 4  # tasks 0 and 1, in both classes
     assert body["summary"]["excluded_posture_divergent"] == 4  # tasks 2 and 3, both rows each
     assert sorted(cell["posture_ids"]) == ["pst_docker", "pst_local"]
+
+
+def test_economics_never_pool_posture_classes(env: Env) -> None:
+    """F35 × ADR-0019 §8: ``posture=all`` may pool RATES over posture-invariant tasks, but a
+    cost or a wall clock is not invariant across postures (a sealed container is slower
+    than the host) — the economics of a cell and of the map spanning two classes are
+    withheld with the classes named; each class read alone serves its own figures."""
+    from crb.core.qualify import Qualification
+    from crb.store import qualifications as sq
+
+    _posture_rows(env, 2, cls="local/inplace/host-env", pid="pst_local", latency_s=10.0)
+    _posture_rows(env, 2, cls="docker/copy/sealed", pid="pst_docker", latency_s=90.0)
+    for i in range(2):
+        for pid, cls in (
+            ("pst_local", "local/inplace/host-env"),
+            ("pst_docker", "docker/copy/sealed"),
+        ):
+            q = Qualification(
+                qualification_id="",
+                repo=BETA,
+                task_id=f"{i:040x}",
+                posture_id=pid,
+                posture={"posture_class": cls, "executor": cls.split("/")[0]},
+                state="qualified",
+            )
+            with env.factory() as s:
+                sq.append(s, q)
+    pooled = _beta(env, "&posture=all")
+    (cell,) = pooled["cells"]
+    assert cell["n"] == 4  # the rates pool: both tasks are posture-invariant
+    for e in (cell["economics"], pooled["economics"]):
+        assert e["pooled"] is True and e["latency_known"] == 4
+        assert e["posture_classes"] == ["docker/copy/sealed", "local/inplace/host-env"]
+        lat = e["latency_per_attempt"]
+        assert lat["value"] is None and lat["ci_low"] is None
+        assert "2 posture classes (docker/copy/sealed, local/inplace/host-env)" in lat["reason"]
+        assert e["pooled_reason"] == lat["reason"]
+    for cls, want in (("local/inplace/host-env", 10.0), ("docker/copy/sealed", 90.0)):
+        e = _beta(env, f"&posture={cls}")["economics"]
+        assert e["pooled"] is False and e["posture_classes"] == [cls]
+        assert e["latency_per_attempt"]["value"] == want
 
 
 def test_pre_2_3_docker_rows_are_excluded_and_counted(env: Env) -> None:

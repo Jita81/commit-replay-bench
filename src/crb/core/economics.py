@@ -20,9 +20,13 @@ Rules
   bound below zero is floored at ``0`` — a cost or a duration cannot be negative — and the
   method string says so. One known row serves its value and no interval; none serves no
   value. Each says why.
-* **Never pooled across apparatus.** Rows from more than one ``apparatus_version`` are
-  refused: every estimate is withheld with the versions named, as the rest of the map
-  refuses to blend apparatus (docs/EVIDENCE-AND-CLAIMS.md §4). Read one apparatus instead.
+* **Never pooled across apparatus, posture or checks arm.** Rows from more than one
+  ``apparatus_version`` (docs/EVIDENCE-AND-CLAIMS.md §4), more than one posture class
+  (ADR-0019 §8) or more than one checks arm (ADR-0024) are refused: the counts stay, every
+  estimate is withheld and the reason names what the rows span. The map may pool RATES over
+  posture classes on request (``posture=all``, invariant tasks only), but a cost or a wall
+  clock is never invariant across postures — a sealed container is slower than the host —
+  so the economics of such a cell are withheld. Read one of each instead.
 
 Navigation
 ----------
@@ -31,12 +35,14 @@ What it is:   The cost and latency fold for one cell (or one repository's rows):
 What it does: ``fold_economics(rows)`` → :class:`Economics` with ``cost_per_attempt``,
               ``cost_per_clean`` and ``latency_per_attempt`` as :class:`Estimate` (n, value,
               ci_low, ci_high, method, reason); refuses a pooled apparatus; never reads an
-              unknown as zero.
+              unknown as zero; refuses rows spanning apparatus versions, posture classes or
+              checks arms.
 How:          Eligible rows only (the cell's ``n``); ``GradeRow.cost_known`` and
               ``latency_s > 0`` pick the known rows; ``t_975`` gives the critical value.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0003-one-routing-rule.md (economics never route — this is a report)
-Works with:   src/crb/core/ledger.py (``GradeRow.cost_known``, ``GradeRow.eligible``),
+Works with:   src/crb/core/ledger.py (``GradeRow.cost_known``, ``GradeRow.eligible``,
+              ``GradeRow.posture_class``, ``GradeRow.checks_arm``),
               src/crb/core/stats.py (``t_975``, ``mean``, ``stddev``),
               src/crb/core/capability.py (attaches an ``Economics`` to every measured cell),
               src/crb/server/routes/capability.py (serves it per cell and for the map),
@@ -58,6 +64,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from crb.core.checks import ARMS
 from crb.core.ledger import GradeRow
 from crb.core.stats import mean, stddev, t_975
 
@@ -70,8 +77,8 @@ METHOD_T_RATIO = (
 )
 
 REASON_POOLED = (
-    "rows from {k} apparatus versions ({versions}) — economics are never pooled across "
-    "apparatus versions; read one apparatus"
+    "rows from {spans} — economics are never pooled across apparatus versions, posture "
+    "classes or checks arms; read one of each"
 )
 REASON_NONE_KNOWN = "no attempt recorded a known {axis}"
 REASON_ONE_KNOWN = "one attempt with a known {axis} — an interval needs at least two"
@@ -108,7 +115,9 @@ class Economics:
     """The economics of one group of rows. ``n_attempts`` / ``n_clean`` are the eligible
     rows (the cell's ``n`` and ``clean``); the ``*_known`` counts are the denominators
     behind each axis; ``pooled`` is ``True`` when the rows span more than one apparatus
-    version, in which case every estimate is withheld."""
+    version, posture class or checks arm, in which case every estimate is withheld and
+    ``pooled_reason`` says what they span (``""`` otherwise). ``posture_classes`` lists the
+    labelled classes (a row graded before apparatus 2.3 carries none)."""
 
     n_attempts: int
     n_clean: int
@@ -117,7 +126,10 @@ class Economics:
     latency_known: int
     latency_known_clean: int
     apparatus_versions: tuple[str, ...]
+    posture_classes: tuple[str, ...]
+    checks_arms: tuple[str, ...]
     pooled: bool
+    pooled_reason: str
     cost_per_attempt: Estimate
     cost_per_clean: Estimate
     latency_per_attempt: Estimate
@@ -131,7 +143,10 @@ class Economics:
             "latency_known": self.latency_known,
             "latency_known_clean": self.latency_known_clean,
             "apparatus_versions": list(self.apparatus_versions),
+            "posture_classes": list(self.posture_classes),
+            "checks_arms": list(self.checks_arms),
             "pooled": self.pooled,
+            "pooled_reason": self.pooled_reason,
             "cost_per_attempt": self.cost_per_attempt.to_dict(),
             "cost_per_clean": self.cost_per_clean.to_dict(),
             "latency_per_attempt": self.latency_per_attempt.to_dict(),
@@ -183,6 +198,23 @@ def _withheld(n: int, method: str, reason: str) -> Estimate:
     return Estimate(n, None, None, None, method, reason)
 
 
+def pooled_reason(
+    versions: tuple[str, ...], classes: tuple[str, ...], arms: tuple[str, ...]
+) -> str:
+    """Why a group of rows may not be folded into one figure (``""`` when it may): each
+    axis with more than one value is named with its values."""
+    spans = [
+        f"{len(values)} {what} ({', '.join(values)})"
+        for what, values in (
+            ("apparatus versions", versions),
+            ("posture classes", classes),
+            ("checks arms", arms),
+        )
+        if len(values) > 1
+    ]
+    return REASON_POOLED.format(spans="; ".join(spans)) if spans else ""
+
+
 def fold_economics(rows: Iterable[GradeRow]) -> Economics:
     """Reduce rows (one cell, or one repository's filtered rows) to :class:`Economics`.
 
@@ -191,35 +223,35 @@ def fold_economics(rows: Iterable[GradeRow]) -> Economics:
     rs = list(rows)
     eligible = [r for r in rs if r.eligible]
     versions = tuple(sorted({r.apparatus_version for r in rs}))
+    classes = tuple(sorted({r.posture_class for r in rs if r.posture_class}))
+    arms = tuple(sorted({r.checks_arm for r in rs}, key=ARMS.index))
     cost_rows = [r for r in eligible if r.cost_known]
     lat_rows = [r for r in eligible if latency_known(r)]
-    counts = {
-        "n_attempts": len(eligible),
-        "n_clean": sum(1 for r in eligible if r.clean),
-        "cost_known": len(cost_rows),
-        "cost_known_clean": sum(1 for r in cost_rows if r.clean),
-        "latency_known": len(lat_rows),
-        "latency_known_clean": sum(1 for r in lat_rows if r.clean),
-    }
-    if len(versions) > 1:
-        reason = REASON_POOLED.format(k=len(versions), versions=", ".join(versions))
-        return Economics(
-            **counts,
-            apparatus_versions=versions,
-            pooled=True,
-            cost_per_attempt=_withheld(counts["cost_known"], METHOD_T_MEAN, reason),
-            cost_per_clean=_withheld(counts["cost_known_clean"], METHOD_T_RATIO, reason),
-            latency_per_attempt=_withheld(counts["latency_known"], METHOD_T_MEAN, reason),
-        )
+    costs = [r.cost_usd for r in cost_rows]
+    reason = pooled_reason(versions, classes, arms)
+    if reason:
+        cost_per_attempt = _withheld(len(cost_rows), METHOD_T_MEAN, reason)
+        cost_per_clean = _withheld(sum(1 for r in cost_rows if r.clean), METHOD_T_RATIO, reason)
+        latency_per_attempt = _withheld(len(lat_rows), METHOD_T_MEAN, reason)
+    else:
+        cost_per_attempt = mean_estimate(costs, "cost")
+        cost_per_clean = ratio_estimate(costs, [r.clean for r in cost_rows])
+        latency_per_attempt = mean_estimate([r.latency_s for r in lat_rows], "latency")
     return Economics(
-        **counts,
+        n_attempts=len(eligible),
+        n_clean=sum(1 for r in eligible if r.clean),
+        cost_known=len(cost_rows),
+        cost_known_clean=sum(1 for r in cost_rows if r.clean),
+        latency_known=len(lat_rows),
+        latency_known_clean=sum(1 for r in lat_rows if r.clean),
         apparatus_versions=versions,
-        pooled=False,
-        cost_per_attempt=mean_estimate([r.cost_usd for r in cost_rows], "cost"),
-        cost_per_clean=ratio_estimate(
-            [r.cost_usd for r in cost_rows], [r.clean for r in cost_rows]
-        ),
-        latency_per_attempt=mean_estimate([r.latency_s for r in lat_rows], "latency"),
+        posture_classes=classes,
+        checks_arms=arms,
+        pooled=bool(reason),
+        pooled_reason=reason,
+        cost_per_attempt=cost_per_attempt,
+        cost_per_clean=cost_per_clean,
+        latency_per_attempt=latency_per_attempt,
     )
 
 
@@ -231,5 +263,6 @@ __all__ = [
     "fold_economics",
     "latency_known",
     "mean_estimate",
+    "pooled_reason",
     "ratio_estimate",
 ]

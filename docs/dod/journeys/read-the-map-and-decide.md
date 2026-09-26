@@ -8,7 +8,7 @@ children: [dod.page.results, dod.page.decisions, dod.page.capability, dod.page.r
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Read the map and decide

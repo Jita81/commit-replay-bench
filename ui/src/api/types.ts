@@ -933,7 +933,7 @@ export interface EconomicsEstimate {
   reason: string
 }
 
-/** `crb.core.economics.Economics` — cost and latency with their denominators, intervals and apparatus. `pooled` = the rows span more than one apparatus version, so every estimate is withheld. */
+/** `crb.core.economics.Economics` — cost and latency with their denominators, intervals and apparatus. `pooled` = the rows span more than one apparatus version, posture class or checks arm, so every estimate is withheld and `pooled_reason` names what they span. */
 export interface Economics {
   n_attempts: number
   n_clean: number
@@ -942,7 +942,12 @@ export interface Economics {
   latency_known: number
   latency_known_clean: number
   apparatus_versions: string[]
+  /** The labelled posture classes of the rows (ADR-0019); empty for rows graded before 2.3. */
+  posture_classes: string[]
+  /** The checks arms of the rows (ADR-0024); one, unless the fold was refused. */
+  checks_arms: string[]
   pooled: boolean
+  pooled_reason: string
   cost_per_attempt: EconomicsEstimate
   cost_per_clean: EconomicsEstimate
   latency_per_attempt: EconomicsEstimate

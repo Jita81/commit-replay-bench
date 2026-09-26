@@ -7,8 +7,10 @@
  * What it does: Pins that a known $0 renders as $0.00 with its n and interval, that an unknown
  *               renders as the dash with the server's reason (never $0.00), that one known row
  *               shows the value with no interval and the reason, that a pooled apparatus is
- *               refused with the versions named, that the denominators are the known counts,
- *               and that a response with no economics block says so.
+ *               refused with the versions named, that a pooled posture class is refused with
+ *               the classes named, that the posture class stands beside the apparatus, that
+ *               the denominators are the known counts, and that a response with no economics
+ *               block says so.
  * How:          Hand-built `Economics` objects; no rendering.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -30,8 +32,11 @@ const econ = (over: Partial<Economics>): Economics => ({
   cost_known_clean: 34,
   latency_known: 40,
   latency_known_clean: 38,
-  apparatus_versions: ['2.2'],
+  apparatus_versions: ['2.3'],
+  posture_classes: ['local/inplace/host-env'],
+  checks_arms: ['off'],
   pooled: false,
+  pooled_reason: '',
   cost_per_attempt: est({ n: 36, value: 0.12, ci_low: 0.1, ci_high: 0.14 }),
   cost_per_clean: est({ n: 34, value: 0.127, ci_low: 0.105, ci_high: 0.149 }),
   latency_per_attempt: est({ n: 40, value: 95, ci_low: 80, ci_high: 110 }),
@@ -45,7 +50,7 @@ describe('economicsTile', () => {
     expect(t.n).toBe(36)
     expect(t.ci).toEqual({ low: 0.1, high: 0.14 })
     expect(t.ciFormat(0.1)).toBe('$0.1000')
-    expect(t.apparatus).toBe(`36 of 40 attempts with a known cost · ${T_MEAN} · apparatus 2.2`)
+    expect(t.apparatus).toBe(`36 of 40 attempts with a known cost · ${T_MEAN} · apparatus 2.3 · posture local/inplace/host-env`)
     const clean = economicsTile(econ({}), 'cost_per_clean')
     expect(clean.n).toBe(34)
     expect(clean.apparatus).toContain('34 clean of 36 attempts with a known cost')
@@ -85,6 +90,21 @@ describe('economicsTile', () => {
     expect(t.value).toBe('—')
     expect(t.apparatus).toContain('never pooled')
     expect(t.apparatus).toContain('apparatus 2.1, 2.2')
+  })
+
+  it('a pooled posture class is refused with the classes named', () => {
+    const reason = 'rows from 2 posture classes (docker/copy/sealed, local/inplace/host-env) — economics are never pooled across apparatus versions, posture classes or checks arms; read one of each'
+    const classes = ['docker/copy/sealed', 'local/inplace/host-env']
+    const t = economicsTile(econ({ pooled: true, pooled_reason: reason, posture_classes: classes, latency_per_attempt: est({ n: 40, reason }) }), 'latency_per_attempt')
+    expect(t.value).toBe('—')
+    expect(t.ci).toBeNull()
+    expect(t.apparatus).toContain('never pooled')
+    expect(t.apparatus).toContain('posture docker/copy/sealed, local/inplace/host-env')
+  })
+
+  it('rows graded before posture labels existed name no posture, never a guessed one', () => {
+    const t = economicsTile(econ({ apparatus_versions: ['2.2'], posture_classes: [] }), 'cost_per_attempt')
+    expect(t.apparatus.endsWith('apparatus 2.2')).toBe(true)
   })
 
   it('no economics block from the server says so', () => {

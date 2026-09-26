@@ -125,8 +125,11 @@ describe('CapabilityPage', () => {
       cost_known_clean: 35,
       latency_known: 0,
       latency_known_clean: 0,
-      apparatus_versions: ['2.0'],
+      apparatus_versions: ['2.3'],
+      posture_classes: ['docker/copy/sealed'],
+      checks_arms: ['off'],
       pooled: false,
+      pooled_reason: '',
       cost_per_attempt: { n: 38, value: 0.012, ci_low: 0.01, ci_high: 0.014, method: T, reason: '' },
       cost_per_clean: { n: 35, value: 0.013, ci_low: 0.011, ci_high: 0.015, method: T, reason: '' },
       latency_per_attempt: { n: 0, value: null, ci_low: null, ci_high: null, method: T, reason: 'no attempt recorded a known latency' },
@@ -145,10 +148,47 @@ describe('CapabilityPage', () => {
     const cost = await screen.findByTestId('tile-cost')
     expect(cost).toHaveTextContent('n =38')
     expect(cost).toHaveTextContent('95% CI[$0.0100, $0.0140]')
-    expect(cost).toHaveTextContent(`38 of 40 attempts with a known cost · ${T} · apparatus 2.0`)
+    expect(cost).toHaveTextContent(`38 of 40 attempts with a known cost · ${T} · apparatus 2.3 · posture docker/copy/sealed`)
     const latency = screen.getByTestId('tile-latency')
     expect(latency).toHaveTextContent('n =0')
     expect(latency).toHaveTextContent('no attempt recorded a known latency')
+  })
+
+  it('a cell whose rows span two posture classes shows no cost or latency, and the tile says why (F35, ADR-0019)', async () => {
+    const T = 'Student-t 95% on the known rows (n-1 df), lower bound floored at 0'
+    const reason = 'rows from 2 posture classes (docker/copy/sealed, local/inplace/host-env) — economics are never pooled across apparatus versions, posture classes or checks arms; read one of each'
+    const withheld = { n: 40, value: null, ci_low: null, ci_high: null, method: T, reason }
+    const economics = {
+      n_attempts: 40,
+      n_clean: 37,
+      cost_known: 40,
+      cost_known_clean: 37,
+      latency_known: 40,
+      latency_known_clean: 37,
+      apparatus_versions: ['2.3'],
+      posture_classes: ['docker/copy/sealed', 'local/inplace/host-env'],
+      checks_arms: ['off'],
+      pooled: true,
+      pooled_reason: reason,
+      cost_per_attempt: withheld,
+      cost_per_clean: { ...withheld, n: 37 },
+      latency_per_attempt: withheld,
+    }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, cells: [cell({ economics })] },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const tile = await screen.findByTestId('cell-measured')
+    // the flat means still exist on the wire; the grid reads the refused fold, never them
+    expect(within(tile).getByTestId('cell-cost').textContent).toBe('—')
+    expect(within(tile).getByTestId('cell-latency').textContent).toBe('—')
+    fireEvent.click(tile)
+    const latency = await screen.findByTestId('tile-latency')
+    expect(latency).toHaveTextContent('95% CI—')
+    expect(latency).toHaveTextContent('never pooled')
+    expect(latency).toHaveTextContent('posture docker/copy/sealed, local/inplace/host-env')
   })
 
   it('shows the designed empty state when no repo is chosen; its action is Connection, not the repo list (J-HEL-14)', async () => {

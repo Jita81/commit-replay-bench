@@ -371,7 +371,7 @@ export const HINTS = {
   'stat.results.clean_rate':
     'Clean attempts over all attempts across every measured cell, with n and a Wilson 95% interval. It is a whole-repository summary and is never a routing input: routes are decided cell by cell.',
   'banner.results.no_throughput':
-    'The ledger records neither human hours nor merge outcomes, so cost per accepted change cannot be shown honestly. Cost per clean attempt is what is measured.',
+    'The ledger records no human hours. Merge outcomes are recorded only for the pull requests the factory opened, never for the attempts measured here, so cost per accepted change cannot be shown honestly. Cost per clean attempt is what is measured.',
   'button.results.routing':
     'Every cell’s route decision with its reason code and the policy thresholds in force.',
   'button.results.oracle':

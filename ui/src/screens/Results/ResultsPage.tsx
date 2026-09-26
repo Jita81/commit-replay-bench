@@ -418,7 +418,7 @@ export function ResultsPage() {
                 </div>
                 <Hint as="div" id="banner.results.no_throughput">
                   <WarningCallout title="No throughput headline">
-                    The ledger records neither human hours nor merge outcomes yet, so cost per accepted change cannot be shown here honestly. What is shown is cost per clean attempt, which is measured.
+                    The ledger records no human hours, and merge outcomes only for the pull requests the factory opened (the map's merged count), never for the attempts measured here. So cost per accepted change cannot be shown here honestly. What is shown is cost per clean attempt, which is measured.
                   </WarningCallout>
                 </Hint>
                 <div className="mt-3 flex flex-wrap gap-2">

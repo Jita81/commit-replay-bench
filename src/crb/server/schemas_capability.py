@@ -128,7 +128,8 @@ class EstimateOut(BaseModel):
 class EconomicsOut(BaseModel):
     """:meth:`crb.core.economics.Economics.to_dict` — cost and latency with their
     denominators, intervals and apparatus. ``pooled`` is ``true`` when the rows span more
-    than one apparatus version: every estimate is then withheld (never blended)."""
+    than one apparatus version, posture class or checks arm: every estimate is then
+    withheld (never blended) and ``pooled_reason`` names what the rows span."""
 
     n_attempts: int
     n_clean: int
@@ -137,7 +138,10 @@ class EconomicsOut(BaseModel):
     latency_known: int
     latency_known_clean: int
     apparatus_versions: list[str]
+    posture_classes: list[str]
+    checks_arms: list[str]
     pooled: bool
+    pooled_reason: str
     cost_per_attempt: EstimateOut
     cost_per_clean: EstimateOut
     latency_per_attempt: EstimateOut

@@ -7,8 +7,9 @@ What it does: Pins that a known $0 is $0 and enters the mean, that an unknown co
               read as $0, that all-unknown serves no value, one known row serves a value and
               no interval (with the reason), that the t interval and the delta-method ratio
               interval match hand-computed values, that a lower bound is floored at 0, that
-              rows from more than one apparatus are refused, and that a measured cell and
-              the served ``cost_usd_mean`` agree with the fold.
+              rows from more than one apparatus version, posture class (ADR-0019) or checks
+              arm (ADR-0024) are refused, and that a measured cell and the served
+              ``cost_usd_mean`` agree with the fold.
 How:          Hand-built ``GradeRow`` lists (``posture_row``: a current-apparatus row carries
               its posture labels); expected numbers computed by hand in the test
               (textbook t values), never by calling the module's own helpers.
@@ -30,9 +31,10 @@ import pytest
 
 from crb.core import capability as cap
 from crb.core import economics as ec
+from crb.core.checks import LABEL_CHECKS
 from crb.core.ledger import LABEL_COST_KNOWN, GradeRow
 from crb.core.version import APPARATUS_VERSION
-from fixtures.posture import posture_row
+from fixtures.posture import TEST_POSTURE_CLASS, posture_row
 
 PACK = "a" * 64
 
@@ -171,6 +173,48 @@ def test_mixed_apparatus_is_refused_never_pooled() -> None:
     for est in (e.cost_per_attempt, e.cost_per_clean, e.latency_per_attempt):
         assert est.value is None and est.ci_low is None and est.ci_high is None
         assert "2 apparatus versions (2.1, " in est.reason and "never pooled" in est.reason
+
+
+def test_mixed_posture_classes_are_refused_never_pooled() -> None:
+    # ADR-0019 §8: a host-measured attempt and a sealed one are different measurements;
+    # the map's posture=all pools their RATES only over invariant tasks, and a cost or a
+    # wall clock is never invariant across postures — so economics refuse the blend
+    sealed = "docker/copy/sealed"
+    rs = [
+        row(cost=0.1, latency=5.0),
+        row(cost=0.3, latency=90.0, labels={"posture_class": sealed}),
+    ]
+    e = ec.fold_economics(rs)
+    assert e.pooled is True and e.posture_classes == (sealed, TEST_POSTURE_CLASS)
+    assert e.cost_known == 2 and e.latency_known == 2
+    for est in (e.cost_per_attempt, e.cost_per_clean, e.latency_per_attempt):
+        assert est.value is None and est.ci_low is None and est.ci_high is None
+        assert f"2 posture classes ({sealed}, {TEST_POSTURE_CLASS})" in est.reason
+        assert "never pooled" in est.reason
+    assert e.pooled_reason == e.cost_per_attempt.reason
+    # one class alone is not pooled: the same rows split by class each serve a value
+    one = ec.fold_economics([r for r in rs if r.posture_class == sealed] * 2)
+    assert one.pooled is False and one.cost_per_attempt.value == pytest.approx(0.3)
+
+
+def test_mixed_checks_arms_are_refused_never_pooled() -> None:
+    # ADR-0024: a row graded with the format step on is a different measurement (the step
+    # itself costs time) from one graded without
+    rs = [row(latency=5.0), row(latency=8.0, labels={LABEL_CHECKS: "fmt=1"})]
+    assert {r.checks_arm for r in rs} == {"off", "fmt"}
+    e = ec.fold_economics(rs)
+    assert e.pooled is True and e.checks_arms == ("off", "fmt")
+    assert e.latency_per_attempt.value is None
+    assert "2 checks arms (off, fmt)" in e.latency_per_attempt.reason
+
+
+def test_an_unpooled_fold_names_its_one_class_and_arm() -> None:
+    e = ec.fold_economics([row(cost=0.1), row(cost=0.2)])
+    assert e.pooled is False and e.pooled_reason == ""
+    assert e.posture_classes == (TEST_POSTURE_CLASS,) and e.checks_arms == ("off",)
+    d = e.to_dict()
+    assert d["posture_classes"] == [TEST_POSTURE_CLASS] and d["checks_arms"] == ["off"]
+    assert d["pooled_reason"] == ""
 
 
 def test_disqualified_rows_are_outside_every_denominator() -> None:
