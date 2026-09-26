@@ -257,9 +257,16 @@ def _triggers(text: str) -> set[str]:
 
 
 def _unchecked_triggers(text: str) -> set[str]:
-    """The triggers of a workflow that no step's ``if:`` condition names. Only the ``if:``
-    lines are read: the concurrency block names events too, and it runs no check."""
-    conditions = re.findall(r"^\s+if: (.+)$", text, re.M)
+    """The triggers of a workflow that no gate step's ``if:`` condition names. Only the
+    ``if:`` lines of the steps that run ``scripts/check_commit_subject.py`` are read: the
+    concurrency block names events too, and so may a step that checks nothing."""
+    steps = re.findall(r"(?ms)^      - .+?(?=^      - |\Z)", text)
+    conditions = [
+        condition
+        for step in steps
+        if "scripts/check_commit_subject.py" in step
+        for condition in re.findall(r"^\s+if: (.+)$", step, re.M)
+    ]
     checked = {e for c in conditions for e in re.findall(r"github\.event_name == '([a-z_]+)'", c)}
     return _triggers(text) - checked
 
@@ -283,6 +290,29 @@ def test_a_step_that_names_the_wrong_event_is_caught(event: str) -> None:
     assert step_if in text, f"no gate step runs on {event}"
     broken = text.replace(step_if, f"        if: github.event_name == '{event}ed'")
     assert _unchecked_triggers(broken) == {event}
+
+
+def test_a_step_that_does_not_run_the_gate_covers_no_trigger() -> None:
+    """Only a step that runs ``scripts/check_commit_subject.py`` checks anything: a setup or
+    diagnostic step conditioned on ``push`` must not count as the push gate when the real
+    gate step names the wrong event (review of PR #54)."""
+    text = _workflow_with("commit-subjects").read_text(encoding="utf-8")
+    step_if = "        if: github.event_name == 'push' && github.event.before"
+    assert step_if in text, "no gate step runs on push"
+    broken = text.replace(
+        step_if, "        if: github.event_name == 'pushed' && github.event.before"
+    )
+    diagnostic = (
+        "      - name: Show the event\n"
+        "        if: github.event_name == 'push'\n"
+        '        run: echo "$GITHUB_EVENT_NAME"\n'
+    )
+    broken = broken.replace(
+        "      - uses: actions/setup-python@v7",
+        diagnostic + "      - uses: actions/setup-python@v7",
+    )
+    assert diagnostic in broken
+    assert _unchecked_triggers(broken) == {"push"}
 
 
 def _concurrency(text: str) -> tuple[str, str]:
