@@ -145,7 +145,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
 
    **The store.**
    - The store is addressed by content: a key built from the recipe, the fetch image ID and the lockfile blob hashes.
-   - A set is built in a staging directory, sealed with a digest, made read-only and renamed into place.
+   - A set is built in a staging directory, sealed with a digest, made read-only and renamed into place. The stage is leased (an exclusive `flock`) until it is sealed or discarded, so `crb deps gc` in another process never removes a stage a fetch is still filling (PR #56).
    - The host never follows what a container wrote. An install or rebuild step runs package code with `/out` writable, so before the seal a symlink that leaves the set, or anything but a regular file at the manifest's name, is refused `PROVISION_UNSAFE_OUTPUT` and the stage is discarded. The manifest is written as a new file that refuses a link, removal never changes permissions through a link, and a link to a directory inside the set is part of its digest.
    - Every task with the same inputs shares it.
    - Only the store can construct a `BundleMount`, and the executor checks every mount again.

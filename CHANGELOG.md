@@ -59,6 +59,12 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **`crb deps gc` never removes a live stage** (product.posture.37; CodeRabbit on PR #56).
+  It removed every `.staging/<uuid>` while a worker in another process could be filling one,
+  so that fetch failed closed with a false refusal. Each stage now holds an exclusive lease
+  (`flock` on `.staging/<uuid>.lease`, taken before the directory exists) until it is sealed
+  or discarded; `gc` removes a stage only when no process holds its lease, and the kernel
+  drops the lease of a crashed one.
 - **A Python pin its marker excludes no longer refuses the task** (product.posture.36;
   CodeRabbit on PR #56). The sealed set's manifest listed every pin, but pip skips a line
   whose environment marker excludes the fetch image's Python (a pip-compile backport such

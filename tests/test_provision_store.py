@@ -94,12 +94,33 @@ def test_gc_keeps_every_cited_key(tmp_path: Path) -> None:
     keys = [f"dep_{str(i) * 64}" for i in range(3, 7)]
     for k in keys:
         store.seal(_fill(store, {"f": b"x" * 1024}), {"lang": "go", "key": k})
-    store.stage()  # a stale stage from a crashed fetch
+    (store.root / ".staging" / ("e" * 32)).mkdir(parents=True)  # a crashed fetch's stage
     removed = store.gc(keep={keys[0], keys[2]}, max_total_gb=0)
     assert set(removed) == {keys[1], keys[3]}
     assert {s.key for s in store.sets()} == {keys[0], keys[2]}
     assert not any((store.root / ".staging").iterdir())
     assert store.gc(keep=set(), max_total_gb=1) == []
+
+
+def test_gc_never_removes_a_stage_a_fetch_is_still_filling(tmp_path: Path) -> None:
+    """``crb deps gc`` runs in its own process while a worker may be fetching: a stage is
+    removed only when no live fetch holds its lease (the kernel drops the lease with a
+    crashed process), never because it merely exists — a removed live stage made that
+    worker's seal fail closed with a false refusal (CodeRabbit on PR #56)."""
+    root = tmp_path / "deps"
+    worker = BundleStore(root)
+    live = worker.stage()
+    (live / "out" / "partial.bin").write_bytes(b"x" * 16)
+    crashed = root / ".staging" / ("f" * 32)  # a stage whose process died: no live lease
+    (crashed / "out").mkdir(parents=True)
+    assert BundleStore(root).gc(keep=set(), max_total_gb=1) == []  # another process
+    assert (live / "out" / "partial.bin").is_file(), "gc removed a live stage"
+    assert not crashed.exists()
+    sealed = worker.seal(live, {"lang": "go", "key": KEY})  # the fetch finishes
+    assert sealed.path.is_dir() and not any((root / ".staging").iterdir())
+    discarded = worker.stage()
+    worker.discard(discarded)  # a failed fetch releases its lease with its stage
+    assert not any((root / ".staging").iterdir())
 
 
 def test_a_mount_outside_the_store_or_without_a_key_name_is_refused(tmp_path: Path) -> None:

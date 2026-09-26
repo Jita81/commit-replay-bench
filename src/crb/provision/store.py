@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as _dt
+import fcntl
 import hashlib
 import json
 import os
@@ -76,6 +77,8 @@ from crb.core.deps import (
 SCHEMA = "crb.bundle/1"
 MANIFEST = "bundle.json"
 STAGING = ".staging"
+#: The suffix of a stage's lease file, beside it under :data:`STAGING`.
+_LEASE = ".lease"
 
 
 def _now() -> str:
@@ -232,13 +235,27 @@ class BundleStore:
         self.root = Path(root).expanduser()
         self.root.mkdir(parents=True, exist_ok=True)
         self.root = register_store_root(self.root)
+        #: The lease each live stage of THIS store holds (stage path → an fd with an
+        #: exclusive ``flock``): :meth:`gc` in another process never removes a leased stage,
+        #: and the kernel drops the lease with a crashed process.
+        self._leases: dict[str, int] = {}
 
     # --- staging and sealing -----------------------------------------------------
     def stage(self) -> Path:
-        """A fresh ``.staging/<uuid>`` (mode 0700) with empty ``in`` and ``out``."""
+        """A fresh ``.staging/<uuid>`` (mode 0700) with empty ``in`` and ``out``, leased
+        (``.staging/<uuid>.lease``, locked BEFORE the directory exists) until it is sealed
+        or discarded — so a :meth:`gc` in another process never removes it mid-fetch."""
         base = self.root / STAGING
         base.mkdir(parents=True, exist_ok=True)
-        st = base / uuid.uuid4().hex
+        name = uuid.uuid4().hex
+        st = base / name
+        fd = os.open(
+            base / f"{name}{_LEASE}",
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self._leases[str(st)] = fd
         st.mkdir(mode=0o700)
         (st / "in").mkdir(mode=0o700)
         (st / "out").mkdir(mode=0o777)
@@ -283,16 +300,17 @@ class BundleStore:
             os.replace(out, final)
         except OSError:
             remove_tree(Path(stage))
+            self._release(Path(stage))
             winner = self.get(lang, key)
             if winner is None:  # pragma: no cover - the rename failed for another reason
                 raise
             return winner
         final.chmod(0o555)
         remove_tree(Path(stage))
+        self._release(Path(stage))
         return Sealed(lang, key, final, record)
 
-    @staticmethod
-    def _refuse_unsafe(stage: Path, out: Path) -> None:
+    def _refuse_unsafe(self, stage: Path, out: Path) -> None:
         """``PROVISION_UNSAFE_OUTPUT`` (the stage discarded) when what the container wrote
         could lead the host out of the stage: ``out`` itself or its manifest name is
         anything but what the store made (a link, a directory, a device), or a symlink
@@ -308,6 +326,7 @@ class BundleStore:
             problems += [f"link {x} leaves the set" for x in unsafe_links(out)]
         if problems:
             remove_tree(stage)
+            self._release(stage)
             raise ProvisionRefused(
                 PROVISION_UNSAFE_OUTPUT,
                 "the fetch wrote something the store will not follow: "
@@ -316,8 +335,35 @@ class BundleStore:
             )
 
     def discard(self, stage: Path) -> None:
-        """Remove an unsealed stage (a failed or refused fetch)."""
+        """Remove an unsealed stage (a failed or refused fetch) and release its lease."""
         remove_tree(Path(stage))
+        self._release(Path(stage))
+
+    def _release(self, stage: Path) -> None:
+        """Drop ``stage``'s lease (its directory is gone): unlink the lease file, then
+        close the locked fd."""
+        fd = self._leases.pop(str(stage), None)
+        with contextlib.suppress(OSError):
+            os.unlink(f"{stage}{_LEASE}")
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+    @staticmethod
+    def _leased(lease: Path) -> bool:
+        """Whether a live fetch (in any process) holds ``lease``. A lease that is not a
+        regular file is never trusted — nor followed."""
+        try:
+            fd = os.open(lease, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            return False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        finally:
+            os.close(fd)
+        return False
 
     # --- reading -----------------------------------------------------------------
     def get(self, lang: str, key: str) -> Sealed | None:
@@ -381,13 +427,24 @@ class BundleStore:
 
     def gc(self, keep: Iterable[str], max_total_gb: float) -> list[str]:
         """Remove the oldest sets until the store is under ``max_total_gb``, never one whose
-        key is in ``keep`` (a key a qualification cites). Stale stages go first. Returns
-        the removed keys."""
+        key is in ``keep`` (a key a qualification cites). Stale stages go first: a stage is
+        stale only when no live fetch holds its lease (a fetch in another process is
+        still filling a leased one). Returns the removed keys."""
         cited = set(keep)
         staging = self.root / STAGING
         if staging.is_dir():
             for st in staging.iterdir():
+                if st.name.endswith(_LEASE):
+                    orphan = not st.with_name(st.name[: -len(_LEASE)]).exists()
+                    if orphan and not self._leased(st):
+                        with contextlib.suppress(OSError):
+                            st.unlink()
+                    continue
+                if self._leased(st.with_name(st.name + _LEASE)):
+                    continue
                 remove_tree(st)
+                with contextlib.suppress(OSError):
+                    st.with_name(st.name + _LEASE).unlink()
         sets = self.sets()
         cap = int(max_total_gb * (1 << 30))
         total = sum(s.bytes for s in sets)
