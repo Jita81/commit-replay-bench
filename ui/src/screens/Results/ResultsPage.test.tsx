@@ -28,7 +28,7 @@
  *               field; that a run poll that fails shows "Could not read the measurement in
  *               progress" with a Try again, never a queued or running banner; that every
  *               query the page reads has a test for its failure state; and that the page's
- *               source reads no query's `data` directly in any syntax (`queryDataReads`).
+ *               source reads no query's `data` directly in any form `queryDataReads` finds.
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`; `qc.refetchQueries()` for a
  *               refetch; the page's own source as `?raw` text for the `currentData` ratchet.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers

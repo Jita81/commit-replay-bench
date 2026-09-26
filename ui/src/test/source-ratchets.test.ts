@@ -9,6 +9,8 @@
  *               read (`q['data']`, `q?.["data"]`, `` q[`data`] ``) and a destructured read
  *               (`const { data } = q`, `const { data: x, isError } = q`) are all found, so a
  *               ratchet built on it cannot be passed by changing the syntax (PR #54 review);
+ *               and, from the second review, `q!.data`, a pattern beside a nested one,
+ *               `q.data-1`, a destructuring assignment and a `data` key deeper in a pattern;
  *               and that what is not a read — `currentData(q)`, a `mapData` name, a
  *               `data-testid` attribute, an object literal with a `data` key — is not.
  * How:          Pure string cases; no React, no DOM.
@@ -35,6 +37,12 @@ describe('queryDataReads', () => {
     ['destructured', 'const { data } = run'],
     ['destructured and renamed', 'const { data: current, isError } = run'],
     ['destructured over lines', 'const {\n  isError,\n  data,\n} = run'],
+    // second review of PR #54: three forms the first matcher let through
+    ['non-null asserted', 'const v = run!.data'],
+    ['destructured beside a nested pattern', 'const { data, error: { message } } = run'],
+    ['unspaced arithmetic', 'const n = run.data-1'],
+    ['destructuring assignment', 'let data; ({ data } = run)'],
+    ['destructured at depth', 'const { result: { data } } = run'],
   ])('finds a %s read', (_, source) => {
     expect(queryDataReads(source)).toHaveLength(1)
   })
