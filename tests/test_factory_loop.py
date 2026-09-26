@@ -1321,7 +1321,8 @@ def test_a_close_asks_for_the_same_repositorys_credentials_as_a_delivery(
 
     class Recording(StaticProvider):
         def resolve(self, repo: str) -> GitCredentials:
-            """Records the key the loop asked for, then answers as the static provider."""
+            """The provider must be asked for the repository key by both close and delivery:
+            record each key asked for, then answer as the static provider."""
             asked.append(repo)
             return super().resolve(repo)
 

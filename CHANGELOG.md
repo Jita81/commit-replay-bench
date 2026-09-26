@@ -37,8 +37,8 @@ reading and writing; the switch-off now takes the lease (409 `intake_busy` while
 it), every pass asks the committed switch again under the lease, and the worker tells the
 tickets their outcomes before it lets the lease go. The Register act trusted the last poll's
 read; it now reads the ticket under the lease and refuses one edited since. The Intake screen
-said "the ticket has been told" when the tracker had refused the queued note; it now says the
-ticket could not be updated. A re-linked repository row let the factory push to, comment on
+showed the message "the ticket has been told" when the tracker had refused the queued note; it
+now says the ticket could not be updated. A re-linked repository row let the factory push to, comment on
 or close the SAME-numbered pull request in the new repository, and the outcome sync read its
 fate; each delivery now records the repository beside the number and every reuse checks it.
 

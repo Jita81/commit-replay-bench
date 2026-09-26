@@ -155,7 +155,8 @@ def test_deliver_refuses_default_before_touching_creds(harness: Harness) -> None
 
         class Boom:
             def resolve(self, repo: str) -> dv.GitCredentials:
-                """Fails the test: no credential may be read before the invariant."""
+                """The default-branch target must be refused before any credential is
+                resolved: reaching this fails the test."""
                 raise AssertionError("credentials must not be resolved before the invariant")
 
         with pytest.raises(dv.DefaultBranchProtectionError):
@@ -928,7 +929,8 @@ def test_a_close_resolves_credentials_for_the_repository_never_the_item() -> Non
 
     class Recording:
         def resolve(self, repo: str) -> dv.GitCredentials:
-            """Records the key the close asked for, then answers with test credentials."""
+            """A close must resolve credentials with the supplied repository identifier,
+            never the item id: record the key asked for, then answer with test credentials."""
             asked.append(repo)
             return _creds()
 
