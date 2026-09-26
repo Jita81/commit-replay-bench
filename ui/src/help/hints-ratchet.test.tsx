@@ -156,11 +156,11 @@ const DERIVED_FAMILIES = ['tab.repo.']
 
 // ─── the shell ────────────────────────────────────────────────────────────────────────────
 
-function renderShell(role: Role, falseQ1 = 0) {
+function renderShell(role: Role, falseQ1 = 0, devAutologin = false) {
   mockApi({
     'GET /auth/me': { ...PRINCIPAL, role },
     'GET /health': { status: 'ok', probes: [{ name: 'ledger', status: 'ok', data: { false_q1: falseQ1 } }] },
-    'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false },
+    'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false, dev_autologin: devAutologin },
     'GET /repos': { items: [] },
   })
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -253,6 +253,15 @@ describe('hint ratchet: the shell (enforced from the start)', () => {
     const { container } = renderShell('viewer', 2)
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
     expect(container.querySelector('[data-hint="banner.shell.stop_condition"]')).not.toBeNull()
+  })
+
+  it('the automatic sign-in banner carries its hint, and the shell under it stays fully hinted', async () => {
+    const { container } = renderShell('admin', 0, true)
+    await waitFor(() => expect(screen.getByTestId('dev-autologin-banner')).toBeInTheDocument())
+    expect(container.querySelector('[data-testid="dev-autologin-banner"] [data-hint="banner.shell.dev_autologin"]')).not.toBeNull()
+    await waitFor(() => expect(container.querySelector('[data-hint="nav.version_line"]')).not.toBeNull())
+    const misses = unhinted(container)
+    expect(misses, `unhinted shell elements with automatic sign-in on:\n  ${misses.join('\n  ')}`).toEqual([])
   })
 })
 

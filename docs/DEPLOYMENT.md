@@ -101,6 +101,7 @@ server and never appear in logs or `/settings`.
 | `CRB_WEB_CONCURRENCY` | | uvicorn workers (default 1; 2 in compose/Helm) |
 | `CRB_BOOTSTRAP_ADMIN__USERNAME` / `__PASSWORD` | first boot | seeds the first admin **only while `users` is empty** (≥ 12 chars) |
 | `CRB_LOCAL_AUTH_ENABLED` | | set `false` once OIDC works |
+| `CRB_AUTH__DEV_AUTOLOGIN` | **never in production** | empty (the default) = off. On a developer's own machine only, names a local account that a browser on that machine is signed in as without a password ([OPERATOR.md §9.1](OPERATOR.md#91-automatic-sign-in-on-a-development-stack), ADR-0027). **Refused at start-up**: `crb serve` refuses it unless `CRB_ENV=dev` and the API binds a loopback address (and with `CRB_LOCAL_AUTH_ENABLED=false`, since it signs in a local account), so no `prod` deployment starts with it set; the image's entrypoint refuses to run any role with it set, whatever `CRB_BIND_HOST` says. A process manager that runs `uvicorn --factory` itself binds an address `crb` cannot see, so there only the per-request checks apply ([SECURITY.md §3.8](SECURITY.md#38-automatic-sign-in-on-a-development-stack)). There is no override |
 | `CRB_OIDC__ISSUER`, `__CLIENT_ID`, `__CLIENT_SECRET`, `__REDIRECT_URL`, `__SCOPES`, `__ROLE_CLAIM`, `__ROLE_MAP`, `__ADMIN_GROUPS` | for SSO | see §4.1 for the Entra ID mapping |
 | `CRB_OIDC__ROLE_FROM_CLAIMS` | | `first_login` (default): the claims set a role on the account's first sign-in and an admin's later change stands; `always`: the provider decides at every sign-in (removing someone from the admin group demotes them next time), each change recorded as `user.role_overridden` ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)) |
 | `CRB_GITHUB__APP_ID`, `__APP_SLUG`, `__PRIVATE_KEY` or `__PRIVATE_KEY_FILE`, `__API_URL`, `__WEB_URL` | for *Connect from GitHub* | the deployment's GitHub App (docs/GITHUB-APP.md); set on the **API and the worker**; the key from the secret store, never inline in a values file |
@@ -531,6 +532,11 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
       reason you have written down; no `fail`. It covers what `/health` cannot see from
       inside a pod — the GitHub App's installations, the secrets directory mode, the
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
+- [ ] Automatic sign-in is off: `crb doctor` on the API host shows its `dev_autologin` line
+      as `ok` with the detail `off`, and `CRB_AUTH__DEV_AUTOLOGIN` is not set anywhere. A
+      `prod` server and the image both refuse to start with it set (ADR-0027), so this line
+      fails only on a stack that is not what it claims to be. Read `crb doctor`, not
+      `GET /api/v1/health`: `/health` says `off` to any caller that could not use it.
 - [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
       (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
 - [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the

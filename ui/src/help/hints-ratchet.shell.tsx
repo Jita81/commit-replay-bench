@@ -49,8 +49,9 @@ export interface ShellScreen {
 /** No session: the login form renders instead of redirecting to `next`. */
 const SIGNED_OUT = {
   'GET /auth/me': () => envelope(401, 'unauthenticated', 'no session'),
-  // a provider is configured, so the organisation button renders beside the local form
-  'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: true },
+  // a provider is configured, so the organisation button renders beside the local form; automatic
+  // sign-in is on, so the development banner renders above it (its POST is unmocked: the form stays)
+  'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: true, dev_autologin: true },
 }
 
 const SIGNED_IN = { 'GET /auth/me': PRINCIPAL }

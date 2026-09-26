@@ -153,6 +153,8 @@ export interface WorkerProbeData {
 export interface Health {
   status: ProbeStatus
   probes: Probe[]
+  /** Automatic sign-in on a development stack (ADR-0027) — beside the probes, never one of them. */
+  dev_autologin?: 'on' | 'off'
 }
 
 /** `GET /version` — the package, the apparatus (the instrument's version, ADR-0001) and the routing policy. */
@@ -162,6 +164,9 @@ export interface Version {
   policy: string
   /** An organisation (OpenID Connect) sign-in is configured; unauthenticated, names nothing. */
   oidc_enabled: boolean
+  /** A development stack signs a browser on its own machine in without a password (ADR-0027);
+   * names no account. Optional so a fixture written before it existed reads as off. */
+  dev_autologin?: boolean
 }
 
 // ---------------------------------------------------------------------------

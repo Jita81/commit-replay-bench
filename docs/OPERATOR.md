@@ -73,6 +73,7 @@ Run it on the API host and on the worker host after installing, after changing a
 | `builders` | which builder credentials / CLIs are configured (names, never values) | — (`warn` when none) |
 | `claude_code` | where an `auth: cli` login would come from (env, secrets file `…xxxx`, keychain, none), the CLI's version; with `--live`, the real probe | the secrets file is group/world readable |
 | `settings` | the server would start with this environment (`CRB_SECRET_KEY`, bootstrap password, `CRB_HOME`, …) | the first refusal, in the server's own words |
+| `dev_autologin` | whether automatic sign-in is on (`CRB_AUTH__DEV_AUTOLOGIN`, [§9.1](#91-automatic-sign-in-on-a-development-stack)) and, if so, for which account | — (`warn` while it is on: a development stack only; `skip` when the settings cannot be read) |
 | `home` | `CRB_HOME` is a persistent path, and the secrets directory is mode `0700` and owned by the user running `crb` | a temporary `CRB_HOME` in `prod` (`warn` in `dev`); a group-readable secrets directory, or one another user owns (the store refuses both) |
 | `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
 | `database` | the store answers and is initialised, every append-only trigger is present and they fire (an UPDATE on `grades` is refused) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
@@ -805,6 +806,66 @@ next sign-in does not undo it. If your organisation manages roles in the provide
 set `CRB_OIDC__ROLE_FROM_CLAIMS=always`: every sign-in then applies the claims, and each time
 that changes a role the account's trail records `user.role_overridden`
 ([DEPLOYMENT §2.1](DEPLOYMENT.md#21-environment-reference)).
+
+### 9.1 Automatic sign-in on a development stack
+
+On a stack you run for yourself on your own computer, typing the password on every visit gets
+in the way. You can tell the stack to sign in any browser on the same computer as one account.
+
+To switch it on, add these to the stack's environment and restart `crb serve`:
+
+```
+CRB_ENV=dev
+CRB_AUTH__DEV_AUTOLOGIN=admin      # the username of an active local account
+```
+
+Leave `CRB_BIND_HOST` at its default (`127.0.0.1`) and do not pass `--host` to `crb serve`.
+Open `http://localhost:8000` (or `http://127.0.0.1:8000`) in a browser on that computer. You
+are signed in as that account, and every page shows the banner "Automatic sign-in is on for
+this development stack — never use in production".
+
+What still works as normal:
+
+- **Sign out** ends the session. The page you land on shows the sign-in form. Reload it and
+  you are signed in again.
+- **Roles.** You get the account's role and nothing more. Name a viewer account to see the
+  product as a viewer sees it.
+- **Changing the password** ends the session, as it does for a typed password. The next page
+  load signs you in again.
+
+It does not sign anyone in when:
+
+- the browser is on another computer — only a connection from `127.0.0.1` or `::1`, arriving
+  on a loopback address, counts;
+- the request came through a proxy, even one on the same computer (any `Forwarded`,
+  `X-Forwarded-*`, `X-Real-IP` or `Via` header, or a client-address header such as
+  `CF-Connecting-IP`, turns it off for that request);
+- the address in the browser is not `localhost`, `127.0.0.1` or `[::1]`;
+- the account does not exist or is deactivated — the API log says which.
+
+**The UI dev server.** If you run the UI with `npm run dev` (or `vite preview`) instead of
+the UI that `crb serve` serves, open `http://localhost:5173` on the same computer. Do not start
+the dev server with `--host` while automatic sign-in is on: that lets other computers on your
+network reach it. The dev server marks every request from another computer as proxied, so
+the API refuses to sign it in, but there is no reason to rely on that.
+
+**Why production refuses it.** `crb serve` will not start with `CRB_AUTH__DEV_AUTOLOGIN` set
+unless `CRB_ENV=dev` and it binds a loopback address (`127.0.0.1`, `::1` or `localhost`).
+`crb serve --host 0.0.0.0` is refused too, and so is `CRB_LOCAL_AUTH_ENABLED=false`: it signs
+in a local account, which that setting turns away. There is no flag to override this. The container
+image refuses to start any role with the variable set, so a container stack cannot use it —
+sign in there as usual. If you run the app yourself with `uvicorn --factory` or another
+process manager, `crb` cannot see the address it binds and cannot refuse it at start-up; only
+the checks on each request apply, so use `crb serve` for a stack with automatic sign-in on.
+
+**How to tell it is on.** Start-up logs a warning that begins `AUTOMATIC SIGN-IN IS ON`.
+`crb doctor` shows `warn  dev_autologin` with the account named. `GET /health` and
+`GET /version` report `dev_autologin` — `on` only to a browser on this computer that it would
+sign in; anyone else sees `off`, as on a stack without it. Every automatic sign-in logs one warning line and
+writes an `auth.dev_autologin` event on the account's trace, with the account as the actor
+and the client address. To switch it off, remove the variable and restart. The design and its
+limits are in [ADR-0027](adr/0027-dev-autologin-on-loopback.md) and
+[SECURITY.md §3.8](SECURITY.md#38-automatic-sign-in-on-a-development-stack).
 
 ## 10. The factory's test author
 

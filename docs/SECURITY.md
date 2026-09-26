@@ -463,6 +463,101 @@ subject to a retention window.
   grading path's supply-chain surface is the Python standard library and `git`.
 - Container images are pinned by tag; the runtime image runs as a non-root user.
 
+### 3.8 Automatic sign-in on a development stack
+
+`CRB_AUTH__DEV_AUTOLOGIN=<username>` (ADR-0027) signs a browser on the same machine in as one
+local account without a password. It exists because a person running the stack for
+themselves before the open beta should not have to type a password on every visit. It is
+built so that it cannot be switched on in production and cannot be reached from another
+machine:
+
+- **Refused at start-up outside a development stack.** `Settings` refuses the variable
+  unless `CRB_ENV=dev` (the default `prod`, and any other value, refuses) and unless
+  `CRB_BIND_HOST` is a loopback address, and refuses it alongside `CRB_LOCAL_AUTH_ENABLED=false`
+  (it signs in a local account, which that setting turns away at `/auth/login`); `crb serve` checks the address it is about to bind
+  again, so `--host 0.0.0.0` is refused too (`dev_autologin_refusal_for`,
+  `crb.server.main.serve`). The container image's entrypoint refuses to run any role with the
+  variable set, because a container is never a development stack on one machine
+  (`deploy/entrypoint.sh`). There is no override flag. [measured — n = 14 test cases under
+  apparatus 2.2 in `tests/test_server_dev_autologin.py::TestSettings`: off by default; `prod`
+  refuses, as an argument and from the environment (2); four non-loopback binds refuse and
+  four loopback binds admit (8); local sign-in switched off refuses; a malformed username
+  refuses; `serve` refuses `--host
+  0.0.0.0` before uvicorn starts; pass/fail, not a rate] [measured — n = 4 test cases under
+  apparatus 2.2 in `tests/test_server_dev_autologin.py::TestTheContainerImage`: the
+  entrypoint refuses `serve`, `worker` and `migrate` with the variable set before anything
+  runs, and runs `serve` as before without it; pass/fail, not a rate]
+- **What the start-up check cannot see.** A process manager that runs the app factory itself
+  (`uvicorn --factory crb.server.app:create_app --host …`, or gunicorn) binds an address the
+  settings never see, so `crb` cannot refuse that bind at start-up. On that path only the
+  per-request checks below apply. One of them is the address each connection arrived on, so a
+  server bound to every interface still refuses a request that arrives on a network interface.
+- **Admitted per request only when the request is plainly local**
+  (`crb.server.auth.dev_autologin_refusal`): the TCP peer is loopback (`127.0.0.0/8`, `::1`);
+  the connection arrived on a loopback address (the ASGI `server` address); no forwarding
+  header is present (`Forwarded`, any `X-Forwarded-*`, `X-Real-IP`, `Via`, and the
+  client-address headers `True-Client-IP`, `CF-Connecting-IP`, `X-Client-IP`, `Client-IP`,
+  `X-Original-Forwarded-For`, `X-Cluster-Client-IP`, `Fastly-Client-IP` and
+  `X-Envoy-External-Address`); the `Host` header names this machine; an `Origin`, when sent,
+  is a loopback origin; and the browser did not mark the request `cross-site`. Anything else
+  is answered exactly as if the setting were off (404 `dev_autologin_off`), with the reason
+  in the API log. [measured — n = 29 refused cases under apparatus 2.2 in
+  `tests/test_server_dev_autologin.py::TestWhoIsSignedIn`: four remote peers, fifteen
+  forwarding headers (`X-Forwarded-For` twice, once naming `127.0.0.1`), three foreign `Host`
+  values, three non-loopback local addresses, one connection with no local address and three
+  cross-site signals are each refused with no session; the same class admits three loopback
+  peers, five loopback host names and a same-origin request; pass/fail, not a rate]
+- **The project's own dev proxy marks what it forwards.** The Vite dev server and
+  `vite preview` (`npm run dev`, `ui/vite.config.ts`) forward `/api` to the API from
+  `127.0.0.1` and pass on the `Host` header the client sent. Without a mark, a request from
+  another machine would look local: with the dev server started with `--host`, anyone on the
+  network could send `Host: localhost` by hand and be signed in. The proxy therefore adds
+  `X-Forwarded-For` to every request whose client is not on this machine, or whose address is
+  unknown (`ui/src/dev/apiProxy.ts`), and the check above refuses it. [measured — n = 21
+  cases under apparatus 2.2 in `ui/src/dev/apiProxy.test.ts`, including the real
+  `ui/vite.config.ts` loaded as Vite loads it; pass/fail, not a rate] [measured — one
+  hand-made `POST /api/v1/auth/dev-autologin` with `Host: localhost:5173` through the real Vite
+  8.0.8 dev server bound to `fe80::1%lo0` (a client address that is not loopback) got 404, and
+  the API logged the `x-forwarded-for` header as the reason; the same request through Vite on
+  `127.0.0.1` got 200; n = 1 run each, apparatus 2.2, 2026-09-26]
+- **An ordinary session.** It issues exactly the session a password sign-in issues — one
+  helper sets both (`_issue_session` in `crb.server.routes.auth`): the same cookie names
+  (`__Host-` when secure), the same credential version including the account's
+  `session_nonce` (§3.3), and the same session-bound CSRF token (`HMAC(secret, uid, cv)`,
+  valid for that session only). So the CSRF check, the role ladder, sign-out, "sign out
+  everywhere" and a password change end or refuse it exactly as they do a typed password's
+  session. It never skips a role check, and it neither adds to nor clears the login
+  limiter's buckets — the per-address bucket or the account's own (username, address)
+  bucket, which a password success clears — it checks no password, and a full bucket still
+  refuses the next password attempt after it. [measured — n = 4 tests in
+  `tests/test_server_dev_autologin.py::TestTheSession`, 6 test cases in
+  `::TestTheSessionIsThePasswordSession` (cookies compared with a password sign-in's with
+  `Secure` on and off, the nonce in the version, the CSRF token refused on another session,
+  sign out everywhere, sign-out on another device) and 4 in `::TestTheLoginLimit`, apparatus
+  2.2; pass/fail, not a rate]
+- **Recorded and visible.** Every sign-in appends `auth.dev_autologin` on the account's trace
+  (actor = the account, `payload.client` = the peer) and logs one warning line; start-up logs
+  a warning; `crb doctor` shows `warn  dev_autologin`; `GET /health` and `GET /version` report
+  `dev_autologin`; and the UI shows a banner on every page, the sign-in page included.
+  `/health` and `/version` say `on` only to a caller the route would sign in. Anyone else
+  reads `off`, the same as a stack without it, so another machine cannot tell whether it is
+  on. `crb doctor` reads the settings directly, so the operator is never told `off` while it
+  is on. [measured — `tests/test_server_dev_autologin.py::TestAuditAndReporting`, four
+  callers that could not sign in each read `off` on both routes, and
+  `ui/src/components/DevAutologinBanner.test.tsx`, apparatus 2.2]
+
+**Who can reach it.** Anyone who can open a TCP connection to the API from the machine
+itself: every local user account and every local process, not only the person who switched
+it on. On a shared machine that is everyone logged in to it, which is why it is for a
+personal development machine only. A reverse proxy on the same machine connects from
+loopback too; the forwarding header it adds is what refuses the request, so a proxy or tunnel
+that strips or never sets those headers would expose it — do not put one in front of a stack
+with automatic sign-in on. The project's own Vite dev and preview proxy is one such proxy; it
+marks every request from another machine, but do not start it with `--host` while automatic
+sign-in is on all the same. A web page in the person's own browser cannot use it: a cross-site
+request is refused, and a page that re-points its own host name at `127.0.0.1` (DNS
+rebinding) arrives with its own name in `Host` and is refused.
+
 ## 4. Threats considered
 
 | # | Threat | Where it lands | Control(s) |
@@ -488,6 +583,7 @@ subject to a retention window.
 | T11 | Session hijack / CSRF / privilege escalation | API | 3.3 `__Host-` cookies, session-bound CSRF, revocable sessions (logout, sign out everywhere), 3.4 RBAC, first-login OIDC roles |
 | T11a | Online password guessing, one account or sprayed across many | API | 3.4 per-(username, address) and per-address limits in the process; the proxy's limiter in production |
 | T11b | An operator, or a model through the MCP tools, points the deployment at an arbitrary host directory | API host | 3.4 `clone_path` confined to `$CRB_HOME/repos`; elsewhere admin-only and recorded; symbolic-link escapes refused |
+| T11c | Automatic sign-in (`CRB_AUTH__DEV_AUTOLOGIN`) is used from another machine, through a proxy, by a hostile web page, or left on in production | API | 3.8: refused at start-up outside `CRB_ENV=dev` and on a non-loopback bind (no override); the container entrypoint refuses any role with it set; per request only a loopback peer, arriving on a loopback address, with no forwarding header, a loopback `Host`, no foreign `Origin` and not `cross-site` — anything else is answered as "off"; the project's Vite dev and preview proxy adds `X-Forwarded-For` for any client not on this machine; an ordinary session — the same cookies, credential version (session nonce included) and session-bound CSRF token as a password sign-in, so sign-out and sign out everywhere end it and it never touches the login limiter; an audit event and a log line per sign-in; `crb doctor` and a banner on every page say it is on, and `/health` and `/version` say so only to a caller that could use it. Residual: every local user and process on the machine can use it; a same-host proxy or tunnel that strips forwarding headers would expose it; a process manager that runs `uvicorn --factory` binds an address `crb` cannot check at start-up, so only the per-request checks apply there |
 | T12 | Cross-organisation data leakage via the federated export | export | allowlist of abstract fields only, k-anonymity, opt-in; consumption not implemented (`crb.core.federated`) |
 | T13 | A weak oracle lets a semantically wrong patch pass | grade | not a mechanical false-Q1; measured and gated by oracle strength (`crb.core.oracle`), routed to `human` below 0.8 |
 

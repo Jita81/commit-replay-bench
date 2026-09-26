@@ -8,6 +8,24 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-26 — a development stack can sign in a browser on its own machine without a password
+
+`CRB_AUTH__DEV_AUTOLOGIN=<username>` (off by default, ADR-0027) signs a browser on the same
+computer in as one local account. `crb serve` refuses it unless `CRB_ENV=dev` and the API binds
+a loopback address, and with `CRB_LOCAL_AUTH_ENABLED=false`, which turns local accounts away;
+the container image refuses to start with it set. Each request must
+come from a loopback peer, arrive on a loopback address, carry no forwarding header and name
+this machine in `Host`; anything else is answered as if it were off. The session is exactly
+the one a password sign-in issues — the same cookies, the credential version with the
+account's session nonce and the session-bound CSRF token — so roles, signing out and "sign
+out everywhere" work as after a typed password, and it never touches the login rate limit.
+Every sign-in is an `auth.dev_autologin` event and a warning line, and every page shows a
+banner while it is on; an open page's banner follows an API restarted with the setting
+changed. The sign-in page shows a status, not the form, while an automatic sign-in settles,
+and one that fails for any reason but a refusal is shown above the form rather than hidden.
+A security review found that the UI's own Vite dev proxy made a request from another machine
+look local; the proxy now marks such requests with `X-Forwarded-For`, and the API refuses them.
+
 ### 2026-09-25 — signing out ends the session; a clone lives where the worker clones; the sign-in CLI sees only what it needs
 
 The external assessment of 2026-09-25 named three security gaps (D2, D3, D4). Each was

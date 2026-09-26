@@ -13,7 +13,8 @@ What it does: ``serve`` hands off to uvicorn; ``worker`` forwards its flags to t
               line per check with ``ok`` / ``warn`` / ``fail`` (``skip`` for a check that does
               not apply) and the fix in the sentence: toolchains, sandbox, builders, the Claude
               Code token store (its no-tool Haiku turn ONLY with ``--live``), the GitHub App
-              (configured, key parses, one installation reachable), the server settings, the
+              (configured, key parses, one installation reachable), the server settings,
+              automatic sign-in (``warn`` while ``CRB_AUTH__DEV_AUTOLOGIN`` is on), the
               ``CRB_HOME`` location and the secrets directory mode and owner, the database
               (initialised, every append-only trigger present, an UPDATE refused), the
               migration head, the worker heartbeat and the built UI with its help bundle
@@ -24,15 +25,16 @@ How:          Each ``cmd_*`` imports inside the function and turns ``ImportError
               observability probes plus the server's ``probe_append_only`` (the trigger
               count AND the refused UPDATE, as ``/health`` reads it), the store's
               ``head_status`` rendered by the SAME ``migrations_result`` as ``/health``, the
-              server's ``probe_worker``, ``temp_dir_reason`` and ``resolve_ui_dist``; the
+              server's ``probe_worker`` and ``probe_dev_autologin``, ``temp_dir_reason`` and
+              ``resolve_ui_dist``; the
               settings are read from the environment as ``crb serve`` would, or (when they
               would refuse) a dev-relaxed copy so the non-secret fields still read. The text
               form maps the shared vocabulary ``ok / degraded / down / skipped`` to
               ``ok / warn / fail / skip``; ``--json`` keeps the vocabulary ``/health`` uses.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   src/crb/server/routes/system.py (``migrations_result``, ``probe_append_only``
-              and ``probe_worker`` — the same readings as ``/health``),
+Works with:   src/crb/server/routes/system.py (``migrations_result``, ``probe_append_only``,
+              ``probe_worker`` and ``probe_dev_autologin`` — the same readings as ``/health``),
               src/crb/store/migrate.py (``upgrade``; ``head_status`` for the doctor line), src/crb/server/settings.py (``Settings``,
               ``temp_dir_reason``), src/crb/server/github_app.py (``GitHubApp`` — the
               installation listing), src/crb/server/app.py (``resolve_ui_dist``; ``serve``
@@ -122,7 +124,8 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     doctor = sub.add_parser(
         "doctor",
         help="check the installation: toolchains, sandbox, builders, Claude Code login, GitHub "
-        "App, settings, CRB_HOME, database, migration head, worker, UI + help bundle",
+        "App, settings, automatic sign-in, CRB_HOME, database, migration head, worker, UI + "
+        "help bundle",
     )
     doctor.add_argument("--json", action="store_true")
     doctor.add_argument("--database-url", default=None)
@@ -553,7 +556,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         probe_claude_code(verify=bool(getattr(args, "live", False))),
     ]
     try:
-        from crb.server.routes.system import migrations_result, probe_worker
+        from crb.server.routes.system import (
+            migrations_result,
+            probe_dev_autologin,
+            probe_worker,
+        )
         from crb.store import migrate as migrate_mod
         from crb.store.db import database_url, make_engine, make_session_factory
     except ImportError:
@@ -562,6 +569,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     settings, refusal = load_settings()
     results.append(probe_settings(settings, refusal))
+    results.append(probe_dev_autologin(settings))
     results.append(probe_home())
     results.append(probe_github_app(settings.github if settings else None))
 

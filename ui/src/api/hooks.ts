@@ -18,13 +18,17 @@
  *               endpoint shows an honest error, not a delayed spinner); runs poll only while
  *               non-terminal and never in a background tab; mutations invalidate the keys they
  *               change so screens refresh without ad-hoc refetches. `useMe` maps a 401 to
- *               `null` (not logged in); `normaliseEvidence` folds two server shapes into one.
+ *               `null` (not logged in) unless a development stack's automatic sign-in succeeds
+ *               first (never again in the page load after Sign out; only its 403/404 refusal
+ *               reads as "no session", any other failure is the query's error); `useVersion`
+ *               refetches on focus so a restarted API's settings reach an open page;
+ *               `normaliseEvidence` folds two server shapes into one.
  * How:          `keys` is the single source of every query key → each hook wraps
  *               `api<T>(path)` in `useQuery` / `useMutation` with the key, `enabled` guards on
  *               empty ids and the polling rule → `useRunEvents` owns a `RunEventStream` per
  *               run id and hands React its snapshot through `useSyncExternalStore`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none
+ * ADRs:         docs/adr/0027-dev-autologin-on-loopback.md (`useMe`'s automatic sign-in)
  * Works with:   ui/src/api/client.ts (the fetch wrapper every hook calls), ui/src/api/types.ts
  *               (the response types), ui/src/api/sse.ts (the stream `useRunEvents` drives),
  *               ui/src/api/repoConfig.ts (the repo-config hooks nest under `keys.repo`),
@@ -37,7 +41,8 @@
  *               ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/src/screens/Signoff/SignoffPage.test.tsx,
- *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks)
+ *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks),
+ *               ui/src/components/DevAutologinBanner.test.tsx (`useMe`'s automatic sign-in)
  *               (every screen test exercises its hooks through `mockApi`)
  * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
  *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
@@ -49,6 +54,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query'
@@ -157,24 +163,81 @@ export function useHealth(): UseQueryResult<Health, ApiError> {
   return useQuery({ queryKey: keys.health, queryFn: () => api<Health>('/health'), retry: false, staleTime: 15_000 })
 }
 
-/** `GET /version` — crb, apparatus and policy versions; never refetched (they change only on deploy). */
+/**
+ * How long a `/version` answer is trusted. Most of it changes only on deploy, but
+ * `dev_autologin` and `oidc_enabled` change whenever the API restarts with other settings, and
+ * the automatic sign-in banner must follow the stack, not the page load.
+ */
+export const VERSION_STALE_MS = 60_000
+
+/** `GET /version` — crb, apparatus and policy versions, and whether OIDC and the automatic
+ * sign-in are on; refetched after a minute and every time the tab regains focus (one cheap,
+ * unauthenticated GET), so a page left open across an API restart shows the new answer. */
 export function useVersion(): UseQueryResult<Version, ApiError> {
-  return useQuery({ queryKey: keys.version, queryFn: () => api<Version>('/version'), retry: false, staleTime: Infinity })
+  return useQuery({
+    queryKey: keys.version,
+    queryFn: () => api<Version>('/version'),
+    retry: false,
+    staleTime: VERSION_STALE_MS,
+    refetchOnWindowFocus: 'always',
+  })
 }
 
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
 
-/** `GET /auth/me`. A 401 resolves to `null` (not an error) — it means "not logged in". */
+/**
+ * Set by Sign out: for the rest of this page load the UI does not ask for an automatic sign-in,
+ * so signing out lands on the form instead of straight back in. A reload starts again — the
+ * same conditions apply to it as to the first load (ADR-0027).
+ */
+let devAutologinSuppressed = false
+
+/** A fresh page load, for tests: the next `useMe` may ask for an automatic sign-in again. */
+export function resetDevAutologin(): void {
+  devAutologinSuppressed = false
+}
+
+/**
+ * No session: when `GET /version` says a development stack has automatic sign-in on, ask
+ * `POST /auth/dev-autologin` for one. `null` whenever it is off, suppressed or refused — the
+ * server answers 404/403 to anything not plainly local, and the person then gets the form.
+ * Any other failure of the POST (a 5xx, a timeout, an unreachable API) is thrown, so the
+ * sign-in page says what went wrong instead of showing a plain form.
+ */
+async function devAutologin(qc: QueryClient): Promise<Principal | null> {
+  if (devAutologinSuppressed) return null
+  let v: Version
+  try {
+    // the same cache entry `useVersion` reads, so the banner and this decision agree
+    v = await qc.fetchQuery({ queryKey: keys.version, queryFn: () => api<Version>('/version'), staleTime: VERSION_STALE_MS })
+  } catch (err) {
+    // the sign-in page reports a failed /version on its own line; here it means "no session"
+    if (err instanceof ApiError) return null
+    throw err
+  }
+  if (v.dev_autologin !== true) return null
+  try {
+    return await api<Principal>('/auth/dev-autologin', { method: 'POST' })
+  } catch (err) {
+    // 404 = off or not plainly local, 403 = its account cannot sign in: both are "no session"
+    if (err instanceof ApiError && (err.status === 403 || err.status === 404)) return null
+    throw err
+  }
+}
+
+/** `GET /auth/me`. A 401 resolves to `null` (not an error) — it means "not logged in" — unless an
+ * automatic sign-in on a development stack succeeds first (`devAutologin`). */
 export function useMe(): UseQueryResult<Principal | null, ApiError> {
+  const qc = useQueryClient()
   return useQuery({
     queryKey: keys.me,
     queryFn: async () => {
       try {
         return await api<Principal>('/auth/me')
       } catch (err) {
-        if (err instanceof ApiError && err.isUnauthenticated) return null
+        if (err instanceof ApiError && err.isUnauthenticated) return devAutologin(qc)
         throw err
       }
     },
@@ -196,7 +259,11 @@ export function useLogin(): UseMutationResult<Principal, ApiError, LoginRequest>
 export function useLogout(): UseMutationResult<void, ApiError, void> {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: () => api<void>('/auth/logout', { method: 'POST' }),
+    mutationFn: () => {
+      // before the request: the refetch that follows sign-out must not sign straight back in
+      devAutologinSuppressed = true
+      return api<void>('/auth/logout', { method: 'POST' })
+    },
     onSettled: () => {
       qc.setQueryData(keys.me, null)
       qc.clear()
