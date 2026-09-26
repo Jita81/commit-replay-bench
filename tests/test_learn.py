@@ -751,6 +751,30 @@ class TestStrengthen:
         bl = learn.strengthening_backlog(cmap, [_score(TASK_A)], generated_at="x")
         assert len(bl.items) == 1 and bl.items[0].labels["reason_code"] == REASON_CONTROLS_ESCAPES
 
+    def test_a_held_cell_whose_scored_tasks_are_all_strong_still_gets_one_item(self) -> None:
+        """A controls escape holds the cell, but every scored task kills its mutants: the work
+        is the escaped CONTROL, not a mutant. Without an item here the flag was dropped
+        silently — the report counted the cell and offered nothing to register (G-984, found
+        by the Learn walkthrough on a fresh stack: controls 1 escape, oracle 4 of 4 killed)."""
+        strong = [
+            _clean(task_id=TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")
+        ] * 10
+        controls = ControlsVerdict(passed=True, constructible=6, total=7, escapes=1)
+        cmap = build_capability_map(strong, projection=PROJECTION_CLASS_SIZE, controls=controls)
+        assert cmap.cells[0].reason_code == REASON_CONTROLS_ESCAPES
+        score = _score(TASK_A, oracle_strength=0.95, killed=3, escaped=[], total=3)
+        score["escaped"] = 0
+        bl = learn.strengthening_backlog(cmap, [score], generated_at="x")
+        assert bl.cells_flagged == ("bug.fix|S",) and bl.cells_without_scores == ()
+        (item,) = bl.items
+        assert item.labels["reason_code"] == REASON_CONTROLS_ESCAPES
+        assert item.title == "strengthen the target tests for cell bug.fix|S"
+        assert "negative control" in item.description
+        assert assess(BacklogItem.from_dict(item.to_dict())).route_hint == ROUTE_BUILD
+        # deterministic: the same map gives the same id
+        again = learn.strengthening_backlog(cmap, [score], generated_at="y").items[0]
+        assert again.id == item.id
+
     def test_strong_scored_task_in_a_held_cell_is_not_work(self) -> None:
         cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
         strong = _score(TASK_A, oracle_strength=0.95, killed=3, escaped=[], total=3)

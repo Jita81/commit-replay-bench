@@ -1057,6 +1057,48 @@ def _item_for_cell(cell: CapabilityCell, *, threshold: float, registered: str) -
     )
 
 
+def _item_for_held_strong_cell(
+    cell: CapabilityCell, *, threshold: float, registered: str
+) -> StrengthenItem:
+    """The one item a held cell gets when every scored task in it is strong: the routing
+    rule holds it for its negative controls (an escape, or too few constructible), so the
+    test work is to make the target tests refuse the cheat a control got through."""
+    assert cell.stats is not None
+    label = cell.label
+    strength = _fmt_strength(cell.stats.oracle_strength_mean)
+    return StrengthenItem(
+        id=f"{STRENGTHEN_ID_PREFIX}{_short_hash(cell.key.label, 'controls')}",
+        title=f"strengthen the target tests for cell {label}",
+        description=(
+            f"every scored task in cell {label} kills its mutants (mean oracle strength "
+            f"{strength} vs threshold {threshold:.2f}), but the cell routes {cell.route} "
+            f"({cell.reason_code}): {cell.reason}. A negative control the grader should refuse "
+            "graded clean, so the target tests cannot tell an implementation from that cheat; "
+            "the controls run on the repository lists which control escaped on which task."
+        ),
+        acceptance_criteria=(
+            "a controls run on the repository reports 0 escapes for the tasks in the cell",
+            f"mean oracle strength for the cell stays >= {threshold:.2f}",
+            "only test files change (belt 1: the oracle is edited by a human, on purpose)",
+        ),
+        structural_facts=(
+            f"subject_under_test: the target tests of every task in cell {label}",
+            "behaviour_asserted: the target tests fail on the negative control that escaped",
+        ),
+        labels={
+            "source": "crb.core.learn",
+            "cell": label,
+            "reason_code": cell.reason_code,
+            "route": cell.route,
+            "oracle_strength": strength,
+            "threshold": f"{threshold:.2f}",
+            "slots": "structural",
+            "n": str(cell.n),
+        },
+        registered=registered,
+    )
+
+
 def strengthening_backlog(
     cmap: CapabilityMap,
     oracle_scores: Iterable[OracleTaskScore | Mapping[str, Any]] = (),
@@ -1072,7 +1114,8 @@ def strengthening_backlog(
     :data:`STRENGTHEN_REASONS`. For each, one item per scored task that belongs to
     the cell AND is weak (strength < ``policy.min_oracle_strength``, or unscoreable,
     or has escaped mutants); a held cell with no per-task score gets ONE cell-level
-    item so the flag is never dropped silently. ``since`` keeps only cells that
+    item, and so does a held cell whose scored tasks are all strong (the controls hold it),
+    so the flag is never dropped silently. ``since`` keeps only cells that
     carry evidence stamped with an apparatus ≥ ``since`` (and scores likewise, when
     stamped). ``generated_at`` is the ``registered`` stamp of every item — pass a
     fixed value for a byte-identical backlog. Item ids are ``sha(cell, repo, task)``
@@ -1122,6 +1165,10 @@ def strengthening_backlog(
                     registered=when,
                 )
             )
+        if not weak:
+            # every scored task kills its mutants, yet the cell is held (a controls escape or
+            # a thin control set): the work is the control, so the flag still becomes ONE item
+            items.append(_item_for_held_strong_cell(cell, threshold=threshold, registered=when))
     items.sort(key=lambda i: (i.labels.get("cell", ""), i.labels.get("repo", ""), i.id))
     return StrengthenBacklog(
         items=tuple(items),

@@ -40,9 +40,9 @@ What it does: Overlays the commit's non-test files onto the parent worktree and 
               ``gold``, provider ``fixture``, ``extra.fixture: true``), spends nothing and
               claims nothing (``done=False``). It is registered only under
               ``CRB_ENABLE_FIXTURE_BUILDER=1``. With ``builder_config {"attempt": cmd}`` it
-              first asks the real shell guard about ``cmd`` (never running it) and records a
-              refusal as a protocol violation — how the Learn walkthrough gets a real
-              refusal row on a hermetic stack.
+              first asks the real shell guard about ``cmd`` (never running it); a refusal is
+              recorded as a protocol violation and the attempt stops with no patch — how
+              the Learn walkthrough gets a real refusal row on a hermetic stack.
 How:          ``source_files``: the commit's changed files minus tests and deletions →
               ``Workspace.overlay_sources`` → a zero-cost ``BuildOutcome``.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
@@ -162,7 +162,10 @@ class FixtureGoldBuilder:
             if reason:
                 errors.append(f"{reason} (attempted: {self.attempt[:120]})")
             emit(on_event, "build.tool", name="shell", ok=not reason, fixture=True)
-        files = self.source_files(workspace, brief)
+        # a refused attempt stops there, as a builder whose one move was refused would: no
+        # patch, so the grade is not clean and the row is `protocol` (a clean grade would
+        # outrank the refusal, and the gold overlay is harness-written, so it is not undone)
+        files = [] if errors else self.source_files(workspace, brief)
         emit(on_event, "build.attempt", builder=self.name, files=files, fixture=True)
         if files:
             workspace.overlay_sources(files)

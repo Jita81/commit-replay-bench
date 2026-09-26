@@ -4,7 +4,8 @@
  *  - A real refusal is made on the live stack: a `fixture_gold` replay queued through the
  *    Runs dialog with `builder_config {"attempt": "git log -p"}` puts that command to the
  *    REAL shell guard, which refuses it, so the rows land as `protocol` exactly as an agentic
- *    builder's would. Nothing is seeded around the product.
+ *    builder's would (every attempt refused, so the run itself ends `failed` and says why).
+ *    Nothing is seeded around the product.
  *  - A cell is held for its oracle the only honest way: more fixture replays of the primary
  *    repository through the API until the cell reaches the routing rule's n, where 04's
  *    controls escape (or a weak oracle) holds it — so the strengthen report has a row.
@@ -47,7 +48,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import AxeBuilder from '@axe-core/playwright'
-import type { Page } from '@playwright/test'
+import type { Browser, Page } from '@playwright/test'
 import { env, expect, personaPassword, primary, signIn, startRun, test, waitForRun } from './support'
 
 test.describe.configure({ mode: 'serial' })
@@ -99,12 +100,32 @@ async function ensurePersonas(page: Page): Promise<void> {
   }
 }
 
+/**
+ * A page signed in as a persona in its OWN browser context. Switching accounts on the
+ * fixture's page (signed in as the admin) raced the sign-out on the first walkthrough; a
+ * fresh context has no session to end, so the persona's sign-in is the only one on it.
+ */
+async function personaPage(browser: Browser, persona: string, viewport?: { width: number; height: number }): Promise<Page> {
+  const context = await browser.newContext({ baseURL: env.baseUrl, ...(viewport ? { viewport } : {}) })
+  const page = await context.newPage()
+  await signIn(page, USERNAME(persona), personaPassword(USERNAME(persona)))
+  return page
+}
+
+/** The bootstrap admin, the same way: its own context at the viewport under test. */
+async function personaPageAdmin(browser: Browser, viewport: { width: number; height: number }): Promise<Page> {
+  const context = await browser.newContext({ baseURL: env.baseUrl, viewport })
+  const page = await context.newPage()
+  await signIn(page)
+  return page
+}
+
 /** Every card of the page has painted: the four eyebrows and each report's table or empty state. */
 async function learnRendered(page: Page): Promise<void> {
   for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale evidence']) await expect(page.getByText(eyebrow, { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('table', { name: /Refusal classes/ })).toBeVisible()
   await expect(page.getByRole('table', { name: /Strengthening backlog/ })).toBeVisible()
-  await expect(page.getByRole('table', { name: /predate the current apparatus/ })).toBeVisible()
+  await expect(page.getByRole('table', { name: /predates the current apparatus/ })).toBeVisible()
   await expect(page.getByText(/^Deriving /)).toHaveCount(0)
 }
 
@@ -115,7 +136,9 @@ test.describe('13 learn: the loop acts from the page', () => {
   test('a real guard refusal: a fixture replay whose attempted command the guard refuses', async ({ page }) => {
     test.setTimeout(6 * MIN)
     await startRun(page, t.name, { kind: 'replay', builder: 'fixture_gold', model: 'gold', limit: 2, builderConfig: { attempt: REFUSED } })
-    await waitForRun(page, 'succeeded', 5 * MIN)
+    // every attempt was refused, so the run ends failed and says why — the rows are written
+    await waitForRun(page, 'failed', 5 * MIN)
+    await expect(page.getByRole('alert').first()).toContainText('protocol violation: archaeology')
     const report = await apiGet(page, `/learn/refusals?repo=${encodeURIComponent(t.name)}`)
     const groups = report.groups as Array<{ prefix: string; shape: string; n: number }>
     const ours = groups.find((g) => g.prefix === 'archaeology' && g.shape.startsWith('git log'))
@@ -135,8 +158,8 @@ test.describe('13 learn: the loop acts from the page', () => {
     expect(await items(), 'the strengthen report holds a cell of the primary repository').toBeGreaterThanOrEqual(1)
   })
 
-  test('the operator reads the loop, the register, the refusal tile and a row of each report that has one', async ({ page }) => {
-    await signIn(page, USERNAME('operator'), personaPassword(USERNAME('operator')))
+  test('the operator reads the loop, the register, the refusal tile and a row of each report that has one', async ({ browser }) => {
+    const page = await personaPage(browser, 'operator')
     await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
     await learnRendered(page)
     await expect(page.getByTestId('learn-loop')).toContainText('You are in the learning loop')
@@ -160,14 +183,14 @@ test.describe('13 learn: the loop acts from the page', () => {
     await plan.getByLabel(/^Plan against apparatus/).fill(WHAT_IF)
     await plan.getByRole('button', { name: 'Plan', exact: true }).click()
     await expect(plan.getByTestId('learn-plan-whatif')).toContainText(`planned against apparatus ${WHAT_IF}`)
-    const planRow = plan.getByRole('table', { name: /predate the current apparatus/ }).locator('tbody tr').first()
+    const planRow = plan.getByRole('table', { name: /predates the current apparatus/ }).locator('tbody tr').first()
     await expect(planRow).toBeVisible()
-    await expect(planRow).toContainText(/replay\|/)
+    await expect(planRow).toContainText(/\S+\|\S+/)
     await expect(plan.getByRole('button', { name: 'Queue runs' })).toHaveCount(0)
   })
 
-  test('the operator decides the refusal class and reads what it wrote, under their name', async ({ page }) => {
-    await signIn(page, USERNAME('operator'), personaPassword(USERNAME('operator')))
+  test('the operator decides the refusal class and reads what it wrote, under their name', async ({ browser }) => {
+    const page = await personaPage(browser, 'operator')
     await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
     const row = page.getByRole('table', { name: /Refusal classes/ }).getByRole('row').filter({ hasText: 'git log' }).first()
     await row.getByRole('button', { name: 'Decide' }).click()
@@ -179,7 +202,7 @@ test.describe('13 learn: the loop acts from the page', () => {
     const done = page.getByRole('dialog', { name: 'Decision recorded' }).getByRole('status')
     await expect(done).toContainText('Recorded as refuse by Walk operator')
     await expect(done).toContainText('shell_corpus_refused.txt')
-    await page.getByRole('button', { name: 'Close' }).click()
+    await page.getByRole('button', { name: 'Close', exact: true }).click()
     // the row now reads the decision and who made it, and is not offered the form again
     await expect(row).toContainText('refuse')
     await expect(row).toContainText('by Walk operator')
@@ -189,8 +212,8 @@ test.describe('13 learn: the loop acts from the page', () => {
     expect(decisions.some((d) => d.verdict === 'refuse' && d.decided_by === 'Walk operator' && d.decided_by_id.length > 0)).toBe(true)
   })
 
-  test('the operator registers the strengthening item and the Factory opens on it', async ({ page }) => {
-    await signIn(page, USERNAME('operator'), personaPassword(USERNAME('operator')))
+  test('the operator registers the strengthening item and the Factory opens on it', async ({ browser }) => {
+    const page = await personaPage(browser, 'operator')
     await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
     const card = page.locator('#strengthen')
     await card.getByRole('button', { name: 'Register' }).first().click()
@@ -202,8 +225,8 @@ test.describe('13 learn: the loop acts from the page', () => {
     await expect(page.locator(`#item-${id}`)).toBeVisible()
   })
 
-  test('the loop walks on: Re-score opens Runs pre-filled, then Oracle, a task and back to the plan', async ({ page }) => {
-    await signIn(page, USERNAME('operator'), personaPassword(USERNAME('operator')))
+  test('the loop walks on: Re-score opens Runs pre-filled, then Oracle, a task and back to the plan', async ({ browser }) => {
+    const page = await personaPage(browser, 'operator')
     await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
     const card = page.locator('#strengthen')
     const rescore = card.getByRole('link', { name: 'Re-score' }).first()
@@ -215,7 +238,7 @@ test.describe('13 learn: the loop acts from the page', () => {
     await expect(dialog.getByTestId('run-new-learn-step')).toContainText('Learning loop, step 4 of 6')
     const tasks = new URL(href, env.baseUrl).searchParams.get('tasks') ?? ''
     if (tasks) await expect(dialog.getByLabel(/^Only these tasks/)).toHaveValue(tasks)
-    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     // back to the report, then its Oracle link to the weakest task's page
     await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
     await page.locator('[data-hint="link.learn.oracle"]').click()
@@ -227,13 +250,13 @@ test.describe('13 learn: the loop acts from the page', () => {
     const plan = page.locator('#remeasure')
     await plan.getByLabel(/^Plan against apparatus/).fill(WHAT_IF)
     await plan.getByRole('button', { name: 'Plan', exact: true }).click()
-    const runs = plan.getByRole('table', { name: /predate the current apparatus/ }).locator('tbody tr').first()
+    const runs = plan.getByRole('table', { name: /predates the current apparatus/ }).locator('tbody tr').first()
     await expect(runs).toBeVisible()
     await expect(page.locator('[data-hint="stat.learn.needed"]')).toContainText(/n =\s*[1-9]/)
   })
 
-  test('a viewer reads the reports and is offered none of the decisions', async ({ page }) => {
-    await signIn(page, USERNAME('viewer'), personaPassword(USERNAME('viewer')))
+  test('a viewer reads the reports and is offered none of the decisions', async ({ browser }) => {
+    const page = await personaPage(browser, 'viewer')
     await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
     await learnRendered(page)
     for (const name of ['Decide', 'Register', 'Queue runs']) await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0)
@@ -246,10 +269,8 @@ test.describe('13 learn: the loop acts from the page', () => {
       { width: 1280, height: 900 },
       { width: 375, height: 812 },
     ]) {
-      test(`axe: /learn with every card rendered is clean for ${persona} @ ${vp.width}, with a hint open`, async ({ page }) => {
-        await page.setViewportSize(vp)
-        if (persona === 'admin') await signIn(page)
-        else await signIn(page, USERNAME(persona), personaPassword(USERNAME(persona)))
+      test(`axe: /learn with every card rendered is clean for ${persona} @ ${vp.width}, with a hint open`, async ({ browser }) => {
+        const page = persona === 'admin' ? await personaPageAdmin(browser, vp) : await personaPage(browser, persona, vp)
         await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
         await learnRendered(page)
         const where = `${persona} @ ${vp.width} /learn?repo=${t.name}`

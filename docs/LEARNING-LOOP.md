@@ -114,7 +114,9 @@ Definition-of-Ready gate (`crb.factory.readiness.assess`) says `build` without a
 supplying anything (the review's play-01 finding: structure helps, values leak). And the
 escaped mutants are listed *when the oracle run recorded them* (`CommitOracleScore.outcomes`
 or the report's `escaped_mutants`); otherwise the item carries the count and says so. A held
-cell with no per-task score gets one cell-level item, so a flag is never dropped silently.
+cell with no per-task score gets one cell-level item, and so does a held cell whose scored
+tasks are all strong — the controls hold it, so the item names the escaped control as the test
+work — so a flag is never dropped silently.
 
 Item ids are `sha(cell, repo, task)` — a re-run produces the same backlog; `--since <apparatus>`
 keeps only cells and scores stamped at or after that version. `--out backlog.json` writes an

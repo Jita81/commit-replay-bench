@@ -160,6 +160,9 @@ def test_an_attempted_command_the_guard_refuses_is_recorded_as_a_protocol_violat
     assert violation.prefix == "archaeology" and violation.command == "git log -p"
     assert out.extra["attempt"] == "git log -p"
     assert out.cost_usd == 0.0 and out.done is False  # still spends and claims nothing
+    # a refused attempt stops there, as a builder whose one move was refused would: no patch,
+    # so the grade is not clean and the row lands as `protocol` (a clean grade outranks it)
+    assert out.extra["files"] == [] and trial.read(pr.SRC) != pr.SRC_FEAT
 
 
 def test_an_attempted_command_the_guard_allows_records_nothing(
@@ -172,3 +175,33 @@ def test_an_attempted_command_the_guard_allows_records_nothing(
     )
     assert out.errors == () and not out.violated
     assert trial.read(pr.SRC) == pr.SRC_FEAT
+
+
+def test_a_refused_attempt_grades_as_a_protocol_row_not_a_clean_one(
+    pyrepo: pr.PyRepo, feat_task: TaskSpec, trial: Workspace
+) -> None:
+    """Through the grader and the ledger's one failure rule: the refused attempt's grade is
+    not clean, so the row's kind is ``protocol``. The first walkthrough of the Learn spec
+    found the opposite — the gold was overlaid after the refusal, the grade came back clean
+    and a clean grade outranks the refusal — so no protocol row reached the report (P-052)."""
+    from crb.builders.adapter import attempt_error
+    from crb.core.ledger import FAILURE_PROTOCOL, derive_failure_kind
+
+    out = fg.FixtureGoldBuilder(attempt="git log -p").build(
+        trial, _brief(feat_task, pyrepo.config), base.Budget()
+    )
+    res = grade(
+        trial,
+        feat_task,
+        config=pyrepo.config,
+        runner=PytestRunner(pyrepo.config),
+        executor=LocalExecutor(),
+    )
+    assert not res.clean
+    kind = derive_failure_kind(
+        clean=res.clean,
+        disqualified=res.disqualified,
+        error=res.error,
+        builder_error=attempt_error(out),
+    )
+    assert kind == FAILURE_PROTOCOL
