@@ -109,7 +109,7 @@ import datetime as _dt
 import os
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from fastapi import APIRouter, Request, Response, status
@@ -243,7 +243,9 @@ def _count_triggers(s: Session) -> int:
     dialect = s.get_bind().dialect.name
     names = [f"{t}_{kind}" for t in APPEND_ONLY_TABLES for kind in ("no_update", "no_delete")]
     if dialect == "sqlite":
-        rows = s.execute(text("SELECT name FROM sqlite_master WHERE type = 'trigger'")).scalars()
+        rows: Iterable[str] = s.execute(
+            text("SELECT name FROM sqlite_master WHERE type = 'trigger'")
+        ).scalars()
     elif dialect == "postgresql":
         rows = s.execute(text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")).scalars()
     else:  # pragma: no cover — unsupported by policy

@@ -107,7 +107,7 @@ def downgrade() -> None:
     """Refused while any review exists: a review is governance evidence and no migration
     may destroy it (docs/DATA-RETENTION.md). An empty table may go."""
     bind = op.get_bind()
-    n = bind.execute(sa.text("SELECT COUNT(*) FROM reviews")).scalar_one()
+    n: int = bind.execute(sa.text("SELECT COUNT(*) FROM reviews")).scalar_one()
     if n:
         raise RuntimeError(f"refusing to downgrade 0003: {n} review row(s) would be destroyed")
     op.drop_table("reviews")
