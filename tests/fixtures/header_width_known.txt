@@ -22,7 +22,6 @@ src/crb/server/worker.py#4f14be913d7a
 src/crb/server/worker.py#b3156f75fbed
 src/crb/server/worker.py#d4c88bbcfaaa
 tests/fixtures/pyrepo.py#6a9c8e7bfb13
-tests/test_cli_doctor.py#fd8620056a73
 tests/test_deploy_health_probes.py#005251726312
 tests/test_factory_author.py#8ebc528e734f
 tests/test_factory_outcomes.py#74a4714b1734
@@ -65,7 +64,6 @@ ui/src/screens/Factory/FactoryPage.tsx#13c71871cb7c
 ui/src/screens/Factory/FactoryPage.tsx#a9f57cf478b2
 ui/src/screens/Help/DocPage.tsx#21d441b1fab7
 ui/src/screens/Oracle/OraclePage.tsx#569371a3da89
-ui/src/screens/Posture/PosturePage.tsx#16fa25a8ec54
 ui/src/screens/Posture/PosturePage.tsx#b2944462cbeb
 ui/src/screens/Repos/ListEditors.tsx#7249ed9e8cad
 ui/src/screens/Repos/RepoConfigTab.tsx#fe74f8641e28

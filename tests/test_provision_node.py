@@ -17,11 +17,13 @@ What it does: Pins the plans' argv and environment; proves against a daemon that
               runner's ``npm ls --all --offline`` probe reads the set whole.
 How:          ``pkgmirror.build_npm_tarballs`` → ``npm cache add`` in a network-less container →
               ``noderepo_deps.build`` → ``SealedProvider.resolve`` (file:// cache) →
-              ``NodeTestRunner`` bound to the selected set on the shipped ``crb-sandbox-node`` image.
+              ``NodeTestRunner`` bound to the selected set on the shipped ``crb-sandbox-node``
+              image.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/provision/node.py (under test), src/crb/core/runners/node_runners.py (the
-              binding), tests/fixtures/pkgmirror.py (the tarballs), tests/fixtures/langs/noderepo_deps.py
+              binding), tests/fixtures/pkgmirror.py (the tarballs),
+              tests/fixtures/langs/noderepo_deps.py
               (the repository)
 Tested by:    tests/test_provision_node.py
 Touch when:   the Node recipe's plans or binding change.

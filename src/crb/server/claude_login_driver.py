@@ -30,7 +30,8 @@ What it is:   The ``claude setup-token`` PTY driver — the only process that ev
 What it does: Runs the CLI, publishes the sign-in URL, types the pasted code, stores the
               token, reports state; gives up at the session TTL (``expired``) or on SIGTERM
               (``cancelled``); exits on its own.
-How:          ``cli_environment`` → ``pty.fork`` + ``execvpe`` → non-blocking reads → ``URL_RE`` / ``TOKEN_RE`` over a stripped
+How:          ``cli_environment`` → ``pty.fork`` + ``execvpe`` → non-blocking reads → ``URL_RE`` /
+              ``TOKEN_RE`` over a stripped
               buffer → ``SecretsStore.set``; ``status.json`` written atomically, mode 0600.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         none

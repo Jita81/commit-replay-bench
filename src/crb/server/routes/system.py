@@ -78,7 +78,8 @@ What it does: Readiness aggregates the store probes (db, migrations at head, app
               503 when any is ``down``, and serves the deployment's ``posture`` beside them
               (where tests and the builder run, and whether production runs unsealed under
               ``CRB_ALLOW_UNSEALED_PROD``, ADR-0023); a read that raises is ``down`` with
-              the fixed ``failure_detail`` naming the request id, the exception logged, never served;
+              the fixed ``failure_detail`` naming the request id, the exception logged, never
+              served;
               liveness checks the database only; ``/metrics``
               refreshes the ledger gauges then renders the shared registry.
 How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the

@@ -15,7 +15,8 @@ What it does: Pins that editing a worktree changes neither the inputs nor the ke
               tree (an escaping replace or a linked manifest); and that a trial selects the
               parent's or the gold's set
               or raises ``ClosureViolation`` naming what was outside.
-How:          ``two_commit_repo`` / ``init_repo`` + ``commit_all`` → ``LockInputs.from_git`` → assert;
+How:          ``two_commit_repo`` / ``init_repo`` + ``commit_all`` → ``LockInputs.from_git`` →
+              assert;
               a spy ``GitRepo`` records every path asked for.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none

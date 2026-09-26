@@ -78,8 +78,9 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
-              README.md, docs/RELEASING.md, docs/CONTRIBUTING.md, docs/SUMMARY.md and
-              docs/reviews/2026-09-25-value-baseline.md (the pages on the allowlist),
+              README.md (the first page on ``ALLOWLIST``; docs/RELEASING.md,
+              docs/CONTRIBUTING.md, docs/SUMMARY.md and
+              docs/reviews/2026-09-25-value-baseline.md are the others),
               docs/DECISION-LOG.md (where a review action's record lives),
               docs/reviews/2026-09-13-critical-friend.md (the review whose actions it holds),
               .github/workflows/ci.yml (the claims job that runs --check),

@@ -32,7 +32,8 @@ How:          ``fixtures.remote.bare_remote`` over ``pyrepo`` with the developer
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/server/worker.py (under test), src/crb/core/git.py (``clone_repo`` and
-              the policy), src/crb/server/routes/repos.py (``confined_clone_path``), tests/fixtures/remote.py, tests/test_server_routes_w3b.py (the API's
+              the policy), src/crb/server/routes/repos.py (``confined_clone_path``),
+              tests/fixtures/remote.py, tests/test_server_routes_w3b.py (the API's
               half), tests/test_git_clone.py (the policy's own suite), tests/test_worker.py
 Tested by:    tests/test_worker_clone.py
 Touch when:   the clone destination or the URL policy changes (mirror the route and CLI suites);

@@ -133,7 +133,8 @@ Schema
 snapshot fields only; ``crb.signoff.v2`` records hash the policy snapshot and the
 attestation (:data:`_V2_BODY_FIELDS`, frozen); ``crb.signoff.v3`` records add
 ``verifier_kind`` (:data:`_V3_BODY_FIELDS`, frozen); ``crb.signoff.v4`` records hash
-everything, ``checks_arm`` and ``posture_class`` included. :meth:`SignoffRecord.body` is schema-aware so an
+everything, ``checks_arm`` and ``posture_class`` included. :meth:`SignoffRecord.body` is
+schema-aware so an
 old chain still verifies after this module learned the new fields, and
 :meth:`SignoffRecord.from_dict` tolerates every shape.
 

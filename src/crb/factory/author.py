@@ -45,7 +45,8 @@ What it is:   The configurable test-author rung — a ``TestAuthor`` that writes
               ``builder:model[:provider]`` spelling as a build rung.
 What it does: Turns a rung label into a test author whose identity the loop's existing
               refusal compares against every build rung (the author and a build rung are
-              never the same rung, nor the same model — C3); asks one OpenAI-compatible model for a single test
+              never the same rung, nor the same model — C3); asks one OpenAI-compatible model for a
+              single test
               file in the repository's own conventions, re-asking on a reply it cannot parse
               or a path the repository does not call a test, and refuses to return anything
               else.
