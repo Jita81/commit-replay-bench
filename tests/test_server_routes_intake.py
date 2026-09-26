@@ -46,6 +46,7 @@ import pytest
 
 from crb.intake import client as c
 from crb.intake.fake import FAKE_TRACKER_ENV, fake_tracker_path
+from crb.server import intake as sv
 from crb.server.app import API_PREFIX
 from crb.server.secrets import TRACKER_TOKEN_SECRET
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_settings
@@ -1009,6 +1010,44 @@ def test_a_ticket_that_cannot_be_read_at_register_is_a_502_and_nothing_is_writte
     assert r.status_code == 502, r.text
     assert envelope(r)["code"] == "tracker_error"
     assert board.read_text(encoding="utf-8") == json.dumps(gone)
+    assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
+    assert _events(env, "intake.approved") == []
+
+
+def test_a_poll_whose_lease_was_taken_over_is_a_409_and_writes_nothing_more(
+    env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR #55 review: a pass that outlives its lease can be taken over while it still
+    works. The served poll goes through the lease fence, so a pass that can no longer
+    renew its lease must stop before its first tracker call and answer 409 ``intake_busy``
+    rather than read and write beside the new holder."""
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    board = fake_tracker_path(tmp_path)
+    before = board.read_text(encoding="utf-8")
+    monkeypatch.setattr(sv.DbLease, "renew", lambda self: False)
+    r = env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "intake_busy"
+    assert "took the column over" in envelope(r)["message"]
+    assert board.read_text(encoding="utf-8") == before
+
+
+def test_a_register_act_whose_lease_was_taken_over_is_a_409_and_writes_nothing(
+    env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Register act goes through the same fence: a lost lease at its live read must be
+    409 ``intake_busy`` with nothing registered and nothing written on the board."""
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200
+    board = fake_tracker_path(tmp_path)
+    before = board.read_text(encoding="utf-8")
+    monkeypatch.setattr(sv.DbLease, "renew", lambda self: False)
+    r = _register(env, revision="1")
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "intake_busy"
+    assert board.read_text(encoding="utf-8") == before
     assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
     assert _events(env, "intake.approved") == []
 

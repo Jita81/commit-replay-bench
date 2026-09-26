@@ -732,6 +732,7 @@ registered from a partial read.
 | `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks; or a ticket whose key cannot become an item id, which costs that ticket and nothing else | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP` |
 | `column_too_large` | the column holds more tickets than one pass may read (`CRB_INTAKE__MAX_PER_POLL`), or the pass ran past `CRB_INTAKE__POLL_BUDGET_S` | narrow the area path or the JQL so the column holds the work that is genuinely ready, or raise the bound; a pass that ran out of time serves what it read and the rest are read next time |
 | `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
+| `lease_lost` | one tracker call took longer than the pass's lease lives, and another pass took the repository over | nothing: the pass renews its lease around every tracker call, so this needs one call slower than the lease; the pass stopped before its next call and the other pass carries on. If it recurs, the tracker is answering very slowly — raise `CRB_INTAKE__POLL_BUDGET_S`, which lengthens the lease with it |
 
 Resume only after root cause, correction, a targeted regression run and re-qualification
 of the affected cells.

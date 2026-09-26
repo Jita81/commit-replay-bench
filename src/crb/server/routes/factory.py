@@ -98,6 +98,7 @@ from crb.factory.evidence import verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, sign, slots_for
 from crb.factory.testfirst import AuthoredTest
 from crb.intake.client import (
+    REASON_LEASE_LOST,
     REASON_NO_PUBLIC_URL,
     REASON_NO_SECRET,
     STOP_ADVICE,
@@ -1505,6 +1506,15 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
             "intake_busy",
             "another pass is reading this repository's column right now (the worker's timer or "
             "another operator): nothing was read or written — try again in a minute",
+        )
+    if report.stopped == REASON_LEASE_LOST:
+        # this pass outlived its lease and another took the repository over (PR #55
+        # review): what it did is on the chain, and the other pass writes the view
+        raise ApiError(
+            409,
+            "intake_busy",
+            "this read took longer than its lease allows and another pass took the column "
+            "over; that pass carries on, so wait a minute and reload",
         )
     if report.withdrawn:
         # switched off between the consent check above and the lease (PR #55 review)

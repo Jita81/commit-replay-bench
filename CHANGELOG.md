@@ -42,6 +42,14 @@ now says the ticket could not be updated. A re-linked repository row let the fac
 or close the SAME-numbered pull request in the new repository, and the outcome sync read its
 fate; each delivery now records the repository beside the number and every reuse checks it.
 
+A later re-review found one more, pinned the same way. The intake lease was stamped only when
+a pass took it, so a pass still calling the tracker after the lease's time to live looked
+crashed, and a second pass could take the repository over while the first kept reading and
+writing. Every tracker call a pass or a Register act makes now renews the lease before and
+after the call. A pass whose lease is taken over while one slow call is in flight stops before
+its next call, acts on nothing that call returned and records the new stop reason
+`lease_lost`; the poll and the Register act answer 409 `intake_busy`.
+
 ### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
 
 SQLAlchemy 2.1.1 reached PyPI on 2026-09-25, and the `server` extra's `sqlalchemy>=2.0` has

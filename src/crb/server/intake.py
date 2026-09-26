@@ -35,7 +35,9 @@ arrives while a factory run is active is **queued, not lost**: the ticket keeps
 ``lease:intake:<repo>`` row in the ``workers`` table) before it reads anything; a second
 pass — the worker's timer and an operator's "Re-read" at once — that finds it held does
 nothing at all and says so (``busy``). A lease left by a crashed pass expires after its
-time to live.
+time to live. A pass that is still working renews it around every tracker call
+(:class:`FencedTracker`), and a pass whose lease was taken over all the same stops before
+its next call and acts on nothing it read (``lease_lost``).
 
 Every stop — tracker unreachable, credential missing, a write the tracker refused, the
 column gone — is an ``intake.stopped`` event carrying one of the published reasons, and
@@ -55,7 +57,8 @@ What it does: Turns a watched column into drafts, gap feedback and — once an o
 How:          Plain functions over injected callables (the tracker, the route lookup, the
               clock, "is a run active") and an injected lease, so the whole flow is exercised
               by a fake tracker with no HTTP and no model; the lease is a row in the
-              ``workers`` table taken by insert (atomic) and renewed only when expired; state
+              ``workers`` table taken by insert (atomic), taken over only when expired, and
+              renewed by the pass around every tracker call (``FencedTracker``); state
               the screen reads is one JSON file beside the repository's evidence chain.
 Layer:        server — docs/ARCHITECTURE.md#43-server
 ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
@@ -115,6 +118,7 @@ from crb.intake.client import (
     LINK_ITEM,
     LINK_PULL_REQUEST,
     REASON_COLUMN_TOO_LARGE,
+    REASON_LEASE_LOST,
     REASON_NO_PUBLIC_URL,
     REASON_NO_SECRET,
     REASON_NOT_CONFIGURED,
@@ -710,6 +714,26 @@ class DbLease:
             self.held = int(getattr(taken, "rowcount", 0) or 0) == 1
             return self.held
 
+    def renew(self) -> bool:
+        """Stamp this holder's heartbeat with now, so a pass still working is never taken
+        for a crashed one (PR #55 review). ``False`` — and ``held`` cleared — when the row is
+        no longer this holder's: another pass took it over after it expired, or a switch-off
+        took and released it. A holder that gets ``False`` must stop before its next act.
+
+        The compare-and-set is on the holder alone: a lease that expired but that nobody
+        took is still this holder's, and renewing it is correct. A takeover that read the
+        old stamp fails its own compare-and-set on the stamp this renewal moved."""
+        stamp = _iso(self.clock())
+        with self.factory() as s:
+            done = s.execute(
+                update(WorkerRow)
+                .where(WorkerRow.worker_id == self.key, WorkerRow.hostname == self.holder)
+                .values(heartbeat=stamp)
+            )
+            s.commit()
+        self.held = int(getattr(done, "rowcount", 0) or 0) == 1
+        return self.held
+
     def release(self) -> None:
         """Drop the lease if this holder still owns it (never another holder's)."""
         with self.factory() as s:
@@ -768,6 +792,73 @@ def intake_lease(
     return IntakeLease(factory, repo, ttl_s=ttl_s, clock=clock)
 
 
+class FencedTracker:
+    """The tracker as a pass holding a lease may use it (PR #55 review).
+
+    The lease is stamped when a pass takes it, and one tracker call can outlast its time to
+    live on its own: httpx's timeout is per phase, a 429 is retried and a verb can make
+    more than one request. A pass that looked crashed could then be taken over while it was
+    still reading and writing. So every verb renews the lease BEFORE the call, and again
+    AFTER it: a pass whose lease was taken over never starts another call, and never acts
+    on what a call returned — a read that outlived the lease registers nothing. Either
+    renewal failing raises ``TrackerError(lease_lost)``, which every caller already handles
+    as a stop; once lost, every later verb raises at once without asking the store.
+
+    A pass never hands the raw tracker on while it holds a lease: :func:`poll_repository`
+    and :func:`register_approved` wrap it here, and ``poll_repository`` hands the fenced
+    one to its ``then`` callback. ``tests/test_intake_service.py`` checks the fence covers
+    every verb of :class:`~crb.intake.client.TrackerClient`.
+    """
+
+    def __init__(self, inner: TrackerClient, lease: DbLease) -> None:
+        self.inner = inner
+        self.lease = lease
+        self.name = inner.name
+        self.lost = False
+
+    def _hold(self, verb: str) -> None:
+        if not self.lost and self.lease.renew():
+            return
+        self.lost = True
+        raise TrackerError(
+            REASON_LEASE_LOST,
+            f"this pass held the repository's lease for longer than it lives and another "
+            f"pass took it over, so this pass stopped at its {verb}",
+        )
+
+    def entered(self, column: str, since: str) -> list[TicketRef]:
+        self._hold("column read")
+        refs = self.inner.entered(column, since)
+        self._hold("column read")
+        return refs
+
+    def read(self, key: str) -> Ticket:
+        self._hold("read")
+        ticket = self.inner.read(key)
+        self._hold("read")
+        return ticket
+
+    def comment(self, key: str, text: str, marker: str) -> None:
+        self._hold("comment")
+        self.inner.comment(key, text, marker)
+        self._hold("comment")
+
+    def label(self, key: str, value: str) -> None:
+        self._hold("label")
+        self.inner.label(key, value)
+        self._hold("label")
+
+    def transition(self, key: str, state: str) -> None:
+        self._hold("transition")
+        self.inner.transition(key, state)
+        self._hold("transition")
+
+    def link(self, key: str, url: str, title: str = "") -> None:
+        self._hold("link")
+        self.inner.link(key, url, title)
+        self._hold("link")
+
+
 # ---------------------------------------------------------------------------
 # the poll
 # ---------------------------------------------------------------------------
@@ -801,7 +892,7 @@ def poll_repository(
     clock: Callable[[], float] = time.monotonic,
     approval: ApprovalPolicy | None = None,
     lease: IntakeLease | None = None,
-    then: Callable[[PollReport], None] | None = None,
+    then: Callable[[PollReport, TrackerClient], None] | None = None,
 ) -> PollReport:
     """Read the watched column once and do whatever each ticket has earned.
 
@@ -812,7 +903,11 @@ def poll_repository(
     switched off before this pass held it (``listener`` is the caller's earlier reading)
     it does the same and returns ``withdrawn``. Every served caller passes one. ``then``
     runs after the column pass while the lease is still held — the worker's outcome
-    writes on the tickets, which must not land after a switch-off either.
+    writes on the tickets, which must not land after a switch-off either — and is handed
+    the tracker it must write through: the :class:`FencedTracker` that renews the lease
+    around every call. A pass whose lease was taken over while it worked stops with
+    ``lease_lost``: it does not write the served view (the new holder does) and does not
+    run ``then``.
 
     Never raises: a tracker failure is a :class:`PollReport` with ``stopped`` set and an
     ``intake.stopped`` event on the chain, and the next poll retries. Nothing is
@@ -841,6 +936,7 @@ def poll_repository(
             busy=True,
             detail="another pass is reading this repository's column; this one did nothing",
         )
+    fenced = FencedTracker(tracker, lease) if lease is not None else None
     try:
         if lease is not None and not lease.consented():
             return PollReport(
@@ -852,7 +948,7 @@ def poll_repository(
             )
         report = _poll_column(
             repo,
-            tracker=tracker,
+            tracker=fenced if fenced is not None else tracker,
             listener=listener,
             column=column,
             home=home,
@@ -867,6 +963,10 @@ def poll_repository(
             clock=clock,
             approval=approval if approval is not None else ApprovalPolicy(),
         )
+        if fenced is not None and fenced.lost:
+            # another pass holds the repository now and writes its own view: this one's rows
+            # stop part-way, and writing them would overwrite the holder's (PR #55 review)
+            return report
         # The served view is written HERE, by the function that reads it, not by each caller
         # in turn: a poll whose caller was killed before its own write left the screen showing
         # a ticket it had already commented on as unread, and the two callers could drift.
@@ -875,7 +975,7 @@ def poll_repository(
         except OSError:  # a cache is not the record; the chain already has every step
             log.warning("intake state not written", extra={"repo": repo})
         if then is not None:
-            then(report)
+            then(report, fenced if fenced is not None else tracker)
         return report
     finally:
         if lease is not None:
@@ -981,6 +1081,16 @@ def _poll_column(
         )
         if row is not None:
             report.rows.append(row)
+        if isinstance(tracker, FencedTracker) and tracker.lost:
+            # the lease was taken over inside this ticket (FencedTracker): the ticket's row
+            # carries the stop, and no further ticket is read by a pass that no longer
+            # holds the repository (PR #55 review)
+            detail = (
+                f"the pass stopped inside ticket {i + 1} of {len(refs)}: another pass took "
+                "the repository over after this one outlived its lease, and carries on"
+            )
+            report.stopped, report.detail = REASON_LEASE_LOST, detail
+            break
         if check_budget.fired:
             # The budget ran out INSIDE this ticket. `_handle_ticket` records that on the
             # ticket's own row and carries on, so without this the stop is invisible on the
@@ -1458,7 +1568,9 @@ def register_approved(
         return _register_approved(
             key,
             revision=revision,
-            tracker=tracker,
+            # every call under the lease renews it, and a live read that outlived it is
+            # refused rather than acted on (PR #55 review)
+            tracker=FencedTracker(tracker, lease) if lease is not None else tracker,
             home=home,
             item_url=item_url,
             approver=approver,
@@ -1529,7 +1641,16 @@ def _register_approved(
     # as if its new words were on the backlog (PR #55 review). The ticket as the tracker
     # serves it now must still be the draft's content; a read that fails raises
     # TrackerError before any write.
-    live = content_revision(tracker.read(key))
+    try:
+        live = content_revision(tracker.read(key))
+    except TrackerError as exc:
+        if exc.reason != REASON_LEASE_LOST:
+            raise
+        raise ApprovalRefused(
+            "intake_busy",
+            "this act took longer than its lease allows and another pass took the column "
+            "over: nothing was registered or written, try again",
+        ) from exc
     if live != now_content:
         raise ApprovalRefused(
             "revision_moved",
@@ -1830,6 +1951,7 @@ __all__ = [
     "ApprovalPolicy",
     "ApprovalRefused",
     "DbLease",
+    "FencedTracker",
     "IntakeLease",
     "IntakeRow",
     "IntakeStore",

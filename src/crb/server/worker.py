@@ -237,7 +237,7 @@ from crb.factory.delivery import (
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
-from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerError
+from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
@@ -832,13 +832,15 @@ class Worker:
         # repository's lease (one pass at a time — a busy pass does nothing)
         budget_s = float(self.settings.intake.poll_budget_s)
 
-        def tell_the_tickets(report: PollReport) -> None:
+        def tell_the_tickets(report: PollReport, tracker: TrackerClient) -> None:
             """What the loop did with the items this column produced, told to the tickets
             that produced them: the pull request link when one opened, the refusal and its
             way forward when the loop stopped, the merge's state move. Read from the
             chain, posted once per marker — and run by ``poll_repository`` while the
             repository's lease is still held, so a switch-off cannot land between the
-            column pass and these writes (PR #55 review)."""
+            column pass and these writes (PR #55 review). ``tracker`` is the one the pass
+            hands over, fenced by the lease, and it shadows the raw one on purpose: a
+            write here must stop when another pass has taken the repository over."""
             del report
             post_outcomes_to_tickets(
                 tracker,

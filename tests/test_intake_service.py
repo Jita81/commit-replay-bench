@@ -1140,6 +1140,221 @@ def test_a_lease_left_by_a_crashed_pass_expires(tmp_path: Path) -> None:
     assert c2.acquire()
 
 
+def test_a_ticket_edited_on_the_board_after_the_last_poll_is_refused_at_register(
+    home: FactoryHome,
+) -> None:
+    """PR #55 review: Register must be bound to the ticket as the tracker serves it now,
+    not to the last poll's read. An edit made after the poll must be refused as
+    ``revision_moved``, and the live read must come before any write."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    # the ticket is edited on the board; nothing polls it again
+    tracker.tickets["4711"] = _ticket(revision="2", title="Add a POST /health route and a GET")
+    tracker.calls.clear()
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+            approver="operator:ada",
+        )
+    assert err.value.code == "revision_moved"
+    assert home.load_backlog() is None
+    assert tracker.calls == [("read", "4711")]  # read first, and nothing written
+    assert sv.EV_REGISTERED not in [e.kind for e in home.events()]
+
+
+# --- PR #55 review: a pass that outlives its lease -------------------------------------
+
+#: The lease's time to live in these tests, in the lease's own clock.
+_TTL = 60.0
+
+
+def _switched_on_store(tmp_path: Path) -> Any:
+    """A real store with repository ``alpha`` switched on, as the served stack holds it."""
+    from crb.store import init_db, make_engine, make_session_factory
+    from crb.store.models import Repo
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'lease.db'}")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    with factory() as s:
+        on = {sv.CONFIG_KEY: sv.ListenerState(enabled=True).to_dict()}
+        s.add(Repo(name="alpha", language="python", runner="pytest", config_json=on))
+        s.commit()
+    return factory
+
+
+def test_a_long_pass_keeps_its_lease_while_it_is_still_calling_the_tracker(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """The lease was stamped once, when the pass took it. A pass still calling the tracker
+    after the time to live looked like a crashed one, and a second pass could take the
+    repository over while the first was still reading and writing. A pass must renew the
+    lease as it works: while it is still calling the tracker, no other pass may take it."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    tracker = _column_of(4)
+    real_read = tracker.read
+    overlapping: list[bool] = []
+
+    def slow_read(key: str) -> c.Ticket:
+        clock[0] += _TTL * 0.6  # each read takes most of the lease; four take far more
+        rival = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+        overlapping.append(rival.acquire())
+        return real_read(key)
+
+    tracker.read = slow_read  # type: ignore[method-assign]
+    report = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        budget_s=10_000,
+        lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]),
+    )
+    assert clock[0] - 1000.0 > _TTL  # the pass ran for longer than the lease lives
+    assert overlapping == [False, False, False, False]
+    assert report.registered == 4 and not report.stopped
+
+
+def test_a_pass_whose_lease_was_taken_over_stops_before_acting_on_what_it_read(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """One tracker call can outlast the lease on its own (a timeout per phase, retries,
+    rate-limit waits), and then another pass may take the repository over. The first pass
+    must not act on what that call returned: it stops before its next tracker call and
+    before it registers anything, and it does not overwrite the new holder's served view."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    tracker = _tracker(_ticket())
+    real_read = tracker.read
+    rivals: list[Any] = []
+
+    def overrun(key: str) -> c.Ticket:
+        clock[0] += _TTL + 1  # this one call outlived the lease
+        rival = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+        assert rival.acquire()  # the lease looked abandoned, so another pass took it
+        rivals.append(rival)
+        return real_read(key)
+
+    tracker.read = overrun  # type: ignore[method-assign]
+    report = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        budget_s=10_000,
+        lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]),
+    )
+    assert report.stopped == c.REASON_LEASE_LOST
+    assert report.registered == 0 and home.load_backlog() is None
+    assert tracker.comments == {} and tracker.labels == {} and tracker.links == {}
+    assert tracker.calls == [("entered", "Ready"), ("read", "4711")]
+    assert not sv.store_for(home).path.exists()  # the new holder writes the view, not this one
+    (stop,) = [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    assert stop.payload["reason"] == c.REASON_LEASE_LOST
+    # the pass that lost the lease did not release the new holder's
+    third = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert not third.acquire()
+    rivals[0].release()
+
+
+def test_a_register_act_whose_lease_was_taken_over_writes_nothing(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """The Register act's live read can outlast the lease too. The act must then be refused
+    as ``intake_busy``: nothing registered, nothing written on the ticket."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    real_read = tracker.read
+
+    def overrun(key: str) -> c.Ticket:
+        clock[0] += _TTL + 1
+        assert sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]).acquire()
+        return real_read(key)
+
+    tracker.read = overrun  # type: ignore[method-assign]
+    tracker.calls.clear()
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+            approver="operator:ada",
+            lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]),
+        )
+    assert err.value.code == "intake_busy"
+    assert home.load_backlog() is None
+    assert tracker.calls == [("read", "4711")]
+
+
+def test_the_callback_after_a_pass_is_handed_the_fenced_tracker(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """``then`` writes on the tickets under the lease (the worker's outcome notes), so it
+    must be handed the fenced tracker, never the raw one: a write it makes after another
+    pass took the repository over must stop like any other."""
+    factory = _switched_on_store(tmp_path)
+    tracker = _tracker(_ticket())
+    handed: list[Any] = []
+    _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL),
+        then=lambda report, fenced: handed.append(fenced),
+    )
+    (fenced,) = handed
+    assert isinstance(fenced, sv.FencedTracker) and fenced.inner is tracker
+
+
+_VERB_ARGS: dict[str, tuple[str, ...]] = {
+    "entered": ("Ready", ""),
+    "read": ("4711",),
+    "comment": ("4711", "text", "marker"),
+    "label": ("4711", c.LABEL_READY),
+    "transition": ("4711", "Done"),
+    "link": ("4711", "https://crb.invalid/x"),
+}
+
+
+@pytest.mark.parametrize("verb", sorted(_VERB_ARGS))
+def test_every_tracker_verb_is_fenced_by_the_lease(verb: str, tmp_path: Path) -> None:
+    """The prevention for the class: a pass never hands the raw tracker on, it hands the
+    fenced one, and the fence covers every verb of the protocol. A verb reached after the
+    lease was taken over must raise ``lease_lost`` without reaching the tracker."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    tracker = _tracker(_ticket())
+    fenced = sv.FencedTracker(tracker, lease)
+    assert fenced.name == tracker.name
+    clock[0] += _TTL + 1
+    assert sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]).acquire()
+    with pytest.raises(c.TrackerError) as err:
+        getattr(fenced, verb)(*_VERB_ARGS[verb])
+    assert err.value.reason == c.REASON_LEASE_LOST
+    assert tracker.calls == []
+
+
+def test_the_fence_covers_every_verb_of_the_tracker_protocol(tmp_path: Path) -> None:
+    """Completeness: a verb added to the tracker protocol must be added to the fence and to
+    the parametrised test above, or this fails."""
+    verbs = {n for n, v in vars(c.TrackerClient).items() if callable(v) and not n.startswith("_")}
+    assert verbs == set(_VERB_ARGS)
+    assert all(n in vars(sv.FencedTracker) for n in verbs)
+    lease = sv.intake_lease(_switched_on_store(tmp_path), "alpha", ttl_s=_TTL)
+    assert isinstance(sv.FencedTracker(FakeTracker(), lease), c.TrackerClient)
+
+
 # --- PR #55 review: no public writer lets a relative link reach a ticket -----------------
 
 #: A builder that marks every link it makes, so a test can look for it on the board.
