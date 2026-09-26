@@ -232,7 +232,13 @@ class TestDeploymentDefaults:
         assert env["CRB_BUILDER__IMAGE"] == "${CRB_BUILDER__IMAGE:-}"
         resolved = worker_main.settings_from_args(
             worker_main.build_parser().parse_args(["--once"]),
-            {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "prod", "CRB_BUILDER__EXECUTOR": ""},
+            {
+                "CRB_HOME": str(tmp_path / "h"),
+                "CRB_ENV": "prod",
+                "CRB_BUILDER__EXECUTOR": "",
+                # a non-root builder user, as every test names one (DL-053's uid ratchet)
+                "CRB_BUILDER__USER": "65534:65534",
+            },
         )
         assert resolved.builder_executor == "docker"
 
@@ -389,7 +395,12 @@ class TestHelmOneBuilderPosture:
         api, worker = _rendered_env(docs, "api"), _rendered_env(docs, "worker")
         assert api.get("CRB_BUILDER__EXECUTOR") == worker.get("CRB_BUILDER__EXECUTOR")
         # and resolved the way each process resolves it
-        worker_env = {**worker, "CRB_HOME": str(tmp_path / "w")}
+        # a non-root builder user, as every test names one (DL-053's uid ratchet)
+        worker_env = {
+            **worker,
+            "CRB_HOME": str(tmp_path / "w"),
+            "CRB_BUILDER__USER": "65534:65534",
+        }
         resolved_worker = worker_main.settings_from_args(
             worker_main.build_parser().parse_args(["--once"]), worker_env
         ).builder_executor
