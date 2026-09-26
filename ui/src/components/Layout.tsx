@@ -43,7 +43,8 @@
  * Touch when:   a screen is added — add its `NAV` entry here and its route in ui/src/App.tsx;
  *               never for a new repository.
  */
-import { NavLink, Outlet, matchPath, useNavigate } from 'react-router'
+import { useEffect, useState } from 'react'
+import { NavLink, Outlet, matchPath, useLocation, useNavigate } from 'react-router'
 import { useHealth, useLogout, useVersion } from '../api/hooks'
 import { useAuth } from '../lib/auth'
 import { useTheme } from '../lib/theme'
@@ -130,6 +131,41 @@ const INSTRUMENT: Array<{ to: string; label: string; role: 'viewer' | 'operator'
 const THEME_GLYPH = { light: '☀', dark: '☾', system: '◐' } as const
 
 /**
+ * The ids of the three blocks the phone "Menu" discloses (F26): the chrome cluster (health
+ * pill, role chip, Help, theme, Sign out) and the two nav rows. From `sm` (640 px) up they
+ * are always shown and the Menu button is not rendered visible; below it they are shown
+ * only while the menu is open. One button controls all three, so `aria-controls` lists them.
+ */
+export const SHELL_MENU_IDS = ['shell-menu-actions', 'shell-nav-primary', 'shell-nav-instrument'] as const
+/** The Menu button's DOM id: Escape returns focus here. */
+export const SHELL_MENU_BUTTON_ID = 'shell-menu-button'
+
+/**
+ * The phone menu's open state, keyed to the address it was opened on, so following any link
+ * inside it closes it (the next screen starts with the navigation folded away) without an
+ * effect that resets state after render. Escape closes it and puts focus back on the button
+ * — unless the Escape was already spent closing a hint bubble (`Hint` default-prevents it and
+ * stops it in the capture phase), so one press closes the innermost thing, as in a dialog.
+ */
+function useShellMenu(): { open: boolean; toggle: () => void } {
+  const { pathname, search } = useLocation()
+  const here = `${pathname}${search}`
+  const [openAt, setOpenAt] = useState<string | null>(null)
+  const open = openAt === here
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      setOpenAt(null)
+      document.getElementById(SHELL_MENU_BUTTON_ID)?.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open])
+  return { open, toggle: () => setOpenAt(open ? null : here) }
+}
+
+/**
  * The app shell: brand, top nav (one brand name in chrome — law 9), health
  * dot, user chip with role, theme toggle. No internals (endpoints, models,
  * versions) in the chrome except the apparatus version in the footer, which
@@ -144,6 +180,9 @@ export function Layout() {
   const health = useHealth()
   const version = useVersion()
   const h = health.data ? probeDisplay(health.data.status) : null
+  const menu = useShellMenu()
+  // below sm the three blocks show only while the menu is open; from sm up, always
+  const folded = menu.open ? '' : 'max-sm:hidden'
 
   return (
     <div className="flex min-h-screen flex-col bg-surface text-on-surface">
@@ -152,13 +191,33 @@ export function Layout() {
       </a>
       <header>
         <div className="bg-primary text-on-primary">
-          <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-6 px-5 py-4">
-            <NavLink to="/home" className="flex items-center gap-3 text-on-primary no-underline">
-              <span className="block rounded-[2px] bg-on-primary px-2.5 pb-[7px] pt-[9px] text-[22px] font-bold leading-none tracking-[-.02em] text-primary">crb</span>
-              <span className="text-[22px] font-bold leading-none">{BRAND}</span>
+          <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-2 gap-y-3 px-5 py-3 sm:gap-6 sm:py-4">
+            <NavLink to="/home" className="flex items-center gap-2 text-on-primary no-underline sm:gap-3">
+              <span className="block rounded-[2px] bg-on-primary px-2 pb-[6px] pt-[8px] text-[17px] font-bold leading-none tracking-[-.02em] text-primary sm:px-2.5 sm:pb-[7px] sm:pt-[9px] sm:text-[22px]">crb</span>
+              <span className="text-[17px] font-bold leading-none sm:text-[22px]">{BRAND}</span>
             </NavLink>
-            {/* the gaps and the role pill are tighter below sm so pill · role · help · theme · sign out is ONE row at 375 px */}
-            <div className="ml-auto flex flex-wrap items-center justify-end gap-x-2.5 gap-y-2 text-[16px] sm:gap-x-4">
+            {/* F26: below 640 px the journey and instrument rows and this cluster fold behind one
+                "Menu" disclosure, so a phone's first screen is the page, not three rows of chrome */}
+            {/* on the header's own blue, like the nav links (hover darkens, never lightens): a
+                ghost button's light hover fill put blue text on light blue (axe, 2.29:1) */}
+            <Hint
+              as="button"
+              id="button.shell.menu"
+              elementId={SHELL_MENU_BUTTON_ID}
+              type="button"
+              className="ml-auto inline-flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-[var(--radius-control)] border border-on-primary bg-transparent px-2.5 text-[14px] font-semibold text-on-primary hover:bg-[#002265] sm:hidden"
+              aria-expanded={menu.open}
+              aria-controls={SHELL_MENU_IDS.join(' ')}
+              onClick={menu.toggle}
+              data-testid="shell-menu-button"
+            >
+              <span aria-hidden>{menu.open ? '✕' : '☰'}</span> Menu
+            </Hint>
+            {/* the gaps and the role pill are tighter below sm; on a phone this cluster is the menu's first row */}
+            <div
+              id={SHELL_MENU_IDS[0]}
+              className={`${folded} flex basis-full flex-wrap items-center gap-x-2.5 gap-y-2 text-[16px] sm:ml-auto sm:basis-auto sm:justify-end sm:gap-x-4`}
+            >
               {h && (
                 <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`} hint="pill.shell.health">
                   {h.label}
@@ -204,8 +263,8 @@ export function Layout() {
             </div>
           </div>
         </div>
-        <nav aria-label="Primary" className="bg-primary-deep">
-          <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap px-5 p-0">
+        <nav aria-label="Primary" id={SHELL_MENU_IDS[1]} className={`${folded} bg-primary-deep`}>
+          <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap px-5 p-0 max-sm:flex-col">
             {JOURNEY.map((n) => (
               <li key={n.to}>
                 <Hint
@@ -225,7 +284,7 @@ export function Layout() {
             ))}
           </ul>
         </nav>
-        <nav aria-label="Instrument" className="border-b border-border bg-surface-high">
+        <nav aria-label="Instrument" id={SHELL_MENU_IDS[2]} className={`${folded} border-b border-border bg-surface-high`}>
           <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap items-center gap-1 px-5 py-1 p-0">
             <li className="pr-2 text-[11px] font-bold uppercase tracking-[.08em] text-on-surface-muted" aria-hidden>
               {instrument.length > 1 ? 'Instrument' : 'Record'}
