@@ -464,6 +464,11 @@ class WorkerSettings:
     home: Path = Path(".crb")
     executor: str = "local"
     docker: DockerSettings | None = None
+    #: The sandbox's tree and copy size (``CRB_SANDBOX__TREE`` / ``__WORK_SIZE``), kept
+    #: when there is no default image (each repository names its own): they decide the
+    #: posture of every docker run, image or no image (ADR-0019 §7).
+    sandbox_tree: str = TREE_COPY
+    sandbox_work_size: str = "1g"
     worker_id: str = ""
     poll_s: float = 2.0
     heartbeat_s: float = 10.0
@@ -1439,7 +1444,13 @@ class Worker:
         kind = str(ctx.params.get("executor") or self.settings.executor or "local")
         docker: DockerSettings | None = None
         if kind == "docker":
-            docker = docker_settings_for(ctx.config, self.settings.docker, ctx.params)
+            docker = docker_settings_for(
+                ctx.config,
+                self.settings.docker,
+                ctx.params,
+                tree=self.settings.sandbox_tree,
+                work_size=self.settings.sandbox_work_size,
+            )
         # The cancel token: a requested cancel kills the running test process (local) or
         # container (docker) instead of waiting for the wall-clock timeout. A docker kill
         # the daemon never confirms is reported the same way a sealed attempt's is.
@@ -1504,7 +1515,11 @@ class Worker:
                 row = s.get(Repo, repo)
                 tree = str(dict(row.config_json or {}).get("sandbox_tree") or "") if row else ""
         if not tree:
-            tree = self.settings.docker.tree if self.settings.docker is not None else TREE_COPY
+            tree = (
+                self.settings.docker.tree
+                if self.settings.docker is not None
+                else self.settings.sandbox_tree
+            )
         return expected_posture_class(
             self.settings.executor, tree=tree, provisioning=self.settings.provision.enabled
         )
@@ -2760,21 +2775,28 @@ def trial_labels_for(ladder: EscalationLadder, base: Budget) -> dict[str, dict[s
 
 
 def docker_settings_for(
-    config: RepoConfig, base: DockerSettings | None, params: Mapping[str, Any]
+    config: RepoConfig,
+    base: DockerSettings | None,
+    params: Mapping[str, Any],
+    *,
+    tree: str = TREE_COPY,
+    work_size: str = "1g",
 ) -> DockerSettings:
     """The sandbox settings for one run: ``params.image`` > the repo's ``sandbox_image``
     > the worker's configured image (``CRB_SANDBOX__IMAGE`` — the DEFAULT for a repository
     that names none, as docs/DEPLOYMENT.md §2.1 says; until 2026-09-21 it silently overrode
     every repository's own image, which is wrong the moment two toolchains share a worker);
     caps come from the worker's settings. No image anywhere → :class:`SandboxUnavailable`
-    (raised by ``DockerSettings``)."""
+    (raised by ``DockerSettings``). With no default image (``base`` is ``None``) the
+    worker's ``tree`` and ``work_size`` still apply — they are the deployment's posture,
+    not the image's."""
     image = str(params.get("image") or "") or config.sandbox_image or (base.image if base else "")
     # ADR-0019 §7: the repository may choose how the tree is presented (a different posture)
-    tree = config.sandbox_tree or (base.tree if base is not None else TREE_COPY)
+    tree = config.sandbox_tree or (base.tree if base is not None else tree)
     if base is not None and image == base.image and tree == base.tree:
         return base
     if base is None:
-        return DockerSettings(image=image, tree=tree)
+        return DockerSettings(image=image, tree=tree, work_size=work_size)
     # every other field — caps, user, the copy's size (ADR-0019) — is the worker's
     return dataclass_replace(base, image=image, tree=tree)
 

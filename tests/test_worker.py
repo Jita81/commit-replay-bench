@@ -1391,6 +1391,31 @@ def test_main_rejects_bad_kinds_and_bad_db(
     assert "error" in json.loads(capsys.readouterr().err.strip().splitlines()[-1])
 
 
+def test_the_sandbox_tree_and_copy_size_hold_without_a_default_image(tmp_path: Path) -> None:
+    """A deployment may leave the worker's image empty (each repository names its own
+    ``sandbox_image``); ``CRB_SANDBOX__TREE`` and ``__WORK_SIZE`` still decide the posture
+    of every docker run — never a silent ``copy`` with the default size — and a tree that
+    is not one of the sandbox's trees stops the worker at start-up (CodeRabbit on PR #56)."""
+    from crb.core.execution import TREE_READONLY
+    from crb.core.spec import Language, RepoConfig
+
+    args = worker_main.build_parser().parse_args(["--once"])
+    env = {
+        "CRB_HOME": str(tmp_path / "h"),
+        "CRB_SANDBOX__EXECUTOR": "docker",
+        "CRB_SANDBOX__TREE": "ReadOnly",
+        "CRB_SANDBOX__WORK_SIZE": "3g",
+    }
+    s = worker_main.settings_from_args(args, env)
+    assert s.docker is None
+    assert s.sandbox_tree == TREE_READONLY and s.sandbox_work_size == "3g"
+    repo_cfg = RepoConfig(name="r", language=Language.PYTHON, sandbox_image="repo:3")
+    d = docker_settings_for(repo_cfg, None, {}, tree=s.sandbox_tree, work_size=s.sandbox_work_size)
+    assert d.image == "repo:3" and d.tree == TREE_READONLY and d.work_size == "3g"
+    with pytest.raises(ValueError, match="CRB_SANDBOX__TREE"):
+        worker_main.settings_from_args(args, {**env, "CRB_SANDBOX__TREE": "copyy"})
+
+
 def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     parser = worker_main.build_parser()
     args = parser.parse_args(["--once"])

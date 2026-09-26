@@ -59,6 +59,11 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **The sandbox's tree holds without a default image** (product.posture.41; CodeRabbit on
+  PR #56). A worker with no `CRB_SANDBOX__IMAGE` (each repository names its own) discarded
+  `CRB_SANDBOX__TREE` and `__WORK_SIZE`, so `readonly` silently ran as `copy` with the default
+  size while `/settings` said `readonly`, and a typo was never caught. Both are now kept on
+  the worker's settings and applied to every docker run, and the tree is validated at start-up.
 - **`/health` no longer starts a container on every readiness poll** (product.posture.40;
   CodeRabbit on PR #56). A worker's `provision` probe inspects three images and a network and
   runs a container to prove the store is visible; `/health` now reuses its result for

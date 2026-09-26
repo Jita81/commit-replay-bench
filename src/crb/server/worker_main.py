@@ -74,7 +74,7 @@ from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from crb.core.execution import DockerSettings, SandboxUnavailable
+from crb.core.execution import SANDBOX_TREES, TREE_COPY, DockerSettings, SandboxUnavailable
 from crb.observability import metrics
 from crb.observability.logging import configure_logging
 from crb.provision.config import ProvisionConfig
@@ -171,7 +171,7 @@ def settings_from_args(
     args: argparse.Namespace, env: dict[str, str] | None = None
 ) -> WorkerSettings:
     """Flags win over ``env`` (``os.environ`` by default) win over the built-in defaults.
-    ``ValueError`` names an unknown run kind; the parser turns it into exit 2."""
+    ``ValueError`` names an unknown run kind or sandbox tree; the parser turns it into exit 2."""
     e = env if env is not None else dict(os.environ)
     home = Path(args.home or e.get(HOME_ENV) or ".crb").expanduser()
     # Builders resolve the secrets dir from the environment only (core has no settings
@@ -184,7 +184,9 @@ def settings_from_args(
         .lower()
     )
     image = (args.image or e.get(SANDBOX_IMAGE_ENV) or e.get(IMAGE_ENV) or "").strip()
-    tree = (e.get(SANDBOX_TREE_ENV) or "copy").strip().lower()
+    tree = (e.get(SANDBOX_TREE_ENV) or TREE_COPY).strip().lower()
+    if tree not in SANDBOX_TREES:  # validated at start-up, image or no image
+        raise ValueError(f"{SANDBOX_TREE_ENV} must be one of {SANDBOX_TREES}, got {tree!r}")
     work_size = (e.get(SANDBOX_WORK_SIZE_ENV) or "1g").strip()
     docker = DockerSettings(image=image, tree=tree, work_size=work_size) if image else None
     kinds = tuple(k.strip() for k in str(args.kinds).split(",") if k.strip())
@@ -203,6 +205,8 @@ def settings_from_args(
         home=home,
         executor=executor,
         docker=docker,
+        sandbox_tree=tree,
+        sandbox_work_size=work_size,
         worker_id=args.worker_id or e.get(WORKER_ID_ENV, ""),
         poll_s=float(args.poll),
         heartbeat_s=float(args.heartbeat),
