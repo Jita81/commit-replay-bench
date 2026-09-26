@@ -338,6 +338,23 @@ class TestHealth:
         assert " s ago — queued runs will not start until a worker does" in worker["detail"]
         assert "ever" not in worker["detail"].replace("never", "")
 
+    def test_an_intake_lease_row_is_never_counted_as_a_worker(
+        self, client: TestClient, factory: sessionmaker[Session]
+    ) -> None:
+        """C6(c): the intake pass's per-repository lease is a row of the same ``workers``
+        table (``lease:intake:<repo>``). While a pass holds it, ``/health`` must not list it
+        as a worker, count it alive, or call it stale when it expires."""
+        from crb.server.intake import intake_lease
+
+        lease = intake_lease(factory, "demo", ttl_s=300)
+        assert lease.acquire()
+        try:
+            worker = _probe(client.get(f"{API_PREFIX}/health").json(), "worker")
+            assert worker["data"]["workers"] == [] and worker["data"]["alive"] == 0
+            assert "lease" not in worker["detail"]
+        finally:
+            lease.release()
+
     def test_worker_probe_reports_unconfirmed_containers_as_degraded(
         self, client: TestClient, factory: sessionmaker[Session]
     ) -> None:

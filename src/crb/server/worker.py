@@ -234,20 +234,24 @@ from crb.factory.backlog import BacklogItem
 from crb.factory.delivery import (
     GitCredentials,
     GitCredentialsProvider,
+    github_close_pr_fn,
     github_comment_pr_fn,
     github_open_pr_fn,
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
-from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerError
+from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
+    ApprovalPolicy,
     ListenerState,
+    PollReport,
     apply_outcome_map,
     build_tracker,
+    intake_lease,
     item_url_for,
     poll_repository,
     post_outcomes_to_tickets,
@@ -845,7 +849,36 @@ class Worker:
         # relative path in somebody else's comment resolves against THEIR host
         item_url = item_url_for(self.settings.public_url, repo)
         # poll_repository writes the view the screen reads, so nothing is returned that this
-        # caller has to remember to persist
+        # caller has to remember to persist. C6 / ADR-0022: the deployment's approval policy
+        # (an operator registers a ready ticket unless its author is allowlisted) and the
+        # repository's lease (one pass at a time — a busy pass does nothing)
+        budget_s = float(self.settings.intake.poll_budget_s)
+
+        def tell_the_tickets(report: PollReport, tracker: TrackerClient) -> None:
+            """What the loop did with the items this column produced, told to the tickets
+            that produced them: the pull request link when one opened, the refusal and its
+            way forward when the loop stopped, the merge's state move. Read from the
+            chain, posted once per marker — and run by ``poll_repository`` while the
+            repository's lease is still held, so a switch-off cannot land between the
+            column pass and these writes (PR #55 review). ``tracker`` is the one the pass
+            hands over, fenced by the lease, and it shadows the raw one on purpose: a
+            write here must stop when another pass has taken the repository over."""
+            del report
+            post_outcomes_to_tickets(
+                tracker,
+                home=home,
+                item_url=item_url,
+                evidence=home.evidence(actor="worker"),
+            )
+            apply_outcome_map(
+                tracker,
+                home=home,
+                outcome_map=dict(self.settings.intake.outcome_map),
+                evidence=home.evidence(actor="worker"),
+            )
+
+        # a busy pass (another holds the lease, and it posts the outcomes too) or a
+        # withdrawn one (the listener was switched off since it was listed) does nothing
         poll_repository(
             repo,
             tracker=tracker,
@@ -857,22 +890,10 @@ class Worker:
             run_active=lambda: self._factory_run_active(repo),
             actor="worker",
             max_tickets=self.settings.intake.max_per_poll,
-            budget_s=float(self.settings.intake.poll_budget_s),
-        )
-        # what the loop did with the items this column produced, told to the tickets that
-        # produced them: the pull request link when one opened, the refusal and its way
-        # forward when the loop stopped. Read from the chain, posted once per marker.
-        post_outcomes_to_tickets(
-            tracker,
-            home=home,
-            item_url=item_url,
-            evidence=home.evidence(actor="worker"),
-        )
-        apply_outcome_map(
-            tracker,
-            home=home,
-            outcome_map=dict(self.settings.intake.outcome_map),
-            evidence=home.evidence(actor="worker"),
+            budget_s=budget_s,
+            approval=ApprovalPolicy.from_settings(self.settings.intake),
+            lease=intake_lease(self.factory, repo, ttl_s=2 * budget_s + 60),
+            then=tell_the_tickets,
         )
 
     def _factory_run_active(self, repo: str) -> bool:
@@ -2208,6 +2229,9 @@ class Worker:
         def comment_pr(**kw: Any) -> None:
             github_comment_pr_fn(api_base=api_base, **kw)
 
+        def close_pr(**kw: Any) -> None:  # ADR-0021: a later non-accept closes an open PR
+            github_close_pr_fn(api_base=api_base, **kw)
+
         spec = FactorySpec(
             config=ctx.config,
             runner=runner,
@@ -2225,6 +2249,7 @@ class Worker:
             creds=creds,
             open_pr_fn=open_pr if creds is not None else None,
             comment_pr_fn=comment_pr if creds is not None else None,
+            close_pr_fn=close_pr if creds is not None else None,
             target_default_branch=str(link.get("default_branch") or "main"),
             # the route gate: the same signed (class × size) map the API serves, under the
             # repo's latest controls verdict, sighted rows of the current apparatus — minus
@@ -2276,8 +2301,9 @@ class Worker:
         can decline one a deployment configures. The label is a rung
         (``builder:model[:provider]``) and its builder must be a registered builder name,
         because the invariant the loop enforces — **the author rung and the build rung are
-        never the same rung** — is a comparison of rung labels
-        (:func:`crb.factory.testfirst.assert_distinct_identity`, applied to every rung by
+        never the same rung, nor the same model** — is a comparison of rung labels and of
+        their model halves (:func:`crb.factory.testfirst.assert_distinct_identity`, C3,
+        applied to every rung by
         :class:`~crb.factory.loop.FactorySpec`). Nothing is enforced twice here; this only
         builds the author so the refusal has a label to compare, and names the ladder in the
         message when an operator has to choose another rung.
@@ -2328,7 +2354,10 @@ class Worker:
             ctx.emitter.error("factory", "outcomes.synced", exc, checked=0)
             return
         report = sync_outcomes(
-            home, lambda n: app.pull_request(installation, full_name, n), actor=ctx.run.actor
+            home,
+            lambda n: app.pull_request(installation, full_name, n),
+            actor=ctx.run.actor,
+            repository=full_name,
         )
         ctx.emit(
             "factory",

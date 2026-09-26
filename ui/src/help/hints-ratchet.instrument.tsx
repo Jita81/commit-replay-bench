@@ -306,6 +306,15 @@ const INTAKE = {
       capability_class: 'backend.route.add', confidence: 0.5, size: 'M', registered: false, is_evolution: false, supersedes: '',
       cell_route: NO_ROUTE, read_at: '2026-09-22T09:05:00Z', stopped: '', stopped_advice: '',
     },
+    {
+      // ADR-0022 — a ready draft waiting for an operator: the Register act and its author line
+      key: '4714', title: 'Fix the rounding on the invoice total', url: 'https://dev.azure.invalid/contoso/Widgets/_workitems/edit/4714', revision: '5',
+      label: 'crb:ready', state: 'Ready for manufacture', item_id: 'ado-4714', item_url: '/factory?repo=alpha&item=ado-4714',
+      feedback: 'Commit Replay Bench: this ticket is ready to manufacture.', open_questions: [],
+      capability_class: 'bug.fix', confidence: 0.67, size: 'S', registered: false, is_evolution: false, supersedes: '',
+      cell_route: DELIVER, read_at: '2026-09-22T09:05:00Z', stopped: '', stopped_advice: '',
+      awaiting_approval: true, author: 'ada@contoso.invalid',
+    },
   ],
 }
 

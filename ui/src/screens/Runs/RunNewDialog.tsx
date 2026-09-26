@@ -128,7 +128,7 @@ const KIND_HELP: Record<RunKind, string> = {
   oracle: 'Measure oracle strength (mutation kill-rate) per task.',
   controls: 'Run the negative-control matrix (gold, noop, tamper, stub, …).',
   label: 'Label mined tasks with an intent class (a model reads the diff; never a grade).',
-  factory: 'Work the frozen backlog: readiness → RED proof → build → route-gated delivery → review.',
+  factory: 'Work the frozen backlog: readiness → RED proof → build → review → route-gated delivery of an accepted build.',
   probe: 'Prove the toolchain on a known-green scope.',
 }
 

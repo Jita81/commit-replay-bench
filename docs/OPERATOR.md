@@ -741,6 +741,7 @@ registered from a partial read.
 | `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks; or a ticket whose key cannot become an item id, which costs that ticket and nothing else | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP` |
 | `column_too_large` | the column holds more tickets than one pass may read (`CRB_INTAKE__MAX_PER_POLL`), or the pass ran past `CRB_INTAKE__POLL_BUDGET_S` | narrow the area path or the JQL so the column holds the work that is genuinely ready, or raise the bound; a pass that ran out of time serves what it read and the rest are read next time |
 | `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
+| `lease_lost` | one tracker call took longer than the pass's lease lives, and another pass took the repository over | nothing: the pass renews its lease around every tracker call, so this needs one call slower than the lease; the pass stopped before its next call and the other pass carries on. If it recurs, the tracker is answering very slowly — raise `CRB_INTAKE__POLL_BUDGET_S`, which lengthens the lease with it |
 
 Resume only after root cause, correction, a targeted regression run and re-qualification
 of the affected cells.
@@ -830,14 +831,20 @@ POST /runs {"repo": "cobra", "kind": "factory", "test_author": "editblock:gpt-os
 POST /runs {"repo": "cobra", "kind": "factory", "test_author": "none"}   # this run pays for no authoring
 ```
 
-**The author rung and the build rung are never the same rung.** This is the same refusal
-that has always stopped a rung building against a test it wrote itself: when the run's spec
-is built, the author's label is compared with every rung on the ladder, and a match ends the
-run with `SameIdentityError` **before anything is built or paid for**. If the run fails that
-way, choose another rung — the message names the ladder. What the refusal deliberately does
-not catch is the same model under a *different* registered builder name; the label space is
-closed to the registry, so no label can be invented to dodge it, but model-level separation
-is your choice of models, not something the product can enforce. [gap]
+**The author and every build rung are different models, not only different rungs.** This
+is the same refusal that has always stopped a rung building against a test it wrote itself:
+when the run's spec is built, the author's label is compared with every rung on the ladder,
+and a match ends the run with `SameIdentityError` **before anything is built or paid for**.
+Since 2026-09-25 the refusal compares the **model** as well as the label: the same model
+under a different registered builder name (`editblock:claude-sonnet-5` writing the test that
+`claude_code:claude-sonnet-5` is graded against) is one model's judgement on both sides of the
+test, and it is refused. Aliases do not get past it: the model id is lower-cased, a
+`@provider`, a `[1m]`-style suffix and a `vendor/` prefix are dropped, and the id is matched
+to the longest model in the pricing table (`CRB_PRICING_JSON` extends it), so
+`claude-sonnet-5-20260901` is `claude-sonnet-5`; Claude Code's bare `opus` / `sonnet` /
+`haiku` count as every model of that family. If the run fails this way, the message names
+the rung by its place on the ladder (`build rung 2`) and the model — change that rung's
+model, or give the test author a different one.
 
 Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
 the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at
@@ -879,6 +886,8 @@ CRB_INTAKE__POLL_S=300
 CRB_INTAKE__MAX_PER_POLL=200                  # a longer column is not read at all (see below)
 CRB_INTAKE__POLL_BUDGET_S=60                  # one pass may take this long, then it stops early
 CRB_INTAKE__OUTCOME_MAP='{"merged": "Done"}'  # EMPTY by default: no ticket is ever moved
+CRB_INTAKE__REQUIRE_APPROVAL=true             # the default: an operator registers each ticket
+CRB_INTAKE__APPROVE_AUTHORS='[]'              # EMPTY by default: nobody skips the Register act
 CRB_PUBLIC_URL=https://crb.example.com        # THIS deployment's address (required, see below)
 ```
 
@@ -919,14 +928,36 @@ click to switch off again.
 the column. For each ticket it has not already handled at its current revision it drafts a
 backlog item, runs the readiness gate, and leaves **one** comment (idempotent by a hidden
 marker) and **one** `crb:` label. When every question a good acceptance test needs is
-answered, the item is registered through the same path the freeze form uses and the ticket
-gets `crb:queued`, a note naming the item and a link to it. An edited ticket comes back as an
+answered, the ticket becomes a **draft waiting for an operator** (ADR-0022): the Intake screen
+shows *Waiting for an operator to register it*, who wrote the ticket, and a **Register this
+ticket** button. Moving a ticket into the column is the request; the Register act is the
+consent, because anyone who can edit the board can write what becomes the backlog item. Read
+the comment on the row — it is what the item will say — and press Register. The item is then
+registered through the same path the freeze form uses, the ticket gets `crb:queued`, a note
+naming the item and a link to it, and the act is recorded against your account
+(`intake.registered` with `approved_by: operator:<your account id>` and your name beside it,
+and `intake.approved` on the system trace). Registering writes on the ticket, so it needs the
+listener on: with the listener off the button is not shown and the act is refused
+(`intake_listener_off`). If the
+ticket was edited after you loaded the page the act is refused (`revision_moved`): reload and
+read the new draft. To let named people's tickets register without the act, list their
+tracker identities in `CRB_INTAKE__APPROVE_AUTHORS` (the ticket's creator: the Azure DevOps
+sign-in name, the Jira email or, where Jira hides it, the account id); `false` in
+`CRB_INTAKE__REQUIRE_APPROVAL` registers every ready ticket unattended. Both are on the record
+on every registration. The allowlist trusts who **created** the ticket, not who edited it
+since; leave it empty if that difference matters to you. An edited ticket comes back as an
 *evolution* — a new item superseding the old one; the frozen record is never rewritten. Over
 a ticket's life it can receive four comments, each marked as its own (what is missing, the
 queued note, the pull-request note, the note if the work stopped), one `crb:` label, a link
 to the item and a link to the pull request, and — only where the outcome map is configured —
 one state change. It edits no other field, never creates a ticket, and never reads a column it
-was not pointed at. Switching the listener on or off is itself an event on the repository's
+was not pointed at. What a ticket says reaches a pull request only as quoted text inside a
+code block, and the branch name is lower-case letters, digits and hyphens. **One pass at a
+time:** the worker's timer, *Re-read the column now* and *Register* each take the repository's
+lease first; a second one that finds it held does nothing and says so (`intake_busy`). A
+rate-limited tracker (HTTP 429) is waited out for up to 10 seconds at a time, twice, as its
+`Retry-After` asks, before the pass stops `unreachable`; and the tracker credential is only
+ever sent to the tracker's own address. Switching the listener on or off is itself an event on the repository's
 system trace (`intake.listener.switched`) naming the operator, so a later switch cannot
 quietly overwrite who consented.
 
@@ -937,7 +968,8 @@ failing `unauthorised` reads `degraded`, not `ok`. It contacts no tracker: a rea
 that called somebody else's service would make this deployment's health depend on theirs, and
 the reachability it reports is therefore the reachability the last poll measured. Every step is on the repository's own evidence chain
 (`GET /factory/{repo}/evidence`) as `intake.polled`, `intake.read`,
-`intake.feedback.posted`, `intake.registered`, `intake.queued`, `intake.delivered`,
+`intake.feedback.posted`, `intake.awaiting_approval`, `intake.registered`, `intake.queued`,
+`intake.delivered`,
 `intake.transitioned` and `intake.stopped` (API.md, "Event vocabulary"). Stop conditions
 are in §8.
 

@@ -12,8 +12,9 @@ The governed loop, per backlog item (the T9 pilot charter):
       → Definition-of-Ready: structural gaps signed off       readiness.py
       → RED proof: the authored test FAILS on the base        testfirst.py
       → build under the four belts, pack + ledger row         build.py
-      → deliver as BRANCH + PR, never the default branch      delivery.py
       → independent review, verdict BEFORE any edit           review.py
+      → deliver an ACCEPTED build as BRANCH + PR, never the   delivery.py
+        default branch (ADR-0021: review before delivery)
       → every step appended to a hash-chained evidence file   evidence.py
     orchestrated, with events, by                              loop.py
 
@@ -36,8 +37,8 @@ ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/factory/loop.py (the orchestrator), src/crb/factory/backlog.py (step
               1), src/crb/factory/readiness.py (step 2), src/crb/factory/testfirst.py (step
-              3), src/crb/factory/build.py (step 4), src/crb/factory/delivery.py (step 5),
-              src/crb/factory/review.py (step 6), src/crb/factory/evidence.py (the ledger
+              3), src/crb/factory/build.py (step 4), src/crb/factory/review.py (step 5),
+              src/crb/factory/delivery.py (step 6), src/crb/factory/evidence.py (the ledger
               every step appends to), docs/API.md#factory-phase-p6
 Tested by:    tests/test_factory_loop.py
 Touch when:   never for a new repository; only when a new step type becomes part of the
@@ -58,6 +59,7 @@ from crb.factory.delivery import (
     NullProvider,
     StaticProvider,
     assert_not_default_branch,
+    close_pull_request,
     deliver,
 )
 from crb.factory.evidence import FactoryEvent, FactoryEvidence, FactoryStore, JsonlFactoryStore
@@ -118,6 +120,7 @@ __all__ = [
     "assess",
     "build_item",
     "build_ladder",
+    "close_pull_request",
     "deliver",
     "prove_red",
     "require_ready",
