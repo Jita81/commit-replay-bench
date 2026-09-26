@@ -271,7 +271,7 @@ export const HELP: ScreenHelp[] = [
     purpose: 'What the ledger teaches, and what the loop does about it: the prevention register lists every bug class with the change that should remove it and whether it worked; three reports list refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.',
     next: {
       viewer: 'Read the register: each class names its lever, its before and after with n, and what happens next. The three reports carry the rows and spend behind them. The decisions are an operator’s.',
-      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: decide a refusal class, register a strengthening item on this repository’s backlog, or queue a cell’s re-measurement runs. Each says what it wrote; queueing spends the budget, so it shows the estimate first.',
+      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: decide a refusal class, register a strengthening item on this repository’s backlog, or queue a cell’s re-measurement runs. Each says what it wrote; queueing spends the budget, so it shows the estimate first. Once the tests are stronger, an item’s row opens Runs with its task filled in to re-qualify, re-score or re-run the controls.',
     },
     numbers: 'A class closes when a kept change is followed by max(20, n) exposed first attempts with no recurrence; n is ceil(ln 0.025 ÷ ln(1 − p0)) from the frozen before window. Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement spend multiplies each cell’s own mean row cost by the rows still needed; a dash means no cost is known.',
     terms: ['apparatus', 'stale', 'oracle_strength', 'wilson', 'cell'],
@@ -279,6 +279,7 @@ export const HELP: ScreenHelp[] = [
       { to: 'LEARNING-LOOP#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring', label: 'Prevention: a bug is closed by a change that stops it recurring' },
       { to: 'LEARNING-LOOP', label: 'The learning loop' },
       { to: 'LEARNING-LOOP#3-what-still-needs-a-human-and-why-that-is-deliberate', label: 'What still needs a human' },
+      { to: 'LEARNING-LOOP#24-what-strengthening-costs-a-person', label: 'What strengthening costs a person' },
     ],
   },
   {

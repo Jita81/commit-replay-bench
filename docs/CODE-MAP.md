@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-578 files with a header · 1 exempt (listed at the end).
+579 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -470,7 +470,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_works_with.py`](../tests/test_works_with.py) | The "Works with" ratchet over every file header in src/, scripts/, tests/ and [`ui/src`](../ui/src). | [`tests/test_works_with.py`](../tests/test_works_with.py) | you fix a listed header (delete its line from the known file). |
 | [`tests/test_workspace.py`](../tests/test_workspace.py) | The trial worktree's test suite — parent checkout, overlays, ``touched_files``, ``diff_stats`` and the integrity checks on the fixture repository. | [`tests/test_workspace.py`](../tests/test_workspace.py) | a new way to hide or fake a change from git is found (add the case here and its disqualification in [`tests/test_grade.py`](../tests/test_grade.py)); a post-create hook kind is added. |
 
-## `ui/e2e` (17 files)
+## `ui/e2e` (18 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -489,6 +489,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`ui/e2e/walkthrough/10-factory.spec.ts`](../ui/e2e/walkthrough/10-factory.spec.ts) | Walkthrough spec 10 (the factory: /factory → /runs/:id → the drawer), tier 1 only — the fixture builder spends nothing and calls no model. | [`scripts/walkthrough.sh`](../scripts/walkthrough.sh) (runs it, tier 1) | a step is added to the loop; the freeze dialog's labels change; the fixture builder learns to build a factory item (then I-1 grades clean and the delivery step, not the build step, is the one to assert). |
 | [`ui/e2e/walkthrough/11-screens.spec.ts`](../ui/e2e/walkthrough/11-screens.spec.ts) | Walkthrough spec 11 (screens) — the visual record of every route for every role at two widths, and the About-block ratchet on the live stack. | [`ui/e2e/walkthrough/11-screens.spec.ts`](../ui/e2e/walkthrough/11-screens.spec.ts) (this file; run by [`scripts/walkthrough.sh`](../scripts/walkthrough.sh)) | a screen is added (add its route and slug to `routes()`); a persona is added. |
 | [`ui/e2e/walkthrough/12-intake.spec.ts`](../ui/e2e/walkthrough/12-intake.spec.ts) | Walkthrough spec 12 (intake: /factory/intake → /factory), tier 1 only; it spends nothing and calls no model. | [`scripts/walkthrough.sh`](../scripts/walkthrough.sh) (runs it, tier 1) | a label or a stop reason is added; the screen's act labels change. |
+| [`ui/e2e/walkthrough/13-learn.spec.ts`](../ui/e2e/walkthrough/13-learn.spec.ts) | Walkthrough spec 13 (learn: /learn with real rows → a decision, a registration and the hand-offs), tier 1 only. | [`scripts/walkthrough.sh`](../scripts/walkthrough.sh) (runs it, tier 1) | a Learn control's name or test id changes; the fixture's `attempt` changes; a persona is added. |
 | [`ui/e2e/walkthrough/repo-config.spec.ts`](../ui/e2e/walkthrough/repo-config.spec.ts) | Walkthrough spec for the Configuration tab, on a repo it registers itself from the tier-1 fixture with a deliberately bare config. | [`ui/e2e/walkthrough/repo-config.spec.ts`](../ui/e2e/walkthrough/repo-config.spec.ts) | a `RepoConfig` field is added (assert its round-trip here) or the audit event payload changes. |
 | [`ui/e2e/walkthrough/support.ts`](../ui/e2e/walkthrough/support.ts) | The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract), `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`, `signIn`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`, `expectLogAction`, `stackHealth`. | every spec under [`ui/e2e/walkthrough`](../ui/e2e/walkthrough) (they all import this) | a walkthrough variable, a tier target or a form label changes; for a new repository in tier 2, add a `RepoTarget` to `publicTargets()`. |
 

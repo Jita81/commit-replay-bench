@@ -277,4 +277,19 @@ describe('ConnectPage', () => {
     expect(status).toHaveTextContent('Waiting for a worker')
     expect(status).not.toHaveTextContent(/Attempt \d/)
   })
+  it('an amber controls stage links to the strengthen report on Learn (G-348, G-432)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos/alpha': MEASURED,
+      'GET /oracle/alpha': { repo: 'alpha', policy: { autoship_floor: 0.8, adequate_floor: 0.5, version: 'adequacy.v1' }, tasks: [{ task_id: 'a'.repeat(40), capability_class: 'bug.fix', size: 'S', strength: 0.6, band: 'adequate', mutants: 10, killed: 6, gate: 'human' }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { repo: 'alpha', run_id: 'r1', passed: true, n_rows: 7, n_tasks: 1, violations: 0, escapes: 1, not_constructible: 1, skipped: 0, rows: [] },
+      'GET /capability-map': EMPTY_MAP,
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const stage = await screen.findByTestId('stage-controls')
+    await waitFor(() => expect(stage).toHaveTextContent('Done, with a finding'))
+    expect(within(stage).getByRole('link', { name: 'Strengthen the tests on Learn' })).toHaveAttribute('href', '/learn?repo=alpha#strengthen')
+    // a stage with no finding carries no such link
+    expect(within(screen.getByTestId('stage-probe')).queryByRole('link', { name: 'Strengthen the tests on Learn' })).toBeNull()
+  })
 })

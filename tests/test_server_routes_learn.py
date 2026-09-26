@@ -20,8 +20,10 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               on the chain with the account as actor and is idempotent; that the API refuses
               exactly what the CLI refuses; that registering freezes the first item, evolves the
               rest and supersedes a re-registered one; that an unknown id and an in-flight
-              factory run are refused with nothing written; and that queueing enqueues the
-              PLAN's own run bodies, never the caller's.
+              factory run are refused with nothing written; that queueing enqueues the
+              PLAN's own run bodies, never the caller's; and that a viewer, a request with no
+              CSRF token and one with another session's token are each refused with nothing
+              written.
 How:          ``make_env`` over the seed; a protocol row appended through ``DbLedger``; the CLI
               invoked over the API's own exports for the parity case; the writes driven through
               ``env.post`` and checked against ``GET /factory/{repo}/backlog``, ``GET /runs`` and
@@ -63,6 +65,8 @@ from fixtures.server_seed import (
     Env,
     assert_rbac,
     envelope,
+    login,
+    logout,
     make_env,
     user_id,
 )
@@ -337,6 +341,75 @@ def test_the_three_writes_are_operator_gated(env: Env) -> None:
         min_role="operator",
         json={"cell": cell, "apparatus": "9.9"},
     )
+
+
+def _learn_writes(env: Env) -> list[tuple[str, dict[str, Any]]]:
+    """The three writes with the smallest bodies the current reports make valid."""
+    gid = _group(env, "archaeology")["group_id"]
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    cell = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()["cells"][0]["label"]
+    return [
+        (f"/learn/refusals/accept?repo={ALPHA}", {"group_id": gid, "verdict": "refuse"}),
+        (f"/learn/strengthen/register?repo={ALPHA}", {"item_ids": [item_id]}),
+        (f"/learn/remeasure/queue?repo={ALPHA}", {"cell": cell, "apparatus": "9.9"}),
+    ]
+
+
+def _nothing_written(env: Env, runs_before: int) -> None:
+    """No learn event on the chain, no corpus file, no backlog and no new run."""
+    with env.factory() as s:
+        learn_events = list(s.execute(select(Event).where(Event.action.like("learn.%"))).scalars())
+    assert learn_events == []
+    assert not (env.settings.home / "learn" / "corpus").exists()
+    assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404
+    assert env.get("/runs").json()["total"] == runs_before
+
+
+def test_a_viewer_is_refused_every_learn_write_and_nothing_is_written(env: Env) -> None:
+    """Operator-gated at the SERVER: a viewer who posts the body the operator's screen would
+    post is refused 403 ``forbidden``, and the refusal leaves nothing behind — no corpus
+    line, no backlog item, no run and no event. The UI hiding the three controls is a
+    convenience; this is the gate."""
+    _add_protocol_row(env)
+    writes = _learn_writes(env)
+    runs_before = env.get("/runs").json()["total"]
+    logout(env.client)
+    login(env.client, "viewer")
+    for path, body in writes:
+        r = env.post(path, json=body)
+        assert r.status_code == 403, (path, r.text)
+        assert envelope(r)["code"] == "forbidden", (path, r.text)
+    login(env.client, "admin")
+    _nothing_written(env, runs_before)
+
+
+def test_every_learn_write_needs_this_sessions_csrf_token(env: Env) -> None:
+    """#52's session rules hold on the three writes: an operator's request with no
+    ``X-CSRF-Token``, or with ANOTHER session's token, is refused 403 ``csrf_failed`` before
+    the route runs, so nothing is written. The token is bound to the session (``HMAC(secret,
+    uid, cv)``), so a token lifted from a viewer's page cannot carry an operator's decision."""
+    _add_protocol_row(env)
+    writes = _learn_writes(env)
+    runs_before = env.get("/runs").json()["total"]
+    logout(env.client)
+    login(env.client, "viewer")
+    viewer_token = env.client.headers["X-CSRF-Token"]
+    logout(env.client)
+    login(env.client, "operator")
+    own_token = env.client.headers.pop("X-CSRF-Token")
+    assert own_token != viewer_token
+    for path, body in writes:
+        missing = env.post(path, json=body)
+        assert missing.status_code == 403, (path, missing.text)
+        assert envelope(missing)["code"] == "csrf_failed", (path, missing.text)
+        foreign = env.post(path, json=body, headers={"X-CSRF-Token": viewer_token})
+        assert foreign.status_code == 403, (path, foreign.text)
+        assert envelope(foreign)["code"] == "csrf_failed", (path, foreign.text)
+    env.client.headers["X-CSRF-Token"] = own_token
+    _nothing_written(env, runs_before)
+    # and with its own token the same operator's decision goes through
+    path, body = writes[0]
+    assert env.post(path, json=body).status_code == 201
 
 
 def test_accepting_a_refusal_writes_the_line_under_the_operators_name(env: Env) -> None:

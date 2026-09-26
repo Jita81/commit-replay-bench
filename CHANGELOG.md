@@ -12,6 +12,22 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Learn acts from the page** (branch `feat/ns1-l`, stream L). The three learning reports hand
+  off to a named operator's decision beside the report that computed it — `POST
+  /learn/refusals/accept`, `/learn/strengthen/register` and `/learn/remeasure/queue`, each
+  operator-gated at the server, bound to the session's CSRF token and recorded as a `learn.*`
+  event (G-532, G-912, brought in from the parked `feat/w2-l`); the prevention register of #57
+  stays above them. The hand-offs arrive pre-filled: a registration opens the Factory on its item,
+  and an item's row opens Runs with the kind and task filled in to re-qualify, re-score or re-run
+  the controls (G-351, G-352); a task that is not gold-clean re-qualifies from the Tasks tab
+  (G-431). The Baseline map, the Oracle gate, the Connection walk and the Factory link to the
+  strengthen report where they reveal the need, and the page says which step of the loop the
+  reader is on (G-348, G-432). The plan reads against a named apparatus as a what-if (G-983).
+  A new walkthrough, `13-learn`, makes a real guard refusal (`fixture_gold`'s `attempt`), decides
+  it and registers an item on a live stack, with axe for every persona at both widths (G-913,
+  which absorbs G-533 — one change filed twice; G-175, G-176, G-349, G-916). The non-goal "the
+  three reports never write" is rewritten: it contradicted G-532.
+
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile
   score working changes per pound, blind, and VALUE heads the definition of done. A bug class is

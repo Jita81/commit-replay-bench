@@ -142,4 +142,21 @@ describe('MapTable', () => {
     expect(signStateOf(c, [signoff({ cell: { capability_class: 'bug.fix', size: 'XS', model: 'claude-sonnet-5' } })]).state).toBe('due')
     expect(signStateOf(c, [signoff({ cell: { capability_class: 'feature.add', size: '*' } })]).state).toBe('due')
   })
+  it('a cell withheld for its oracle links its reason to the strengthen report on Learn (G-348)', () => {
+    render(
+      <MemoryRouter>
+        <MapTable
+          map={MAP([cell({ size: 'S', n: 14, route: 'human', reason_code: 'controls_escapes' }), cell({ size: 'M', n: 12, route: 'human', reason_code: 'oracle_weak' }), cell({ size: 'L', n: 4, route: 'calibrate', reason_code: 'n_below_min' })])}
+          signoffs={[signoff({ cell: { capability_class: 'refactor', size: 'XS' } })]}
+          repo="cobra"
+        />
+      </MemoryRouter>,
+    )
+    for (const size of ['S', 'M']) {
+      const link = screen.getByTestId(`cell-bug.fix-${size}`).querySelector('a')!
+      expect(link).toHaveAttribute('href', '/learn?repo=cobra#strengthen')
+    }
+    // a thin cell is not an oracle problem: more attempts, not stronger tests
+    expect(screen.getByTestId('cell-bug.fix-L').querySelector('a')).toBeNull()
+  })
 })

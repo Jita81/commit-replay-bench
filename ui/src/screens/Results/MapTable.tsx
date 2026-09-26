@@ -72,6 +72,9 @@ function shortDate(iso: string): string {
 /** A cell's sign-off line while the repository's sign-offs have not loaded (PR #54 review). */
 const SIGNOFF_NOT_LOADED = 'sign-off not loaded'
 
+/** The routing reasons stronger tests can move (crb.core.learn STRENGTHEN_REASONS). */
+const STRENGTHEN_REASONS: ReadonlySet<string> = new Set(['oracle_weak', 'controls_escapes', 'controls_thin'])
+
 /** `canSign`: the reader holds the approver role, so "sign-off due" may link to the form. Default off: a viewer-safe grid. */
 export function MapTable({ map, signoffs, repo, canSign = false }: { map: CapabilityMap; signoffs: Signoff[] | null; repo: string; canSign?: boolean }) {
   // every size tier, always — an absent column would hide the honest "not measured"
@@ -160,6 +163,10 @@ export function MapTable({ map, signoffs, repo, canSign = false }: { map: Capabi
                     <Hint as="div" id="map.cell.signoff" tabStop={false} className="text-[14px] leading-[1.4] text-on-surface-muted">
                       {sign?.state === 'due' && canSign ? (
                         <Link to={`/signoff?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${c.capability_class}|${c.size}`)}`}>{last}</Link>
+                      ) : last === c.reason_code && STRENGTHEN_REASONS.has(c.reason_code) ? (
+                        // G-348 — a cell withheld for its ORACLE is moved by stronger tests, not by
+                        // more attempts: its reason opens the Learn report that names that work
+                        <Link to={`/learn?repo=${encodeURIComponent(repo)}#strengthen`}>{last}</Link>
                       ) : (
                         last
                       )}

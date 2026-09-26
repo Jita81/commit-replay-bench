@@ -40,7 +40,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { LearnPage, type RefusalGroup, type RefusalReport, type RemeasureCell, type RemeasurePlan, type StrengthenItem, type StrengthenReport } from './LearnPage'
 import { REGISTER } from './register.fixture'
 
@@ -334,7 +334,8 @@ describe('LearnPage', () => {
     const done = await screen.findByText(/strengthen-1-v2 was registered/)
     expect(done).toHaveAttribute('role', 'status')
     expect(done.textContent).toContain('superseding strengthen-1')
-    expect(screen.getByRole('link', { name: 'Factory' })).toHaveAttribute('href', '/factory?repo=alpha')
+    // the hand-off arrives pre-filled: the Factory opens on the item just registered (G-351)
+    expect(screen.getByRole('link', { name: 'Factory' })).toHaveAttribute('href', '/factory?repo=alpha&item=strengthen-1-v2')
   })
 
   it('queueing a re-measurement confirms the plan’s own estimate before anything is sent (G-532)', async () => {
@@ -366,5 +367,126 @@ describe('LearnPage', () => {
     const plan = within(await screen.findByTestId('learn-queue-summary'))
     expect(plan.getByText('not known — no row of this cell recorded a cost')).toBeInTheDocument()
     expect(plan.queryByText('$0.00')).toBeNull()
+  })
+  it('with no repository chosen, says which is missing and offers the one action to connect one (G-172)', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /repos': { items: [], total: 0, limit: 50, offset: 0 } })
+    renderApp(<LearnPage />, { route: '/learn' })
+    expect(await screen.findByText('Pick a repository')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Connect a repository' })).toHaveAttribute('href', '/connect')
+  })
+
+  it('the refusal tile reads one apparatus’s rate with its n, interval and version (G-173)', async () => {
+    const one = { apparatus_version: '2.2', rows_total: 40, rows_protocol: 3, share: 0.075, ci_low: 0.026, ci_high: 0.2 }
+    mockApi(operatorApi({ 'GET /learn/refusals': { ...REFUSALS, rows_total: 40, rows_protocol: 3, protocol_share: 0.075, share: one, by_apparatus: [one], groups: [GROUP] } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const tile = (await screen.findByText('Instrument-caused rows')).closest('[data-component="stat-tile"]')!
+    expect(tile).toHaveTextContent('7.5%')
+    expect(tile).toHaveTextContent('n =40')
+    expect(tile).toHaveTextContent('95% CI[2.6%, 20.0%]')
+    expect(tile).toHaveTextContent('apparatus 2.2 · failure_kind = protocol · Wilson 95%')
+  })
+
+  it('with two apparatus versions the refusal tile shows each version’s own rate, never a blended headline (G-173)', async () => {
+    const a = { apparatus_version: '2.1', rows_total: 20, rows_protocol: 1, share: 0.05, ci_low: 0.009, ci_high: 0.236 }
+    const b = { apparatus_version: '2.2', rows_total: 20, rows_protocol: 5, share: 0.25, ci_low: 0.112, ci_high: 0.469 }
+    const blended = { rows_total: 40, rows_protocol: 6, share: 0.15, ci_low: 0.071, ci_high: 0.291 }
+    mockApi(operatorApi({ 'GET /learn/refusals': { ...REFUSALS, rows_total: 40, rows_protocol: 6, protocol_share: 0.15, share: blended, by_apparatus: [a, b], groups: [GROUP] } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const tile = (await screen.findByText('Instrument-caused rows (per apparatus)')).closest('[data-component="stat-tile"]')!
+    expect(tile).toHaveTextContent('2.1: 5.0% · 2.2: 25.0%')
+    expect(tile).toHaveTextContent('2.1: 1/20 [1%–24%] · 2.2: 5/20 [11%–47%] · Wilson 95%')
+    expect(tile).not.toHaveTextContent('15.0%')
+    expect(tile).toHaveTextContent('95% CI—')
+  })
+
+  it('a report that fails says why and retries alone; the other two still render (G-174)', async () => {
+    let strengthenCalls = 0
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    mockApi(
+      operatorApi({
+        'GET /learn/remeasure': async () => {
+          await gate
+          return json({ ...REMEASURE, cells: [CELL] })
+        },
+        'GET /learn/strengthen': () => {
+          strengthenCalls += 1
+          return strengthenCalls === 1 ? envelope(500, 'internal_error', 'the oracle scores could not be read') : json({ ...STRENGTHEN, items: [ITEM] })
+        },
+      }),
+    )
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    // the loading line names the report still being derived
+    expect(await screen.findByText('Deriving the re-measurement plan…')).toBeInTheDocument()
+    release()
+    expect(await screen.findByText('the oracle scores could not be read')).toBeInTheDocument()
+    // the other two reports rendered regardless
+    expect(await screen.findByText('egress refused')).toBeInTheDocument()
+    expect(await screen.findByText(CELL.label)).toBeInTheDocument()
+    const card = document.getElementById('strengthen')!
+    await userEvent.click(within(card).getByRole('button', { name: /retry/i }))
+    expect(await within(card).findByText('Strengthen the divide tests')).toBeInTheDocument()
+    expect(strengthenCalls).toBe(2)
+  })
+
+  it('an operator’s strengthening row hands off to Runs pre-filled with its task (G-352)', async () => {
+    const task = 'c'.repeat(40)
+    mockApi(operatorApi({ 'GET /learn/strengthen': { ...STRENGTHEN, items: [{ ...ITEM, labels: { ...ITEM.labels, task_id: task } }] } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    expect(await screen.findByRole('link', { name: 'Re-qualify' })).toHaveAttribute('href', `/runs?repo=alpha&new=qualify&tasks=${task}&from=learn`)
+    expect(screen.getByRole('link', { name: 'Re-score' })).toHaveAttribute('href', `/runs?repo=alpha&new=oracle&tasks=${task}&from=learn`)
+    expect(screen.getByRole('link', { name: 'Re-run controls' })).toHaveAttribute('href', `/runs?repo=alpha&new=controls&tasks=${task}&from=learn`)
+  })
+
+  it('a viewer is offered no run hand-off from a strengthening row', async () => {
+    mockApi({ ...operatorApi(), 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    await screen.findByText('Strengthen the divide tests')
+    for (const name of ['Re-qualify', 'Re-score', 'Re-run controls']) expect(screen.queryByRole('link', { name })).toBeNull()
+  })
+
+  it('says which loop the reader is in, and each report is an anchor the screens that reveal a need link to (G-348)', async () => {
+    mockApi(operatorApi())
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha#strengthen' })
+    const loop = await screen.findByTestId('learn-loop')
+    expect(loop).toHaveTextContent('You are in the learning loop')
+    for (const step of ['read the reports', 'Oracle', 'strengthen the tests in your repository', 're-score and re-qualify', 'register and queue', 'decide the refusals']) expect(loop).toHaveTextContent(step)
+    for (const id of ['prevention', 'refusals', 'strengthen', 'remeasure']) expect(document.getElementById(id)).not.toBeNull()
+  })
+  it('the strengthen report says what the test work cost a person, measured, with its n and apparatus (G-350)', async () => {
+    mockApi(operatorApi())
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const cost = await screen.findByTestId('learn-strengthen-cost')
+    expect(cost).toHaveTextContent('five author–adversary rounds and about 45 test rows')
+    expect(cost).toHaveTextContent('measured: n = 1 item, 5 revisions, 10 wrong builds')
+    expect(cost).toHaveTextContent('apparatus 2.2')
+    expect(within(cost).getByRole('link', { name: 'What strengthening costs' })).toHaveAttribute('href', '/help/docs/LEARNING-LOOP#24-what-strengthening-costs-a-person')
+  })
+  it('the plan can be read against a named apparatus before a bump, and a what-if plan queues nothing (G-983)', async () => {
+    const { calls } = mockApi(
+      operatorApi({
+        'GET /learn/remeasure': (url: string) =>
+          url.includes('apparatus=9.9') ? json({ ...REMEASURE, current_apparatus: '9.9', rows_stale: 12, cells: [CELL] }) : json(REMEASURE),
+      }),
+    )
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const card = await waitFor(() => {
+      const c = document.getElementById('remeasure')
+      if (!c || !within(c).queryByText('Nothing stale')) throw new Error('not yet')
+      return c
+    })
+    await userEvent.type(within(card).getByLabelText(/^Plan against apparatus/), '9.9')
+    await userEvent.click(within(card).getByRole('button', { name: 'Plan' }))
+    expect(await within(card).findByText(CELL.label)).toBeInTheDocument()
+    expect(within(card).getByTestId('learn-plan-whatif')).toHaveTextContent('planned against apparatus 9.9')
+    // a what-if plan is a preview: its runs would grade under the running apparatus, so none is offered
+    expect(within(card).queryByRole('button', { name: 'Queue runs' })).toBeNull()
+    expect(calls.some((c) => c.path === '/learn/remeasure' && c.url.includes('apparatus=9.9'))).toBe(true)
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([])
+    // back to the running version: the plan, and the Queue control, return
+    await userEvent.click(within(card).getByRole('button', { name: 'Plan for the running version' }))
+    expect(await within(card).findByText('Nothing stale')).toBeInTheDocument()
   })
 })

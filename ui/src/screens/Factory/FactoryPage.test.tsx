@@ -674,4 +674,12 @@ describe('FactoryPage — the shipped contract', () => {
   it('deliverableCount counts the items whose cell routes deliver', () => {
     expect(deliverableCount(TASKS)).toBe(1)
   })
+  it('an item stopped for a weak test links to the strengthen report on Learn (G-348)', async () => {
+    const reason = 'the reviewer found the oracle weak'
+    const stopped: FactoryTask = { ...TASKS[0]!, status: 'oracle_needs_strengthening', outcome_reason: reason, error: reason, refusal: { step: 'review', reason, reason_code: '', measured_route: '' } }
+    mockApi(base({ 'GET /factory/alpha/tasks': [stopped, TASKS[1]!] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const refusal = await screen.findByTestId('refusal-I-1')
+    expect(within(refusal).getByRole('link', { name: 'Strengthen the tests on Learn' })).toHaveAttribute('href', '/learn?repo=alpha#strengthen')
+  })
 })

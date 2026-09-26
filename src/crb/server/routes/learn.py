@@ -59,7 +59,10 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` — the same
               writer the CLI uses), src/crb/server/routes/oracle.py (``SCORE_ACTIONS``,
-              ``latest_controls_verdict``), src/crb/server/factory_state.py
+              ``latest_controls_verdict``), src/crb/server/routes/capability.py
+              (``rows_for_arm`` — a report and its write read one checks arm, ADR-0024),
+              src/crb/server/app.py (``CsrfMiddleware`` — every write is bound to the
+              session's CSRF token before it reaches a route), src/crb/server/factory_state.py
               (``FactoryHome.register_backlog`` / ``register_evolution`` — the one
               registration path), src/crb/server/routes/runs.py (``new_run``,
               ``require_jobs``, ``append_system_event`` — how a run is queued and how an

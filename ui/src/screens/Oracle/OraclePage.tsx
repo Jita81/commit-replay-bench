@@ -161,6 +161,16 @@ function ControlsSection({ repo }: { repo: string }) {
           ]}
         />
       </Hint>
+      {(c.escapes > 0 || (v && v.state !== 'passed' && v.state !== 'unmeasured')) && (
+        // G-348 / G-432 — the finding's way forward: the strengthen report names the test work,
+        // registers it, and re-runs the oracle and the controls for the task once it is done
+        <p className="m-0 text-sm">
+          Learning loop, step 2 of 6: deliver is withheld until the tests catch what escaped.{' '}
+          <Hint as={Link} id="link.oracle.learn" to={`/learn?repo=${encodeURIComponent(repo)}#strengthen`} className="underline underline-offset-4">
+            Strengthen the tests on Learn
+          </Hint>
+        </p>
+      )}
       <DataTable rows={c.rows} columns={columns} rowKey={(r) => `${r.task_id}|${r.control}`} caption="Negative-control rows" dense initialSort={{ key: 'verdict', dir: 'desc' }} empty={<EmptyState compact title="No control rows" />} />
     </div>
   )

@@ -139,6 +139,24 @@ than the rule needs, a second request asks for the remainder by `limit` and says
 derivation queues nothing — `crb learn remeasure` prints JSON for the operator to post, and
 `POST /learn/remeasure/queue` sends one cell's bodies on an operator's own instruction (§4).
 
+### 2.4 What strengthening costs a person
+
+The re-measurement plan prices the runs; nothing prices the person. The one measured record
+is the `cobra-2154` item's test, strengthened until only a real fix passed it: **five
+author–adversary rounds and about 45 test rows for one XS/S bug fix** [measured — n = 1
+item, 5 revisions, 10 wrong builds; pristine clones of `Jita81/cobra` at `9c0edca`, Go
+1.26.4, `go test -json -count=1 ./...`; apparatus 2.2; the record is
+`docs/reviews/2026-09-21-oracle-adequacy-2154.md`]. One item is not a rate: read it as what
+the work can take, not what it usually takes [hypothesis]. The strengthen report on the
+Learn page quotes the same figures with the same provenance and links here.
+
+Once the tests are stronger, the item's row on the Learn page hands the person back into the
+product: **Re-qualify**, **Re-score** and **Re-run controls** each open the Runs dialog with
+the run kind and the item's task already filled in (`/runs?repo=…&new=<kind>&tasks=<sha>`),
+so the oracle, the controls and the task's qualification are re-measured without re-mining
+the history or typing a task id. Registering the item opens the Factory on the item it
+registered (`/factory?repo=…&item=<id>`).
+
 ## 3. What still needs a human, and why that is deliberate
 
 Three decisions, three writes, one rule: **the product proposes and a named person accepts**. What

@@ -48,11 +48,11 @@
  * Touch when:   a report gains a field (src/crb/core/learn.py — mirror the interface here)
  *               or a fourth play is added to docs/LEARNING-LOOP.md; never for a new repository.
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import { api, ApiError } from '../../api/client'
-import { Button } from '../../components/Button'
+import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { Dialog } from '../../components/Dialog'
@@ -60,7 +60,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea, TextField } from '../../components/Field'
 import { NotificationBanner, WarningButton } from '../../components/govuk'
-import { Term } from '../../components/Help'
+import { DocLink, Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
@@ -237,11 +237,11 @@ function useLearnStrengthen(repo: string): UseQueryResult<StrengthenReport, ApiE
   })
 }
 
-/** `GET /learn/remeasure?repo=`. */
-function useLearnRemeasure(repo: string): UseQueryResult<RemeasurePlan, ApiError> {
+/** `GET /learn/remeasure?repo=` — against the running apparatus, or `apparatus` for a what-if plan. */
+function useLearnRemeasure(repo: string, apparatus = ''): UseQueryResult<RemeasurePlan, ApiError> {
   return useQuery({
-    queryKey: ['learn', repo, 'remeasure'] as const,
-    queryFn: () => api<RemeasurePlan>(`/learn/remeasure?repo=${enc(repo)}`),
+    queryKey: ['learn', repo, 'remeasure', apparatus] as const,
+    queryFn: () => api<RemeasurePlan>(`/learn/remeasure?repo=${enc(repo)}${apparatus ? `&apparatus=${enc(apparatus)}` : ''}`),
     enabled: repo.length > 0,
     retry: false,
   })
@@ -617,6 +617,31 @@ function StrengthenSection({ repo }: { repo: string }) {
       ...(operator
         ? [
             {
+              // G-352 — the way back into the product after the tests were strengthened in the
+              // repository: each link opens the Runs dialog with the kind and this item's task
+              // already filled in (a cell-level item names no task, so its runs cover them all)
+              key: 'remeasure',
+              header: 'Re-measure',
+              hint: 'col.learn_strengthen.remeasure' as const,
+              cell: (i: StrengthenItem) => {
+                const tasks = i.labels.task_id ? `&tasks=${enc(i.labels.task_id)}` : ''
+                const to = (kind: string) => `/runs?repo=${enc(repo)}&new=${kind}${tasks}&from=learn`
+                return (
+                  <span className="flex flex-wrap gap-x-2 gap-y-1 text-xs">
+                    <Hint as={Link} id="link.learn.requalify" to={to('qualify')}>
+                      Re-qualify
+                    </Hint>
+                    <Hint as={Link} id="link.learn.rescore" to={to('oracle')}>
+                      Re-score
+                    </Hint>
+                    <Hint as={Link} id="link.learn.recontrols" to={to('controls')}>
+                      Re-run controls
+                    </Hint>
+                  </span>
+                )
+              },
+            },
+            {
               key: 'register',
               header: 'Register',
               hint: 'col.learn_strengthen.register' as const,
@@ -637,7 +662,7 @@ function StrengthenSection({ repo }: { repo: string }) {
           ]
         : []),
     ],
-    [operator, pending, register],
+    [operator, pending, register, repo],
   )
   if (q.isPending) return <Pending what="the strengthening backlog" />
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
@@ -647,15 +672,19 @@ function StrengthenSection({ repo }: { repo: string }) {
       {register.data && (
         <Outcome hint="banner.learn.registered">
           {registeredSentence(repo, register.data)}{' '}
-          <Hint as={Link} id="link.learn.factory" to={`/factory?repo=${enc(repo)}`}>
+          <Hint as={Link} id="link.learn.factory" to={`/factory?repo=${enc(repo)}${register.data.registered[0] ? `&item=${enc(register.data.registered[0].item_id)}` : ''}`} className="underline underline-offset-4">
             Factory
           </Hint>
         </Outcome>
       )}
       {register.isError && <ErrorState error={register.error} />}
       <p className="m-0 text-sm text-on-surface-muted">
-        <Term id="cell">Cells</Term> withheld from deliver because their <Term id="oracle_strength">oracle strength</Term> is under the bar or their <Term id="negative_controls">negative controls</Term> escaped or were thin, each as a test-writing item in the backlog’s own shape. More attempts will not move these cells; stronger tests will. {operator ? 'Register puts an item on this repository’s backlog; registering one twice supersedes it rather than overwriting it.' : 'An operator registers an item on the backlog.'}
+        <Term id="cell">Cells</Term> withheld from deliver because their <Term id="oracle_strength">oracle strength</Term> is under the bar or their <Term id="negative_controls">negative controls</Term> escaped or were thin, each as a test-writing item in the backlog’s own shape. More attempts will not move these cells; stronger tests will. {operator ? 'Register puts an item on this repository’s backlog; registering one twice supersedes it rather than overwriting it. Once the tests are stronger, Re-qualify, Re-score and Re-run controls open a run for the item’s task.' : 'An operator registers an item on the backlog and re-runs its oracle once the tests are stronger.'}
       </p>
+      <Hint as="p" id="text.learn.strengthen_cost" className="m-0 text-sm text-on-surface-muted" data-testid="learn-strengthen-cost">
+        What the work costs a person: one small cobra item needed five author–adversary rounds and about 45 test rows before only a real fix passed its test (measured: n = 1 item, 5 revisions, 10 wrong builds; Jita81/cobra at 9c0edca, Go 1.26.4, apparatus 2.2). One item is not a rate.{' '}
+        <DocLink to="LEARNING-LOOP#24-what-strengthening-costs-a-person">What strengthening costs</DocLink>
+      </Hint>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Oracle-held cells" hint="stat.learn.oracle_held" value={s.cells_flagged.length ? fmtInt(s.cells_flagged.length) : '—'} n={s.cells_flagged.length} apparatus={`routing.v1 · oracle threshold ${s.threshold.toFixed(2)}`} tone={s.cells_flagged.length ? 'amber' : 'green'} />
         <StatTile label="Strengthening items" hint="stat.learn.items" value={s.items.length ? fmtInt(s.items.length) : '—'} n={s.items.length} apparatus="test.add · structural slots only · DoR: build" />
@@ -728,7 +757,7 @@ function QueueDialog({ repo, cell, onClose }: { repo: string; cell: RemeasureCel
         {done ? (
           <Outcome hint="banner.learn.queued">
             {queuedSentence(done)}{' '}
-            <Hint as={Link} id="link.learn.queued_runs" to={`/runs?repo=${enc(repo)}`}>
+            <Hint as={Link} id="link.learn.queued_runs" to={`/runs?repo=${enc(repo)}`} className="underline underline-offset-4">
               Runs
             </Hint>
           </Outcome>
@@ -757,11 +786,20 @@ function QueueDialog({ repo, cell, onClose }: { repo: string; cell: RemeasureCel
   )
 }
 
+/** An apparatus version as the API takes it: digits and dots, as `2.3` or `3.0.1`. */
+const APPARATUS_RE = /^\d+(\.\d+){0,3}$/
+
 /** Stale evidence → the runs to queue; the spend tile is a dash when no cell has a known cost. */
 function RemeasureSection({ repo }: { repo: string }) {
-  const q = useLearnRemeasure(repo)
+  // G-983 — a what-if plan: what re-measuring would cost if the apparatus moved to this
+  // version (the CLI's `crb learn remeasure --apparatus`). Blank = the running version.
+  const [draft, setDraft] = useState('')
+  const [whatIf, setWhatIf] = useState('')
+  const q = useLearnRemeasure(repo, whatIf)
   const { can } = useAuth()
-  const operator = can('operator')
+  // a what-if plan is a preview: its runs would grade under the RUNNING apparatus and could
+  // never clear the plan they were queued from, so the Queue control is not offered for it
+  const operator = can('operator') && !whatIf
   const [queueing, setQueueing] = useState('')
   const columns = useMemo<Column<RemeasureCell>[]>(
     () => [
@@ -788,11 +826,52 @@ function RemeasureSection({ repo }: { repo: string }) {
     ],
     [operator],
   )
+  const whatIfControls = (
+    <div className="flex flex-wrap items-end gap-2">
+      <TextField
+        label="Plan against apparatus"
+        hint="field.learn.plan_apparatus"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.trim())}
+        placeholder="e.g. 2.4"
+        className="w-40"
+        description="What a bump would cost before making it. Blank plans for the version this deployment runs."
+        error={draft && !APPARATUS_RE.test(draft) ? 'A version is digits and dots, such as 2.4.' : undefined}
+      />
+      <Button size="sm" hint="button.learn.plan_apparatus" disabled={!draft || !APPARATUS_RE.test(draft) || draft === whatIf} onClick={() => setWhatIf(draft)}>
+        Plan
+      </Button>
+      {whatIf && (
+        <Button
+          size="sm"
+          hint="button.learn.plan_running"
+          onClick={() => {
+            setWhatIf('')
+            setDraft('')
+          }}
+        >
+          Plan for the running version
+        </Button>
+      )}
+    </div>
+  )
   if (q.isPending) return <Pending what="the re-measurement plan" />
-  if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+  if (q.isError)
+    return (
+      <div className="space-y-4">
+        {whatIfControls}
+        <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+      </div>
+    )
   const p = q.data
   return (
     <div className="space-y-4">
+      {whatIfControls}
+      {whatIf && (
+        <Hint as="p" id="banner.learn.plan_whatif" className="m-0 text-sm font-semibold" data-testid="learn-plan-whatif">
+          A what-if plan: planned against apparatus {p.current_apparatus}, not the version this deployment runs. Nothing here is stale until the apparatus actually moves, so no run is offered.
+        </Hint>
+      )}
       <p className="m-0 text-sm text-on-surface-muted">
         Cells whose rows predate the current <Term id="apparatus">apparatus</Term>. <Term id="stale">Stale</Term> evidence is kept as history and licenses nothing; the plan lists the runs to queue and what they would cost. {operator ? 'Queue runs sends one cell’s runs, after showing you the estimate it will spend.' : 'An operator queues the runs.'}
       </p>
@@ -829,6 +908,20 @@ function RemeasureSection({ repo }: { repo: string }) {
   )
 }
 
+/**
+ * G-348 — which loop the reader is in, and where each of its steps happens. The loop has
+ * no position in the journey bar (it is not one of the four journey steps), so the page says
+ * it itself: the six steps of docs/dod/journeys/learn-and-strengthen.md, in order.
+ */
+function LoopPosition() {
+  return (
+    <Hint as="p" id="step.learn.loop" className="m-0 max-w-[80ch] text-sm text-on-surface-body" data-testid="learn-loop">
+      You are in the learning loop. 1 read the reports here → 2 find the escaped mutants on Oracle → 3 strengthen the tests in your repository → 4 re-score and re-qualify from the item’s row → 5 register and queue here → 6 decide the refusals here. The screens that
+      find a weak oracle, a controls escape or a stopped item link back to this page.
+    </Hint>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -845,6 +938,11 @@ export function LearnPage() {
   const [repo, setRepo] = useRepoParam()
   const [params] = useSearchParams()
   const focus = params.get('class') ?? ''
+  // the screens that reveal a need link to one report (`#strengthen`, `#refusals`, …)
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (repo && hash.length > 1) document.getElementById(hash.slice(1))?.scrollIntoView?.({ block: 'start' })
+  }, [repo, hash])
   return (
     <div className="space-y-6">
       <PageHeader
@@ -854,19 +952,28 @@ export function LearnPage() {
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
       {!repo ? (
-        <EmptyState title="Pick a repository" reason="The three reports are derived from one repository's ledger rows." />
+        <EmptyState
+          title="Pick a repository"
+          reason="The three reports are derived from one repository's ledger rows. Choose one in the picker above, or connect one first."
+          action={
+            <LinkButton to="/connect" hint="link.learn.connect">
+              Connect a repository
+            </LinkButton>
+          }
+        />
       ) : (
         <>
+          <LoopPosition />
           <Card eyebrow="Prevention" title="Bug classes → the change that removes them" id="prevention">
             <PreventionSection repo={repo} focus={focus} />
           </Card>
-          <Card eyebrow="Refusals" title="Refusals → guard corpus">
+          <Card eyebrow="Refusals" title="Refusals → guard corpus" id="refusals">
             <RefusalsSection repo={repo} />
           </Card>
-          <Card eyebrow="Weak oracles" title="Weak oracles → strengthening backlog">
+          <Card eyebrow="Weak oracles" title="Weak oracles → strengthening backlog" id="strengthen">
             <StrengthenSection repo={repo} />
           </Card>
-          <Card eyebrow="Stale evidence" title="Apparatus change → re-measurement plan">
+          <Card eyebrow="Stale evidence" title="Apparatus change → re-measurement plan" id="remeasure">
             <RemeasureSection repo={repo} />
           </Card>
         </>
