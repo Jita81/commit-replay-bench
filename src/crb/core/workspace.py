@@ -76,7 +76,9 @@ Works with:   src/crb/core/grade.py (the belts that read every view here), src/c
               (the argv-only git wrapper), src/crb/core/mine.py (RED / baseline / gold on a
               workspace), src/crb/core/run.py (creates one per attempt), src/crb/core/spec.py
               (RepoConfig: language fixups and ``post_create`` hooks),
-              src/crb/builders/base.py (the builder is confined to ``root``)
+              src/crb/builders/base.py (the builder is confined to ``root``),
+              src/crb/core/deps.py (``is_sealed_node_set``: the ``node_modules`` link a local
+              sealed run plants is the harness's)
 Tested by:    tests/test_workspace.py, tests/test_grade.py, tests/test_mine.py,
               tests/test_test_infra.py
 Touch when:   onboarding a repository whose worktree needs a fixup before its tests run — add
@@ -99,6 +101,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from crb.core.deps import is_sealed_node_set
 from crb.core.git import GitError, GitRepo
 from crb.core.spec import Language, RepoConfig
 
@@ -488,10 +491,15 @@ class Workspace:
                     self.harness_files[rel] = HARNESS_SYMLINK
 
     def harness_unchanged(self, rel: str) -> bool:
-        """``rel`` was written by the harness at create time and is still exactly that."""
+        """``rel`` was written by the harness at create time and is still exactly that —
+        or it is the ``node_modules`` link a local sealed run plants when the worktree had
+        none (the clone was never set up): a link at a SEALED Node set in a registered
+        store, which only the store can make (:func:`~crb.core.deps.is_sealed_node_set`).
+        A link anywhere else, a writable set or a real directory stays the builder's."""
         recorded = self.harness_files.get(rel)
         if recorded is None:
-            return False
+            link = self.root / rel
+            return rel == "node_modules" and link.is_symlink() and is_sealed_node_set(link)
         if recorded == HARNESS_SYMLINK:
             return (self.root / rel).is_symlink()
         return self.file_hash(rel) == recorded

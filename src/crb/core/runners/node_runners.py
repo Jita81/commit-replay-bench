@@ -175,7 +175,10 @@ class _NodeBase(BaseRunner):
         With a sealed set bound (ADR-0019) on the host, the link is pointed at THAT set:
         Node resolves ``./node_modules`` before ``NODE_PATH``, so a link left at the clone's
         tree would grade a ``sealed`` posture against the clone's install (CodeRabbit on PR
-        #56). No era is ever installed for a sealed set. A ``node_modules`` that is not a
+        #56). No era is ever installed for a sealed set. A worktree with NO entry gets the
+        link too: ``npm ls`` and an ES module ``import`` never read ``NODE_PATH`` (the
+        second thread, node_runners.py:201), and the workspace owns a link at a sealed set
+        as the harness's (``Workspace.harness_unchanged``). A ``node_modules`` that is not a
         link (the commit holds its own tree) would shadow the set the same way and is the
         commit's, never the harness's to delete: ``PROVISION_TREE_SHADOWS_SET`` (task
         scope), never a verdict.
@@ -190,7 +193,13 @@ class _NodeBase(BaseRunner):
                 if link.resolve() != sealed.resolve():
                     link.unlink()
                     link.symlink_to(sealed)
-            elif link.exists():
+            elif not link.exists():
+                # no entry at all (the clone was never set up, so the workspace planted
+                # none): ``npm ls`` never reads NODE_PATH and an ES module import ignores
+                # it, so both need ./node_modules — the workspace owns this link as the
+                # harness's because it points at a sealed set (is_sealed_node_set)
+                link.symlink_to(sealed)
+            else:
                 raise ProvisionRefused(
                     PROVISION_TREE_SHADOWS_SET,
                     "./node_modules is part of the commit's own tree, so on the host Node "

@@ -369,6 +369,32 @@ def mount_problem(mount: BundleMount, *, check_seal: bool = True) -> str:
     return ""
 
 
+def is_sealed_node_set(path: Path) -> bool:
+    """``path`` resolves to a sealed Node set: a ``node_modules`` directory inside a key's
+    directory under a registered bundle store (``<store>/node/<key>/…/node_modules``) that
+    nobody can write — the rule :func:`mount_problem` applies to a mount at
+    ``/work/node_modules``, seal included. Only the store makes one, so a worktree's
+    ``node_modules`` link at such a set is the harness's (a local sealed run links it in),
+    never a builder's change (CodeRabbit on PR #56, node_runners.py:201)."""
+    try:
+        host = Path(path).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    if host.name != "node_modules":
+        return False
+    owner = next((r for r in store_roots() if r in host.parents), None)
+    if owner is None:
+        return False
+    parts = host.relative_to(owner).parts
+    if len(parts) < 3 or parts[0] != "node" or not KEY_RE.fullmatch(parts[1]):
+        return False
+    try:
+        mount = BundleMount(host, "/work/node_modules", parts[1])
+    except ValueError:
+        return False
+    return mount_problem(mount, check_seal=True) == ""
+
+
 def validate_mount(mount: BundleMount) -> None:
     """Raise ``ValueError`` unless ``mount`` passes :func:`mount_problem` with the seal."""
     problem = mount_problem(mount, check_seal=True)
