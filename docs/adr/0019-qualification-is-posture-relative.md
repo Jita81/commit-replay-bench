@@ -110,7 +110,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
 
    **If the control is red,** the trial's error becomes `environment: …`. The unchanged rule reads that as `harness`, which is counted against autonomy in the fail-closed rate and never against the model. The task's qualification is revoked and its ladder stops. Two such rows in a row stop the run (`env_stop`, event `run.environment_stop`), as `outage_stop` does for outages.
 
-   **If the trial's own tree could not be given its ground** (the throwaway copy failed, `env_error: tree_copy_failed`), whose fault it was is a blame decision too, so the same control runs first. A green control means the posture holds the gold's tree and the trial's own tree did not fit (its size or its file modes): the trial is disqualified (`dq_reason: trial tree: …`), never charged, never an `environment:` row, and nothing is revoked. A red control makes it an `environment:` row as above. Only a row whose control ran red (`env_code: GOLD_CONTROL_RED`) revokes a qualification; an unwitnessed grade's environment row (`TEST_RUN_ENVIRONMENT`) stops the ladder and revokes nothing.
+   **If the trial's own tree could not be given its ground** (the throwaway copy failed, `env_error: tree_copy_failed`), whose fault it was is a blame decision too, so the same control runs first. A green control means the posture holds the gold's tree and the trial's own tree did not fit (its size, or a path the worker could not make readable to the sandbox's user): the trial is disqualified (`dq_reason: trial tree: …`), never charged, never an `environment:` row, and nothing is revoked. A red control makes it an `environment:` row as above. Only a row whose control ran red (`env_code: GOLD_CONTROL_RED`) revokes a qualification; an unwitnessed grade's environment row (`TEST_RUN_ENVIRONMENT`) stops the ladder and revokes nothing.
 
    `MisattributionViolation` sits beside `FalseQ1Violation`. It makes 2 things impossible to construct:
    - a blamed `GradeResult` without a witness;
@@ -173,6 +173,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
    - It copies the tree into a size-capped tmpfs at `/work` (`rw,exec,nosuid,nodev`), and only then runs the command. The copy is `exec` because the tree has always been executable to its own tests.
    - The copy dies with the container.
    - Declared output paths are still bound from the worktree.
+   - The whole tree reaches the tests, whatever its host modes. The container's user owns nothing on the host, so before a container starts the executor adds read (and search, on a directory) for its owner and for others on every path the worker owns. It never adds a write bit, never changes the owner's execute bit (git's mode) and never follows a link. A path it cannot make readable fails the copy (`tree_copy_failed`), and the copy never leaves a path out: GNU tar's "removed before we read it" is fatal, although tar exits 1 for it (PR #56).
    - A repository whose tree is too large to copy can choose `sandbox_tree: readonly`. That is a different posture and is qualified separately.
    - In every posture, belts 4 and 5 read the builder's changes as they stood before the first test ran. A file a test writes is therefore never counted as the builder's.
 

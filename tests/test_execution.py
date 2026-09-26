@@ -456,9 +456,12 @@ def test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tm
     )
     argv = d.build_argv(cmd)
     script = (
-        "{ tar -C /src --warning=no-file-changed --exclude=./node_modules "
+        "{ { tar -C /src --warning=no-file-changed --exclude=./node_modules "
         "--exclude=./.pytest_scratch -cf - .; "
-        "[ $? -le 1 ] || : > /tmp/.crb-copy-failed; } | tar -C /work -xf - "
+        "[ $? -le 1 ] || : > /tmp/.crb-copy-failed; } 2> /tmp/.crb-copy-err; "
+        "cat /tmp/.crb-copy-err >&2; "
+        'case "$(cat /tmp/.crb-copy-err)" in *"removed before we read"*) '
+        ": > /tmp/.crb-copy-failed;; esac; } | tar -C /work -xf - "
         "&& [ ! -e /tmp/.crb-copy-failed ] "
         "|| { echo crb:tree-copy-failed >&2; exit 97; }; "
         'cd "/work/$0" && exec "$@"'
@@ -574,6 +577,55 @@ def test_a_bundle_mount_outside_the_store_is_refused(tmp_path: Path) -> None:
     (good.host_path).chmod(0o755)
     with pytest.raises(SandboxUnavailable, match="not sealed"):
         d.build_argv(Command(("go", "test"), tmp_path, ro_mounts=(good,)))
+
+
+@pytest.mark.parametrize("tree", ["copy", "readonly"])
+def test_docker_run_lets_the_sandbox_uid_read_the_tree_never_write_never_through_a_link(
+    tmp_path: Path, tree: str
+) -> None:
+    """Host modes never hide the tree from the sandbox uid (PR #56, sandbox-images): before
+    the container starts, every directory and file the worker owns gains read (and search on
+    a directory) for its owner and for others — a file executable by its owner becomes so
+    for others. No write bit is ever added, the owner's execute bit (git's mode) is never
+    changed, a link is never followed, the command's own writable paths are left to
+    ``build_argv``, and in the copy tree ``node_modules`` (never copied) is not walked."""
+
+    def mode(p: Path) -> int:
+        return stat.S_IMODE(os.lstat(p).st_mode)
+
+    root = tmp_path / "tree"
+    planted = {
+        "locked/sub/inner.txt": 0o644,
+        "owner_only.txt": 0o600,
+        "no_bits.txt": 0o000,
+        "run.sh": 0o700,
+        "node_modules/pkg.js": 0o600,
+    }
+    for rel, m in planted.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("x", encoding="utf-8")
+        (root / rel).chmod(m)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    outside.chmod(0o600)
+    (root / "link").symlink_to(outside)
+    (root / ".pytest_scratch").mkdir()
+    (root / "locked" / "sub").chmod(0o000)
+    (root / "locked").chmod(0o000)
+    try:
+        d = DockerExecutor(_settings(tree=tree), runner=FakeRunner(_ok(), _ok("")))
+        d.run(Command(("pytest",), root, writable_paths=(".pytest_scratch",)))
+        assert mode(root / "locked") == 0o505 and mode(root / "locked" / "sub") == 0o505
+        assert mode(root / "locked" / "sub" / "inner.txt") == 0o644
+        assert mode(root / "owner_only.txt") == 0o604
+        assert mode(root / "no_bits.txt") == 0o404
+        assert mode(root / "run.sh") == 0o705
+        assert mode(outside) == 0o600  # never through the link
+        assert mode(root / ".pytest_scratch") == 0o733  # build_argv's, not widened
+        assert mode(root / "node_modules" / "pkg.js") == (0o600 if tree == "copy" else 0o604)
+    finally:
+        for p in (root / "locked", root / "locked" / "sub"):
+            p.chmod(0o755)
 
 
 def test_tree_copy_failure_is_an_env_error_not_a_verdict(tmp_path: Path) -> None:

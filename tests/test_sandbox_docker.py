@@ -68,7 +68,14 @@ from pathlib import Path
 
 import pytest
 
-from crb.core.execution import Command, DockerExecutor, DockerSettings, UnconfirmedKill
+from crb.core.execution import (
+    TREE_COPY_MARKER,
+    TREE_COPY_RC,
+    Command,
+    DockerExecutor,
+    DockerSettings,
+    UnconfirmedKill,
+)
 from crb.core.git import GitRepo
 from crb.core.mine import Candidate, qualify
 from crb.core.runners import get_runner
@@ -266,6 +273,79 @@ def test_host_worktree_unchanged_after_sandboxed_run(trial, task, config, runner
     assert trial.touched_files() == sorted({*task.src_files, *task.test_files})
     stray = {p.name for p in trial.root.iterdir()} - top_before - _ALLOWED_HOST_WRITES
     assert not stray, f"sandboxed run left {sorted(stray)} on the host"
+
+
+# ---------------------------------------------------------------------------
+# Host modes never hide the tree from the sandbox uid (PR #56, the sandbox-images job)
+# ---------------------------------------------------------------------------
+
+#: What a real worktree can hold that the sandbox uid cannot read as it stands: a
+#: directory with no mode bits, a file only its owner may read (a restrictive umask, a
+#: tool's private cache) and a file with no mode bits at all.
+_HIDDEN = {"locked/inner.txt": "inner", "owner_only.txt": "owner", "no_bits.txt": "none"}
+
+
+def _plant_hidden(root: Path) -> None:
+    for rel, text in _HIDDEN.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text + "\n", encoding="utf-8")
+    (root / "owner_only.txt").chmod(0o600)
+    (root / "no_bits.txt").chmod(0o000)
+    (root / "locked").chmod(0o000)
+
+
+def _unplant_hidden(root: Path) -> None:
+    """Give the owner its modes back so the worktree can be removed whatever the run did."""
+    (root / "locked").chmod(0o755)
+    for rel in _HIDDEN:
+        (root / rel).chmod(0o644)
+
+
+@pytest.mark.parametrize("tree", ["copy", "readonly"])
+def test_a_path_host_modes_hide_from_the_sandbox_uid_still_reaches_the_tests(trial, tree):
+    """The tree the tests see is the WHOLE worktree, whatever its host modes: a mode-000
+    directory, a mode-600 file and a mode-000 file are read inside the container, in the
+    throwaway copy and in the read-only tree alike — never a ``tree_copy_failed`` the model
+    would be disqualified for, never a path silently left out of the copy."""
+    _plant_hidden(trial.root)
+    try:
+        ex = DockerExecutor(DockerSettings(image=IMAGE, tree=tree))
+        r = ex.run(Command(("cat", *_HIDDEN), trial.root, timeout=60))
+    finally:
+        _unplant_hidden(trial.root)
+    assert r.ok and r.env_error == "", r.combined
+    assert r.stdout.split() == list(_HIDDEN.values())
+
+
+def test_a_command_after_a_runner_wrote_its_scratch_still_copies_the_tree(
+    trial, task, runner, executor
+):
+    """The CI failure, reproduced from the product's own steps: the pytest runner declares
+    ``.pytest_scratch`` writable (created 0733 on the host); the NEXT command, which does
+    not declare it, copies the tree including that directory — and must not fail on it."""
+    trial.overlay_sources(task.src_files)
+    assert runner.run(executor, trial.root, (pyrepo_min.TEST_SUB,)).green
+    r = executor.run(Command(("ls", "-A"), trial.root, timeout=60))
+    assert r.ok and r.env_error == "", r.combined
+    assert ".pytest_scratch" in r.stdout.split()
+
+
+def test_the_copy_fails_closed_on_a_path_it_cannot_read_never_drops_it(trial, executor):
+    """Belt and braces under the host-side grant: the copy script itself, run WITHOUT the
+    grant, stops with the tree-copy marker on a directory it cannot read. Under colima GNU
+    tar calls such a directory "removed before we read it" and exits 1 — the exit the script
+    must tolerate for "file changed" — so the rc alone would have dropped it silently."""
+    locked = trial.root / "locked"
+    locked.mkdir()
+    (locked / "inner.txt").write_text("inner\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        argv = executor.build_argv(Command(("true",), trial.root, timeout=60))
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=120, check=False)
+    finally:
+        locked.chmod(0o755)
+    assert r.returncode == TREE_COPY_RC and TREE_COPY_MARKER in r.stderr, r.stderr
 
 
 # ---------------------------------------------------------------------------

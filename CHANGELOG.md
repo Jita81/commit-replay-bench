@@ -50,6 +50,15 @@ seam, `crb.core.deps`, and wired end to end.
   - `QUAL_ENV_UNLOADABLE`'s fix covers provisioning on as well as off;
   - the count of run `0c44ff24…`'s rows (3 observed, 4 in stream D's reading of an export that
     is not committed) is marked disputed wherever it is cited **[gap]** (F42).
+- **Host file modes never hide the tree from the sandbox** (product.posture.32; CI's
+  `sandbox-images` job on PR #56). The container's user owns nothing on the host, so a path
+  the host's modes kept from others failed the copy (`tree_copy_failed` on Linux — first
+  seen on the `0733` writable path the pytest runner itself had declared for the previous
+  command) or, under colima, was silently left out of the copy. Before a container starts,
+  `grant_sandbox_read` now adds read (and search) for the owner and for others on every path
+  the worker owns — never a write bit, never git's execute bit, never through a link — and
+  the copy treats GNU tar's "removed before we read it" as fatal, so a path it still cannot
+  read stops the copy instead of vanishing from it.
 
 ### 2026-09-25 — qualification is posture-relative (ADR-0019, apparatus 2.3)
 

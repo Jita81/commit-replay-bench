@@ -20,7 +20,10 @@ an :class:`Executor`. The executor decides *where* it runs:
 No command gets a network under docker: ``Command.network=True`` is refused —
 dependencies are provisioned per task outside the test container (ADR-0019), never
 installed in the sandbox. A tree that cannot be copied (rc 97 with the marker) is an
-environment error on the result (``ExecResult.env_error``), never a verdict.
+environment error on the result (``ExecResult.env_error``), never a verdict. Host file modes
+never hide the tree from the container's user: :func:`grant_sandbox_read` makes every path
+the worker owns readable to it before the container starts, and the copy never leaves a
+path out.
 
 Navigation
 ----------
@@ -33,7 +36,9 @@ What it does: Runs one command with a wall clock and a cancel token and reports 
               to an allowlist so a repository's tests never see the operator's secrets; and
               refuses — ``SandboxUnavailable`` — whenever the container cannot be provided
               exactly as hardened (no binary, no daemon, root user, forbidden mount, launch
-              failure). It never falls back to the host.
+              failure). It never falls back to the host. Before a container starts it makes
+              the worktree readable to the container's user whatever its host modes
+              (``grant_sandbox_read``: read, never write, never through a link).
 How:          ``Command`` (argv, root, writable paths, sealed ``ro_mounts``) → ``build_argv``
               (the full ``docker run`` hardening set, the worktree read-only at ``/src`` and a
               throwaway tmpfs copy at ``/work`` — or the ``readonly`` tree — each bundle mount
@@ -89,6 +94,7 @@ import logging
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import threading
@@ -397,10 +403,16 @@ TREE_COPY_MARKER = "crb:tree-copy-failed"
 #: ``$0`` is the working directory relative to the tree; ``$@`` the command. The reading tar
 #: writes a marker on a fatal error (exit 2 or more) so a partial copy is never mistaken for
 #: a tree (``sh`` has no ``pipefail``); its exit 1 — "file changed as we read it", which a
-#: bind mount's directory times provoke under colima — is a warning, not a failure.
+#: bind mount's directory times provoke under colima — is a warning, not a failure. The
+#: same exit 1 is all GNU tar gives for a path it could not open under colima ("removed
+#: before we read it"), so that message is read from its stderr (echoed as it was) and is
+#: fatal too: a path is never silently left out of the copy (PR #56).
 _COPY_SCRIPT = (
-    "{{ tar -C /src --warning=no-file-changed {excludes}-cf - .; "
-    "[ $? -le 1 ] || : > /tmp/.crb-copy-failed; }} | tar -C {work} -xf - "
+    "{{ {{ tar -C /src --warning=no-file-changed {excludes}-cf - .; "
+    "[ $? -le 1 ] || : > /tmp/.crb-copy-failed; }} 2> /tmp/.crb-copy-err; "
+    "cat /tmp/.crb-copy-err >&2; "
+    'case "$(cat /tmp/.crb-copy-err)" in *"removed before we read"*) '
+    ": > /tmp/.crb-copy-failed;; esac; }} | tar -C {work} -xf - "
     "&& [ ! -e /tmp/.crb-copy-failed ] "
     "|| {{ echo " + TREE_COPY_MARKER + " >&2; exit " + str(TREE_COPY_RC) + "; }}; "
     'cd "{work}/$0" && exec "$@"'
@@ -823,6 +835,12 @@ class DockerExecutor:
         """Run ``cmd`` in the sandbox. A timeout is a result (124); a failure of docker
         itself to launch (exit 125, a missing binary) is :class:`SandboxUnavailable`."""
         argv = self.build_argv(cmd)
+        # the tree the container reads is the WHOLE worktree whatever its host modes: the
+        # sandbox uid owns nothing on the host (see grant_sandbox_read)
+        copy = self.settings.tree == TREE_COPY and "." not in cmd.writable_paths
+        grant_sandbox_read(
+            cmd.root, skip=(*(("node_modules",) if copy else ()), *cmd.writable_paths)
+        )
         started = time.monotonic()
         # The real daemon always takes the polled path — with or without a cancel token —
         # because it is the one that kills the CONTAINER on the wall clock and confirms
@@ -852,6 +870,73 @@ class DockerExecutor:
             time.monotonic() - started,
             env_error=_env_error(r.returncode, r.stderr or ""),
         )
+
+
+#: What the sandbox uid needs on a path the worker owns: read on a file, read and search on
+#: a directory — for others (the container's uid owns nothing on the host) and for the
+#: owner (so the walk can enter a mode-000 directory, and so a copy tar restores is the
+#: container user's to read).
+_GRANT_DIR = stat.S_IRUSR | stat.S_IXUSR | stat.S_IROTH | stat.S_IXOTH
+_GRANT_FILE = stat.S_IRUSR | stat.S_IROTH
+
+
+def grant_sandbox_read(root: Path, *, skip: Sequence[str] = ()) -> None:
+    """Make the worktree readable by the sandbox uid before a container reads it (PR #56).
+
+    The container runs as a uid (``65534`` by default) that owns nothing on the host, so a
+    path the host's modes keep from "others" — a restrictive umask, a tool's private cache,
+    the ``0733`` writable path a previous command declared — was either a ``tree_copy_failed``
+    (Linux: tar cannot open it) or, under colima, silently missing from the copy. Every
+    directory and regular file the worker OWNS gains :data:`_GRANT_DIR` / :data:`_GRANT_FILE`,
+    and a file its owner may execute becomes executable by others. Bits are only added:
+    never a write bit, never the owner's execute bit (git's mode is unchanged). A link is
+    never followed (``lstat``; a link is left as it is). A path the worker does not own, or
+    cannot change, is left as it is: if the container cannot read it the copy fails closed
+    (``tree_copy_failed`` — an environment error, never a verdict), it is never skipped.
+    ``skip`` names root-relative top-level paths not walked (the command's writable paths,
+    which ``build_argv`` sets up, and what the copy excludes)."""
+    uid = os.geteuid()
+    nofollow = os.chmod in os.supports_follow_symlinks
+    skipped = {s.strip("/") for s in skip}
+
+    def grant(path: str, st: os.stat_result, bits: int) -> None:
+        want = stat.S_IMODE(st.st_mode) | bits
+        if want == stat.S_IMODE(st.st_mode) or st.st_uid != uid:
+            return
+        with contextlib.suppress(OSError, NotImplementedError):
+            if nofollow:
+                os.chmod(path, want, follow_symlinks=False)
+            else:
+                os.chmod(path, want)  # lstat said: not a link
+
+    try:
+        top = os.lstat(root)
+    except OSError:
+        return
+    if not stat.S_ISDIR(top.st_mode):
+        return
+    grant(str(root), top, _GRANT_DIR)
+    stack = [(str(root), True)]
+    while stack:
+        dirpath, is_top = stack.pop()
+        try:
+            with os.scandir(dirpath) as it:
+                entries = list(it)
+        except OSError:
+            continue  # the copy (or the tests) will say so; nothing is skipped silently
+        for e in entries:
+            if is_top and e.name in skipped:
+                continue
+            try:
+                st = e.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                grant(e.path, st, _GRANT_DIR)
+                stack.append((e.path, False))
+            elif stat.S_ISREG(st.st_mode):
+                extra = stat.S_IXOTH if st.st_mode & stat.S_IXUSR else 0
+                grant(e.path, st, _GRANT_FILE | extra)
 
 
 def _env_error(rc: int, stderr: str) -> str:
