@@ -8,6 +8,66 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — signing out ends the session; a clone lives where the worker clones; the sign-in CLI sees only what it needs
+
+The external assessment of 2026-09-25 named three security gaps (D2, D3, D4). Each was
+reproduced with a failing test on `main` before it was changed (DL-054).
+
+- **Signing out ends the session, not only the cookie.** A session cookie is signed and
+  stateless, so clearing it in one browser left any copy of it valid until it expired.
+  Each account now carries a `session_nonce` (migration `0009`) that is part of the
+  version a cookie is bound to. Signing out rotates it, and so does the new admin action
+  **sign out everywhere** (`POST /users/{id}/sessions/revoke`, `user.sessions_revoked`),
+  which is also the first way to end an identity-provider account's sessions. Because the
+  nonce is per account, signing out ends the account's sessions on every device. Existing
+  sessions survive the upgrade.
+- **The CSRF token is bound to the session.** It was a random value the header had to
+  match, so anyone who could plant a cookie could choose a pair that passed. It is now
+  `HMAC(secret, user id, credential version)`, recomputed by the middleware from the signed
+  session cookie. When cookies are `Secure` they are named `__Host-crb_session` and
+  `__Host-crb_csrf`; the UI and the MCP client read either name. On a secure deployment
+  everybody signs in once more after the upgrade. The check also no longer skips itself:
+  it read cookies with a stricter parser than the sign-in check, so one malformed cookie
+  from a sibling site (a space, JSON, a consent date) hid the session from it while the
+  request still authenticated, and a forged request needed no token at all (this was true
+  on `main` too). Both now read the session through one function.
+- **Guessing across many usernames is limited too.** Besides five failures a minute per
+  username and address, one address may now fail twenty times a minute whatever the
+  usernames. The limiter is per process, so DEPLOYMENT §8 now requires the proxy to limit
+  `POST /api/v1/auth/login` as well.
+- **An admin's role change survives the next single sign-on.** Identity-provider claims
+  used to overwrite the stored role at every sign-in, silently undoing an admin's change.
+  They now set the role on the first sign-in only; `CRB_OIDC__ROLE_FROM_CLAIMS=always`
+  restores the old behaviour and records each change as `user.role_overridden`.
+- **A registered clone must live in `$CRB_HOME/repos`.** `POST` and `PUT /repos` — and the
+  MCP write tools that ride them — accepted any directory on the server as a `clone_path`.
+  Outside `$CRB_HOME/repos` is now admin-only and recorded (`repo.clone_path.outside_home`);
+  an operator gets `403 clone_path_outside_home`; a symbolic link out of that directory is
+  refused for everyone (`422 clone_path_escapes`); a relative path is refused. The
+  symbolic-link rule is checked again when the path is used — by the worker before a run
+  reads the clone, and by the profile walk — because a path that did not exist when it was
+  registered can gain a link later. The review of this change found the worker's own clone
+  destination (`$CRB_HOME/repos/<name>`, used when a repository has a URL and no clone yet)
+  skipped that check, and the clone step reused whatever repository a link there pointed
+  at. The destination is now checked too, git opens the path that was checked rather than
+  the path as written, the clone step refuses a destination that is a symbolic link, and a
+  test holds every place that opens a stored clone to the one checking function. A second
+  review found the destination check asked only whether a link there stayed inside
+  `$CRB_HOME/repos`, so a link to another repository's clone in that directory was still
+  reused and saved as this repository's clone. The destination must now be exactly
+  `$CRB_HOME/repos/<name>` and never a link, wherever the link leads. A test now also fails
+  when a new function in the server opens git without being on the list of places that
+  must use the checking function, so that list cannot quietly fall behind. A third review found
+  that test looked only for the two ways the server opens a repository, so a function that
+  ran `git` as a command of its own passed it. It now also fails on any new function in
+  the server that starts a process, until someone records whether it is git and, if so,
+  on what.
+- **`claude setup-token` gets an allowlisted environment.** The sign-in helper ran the CLI
+  with the API process's whole environment — the secret key, the database URL, the OIDC
+  client secret. It now passes `PATH`, `HOME`, a plain terminal, a no-op browser, the
+  host's proxy and certificate-authority variables (so the sign-in works behind a proxy)
+  and a `CLAUDE_CONFIG_DIR` created for that sign-in and removed after it.
+
 ### 2026-09-25 — the gate tools are pinned, and the suite no longer depends on the machine it runs on
 
 mypy and ruff are pinned exactly (Dependabot moves them) and CI runs daily on `main` because a SQLAlchemy release, not a commit, turned eight untyped query results into mypy errors; the eight are annotated. The suite no longer depends on the uid it runs as, a docker daemon or the network: tests name a non-root builder user (a ratchet refuses one that does not), the doctor tests never ask the host's daemon, and a `network` test is skipped with the host and the reason when the host is unreachable (and fails instead under `CRB_TEST_STRICT_WARMUP=1`, as in CI, where an unreachable host is a defect). The ratchet exempts only settings built after the test pins `os.getuid` in its own body, and only a pin on the `os` module itself, found through the file's imports (`Fake.os` is not `os`). The local pytest gate in `docs/CONTRIBUTING.md` now measures branch coverage as CI does, and a test fails when a documented gate command drifts from `ci.yml`. `.coverage` and `coverage.xml` are ignored. The pins fix the tools, not the verdict — every other dependency still resolves fresh, which is what the daily run is for — and `docs/CONTRIBUTING.md` now says so and has joined the claims gate's allowlist (assessment 2026-09-25 §E1–E2, DL-053).

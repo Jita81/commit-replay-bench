@@ -17,7 +17,11 @@ session directory:
 
 The token is never written anywhere but the secrets store; the pasted code is never
 written anywhere but the PTY. Terminal escape sequences are stripped before any text is
-matched or reported.
+matched or reported. The CLI itself runs with an allowlisted environment
+(:func:`cli_environment`: ``PATH``, ``HOME``, a plain terminal, a no-op browser and a
+``CLAUDE_CONFIG_DIR`` used by this sign-in only) — this helper inherits the API process's
+environment, and the secret key, the database URL and the OIDC client secret in it are not
+the CLI's to read (assessment 2026-09-25, D3).
 
 Navigation
 ----------
@@ -26,7 +30,7 @@ What it is:   The ``claude setup-token`` PTY driver — the only process that ev
 What it does: Runs the CLI, publishes the sign-in URL, types the pasted code, stores the
               token, reports state; gives up at the session TTL (``expired``) or on SIGTERM
               (``cancelled``); exits on its own.
-How:          ``pty.fork`` → non-blocking reads → ``URL_RE`` / ``TOKEN_RE`` over a stripped
+How:          ``cli_environment`` → ``pty.fork`` + ``execvpe`` → non-blocking reads → ``URL_RE`` / ``TOKEN_RE`` over a stripped
               buffer → ``SecretsStore.set``; ``status.json`` written atomically, mode 0600.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         none
@@ -35,9 +39,12 @@ Works with:   src/crb/server/claude_login.py (the broker that spawns and reads t
               (``CLI_TOKEN_SECRET``, ``CLAUDE_CODE_TOKEN_PREFIX`` — the name and the shape),
               src/crb/core/redact.py (the detail that reaches the API is redacted)
 Tested by:    tests/test_server_claude_login.py (a fake ``claude`` script replays the CLI's
-              transcript: URL, paste prompt, token — and the failure wordings)
+              transcript: URL, paste prompt, token — and the failure wordings; another dumps
+              the environment it was given)
 Touch when:   the CLI changes its sign-in transcript (the URL host/path, the paste prompt, the
-              token prefix); never for a new repository.
+              token prefix) or needs another variable to run (add it to ``CLI_PASSTHROUGH``
+              or ``CLI_NETWORK_PASSTHROUGH`` with the reason, never the whole environment);
+              never for a new repository.
 """
 
 from __future__ import annotations
@@ -48,9 +55,11 @@ import os
 import pty
 import re
 import select
+import shutil
 import signal
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 from crb.core.redact import redact_and_cap
@@ -74,6 +83,26 @@ PASTE_PROMPT = re.compile(r"paste\s*code\s*here", re.I)
 FAILURE_HINTS = re.compile(
     r"invalid|expired|denied|unauthori[sz]ed|error|failed|subscription|not logged in", re.I
 )
+#: The only variables the CLI inherits from the helper's environment (see
+#: :func:`cli_environment`), and the ones it is given fixed values for.
+CLI_PASSTHROUGH: tuple[str, ...] = ("PATH", "HOME")
+#: How the host reaches the internet — an outbound proxy (both spellings of the convention)
+#: and a private certificate authority. The sign-in has to reach the service, so these pass
+#: through too; the allowlist limits what the CLI can READ, not where it can connect. A
+#: proxy URL may carry the proxy's own credential: that is the host's egress credential,
+#: which the CLI needs to connect at all.
+CLI_NETWORK_PASSTHROUGH: tuple[str, ...] = (
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+)
+CLI_FIXED: Mapping[str, str] = {"TERM": "dumb", "NO_COLOR": "1", "BROWSER": "/usr/bin/true"}
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[=>]|\r")
 
 
@@ -94,6 +123,24 @@ def _scrub(text: str) -> str:
     return TOKEN_RE.sub("sk-ant-oat01-[REDACTED]", ANSI_RE.sub("", text))
 
 
+def cli_environment(parent: Mapping[str, str], config_dir: Path) -> dict[str, str]:
+    """The whole environment ``claude setup-token`` runs with: ``PATH`` and ``HOME`` from
+    ``parent`` (so the CLI can find itself and its runtime), a plain TUI (``TERM=dumb``,
+    ``NO_COLOR``), a browser that does nothing (it must never open one on the server), and
+    ``CLAUDE_CONFIG_DIR`` pointed at ``config_dir`` — a directory used by this sign-in only
+    and removed when it ends, so the CLI neither reads nor writes the host account's own
+    Claude configuration. The host's proxy and certificate-authority variables
+    (:data:`CLI_NETWORK_PASSTHROUGH`) pass through so the sign-in works behind a proxy.
+    Nothing else: the API process holds the secret key, the database URL and the OIDC
+    client secret, and none of that is the CLI's business (D3)."""
+    env = {
+        key: parent[key] for key in (*CLI_PASSTHROUGH, *CLI_NETWORK_PASSTHROUGH) if key in parent
+    }
+    env.update(CLI_FIXED)
+    env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+    return env
+
+
 def run(session_dir: str) -> int:
     sdir = Path(session_dir)
     meta = json.loads((sdir / "meta.json").read_text(encoding="utf-8"))
@@ -108,13 +155,14 @@ def run(session_dir: str) -> int:
 
     signal.signal(signal.SIGTERM, _on_term)
 
+    config_dir = sdir / "cli-config"
+    config_dir.mkdir(mode=0o700, exist_ok=True)
+    child_env = cli_environment(os.environ, config_dir)
+
     pid, fd = pty.fork()
-    if pid == 0:  # the CLI: never let it open a browser on the server, keep the TUI plain
-        os.environ["BROWSER"] = "/usr/bin/true"
-        os.environ["TERM"] = "dumb"
-        os.environ["NO_COLOR"] = "1"
+    if pid == 0:  # the CLI: the allowlisted environment only (D3)
         try:
-            os.execvp(binary, [binary, "setup-token"])  # noqa: S606 — the whole point of this helper
+            os.execvpe(binary, [binary, "setup-token"], child_env)  # noqa: S606 — the point
         except OSError:
             os._exit(127)
 
@@ -200,6 +248,7 @@ def run(session_dir: str) -> int:
             os.close(fd)
         (sdir / "code.txt").unlink(missing_ok=True)
         (sdir / "url.txt").unlink(missing_ok=True)
+        shutil.rmtree(config_dir, ignore_errors=True)
         buf = ""
         typed = ""
         _status(sdir, outcome, detail, fingerprint=fingerprint)

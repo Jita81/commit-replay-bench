@@ -200,17 +200,32 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   prefixes, JWTs, `key=value` secrets, URL userinfo, private-key blocks). [measured]
   `tests/test_redact.py`
 - Session cookies are signed (`itsdangerous`), `HttpOnly`, `SameSite=Lax`, `Secure` outside
-  `CRB_ENV=dev`; the secret key is mandatory in production. CSRF is double-submit
-  (`crb_csrf` cookie + `X-CSRF-Token` header) on every unsafe method. [measured]
-  `tests/test_server_auth.py`
-- **Sessions end on a password change and on deactivation.** The cookie carries the
-  credential version it was issued under (a fingerprint of the account's argon2 hash);
-  setting a password re-salts the hash, so every session of that account answers
-  `401 session_revoked` on its next request — no server-side session table to keep or
-  leak. A deactivated account is refused on its very next request and for as long as it
+  `CRB_ENV=dev`; the secret key is mandatory in production. Whenever cookies are `Secure`
+  they are named `__Host-crb_session` / `__Host-crb_csrf`: the browser accepts such a
+  cookie only from a secure response with `Path=/` and no `Domain`, so a sibling host
+  cannot plant or shadow one (a plain-named cookie is ignored). CSRF is **bound to the
+  session**: every unsafe method must carry `X-CSRF-Token` equal to
+  `HMAC(secret, user id, credential version)`, which the middleware recomputes from the
+  signed session cookie — a cookie/header pair chosen by whoever can set cookies is
+  refused, and the token ends with its session. The middleware and the authentication
+  check read the session cookie through one function over the same lenient parser, so a
+  malformed neighbour cookie (a space, JSON, a consent banner's date) cannot hide the
+  session from the CSRF check while the request still authenticates. [measured]
+  `tests/test_server_auth.py::TestCsrfBoundToSession`,
+  `tests/test_server_auth.py::TestCsrfSeesTheSameCookiesAsAuth`
+- **Sessions end on a password change, on logout, on "sign out everywhere" and on
+  deactivation.** The cookie carries the credential version it was issued under (a
+  fingerprint of the account's argon2 hash and its `session_nonce`); setting a password
+  re-salts the hash, and logout (`POST /auth/logout`) or an admin's sign-out-everywhere
+  (`POST /users/{id}/sessions/revoke`, which works for an OIDC account too) rotates the
+  nonce, so every session of that account — on every device, since the nonce is per
+  account — answers `401 session_revoked` on its next request; no server-side session
+  table to keep or leak. A copied cookie therefore dies with the logout, not at
+  `session_ttl`. [measured] `tests/test_server_auth.py::TestSessionRevocation`
+  A deactivated account is refused on its very next request and for as long as it
   is inactive; the active flag is not part of the version, so re-activating within
   `session_ttl` restores the sessions issued before — containing a compromised account
-  means deactivating **and** setting a new password. A self-service change
+  means deactivating **and** signing it out everywhere (or setting a new password). A self-service change
   (`PUT /users/me/password`) requires the current password — a borrowed session cannot
   change it — and re-issues the cookie only to the browser that made the change. The
   break-glass path (`crb users set-password | deactivate` on the host, where database
@@ -237,8 +252,15 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   and deleted the moment the helper has typed it; the token is never in a response, an
   event, a log line or the session directory (the helper scrubs token shapes from
   everything it reports). One session per deployment at a time; ten-minute expiry;
-  admin only. [measured] `tests/test_server_claude_login.py` (a fake CLI replays the real
-  transcript, including a refused code and a token-shaped run in an error line).
+  admin only. The CLI runs with an allowlisted environment — `PATH`, `HOME`, `TERM=dumb`,
+  `NO_COLOR`, a no-op `BROWSER`, the host's proxy and certificate-authority variables
+  (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` in either case, `NODE_EXTRA_CA_CERTS`,
+  `SSL_CERT_FILE`, `SSL_CERT_DIR`, so the sign-in works behind a proxy) and a
+  `CLAUDE_CONFIG_DIR` created for that sign-in and removed after it — so the secret key, the database URL and the OIDC client secret the
+  API process holds never reach it, and it neither reads nor writes the host account's own
+  Claude configuration. [measured] `tests/test_server_claude_login.py` (a fake CLI replays
+  the real transcript, including a refused code and a token-shaped run in an error line;
+  another dumps the environment it was given).
 
 - **Where.** One file per secret under `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` →
   `./.crb/secrets`: `claude_code_oauth_token` (the raw value) and
@@ -290,11 +312,71 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 
 - OIDC (Entra ID or any provider): authorisation-code flow with PKCE and a signed state
   cookie; ID-token validation against the provider's JWKS; role from a configurable claim /
-  group map; users upserted by `(issuer, subject)`. [design — exercised with an injected fake
-  provider in tests; not yet run against a live IdP]
-- Local accounts (argon2id, constant-time compare, per-user+IP rate limit) exist for
-  bootstrap and air-gapped installs; disable with `CRB_LOCAL_AUTH_ENABLED=false` once OIDC
-  works. [measured]
+  group map; users upserted by `(issuer, subject)`. The claims set an account's role on its
+  **first** sign-in only; after that the role is the admin's to change and a sign-in does
+  not revert it. `CRB_OIDC__ROLE_FROM_CLAIMS=always` makes the provider the source of truth
+  instead (a removal from the admin group then demotes at the next sign-in) and records
+  every change it makes as `user.role_overridden` with the role before and after.
+  [design — exercised with an injected fake provider in tests; not yet run against a live
+  IdP]
+- Local accounts (argon2id, constant-time compare) exist for bootstrap and air-gapped
+  installs; disable with `CRB_LOCAL_AUTH_ENABLED=false` once OIDC works. Failed sign-ins are
+  limited in the API process: five a minute per username and address, and twenty a minute
+  per address whatever the usernames (a spray across accounts). The limiter is in memory and
+  per process, so **production must also limit `POST /api/v1/auth/login` per client address
+  at the reverse proxy**, which sees every replica ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)).
+  [measured] `tests/test_server_auth.py::TestLoginRateLimitPerIp`
+- Where a registered repository may live: a `clone_path` must resolve inside
+  `$CRB_HOME/repos`, where the worker clones. A path elsewhere on the host is an admin's
+  decision and is recorded (`repo.clone_path.outside_home`); anyone else — including a model
+  through the MCP write tools, which ride the same route — gets `403
+  clone_path_outside_home`; a path under that directory that resolves outside it (a symbolic
+  link) is refused for every role. The same check runs again where the path is used — the
+  worker before it reads a clone, and the profile walk — because a path that did not exist
+  at registration can gain a link later (for example from another repository's clone).
+  The worker's own clone destination (`$CRB_HOME/repos/<name>`) has a stricter rule, checked
+  before any git process starts: it must be exactly that directory, or nothing yet, and never
+  a symbolic link — whether the link leads outside the directory or to another repository's
+  clone inside it. git is then pointed at the resolved path that was checked;
+  `clone_repo` refuses a destination that is a symbolic link; and a structural test holds
+  every place that opens a stored clone to the one use-time function
+  (`confined_clone_path`), with a second test that fails when a function in `crb.server`
+  calls `GitRepo(…)` or `clone_repo(…)`, or starts any process (through `subprocess`, `os`,
+  `asyncio` or `pty`), and is not on one of that test's lists, and a third that refuses an
+  import of a process starter the second test could not see. These scans resolve an
+  imported alias (`from crb.core.git import GitRepo as G`), and each is run on a
+  throwaway module that uses every import form, so renaming an import does not hide a call.
+  When one name is bound by two imports in a module (a module-level one and one inside a
+  function), a scan that looks for git or the link rule counts the call if either import
+  makes it one, and the use-site test counts a path as confined only if both are the
+  confiner; this can give a false alarm, which renaming the import clears, but never a
+  miss. A name bound some other way — an assignment such as `G = GitRepo` — is not
+  resolved.
+  **[measured — n = 36 tests, all passing on this change (PR #52); method: pytest on the
+  node ids below, which include a link at the destination in five shapes (outside the
+  directory, to another clone inside it, to an empty directory, dangling, and chained). The
+  tests that pin a fix were written before it: 8 of the 9 clone-path tests added first
+  failed on `main` at 8ab88ad (the ninth is the control that must pass), and 8 of the 10 destination-shape tests failed on 7d5a619 (the
+  other 2, the outside shape, already passed there), and the 3 import-form tests failed on
+  ca17168, before the names were resolved, and the 5 colliding-import tests failed on
+  e0a6fce, before every import of a name was kept; apparatus 2.2. A count of tests, not a
+  rate, so no interval]** `tests/test_server_routes_repos.py::TestClonePathConfinement`,
+  `tests/test_worker_clone.py::test_a_clone_path_that_escapes_the_root_at_use_time_fails_the_run`,
+  `tests/test_worker_clone.py::test_a_link_at_the_clone_destination_is_refused_before_any_git_command`,
+  `tests/test_worker_clone.py::test_every_link_at_the_clone_destination_is_refused_before_any_git_command`,
+  `tests/test_worker_clone.py::test_the_destination_rule_is_identity_not_containment`,
+  `tests/test_worker_clone.py::test_git_opens_only_the_confined_path_at_every_use_site`,
+  `tests/test_worker_clone.py::test_the_use_site_list_is_every_place_the_server_opens_git`,
+  `tests/test_worker_clone.py::test_the_server_names_process_starters_only_through_their_module`,
+  `tests/test_worker_clone.py::test_the_git_opener_discovery_sees_every_import_form`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_sees_aliased_openers_and_confiners`,
+  `tests/test_worker_clone.py::test_the_link_rule_scan_sees_an_aliased_import`,
+  `tests/test_worker_clone.py::test_the_git_opener_discovery_sees_every_binding_of_a_colliding_alias`,
+  `tests/test_worker_clone.py::test_the_link_rule_scan_sees_every_binding_of_a_colliding_alias`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_confines_only_when_every_binding_is_a_confiner`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_reports_an_opener_called_without_its_path`,
+  `tests/test_git_clone.py::test_clone_refuses_a_destination_that_is_a_symbolic_link`,
+  `tests/test_mcp_server.py::test_register_repo_tool_is_confined_to_the_repos_root`
 - Account lifecycle: an admin sets a password or the active flag (`PUT /users/{id}/password`,
   `PUT /users/{id}/active`); a person changes their own with the current password
   (`PUT /users/me/password`); on the host, `crb users` does the same without a login
@@ -399,10 +481,13 @@ subject to a retention window.
 | T7b | The stored token leaks through the API, the UI, a log or an evidence pack | API / UI / logs | 3.3.1 status-only responses (≤4-char fingerprint), password field never echoed and cleared on save, log lines carry name + fingerprint, verify output redacted |
 | T7c | The verify button is used to burn subscription quota | API | 3.3.1 one probe per 10 s per deployment, one no-tool Haiku turn, admin-only |
 | T7d | API-host compromise | secrets file | token compromise: rotate (`claude setup-token`, paste, revoke the old one) — see 3.3.1 |
+| T7e | The `claude setup-token` CLI reads the API's own secrets from its environment | API host | 3.3.1 allowlisted environment and a throwaway `CLAUDE_CONFIG_DIR` |
 | T8 | An insider edits a past verdict | ledger | 3.5 triggers + hash chain + `/health` proof |
 | T9 | A false pass is recorded because a runner could not attribute a failure | grade | fail-closed parse rule (`unattributed failure` ⇒ belt 3 false), harness errors ⇒ not clean |
 | T10 | A green with no real change is credited (build-cache ghost) | grade | belt 4 `source_changed` |
-| T11 | Session hijack / CSRF / privilege escalation | API | 3.3 cookies, CSRF, 3.4 RBAC |
+| T11 | Session hijack / CSRF / privilege escalation | API | 3.3 `__Host-` cookies, session-bound CSRF, revocable sessions (logout, sign out everywhere), 3.4 RBAC, first-login OIDC roles |
+| T11a | Online password guessing, one account or sprayed across many | API | 3.4 per-(username, address) and per-address limits in the process; the proxy's limiter in production |
+| T11b | An operator, or a model through the MCP tools, points the deployment at an arbitrary host directory | API host | 3.4 `clone_path` confined to `$CRB_HOME/repos`; elsewhere admin-only and recorded; symbolic-link escapes refused |
 | T12 | Cross-organisation data leakage via the federated export | export | allowlist of abstract fields only, k-anonymity, opt-in; consumption not implemented (`crb.core.federated`) |
 | T13 | A weak oracle lets a semantically wrong patch pass | grade | not a mechanical false-Q1; measured and gated by oracle strength (`crb.core.oracle`), routed to `human` below 0.8 |
 

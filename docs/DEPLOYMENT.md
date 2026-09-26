@@ -102,6 +102,7 @@ server and never appear in logs or `/settings`.
 | `CRB_BOOTSTRAP_ADMIN__USERNAME` / `__PASSWORD` | first boot | seeds the first admin **only while `users` is empty** (≥ 12 chars) |
 | `CRB_LOCAL_AUTH_ENABLED` | | set `false` once OIDC works |
 | `CRB_OIDC__ISSUER`, `__CLIENT_ID`, `__CLIENT_SECRET`, `__REDIRECT_URL`, `__SCOPES`, `__ROLE_CLAIM`, `__ROLE_MAP`, `__ADMIN_GROUPS` | for SSO | see §4.1 for the Entra ID mapping |
+| `CRB_OIDC__ROLE_FROM_CLAIMS` | | `first_login` (default): the claims set a role on the account's first sign-in and an admin's later change stands; `always`: the provider decides at every sign-in (removing someone from the admin group demotes them next time), each change recorded as `user.role_overridden` ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)) |
 | `CRB_GITHUB__APP_ID`, `__APP_SLUG`, `__PRIVATE_KEY` or `__PRIVATE_KEY_FILE`, `__API_URL`, `__WEB_URL` | for *Connect from GitHub* | the deployment's GitHub App (docs/GITHUB-APP.md); set on the **API and the worker**; the key from the secret store, never inline in a values file |
 | `CRB_INTAKE__TRACKER`, `__URL`, `__PROJECT`, `__COLUMN`, `__AREA_PATH`, `__JQL`, `__EMAIL`, `__POINTS_FIELD`, `__ACCEPTANCE_FIELD`, `__POLL_S`, `__MAX_PER_POLL`, `__POLL_BUDGET_S`, `__OUTCOME_MAP` | for *work arriving from a board* | the tracker this deployment takes work from (ADR-0017); set on the **API and the worker** so one environment configures both. `TRACKER` is `none` (the default — nothing is read anywhere), `ado` or `jira`; `URL` must be `https://`; `POLL_S` defaults to 300; `MAX_PER_POLL` (200) bounds one pass — a longer column is not read at all, it stops with `column_too_large` — and `POLL_BUDGET_S` (60) is how long one pass may take before it stops early and serves what it read; `OUTCOME_MAP` is JSON (`{"merged": "Done"}`) and is **empty by default**, so no ticket is ever moved. The credential is NOT an environment variable: an admin stores it at `PUT /settings/secrets/tracker-token`. Whether a given repository's listener is on is per repository, **default off**, and an operator's to switch |
 | `CRB_SANDBOX__EXECUTOR` | api, worker | `docker` (default, fail-closed) or `local` (development). Read by the API (`/settings`, `/health`) and by the worker (`crb worker`; its short form `CRB_EXECUTOR` is read when this is absent) |
@@ -491,6 +492,12 @@ upgrade`. (The dev stack that produced the NHS measurement needed exactly three 
 moves on 2026-09-16 — three `run.cancel_requested` notes that had collided with the
 worker's next event.)
 
+**Upgrading to revision `0009`** (`users.session_nonce`): additive; every account keeps
+its sessions. On a deployment whose cookies are `Secure` (the default outside
+`CRB_ENV=dev`) the cookies are renamed `__Host-crb_session` / `__Host-crb_csrf`, so
+everybody signs in once more after the upgrade. From this release, signing out ends the
+account's sessions on every device.
+
 Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up -d`
 ([deploy/README.md §5](../deploy/README.md#5-upgrade)).
 
@@ -538,6 +545,12 @@ api → OIDC issuer; (`dind` only) sidecar → your registry. Sandboxes run with
 - [ ] Backups: PITR enabled; a restore has been rehearsed and verified against the chain.
 - [ ] `false_q1 == 0` and `crb_false_q1_total == 0` on the dashboards, with an alert on any
       non-zero value ([OPERATOR.md §8](OPERATOR.md#8-stop-conditions)).
+- [ ] The reverse proxy limits `POST /api/v1/auth/login` per client address (for example
+      ingress-nginx `nginx.ingress.kubernetes.io/limit-rpm: "20"` on a path-scoped ingress,
+      or `limit_req` on `/api/v1/auth/login`). This is required: the product's own limiter
+      (five failures a minute per username and address, twenty per address) lives in the
+      memory of one API process, so it does not see the other replicas or survive a restart
+      ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
 
 ## 9. Observability
 

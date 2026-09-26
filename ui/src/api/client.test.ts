@@ -3,7 +3,8 @@
  *
  * Navigation
  * ----------
- * What it is:   Unit tests for the API client (`api`, `ApiError`, `qs`, `readCookie`).
+ * What it is:   Unit tests for the API client (`api`, `ApiError`, `qs`, `readCookie`,
+ *               `readCsrfToken`).
  * What it does: Pins that every call is prefixed `/api/v1` with credentials, that unsafe
  *               methods carry the CSRF cookie as `X-CSRF-Token` (and nothing when the cookie
  *               is absent), that the error envelope becomes `ApiError` with 401 / 403 / 409
@@ -21,7 +22,7 @@
  *               update ui/src/api/client.ts and the matching case together.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { API_TIMEOUT_MS, ApiError, api, qs, readCookie } from './client'
+import { API_TIMEOUT_MS, ApiError, api, qs, readCookie, readCsrfToken } from './client'
 
 function ok(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -163,5 +164,13 @@ describe('helpers', () => {
   it('qs omits empty values', () => {
     expect(qs({ repo: 'x', kind: undefined, clean: false, limit: 0, offset: '' })).toBe('?repo=x&clean=false&limit=0')
     expect(qs({})).toBe('')
+  })
+
+  it('reads the CSRF token under the __Host- name a TLS deployment sets, else the plain name', () => {
+    expect(readCsrfToken('__Host-crb_csrf=tls-tok; other=1')).toBe('tls-tok')
+    expect(readCsrfToken('crb_csrf=plain-tok')).toBe('plain-tok')
+    // both present (a plain one planted beside the real one): the __Host- cookie wins
+    expect(readCsrfToken('crb_csrf=planted; __Host-crb_csrf=real')).toBe('real')
+    expect(readCsrfToken('other=1')).toBeNull()
   })
 })

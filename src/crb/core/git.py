@@ -22,8 +22,9 @@ What it does: Runs ``git -C <path> …`` with captured output and a wall clock; 
               ``GitError`` (argv and stderr preserved) on ``check=True`` failures; reads
               history, changed files, churn, author dates and file contents from the
               object store; adds and removes worktrees. Refuses clone sources that are not
-              ``https://`` / ssh (``file://`` only under the test-only switch) and never
-              lets a credential reach a log or an exception.
+              ``https://`` / ssh (``file://`` only under the test-only switch), refuses a
+              clone destination that is a symbolic link, and never lets a credential reach
+              a log or an exception.
 How:          ``run`` → ``subprocess.run(["git", "-C", path, …])`` (no shell, timeout →
               ``GitError`` rc 124); ``clone_repo`` → ``validate_clone_url`` → clone into a
               sibling temp dir with ``GIT_TERMINAL_PROMPT=0`` → rename into place on exit 0;
@@ -339,7 +340,8 @@ def clone_repo(
 
     * **Idempotent.** An existing git repository at ``dest`` is reused as-is (its
       HEAD is returned, nothing is fetched); a non-empty non-repository ``dest``
-      is an error, never overwritten.
+      is an error, never overwritten; a ``dest`` that is a symbolic link (dangling or
+      not) is an error before any git process starts, never followed.
     * **Atomic.** git clones into ``<dest>.tmp-<pid>-<ns>`` beside ``dest`` and the
       directory is renamed into place only after a zero exit; a failure or a
       timeout removes the temp directory. Two concurrent callers race on the
@@ -353,6 +355,14 @@ def clone_repo(
     src = validate_clone_url(url, allow_local=allow_local)
     target = Path(dest)
     safe = redact_url(src)
+    if target.is_symlink():
+        # never reuse, replace or clone through a link: the repository behind it is not the
+        # destination the caller checked (PR #52 review) — refused before any git process
+        raise GitError(
+            [git_binary, "clone", "--quiet", "--no-tags", safe, str(target)],
+            1,
+            f"destination {target} is a symbolic link; refusing to clone or reuse through it",
+        )
     if target.exists():
         existing = GitRepo(target, git_binary=git_binary)
         if existing.is_repo():
