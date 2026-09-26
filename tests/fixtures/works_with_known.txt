@@ -45,7 +45,6 @@ tests/test_cli_doctor.py
 tests/test_cli_repo_url.py
 tests/test_cli_users.py
 tests/test_code_map.py
-tests/test_conftest_langs.py
 tests/test_factory_backlog.py
 tests/test_factory_build.py
 tests/test_factory_loop.py

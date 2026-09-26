@@ -14,7 +14,8 @@ How:          ``httpx.Client`` (or any subclass — the tests inject FastAPI's `
               which is one) with ``base_url`` = ``CRB_API_URL``; ``login()`` POSTs
               ``/auth/login``, then every unsafe request adds ``X-CSRF-Token`` from the
               ``crb_csrf`` cookie (``__Host-crb_csrf`` on a TLS deployment) the way the
-              browser does (src/crb/server/app.py's CSRF middleware). Credentials come from the environment (``CRB_MCP_USERNAME`` /
+              browser does (src/crb/server/app.py's CSRF middleware). Credentials come from the
+              environment (``CRB_MCP_USERNAME`` /
               ``CRB_MCP_PASSWORD``) and are never logged or echoed.
 Layer:        mcp — docs/ARCHITECTURE.md#44-outer-layers (a client of the server layer, never
               an importer of it)

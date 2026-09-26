@@ -5,7 +5,8 @@
  * Navigation
  * ----------
  * What it is:   The screen at /repos/:name with four tabs: Overview (task counts, probe,
- *               the posture panel — qualified N of M, ADR-0019 — and next steps), Change profile (class × size histogram), Tasks (the mined
+ *               the posture panel — qualified N of M, ADR-0019 — and next steps), Change profile
+ *               (class × size histogram), Tasks (the mined
  *               `TaskSpec`s) and Configuration.
  * What it does: Shows what the instrument knows about one repository: whether it can run the
  *               repo's tests (the probe pill with the runner's own summary), how many

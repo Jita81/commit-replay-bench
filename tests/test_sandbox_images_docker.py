@@ -38,7 +38,8 @@ What it is:   The suite for the shipped reference sandbox images (deploy/sandbox
 What it does: Pins, per image, that the default and the executor's user are uid 65534, that
               the root filesystem and the worktree (``/src``) are read-only from inside while
               the throwaway ``/work`` copy and ``/tmp`` are writable and the host tree stays
-              byte-identical, that ``sh`` and GNU ``tar`` are present, that no setuid/setgid file is in the image, that ``/tmp`` is
+              byte-identical, that ``sh`` and GNU ``tar`` are present, that no setuid/setgid file is
+              in the image, that ``/tmp`` is
               ``noexec`` except for the Go runner's command, that a network probe FAILS
               through the language's runner, that an absent image is ``SandboxUnavailable``
               rather than a pull, that the language

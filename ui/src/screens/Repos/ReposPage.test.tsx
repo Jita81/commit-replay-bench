@@ -1,5 +1,6 @@
 /**
- * ui/src/screens/Repos/ReposPage.tsx — the list of repositories, its probe pills and its empty state per role.
+ * ui/src/screens/Repos/ReposPage.tsx — the list of repositories, its probe pills and its empty
+ * state per role.
  *
  * Navigation
  * ----------

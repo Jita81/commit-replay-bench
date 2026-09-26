@@ -1,6 +1,6 @@
 # ADR-0021 — The factory reviews before it delivers; only an accepted build opens a pull request
 
-**Status:** Proposed
+**Status:** Proposed (DL-059)
 **Date:** 2026-09-25
 **Apparatus impact:** none — this orders the factory's steps and decides which verdict may
 reach delivery. It changes no belt, no grade, no cell, no route, no threshold and no
@@ -74,9 +74,9 @@ pull request on the build the review asked to change and then updated it.
 - `deliver()` gained a required `verdict` argument: every caller must say which verdict
   licenses the delivery.
 - We must never again deliver before the review, nor deliver on a verdict other than
-  `accept`. The tests in `tests/test_factory_loop.py` (C1 section) and
-  `tests/test_factory_delivery.py::test_deliver_refuses_any_verdict_but_accept_before_touching_creds`
-  are ratchets.
+  `accept`. The tests in `tests/test_factory_loop.py` (C1 section) and, in
+  `tests/test_factory_delivery.py`,
+  `test_deliver_refuses_any_verdict_but_accept_before_touching_creds` are ratchets.
 
 ## Alternatives considered
 

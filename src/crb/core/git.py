@@ -28,7 +28,8 @@ What it does: Runs ``git -C <path> …`` with captured output and a wall clock; 
               a log or an exception.
 How:          ``run`` → ``subprocess.run(["git", "-C", path, …])`` (no shell, timeout →
               ``GitError`` rc 124; a one-shot credential goes in ``env`` through
-              ``git_config_env``, never on the argv); ``clone_repo`` → ``validate_clone_url`` → clone into a
+              ``git_config_env``, never on the argv); ``clone_repo`` → ``validate_clone_url`` →
+              clone into a
               sibling temp dir with ``GIT_TERMINAL_PROMPT=0`` → rename into place on exit 0;
               ``redact_url`` / ``redact_urls_in`` strip userinfo from every message.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules

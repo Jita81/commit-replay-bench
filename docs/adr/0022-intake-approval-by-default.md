@@ -1,6 +1,6 @@
 # ADR-0022 — An operator approves a ticket before it is registered; one pass per repository
 
-**Status:** Proposed
+**Status:** Proposed (DL-059)
 **Date:** 2026-09-25
 **Apparatus impact:** none — intake decides *which* items exist, never how one is graded
 (ADR-0017's reasoning holds): no belt, cell, route, threshold or sign-off clause moves, and

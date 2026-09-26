@@ -2,7 +2,8 @@
 
 Local login is rate limited per ``(username, client ip)`` and per client ip; a failure
 never says which half was wrong. Logout rotates the account's session nonce, so it ends
-every session of the account, not only this browser's cookie. OIDC state, nonce and the PKCE verifier travel in a signed,
+every session of the account, not only this browser's cookie. OIDC state, nonce and the PKCE
+verifier travel in a signed,
 short-lived, HttpOnly cookie, so the callback can only complete a login this
 browser started. ``next`` is constrained to a same-origin path.
 

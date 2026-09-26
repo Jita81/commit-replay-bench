@@ -24,7 +24,8 @@ How:          ``ProvisionConfig.from_env`` (or ``--store``) → ``BundleStore`` 
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/provision/store.py (the store), src/crb/provision/config.py (where it is),
-              src/crb/cli/main.py (registers the verb), docs/OPERATOR.md#21-environment-setup--the-only-network-phase
+              src/crb/cli/main.py (registers the verb),
+              docs/OPERATOR.md#21-environment-setup--the-only-network-phase
               (when to run it)
 Tested by:    tests/test_cli_deps.py
 Touch when:   never for a new repository; a new store operation gets a subcommand here.

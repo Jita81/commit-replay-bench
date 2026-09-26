@@ -16,7 +16,8 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0019-qualification-is-posture-relative.md
  * Works with:   ui/src/screens/Repos/PosturePanel.tsx (under test),
- *               ui/src/screens/Repos/RepoDetail.tsx (mounts it), ui/src/screens/Repos/repoFixtures.ts
+ *               ui/src/screens/Repos/RepoDetail.tsx (mounts it),
+ *               ui/src/screens/Repos/repoFixtures.ts
  *               (`REPO`), ui/src/test/utils.tsx (`mockApi`, `renderApp`)
  * Tested by:    ui/src/screens/Repos/PosturePanel.test.tsx
  * Touch when:   the panel shows a new fact from the posture route.

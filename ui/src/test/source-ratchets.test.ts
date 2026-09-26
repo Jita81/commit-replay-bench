@@ -17,8 +17,8 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/test/source-ratchets.ts (under test),
- *               ui/src/screens/Results/ResultsPage.test.tsx and
- *               ui/src/screens/Capability/CapabilityPage.test.tsx (the ratchets that use it)
+ *               ui/src/screens/Results/ResultsPage.test.tsx (a ratchet that uses it),
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx (another ratchet that uses it)
  * Tested by:    (this is a test file)
  * Touch when:   a new syntax for reading a property appears in TypeScript, or the matcher
  *               is found to miss one (add the case here first).

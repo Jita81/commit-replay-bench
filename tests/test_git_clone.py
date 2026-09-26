@@ -9,7 +9,8 @@ What it does: Pins that only HTTPS and SSH URLs are accepted (``file://`` only u
               ``CRB_ALLOW_LOCAL_CLONE`` developer switch), that refusals and errors never echo an
               embedded credential, that ``redact_url`` / ``redact_urls_in`` scrub free text, and
               that a clone takes the full history without tags, is idempotent, refuses a
-              non-empty non-repository destination and a destination that is a symbolic link, and cleans up on failure or timeout (rc 124).
+              non-empty non-repository destination and a destination that is a symbolic link, and
+              cleans up on failure or timeout (rc 124).
 How:          ``bare_remote`` from ``fixtures.remote`` serves ``pyrepo``; a URL to a closed port
               proves the fail-fast error path without a network.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules

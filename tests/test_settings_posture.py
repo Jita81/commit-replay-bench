@@ -32,8 +32,9 @@ ADRs:         docs/adr/0023-production-refuses-the-unsealed-posture.md,
 Works with:   src/crb/server/settings.py (the rule), src/crb/server/worker_main.py (the
               worker's reading of it), src/crb/server/routes/system.py (``/health``),
               src/crb/server/worker.py (the apparatus stamp; its cases are in
-              tests/test_worker.py), deploy/docker-compose.yml, deploy/helm/crb/values.yaml,
-              docs/API.md (the ``posture`` shape), ui/src/api/types.ts (``DeploymentPosture``)
+              tests/test_worker.py), deploy/docker-compose.yml (compose's one builder value),
+              deploy/helm/crb/values.yaml (the chart's one builder value), docs/API.md (the
+              ``posture`` shape), ui/src/api/types.ts (``DeploymentPosture``)
 Tested by:    tests/test_settings_posture.py
 Touch when:   the override changes name, a new executor kind is added (decide whether it is
               sealed), a posture key is added (write it in docs/API.md and the UI type too), or

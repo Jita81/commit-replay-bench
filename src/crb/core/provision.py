@@ -37,7 +37,8 @@ Works with:   src/crb/core/deps.py (the seam types and the refusal vocabulary),
               src/crb/core/git.py (``show_blob``: the object store is the only input),
               src/crb/provision/__init__.py (the providers that fetch what this reads),
               src/crb/core/runners/node_runners.py (``lock_key``: the same normalisation of a
-              Node lockfile, for the host's eras), src/crb/core/spec.py (``RepoConfig.runner`` and ``runner_opts``)
+              Node lockfile, for the host's eras), src/crb/core/spec.py (``RepoConfig.runner`` and
+              ``runner_opts``)
 Tested by:    tests/test_provision.py
 Touch when:   a lock format becomes provisioned (a parser here, a recipe under
               src/crb/provision/, and a row in docs/DEPLOYMENT.md §3.4); never for a new
