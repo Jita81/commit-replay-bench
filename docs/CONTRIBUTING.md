@@ -49,7 +49,7 @@ resolved environment) and produces a CycloneDX SBOM.
 
 No test may fail because of the machine it runs on. Running as root, with no docker daemon or
 with no network is meant to change which tests run, not their results: builder settings in
-tests name a non-root user, the doctor tests never ask the host's daemon, and a test that needs
+tests name a non-root user or pin `os.getuid`, the doctor tests never ask the host's daemon, and a test that needs
 a daemon or a network host is skipped with the reason when it is absent (under
 `CRB_TEST_STRICT_WARMUP=1` an unreachable host is a failure instead, below). One whole-suite
 run under all three conditions still had one failure, from timing rather than the host
@@ -72,7 +72,8 @@ Set `CRB_TEST_STRICT_WARMUP=1`, as CI does, to turn an unreachable registry or n
 or a failed toolchain warm-up, into a failure instead of a skip: CI has the network, so there
 an unreachable host is a defect. A missing docker daemon is always a skip.
 No test may depend on the uid it runs as: name a non-root user when you build builder
-container settings (`tests/test_builders_container.py` refuses a test that does not).
+container settings, or pin `os.getuid` before you build them (`tests/test_builders_container.py`
+refuses a test that does neither).
 
 **Run the full suite, not just your files.** A change to the core can alter a verdict
 elsewhere; the negative-controls and census-re-derivation gates (P1) exist to catch that.
