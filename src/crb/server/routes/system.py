@@ -117,6 +117,7 @@ import datetime as _dt
 import os
 import time
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request, Response, status
@@ -650,11 +651,23 @@ def probe_intake(
     return probes.run_probe("intake", _read, request_id=request_id)
 
 
-def probe_served(settings: Settings, *, request_id: str = "") -> ProbeResult:
+#: ``collect_health`` without the app's mounted UI directory (a caller outside a request):
+#: the probe then resolves the candidates itself.
+UI_DIST_UNKNOWN: Any = object()
+
+
+def probe_served(
+    settings: Settings, *, request_id: str = "", ui_dist: Path | None = UI_DIST_UNKNOWN
+) -> ProbeResult:
     """``build``: the commit this process runs, the checkout's and the served UI bundle's
-    agree (``degraded`` when not — see :func:`crb.observability.build_stamp.probe_build`)."""
+    agree (``degraded`` when not — see :func:`crb.observability.build_stamp.probe_build`).
+    ``ui_dist`` is the directory the app MOUNTED at start-up (``app.state.ui_dist``;
+    ``None`` = no UI served): the bundle compared is the one served, never a fresh look-up
+    that a directory appearing or vanishing since start-up would change."""
 
     def _read() -> ProbeResult:
+        if ui_dist is not UI_DIST_UNKNOWN:
+            return build_stamp.probe_build(ui_dist)
         from crb.server.app import resolve_ui_dist  # noqa: PLC0415 — the app imports this module
 
         return build_stamp.probe_build(resolve_ui_dist(settings))
@@ -677,6 +690,7 @@ def collect_health(
     *,
     role: str | None = None,
     request_id: str = "",
+    ui_dist: Path | None = UI_DIST_UNKNOWN,
 ) -> dict[str, Any]:
     """The deep probe (readiness). ``role`` defaults to :func:`process_role``;
     ``request_id`` is what a failed read's detail names (the route passes the middleware's).
@@ -696,7 +710,7 @@ def collect_health(
         probes.run_probe("builders", probes.probe_builders, request_id=rid),
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
         probe_intake(factory, settings, request_id=rid),
-        probe_served(settings, request_id=rid),
+        probe_served(settings, request_id=rid, ui_dist=ui_dist),
     ]
     out = _stamp(probes.aggregate(results), role)
     # the served commits and `stale` at the top level, so a reader need not find the probe
@@ -726,7 +740,9 @@ def health(
     request: Request, response: Response, factory: SessionFactoryDep, settings: SettingsDep
 ) -> dict[str, Any]:
     """Readiness: 503 only on ``down`` — ``degraded`` still serves (with caveats)."""
-    out = collect_health(factory, settings, request_id=request_id(request))
+    state = request.app.state
+    mounted = state.ui_dist if getattr(state, "ui_mounted", False) else UI_DIST_UNKNOWN
+    out = collect_health(factory, settings, request_id=request_id(request), ui_dist=mounted)
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return out

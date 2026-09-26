@@ -580,6 +580,29 @@ class TestHealth:
             served = c.get(f"{API_PREFIX}/health").json()["served"]
             assert served["stale"] is True and "restart the server" in served["reasons"][0]
 
+    def test_health_reads_the_bundle_the_app_mounted_not_a_fresh_lookup(
+        self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The app picks its UI directory once, at start-up (``app.state.ui_dist``). The
+        probe looked the candidates up again, so a directory that stopped resolving after
+        start-up read as "no UI bundle served" while the mount still served it (CodeRabbit,
+        PR #57). The probe reads the mounted directory."""
+        from crb.observability import build_stamp
+
+        a, b = "a" * 40, "b" * 40
+        monkeypatch.setattr(build_stamp, "process_commit", lambda: a)
+        monkeypatch.setattr(build_stamp, "checkout_commit", lambda root=None: a)
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+        (dist / build_stamp.BUILD_STAMP_FILE).write_text(json.dumps({"commit": b}), "utf-8")
+        settings = make_settings(tmp_path, ui_dist=str(dist))
+        with TestClient(create_app(settings, factory)) as c:
+            assert c.get(f"{API_PREFIX}/health").json()["served"]["stale"] is True
+            (dist / "index.html").unlink()  # a fresh lookup no longer finds this directory
+            served = c.get(f"{API_PREFIX}/health").json()["served"]
+            assert served["stale"] is True and served["ui_commit"] == b
+
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200
         assert client.get(f"{API_PREFIX}/health/live").status_code == 200

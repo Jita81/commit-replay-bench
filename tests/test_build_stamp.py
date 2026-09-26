@@ -125,6 +125,23 @@ def test_unknown_commits_are_never_compared_and_never_read_as_fresh(tmp_path: Pa
     assert p.status != OK  # ...and it is not reported as fresh either
 
 
+def test_a_served_unstamped_bundle_is_stale_even_when_the_source_commit_is_unknown(
+    tmp_path: Path,
+) -> None:
+    """An image built without ``CRB_SOURCE_COMMIT`` has no checkout and an empty stamp: a
+    bundle IS served and nothing can name its source. That read ``skipped`` with ``stale:
+    false`` (CodeRabbit, PR #57); it is stale, and the sentence names the build argument.
+    No bundle at all is still ``absent`` and still skipped."""
+    unstamped = _dist(tmp_path, None)
+    p = bs.probe_build(unstamped, server="", checkout="")
+    assert p.status == DEGRADED and p.data["stale"] is True
+    assert p.data["ui_stamp"] == bs.UI_UNSTAMPED and bs.SOURCE_COMMIT_ENV in p.detail
+    (unstamped / bs.BUILD_STAMP_FILE).write_text('{"commit": ""}', encoding="utf-8")
+    p = bs.probe_build(unstamped, server="", checkout="", stale_status=DOWN)
+    assert p.status == DOWN and p.data["ui_stamp"] == bs.UI_UNREADABLE
+    assert bs.probe_build(None, server="", checkout="").status == SKIPPED
+
+
 def test_the_probe_is_degraded_for_health_and_down_for_doctor() -> None:
     health = bs.probe_build(None, server=A, checkout=B)
     doctor = bs.probe_build(None, server=A, checkout=B, stale_status=DOWN)
@@ -230,3 +247,15 @@ def test_the_image_carries_the_commit_into_the_ui_build_and_the_runtime() -> Non
     assert f"ARG {bs.SOURCE_COMMIT_ENV}" in ui_stage
     assert f"ARG {bs.SOURCE_COMMIT_ENV}" in runtime
     assert f"{bs.SOURCE_COMMIT_ENV}=${{{bs.SOURCE_COMMIT_ENV}}}" in runtime
+
+
+def test_the_ui_build_bounds_every_process_it_spawns() -> None:
+    """``vite.config.ts`` asks git for the commit it stamps. A synchronous spawn without a
+    timeout hangs the UI build for as long as git does (CodeRabbit, PR #57); every one is
+    bounded, and a timeout falls back to the unknown-commit stamp."""
+    import re
+
+    config = ROOT / "ui" / "vite.config.ts"
+    calls = re.findall(r"\b(?:execFileSync|execSync|spawnSync)\([^\n]*", config.read_text("utf-8"))
+    assert calls, "the build stamp no longer spawns git: update this test"
+    assert all("timeout:" in c for c in calls), calls

@@ -34,9 +34,10 @@ function sourceCommit(): string {
   const fromEnv = process.env.CRB_SOURCE_COMMIT?.trim()
   if (fromEnv) return fromEnv
   try {
-    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    // bounded: a git that never exits must not hang the build; a timeout lands in the catch
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000 }).trim()
   } catch {
-    return '' // no git and no variable: the stamp says so, and the server reports it as unreadable
+    return '' // no git, no variable or git timed out: the stamp says so, and the server reports it as unreadable
   }
 }
 

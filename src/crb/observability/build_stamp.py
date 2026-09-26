@@ -158,11 +158,19 @@ def served_report(*, server: str, checkout: str, dist: Path | None) -> dict[str,
             f"the UI bundle was built from {_short(ui_commit)} but the server runs "
             f"{_short(reference)} — rebuild it (`npm --prefix ui run build`) and restart"
         )
-    elif ui_state in (UI_UNSTAMPED, UI_UNREADABLE) and reference:
+    elif ui_state in (UI_UNSTAMPED, UI_UNREADABLE):
+        # a SERVED bundle whose source cannot be named is stale whether or not the server's
+        # own commit is known (an image built without the build argument knows neither)
+        fix = (
+            "rebuild it (`npm --prefix ui run build`)"
+            if reference
+            else f"rebuild the image with `--build-arg {SOURCE_COMMIT_ENV}=$(git rev-parse "
+            "HEAD)` (or the UI with `npm --prefix ui run build` in a checkout)"
+        )
         reasons.append(
             f"the UI bundle carries no readable {BUILD_STAMP_FILE} — it was built before "
-            "stamping existed or outside `npm run build`, so its source cannot be named; "
-            "rebuild it (`npm --prefix ui run build`)"
+            f"stamping existed, outside `npm run build` or without {SOURCE_COMMIT_ENV}, so "
+            f"its source cannot be named; {fix}"
         )
     return {
         "server_commit": server,
