@@ -547,6 +547,31 @@ def test_pins_the_uid_by_its_dotted_name(monkeypatch):
 def test_pins_the_uid_by_a_longer_dotted_name(monkeypatch):
     monkeypatch.setattr("crb.builders.container.os.getuid", lambda: 10001)
     BuilderContainerSettings(image="i")
+
+
+def test_builds_before_it_pins_the_uid(monkeypatch):
+    BuilderContainerSettings(image="i")  # built before the pin: pins nothing
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_reads_the_env_before_it_pins_the_uid(monkeypatch):  # pins nothing
+    monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    BuilderContainerSettings.from_env()
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+
+
+def test_pins_the_uid_before_it_sets_the_env(monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    BuilderContainerSettings.from_env()
+
+
+def test_pins_the_uid_only_in_a_helper_it_never_calls(monkeypatch):
+    def pin():
+        monkeypatch.setattr(os, "getuid", lambda: 10001)
+
+    BuilderContainerSettings(image="i")  # an uncalled helper's pin pins nothing
 """
 
 
@@ -555,18 +580,24 @@ def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
 ) -> None:
     """Only a test that PINS the uid is independent of the host's: one that merely reads
     ``os.getuid()`` (or names it in a string) and then builds settings on the default still
-    depends on the machine, and the ratchet must still see it (PR #51 review)."""
+    depends on the machine, and the ratchet must still see it (PR #51 review). A pin covers
+    only what runs after it in the test's own body: settings built, or the executor set,
+    before the pin, and a pin inside a helper the test never calls, are still reported."""
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     sample = tests_dir / "test_sample.py"
     sample.write_text(_RATCHET_SAMPLE, encoding="utf-8")
     monkeypatch.setitem(globals(), "TESTS_DIR", tests_dir)
     unpinned = {
-        f"tests/test_sample.py:{i}"
+        (
+            f"tests/test_sample.py:{i} ({line[4:].split('(')[0]})"
+            if line.startswith("def ")
+            else f"tests/test_sample.py:{i}"
+        )
         for i, line in enumerate(_RATCHET_SAMPLE.splitlines(), start=1)
         if "pins nothing" in line
     }
-    assert len(unpinned) == 4
+    assert len(unpinned) == 7
     assert _settings_on_the_hosts_uid(sample) == unpinned
 
 
