@@ -208,6 +208,23 @@ Each artefact below was proved by breaking it and watching its test fail.
 - Two bugs this wave made in its own work are registered with their artefacts (P-011, a
   namespace package's `__file__`; P-012, header lines over 100 columns — a ratchet).
 
+### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
+
+SQLAlchemy 2.1.1 reached PyPI on 2026-09-25, and the `server` extra's `sqlalchemy>=2.0` has
+no ceiling, so a fresh install (CI's `types` job) resolves it. In 2.1, `Result` and `Select`
+are typed with a variadic `TypeVarTuple`. When mypy cannot see through a statement (a
+`text(...)` query, or one passed through an `Any`-typed helper), `.scalars()` and
+`.scalar_one()` now infer `Never` where 2.0 gave `Any`. `mypy --strict` reported eight
+`[var-annotated]` errors on an unchanged `main`. Each of the eight sites now states the type
+it already had at runtime. A comprehension variable cannot be annotated in place, so those
+results go into an annotated local first. Python never evaluates a local annotation, so
+nothing changes at runtime.
+
+2.1.1 changes nothing at runtime here, so the dependency is not pinned [measured — mypy clean
+on 2.0.52 and 2.1.1; the full suite (`-m "not sandbox_images"`) under 2.1.1, 3972 passed, 72
+skipped, 0 failed; the store suite on SQLite and PostgreSQL 16, 111 passed and none skipped,
+under both versions].
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real
