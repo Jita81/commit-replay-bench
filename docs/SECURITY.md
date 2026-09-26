@@ -343,13 +343,16 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   (`confined_clone_path`), with a second test that fails when a function in `crb.server`
   calls `GitRepo(…)` or `clone_repo(…)`, or starts any process (through `subprocess`, `os`,
   `asyncio` or `pty`), and is not on one of that test's lists, and a third that refuses an
-  import of a process starter the second test could not see.
-  **[measured — n = 28 tests, all passing on this change (PR #52); method: pytest on the
+  import of a process starter the second test could not see. These scans resolve an
+  imported alias (`from crb.core.git import GitRepo as G`), and each is run on a
+  throwaway module that uses every import form, so renaming an import does not hide a call.
+  **[measured — n = 31 tests, all passing on this change (PR #52); method: pytest on the
   node ids below, which include a link at the destination in five shapes (outside the
   directory, to another clone inside it, to an empty directory, dangling, and chained). The
   tests that pin a fix were written before it: 8 of the 9 clone-path tests added first
   failed on `main` at 8ab88ad (the ninth is the control that must pass), and 8 of the 10 destination-shape tests failed on 7d5a619 (the
-  other 2, the outside shape, already passed there); apparatus 2.2. A count of tests, not a
+  other 2, the outside shape, already passed there), and the 3 import-form tests failed on
+  ca17168, before the names were resolved; apparatus 2.2. A count of tests, not a
   rate, so no interval]** `tests/test_server_routes_repos.py::TestClonePathConfinement`,
   `tests/test_worker_clone.py::test_a_clone_path_that_escapes_the_root_at_use_time_fails_the_run`,
   `tests/test_worker_clone.py::test_a_link_at_the_clone_destination_is_refused_before_any_git_command`,
@@ -358,6 +361,9 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   `tests/test_worker_clone.py::test_git_opens_only_the_confined_path_at_every_use_site`,
   `tests/test_worker_clone.py::test_the_use_site_list_is_every_place_the_server_opens_git`,
   `tests/test_worker_clone.py::test_the_server_names_process_starters_only_through_their_module`,
+  `tests/test_worker_clone.py::test_the_git_opener_discovery_sees_every_import_form`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_sees_aliased_openers_and_confiners`,
+  `tests/test_worker_clone.py::test_the_link_rule_scan_sees_an_aliased_import`,
   `tests/test_git_clone.py::test_clone_refuses_a_destination_that_is_a_symbolic_link`,
   `tests/test_mcp_server.py::test_register_repo_tool_is_confined_to_the_repos_root`
 - Account lifecycle: an admin sets a password or the active flag (`PUT /users/{id}/password`,

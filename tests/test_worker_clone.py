@@ -23,7 +23,9 @@ What it does: Pins that a URL-registered repo is cloned into ``<home>/repos/<nam
               link shapes); an AST ratchet holds every use site to ``confined_clone_path``; and
               a discovery test keeps that list, and the lists of git on other paths and of
               processes that are not git, equal to every function in ``crb.server`` that
-              calls ``GitRepo`` / ``clone_repo`` or starts a process (no aliased imports).
+              calls ``GitRepo`` / ``clone_repo`` or starts a process (no aliased imports of
+              a process starter; an aliased ``GitRepo`` / ``clone_repo`` / confiner import is
+              resolved, and each scan is run on a throwaway module using every import form).
 How:          ``fixtures.remote.bare_remote`` over ``pyrepo`` with the developer switch;
               ``RecordingBuilder`` captures its constructor kwargs; ``test_worker``'s harness;
               ``_spy_git`` records every git process ``crb.core.git`` starts.
@@ -506,36 +508,53 @@ def _func(tree: ast.AST, name: str) -> ast.FunctionDef:
     return next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name)
 
 
-def _call_name(call: ast.Call) -> str:
+def _aliases(tree: ast.AST) -> dict[str, str]:
+    """``from m import name as alias`` anywhere in a module (a function-local import
+    included) → ``{alias: name}``. ``import m as a`` needs nothing: ``a.name(…)`` is
+    matched by its attribute."""
+    return {
+        a.asname: a.name
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom)
+        for a in n.names
+        if a.asname
+    }
+
+
+def _call_name(call: ast.Call, aliases: dict[str, str]) -> str:
+    """The name a call is to, with an imported alias resolved to what it imports. The
+    aliases are required, so no scan can match a renamed import by its new name."""
     f = call.func
-    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+    if isinstance(f, ast.Name):
+        return aliases.get(f.id, f.id)
+    return f.attr if isinstance(f, ast.Attribute) else ""
 
 
-def _is_confined(value: ast.expr) -> bool:
+def _is_confined(value: ast.expr, aliases: dict[str, str]) -> bool:
     """``confiner(…)``, or ``confiner(…) if … else None`` (nothing to open)."""
     if isinstance(value, ast.IfExp):
         none = isinstance(value.orelse, ast.Constant) and value.orelse.value is None
-        return none and _is_confined(value.body)
-    return isinstance(value, ast.Call) and _call_name(value) in _CONFINERS
+        return none and _is_confined(value.body, aliases)
+    return isinstance(value, ast.Call) and _call_name(value, aliases) in _CONFINERS
 
 
 def _git_opens(source: str, function: str) -> list[tuple[int, str, bool]]:
     """Every ``GitRepo(…)`` and ``clone_repo(…)`` in ``function``: (line, the path git is
     given, whether that path is a name bound to the confiner's result)."""
     tree = ast.parse(source)
-    fn = _func(tree, function)
+    fn, aliases = _func(tree, function), _aliases(tree)
     confined = {
         t.id
         for n in ast.walk(fn)
-        if isinstance(n, ast.Assign) and _is_confined(n.value)
+        if isinstance(n, ast.Assign) and _is_confined(n.value, aliases)
         for t in n.targets
         if isinstance(t, ast.Name)
     }
     return [
         (n.lineno, ast.unparse(arg), isinstance(arg, ast.Name) and arg.id in confined)
         for n in ast.walk(fn)
-        if isinstance(n, ast.Call) and _call_name(n) in _OPENERS
-        for arg in [n.args[_OPENERS[_call_name(n)]]]
+        if isinstance(n, ast.Call) and _call_name(n, aliases) in _OPENERS
+        for arg in [n.args[_OPENERS[_call_name(n, aliases)]]]
     ]
 
 
@@ -590,9 +609,12 @@ def _git_openers_in(server: Path) -> set[tuple[str, str]]:
     or that starts a process by any other route — a hand-built ``git`` argv included."""
     found = set()
     for path in server.rglob("*.py"):
-        for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        aliases = _aliases(tree)
+        for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                (isinstance(n, ast.Call) and _call_name(n) in _OPENERS) or _starts_a_process(n)
+                (isinstance(n, ast.Call) and _call_name(n, aliases) in _OPENERS)
+                or _starts_a_process(n)
                 for n in ast.walk(fn)
             ):
                 found.add((path.relative_to(server.parent).as_posix(), fn.name))
@@ -641,9 +663,11 @@ def _link_rule_callers(src: Path) -> set[tuple[str, str]]:
     """Every function under ``src`` that calls ``clone_path_escapes(…)``."""
     found = set()
     for path in src.rglob("*.py"):
-        for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        aliases = _aliases(tree)
+        for fn in ast.walk(tree):
             if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-                isinstance(n, ast.Call) and _call_name(n) == "clone_path_escapes"
+                isinstance(n, ast.Call) and _call_name(n, aliases) == "clone_path_escapes"
                 for n in ast.walk(fn)
             ):
                 found.add((path.relative_to(src).as_posix(), fn.name))
