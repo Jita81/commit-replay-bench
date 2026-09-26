@@ -21,7 +21,8 @@ What it does: Renders the chart and, for the API and the worker Deployments, res
               operator's own claim replaces the chart's; that no pod label or annotation the
               chart sets can be set again in ``podLabels`` / ``podAnnotations`` (P-047); and
               that every claim the chart makes is named in DEPLOYMENT §5, the recovery
-              procedure (P-048).
+              procedure (P-048); and that each restore order there brings the credentials
+              back before it starts the worker (P-049).
 How:          ``helm template`` → a YAML loader that refuses a repeated key → the Deployment
               pod specs; skipped without ``helm`` only off CI (on CI a missing ``helm`` fails
               the suite).
@@ -32,7 +33,7 @@ Works with:   deploy/helm/crb/templates/_helpers.tpl (the ``crb.secretsStore*`` 
               deploy/helm/crb/values.yaml (``secretsStore``), src/crb/core/secrets_file.py
               (``resolve_secrets_dir``, the resolution this suite mirrors),
               docs/DEPLOYMENT.md (§3.2 and §5, the placement rule and the recovery procedure),
-              docs/PREVENTION.md (P-043, P-046 to P-048, the rows this suite closes)
+              docs/PREVENTION.md (P-043, P-046 to P-049, the rows this suite closes)
 Tested by:    tests/test_deploy_secrets_store.py
 Touch when:   a pod that reads or writes the secrets store is added to the chart, or the
               store's resolution changes in src/crb/core/secrets_file.py; never give the API
@@ -394,3 +395,64 @@ def test_every_claim_the_chart_makes_is_in_the_recovery_procedure() -> None:
         assert CLAIM_IN_RECOVERY[component] in section, (
             f"DEPLOYMENT §5 does not name the {component} claim ({CLAIM_IN_RECOVERY[component]})"
         )
+
+
+def _recovery_section() -> str:
+    text = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    return text.split("## 5. Backup and restore", 1)[1].split("\n## 6.", 1)[0]
+
+
+def _restore_orders(section: str) -> list[list[str]]:
+    """Each ``Restore order …:`` paragraph of §5, as its steps (split on ``→``)."""
+    orders = []
+    for para in section.split("\n\n"):
+        flat = " ".join(para.split())
+        if flat.startswith("Restore order"):
+            orders.append([s.strip() for s in flat.split(":", 1)[1].split("→")])
+    return orders
+
+
+def _started(step: str) -> set[str]:
+    """The pods a ``start …`` step starts, read before any parenthesis."""
+    if not step.lower().startswith("start "):
+        return set()
+    head = step.split("(", 1)[0]
+    return {pod for pod in ("api", "worker") if f" {pod}" in f" {head}"}
+
+
+def test_the_recovery_procedure_starts_the_worker_only_after_the_credentials() -> None:
+    """The submit check (P-003) is the only credential check: the worker claims a run that
+    was queued or running at backup time as soon as it starts, and checks nothing. So each
+    restore order in §5 must bring the credentials back before it starts the worker, and the
+    path that supplies them through Settings must start the api alone first (CodeRabbit on
+    PR #57, P-049)."""
+    orders = _restore_orders(_recovery_section())
+    assert orders, "DEPLOYMENT §5 has no `Restore order …:` paragraph"
+    via_settings = 0
+    for steps in orders:
+        creds = [i for i, s in enumerate(steps) if "secrets store" in s or "credentials" in s]
+        workers = [i for i, s in enumerate(steps) if "worker" in _started(s)]
+        assert creds and workers, f"a restore order names no credential or no worker: {steps}"
+        assert creds[0] < workers[0], f"the worker starts before the credentials: {steps}"
+        if "Settings" in steps[creds[0]]:
+            via_settings += 1
+            api_first = [i for i, s in enumerate(steps[: creds[0]]) if "api" in _started(s)]
+            assert api_first, f"Settings is used before the api is started: {steps}"
+            assert all("worker" not in _started(s) for s in steps[: creds[0]]), steps
+    # §5 offers two choices for the store (restore the claim, or supply the credentials
+    # again), so it gives an order for each
+    assert len(orders) >= 2 and via_settings >= 1, orders
+
+
+def test_a_read_write_once_store_refuses_opposing_required_node_affinities() -> None:
+    """Both pods carry required node affinity, to different zones: neither is missing a
+    rule, but no node satisfies both, so the pin leaves one pending. The guard compares the
+    values, not only their presence (CodeRabbit on PR #57, P-046)."""
+    term = f"affinity.nodeAffinity.{_TERM}.nodeSelectorTerms[0].matchExpressions[0]"
+    args: list[str] = []
+    for pod, zone in (("api", "zone-a"), ("worker", "zone-b")):
+        args += ["--set", f"{pod}.{term}.key=topology.kubernetes.io/zone"]
+        args += ["--set", f"{pod}.{term}.operator=In"]
+        args += ["--set", f"{pod}.{term}.values={{{zone}}}"]
+    err = _refused(*args)
+    assert "api.affinity" in err and "ReadWriteMany" in err, err

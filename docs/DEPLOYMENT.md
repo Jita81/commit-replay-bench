@@ -405,9 +405,11 @@ reproducible from the repositories, convenient to keep) and the secrets store
   * Back the claim up with a volume snapshot (or a copy of `/srv/crb-secrets/store`) held
     with the same protection as the Kubernetes Secret — it holds live credentials — and
     restore it before the api and the worker start.
-  * Or do not back it up, and after a restore supply the credentials again before any run:
-    Settings → Claude Code login, and the tracker token. Until then a run whose builder needs
-    the Claude Code login is refused when it is submitted.
+  * Or do not back it up, and after a restore supply the credentials again before the
+    worker starts: Settings → Claude Code login, and the tracker token. The api refuses a
+    new run whose builder has no credential when it is submitted, but that is the only
+    check. The worker claims a run that was queued or running when the backup was taken as
+    soon as it starts, and without the credential that run's attempts fail.
 
 * **Managed PostgreSQL**: PITR is the primary backup; take a logical `pg_dump -Fc` before
   every upgrade and monthly for off-platform retention.
@@ -421,9 +423,19 @@ reproducible from the repositories, convenient to keep) and the secrets store
   `crb ledger verify` walks the core JSONL ledger at `$CRB_HOME/ledger.jsonl`, not the
   database — it cannot prove a database copy.
 
-Restore order: database (on an *empty* target) → work volume → secrets store (restored, or
-supplied again once the api is up) → `migrate` (no-op at head; it re-asserts the triggers) →
-api/worker → ledger verify → the `migrations` and `append_only` probes on `/api/v1/health`.
+There is one restore order for each choice. In both, ledger verify and the health probes
+come after the pods start.
+
+Restore order when the secrets store is restored: database (on an *empty* target) → work
+volume → secrets store → `migrate` (no-op at head; it re-asserts the triggers) → start the
+api and the worker → ledger verify → the `migrations` and `append_only` probes on
+`/api/v1/health`.
+
+Restore order when the credentials are supplied again: database (on an *empty* target) →
+work volume → `migrate` (no-op at head; it re-asserts the triggers) → start the api alone
+(`worker.replicaCount: 0`) → supply the credentials again through Settings → start the
+worker (`worker.replicaCount` back to its value) → ledger verify → the `migrations` and
+`append_only` probes on `/api/v1/health`.
 
 ### 5.1 Backup and restore (SQLite)
 

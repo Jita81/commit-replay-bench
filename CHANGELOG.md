@@ -38,7 +38,9 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   whether a selector or node affinity keeps the worker there (P-046); a pod label
   or annotation the chart sets can no longer be set again in `podLabels` / `podAnnotations`
   (P-047). DEPLOYMENT §5 now backs up the secrets store or has the credentials supplied
-  again after a restore (P-048).
+  again after a restore (P-048), with one restore order for each choice: when the
+  credentials are supplied again, the api starts alone and the worker starts only after
+  them, because the worker claims a queued run without checking its credential (P-049).
 
 ### 2026-09-26 — conformance with the external assessment (§0 rules, §F conditions)
 
