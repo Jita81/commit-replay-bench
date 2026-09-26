@@ -13,9 +13,11 @@ What it does: Pins that a viewer can read the column but only an operator can sw
               lease is 409 ``intake_busy``, that the served row carries the cell route the
               ticket was told about, and that the tracker credential is never in a response.
               Since the PR #55 review: that the Register act is refused while the listener is
-              off, that ``approved_by`` is the operator's account id, and — as prevention —
-              that no route builds a tracker except through the listener check and no
-              ``operator:`` identity is built from a display name.
+              off or once the deployment has lost its public address, that ``approved_by``
+              is the operator's account id, and — as prevention — that no route builds a
+              tracker except through the listener check, that check re-applies the switch's
+              readiness rule, and no approval identity (``approved_by`` / ``approver`` / an
+              ``operator:`` f-string) is built from a display name.
 How:          The shared ``make_env`` stack with ``CRB_ENABLE_FAKE_TRACKER`` set and the
               file-backed :class:`crb.intake.fake.FileTracker` as the deployment's tracker.
               **No real Azure DevOps or Jira is contacted by this suite or by CI.**
@@ -721,28 +723,128 @@ def test_a_route_reaches_the_board_only_through_the_listener_check() -> None:
     assert callers == {"factory.py::_consented_tracker": 1}
 
 
-def test_no_audit_identity_is_built_from_a_display_name() -> None:
-    """The prevention for the ``approved_by`` class: an ``operator:<…>`` identity written
-    to a record is built from the account id, never from a display name (mutable, not
-    unique). Scans every f-string in the server package that starts ``operator:``."""
+#: The names an approval identity travels under, as a keyword argument, a dict key or an
+#: assignment target. ``approved_by_name`` / ``approver_name`` are the human-readable
+#: labels recorded BESIDE the identity, so they are deliberately not in this set.
+_APPROVAL_IDENTITY_FIELDS = frozenset({"approved_by", "approver"})
+
+
+def _display_name_offenders(tree: Any) -> list[int]:
+    """Lines where an approval identity is built from a display name: an ``operator:<…>``
+    f-string that reads ``display_name``, or a value that reads ``display_name`` (or a
+    ``*_name`` variable holding one) bound to an ``approved_by`` / ``approver`` keyword
+    argument, dict key or assignment target."""
     import ast
 
-    src = Path(__file__).resolve().parents[1] / "src" / "crb" / "server"
-    offenders: list[str] = []
-    for p in sorted(src.rglob("*.py")):
-        for node in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
-            if not isinstance(node, ast.JoinedStr) or not node.values:
-                continue
+    def reads_a_name(value: Any) -> bool:
+        return any(
+            (isinstance(n, ast.Attribute) and n.attr == "display_name")
+            or (isinstance(n, ast.Name) and (n.id == "display_name" or n.id.endswith("_name")))
+            for n in ast.walk(value)
+        )
+
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr) and node.values:
             head = node.values[0]
-            if not (
+            if (
                 isinstance(head, ast.Constant)
                 and isinstance(head.value, str)
                 and head.value.startswith("operator:")
+                and reads_a_name(node)
             ):
-                continue
-            names = {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)} | {
-                n.id for n in ast.walk(node) if isinstance(n, ast.Name)
+                lines.append(node.lineno)
+        elif isinstance(node, ast.keyword):
+            if node.arg in _APPROVAL_IDENTITY_FIELDS and reads_a_name(node.value):
+                lines.append(node.value.lineno)
+        elif isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values, strict=True):
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value in _APPROVAL_IDENTITY_FIELDS
+                    and reads_a_name(value)
+                ):
+                    lines.append(key.lineno)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            named = {t.id for t in targets if isinstance(t, ast.Name)} | {
+                t.attr for t in targets if isinstance(t, ast.Attribute)
             }
-            if "display_name" in names:
-                offenders.append(f"{p.relative_to(src)}:{node.lineno}")
+            if named & _APPROVAL_IDENTITY_FIELDS and node.value and reads_a_name(node.value):
+                lines.append(node.lineno)
+    return lines
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'approved_by = f"operator:{operator.display_name}"',
+        "approver = operator.display_name",
+        "approver = operator.display_name or operator.id",
+        "register(approved_by=operator.display_name)",
+        "register(approver=approver_name)",
+        'payload = {"approved_by": user.display_name}',
+        "self.approver = operator.display_name",
+    ],
+)
+def test_the_approval_identity_ratchet_catches_each_way_back(source: str) -> None:
+    """The ratchet below is only as good as what it catches: each of these is a way the
+    ``approved_by`` bug could come back, and each is flagged."""
+    import ast
+
+    assert _display_name_offenders(ast.parse(source)) != []
+
+
+def test_no_approval_identity_is_built_from_a_display_name() -> None:
+    """The prevention for the ``approved_by`` class (PR #55 review): an approval identity
+    written to a record is built from the account id, never from a display name (mutable,
+    not unique). Scans every module in the server package for the shapes
+    ``_display_name_offenders`` names. It covers APPROVAL identities only: display labels
+    such as ``switched_by`` are recorded beside an event whose ``actor`` is the id."""
+    import ast
+
+    src = Path(__file__).resolve().parents[1] / "src" / "crb" / "server"
+    offenders = [
+        f"{p.relative_to(src)}:{line}"
+        for p in sorted(src.rglob("*.py"))
+        for line in _display_name_offenders(ast.parse(p.read_text(encoding="utf-8")))
+    ]
     assert offenders == []
+
+
+# --- PR #55 review: readiness is rechecked on every board route, not only at the switch ---
+
+
+def test_the_register_act_is_refused_when_the_deployment_has_lost_its_address(
+    env: Env, tmp_path: Path
+) -> None:
+    """The switch checks that this deployment knows its own address, but consent outlives
+    the check: a restart without ``CRB_PUBLIC_URL`` leaves the listener on. The Register
+    act then wrote ``crb:queued``, a "Follow it here" comment and a link that were all a
+    RELATIVE path — dead on the tracker's site, and refused by Azure DevOps as a relation.
+    It is refused (422 ``intake_no_public_url``) and nothing reaches the board."""
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200
+    env.settings.public_url = ""  # a restart without CRB_PUBLIC_URL; the consent is stored
+    board = fake_tracker_path(tmp_path)
+    before = board.read_text(encoding="utf-8")
+    r = _register(env)
+    assert r.status_code == 422, r.text
+    assert envelope(r)["code"] == "intake_no_public_url"
+    assert "CRB_PUBLIC_URL" in envelope(r)["message"]
+    assert board.read_text(encoding="utf-8") == before
+    assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
+    assert _events(env, "intake.approved") == []
+
+
+def test_every_board_route_rechecks_what_the_switch_checked() -> None:
+    """The prevention for the class: the switch-time readiness rule lives in ONE function,
+    and the one way a route reaches the board (``_consented_tracker``, held to that by
+    ``test_a_route_reaches_the_board_only_through_the_listener_check``) calls it. So a new
+    board-writing route cannot skip a check the switch made, however long ago it was made."""
+    routes = Path(__file__).resolve().parents[1] / "src" / "crb" / "server" / "routes"
+    assert _calls_in(routes / "factory.py", "_refuse_unless_ready_to_listen") == {
+        "put_intake": 1,
+        "_consented_tracker": 1,
+    }

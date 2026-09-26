@@ -14,7 +14,9 @@ What it does: Pins that the same column polled twice writes to the ticket once, 
               ticket waits as a draft until an operator's Register act registers the
               revision they read, that an allowlisted author bypasses it on the record, and
               that two overlapping passes register once because a pass takes a lease that
-              expires when its holder dies.
+              expires when its holder dies. Since the PR #55 review: that no public
+              function taking an ``item_url`` builder lets a relative link reach a ticket
+              (a ratchet lists every such function).
 How:          A real ``FactoryHome`` under ``tmp_path`` (so the hash chain is the real
               one) plus ``fixtures.intake``'s ``FakeTracker``. No HTTP, no
               database, no model — the whole flow is exercised in milliseconds.
@@ -554,7 +556,7 @@ def test_the_pull_request_link_reaches_the_ticket_it_came_from(home: FactoryHome
     written = sv.post_outcomes_to_tickets(
         tracker,
         home=home,
-        item_url=lambda i: f"/factory?item={i}",
+        item_url=lambda i: f"https://crb.invalid/factory?item={i}",
         evidence=home.evidence(actor="worker"),
     )
     assert written == ["4711"]
@@ -564,7 +566,7 @@ def test_the_pull_request_link_reaches_the_ticket_it_came_from(home: FactoryHome
         sv.post_outcomes_to_tickets(
             tracker,
             home=home,
-            item_url=lambda i: f"/factory?item={i}",
+            item_url=lambda i: f"https://crb.invalid/factory?item={i}",
             evidence=home.evidence(actor="worker"),
         )
         == []
@@ -580,7 +582,7 @@ def test_a_stopped_item_tells_its_ticket_the_status_and_the_way_forward(home: Fa
     assert sv.post_outcomes_to_tickets(
         tracker,
         home=home,
-        item_url=lambda i: f"/factory?item={i}",
+        item_url=lambda i: f"https://crb.invalid/factory?item={i}",
         evidence=home.evidence(actor="worker"),
     ) == ["4711"]
     body = "".join(tracker.comments["4711"].values())
@@ -598,7 +600,7 @@ def test_an_accepted_item_is_not_told_it_was_refused(home: FactoryHome) -> None:
         sv.post_outcomes_to_tickets(
             tracker,
             home=home,
-            item_url=lambda i: f"/factory?item={i}",
+            item_url=lambda i: f"https://crb.invalid/factory?item={i}",
             evidence=home.evidence(actor="worker"),
         )
         == []
@@ -627,7 +629,10 @@ def test_only_the_latest_item_registered_from_a_ticket_writes_its_refusal(
     for _ in range(2):  # twice: a poll runs this every pass
         before = len(tracker.calls)
         written = sv.post_outcomes_to_tickets(
-            tracker, home=home, item_url=lambda i: f"/factory?item={i}", evidence=home.evidence()
+            tracker,
+            home=home,
+            item_url=lambda i: f"https://crb.invalid/factory?item={i}",
+            evidence=home.evidence(),
         )
         writes = [verb for verb, key in tracker.calls[before:] if verb == "comment"]
         assert writes == ["comment"]  # ONE write, not one per item the ticket ever produced
@@ -645,7 +650,10 @@ def test_a_ticket_with_a_pull_request_is_told_about_that_rather_than_an_earlier_
     ev.append("item.outcome", "fake-4711", status="not_ready", error="a gap")
     ev.append("delivery.opened", "fake-4711", pr_url="https://github.invalid/pr/9")
     sv.post_outcomes_to_tickets(
-        tracker, home=home, item_url=lambda i: f"/factory?item={i}", evidence=home.evidence()
+        tracker,
+        home=home,
+        item_url=lambda i: f"https://crb.invalid/factory?item={i}",
+        evidence=home.evidence(),
     )
     body = "".join(tracker.comments["4711"].values())
     assert "https://github.invalid/pr/9" in body
@@ -1123,3 +1131,114 @@ def test_a_lease_left_by_a_crashed_pass_expires(tmp_path: Path) -> None:
     assert not c2.acquire()
     b.release()
     assert c2.acquire()
+
+
+# --- PR #55 review: no public writer lets a relative link reach a ticket -----------------
+
+#: A builder that marks every link it makes, so a test can look for it on the board.
+_DEAD = "/NOT-ABSOLUTE"
+
+
+def _relative(item_id: str) -> str:
+    return f"{_DEAD}/factory?item={item_id}"
+
+
+def _on_the_board(tracker: FakeTracker) -> list[str]:
+    """Every comment and link this product has written on the fake board."""
+    return [text for by_marker in tracker.comments.values() for text in by_marker.values()] + [
+        url for urls in tracker.links.values() for url in urls
+    ]
+
+
+def _scenario_poll(home: FactoryHome) -> FakeTracker:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), item_url=_relative)
+    return tracker
+
+
+def _scenario_register(home: FactoryHome) -> FakeTracker:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())  # a draft waits
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=_relative,
+            approver="operator:ada",
+        )
+    assert err.value.code == c.REASON_NO_PUBLIC_URL
+    assert "CRB_PUBLIC_URL" in err.value.message
+    assert home.load_backlog() is None  # refused before the frozen record was touched
+    assert sv.EV_REGISTERED not in [e.kind for e in home.events()]
+    return tracker
+
+
+def _scenario_outcomes(home: FactoryHome) -> FakeTracker:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())  # registered, with an absolute link
+    home.evidence(actor="run").append(
+        "item.outcome", "fake-4711", status="no_oracle", error="no authored test"
+    )
+    sv.post_outcomes_to_tickets(
+        tracker, home=home, item_url=_relative, evidence=home.evidence(actor="worker")
+    )
+    return tracker
+
+
+#: Every public function in ``crb.server.intake`` that takes an ``item_url`` builder, with
+#: a scenario that hands it a RELATIVE one after whatever state it needs.
+_ITEM_URL_WRITERS = {
+    "poll_repository": _scenario_poll,
+    "register_approved": _scenario_register,
+    "post_outcomes_to_tickets": _scenario_outcomes,
+}
+
+
+def test_the_register_act_refuses_a_relative_link_before_any_write(home: FactoryHome) -> None:
+    """PR #55 review: the Register act had no address check of its own, so a deployment
+    that lost ``CRB_PUBLIC_URL`` after the switch wrote ``crb:queued``, a comment and a link
+    that all pointed nowhere. It is refused, and nothing after the poll reaches the board."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    before = list(tracker.calls)
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=sv.item_url_for("", "alpha"),
+            approver="operator:ada",
+        )
+    assert err.value.code == c.REASON_NO_PUBLIC_URL
+    assert tracker.calls == before
+    assert home.load_backlog() is None
+
+
+@pytest.mark.parametrize("name", sorted(_ITEM_URL_WRITERS))
+def test_no_writer_puts_a_relative_link_on_a_ticket(name: str, tmp_path: Path) -> None:
+    """The prevention for the class: whichever function is handed a relative builder, no
+    comment and no link it writes carries that link."""
+    tracker = _ITEM_URL_WRITERS[name](FactoryHome(tmp_path, "alpha"))
+    assert [text for text in _on_the_board(tracker) if _DEAD in text] == []
+
+
+def test_every_public_function_that_takes_an_item_url_is_held_to_the_absolute_rule() -> None:
+    """The ratchet: a new public function that takes an ``item_url`` builder fails here until
+    it has a scenario in ``_ITEM_URL_WRITERS`` — so the next writer cannot be the one that
+    forgets the check."""
+    import inspect
+
+    takers = {
+        name
+        for name, fn in vars(sv).items()
+        if inspect.isfunction(fn)
+        and fn.__module__ == sv.__name__
+        and not name.startswith("_")
+        and "item_url" in inspect.signature(fn).parameters
+    }
+    assert takers == set(_ITEM_URL_WRITERS)

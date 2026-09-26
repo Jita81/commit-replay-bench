@@ -43,7 +43,9 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
   put the draft waiting for ticket ``key`` on the frozen record, as the operator read it at
   ``revision``; evented on the chain (``approved_by: operator:<account id>``) and on the
   repository's system trace; 422 ``intake_listener_off`` while the listener is off. Both
-  board-touching routes reach the tracker only through ``_consented_tracker``.
+  board-touching routes reach the tracker only through ``_consented_tracker``, which also
+  re-applies the switch's readiness rule (422 ``intake_not_configured`` /
+  ``intake_no_credential`` / ``intake_no_public_url``) — consent outlives a restart.
 
 Running the loop is a run kind: ``POST /runs {kind: "factory"}`` (see ``routes/runs.py``
 and the worker); this module never builds anything.
@@ -1370,9 +1372,11 @@ def _consented_tracker(
     """The ONE way a route reaches a repository's board: refused (422
     ``intake_listener_off``) while that repository's listener is off — the switch is the
     consent to read and write on that board (ADR-0017), and ``button.intake.switch_off``
-    promises nothing on it is read or written afterwards — then the deployment's tracker,
-    or 502 ``tracker_error`` with the published advice. A route that built a tracker
-    itself could forget the check (the Register act did: PR #55 review);
+    promises nothing on it is read or written afterwards — then refused (422) by the same
+    readiness rule the switch applied (``_refuse_unless_ready_to_listen``: tracker,
+    credential, public address), because a stored consent outlives a restart that lost one
+    of them — then the deployment's tracker, or 502 ``tracker_error`` with the published
+    advice. A route that built a tracker itself could forget the check (the Register act did: PR #55 review);
     ``tests/test_server_routes_intake.py::test_a_route_reaches_the_board_only_through_the_listener_check``
     holds every route to this function."""
     listener = ListenerState.from_config(row.config_json)
@@ -1382,6 +1386,9 @@ def _consented_tracker(
             "intake_listener_off",
             f"the intake listener for {row.name!r} is off: {act}",
         )
+    # consent outlives the switch's checks: a restart without CRB_PUBLIC_URL (or a deleted
+    # credential) leaves the listener on, so every board route asks again (PR #55 review)
+    _refuse_unless_ready_to_listen(settings, secrets)
     try:
         tracker = build_tracker(
             settings.intake,
@@ -1518,6 +1525,8 @@ def register_intake_ticket(
             lease=intake_lease(factory, repo, ttl_s=2 * budget_s + 60),
         )
     except ApprovalRefused as exc:
+        if exc.code == REASON_NO_PUBLIC_URL:  # the service's own guard behind the route's
+            raise ApiError(422, "intake_no_public_url", exc.message) from exc
         code = exc.code if exc.code in _REGISTER_REFUSALS else "register_refused"
         raise ApiError(409, code, exc.message) from exc
     append_system_event(

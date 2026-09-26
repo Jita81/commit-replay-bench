@@ -245,7 +245,8 @@ class ApprovalPolicy:
 class ApprovalRefused(RuntimeError):
     """The Register act could not register: ``code`` is the API's error word
     (``nothing_to_register``, ``revision_moved``, ``factory_run_active``,
-    ``intake_busy``, ``register_refused``), ``message`` the sentence a person reads."""
+    ``intake_busy``, ``register_refused``, ``no_public_url``), ``message`` the sentence a
+    person reads."""
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(f"{code}: {message}")
@@ -555,8 +556,11 @@ def item_url_for(public_url: str, repo: str) -> Callable[[str], str]:
     TRACKER's host, so the "Follow it here" the customer is given, and the link attached
     beside it, go nowhere — and Azure DevOps refuses a relation whose URL is not a URI.
 
-    With no ``CRB_PUBLIC_URL`` set the result is deliberately relative, which
-    :func:`poll_repository` recognises and stops on (``no_public_url``) before any write.
+    With no ``CRB_PUBLIC_URL`` set the result is deliberately relative, which every writer
+    recognises before any write: :func:`poll_repository` stops ``no_public_url``,
+    :func:`register_approved` refuses ``no_public_url`` and :func:`post_refusal` posts
+    nothing. ``tests/test_intake_service.py::test_every_public_function_that_takes_an_item_url_is_held_to_the_absolute_rule``
+    holds every public function that takes this builder to that.
     """
     base = str(public_url or "").strip().rstrip("/")
 
@@ -1378,9 +1382,10 @@ def register_approved(
     the repository's lease (``intake_busy``), when the ticket's content has moved since
     the revision the operator read (``revision_moved``: a different draft is not what they
     approved), when no draft is waiting (``nothing_to_register``), when a factory run
-    holds the backlog (``factory_run_active``) or when the frozen record refuses it
-    (``register_refused``). On success the chain carries ``intake.registered`` with
-    ``approved_by``, the ticket is labelled queued with its note and link (a refused
+    holds the backlog (``factory_run_active``), when ``item_url`` would write a relative
+    link (``no_public_url`` — this deployment has lost its address since the switch) or
+    when the frozen record refuses it (``register_refused``). On success the chain carries
+    ``intake.registered`` with ``approved_by``, the ticket is labelled queued with its note and link (a refused
     courtesy write is an ``intake.stopped``, never an unregistration), and the served row
     is updated without another poll. ``approver`` is the stable identity recorded as
     ``approved_by`` (the route passes ``operator:<account id>``); ``approver_name`` is the
@@ -1418,6 +1423,8 @@ def _register_approved(
     approver_name: str = "",
     run_active: Callable[[], bool],
 ) -> IntakeRow:
+    """:func:`register_approved` under the lease: every refusal is checked before the
+    first write, so a refused act leaves the frozen record and the ticket untouched."""
     events = _read_events(home)
     reads = [
         e
@@ -1455,6 +1462,10 @@ def _register_approved(
             "factory_run_active",
             "a factory run holds this repository's backlog: register the ticket once it ends",
         )
+    if not is_absolute_url(item_url("probe")):
+        # the same guard the poll applies, asked of the builder: the switch checked the
+        # address, but consent outlives a restart without CRB_PUBLIC_URL (PR #55 review)
+        raise ApprovalRefused(REASON_NO_PUBLIC_URL, STOP_ADVICE[REASON_NO_PUBLIC_URL])
     item = BacklogItem.from_dict(dict(waiting.payload.get("item") or {}))
     evidence = home.evidence(actor=approver)
     try:
@@ -1572,7 +1583,13 @@ def post_refusal(
     url: str,
     evidence: Any,
 ) -> bool:
-    """Tell the ticket the loop stopped, carrying the served way forward verbatim."""
+    """Tell the ticket the loop stopped, carrying the served way forward verbatim.
+
+    Writes nothing, and returns ``False``, when ``url`` is relative: a deployment that has
+    lost ``CRB_PUBLIC_URL`` would otherwise send a reader to a link that does not open.
+    The note is posted by the first pass that has an address (PR #55 review)."""
+    if not is_absolute_url(url):
+        return False
     text = render_refusal(item_id, status=status, reason=reason, way_forward=way_forward, url=url)
     try:
         tracker.comment(key, text, marker_for(tracker.name, f"{key}:refusal"))
