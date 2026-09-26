@@ -369,25 +369,33 @@ def empty_for(repo: str) -> LearningSnapshot:
     return empty_snapshot(repo)
 
 
-def current_checks_arm(factory: sessionmaker[Session], repo: str) -> str:
+def checks_arm_in(session: Session, repo: str) -> str:
     """The ``checks`` arm ``repo``'s next run grades under when the run overrides nothing:
     the repository's own ``checks`` block under the loop's overlay (the team's keys win),
-    resolved exactly as the worker resolves a run (ADR-0024). It is what a reader of the
-    repository's cells sees by default, so a switch turned on starts its cells afresh rather
-    than lending them the rows of the instrument it replaced. A chain that cannot be read is
-    ``learn: off`` (as for a run); a block the configuration refuses is no switch at all."""
+    resolved exactly as the worker resolves a run (ADR-0024), read in ``session``. It is what
+    a reader of the repository's cells sees by default, so a switch turned on starts its cells
+    afresh rather than lending them the rows of the instrument it replaced. A chain that
+    cannot be read is ``learn: off`` (as for a run); a block the configuration refuses is no
+    switch at all."""
+    repo_row = session.get(Repo, repo)
     try:
-        snap = learning_snapshot(factory, repo)
+        recs = EventsPreventionStore(session, repo).records()
+        snap = snapshot(recs, repo=repo, params={}, base_config=base_config(repo_row))
     except Exception as exc:  # a read path never fails on the loop's chain
         log.warning("prevention: snapshot for %s unreadable (%s); learn=off", repo, exc)
         snap = empty_snapshot(repo)
-    with factory() as s:
-        base = base_config(s.get(Repo, repo)).get(W_SECTION)
+    base = base_config(repo_row).get(W_SECTION)
     try:
         checks = RepoChecks.from_config(snap.config_section(W_SECTION, base))
     except ValueError:
         checks = RepoChecks()
     return resolve_checks(checks, None).arm
+
+
+def current_checks_arm(factory: sessionmaker[Session], repo: str) -> str:
+    """:func:`checks_arm_in` in a session of its own."""
+    with factory() as s:
+        return checks_arm_in(s, repo)
 
 
 __all__ = [
@@ -399,6 +407,7 @@ __all__ = [
     "all_prevention_records",
     "base_config",
     "calibratable_for",
+    "checks_arm_in",
     "current_checks_arm",
     "empty_for",
     "learn_trace_id",

@@ -19,6 +19,15 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   yield read the run's own arm, the scorecard keys its cells and routing by arm, and the
   abstract export carries `off` rows only. No apparatus bump: a stamp and a read filter, as
   ADR-0019 makes posture (ADR-0024 §6). The finish gate pools; it never changes a belt.
+- **A sign-off reads, stamps and lifts one checks arm.** The preview and `POST /signoffs`
+  measure the cell on the repository's own arm (a belt-6 row in scope was a 500 before), the
+  attested row must be of that arm, the record stamps it (schema `crb.signoff.v4`, the v3 body
+  frozen), and the overlay lifts only the cell of the arm it was signed on — a sign-off made
+  before a switch is listed as stale instead of lifting the new arm's cell. The scorecard's
+  headline (`/value`, `checks` in the response) and `/failure-split` read one arm too.
+- **SQLAlchemy 2.1: the eight result sites main annotated in #50 are annotated here too**, the
+  same text in the files this branch shares with main, so the types job passes on a fresh
+  install and the two changes meet without a conflict.
 - **ADR-0021 "working by construction" is ADR-0024**: PR #55 carries ADR-0021 (factory
   review before delivery), ADR-0022 (intake approval) and PR #53 ADR-0023.
 - **The assessment's five "trustworthy when" conditions head the product's definition of

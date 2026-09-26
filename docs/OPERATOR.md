@@ -395,7 +395,10 @@ your next run grades under — `off`, `fmt`, `api` or `fmt,api` — so after the
 cell calibrates until the new arm is measured, and a delivery is never licensed on rows the
 old instrument graded. The old rows stay on the ledger: `GET /capability-map?repo=…&checks=off`
 reads them, and the CLI takes `--checks`. The finish gate is not an arm (the belts, not the
-gate, decide clean): switching it changes no cell.
+gate, decide clean): switching it changes no cell. **A sign-off is of one arm too**: one made
+before the switch goes stale (the Decisions inbox lists it with the arm it was signed on and
+the arm read now) and lifts nothing on the new arm until an approver signs it again; the
+scorecard's headline (`/value?repo=…`) and the failure split read the repository's own arm.
 
 To see what the product derives for a checkout against what its CI runs, and the gaps:
 

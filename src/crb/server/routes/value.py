@@ -6,6 +6,9 @@ One read-only route over the store: the ledger rows (out of the store as
 :func:`crb.core.value.value_report`. ``repo`` scopes it to one repository (404 when unknown);
 without it the report covers every repository and lists each one's north star. ``apparatus``
 defaults to the current version — pooling is ``apparatus=all`` and the response says it pooled.
+``checks`` is the one checks arm the headline reads (ADR-0024; there is no pooled view): by
+default the repository's own arm (``checks_arm_in``) when ``repo`` is given and ``off`` for the
+cross-repository report; the response names it in ``checks``.
 The bug register behind the learning curve is the prevention loop's
 (:func:`crb.core.value.default_register` over every repository's verified chain); the response
 names it.
@@ -22,7 +25,7 @@ How:          ``DbLedger.rows`` (every repository — the pooled-review fallback
               (latest per row, joined to its row); ``all_prevention_records`` → the register →
               ``value_report`` scoped to ``repo``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0003-one-routing-rule.md
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/value.py (the report), src/crb/store/ledger.py (the rows and the
               reviews), src/crb/server/routes/repos.py (``get_repo_or_404``),
               src/crb/server/prevention_state.py (the loop's chain and mechanisms),
@@ -38,6 +41,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
+from crb.core.checks import ARM_OFF
 from crb.core.ledger import LedgerIntegrityError
 from crb.core.value import (
     DEFAULT_USD_PER_GBP,
@@ -50,7 +54,8 @@ from crb.core.value import (
 )
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
-from crb.server.prevention_state import all_prevention_records, mechanisms
+from crb.server.prevention_state import all_prevention_records, current_checks_arm, mechanisms
+from crb.server.routes.capability import CHECKS_CURRENT, CHECKS_PATTERN
 from crb.server.routes.repos import get_repo_or_404
 from crb.store.ledger import DbLedger, DbReviewLedger
 
@@ -71,10 +76,14 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
     apparatus: str = Query(default="current", max_length=32),
     window: int = Query(default=DEFAULT_WINDOW, ge=5, le=1000),
     usd_per_gbp: float = Query(default=DEFAULT_USD_PER_GBP, gt=0.2, le=5.0),
+    checks: str = Query(default=CHECKS_CURRENT, pattern=CHECKS_PATTERN),
 ) -> dict[str, Any]:
     del viewer
     if repo is not None:
         get_repo_or_404(db, repo)
+    # the headline reads one arm: the repository's own, or ``off`` across repositories
+    if checks == CHECKS_CURRENT:
+        checks = current_checks_arm(factory, repo) if repo is not None else ARM_OFF
     # every repository is read even for one: a repository with too few reviews borrows every
     # repository's before it falls back to the proxy, and a false-Q1 row anywhere refuses
     grades = list(DbLedger(factory).rows())
@@ -109,6 +118,7 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
         usd_per_gbp=usd_per_gbp,
         register=register,
         reviews_source=REVIEWS_FROM_STORE,
+        checks=checks,
     ).to_dict()
 
 

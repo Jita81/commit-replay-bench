@@ -41,6 +41,13 @@ What is measured, and the rule for each
   cell (repository × mode × cell key) with the ONE routing rule from the rows before it only;
   of the rows attempted under a ``deliver`` decision, how many were clean (and working).
   Controls are not evaluated here (numeric clauses only) and the output says so.
+* **One checks arm** (ADR-0024) — a row graded with the format step or belt 6 on answers a
+  different question from one graded without, so the headline figures (the north star, the
+  rates, precision, process loss and the per-repository roll-ups) read ONE arm: ``checks``,
+  the ``off`` arm by default (the server passes a repository's own arm when the report is
+  scoped to one). The cells and prospective routing are keyed by arm, so they read every arm
+  side by side; the learning curve reads every arm on purpose — a lever the loop switches on
+  is exactly the before/after it measures, and it counts bug classes, not clean verdicts.
 
 Navigation
 ----------
@@ -50,15 +57,17 @@ What it is:   The value scorecard — pure functions from ledger rows and review
 What it does: Reduces rows (``ValueRow``, adapted from ``GradeRow`` or read from an export) and
               verdicts to a ``ValueReport`` whose every rate carries k, n and a Wilson
               interval, whose unmeasured figures are null, whose apparatus scope defaults to the
-              current version (pooling is explicit and flagged), whose cells never pool two checks
-              arms, and whose time-ordered
+              current version (pooling is explicit and flagged), whose headline reads one checks
+              arm (named in ``checks``) and whose cells never pool two, and whose time-ordered
               measures use only prior data. Never writes, never calls a model.
-How:          ``select_rows`` (repo, apparatus) → ``north_star`` (``Rate`` × ``precision``) →
-              ``process_loss`` → ``learning_curve`` (``BugRegister.class_of`` per attempt,
-              windows, ``statuses`` → shares) → ``prospective_routing`` (running ``CellStats``
-              per cell → ``route``) → per-cell and per-repository roll-ups.
+How:          ``select_rows`` (repo, apparatus) → the ``checks`` arm → ``north_star``
+              (``Rate`` × ``precision``) → ``process_loss`` → ``learning_curve``
+              (``BugRegister.class_of`` per attempt, windows, ``statuses`` → shares) →
+              ``prospective_routing`` (running ``CellStats`` per cell → ``route``) → per-cell
+              and per-repository roll-ups.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0003-one-routing-rule.md
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0024-working-by-construction.md
+              (the headline reads one checks arm)
 Works with:   src/crb/core/ledger.py (the rows, the failure kinds, ``CellStats``),
               src/crb/core/review.py (the verdicts precision reads), src/crb/core/stats.py (the
               Wilson interval), src/crb/core/routing.py (the rule the prospective decisions
@@ -81,7 +90,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from crb.core.checks import ARM_OFF
+from crb.core.checks import ARM_OFF, ARMS
 from crb.core.ledger import (
     FAILURE_BUDGET,
     FAILURE_CLEAN,
@@ -982,6 +991,8 @@ class ValueReport:
     repos: list[dict[str, Any]]
     usd_per_gbp: float
     reviews_source: str = REVIEWS_FROM_CALLER
+    #: the one ``checks`` arm the headline figures read (ADR-0024)
+    checks: str = ARM_OFF
 
     def to_dict(self) -> dict[str, Any]:
         versions = sorted({r.apparatus_version for r in self.rows})
@@ -994,6 +1005,9 @@ class ValueReport:
             "apparatus": self.apparatus,
             "apparatus_versions": versions,
             "pooled": len(versions) > 1,
+            # the headline (north star, rates, precision, loss, repos) reads this arm only;
+            # the cells and the prospective routing are keyed by arm, the curve spans arms
+            "checks": self.checks,
             "rows": len(self.rows),
             "usd_per_gbp": self.usd_per_gbp,
             "north_star": self.north.to_dict(),
@@ -1049,16 +1063,27 @@ def value_report(
     usd_per_gbp: float = DEFAULT_USD_PER_GBP,
     policy: RoutingPolicy = DEFAULT_POLICY,
     reviews_source: str = REVIEWS_FROM_CALLER,
+    checks: str = ARM_OFF,
 ) -> ValueReport:
-    """The scorecard over one scope. Pure: the same rows and verdicts give the same report."""
+    """The scorecard over one scope. Pure: the same rows and verdicts give the same report.
+    ``checks`` is the one arm the headline reads (ADR-0024 — never two); the cells and the
+    prospective routing, keyed by arm, and the learning curve read every arm in scope."""
     if usd_per_gbp <= 0:
         raise ValueError("usd_per_gbp must be positive")
+    if checks not in ARMS:
+        raise ValueError(f"unknown checks arm {checks!r}; expected one of {ARMS}")
     all_rows = list(rows)
     all_verdicts = list(verdicts)
-    scoped = select_rows(all_rows, repo=repo, apparatus=apparatus)
+    every_arm = select_rows(all_rows, repo=repo, apparatus=apparatus)
+    scoped = [r for r in every_arm if r.checks_arm == checks]
     vs = _verdicts_in_scope(all_verdicts, scoped, repo)
-    # every repository's reviews in the same apparatus scope: the fallback before the proxy
-    pooled_vs = _verdicts_in_scope(all_verdicts, select_rows(all_rows, apparatus=apparatus), None)
+    # every repository's reviews in the same apparatus and arm scope: the fallback before
+    # the proxy
+    pooled_vs = _verdicts_in_scope(
+        all_verdicts,
+        [r for r in select_rows(all_rows, apparatus=apparatus) if r.checks_arm == checks],
+        None,
+    )
     sizes = sorted(
         {r.size for r in scoped if r.mode == "blind"}, key=lambda s: (_SIZE_ORDER.get(s, 9), s)
     )
@@ -1090,12 +1115,13 @@ def value_report(
         rates=rates,
         precision=precision(scoped, vs, pooled_vs),
         loss=process_loss(scoped, usd_per_gbp=usd_per_gbp),
-        curve=learning_curve(scoped, window=window, register=register),
-        routing=prospective_routing(scoped, policy=policy),
-        cells=_cells(scoped, usd_per_gbp),
+        curve=learning_curve(every_arm, window=window, register=register),
+        routing=prospective_routing(every_arm, policy=policy),
+        cells=_cells(every_arm, usd_per_gbp),
         repos=repos,
         usd_per_gbp=usd_per_gbp,
         reviews_source=reviews_source,
+        checks=checks,
     )
 
 

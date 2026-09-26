@@ -397,7 +397,7 @@ export const HINTS = {
   'button.decisions.read':
     'Read the decision without acting. The role that can act is named under the button.',
   'tile.decisions.stale':
-    'A cell signed under an earlier apparatus. It is kept as history and licenses nothing until an approver re-signs it under the current apparatus or revokes it.',
+    'A cell signed under an earlier apparatus, or on a checks arm the repository no longer grades under (the format step or the public-API check was switched since). It is kept as history and licenses nothing until an approver re-signs it on the current instrument or revokes it.',
   'button.decisions.resign':
     'Open the sign-off form on this cell to revoke the stale attestation or sign it again under the current apparatus.',
 

@@ -103,7 +103,23 @@ that programme, none yet measured under apparatus 2.2]**.
    plans, the forecast and the review cells. The worker's calibrated budget and escalation
    yield read the run's own arm. The CLI (`crb route`, `crb learn strengthen|remeasure`)
    takes `--checks` (default `off`), and `crb ledger stats` prints one cell per key and arm.
-   The scorecard keys its cells and its prospective routing by arm. The abstract export
+   The scorecard keys its cells and its prospective routing by arm, and its headline (the
+   north star, the rates, precision, process loss and the per-repository roll-ups) reads one
+   arm, named in its `checks` field: the repository's own for `GET /value?repo=`, `off` for
+   the cross-repository report, another on `?checks=<arm>`. Its learning curve spans arms on
+   purpose — a lever the loop switches on is the before/after it measures, and it counts bug
+   classes, not clean verdicts. `GET /failure-split` reads the repository's own arm (a run's
+   split is that run's rows, which are one arm). A **sign-off** reads, stamps and lifts one
+   arm: the preview and `POST /signoffs` measure the cell on the repository's own arm, the
+   attested row must be of that arm (422 otherwise), the record stamps it (`checks_arm`,
+   hash-covered; sign-off schema `crb.signoff.v4`, the v3 body frozen), and the overlay
+   (`apply_signoffs`) lifts only a cell read on the arm the record was signed on, as it lifts
+   only a cell read on the apparatus the record was signed at (ADR-0015). A record from
+   before the switchboard carries no arm and was signed on `off`. A sign-off made before a
+   repository switched belt 6 on therefore goes stale (listed with `checks_arm` and
+   `checks_arm_current`) and lifts nothing on the new arm until an approver signs again. The
+   arm is not part of the sign-off's scope, so a later attestation of the same scope on
+   another arm supersedes the earlier one. The abstract export
    carries `off` rows only: a switched-on arm is a local experiment until an A/B makes it
    the default, and an abstract cell has no field that could keep two arms apart.
 

@@ -112,6 +112,8 @@ OUT_KEYS = {
     "verifier_kind",
     "stale",
     "apparatus_current",
+    "checks_arm",
+    "checks_arm_current",
     "created",
     "revoked",
     "revoked_by",
@@ -304,7 +306,7 @@ class TestCreate:
         # the rows carry no strength; the stamped one is the task-level measurement
         assert ev["oracle_strength"] == pytest.approx(STRONG_ORACLE)
         # the policy decision
-        assert d["schema"] == "crb.signoff.v3"
+        assert d["schema"] == "crb.signoff.v4"
         assert d["policy_version"] == "signoff-policy.v3"
         assert d["verifier_kind"] == "local"  # the seed's users are local accounts
         assert d["policy_thresholds"] == DEFAULT_THRESHOLDS
@@ -917,7 +919,7 @@ class TestVerifierKind:
         assert (
             d["verifier_kind"] == "oidc"
             and d["approver"] == uid
-            and d["schema"] == "crb.signoff.v3"
+            and d["schema"] == "crb.signoff.v4"
         )
         (row,) = _signoffs(env)
         assert row.cell_json["verifier_kind"] == "oidc" and row.row_hash == signoff_hash(row)

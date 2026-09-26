@@ -1188,9 +1188,15 @@ class SignoffOut(BaseModel):
     #: The attestation was made on an earlier apparatus than the one this deployment reads
     #: at now: it stays on the record but lifts nothing (evidence expires when the
     #: apparatus changes — EVIDENCE-AND-CLAIMS §4); the Decisions inbox offers re-sign or
-    #: revoke. ``apparatus_current`` is the deployment's apparatus for comparison.
+    #: revoke. ``apparatus_current`` is the deployment's apparatus for comparison. A record
+    #: signed on a ``checks`` arm other than the one the repository's cells are read on now
+    #: is stale too (ADR-0024): ``checks_arm`` is the arm it was signed on (``off`` for a
+    #: record from before the switchboard) and ``checks_arm_current`` the repository's arm
+    #: now (``""`` for a record not tied to one repository).
     stale: bool = False
     apparatus_current: str = ""
+    checks_arm: str = ""
+    checks_arm_current: str = ""
     evidence: SignoffEvidence
     prev_hash: str
     row_hash: str

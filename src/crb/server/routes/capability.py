@@ -433,20 +433,26 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
     responses={401: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="The failure_kind split (and both rates) over a repo's rows, or one run's",
 )
-def failure_split_route(
+def failure_split_route(  # noqa: PLR0917 — FastAPI dependencies + query params
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
     repo: str = Query(min_length=1, max_length=64),
     run_id: str = Query(default="", max_length=32),
+    checks: str = Query(default=CHECKS_CURRENT, pattern=CHECKS_PATTERN),
 ) -> FailureSplitResponse:
     """``clean · builder_red · budget · protocol · harness`` (= n) + ``disqualified``
     over the repo's rows, or the run's when ``run_id`` is given, with the all-rows
     point and the model point side by side. An unknown ``run_id`` answers an empty
-    split (n = 0), never an invented one."""
+    split (n = 0), never an invented one. The repo-wide split reads one ``checks`` arm —
+    the repository's own by default (ADR-0024), so its clean rate never blends two
+    instruments beside per-arm cells; a run's split is its own rows, graded on the one arm
+    the run resolved, and ``checks`` does not filter it."""
     del viewer
     get_repo_or_404(db, repo)
     rows = list(DbLedger(factory).rows(repo=repo, run_id=run_id or None))
+    if not run_id:
+        rows = rows_for_arm(factory, repo, rows, checks)
     split = failure_split(rows)
     return FailureSplitResponse(repo=repo, run_id=run_id, **split.to_dict())
 

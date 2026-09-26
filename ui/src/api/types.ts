@@ -974,6 +974,10 @@ export interface Signoff {
   stale: boolean
   /** The deployment's current apparatus, for comparison with `evidence.apparatus_versions`. */
   apparatus_current: string
+  /** The checks arm the evidence was signed on (ADR-0024) — `off` for a record from before the switchboard. A record signed on another arm than `checks_arm_current` is stale too. */
+  checks_arm?: string
+  /** The checks arm the repository's cells are read on now; `""` for a record not tied to one repository. */
+  checks_arm_current?: string
   revoked_by: string | null
   revoked_by_name?: string | null
   revoked_at: string | null
@@ -1677,6 +1681,8 @@ export interface ValueReport {
   apparatus: string
   apparatus_versions: string[]
   pooled: boolean
+  /** The one checks arm the headline reads (ADR-0024): the repository's own, or `off` across repositories. */
+  checks?: string
   rows: number
   usd_per_gbp: number
   north_star: ValueNorthStar
