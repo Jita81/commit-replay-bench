@@ -17,7 +17,9 @@
  *               title inside the tile, and never a button inside the tile's button. The
  *               detail card recomputes the interval in the browser and flags drift from the
  *               server's rather than hiding it. The run action in the empty state is an
- *               operator's; other roles read who acts.
+ *               operator's; other roles read who acts. The header's controls pill reads the
+ *               map through `currentData`, so a refetch that fails never leaves the old
+ *               verdict beside the error.
  * How:          `useRepoParam` → `useCapabilityMapWithControls(repo, projection)` → index the
  *               cells by `class|size` → the full taxonomy × size order as the grid so 0-count
  *               classes render honestly → `CellBox` per cell, `CellDetail` on click.
@@ -61,6 +63,7 @@ import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
 import { VerdictPill } from '../../components/VerdictPill'
 import { apiUrl } from '../../api/client'
+import { currentData } from '../../api/hooks'
 import { useAuth } from '../../lib/auth'
 import { fmtInt, fmtPct, fmtRatio, fmtSeconds, fmtUsd, wilson } from '../../lib/format'
 import { tierDisplay } from '../../lib/verdict'
@@ -337,6 +340,9 @@ export function CapabilityPage() {
   }, [repo, byLanguage, byModel, language, model])
 
   const map = useCapabilityMapWithControls(repo, projection)
+  // the header pill sits outside QueryBoundary: after a failed refetch it must not show the
+  // earlier verdict beside the error (PR #54 review)
+  const mapData = currentData(map)
 
   return (
     <>
@@ -347,7 +353,7 @@ export function CapabilityPage() {
         actions={
           <>
             <RepoPicker value={repo} onChange={setRepo} />
-            {repo && map.data && <ControlsPill verdict={map.data.controls} minShare={map.data.policy?.min_controls_share} />}
+            {repo && mapData && <ControlsPill verdict={mapData.controls} minShare={mapData.policy?.min_controls_share} />}
             {repo && (
               <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv&repo=${encodeURIComponent(repo)}`)} download hint="button.capability.export">
                 Export CSV

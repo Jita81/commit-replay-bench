@@ -501,7 +501,11 @@ _CONFINERS = {"_confined_clone", "confined_clone_path"}
 #: the calls that open git on a path, and which positional argument that path is
 _OPENERS = {"GitRepo": 0, "clone_repo": 1}
 #: (module, function) → where a stored clone path is turned into a git handle
-_USE_SITES = [("server/worker.py", "_load_repo"), ("server/routes/repos.py", "compute_profile")]
+_USE_SITES = [
+    ("server/worker.py", "_load_repo"),
+    ("server/routes/repos.py", "compute_profile"),
+    ("server/routes/repos.py", "_clone_history"),
+]
 
 
 def _func(tree: ast.AST, name: str) -> ast.FunctionDef:
@@ -587,6 +591,9 @@ _NOT_A_STORED_CLONE = {
     ("server/routes/grades.py", "retained_patch_text"): "a retained worktree under scratch",
     ("server/worker.py", "_fetch_default_branch"): (
         "runs git fetch in the GitRepo that _load_repo already confined (git.path)"
+    ),
+    ("server/routes/repos.py", "_history_at"): (
+        "walks the path _clone_history already confined (its cached, resolved key)"
     ),
 }
 #: server functions that start a process that is not git, and what they start

@@ -1,0 +1,60 @@
+# The commit-subject gate (scripts/check_commit_subject.py), in its own workflow.
+#
+# Why its own workflow: the gate checks the pull request's title as well as its commits,
+# because a squash merge writes the title on main as the commit subject. A title edited
+# after the checks passed must be checked again, so this workflow listens for `edited`.
+# Keeping it apart from ci.yml means editing a description re-runs this one short job, not
+# the whole CI.
+#
+# On a push to main it checks the subjects that actually landed. That is detection, not
+# prevention: the merge dialog can rewrite the squash subject after the last pull-request
+# check, and this is the only place the real subject can be read.
+#
+# No manual trigger: each step below runs on one event, so a `workflow_dispatch` run would
+# check nothing and still pass. Each push to main is its own concurrency group: a push run
+# checks only the range that push brought, so a later push must never cancel it. Only a
+# superseded pull-request run is cancelled (tests/test_check_commit_subject.py pins both).
+
+name: commit-subjects
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commit-subjects-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  commit-subjects:
+    name: commit-subjects (Conventional Commits, imperative, at most 72 characters)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the range walks the pull request's own commits
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # The title is passed through the environment, never interpolated into the script:
+      # a pull request title is untrusted input.
+      - name: Every commit subject on the pull request, and its title
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python scripts/check_commit_subject.py --range "$BASE_SHA..$HEAD_SHA" --title "$PR_TITLE" --check
+      - name: Every commit subject that landed on main in this push
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+        run: python scripts/check_commit_subject.py --range "$BEFORE_SHA..$AFTER_SHA" --check

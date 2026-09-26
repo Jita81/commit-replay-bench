@@ -356,6 +356,24 @@ export interface RepoProfile {
   cells: ProfileCell[]
 }
 
+/**
+ * `GET /repos/{name}/pool` — which stretch of history the mined tasks come from. The miner
+ * takes the newest non-merge commits that touch both source and tests, so this is the pool's
+ * recency bias, shown. The history fields and `share` are `null` when the clone cannot be read
+ * on the API host, and `history_unavailable` says why.
+ */
+export interface RepoPool {
+  repo: string
+  n_tasks: number
+  oldest_authored: string | null
+  newest_authored: string | null
+  history_commits: number | null
+  history_first_authored: string | null
+  window_commits: number | null
+  share: number | null
+  history_unavailable: '' | 'no_clone_path' | 'clone_path_escapes' | 'clone_unavailable' | 'git_failed'
+}
+
 // ---------------------------------------------------------------------------
 // Runs
 // ---------------------------------------------------------------------------
