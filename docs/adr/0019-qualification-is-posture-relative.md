@@ -158,6 +158,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
    **At test time.**
    - The set is mounted read-only with the offline flags: `GOMODCACHE=/deps/gomod GOPROXY=off GOSUMDB=off` for Go, `/deps/site` on `PYTHONPATH` for Python, and `/work/node_modules` with `NODE_PATH` for Node.
    - The test container keeps `--network=none`.
+   - On the host executor (`local/inplace/sealed`) the same set is used through the store's own paths. Node resolves `./node_modules` before `NODE_PATH`, so the worktree's `node_modules` link is pointed at the bound set before a test run, a lint plan or the environment probe (PR #56).
    - `Command.network=True` is refused under docker.
 
    **Switching it on.**

@@ -339,3 +339,53 @@ def test_planted_node_modules_link_is_git_ignored(trial, config, tool):
     discarded = discard_source_edits(trial, config, [])
     assert "node_modules" not in discarded
     assert (trial.root / "node_modules").is_symlink()
+
+
+def test_a_local_sealed_run_resolves_the_sealed_tree_not_the_clones(tmp_path: Path) -> None:
+    """``local/inplace/sealed`` (provisioning on, the host executor): Node resolves
+    ``./node_modules`` before ``NODE_PATH``, and the workspace links every worktree's
+    ``node_modules`` to the CLONE's tree — so the tests, the lint tools and the
+    environment probe (``npm ls``) must see the SEALED set through that link, never the
+    clone's install under a ``sealed`` label (CodeRabbit on PR #56)."""
+    from crb.core.deps import SCHEME_NODE, BundleMount, DepsBinding, register_store_root
+
+    key = "dep_" + "a" * 64
+    store = register_store_root(tmp_path / "store")
+    sealed = store / "node" / key / "node_modules"
+    (sealed / ".bin").mkdir(parents=True)
+    sealed.chmod(0o555)
+    clone_nm = tmp_path / "clone" / "node_modules"
+    (clone_nm / ".bin").mkdir(parents=True)
+    root = tmp_path / "wt"
+    root.mkdir()
+    for d in (root, clone_nm.parent):  # one manifest: the clone's tree matches the worktree
+        (d / "package.json").write_text('{"name": "x"}', encoding="utf-8")
+    (root / "node_modules").symlink_to(clone_nm)
+    binding = DepsBinding(
+        role="gold",
+        lang="node",
+        scheme=SCHEME_NODE,
+        key=key,
+        digest="sha256:" + "d" * 64,
+        mounts=(BundleMount(sealed, "/work/node_modules", key),),
+        env={"NODE_PATH": "/work/node_modules"},
+        local_env={"NODE_PATH": str(sealed)},
+    )
+    runner = get_runner(noderepo.config("node"))
+    runner.env_dir = tmp_path / "env"
+    ex = LocalExecutor()
+    with runner.deps_bound(binding):
+        # the probe (``npm ls`` in the worktree) — built before any run touched the link
+        probe = runner.env_probe_command(root, (), executor=ex, timeout=30)
+        assert probe is not None and probe.root == root.resolve()
+        assert (root / "node_modules").resolve() == sealed.resolve()
+        (root / "node_modules").unlink()
+        (root / "node_modules").symlink_to(clone_nm)
+        runner.ensure_era(root, ex)  # what run() and lint_plan() call first
+    assert (root / "node_modules").resolve() == sealed.resolve()
+    # without a sealed set the worktree keeps today's link
+    (root / "node_modules").unlink()
+    (root / "node_modules").symlink_to(clone_nm)
+    runner.ensure_era(root, ex)
+    assert (root / "node_modules").resolve() == clone_nm.resolve()
+    sealed.chmod(0o755)

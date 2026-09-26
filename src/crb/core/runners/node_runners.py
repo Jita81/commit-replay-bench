@@ -170,11 +170,24 @@ class _NodeBase(BaseRunner):
         is installed once (``npm ci`` from that manifest, network on, like setup) and
         the link is re-pointed. Returns the era root used, ``None`` when the clone's
         tree already matches (or under docker, where the image ships the tree).
+
+        With a sealed set bound (ADR-0019) on the host, the link is pointed at THAT set:
+        Node resolves ``./node_modules`` before ``NODE_PATH``, so a link left at the clone's
+        tree would grade a ``sealed`` posture against the clone's install (CodeRabbit on PR
+        #56). No era is ever installed for a sealed set.
         """
-        if executor.name == "docker" or self.env_dir is None or self._sealed_nm() is not None:
-            return None  # a sealed set (ADR-0019) is the tree: no era is ever installed
+        if executor.name == "docker":
+            return None
         root = Path(root)
         link = root / "node_modules"
+        sealed = self._sealed_nm()
+        if sealed is not None:
+            if link.is_symlink() and link.resolve() != sealed.resolve():
+                link.unlink()
+                link.symlink_to(sealed)
+            return None
+        if self.env_dir is None:
+            return None
         if not link.is_symlink():
             return None  # the worktree owns a real tree (or has none to re-point)
         clone_nm = link.resolve()
@@ -271,6 +284,7 @@ class _NodeBase(BaseRunner):
         the posture cannot run this parent."""
         if self._sealed_nm() is None:
             return None
+        self.ensure_era(root, executor)  # on the host: ./node_modules IS the bound set
         npm = executor.tool("npm", self.opts.get("npm"))
         return Command(
             (npm, "ls", "--all", "--offline"),

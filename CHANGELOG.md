@@ -59,6 +59,11 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **A local sealed Node posture uses the sealed set** (product.posture.35; CodeRabbit on
+  PR #56). On the host executor Node resolves `./node_modules` before `NODE_PATH`, and the
+  worktree's link still pointed at the clone's install, so `local/inplace/sealed` graded
+  and probed (`npm ls`) the clone's tree under a `sealed` label. The link is now pointed at
+  the bound set before a test run, a lint plan and the environment probe.
 - **The toolchain probe copies nothing** (product.posture.34; CodeRabbit on PR #56). `mine`
   resolves the posture in the clone, `.git` and all, and the version probe copied that whole
   tree into the sandbox's tmpfs: a large clone failed the copy and was reported as "cannot
