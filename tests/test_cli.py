@@ -751,6 +751,22 @@ def test_route_decisions(mined: CliRepo, run: Run, tmp_path: Path) -> None:
     assert code == 2
 
 
+def test_route_on_an_arm_with_no_rows_is_unmeasured_never_a_success(
+    mined: CliRepo, run: Run
+) -> None:
+    """ADR-0024 §6: ``crb route`` reads one checks arm. A ledger whose rows are all of
+    another arm used to route nothing and exit 0, which read as "nothing to stop" (CodeRabbit,
+    PR #57). The arm is named, the rows of the other arms are counted and the exit is 1."""
+    code, d = run_json(run, ["route", "--checks", "fmt"])
+    assert code == 1
+    assert d["checks"] == "fmt" and d["rows"] == 0 and d["decisions"] == []
+    assert d["unmeasured"] is True and d["rows_by_arm"]["off"] > 0  # type: ignore[index,operator]
+    code, out, _ = run(["route", "--checks", "fmt"])
+    assert code == 1 and "no rows graded under the checks arm 'fmt'" in out
+    code, d = run_json(run, ["route"])
+    assert code == 0 and d["checks"] == "off" and d["unmeasured"] is False
+
+
 def test_forged_false_q1_row_cannot_even_be_read(run: Run, tmp_path: Path) -> None:
     """A false-Q1 row cannot be written through the ledger, so forge one on disk. The
     row-level invariant fires on LOAD, before routing could ever see it: exit 2."""

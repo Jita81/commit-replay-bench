@@ -26,18 +26,18 @@ spec:
       {{- include "crb.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker
   template:
+    {{- $labels := printf "%s\napp.kubernetes.io/component: worker\ncrb.dev/sandbox-mode: %s\n%s" (include "crb.selectorLabels" .) $mode (include "crb.secretsStore.podLabel" .) }}
+    {{- $annotations := printf "checksum/config: %s" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum) }}
     metadata:
       labels:
-        {{- include "crb.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: worker
-        crb.dev/sandbox-mode: {{ $mode }}
-        {{- with .Values.worker.podLabels }}
-        {{- toYaml . | nindent 8 }}
+        {{- $labels | nindent 8 }}
+        {{- with include "crb.podExtra" (dict "owned" $labels "extra" .Values.worker.podLabels "what" "worker.podLabels") }}
+        {{- . | nindent 8 }}
         {{- end }}
       annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- with .Values.worker.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
+        {{- $annotations | nindent 8 }}
+        {{- with include "crb.podExtra" (dict "owned" $annotations "extra" .Values.worker.podAnnotations "what" "worker.podAnnotations") }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "crb.serviceAccountName" . }}
@@ -103,6 +103,7 @@ spec:
             {{- include "crb.scratchMounts" . | nindent 12 }}
             - name: work
               mountPath: /srv/crb
+            {{- include "crb.secretsStore.mount" . | nindent 12 }}
             {{- if eq $mode "dind" }}
             - name: docker-sock
               mountPath: /var/run/docker
@@ -153,6 +154,7 @@ spec:
         {{- end }}
       volumes:
         {{- include "crb.scratchVolumes" . | nindent 8 }}
+        {{- include "crb.secretsStore.volume" . | nindent 8 }}
         - name: work
           {{- if eq .Values.worker.workDir.type "pvc" }}
           persistentVolumeClaim:
@@ -183,8 +185,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.worker.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
+      {{- with include "crb.secretsStore.affinity" (dict "root" $ "affinity" .Values.worker.affinity) }}
+      {{- . | nindent 6 }}
       {{- end }}
 {{- end }}

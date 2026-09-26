@@ -15,8 +15,11 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               that a gap line must name the change and a known owner layer, that one gap id
               carries one line across the tree, and that an F-/B- id must be a row of the
               ordered backlog and is named in the ranking; that the rank counts how many
-              criteria a gap blocks and doubles a `partial` in the honesty categories; and
-              that ``--check`` fails on a stale GAP-ANALYSIS.md.
+              criteria a gap blocks and doubles a `partial` in the honesty categories; that
+              ``--check`` fails on a stale GAP-ANALYSIS.md; and that the prevention register
+              (docs/PREVENTION.md) must exist and refuses an entry closed without an
+              executable artefact that resolves, an advisory closure, a pending entry with no
+              gap, an unknown level or status, a duplicate id and a missing first-seen.
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
@@ -137,6 +140,22 @@ PRODUCT = (
 )
 
 
+#: A minimal prevention register: one closed row (an executable artefact that resolves) and one
+#: pending row (a gap with an owner).
+REGISTER = """# Prevention register
+
+## Register
+
+| id | bug | class | first seen | artefact | level | status | gap |
+|---|---|---|---|---|---|---|---|
+| P-001 | A long job name | ci-name | PR #48 | `test:tests/test_x.py::test_one` · `ci:code-map` | gate | closed | |
+| P-002 | Patches thrown away | retention | 2026-09-25 export | pending | construction | pending | G-701 |
+
+## Gaps
+- **G-701** — clean patches are not kept · store the graded patch · server
+"""
+
+
 def _rows(prefix: str, cats: list[str]) -> str:
     return "\n".join(
         f"| {prefix}.{c.lower()}.{i} | {c} | ok | `code:ui/src/App.tsx::App` | met | |"
@@ -203,6 +222,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
     (tmp_path / ".github/workflows/ci.yml").write_text(
         "jobs:\n  code-map:\n    name: code-map\n", encoding="utf-8"
     )
+    (tmp_path / "docs/PREVENTION.md").write_text(REGISTER, encoding="utf-8")
     monkeypatch.setattr(mod, "ROOT", tmp_path)
     monkeypatch.setattr(mod, "DOD", tmp_path / "docs/dod")
     monkeypatch.setattr(mod, "OUT", tmp_path / "docs/dod/GAP-ANALYSIS.md")
@@ -215,6 +235,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
     monkeypatch.setattr(mod, "DECISION_LOG", tmp_path / "docs/DECISION-LOG.md")
     monkeypatch.setattr(mod, "ADR_DIR", tmp_path / "docs/adr")
     monkeypatch.setattr(mod, "BACKLOG", tmp_path / "docs/reviews/backlog.md")
+    monkeypatch.setattr(mod, "PREVENTION", tmp_path / "docs/PREVENTION.md")
     return mod, tmp_path
 
 
@@ -240,6 +261,7 @@ def _write_all(root: Path, *, ng_state: str = "n/a", ng_gap: str = "not applicab
     ]
     scats = [*jcats[:10], "TRIGGER", "OUTCOME", "HANDOFF", "MEASURE", "AUTOMATION"]
     pcats = [
+        "VALUE",
         *jcats[:10],
         "IDENTITY",
         "GO-LIVE",
@@ -353,6 +375,27 @@ def test_parent_and_children_must_agree_and_a_missing_category_is_a_defect(
     out = capsys.readouterr().out
     assert "parent dod.journey.read-the-map does not list it under children" in out
     assert "no criterion for category PROOF" in out
+
+
+def test_the_products_value_criteria_come_first(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The value the product exists to deliver heads its definition of done; a product
+    artefact whose table does not open with VALUE is a defect, and one without it is too."""
+    mod, root = tree
+    _write_all(root)
+    p = root / "docs/dod/product.md"
+    lines = p.read_text(encoding="utf-8").split("\n")
+    value = next(i for i, line in enumerate(lines) if "| VALUE |" in line)
+    moved = lines[:value] + lines[value + 1 :]
+    last = max(i for i, line in enumerate(moved) if line.startswith("| product."))
+    moved.insert(last + 1, lines[value])
+    p.write_text("\n".join(moved), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "the product's VALUE criteria come first" in capsys.readouterr().out
+    p.write_text("\n".join(lines[:value] + lines[value + 1 :]), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "no criterion for category VALUE" in capsys.readouterr().out
 
 
 def test_check_fails_on_a_stale_gap_analysis_or_status_line(
@@ -585,3 +628,118 @@ def test_the_rank_counts_what_a_gap_blocks_and_doubles_a_partial_in_the_honesty_
     assert truth[0] == 40 and truth[1] == 2
     mod.roll_up(arts)
     assert "## Open gaps by fan-out" in mod.render(arts)
+
+
+def test_an_open_value_criterion_outranks_every_other_open_criterion(
+    tree: tuple[ModuleType, Path],
+) -> None:
+    """The operator's refocus is the order of work: the weakest open VALUE criterion (a
+    product criterion blocking one) scores above the strongest possible other one (a product
+    criterion in a weight-5 category blocking three or more, doubled)."""
+    mod, _root = tree
+    others = max(w for c, w in mod.WEIGHT.items() if c != "VALUE")
+    strongest_other = mod.LEVEL_WEIGHT["product"] * others * 3 * 2
+    weakest_value = mod.LEVEL_WEIGHT["product"] * mod.WEIGHT["VALUE"] * 1 * 1
+    assert "VALUE" in mod.HONESTY and weakest_value * 2 > strongest_other
+    assert mod.EXTRA["product"][0] == "VALUE"
+
+
+def _register_row(row: str) -> str:
+    return REGISTER.replace(
+        "| P-002 | Patches thrown away | retention | 2026-09-25 export | pending | construction | pending | G-701 |",
+        row,
+    )
+
+
+@pytest.mark.parametrize(
+    ("row", "error"),
+    [
+        (
+            "| P-002 | x | c | e | `code:ui/src/App.tsx::App` | gate | closed | |",
+            "closed only by an artefact that fails when its class recurs",
+        ),
+        (
+            "| P-002 | x | c | e | `test:tests/test_x.py::test_one` | advisory | closed | |",
+            "advisory artefact cannot close a defect",
+        ),
+        ("| P-002 | x | c | e | pending | gate | pending | |", "pending needs a gap id"),
+        (
+            "| P-002 | x | c | e | `test:tests/test_x.py::test_nope` | gate | closed | |",
+            "evidence does not resolve: test:tests/test_x.py::test_nope",
+        ),
+        ("| P-002 | x | c | e | pending | wishful | pending | G-701 |", "level must be one of"),
+        ("| P-002 | x | c | e | pending | gate | parked | G-701 |", "status must be one of"),
+        ("| P-001 | x | c | e | pending | gate | pending | G-701 |", "duplicate id P-001"),
+        ("| P-002 | x | c | | pending | gate | pending | G-701 |", "needs a first-seen"),
+        ("| P-002 | x | c | e | pending | gate | pending | G-799 |", "gap G-799 is not defined"),
+    ],
+)
+def test_the_prevention_register_refuses_an_entry_without_a_working_artefact(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str], row: str, error: str
+) -> None:
+    """STANDARD.md §7: a defect is closed only with the artefact that fails if its class
+    recurs. The register is checked like the artefacts: every reference resolves, a closed
+    row carries an executable one (test / vitest / spec / ci), advisory text never closes a
+    defect, and a pending row names its gap and owner."""
+    mod, root = tree
+    _write_all(root)
+    assert mod.main([]) == 0
+    (root / "docs/PREVENTION.md").write_text(_register_row(row), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert error in capsys.readouterr().out
+
+
+def test_the_register_refuses_a_gap_id_defined_twice_with_different_text(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """STANDARD §2: one id is one piece of work. The artefacts refused a gap id defined twice
+    in one file; the register's parser let the second line overwrite the first, so a
+    pending row rendered the wrong "what is missing" (CodeRabbit, PR #57). Both parsers
+    now record a gap through one function, and the same line twice is still accepted."""
+    mod, root = tree
+    _write_all(root)
+    same = REGISTER + "- **G-701** — clean patches are not kept · store the graded patch · server\n"
+    (root / "docs/PREVENTION.md").write_text(same, encoding="utf-8")
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    capsys.readouterr()
+    other = REGISTER + "- **G-701** — transcripts are thrown away · keep them · server\n"
+    (root / "docs/PREVENTION.md").write_text(other, encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    out = capsys.readouterr().out
+    assert "PREVENTION.md:" in out and "gap G-701 is defined twice" in out
+    _rows, gaps, _ = mod.parse_prevention(root / "docs/PREVENTION.md")
+    assert gaps["G-701"].startswith("clean patches are not kept")  # the first line stands
+
+
+def test_the_register_must_exist_and_its_counts_reach_the_gap_analysis(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    mod, root = tree
+    _write_all(root)
+    assert mod.main([]) == 0
+    out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
+    assert "## Our own bugs — the prevention register" in out
+    assert "**2 registered · 1 closed (gate 1) · 1 pending.**" in out
+    assert (
+        "| P-002 | Patches thrown away | construction | G-701 | clean patches are not kept" in out
+    )
+    (root / "docs/PREVENTION.md").unlink()
+    assert mod.main(["--check"]) == 1
+    assert "docs/PREVENTION.md is missing" in capsys.readouterr().out
+
+
+def test_two_streams_numbering_the_same_criterion_id_are_refused(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-016: three parallel streams each added ``measure.truth.16`` to
+    the same file; the merge had to renumber them. A duplicate id must fail the gate, never
+    silently shadow the other criterion."""
+    mod, root = tree
+    _write_all(root)
+    stream = root / "docs/dod/streams/measure.md"
+    lines = stream.read_text(encoding="utf-8").splitlines()
+    first = next(i for i, ln in enumerate(lines) if ln.startswith("| measure."))
+    lines.insert(first + 1, lines[first])
+    stream.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "duplicate criterion id measure." in capsys.readouterr().out

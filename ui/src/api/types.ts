@@ -974,6 +974,10 @@ export interface Signoff {
   stale: boolean
   /** The deployment's current apparatus, for comparison with `evidence.apparatus_versions`. */
   apparatus_current: string
+  /** The checks arm the evidence was signed on (ADR-0024) — `off` for a record from before the switchboard. A record signed on another arm than `checks_arm_current` is stale too. */
+  checks_arm?: string
+  /** The checks arm the repository's cells are read on now; `""` for a record not tied to one repository. */
+  checks_arm_current?: string
   revoked_by: string | null
   revoked_by_name?: string | null
   revoked_at: string | null
@@ -1472,4 +1476,215 @@ export interface Intake {
   connection: IntakeConnection
   last_poll: IntakePoll | null
   rows: IntakeRow[]
+}
+
+// ---------------------------------------------------------------------------
+// The prevention loop (ADR-0020) — `GET /learn/register` (crb.prevention.register.v1)
+// ---------------------------------------------------------------------------
+
+/** One of stream S's five: where a bug class stands in the prevention loop. */
+export type PreventionStatus = 'open' | 'applied' | 'closed' | 'retired' | 'escalated'
+
+/** The repository's learning switch, folded from the chain: the last `switched` record. */
+export interface PreventionSwitch {
+  auto_apply: 'off' | 'context' | 'config'
+  switched_by: string
+  switched_at: string
+  reason: string
+  record_id: string
+}
+
+/** The lever the loop would apply, the levers it passed over and why, and what it would file. */
+export interface PreventionLeverChoice {
+  lever_id: string
+  level: string
+  family: string
+  why: string
+  allowed: boolean
+  passed_over: Array<{ lever_id: string; level: string; why_not: string }>
+  propose: string[]
+}
+
+/** One applied change (or a person's link) as the chain records it. */
+export interface PreventionChange {
+  change_id: string
+  lever_id: string
+  family: string
+  level: string
+  targets: string[]
+  stratum_mode: string
+  key: string
+  what: Record<string, unknown>
+  applied_at: string
+  applied_by: string
+  on_behalf_of: string
+  before: Record<string, Record<string, unknown>>
+  state: 'in_force' | 'retired' | 'reverted'
+  record_hash: string
+}
+
+/** A filed item for a person: the class, the lever, its level, and where it went once registered. */
+export interface PreventionProposal {
+  item_id: string
+  targets: string[]
+  lever_id: string
+  level: string
+  scope: string
+  kind: string
+  title: string
+  description: string
+  expected_effect: string
+  evidence_refs: string[]
+  evidence_total: number
+  proposed_at: string
+  record_hash: string
+  registered: Record<string, unknown> | null
+}
+
+/** Before → after for one class under the change in force, with the bar the rule decides at. */
+export interface PreventionMeasurement {
+  signature: string
+  stratum_mode: string
+  key: string
+  before: { k: number; n: number; p0: number; digest: string; clean_rate: number }
+  exposed: { k: number; n: number; clean_k: number; clean_ci_low: number; clean_ci_high: number }
+  unexposed_n: number
+  concurrent: { k: number; n: number }
+  /** Attempts the change never reached, on tasks no exposed attempt ran: while the class recurs there at or above p0, it is never kept or closed. */
+  withheld?: { k: number; n: number }
+  not_comparable: number
+  decisive_n: number
+  looks: number[]
+  closing_window: number
+  closing_zero_run: number
+  bar: string
+  deterministic: boolean
+}
+
+/** One bug class of one repository (ADR-0020 §3). */
+export interface PreventionEntry {
+  repo: string
+  signature: string
+  family: string
+  sub: string
+  detail: string
+  first_seen: string
+  first_ref: string
+  last_seen: string
+  occurrences: number
+  first_attempts: number
+  blocked: number
+  tasks: number
+  runs: number
+  cost_usd: number
+  refs: string[]
+  refs_total: number
+  by_mode: Record<string, number>
+  by_apparatus: Record<string, number>
+  not_comparable: number
+  stratum: { mode: string; key: string; n: number; k: number; tasks: number }
+  actionable: boolean
+  why_not: string
+  capability: boolean
+  recommendation: PreventionLeverChoice
+  change: PreventionChange | null
+  proposals: PreventionProposal[]
+  measurement: PreventionMeasurement | null
+  status: PreventionStatus
+  qualifiers: string[]
+  lever_kind: 'process' | 'context' | ''
+  next: string
+  history: Array<{ kind: string; record_id: string; row_hash: string; created: string; actor: string; on_behalf_of: string; summary: string }>
+}
+
+/** `GET /learn/register?repo=` — the prevention register of one repository. */
+export interface PreventionRegister {
+  schema: string
+  repo: string
+  rules: Record<string, string>
+  apparatus: string
+  switch: PreventionSwitch
+  attempts: Record<string, number>
+  counts: Record<PreventionStatus, number>
+  share_closed: number | null
+  share_closed_by_process: number | null
+  overlay: Record<string, Record<string, unknown>>
+  playbook: { lines: Array<{ line_id: string; template_id: string; signature: string; text: string }>; chars: number; max_lines: number; max_chars: number; sha256: string }
+  entries: PreventionEntry[]
+  proposals: PreventionProposal[]
+  links: Array<{ record_id: string; targets: string[]; ref: string; note: string; linked_at: string; actor: string }>
+  chain: { records: number; head: string; verified: boolean; error?: string }
+  decisions_verified: string[]
+}
+
+/** One record a prevention write appended, as the chain holds it. */
+export interface PreventionRecordOut {
+  kind: string
+  repo: string
+  record_id: string
+  created: string
+  actor: string
+  on_behalf_of: string
+  reason: string
+  payload: Record<string, unknown>
+  row_hash: string
+}
+
+// ---------------------------------------------------------------------------
+// Value — the scorecard (`GET /value`, crb.core.value.ValueReport.to_dict)
+// ---------------------------------------------------------------------------
+
+/** A rate as the scorecard serves it: `null` point and interval when `n = 0`, never zero. */
+export interface ValueRate {
+  k: number
+  n: number
+  point: number | null
+  ci_low: number | null
+  ci_high: number | null
+  /** Distinct tasks under `n` and `k` — `n` counts attempts, and repeats on a task are not independent. */
+  n_tasks?: number
+  k_tasks?: number
+}
+
+/** `north_star` — working changes per pound, blind: an estimate (clean rate × precision). */
+export interface ValueNorthStar {
+  label: string
+  per_pound: number | null
+  per_pound_low: number | null
+  per_pound_high: number | null
+  pounds_per_working: number | null
+  pounds_per_working_low: number | null
+  pounds_per_working_high: number | null
+  working_rate: number | null
+  working_rate_low: number | null
+  working_rate_high: number | null
+  working_estimate: number | null
+  n_attempts: number
+  n_valid: number
+  /** Distinct tasks under `n_valid` (attempts): the independence the intervals assume is at most this. */
+  n_tasks?: number | null
+  clean: number
+  clean_tasks?: number | null
+  clean_rate: ValueRate
+  precision_basis: 'review' | 'review_pooled' | 'proxy' | 'none'
+  precision: ValueRate
+  spend_usd: number
+  spend_gbp: number
+  usd_per_gbp: number
+  method: string
+}
+
+/** `GET /value` — only the fields a screen reads are typed; the rest is in docs/API.md. */
+export interface ValueReport {
+  schema: 'crb.value.v1'
+  repo: string | null
+  apparatus: string
+  apparatus_versions: string[]
+  pooled: boolean
+  /** The one checks arm the headline reads (ADR-0024): the repository's own, or `off` across repositories. */
+  checks?: string
+  rows: number
+  usd_per_gbp: number
+  north_star: ValueNorthStar
+  learning_curve: { source: string; attempts: number; register: { source: string; n_classes: number; closed: number; closed_share: number | null } }
 }

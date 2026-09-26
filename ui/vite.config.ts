@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from 'vite'
+import { execFileSync } from 'node:child_process'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -17,15 +18,46 @@ import tailwindcss from '@tailwindcss/vite'
  *   (the project root), so the root is named too, and nothing else in the repository
  *   is readable through `/@fs/` should the dev server ever be exposed beyond localhost.
  * - Build: static assets land in `ui/dist`; the server serves them behind
- *   the same origin as the API in production.
+ *   the same origin as the API in production. `buildStamp` writes `dist/build-stamp.json`
+ *   naming the commit the bundle was built from (`CRB_SOURCE_COMMIT` when the image build
+ *   passes it — an image context has no `.git` — else `git rev-parse HEAD`), so `/health` and
+ *   `crb doctor` can say when the served bundle is not the served code
+ *   (src/crb/observability/build_stamp.py; docs/PREVENTION.md P-002).
  * - Test: vitest with jsdom; `src/test/setup.ts` installs jest-dom matchers; the per-test
  *   timeout is raised from vitest's 5 s default because the `ui-unit` CI job is blocking and
  *   runs on a slower shared runner than a developer's machine (see `test.testTimeout` below).
  */
 const apiOrigin = process.env.CRB_API_ORIGIN ?? 'http://127.0.0.1:8000'
 
+/** The commit this bundle is built from: the image's build argument, else the checkout's HEAD. */
+function sourceCommit(): string {
+  const fromEnv = process.env.CRB_SOURCE_COMMIT?.trim()
+  if (fromEnv) return fromEnv
+  try {
+    // bounded: a git that never exits must not hang the build; a timeout lands in the catch
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000 }).trim()
+  } catch {
+    return '' // no git, no variable or git timed out: the stamp says so, and the server reports it as unreadable
+  }
+}
+
+/** Writes `build-stamp.json` into the build output (read by src/crb/observability/build_stamp.py). */
+function buildStamp(): Plugin {
+  return {
+    name: 'crb-build-stamp',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'build-stamp.json',
+        source: JSON.stringify({ commit: sourceCommit(), built_at: new Date().toISOString() }) + '\n',
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), buildStamp()],
   server: {
     port: 5173,
     // this project + the guides only, so `import.meta.glob('../../../docs/*.md')` resolves in

@@ -24,7 +24,7 @@ cp deploy/.env.example deploy/.env && chmod 0600 deploy/.env
 $EDITOR deploy/.env            # POSTGRES_PASSWORD, CRB_SECRET_KEY (openssl rand -hex 32),
                                # CRB_BOOTSTRAP_ADMIN__PASSWORD, the model endpoint
 sudo install -d -o 10001 -g 10001 -m 0750 /srv/crb   # state dir; same path inside containers
-docker compose -f deploy/docker-compose.yml up -d --build
+CRB_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.yml up -d --build
 docker compose -f deploy/docker-compose.yml ps        # db healthy, migrate exited 0, api + worker up
 curl -fsS http://127.0.0.1:8000/api/v1/health         # database, migrations, append-only probe
 ```
@@ -38,7 +38,13 @@ while the `users` table is empty), then configure OIDC and set
 buildx plugin (some Homebrew / colima set-ups) `docker build` falls back to the legacy
 builder and fails at the first `RUN --mount` — install `docker-buildx` and run
 `docker buildx build --load -f deploy/Dockerfile -t crb:local .` instead. Most
-installations should not build at all: use the released image (§1.1).
+installations should not build at all: use the released image (§1.1). A local build must name
+the commit it was built from: the build context carries no `.git`. Compose passes
+`CRB_SOURCE_COMMIT` from your shell to the build (the command above sets it); a direct
+`docker build` needs `--build-arg CRB_SOURCE_COMMIT=$(git rev-parse HEAD)`. An image built
+without it serves a UI whose source cannot be named, so `/health`'s `build` probe reads
+`degraded` (the API still serves; `/health` answers 200) and `crb doctor` fails its `build`
+line; the detail names this build argument as the fix. CI and the release workflow pass it.
 
 ## 1.1 Use the released image instead of building
 

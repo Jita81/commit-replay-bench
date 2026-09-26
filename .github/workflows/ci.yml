@@ -130,8 +130,9 @@ jobs:
         run: python scripts/code_map.py --check
 
   # GitHub truncates a check-run name at 100 characters, and branch protection matches the
-  # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Keep
-  # every `name:` in this file under 100 characters.
+  # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Every
+  # job name in every workflow stays under 100 characters: tests/test_ci_job_names.py fails
+  # the `test` job otherwise (docs/PREVENTION.md P-001).
   dod:
     name: dod (every route, journey and stream has its definition of done; evidence resolves)
     runs-on: ubuntu-latest
@@ -217,6 +218,11 @@ jobs:
           git config --global user.email "ci@crb.invalid"
           git config --global user.name "crb ci"
           git config --global init.defaultBranch main
+      # the chart suites render deploy/helm/crb (tests/test_deploy_secrets_store.py fails on
+      # CI without helm rather than skip: one secrets store for the api and worker, P-043)
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.4
       - name: pytest (coverage >= 70)
         # `sandbox_images` builds the reference sandbox images; the sandbox-images job builds
         # each once (cached) and runs exactly those tests on it — nothing is skipped in CI.
@@ -462,6 +468,8 @@ jobs:
           push: false
           load: true
           tags: crb:ci
+          # the served-commit stamp (src/crb/observability/build_stamp.py): the context has no .git
+          build-args: CRB_SOURCE_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true
       - name: Smoke the image — non-root, read-only root, migrate on SQLite, UI + tools present
@@ -489,6 +497,13 @@ jobs:
           # the chart refuses the two silent misconfigurations (an unreachable database, two workers on one RWO volume)
           if helm template crb deploy/helm/crb > /dev/null 2>&1; then echo "expected render failure: external postgres without cidrs"; exit 1; fi
           if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set worker.replicaCount=2 > /dev/null 2>&1; then echo "expected render failure: replicaCount=2 on RWO"; exit 1; fi
+          # one secrets store for the api and the worker (P-043): an operator's claim renders; a
+          # mode two pods cannot share is refused
+          helm template crb deploy/helm/crb --set 'networkPolicy.postgres.cidrs={10.0.0.0/8}' --set secretsStore.existingClaim=kv-secrets --set secretsStore.accessMode=ReadWriteMany > /dev/null
+          if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set secretsStore.accessMode=ReadWriteOncePod > /dev/null 2>&1; then echo "expected render failure: a ReadWriteOncePod secrets store"; exit 1; fi
+          # the pin puts the api on the worker's node: a worker-only tainted pool is refused (P-046)
+          if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set 'worker.tolerations[0].key=crb.dev/worker' --set 'worker.tolerations[0].operator=Exists' > /dev/null 2>&1; then echo "expected render failure: api cannot follow the worker's placement"; exit 1; fi
+          if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set 'worker.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key=crb.dev/pool' --set 'worker.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].operator=Exists' > /dev/null 2>&1; then echo "expected render failure: api cannot follow the worker's node affinity"; exit 1; fi
       - name: docker compose config
         run: |
           printf 'POSTGRES_PASSWORD=ci\nCRB_SECRET_KEY=ci\n' > deploy/.env

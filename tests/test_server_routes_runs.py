@@ -8,7 +8,9 @@ What it does: Pins the list shape and order, filters and pagination, the queue l
               present, counts / progress / cost (derived when the worker wrote none), 404; create
               RBAC, the enqueued fields, blind kind implies blind mode, non-build kinds need no
               builder, 422 validation, unknown repo 404 and queue unavailable 503, the
-              ``JobQueue`` class adapter; the budget ladder (forwarded only as set, object rungs
+              ``JobQueue`` class adapter; a ``claude_code`` auth with no credential refused
+              at submit (422 ``builder_credential_missing``, presence only, nothing queued —
+              docs/PREVENTION.md P-003); the budget ladder (forwarded only as set, object rungs
               stored as sent, mixed ladders, bounds and rung shape 422, repeated rungs refused
               unless the budget differs, ``labels.budget_tier`` on task rows); cancel RBAC /
               queue call / terminal 409 / 404; the task table and error rows; the paginated,
@@ -66,6 +68,11 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
         if key.startswith("CRB_"):
             monkeypatch.delenv(key, raising=False)
+    # POST /runs refuses a claude_code run whose auth has no credential (P-003). These
+    # cases are about everything else, so the worker's key is PRESENT — a placeholder, never
+    # a real key; TestCredentialPresence removes it on purpose.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-placeholder-not-a-key")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk-test-placeholder-not-a-key")
 
 
 @pytest.fixture
@@ -534,6 +541,243 @@ class TestCreate:
         assert env.get("/runs?limit=2").json()["total"] == 9
 
 
+# --- a builder auth with no credential is refused at submit (P-003) -----------------------
+
+
+class TestCredentialPresence:
+    """Run 8d9c5e55 was queued for ``claude_code`` with no ``builder_config.auth``: the
+    served default ``api_key`` met a deployment with no key, and all nine attempts failed at
+    $0 in 5.4 s. ``POST /runs`` now refuses that at submit — a PRESENCE check only (the
+    variable is set, the token file exists): no secret is read, returned or logged."""
+
+    def _post(self, env: Env, **over: Any) -> Any:
+        login(env.client, "operator")
+        return env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, **over})
+
+    def test_api_key_auth_with_no_key_is_refused_with_the_fix_and_nothing_queued(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        r = self._post(env)
+        assert r.status_code == 422, r.text
+        err = envelope(r)
+        assert err["code"] == "builder_credential_missing"
+        assert "ANTHROPIC_API_KEY" in err["message"] and '{"auth": "cli"}' in err["message"]
+        assert err["detail"] == {"builder": "claude_code", "auth": "api_key"}
+        assert jobs.enqueued == []  # refused at submit: nothing reached the queue
+
+    def test_a_rung_further_up_the_ladder_is_checked_too(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        r = self._post(
+            env,
+            builder="openai_agent",
+            model="gpt-oss-120b",
+            ladder=["r1", "claude_code:claude-opus-5"],
+        )
+        assert r.status_code == 422 and envelope(r)["code"] == "builder_credential_missing"
+        assert jobs.enqueued == []
+
+    def test_present_credentials_are_accepted_and_never_echoed(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        r = self._post(env)  # the placeholder key is present
+        assert r.status_code == 201 and "sk-ant-test-placeholder" not in r.text
+        # cli auth: a stored token file is enough — presence, not content
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))  # no `claude` on PATH either
+        monkeypatch.setenv("CRB_SECRETS_DIR", str(tmp_path / "secrets"))
+        r = self._post(env, builder_config={"auth": "cli"})
+        assert r.status_code == 422 and envelope(r)["detail"]["auth"] == "cli"
+        assert "claude setup-token" in envelope(r)["message"]
+        (tmp_path / "secrets").mkdir(mode=0o700)
+        token = tmp_path / "secrets" / "claude_code_oauth_token"
+        token.write_text("x" * 80, encoding="utf-8")
+        token.chmod(0o600)
+        r = self._post(env, builder_config={"auth": "cli"})
+        assert r.status_code == 201, r.text
+        assert "x" * 20 not in r.text
+
+    def test_an_openai_compatible_builder_with_no_key_is_refused_at_submit(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same class as run 8d9c5e55 on the other builders: ``openai_agent`` and
+        ``editblock`` refused only at build time, after the run was queued."""
+        monkeypatch.delenv("CEREBRAS_API_KEY")
+        for builder in ("openai_agent", "editblock"):
+            r = self._post(env, builder=builder, model="gpt-oss-120b")
+            assert r.status_code == 422, r.text
+            err = envelope(r)
+            assert err["code"] == "builder_credential_missing"
+            assert "CEREBRAS_API_KEY" in err["message"]
+            assert err["detail"] == {"builder": builder, "auth": "api_key"}
+        assert jobs.enqueued == []
+        monkeypatch.setenv("CEREBRAS_API_KEY", "csk-present")
+        r = self._post(env, builder="openai_agent", model="gpt-oss-120b")
+        assert r.status_code == 201 and "csk-present" not in r.text
+
+    def test_the_check_asks_for_the_variable_the_build_needs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from crb.builders.openai_client import (
+            MissingCredential,
+            credential_missing,
+            key_env,
+            make_chat,
+        )
+
+        monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+        name = key_env()
+        assert name in credential_missing()
+        # the key is checked before the client package is imported, so the build always
+        # fails naming the variable — never a generic error that proves nothing
+        with pytest.raises(MissingCredential) as caught:
+            make_chat("gpt-oss-120b")
+        assert name in str(caught.value)
+
+    @pytest.mark.parametrize("azure", [False, True])
+    def test_the_check_and_the_build_read_the_configured_endpoint(
+        self, monkeypatch: pytest.MonkeyPatch, azure: bool
+    ) -> None:
+        """``CRB_OPENAI_BASE_URL`` / ``CRB_OPENAI_KEY_ENV`` (and the Azure trio) configure
+        the OpenAI-compatible builders (docs/DEPLOYMENT.md). The submit-time check and the
+        builders both fell back to the Cerebras default instead, so an Azure or self-hosted
+        deployment was refused for a key it does not use, and built against Cerebras
+        (CodeRabbit, PR #57)."""
+        from crb.builders.editblock import EditBlockBuilder
+        from crb.builders.openai_agent import OpenAIAgentBuilder
+        from crb.builders.openai_client import (
+            MissingCredential,
+            credential_missing,
+            key_env,
+            make_chat,
+        )
+
+        for var in ("CEREBRAS_API_KEY", "VLLM_KEY", "AZ_KEY", "CRB_AZURE_ENDPOINT"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("CRB_OPENAI_BASE_URL", "https://vllm.internal/v1")
+        monkeypatch.setenv("CRB_OPENAI_KEY_ENV", "VLLM_KEY")
+        want, provider = "VLLM_KEY", "vllm.internal"
+        if azure:
+            monkeypatch.setenv("CRB_AZURE_ENDPOINT", "https://x.openai.azure.com")
+            monkeypatch.setenv("CRB_AZURE_KEY_ENV", "AZ_KEY")
+            monkeypatch.delenv("CRB_AZURE_DEPLOYMENT", raising=False)
+            # a half-configured Azure endpoint is refused by name, never a 500
+            assert "CRB_AZURE_" in credential_missing()
+            monkeypatch.setenv("CRB_AZURE_DEPLOYMENT", "gpt-oss")
+            want, provider = "AZ_KEY", "azure"
+        assert key_env() == want
+        assert want in credential_missing() and "CEREBRAS_API_KEY" not in credential_missing()
+        with pytest.raises(MissingCredential, match=want):
+            make_chat("gpt-oss-120b")
+        assert OpenAIAgentBuilder(model="gpt-oss-120b").provider == provider
+        assert EditBlockBuilder(model="gpt-oss-120b").provider == provider
+        monkeypatch.setenv(want, "present")
+        assert credential_missing() == ""
+
+    def test_no_caller_decides_the_endpoint_on_its_own(self) -> None:
+        """The class behind the endpoint bug, ratcheted: an OpenAI-compatible caller that
+        falls back to Cerebras itself (``… if endpoint else "cerebras"``, ``or
+        EndpointConfig()``) ignores the deployment's endpoint. Every caller asks
+        ``resolved_endpoint``."""
+        import re
+
+        from crb.builders import openai_client
+
+        pattern = re.compile(r'endpoint else "cerebras"|or EndpointConfig\(\)')
+        root = Path(openai_client.__file__).resolve().parents[1]  # src/crb
+        offenders = sorted(
+            str(p.relative_to(root))
+            for p in root.rglob("*.py")
+            if pattern.search(p.read_text(encoding="utf-8"))
+        )
+        assert offenders == []
+
+    def test_every_registered_builder_is_checked_or_exempt_by_name(self) -> None:
+        """A new builder cannot skip the submit-time check (P-003's class, ratcheted)."""
+        from crb.builders import _REGISTRY
+        from crb.server.routes.runs import CREDENTIAL_CHECKS, CREDENTIAL_EXEMPT
+
+        names = {*_REGISTRY, "fixture_gold"}
+        assert not set(CREDENTIAL_CHECKS) & set(CREDENTIAL_EXEMPT)
+        for name in names:
+            assert name in CREDENTIAL_CHECKS or name in CREDENTIAL_EXEMPT, name
+        assert all(why.strip() for why in CREDENTIAL_EXEMPT.values())
+
+    def test_the_stored_token_is_never_read_only_its_presence(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """PRESENCE ONLY: a stored token the process cannot read (mode 000), with every read
+        of the secrets directory made to raise, is still accepted — so a check that read the
+        secret would fail here."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
+        secrets = tmp_path / "secrets"
+        monkeypatch.setenv("CRB_SECRETS_DIR", str(secrets))
+        secrets.mkdir(mode=0o700)
+        token = secrets / "claude_code_oauth_token"
+        token.write_text("x" * 80, encoding="utf-8")
+        token.chmod(0o000)
+        real_open = Path.open
+
+        def guarded(self: Path, *a: Any, **kw: Any) -> Any:
+            if str(self).startswith(str(secrets)):
+                raise AssertionError(f"a secret was read: {self}")
+            return real_open(self, *a, **kw)
+
+        monkeypatch.setattr(Path, "open", guarded)
+        monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: guarded(self).read())
+        monkeypatch.setattr(Path, "read_bytes", lambda self: guarded(self, "rb").read())
+        try:
+            r = self._post(env, builder_config={"auth": "cli"})
+        finally:
+            token.chmod(0o600)
+        assert r.status_code == 201, r.text
+
+    def test_a_stored_token_others_can_read_is_refused_without_reading_it(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The build refuses a token file with group or world bits (``SecretsStore.get``:
+        ``chmod 0600 it``), so a ``0644`` token passed the submit-time check and then failed
+        every attempt as a model error — the P-003 failure the check exists to prevent
+        (CodeRabbit, PR #57). The check reads the file's mode, never its value."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
+        secrets = tmp_path / "secrets"
+        monkeypatch.setenv("CRB_SECRETS_DIR", str(secrets))
+        secrets.mkdir(mode=0o700)
+        token = secrets / "claude_code_oauth_token"
+        token.write_text("x" * 80, encoding="utf-8")
+        token.chmod(0o644)
+        real_open = Path.open
+
+        def guarded(self: Path, *a: Any, **kw: Any) -> Any:
+            if str(self).startswith(str(secrets)):
+                raise AssertionError(f"a secret was read: {self}")
+            return real_open(self, *a, **kw)
+
+        monkeypatch.setattr(Path, "open", guarded)
+        monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: guarded(self).read())
+        r = self._post(env, builder_config={"auth": "cli"})
+        assert r.status_code == 422, r.text
+        err = envelope(r)
+        assert err["code"] == "builder_credential_missing"
+        assert "chmod 0600" in err["message"] and "x" * 20 not in r.text
+        assert jobs.enqueued == []
+        token.chmod(0o600)
+        assert self._post(env, builder_config={"auth": "cli"}).status_code == 201
+
+    def test_a_build_free_kind_is_never_checked(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        login(env.client, "operator")
+        r = env.post("/runs", json={"repo": ALPHA, "kind": "mine"})
+        assert r.status_code == 201, r.text
+
+
 # --- budget + object rungs (C8) ------------------------------------------------------------
 
 
@@ -575,6 +819,24 @@ class TestBudgetLadder:
         r = env.post("/runs", json={"repo": ALPHA, "kind": "blind", **SONNET, "budget": {}})
         assert r.status_code == 201 and "budget" not in jobs.enqueued[-1].params_json
         assert r.json()["budget"] == {}
+
+    def test_spend_switches_are_stored_only_when_set_and_validated(
+        self, env: Env, jobs: FakeJobs
+    ) -> None:
+        """Stream K: ``budget_profile`` (opt-in) and ``escalation`` reach the worker as
+        ``params``; absent = the repository's setting, else the default."""
+        login(env.client, "operator")
+        body = {"repo": ALPHA, "kind": "blind", **SONNET}
+        r = env.post("/runs", json={**body, "budget_profile": "calibrated", "escalation": "always"})
+        assert r.status_code == 201, r.text
+        params = jobs.enqueued[-1].params_json
+        assert params["budget_profile"] == "calibrated" and params["escalation"] == "always"
+        r = env.post("/runs", json=body)
+        assert r.status_code == 201
+        assert {"budget_profile", "escalation"}.isdisjoint(jobs.enqueued[-1].params_json)
+        for bad in ({"budget_profile": "generous"}, {"escalation": "sometimes"}):
+            r = env.post("/runs", json={**body, **bad})
+            assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
 
     def test_object_rungs_stored_as_sent_and_echoed(self, env: Env, jobs: FakeJobs) -> None:
         """The blind budget sweep: one model, 25 → 50 → 100 tool calls, one attempt per
@@ -1022,3 +1284,18 @@ class TestSse:
             return [chunk async for chunk in gen]
 
         assert asyncio.run(drive()) == []  # no events for the running run; client went away
+
+
+def test_the_suite_never_sees_the_hosts_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P-037: the suite-wide pin makes ``claude_cli_on_path`` read ``False`` whatever this
+    machine has, so a ``cli``-auth run with no token is refused here exactly as on a bare CI
+    runner; a test that wants the CLI present says so, and is then accepted."""
+    from crb.builders import claude_code
+    from crb.builders.claude_code import credential_missing
+
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setenv("CRB_SECRETS_DIR", "/nonexistent-crb-secrets")
+    assert claude_code.claude_cli_on_path() is False
+    assert "no `claude` CLI on PATH" in credential_missing("cli", secrets_dir=Path("/nonexistent"))
+    monkeypatch.setattr(claude_code, "claude_cli_on_path", lambda: True)
+    assert credential_missing("cli", secrets_dir=Path("/nonexistent")) == ""

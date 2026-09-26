@@ -28,9 +28,11 @@ Navigation
 What it is:   The ``/runs`` API — create, list, inspect, cancel a run; its per-task table;
               its stored and streamed StepEvents.
 What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_config, retain,
-              outage_stop, preflight) into a queued ``Run`` row; serves run views with
-              counts re-derived from the ledger when the worker wrote none; streams events
-              as SSE with resume-by-seq; cancellation is a flag the worker honours.
+              outage_stop, preflight, budget_profile, escalation, checks, learning) into a
+              queued ``Run`` row, refusing at submit (422 ``builder_credential_missing``,
+              presence only) a run whose builder auth has no credential; serves run views
+              with counts re-derived from the ledger when the worker wrote none; streams
+              events as SSE with resume-by-seq; cancellation is a flag the worker honours.
 How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQLAlchemy
               queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
@@ -68,7 +70,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
+from crb.builders.claude_code import credential_missing as claude_code_credential_missing
+from crb.builders.claude_code import default_auth as claude_code_default_auth
 from crb.builders.claude_code import default_model as claude_code_default_model
+from crb.builders.openai_client import credential_missing as openai_credential_missing
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.observability.events import StepEvent, StepStatus
@@ -93,6 +98,7 @@ from crb.server.schemas import (
     RunTaskRow,
     StepEventOut,
 )
+from crb.server.secrets import secrets_dir_for
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 
@@ -576,6 +582,14 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["preflight"] = True
     elif isinstance(body.preflight, PreflightIn):
         params["preflight"] = body.preflight.model_dump()
+    if body.budget_profile is not None:
+        params["budget_profile"] = body.budget_profile
+    if body.escalation is not None:
+        params["escalation"] = body.escalation
+    if body.checks is not None and body.checks.overrides():
+        params["checks"] = body.checks.overrides()
+    if body.learning is not None:
+        params["learning"] = body.learning
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
@@ -590,6 +604,61 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params_json=params,
         actor=actor,
     )
+
+
+#: The builders whose credential ``POST /runs`` can check by presence, and how. Every
+#: registered builder is here or in :data:`CREDENTIAL_EXEMPT` —
+#: tests/test_server_routes_runs.py holds that, so a new builder cannot skip the check.
+CREDENTIAL_CHECKS: dict[str, Callable[..., str]] = {
+    "claude_code": claude_code_credential_missing,
+    "openai_agent": openai_credential_missing,
+    "editblock": openai_credential_missing,
+}
+#: Builders that need no credential, each with why.
+CREDENTIAL_EXEMPT: dict[str, str] = {
+    "fixture_gold": "the test-only fixture builder applies the gold diff and calls no model",
+}
+
+
+def run_builders(run: Run) -> list[str]:
+    """Every builder the run can call: the run's own and each rung's (a ``builder:model``
+    label or an object rung; ``rN`` labels are the run's own builder)."""
+    names = [run.builder] if run.builder else []
+    for entry in run.ladder_json or []:
+        if isinstance(entry, Mapping):
+            names.append(str(entry.get("builder", "")))
+        elif isinstance(entry, str) and ":" in entry:
+            names.append(entry.split(":", 1)[0])
+    return list(dict.fromkeys(n for n in names if n))
+
+
+def credential_refusal(run: Run, settings: Any) -> None:
+    """422 ``builder_credential_missing`` when a builder this run would call has no
+    credential for its auth — checked at submit so a run that can only fail is never
+    queued (docs/PREVENTION.md P-003: run 8d9c5e55 failed nine attempts at $0 on a default
+    ``api_key`` with no key). PRESENCE ONLY: nothing secret is read, returned or logged.
+    The API checks its own environment; the shipped compose and Helm give the API and the
+    worker the same credential environment."""
+    if run.kind not in BUILD_KINDS:
+        return
+    cfg = dict((run.params_json or {}).get("builder_config") or {})
+    for name in run_builders(run):
+        check = CREDENTIAL_CHECKS.get(name)
+        if check is None:
+            continue
+        auth = str(cfg.get("auth", "") or "")
+        why = check(auth, secrets_dir=secrets_dir_for(settings))
+        if why:
+            raise ApiError(
+                422,
+                "builder_credential_missing",
+                why + " — nothing was queued",
+                detail={
+                    "builder": name,
+                    "auth": auth.strip()
+                    or (claude_code_default_auth() if name == "claude_code" else "api_key"),
+                },
+            )
 
 
 @router.post(
@@ -620,6 +689,7 @@ def create_run(
         raise ApiError(422, "validation_error", f"{named} apply to factory runs only")
     api = require_jobs()
     run = new_run(body, actor=operator.id)
+    credential_refusal(run, settings)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the
         # evolutions chain, since an evolution registered in the same window changes what

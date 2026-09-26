@@ -1,0 +1,21 @@
+# The harness cause table (crb.core.prevention.harness_cause), pinned: expected<TAB>error.
+# One ordered table, first match wins. A new cause or a reordering changes a line here and
+# bumps crb.prevention.sig.v1. Errors are the shapes the product records (or a fixture of one).
+runner-tool-missing:jest	runner tool missing: jest — the node runner's test command starts with jest and node_modules/.bin/jest is absent
+runner-tool-missing:other	runner tool missing: frobnicate — not on PATH
+linter-unrunnable:ruff	lint: ruff could not run: No such file or directory
+linter-unrunnable:other	lint: linter could not run (a step errored)
+no-credential	model_error: ANTHROPIC_API_KEY not set — API key is not set for the api_key auth
+no-credential	builder unavailable: RuntimeError: no API key configured for provider openai
+runner-tool-missing:jest	sh: 1: jest: not found
+runner-tool-missing:npx	npx: command not found
+runner-tool-missing:pytest	executable 'pytest' was not found
+env-network:pip	pip install -e . failed: Could not resolve host: pypi.org (network is unreachable)
+env-network:npm	npm ERR! request to https://registry.npmjs.org failed, reason: getaddrinfo EAI_AGAIN (proxy)
+env-network:go	go: downloading example.com/mod: dial tcp: lookup proxy.golang.org: temporary failure in name resolution
+sandbox	SandboxUnavailable: the docker daemon is not reachable
+sandbox	container exited 137 before the tests ran
+timeout	grade timed out after 900 s
+timeout	TimeoutExpired: the runner took longer than 600s
+other	grader exception: KeyError: 'target'
+other	copy_back failed: OSError: disk full

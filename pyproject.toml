@@ -51,6 +51,8 @@ dev = [
   "mypy>=1.11",
   "import-linter>=2.0",
   "hypothesis>=6.100",
+  # the chart and compose suites parse rendered YAML (tests/test_deploy_secrets_store.py)
+  "pyyaml>=6.0",
 ]
 all = ["commit-replay-bench[openai,claude,server,postgres,mcp,dev]"]
 

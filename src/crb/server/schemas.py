@@ -42,7 +42,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, Query
 from pydantic import (
@@ -58,10 +58,12 @@ from pydantic import (
 
 from crb.builders.base import Budget
 from crb.core.capability import TIERS
+from crb.core.checks import RepoChecks
 from crb.core.git import CloneUrlError, validate_clone_url
 from crb.core.grade import MODES
 from crb.core.ledger import CELL_FIELDS
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RUNNERS, SIZE_TIER_NAMES
+from crb.core.spend import BUDGET_PROFILES, ESCALATION_POLICIES, validate_spend_config
 
 PAGE_DEFAULT = 50
 PAGE_MAX = 500
@@ -228,6 +230,28 @@ class _RepoConfigFields(BaseModel):
     runner_opts: dict[str, Any] | None = None
     sandbox_image: str | None = Field(default=None, max_length=512)
     mining: dict[str, int] | None = None
+    #: The repository's spend switches (``RepoConfig.spend``, crb.core.spend):
+    #: ``{"budget_profile": "default"|"calibrated", "escalation": "measured"|"always"}``.
+    #: A run's own ``budget_profile`` / ``escalation`` wins.
+    spend: dict[str, str] | None = None
+
+    @field_validator("spend")
+    @classmethod
+    def _spend_known(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        return None if v is None else validate_spend_config(v)
+
+    #: "Clean means working" switches for the repository (ADR-0024) — the one surface the
+    #: prevention loop writes: ``format_step``, ``finish_gate``, ``api_stable``, declared
+    #: ``commands`` / ``formatter``. Validated by ``crb.core.checks.RepoChecks``; a
+    #: change is a ``repo.updated`` event with its diff, like every config change.
+    checks: dict[str, Any] | None = None
+
+    @field_validator("checks")
+    @classmethod
+    def _checks_shape(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        if v is not None:
+            RepoChecks.from_config(v)  # ValueError → 422 with the reason
+        return v
 
     @field_validator("runner")
     @classmethod
@@ -533,6 +557,20 @@ class RunRetention(BaseModel):
     transcripts: bool = False
 
 
+class RunChecksIn(BaseModel):
+    """``params.checks`` — this run's override of the repository's switches (ADR-0024).
+    ``null`` / absent = the repository's value (itself OFF by default)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format_step: bool | None = None
+    finish_gate: bool | None = None
+    api_stable: bool | None = None
+
+    def overrides(self) -> dict[str, bool]:
+        return {k: v for k, v in self.model_dump().items() if v is not None}
+
+
 class PreflightIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -584,6 +622,28 @@ class RunCreateRequest(BaseModel):
     #: ``{fix, repair_turns}``. OFF when absent. A run with it on is recorded as the
     #: builder ``<name>+preflight`` — a different arm, never pooled with plain rows.
     preflight: bool | PreflightIn | None = None
+    #: Build kinds: ``calibrated`` runs each attempt under caps taken from the ledger's own
+    #: clean completions in its cell (p90 × 1.5, never below the run's caps, never above
+    #: twice them, only with ≥ 8 clean rows; crb.core.spend). Changes what the builder is
+    #: given, so OFF (``default``) unless asked; recorded on every row (``budget_profile``,
+    #: ``budget_calibration``, ``budget_tier``). ``None`` = the repository's ``spend`` setting.
+    budget_profile: str | None = None
+    #: Build kinds: ``measured`` (the default) stops a task climbing to the next rung where
+    #: that rung's prior escalations in the cell yielded under 10% clean (with ≥ 10 of them);
+    #: ``always`` climbs every rung. The decision and the rule are on the row.
+    #: ``None`` = the repository's ``spend`` setting, else ``measured``.
+    escalation: str | None = None
+    #: "Clean means working" for THIS run (ADR-0024): ``format_step`` (the repository's own
+    #: formatter before grading), ``finish_gate`` (the repository's checks as the brief's
+    #: checklist, verified, one repair turn) and ``api_stable`` (belt 6). Each overrides the
+    #: repository's ``checks`` block; absent = the repository's (OFF by default). Stored as
+    #: ``params.checks`` and every row records the resolved switches (``labels.checks``).
+    checks: RunChecksIn | None = None
+    #: The prevention loop (ADR-0020): ``"off"`` opts THIS run out of the repository's
+    #: learning switch — no playbook line, no overlay, rows stamped ``learn: off``. A run may
+    #: opt out, never in (the switch is the repository's, thrown by an operator). Stored as
+    #: ``params.learning`` only when set; the Phase B campaign's off arm uses it.
+    learning: Literal["off"] | None = None
     #: ``factory`` runs only: the frozen backlog this run is meant to work. When set it
     #: must equal the repo's ACTIVE backlog hash or the request is refused (409
     #: ``backlog_hash_mismatch``); the active hash is always stamped into
@@ -636,6 +696,20 @@ class RunCreateRequest(BaseModel):
                 )
         if len(json.dumps(v, ensure_ascii=False)) > BUILDER_CONFIG_MAX_BYTES:
             raise ValueError(f"builder_config exceeds {BUILDER_CONFIG_MAX_BYTES} bytes")
+        return v
+
+    @field_validator("budget_profile")
+    @classmethod
+    def _profile_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in BUDGET_PROFILES:
+            raise ValueError(f"budget_profile must be one of {BUDGET_PROFILES}")
+        return v
+
+    @field_validator("escalation")
+    @classmethod
+    def _escalation_known(cls, v: str | None) -> str | None:
+        if v is not None and v not in ESCALATION_POLICIES:
+            raise ValueError(f"escalation must be one of {ESCALATION_POLICIES}")
         return v
 
     @field_validator("mode")
@@ -1114,9 +1188,15 @@ class SignoffOut(BaseModel):
     #: The attestation was made on an earlier apparatus than the one this deployment reads
     #: at now: it stays on the record but lifts nothing (evidence expires when the
     #: apparatus changes — EVIDENCE-AND-CLAIMS §4); the Decisions inbox offers re-sign or
-    #: revoke. ``apparatus_current`` is the deployment's apparatus for comparison.
+    #: revoke. ``apparatus_current`` is the deployment's apparatus for comparison. A record
+    #: signed on a ``checks`` arm other than the one the repository's cells are read on now
+    #: is stale too (ADR-0024): ``checks_arm`` is the arm it was signed on (``off`` for a
+    #: record from before the switchboard) and ``checks_arm_current`` the repository's arm
+    #: now (``""`` for a record not tied to one repository).
     stale: bool = False
     apparatus_current: str = ""
+    checks_arm: str = ""
+    checks_arm_current: str = ""
     evidence: SignoffEvidence
     prev_hash: str
     row_hash: str

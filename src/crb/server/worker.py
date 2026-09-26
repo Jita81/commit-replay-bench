@@ -143,6 +143,7 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               delivery and the pull-request read), src/crb/server/reaper.py (the durable
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
+              tests/test_worker_spend.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py
@@ -188,6 +189,8 @@ from crb.builders.budget import budget_for_rung
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
+from crb.core.checks import ARM_OFF, RepoChecks
+from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
@@ -200,7 +203,7 @@ from crb.core.git import (
     redact_url,
 )
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED
-from crb.core.ledger import GradeRow, false_q1_total, is_outage_error
+from crb.core.ledger import GradeRow, false_q1_total, is_outage_error, rows_for_checks
 from crb.core.mine import MineOutcome, mine
 from crb.core.oracle.controls import (
     CONTROLS,
@@ -216,6 +219,8 @@ from crb.core.oracle.mutation import (
     aggregate_by_cell,
     score_task,
 )
+from crb.core.patches import PatchStore
+from crb.core.prevention import K_SECTION, W_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.redact import redact_and_cap
 from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
@@ -249,10 +254,18 @@ from crb.server.intake import (
     poll_repository,
     post_outcomes_to_tickets,
 )
+from crb.server.prevention_state import learning_snapshot, learning_tick
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
-from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
+from crb.server.routes.capability import (
+    CHECKS_CURRENT,
+    rows_for_apparatus,
+    rows_for_arm,
+    rows_for_mode,
+    signed_map,
+)
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
+from crb.server.spend import SpendHooks, build_spend_hooks, pack_turns
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -341,6 +354,9 @@ def _reaper_docker() -> str:
 #: Row labels the worker stamps per rung (``_RunLedger``). Hashed like every label.
 LABEL_BUDGET_TIER = "budget_tier"
 LABEL_RUNG_INDEX = "rung_index"
+#: An attempt that ran under a calibrated budget carries this (crb.core.spend) — its own
+#: ``budget_tier`` is then the record, not the rung's declared one.
+LABEL_BUDGET_PROFILE = "budget_profile"
 
 
 def budget_tier(budget: Budget) -> str:
@@ -444,6 +460,9 @@ class WorkerSettings:
     stale_after_s: float = 120.0
     kinds: tuple[str, ...] = ()
     keep_worktrees: bool = False
+    #: Keep every graded attempt's patch, redacted and content-addressed, under
+    #: ``<home>/evidence/patches`` (crb.core.patches) — ``CRB_RETENTION__PATCHES``.
+    store_patches: bool = True
     max_reclaims: int = 3
     #: The worker's own Prometheus exposition (J-TEL-1): every build / grade / cost series
     #: is recorded in THIS process, so the API's ``/metrics`` never carries them. Served by
@@ -567,7 +586,11 @@ class _RunLedger:
         extra = self._trial_labels.get(row.trial)
         if not extra:
             return row
-        return GradeRow(**{**row.fields(), "labels": {**row.labels, **extra}})
+        labels = {**row.labels, **extra}
+        if LABEL_BUDGET_PROFILE in row.labels and LABEL_BUDGET_TIER in row.labels:
+            # a calibrated attempt ran under its own caps: its tier is the record
+            labels[LABEL_BUDGET_TIER] = row.labels[LABEL_BUDGET_TIER]
+        return GradeRow(**{**row.fields(), "labels": labels})
 
     def _pack_body(self, pack_hash: str) -> dict[str, Any] | None:
         try:
@@ -1777,6 +1800,46 @@ class Worker:
                 raise ValueError(f"rung {i} ({rung.label}) has an invalid budget: {exc}") from exc
         return ladder
 
+    def _spend_hooks(
+        self,
+        ctx: RunContext,
+        ladder: EscalationLadder,
+        *,
+        mode: str,
+        repo_spend: Mapping[str, Any] | None = None,
+        checks_arm: str = ARM_OFF,
+    ) -> SpendHooks:
+        """The spend rules bound to this run from the ledger as it stands now (prior rows
+        only): the escalation gate and, when the run or the repository asks for
+        ``budget_profile: calibrated``, the per-attempt budget (crb.server.spend). A ledger
+        that cannot be read (a tampered row the core refuses to construct) measures
+        nothing: the rules then see no history — the ladder climbs as before and a
+        calibrated attempt keeps its floor — and the trace says why. ``repo_spend`` is the
+        repository's ``spend`` block under the prevention loop's overlay (the team's keys
+        win); ``None`` reads the configuration as stored. Only rows of the run's own
+        ``checks`` arm are read: a calibrated cap or an escalation yield never pools rows
+        graded with the format step or belt 6 set otherwise (ADR-0024)."""
+        try:
+            rows = rows_for_checks(self.ledger.rows(), checks_arm)
+        except Exception as exc:  # the rules are advisory spend, never a reason to fail a run
+            rows = []
+            ctx.emit(
+                "system",
+                "run.spend_history_unreadable",
+                status=StepStatus.ERROR,
+                error=f"{type(exc).__name__}: {exc}"[:300],
+            )
+        return build_spend_hooks(
+            rows=rows,
+            repo=ctx.run.repo,
+            mode=mode,
+            ladder=ladder,
+            params=ctx.params,
+            repo_spend=dict(ctx.config.spend if repo_spend is None else repo_spend),
+            tier_fn=budget_tier,
+            turns_for=lambda hashes: pack_turns(self.factory, hashes),
+        )
+
     @staticmethod
     def _budget(ctx: RunContext) -> Budget:
         """The run-level budget: the builder's defaults overlaid with ``params.budget``."""
@@ -1790,7 +1853,12 @@ class Worker:
         ctx.counts.update({"tasks": 0, "total": total, "rows": 0, "clean": 0})
         ladder = self._ladder(ctx)
         budget = self._budget(ctx)
-        rungs = trial_labels_for(ladder, budget)
+        # the prevention loop's snapshot (ADR-0020), taken once: every row of the run carries
+        # the switch, the changes in force and the overlay it ran under
+        learning = self._learning_snapshot(ctx)
+        rungs = {
+            k: {**v, **learning.run_labels()} for k, v in trial_labels_for(ladder, budget).items()
+        }
         retain = dict(p.get("retain") or {})
         runner = self._runner(ctx)
         executor = self._executor(ctx)
@@ -1805,6 +1873,21 @@ class Worker:
         # belt-5 pre-flight (adapter.Preflight): OFF unless the run asks; a run with it on is
         # a different arm (builder '<name>+preflight') and the apparatus stamp says so
         preflight = Preflight.from_params(p.get("preflight"))
+        # the loop's configuration levers (ADR-0020) reach the run through the same two
+        # surfaces a person writes — K's ``spend`` and W's ``checks`` — under the team's keys
+        # "clean means working" (ADR-0024): the run's switches over the repository's
+        # ``checks`` block — each OFF unless one of them says otherwise; stamped below
+        checks = resolve_checks(
+            RepoChecks.from_config(learning.config_section(W_SECTION, ctx.config.checks)),
+            p.get("checks"),
+        )
+        spend = self._spend_hooks(
+            ctx,
+            ladder,
+            mode=mode,
+            repo_spend=learning.config_section(K_SECTION, ctx.config.spend),
+            checks_arm=checks.arm,
+        )
         spec = RunSpec(
             run_id=run.id,
             config=ctx.config,
@@ -1819,6 +1902,7 @@ class Worker:
             timeout=ctx.timeout,
             corpus_sha=str(p.get("corpus_sha") or ""),
             policy_version=str(p.get("policy_version") or ""),
+            evaluate_api=checks.api_stable,
             keep_worktrees=bool(
                 p.get("keep_worktrees", retain.get("worktrees", self.settings.keep_worktrees))
             ),
@@ -1826,11 +1910,14 @@ class Worker:
                 "worker": self.worker_id,
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
+                "learning": learning.apparatus(),
                 **(
                     {"preflight": {"fix": preflight.fix, "repair_turns": preflight.repair_turns}}
                     if preflight is not None
                     else {}
                 ),
+                "spend": spend.apparatus(),
+                **({"checks": checks.to_dict()} if checks.any_on else {}),
                 # one entry per rung, in order: what climbed, under which tier
                 "ladder": [
                     {
@@ -1842,6 +1929,10 @@ class Worker:
                     for i, r in enumerate(ladder)
                 ],
             },
+            patch_store=PatchStore.under(self.evidence_dir)
+            if self.settings.store_patches
+            else None,
+            escalation_gate=spend.escalation_gate,
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
         build_fn = build_fn_for(
@@ -1861,6 +1952,10 @@ class Worker:
             container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
+            budget_for_task=spend.budget_for_task,
+            # absent label = every switch OFF under the default block (rows as before)
+            checks=checks if checks.any_on or not checks.repo.is_default else None,
+            learning=learning,
         )
         self._progress(ctx, 0, total)
 
@@ -1905,6 +2000,7 @@ class Worker:
         ctx.counts.update(counts)
         self._progress(ctx, summary.tasks, total)
         self._ledger_health()
+        self._learning_tick(run.repo)
         if tripped() and not self._cancelled(ctx):
             reason = (
                 f"provider outage: {streak['n']} consecutive attempts refused; "
@@ -1924,6 +2020,25 @@ class Worker:
             first = next((r.error for r in self.ledger.rows(run_id=spec.run_id) if r.error), "")
             return STATUS_FAILED, counts, f"all {summary.rows} attempt(s) errored: {first}"[:1000]
         return STATUS_SUCCEEDED, counts, ""
+
+    def _learning_snapshot(self, ctx: RunContext) -> LearningSnapshot:
+        """The prevention loop's snapshot for this run; a chain that cannot be read gives
+        ``learn: off`` — which is then true — and never stops the run."""
+        try:
+            return learning_snapshot(self.factory, ctx.run.repo, ctx.params)
+        except Exception as exc:
+            _LOG.warning(
+                "prevention: snapshot for %s unreadable (%s); learn=off", ctx.run.repo, exc
+            )
+            return empty_snapshot(ctx.run.repo)
+
+    def _learning_tick(self, repo: str) -> None:
+        """One tick of the repository's prevention loop after a build run; it never fails
+        the run (``learning_tick`` logs and returns)."""
+        try:
+            learning_tick(self.factory, self.home, repo)
+        except Exception as exc:  # belt and braces: learning_tick itself never raises
+            _LOG.warning("prevention: tick for %s failed: %s", repo, exc)
 
     def _ledger_health(self) -> None:
         try:
@@ -1987,13 +2102,21 @@ class Worker:
         Rows of ``run_id`` — THIS run's own graded builds — are excluded: the map that
         licenses a delivery is the map as it stood before the run, never one the run's own
         clean rows have nudged (B-1b finding 2: PR bodies said ``n=27`` where the freeze saw
-        26 → DL-045). Each decision also carries ``apparatus_versions`` for the record."""
+        26 → DL-045). Each decision also carries ``apparatus_versions`` for the record.
+
+        ADR-0024: only rows of the repository's own ``checks`` arm license a delivery — a
+        cell measured with the format step or belt 6 set otherwise never does."""
         cache: dict[str, dict[str, Any] | None] = {}
         computed: dict[str, bool] = {}
 
         def compute() -> None:
             before = (r for r in self.ledger.rows(repo=repo) if not run_id or r.run_id != run_id)
-            rows = rows_for_apparatus(rows_for_mode(before, "sighted"), "current")
+            rows = rows_for_arm(
+                self.factory,
+                repo,
+                rows_for_apparatus(rows_for_mode(before, "sighted"), "current"),
+                CHECKS_CURRENT,
+            )
             with self.factory() as s:
                 cmap, _ = signed_map(
                     rows, PROJECTION_CLASS_SIZE, s, repo, controls=latest_controls_verdict(s, repo)
@@ -2147,6 +2270,7 @@ class Worker:
             timeout=ctx.timeout,
             max_rework=int(p.get("max_rework", 1)),
             keep_workspaces=bool(retain.get("worktrees", False)),
+            keep_patches=self.settings.store_patches,
         )
         loop = FactoryLoop(spec, ctx.git, emitter=ctx.emitter)
         total = len(backlog.ordered())

@@ -16,7 +16,9 @@ What it does: Pins the health shape and its append-only probe (an UPDATE is prov
               never touches the sandbox (the A11 container) and ignores a false-Q1 ledger but
               fails when the database is gone; the metrics exposition (HTTP and ledger series;
               can be disabled); the version carrying apparatus and policy; and the settings view
-              requiring admin and redacting.
+              requiring admin and redacting; and that ``/health`` serves the served commits
+              (server, checkout, UI bundle) with a ``stale`` flag and a degraded ``build``
+              probe on any disagreement (docs/PREVENTION.md P-002).
 How:          ``create_app`` over a temp SQLite factory with probes patched at the function seam.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
@@ -77,6 +79,7 @@ PROBE_NAMES = {
     "toolchains",
     "builders",
     "worker",
+    "build",
 }
 
 
@@ -491,6 +494,7 @@ class TestHealth:
 
         for fn in ("probe_docker", "probe_toolchains", "probe_builders"):
             monkeypatch.setattr(f"crb.server.routes.system.probes.{fn}", _boom)
+        monkeypatch.setattr("crb.server.routes.system.build_stamp.probe_build", _boom)
         settings = make_settings(tmp_path, sandbox={"executor": "docker"})
         with caplog.at_level(logging.ERROR, logger="crb.observability.probes"):
             body = collect_health(_factory, settings, role="all", request_id="req-42")  # type: ignore[arg-type]
@@ -534,6 +538,73 @@ class TestHealth:
         r = client.get(f"{API_PREFIX}/health")
         rid = r.headers["X-Request-ID"]
         assert rid and _probe(r.json(), "db")["detail"] == failure_detail("db", rid)
+
+    def test_health_serves_the_served_commits_and_a_stale_flag(
+        self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P-002: the stack served code behind ``origin/main`` and a UI built from an older
+        tree still, and nothing said so. ``/health`` now serves the server's commit (captured
+        at start), the checkout's (now) and the bundle's (its build stamp) with ``stale``,
+        and the ``build`` probe reads degraded — never 503: stale code still serves."""
+        from crb.observability import build_stamp
+
+        a, b = "a" * 40, "b" * 40
+        monkeypatch.setattr(build_stamp, "process_commit", lambda: a)
+        monkeypatch.setattr(build_stamp, "checkout_commit", lambda root=None: a)
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+        stamp = dist / build_stamp.BUILD_STAMP_FILE
+        stamp.write_text(json.dumps({"commit": a}), encoding="utf-8")
+        settings = make_settings(tmp_path, ui_dist=str(dist))
+        with TestClient(create_app(settings, factory)) as c:
+            body = c.get(f"{API_PREFIX}/health").json()
+            assert body["served"] == {
+                "server_commit": a,
+                "checkout_commit": a,
+                "ui_commit": a,
+                "ui_stamp": "stamped",
+                "stale": False,
+                "reasons": [],
+            }
+            assert _probe(body, "build")["status"] == "ok"
+            # the bundle rebuilt from another tree: stale, with the fix in the sentence
+            stamp.write_text(json.dumps({"commit": b}), encoding="utf-8")
+            r = c.get(f"{API_PREFIX}/health")
+            assert r.status_code == 200 and r.json()["served"]["stale"] is True
+            build = _probe(r.json(), "build")
+            assert build["status"] == "degraded" and "rebuild it" in build["detail"]
+            # a `git pull` under a running server: the process still runs the old commit
+            stamp.write_text(json.dumps({"commit": a}), encoding="utf-8")
+            monkeypatch.setattr(build_stamp, "checkout_commit", lambda root=None: b)
+            served = c.get(f"{API_PREFIX}/health").json()["served"]
+            assert served["stale"] is True and "restart the server" in served["reasons"][0]
+
+    def test_health_reads_the_bundle_the_app_mounted_not_a_fresh_lookup(
+        self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The app picks its UI directory once, at start-up (``app.state.ui_dist``). The
+        probe looked the candidates up again, so a directory that stopped resolving after
+        start-up read as "no UI bundle served" while the mount still served it (CodeRabbit,
+        PR #57). The probe reads the mounted directory."""
+        from crb.observability import build_stamp
+
+        a, b = "a" * 40, "b" * 40
+        monkeypatch.setattr(build_stamp, "process_commit", lambda: a)
+        monkeypatch.setattr(build_stamp, "checkout_commit", lambda root=None: a)
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+        (dist / build_stamp.BUILD_STAMP_FILE).write_text(json.dumps({"commit": b}), "utf-8")
+        settings = make_settings(tmp_path, ui_dist=str(dist))
+        with TestClient(create_app(settings, factory)) as c:
+            assert c.get(f"{API_PREFIX}/health").json()["served"]["stale"] is True
+            # a fresh candidate lookup no longer finds a UI directory; the mount still serves
+            settings.ui_dist = str(tmp_path / "missing-dist")
+            ui = c.get("/")
+            assert ui.status_code == 200 and ui.text == "<html></html>"
+            served = c.get(f"{API_PREFIX}/health").json()["served"]
+            assert served["stale"] is True and served["ui_commit"] == b
 
     def test_health_needs_no_auth(self, client: TestClient) -> None:
         assert client.get(f"{API_PREFIX}/health").status_code == 200
@@ -727,7 +798,7 @@ class TestSettingsView:
             assert "oidc-secret-value-123" not in dumped
             # the UI shape (ui/src/api/types.ts `Settings`) …
             assert body["oidc_enabled"] is True
-            assert body["retention"] == {"transcripts_days": 7}
+            assert body["retention"] == {"transcripts_days": 7, "patches": True}
             assert body["sandbox_mode"] == "local"
             assert body["ledger_backend"] == "sqlite"
             assert body["apparatus_version"] and body["policy_version"]

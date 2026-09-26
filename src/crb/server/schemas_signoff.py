@@ -227,6 +227,8 @@ class SignoffPreviewEvidence(BaseModel):
     oracle_strength: float | None
     oracle: SignoffOracleOut
     apparatus_versions: list[str]
+    #: the ``checks`` arm the evidence is read on — the repository's own (ADR-0024)
+    checks_arm: str = ""
     belt_sets: list[str]
     model_n: int
     model_point: float | None

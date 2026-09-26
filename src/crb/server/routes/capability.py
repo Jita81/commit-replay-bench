@@ -27,12 +27,13 @@ Navigation
 What it is:   The ``/capability-map``, ``/routes`` and ``/failure-split`` route module — the
               product's central read: what the ledger licenses per cell.
 What it does: Loads the repo's rows as ``GradeRow`` (a false-Q1 row refuses to load →
-              409), filters to one mode and one apparatus (never pooled by default),
+              409), filters to one mode, one apparatus (never pooled by default) and one
+              ``checks`` arm (never pooled at all — the repository's own by default),
               reduces them under the ONE routing rule with the repo's latest controls
               verdict and task-level oracle scores, overlays active sign-offs at read time,
               and returns only MEASURED cells — absence is honest-empty.
-How:          ``rows_for_mode`` → ``rows_for_apparatus`` → ``signed_map`` (=
-              ``build_capability_map`` + ``apply_signoffs_to_map``) → ``cell_out`` per
+How:          ``rows_for_mode`` → ``rows_for_apparatus`` → ``rows_for_arm`` → ``signed_map``
+              (= ``build_capability_map`` + ``apply_signoffs_to_map``) → ``cell_out`` per
               measured cell; ``parse_by`` maps the ``?by=`` aliases onto ``CELL_FIELDS``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
@@ -46,7 +47,8 @@ Works with:   src/crb/core/capability.py (``build_capability_map``, ``Capability
               pull requests per cell, served as ``n_delivered`` / ``n_merged``),
               ui/src/screens/Capability (the map screen),
               docs/API.md#capability-routing-forecast-sign-off
-Tested by:    tests/test_server_routes_capability.py, tests/test_server_routes_signoffs.py
+Tested by:    tests/test_server_routes_capability.py, tests/test_server_routes_signoffs.py,
+              tests/test_checks_pooling.py
 Touch when:   never for a new repository; adding a cell-key field means ``BY_ALIASES`` here,
               ``CELL_FIELDS`` in src/crb/core/ledger.py, the schema and the UI type; changing
               the default ``mode`` / ``apparatus`` filter is a claims decision
@@ -61,7 +63,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 
 from fastapi import APIRouter, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.capability import (
     PROJECTION_CELL,
@@ -72,7 +74,8 @@ from crb.core.capability import (
     build_capability_map,
     trusted_autonomy_coverage,
 )
-from crb.core.ledger import CELL_FIELDS, GradeRow, failure_split
+from crb.core.checks import ARMS
+from crb.core.ledger import CELL_FIELDS, GradeRow, failure_split, rows_for_checks
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DELIVER, ControlsVerdict
 from crb.core.signoff import apply_signoffs_to_map
 from crb.core.spec import SIZE_TIER_NAMES
@@ -80,6 +83,7 @@ from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import DeliveryCounts, FactoryHome, delivery_counts_matching
+from crb.server.prevention_state import current_checks_arm
 from crb.server.routes.oracle import latest_controls_verdict, oracle_by_task, verdict_dict
 from crb.server.routes.repos import cached_profile, get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
@@ -126,6 +130,23 @@ def rows_for_apparatus(rows: Iterable[GradeRow], apparatus: str) -> list[GradeRo
         return rs
     want = APPARATUS_VERSION if apparatus in ("", "current") else apparatus
     return [r for r in rs if r.apparatus_version == want]
+
+
+#: ``?checks=`` beside an arm (``crb.core.checks.ARMS``): the repository's own arm, the
+#: default. There is no pooled view (ADR-0024).
+CHECKS_CURRENT = "current"
+#: The ``checks`` query's vocabulary, as a pattern.
+CHECKS_PATTERN = "^(" + "|".join((CHECKS_CURRENT, *ARMS)) + ")$"
+
+
+def rows_for_arm(
+    factory: sessionmaker[Session], repo: str, rows: Iterable[GradeRow], checks: str
+) -> list[GradeRow]:
+    """ADR-0024: a row graded with the format step or belt 6 on is never counted in a cell
+    with one graded without. ``current`` (the default) reads the arm the repository's next
+    run grades under — the arm its cells license delivery in; an arm word selects that one."""
+    arm = current_checks_arm(factory, repo) if checks == CHECKS_CURRENT else checks
+    return rows_for_checks(rows, arm)
 
 
 def rows_for_mode(rows: Iterable[GradeRow], mode: str) -> list[GradeRow]:
@@ -198,6 +219,7 @@ def split_out(c: CapabilityCell) -> FailureSplitOut:
         disqualified=c.n_disqualified,
         lint=c.stats.n_lint if c.stats is not None else 0,
         lint_evaluated=c.stats.n_lint_evaluated if c.stats is not None else 0,
+        api=c.stats.n_api if c.stats is not None else 0,
     )
 
 
@@ -253,11 +275,13 @@ def cell_out(
         n_disqualified=s.n_disqualified,
         n_lint=s.n_lint,
         n_lint_evaluated=s.n_lint_evaluated,
+        n_api=s.n_api,
         model_n=s.model_n,
         model_point=None if c.model_point is None else round(c.model_point, 4),
         model_ci_low=None if c.model_point is None else round(s.model_ci.low, 4),
         model_ci_high=None if c.model_point is None else round(s.model_ci.high, 4),
         failure_split=split_out(c),
+        checks_arm=s.checks_arm,
     )
 
 
@@ -297,11 +321,17 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     by: str | None = Query(default=None, max_length=128),
     mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
     apparatus: str = Query(default="current", max_length=32),
+    checks: str = Query(default=CHECKS_CURRENT, pattern=CHECKS_PATTERN),
 ) -> CapabilityMapWithControlsOut:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by)
-    rows = rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus)
+    rows = rows_for_arm(
+        factory,
+        repo,
+        rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus),
+        checks,
+    )
     controls = latest_controls_verdict(db, repo)
     cmap, n_signoffs = signed_map(rows, projection, db, repo, controls=controls)
     cells = [c for c in cmap.cells if c.measured]
@@ -354,11 +384,17 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
     by: str | None = Query(default=None, max_length=128),
     mode: str = Query(default="sighted", pattern="^(sighted|blind|all)$"),
     apparatus: str = Query(default="current", max_length=32),
+    checks: str = Query(default=CHECKS_CURRENT, pattern=CHECKS_PATTERN),
 ) -> RoutesWithControlsResponse:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by) if by else PROJECTION_CELL
-    rows = rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus)
+    rows = rows_for_arm(
+        factory,
+        repo,
+        rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus),
+        checks,
+    )
     controls = latest_controls_verdict(db, repo)
     cmap, _ = signed_map(rows, projection, db, repo, controls=controls)
     decisions: list[RouteDecisionWithControlsOut] = []
@@ -398,20 +434,26 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
     responses={401: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="The failure_kind split (and both rates) over a repo's rows, or one run's",
 )
-def failure_split_route(
+def failure_split_route(  # noqa: PLR0917 — FastAPI dependencies + query params
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
     repo: str = Query(min_length=1, max_length=64),
     run_id: str = Query(default="", max_length=32),
+    checks: str = Query(default=CHECKS_CURRENT, pattern=CHECKS_PATTERN),
 ) -> FailureSplitResponse:
     """``clean · builder_red · budget · protocol · harness`` (= n) + ``disqualified``
     over the repo's rows, or the run's when ``run_id`` is given, with the all-rows
     point and the model point side by side. An unknown ``run_id`` answers an empty
-    split (n = 0), never an invented one."""
+    split (n = 0), never an invented one. The repo-wide split reads one ``checks`` arm —
+    the repository's own by default (ADR-0024), so its clean rate never blends two
+    instruments beside per-arm cells; a run's split is its own rows, graded on the one arm
+    the run resolved, and ``checks`` does not filter it."""
     del viewer
     get_repo_or_404(db, repo)
     rows = list(DbLedger(factory).rows(repo=repo, run_id=run_id or None))
+    if not run_id:
+        rows = rows_for_arm(factory, repo, rows, checks)
     split = failure_split(rows)
     return FailureSplitResponse(repo=repo, run_id=run_id, **split.to_dict())
 
@@ -423,6 +465,7 @@ __all__ = [
     "controls_out",
     "parse_by",
     "router",
+    "rows_for_arm",
     "signed_map",
     "split_out",
 ]

@@ -47,6 +47,9 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
         if key.startswith("CRB_"):
             monkeypatch.delenv(key, raising=False)
+    # POST /runs refuses a builder whose key variable is unset (P-003): the OpenAI-compatible
+    # builders' key is PRESENT here — a placeholder, never a real key
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk-test-placeholder-not-a-key")
 
 
 @pytest.fixture
@@ -82,7 +85,12 @@ def jobs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
 
 
 class TestBuilderConfig:
-    def test_stored_under_params_and_served(self, env: Env, jobs: list[Run]) -> None:
+    def test_stored_under_params_and_served(
+        self, env: Env, jobs: list[Run], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # auth 'cli' is refused at submit without a credential (P-003); this case is about
+        # storage, so a PRESENT placeholder token (never a real one) — not the host's CLI.
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "placeholder-not-a-token")
         cfg = {"auth": "cli", "effort": "high", "extra_args": ["--x"], "keep_transcript": True}
         r = env.post(
             "/runs",
@@ -208,6 +216,9 @@ class TestClaudeCodeModelDefault:
         self, env: Env, jobs: list[Run], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("CRB_CLAUDE_CODE_MODEL", raising=False)
+        # the default auth is api_key, and POST /runs refuses one with no key (P-003): this
+        # case is about the model default, so the key is present — a placeholder, never real
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-placeholder-not-a-key")
         r = env.post("/runs", json={"repo": ALPHA, "kind": "replay", "builder": "claude_code"})
         assert r.status_code == 201, r.text
         assert r.json()["model"] == "claude-sonnet-5" and jobs[-1].model == "claude-sonnet-5"

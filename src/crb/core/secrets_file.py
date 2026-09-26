@@ -214,6 +214,12 @@ class SecretsStore:
             )
         return st
 
+    def stat_for_read(self, name: str) -> os.stat_result | None:
+        """The value file's metadata as :meth:`get` would judge it — ``None`` when absent,
+        :class:`SecretsInsecure` when :meth:`get` would refuse it — WITHOUT reading the
+        value. A presence check that must agree with the read uses this."""
+        return self._check_file_for_read(self.value_path(name))
+
     def ensure_dir(self) -> Path:
         """Create the directory 0700 when missing, then verify it is fit to write into."""
         if not self._dir.exists():

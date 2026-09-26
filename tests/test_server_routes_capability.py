@@ -220,6 +220,7 @@ class TestCapabilityMap:
                 "disqualified",
                 "lint_evaluated",
                 "outage",
+                "api",
             }
             assert c["capability_class"] != "*" and c["size"] != "*" and c["language"] == "*"
 
@@ -273,6 +274,7 @@ class TestCapabilityMap:
             "disqualified": 0,
             "outage": 0,
             "lint_evaluated": 0,  # the seed's repo configures no linter: belt 5 never evaluated
+            "api": 0,  # belt 6 is opt-in (ADR-0024): never switched on for the seed
         }
         assert c["n_builder_red"] == 2 and c["model_n"] == 40 and c["model_point"] == 0.95
         assert c["model_ci_low"] == c["ci_low"] and c["model_ci_high"] == c["ci_high"]
@@ -412,6 +414,7 @@ class TestCapabilityMap:
             "disqualified": 0,
             "outage": 0,
             "lint_evaluated": 0,
+            "api": 0,
         }
         assert c["point"] == 0.5 and c["model_n"] == 3 and c["model_point"] == round(2 / 3, 4)
         assert c["model_ci_low"] < c["model_point"] < c["model_ci_high"]
@@ -634,6 +637,7 @@ class TestFailureSplit:
             "",
             "builder_red",
             "lint",
+            "api",
             "budget",
             "protocol",
             "harness",

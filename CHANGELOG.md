@@ -8,6 +8,238 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-26 — the CodeRabbit review of the value merge (PR #57)
+
+- **Every attempt of a checks-on run carries its `checks` stamp**, including a refusal
+  before spend and a builder that raised or could not be built: `build_fn_for` has one exit
+  that stamps it, so no row of such a run reads as arm `off` (ADR-0024 §6; P-038).
+- **A repair that fails to reach the model keeps the first build's patch.** A 429 or a dead
+  credential on the finish gate's or the pre-flight's repair call no longer turns an
+  admissible attempt into a model error whose edits are discarded; the label says
+  `repair_error=model_error` (P-039). The gate's parent-commit baseline is measured once per
+  task and mode, not before every rung.
+- **One endpoint resolver.** The OpenAI-compatible builders, the labeller, the test author and
+  the submit-time credential check all read `CRB_OPENAI_BASE_URL` / `CRB_AZURE_*` through
+  `resolved_endpoint` (P-040). A stored Claude Code token with group or world bits is refused
+  at submit, as the build refuses it.
+- **The worker reads every shared settings block from an explicit environment**, derived from
+  the model, so `CRB_RETENTION__PATCHES=false` is honoured on that path (P-041).
+- `crb route` names its checks arm and exits 1 when the ledger has rows but none of that arm.
+  Capability cells carry `checks_arm`. `/health` compares the bundle the app mounted, and an
+  unstamped served bundle is stale even when the source commit is unknown. A kept patch is
+  written through its own temporary file. `checks.formatter` is validated in full. A
+  calibration floor must be positive. "Not only mergeable" no longer reads as a negation.
+  Review corrections commit their evidence events one by one. A prevention append that keeps
+  colliding is a 409, and a registration whose record failed is recorded on retry, never
+  registered twice. The three learning reports are in `docs/API.md` and `docs/OPERATOR.md`.
+- **The Helm chart refuses two placements that could not run.** With the default
+  ReadWriteOnce `secretsStore`, `api.nodeSelector`, `api.tolerations` and `api.affinity`
+  must equal the worker's, so the API can follow a worker on a dedicated, tainted pool,
+  whether a selector or node affinity keeps the worker there (P-046); a pod label
+  or annotation the chart sets can no longer be set again in `podLabels` / `podAnnotations`
+  (P-047). DEPLOYMENT §5 now backs up the secrets store or has the credentials supplied
+  again after a restore (P-048).
+
+### 2026-09-26 — conformance with the external assessment (§0 rules, §F conditions)
+
+- **A row graded with the format step or belt 6 on is never counted with one graded without.**
+  Each row's "clean means working" arm (`off`, `fmt`, `api`, `fmt,api`) is read from its
+  hashed `checks` stamp; `cell_stats` refuses a cell of two arms, and every reader picks one.
+  The map, `/routes`, the delivery gate, the Factory page's cell routes, the Learn plans, the
+  forecast and the review cells read the repository's own arm by default, and
+  `?checks=<arm>` or `--checks` reads another. The worker's calibrated budget and escalation
+  yield read the run's own arm, the scorecard keys its cells and routing by arm, and the
+  abstract export carries `off` rows only. No apparatus bump: a stamp and a read filter, as
+  ADR-0019 makes posture (ADR-0024 §6). The finish gate pools; it never changes a belt.
+- **A sign-off reads, stamps and lifts one checks arm.** The preview and `POST /signoffs`
+  measure the cell on the repository's own arm (a belt-6 row in scope was a 500 before), the
+  attested row must be of that arm, the record stamps it (schema `crb.signoff.v4`, the v3 body
+  frozen), and the overlay lifts only the cell of the arm it was signed on — a sign-off made
+  before a switch is listed as stale instead of lifting the new arm's cell. The scorecard's
+  headline (`/value`, `checks` in the response) and `/failure-split` read one arm too.
+- **SQLAlchemy 2.1: the eight result sites main annotated in #50 are annotated here too**, the
+  same text in the files this branch shares with main, so the types job passes on a fresh
+  install and the two changes meet without a conflict.
+- **ADR-0021 "working by construction" is ADR-0024**: PR #55 carries ADR-0021 (factory
+  review before delivery), ADR-0022 (intake approval) and PR #53 ADR-0023.
+- **The assessment's five "trustworthy when" conditions head the product's definition of
+  done beside the VALUE criteria**, each unmet with its gap (G-660 to G-664).
+
+### 2026-09-26 — the value merge's adversarial review: every finding fixed, every class stopped
+
+- **The loop cannot close a class it did not remove.** Displacement is measured against the
+  before window's non-target failure rate, so the same attempts failing as another class read
+  `displaced`, not `closed`; a class still recurring on tasks the change never reached (runs
+  opted out, or a team override) is never kept or closed; a quiet (`dormant`) class is never
+  given a lever, deterministic or not; a run's own `budget_profile` outranks the loop's switch
+  and its rows are never counted as exposed (ADR-0020 §6.6, §6.10, §6.14).
+- **Every ladder ends in a filed item, and only climbs.** A class no specific code item admits
+  (`lint`, `format`, `builder_red:no_source_change`, `harness:other`…) files
+  `item:prevent-class` when nothing the loop may apply is left, and a retired switch never
+  falls back to a playbook line (ADR-0020 §5, §9).
+- **No builder code reaches a brief as a "rule".** Each belt-5 rule parser reads a rule id only
+  where its tool prints one (ruff, tsc, clippy, checkstyle, standard), never from a message or
+  a source snippet.
+- **The scorecard reads what Learn reads.** `GET /value` hands the register the evidence
+  packs, so a `format:gofmt` class is the same class on both; the report names its review
+  source (`reviews_source: "store"`), serves `n_tasks` beside every attempt count, labels
+  `routing.deliver_working` as the proxy and serves deliver decisions by mode. Home's tile no
+  longer calls the per-pound range a 95% interval.
+- **`POST /runs` checks every builder's credential.** `openai_agent` and `editblock` with no
+  key are refused at submit like `claude_code`; every registered builder is checked or
+  exempt by name, and a test makes a read of the stored token fail.
+- **Belt 6 and the format step stay in their remit.** A Go `doc/` package is public API; a
+  stdlib or `__future__` import in a package `__init__.py` is not a re-export; a ruff the
+  repository's pin forbids never formats, and `cargo fmt` (crate-wide) is a named skip.
+- **Our own gates caught up.** Header width covers tests/ and ui/src by line identity;
+  "Works with" is ratcheted to three to eight entries with reasons; CI job names cover
+  `*.yaml` and unnamed matrix jobs; ADRs from 0020 on are wrapped and cite their decision-log
+  row (DL-054 added for ADR-0024). Nineteen classes are new rows in `docs/PREVENTION.md`
+  (P-018 to P-036).
+
+### 2026-09-25 — the value wave wired: a bug class meets a process lever, and the curve shows it
+
+- **The loop's configuration levers now reach a run.** `crb.server.prevention_state.mechanisms`
+  ships stream W's format step and finish gate and stream K's calibrated budget; the worker
+  resolves `RepoConfig.checks` and `RepoConfig.spend` under the loop's overlay (the team's own
+  keys still win, and a run may opt out with `learning: "off"`), so the row records the switch
+  it ran under (`labels.checks`, `labels.budget_profile`). None is on by default.
+- **The loop never applies a calibrated budget K's rule cannot set.** A budget class in a cell
+  with fewer than 8 clean completions is passed over as "cannot calibrate"; on the 2026-09-25
+  export that is click's sighted L cell [measured — n = 43 sighted first attempts in click;
+  method: `scripts/prevention_from_export.py` with K's calibration check; apparatus 2.2].
+- **The scorecard's learning curve reads the loop's register** (`crb.prevention.register.v1`,
+  behind `crb.core.value.default_register`); `GET /value` reads every repository's verified
+  chain and answers `409 prevention_chain_broken` when one does not verify.
+- **One definition each.** The loop's first attempt is the complement of K's escalated trial,
+  the formatter names cover every formatter W writes, and the five statuses are shared — each
+  pinned by `tests/test_value_wiring.py`.
+- The baseline page is recomputed with the merged code and gains today's register for cobra,
+  click and koa; its prose is now held to its own tables by a test (`docs/PREVENTION.md`
+  P-015).
+
+### 2026-09-25 — keep what we make, stop paying for nothing (value programme, stream K)
+
+- **Every graded attempt keeps its patch** (`crb.core.patches`, ADR-0006 amended): the
+  grader's own text, redacted, capped at 1 MiB, content-addressed under
+  `CRB_HOME/evidence/patches/` and named in the evidence pack; `GET /grades/{row_hash}/patch`
+  serves it with no retained worktree. The 2026-09-25 export had 0 of 190 clean patches
+  retrievable [measured — n = 618 exported rows, apparatus 2.0–2.2, method: each clean row's
+  retention reason]. `CRB_RETENTION__PATCHES=false` keeps none.
+- **A review's mergeable answer must agree with its words**: both review ledgers refuse
+  `mergeable_contradicts_statement` at append; `POST /reviews/corrections/mergeable` (admin)
+  appends a correction for a stored contradiction — the two found are never edited.
+- **Escalation stops where it does not pay** (default `escalation: measured`): a failed
+  attempt climbs only when that rung's earlier escalations in the cell came back clean at
+  least 1 in 10 times (n ≥ 10); the rule is on the row; `always` per run or per repository. On the
+  export, escalated retries returned 2 clean of 40 for $20.70 [measured — n = 40 valid r2/r3
+  rows, apparatus 2.0–2.2, method: the product's failure rule, `scripts/spend_from_export.py`].
+- **Opt-in calibrated budget** (`budget_profile: calibrated`, per run or per repository):
+  caps from the cell's clean completions (p90 × 1.5, floor the run's caps, ceiling twice
+  them, n ≥ 8), recorded on the row. Off until a paired comparison measures it.
+- `scripts/spend_from_export.py` recomputes the budget-stop and escalation numbers from a
+  ledger export with the product's own failure rule.
+### 2026-09-25 — "clean" means working, by construction (opt-in, ADR-0024)
+
+Of the clean patches a person has reviewed, 4 of 13 would have been merged **[measured —
+n = 13 reviewed clean patches, method: the review records and the cobra critical-friend
+review, apparatus 2.2]**; two of the reasons are mechanical. Three mechanisms, each OFF by
+default and recorded on every row it touches:
+
+- **The format step.** The repository's own formatter rewrites the changed source files
+  before grading, so the graded patch is the formatted one; skipped with a named reason when
+  the repository configures none (`labels.format_step`).
+- **The finish gate.** The repository's own checks go in the brief as a numbered checklist,
+  are re-run after the build, and one bounded repair call follows a failure; `done` needs them
+  to pass; a blind checklist that names the held-out oracle is refused before any spend
+  (`labels.finish_gate`).
+- **Belt 6 `api_stable`.** A patch that changes the public API of the code it touched (Go,
+  Python, JavaScript/TypeScript) in a way the maintainers' commit did not is not clean;
+  failure kind `api`; recorded as the hashed `api_stable` label, which the ledger checks.
+- **One switchboard.** `RepoConfig.checks` (written by `PUT /repos/{name}`, on the audit
+  trail) and `params.checks` per run; every row records the switches, their sources and the
+  configuration version (`labels.checks`). The prevention loop writes this surface.
+- **The runner-command audit** of the six live repositories fixed five detector gaps: a frozen
+  pre-commit ruff `rev` (click), a ruff outside the repository's pin now refuses instead of
+  judging (mesh-client), black check mode (mesh-client), eslint/stylelint `--max-warnings`
+  and stylelint itself (the NHS repositories), prettier on the files it formats
+  (`docs/reviews/2026-09-25-runner-commands-audit.md`).
+### 2026-09-25 — a bug is closed by prevention (ADR-0020, value wave stream L)
+
+The operator: "we should be learning from a bug and then going back to update our process or
+context to remove it moving forward." Every failure class a builder shows is now registered,
+given the strongest change it admits, and kept, retired or escalated by what the next first
+attempts show. Behind one per-repository switch, `learning.auto_apply`, which is **off** until
+an operator throws it; the apparatus stays 2.2.
+
+- **The register** (`crb.core.prevention`, `GET /learn/register`, `crb learn prevention`):
+  every class of a repository with its evidence on first attempts, the lever the loop would
+  choose and every lever it passed over, the change in force and its before → after with n
+  and the bar, one of five statuses and the next step.
+- **The rule** (`crb.prevention.rule.v1`): the before window is frozen at application;
+  exposure is read from the row's own labels; decisive n = `ceil(ln 0.025 / ln(1 − p0))`;
+  two looks; harm at the tenth attempt; closed on a zero run of `max(20, n)` with no
+  displacement; a quiet class with no change on record is dormant and never credited.
+- **The one rule**: the loop may switch on the formatter step, the finish gate and the
+  calibrated budget, and add up to seven checklist lines from closed templates — never a
+  grader key (`check_writable` refuses each by name). Lines never carry task text: held out
+  by task, leak-gated at injection, capped, and tested with canaries.
+- **The chain**: the loop's acts are hash-chained records in `learn.prevention.recorded`
+  system events (no table, no migration); every row records `learn`, `learn_changes`,
+  `learn_overlay`, `learn_lines`, `learn_dropped` and `learn_playbook`.
+- **Operator acts**: `PUT /learn/switch`, `POST /learn/tick`, `POST
+  /learn/changes/{id}/revert`, `POST /learn/items/{id}/register`, `POST /learn/links`; a run
+  may opt out with `POST /runs {learning: "off"}`. The Learn page's register card and a
+  `prevention` row in the Decisions inbox.
+- `scripts/prevention_from_export.py` builds the register over an exported ledger (the
+  export itself is never committed).
+### 2026-09-25 — the scorecard: working changes per pound, blind
+
+The operator asked for the product to produce working software and for its learning to get
+better the more data goes through it. This adds the number that says whether it does.
+
+- **`GET /value` and one Home tile.** `crb.core.value` computes working changes per pound on
+  blind attempts (blind clean rate × clean → working precision over every pound spent on blind
+  attempts, with the product of the two Wilson bounds as its range), clean → working precision
+  (a person's reviews first, every repository's reviews next, a labelled lint-and-interface
+  proxy last), the rows and pounds lost to budget, protocol, harness and outage, each bug
+  class's recurrence per window of attempts from prior data only, and how precise `deliver`
+  decisions were when made at the time. The register behind the curve is a stub until the
+  prevention loop is wired (`default_register`), and the response says so.
+- **The baseline, recomputed.** `scripts/value_baseline.py` runs the same report over an
+  exported ledger; `docs/reviews/2026-09-25-value-baseline.md` carries it: about 7% of blind
+  attempts would be merged, about one working change per £5 [measured — n = 94 valid blind
+  attempts × n = 13 reviewed clean patches; method: the report over the 2026-09-25 export;
+  apparatus 2.2]. The page is on the claims gate.
+- **VALUE heads the definition of done.** A new product category, first in `product.md`, whose
+  open criteria outrank every other in the order of work; the checker refuses a product
+  artefact where it is not first.
+### 2026-09-25 — our own bugs are closed by prevention, not by a fix alone
+
+The product's loop now has one rule — learn from a bug, then change the process or the context
+so its class cannot recur — and we build the product by the same rule (`docs/dod/STANDARD.md`
+§7). `docs/PREVENTION.md` is our own bug register: each bug's class, when it bit us, and the
+artefact that FAILS if the class comes back; `scripts/dod_check.py` refuses a row closed by
+prose or by a reference that cannot fail, and the new pull-request template asks for the row.
+Each artefact below was proved by breaking it and watching its test fail.
+
+- **A CI job name can no longer outgrow a required check** (P-001):
+  `tests/test_ci_job_names.py` renders every job name in every workflow, matrix values
+  expanded, and fails at 100 characters.
+- **The stack says when it serves stale code** (P-002): `/health` serves the commit the server
+  was started from, the checkout's and the UI bundle's (`ui/vite.config.ts` now writes
+  `build-stamp.json`; an image carries `CRB_SOURCE_COMMIT`) as `served` with `stale`, and a
+  degraded `build` probe; `crb doctor` fails when the bundle is not the code and warns when the
+  checkout trails `origin/main`.
+- **A run that can only fail is refused at submit** (P-003): `POST /runs` answers 422
+  `builder_credential_missing` with the fix when a `claude_code` rung's auth has no credential
+  — a presence check that never reads a secret — and the Runs dialog shows it.
+- **A missing runner tool is caught before the builder is paid** (P-004): an attempt whose
+  test command cannot start (`jest` missing) is refused with `runner tool missing: <tool>`
+  before any builder call.
+- Two bugs this wave made in its own work are registered with their artefacts (P-011, a
+  namespace package's `__file__`; P-012, header lines over 100 columns — a ratchet).
+
 ### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
 
 SQLAlchemy 2.1.1 reached PyPI on 2026-09-25, and the `server` extra's `sqlalchemy>=2.0` has

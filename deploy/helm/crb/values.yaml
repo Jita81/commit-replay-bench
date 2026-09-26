@@ -75,6 +75,28 @@ config:
 extraEnv: []
 
 # ---------------------------------------------------------------------------------------
+# The secrets store (CRB_SECRETS_DIR = /srv/crb-secrets/store). The api WRITES it (Settings →
+# Claude Code login, the tracker token) and checks it when a run is submitted; the worker
+# READS it at build time. Both pods mount this ONE claim — never give them separate volumes:
+# a token only the api can see passes the submit check and fails every build
+# (docs/PREVENTION.md P-043). A credential in existingSecret (ANTHROPIC_API_KEY,
+# CLAUDE_CODE_OAUTH_TOKEN) reaches both pods through the environment and needs no store.
+secretsStore:
+  # A claim you manage (e.g. ReadWriteMany on Azure Files, EFS or NFS). Empty = the chart
+  # makes <release>-crb-secrets, which `helm uninstall` removes.
+  existingClaim: ""
+  size: 1Gi
+  storageClassName: ""
+  # ReadWriteOnce works with any storage class but attaches to one node, so the chart pins
+  # the api and the worker pods to one node (a required pod affinity, added to any
+  # api.affinity / worker.affinity you set). The render then refuses an api.nodeSelector,
+  # api.tolerations or api.affinity that differs from the worker's: a worker on a tainted
+  # pool (by selector or node affinity) the api cannot follow would leave one pod pending
+  # (P-046). ReadWriteMany lifts the pin. Back the claim up,
+  # or supply the credentials again after a restore (docs/DEPLOYMENT.md §5).
+  accessMode: ReadWriteOnce
+
+# ---------------------------------------------------------------------------------------
 postgresql:
   # external: CRB_DATABASE_URL in the existing Secret points at a managed server
   #           (Azure Database for PostgreSQL Flexible Server with a private endpoint, …).

@@ -113,7 +113,13 @@ from crb.server.intake import (
     needs_credential,
     poll_repository,
 )
-from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
+from crb.server.routes.capability import (
+    CHECKS_CURRENT,
+    rows_for_apparatus,
+    rows_for_arm,
+    rows_for_mode,
+    signed_map,
+)
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.runs import append_system_event, system_trace_id
@@ -952,9 +958,13 @@ def list_tasks(
 def _cell_routes(db: DbDep, factory: SessionFactoryDep, repo: str) -> dict[str, CellRouteOut]:
     """``class|size`` → the map's decision, from exactly the reading the worker's delivery
     gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows on the current
-    apparatus, the repo's latest controls verdict, sign-offs overlaid."""
-    rows = rows_for_apparatus(
-        rows_for_mode(DbLedger(factory).rows(repo=repo), "sighted"), "current"
+    apparatus in the repository's own ``checks`` arm (ADR-0024), the repo's latest controls
+    verdict, sign-offs overlaid."""
+    rows = rows_for_arm(
+        factory,
+        repo,
+        rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), "sighted"), "current"),
+        CHECKS_CURRENT,
     )
     cmap, _ = signed_map(
         rows, PROJECTION_CLASS_SIZE, db, repo, controls=latest_controls_verdict(db, repo)

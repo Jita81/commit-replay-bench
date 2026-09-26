@@ -95,6 +95,9 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
         if key.startswith("CRB_"):
             monkeypatch.delenv(key, raising=False)
+    # POST /runs refuses a builder whose key variable is unset (P-003): the OpenAI-compatible
+    # builders' key is PRESENT here — a placeholder, never a real key
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk-test-placeholder-not-a-key")
 
 
 @pytest.fixture

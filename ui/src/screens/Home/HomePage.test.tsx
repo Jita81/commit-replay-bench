@@ -19,7 +19,10 @@
  *               "Incomplete" and no App with a URL repository "Optional"; that the degraded
  *               sandbox is an "Important" banner linking to Deployment (J-HEL-5), and that
  *               the cost statement and "Why two people" are present; and that every
- *               element carries a hint whose copy opens on hover (the task-5 status tag).
+ *               element carries a hint whose copy opens on hover (the task-5 status tag); and
+ *               that the north-star tile shows working changes per £ with n, its range in
+ *               pounds and its apparatus, reads every repository, and is an honest empty tile
+ *               when unmeasured or refused.
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -239,6 +242,47 @@ describe('HomePage', () => {
     expect(screen.queryByRole('region', { name: 'Important' })).not.toBeInTheDocument()
     // the first press goes to choosing a repository, never to an empty Decisions
     expect(screen.getByRole('link', { name: 'Continue to task 2: Choose a repository' })).toHaveAttribute('href', '/connect')
+  })
+
+  it('the north star tile shows working changes per £ with its n, its range in pounds and its apparatus, and opens its hint', async () => {
+    const ns = { label: 'working changes per pound, blind', per_pound: 0.2063, per_pound_low: 0.0581, per_pound_high: 0.5433, pounds_per_working: 4.85, pounds_per_working_low: 1.84, pounds_per_working_high: 17.21, working_rate: 0.072, working_rate_low: 0.02, working_rate_high: 0.19, working_estimate: 6.77, n_attempts: 260, n_valid: 94, n_tasks: 37, clean: 22, clean_tasks: 15, clean_rate: { k: 22, n: 94, point: 0.234, ci_low: 0.16, ci_high: 0.329 }, precision_basis: 'review', precision: { k: 4, n: 13, point: 0.308, ci_low: 0.127, ci_high: 0.576 }, spend_usd: 44.3, spend_gbp: 32.81, usd_per_gbp: 1.35, method: 'estimate' }
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
+      'GET /value': { schema: 'crb.value.v1', repo: null, apparatus: '2.2', apparatus_versions: ['2.2'], pooled: false, rows: 518, usd_per_gbp: 1.35, north_star: ns, learning_curve: { source: 'crb.prevention.register.v1', attempts: 278, register: { source: 'crb.prevention.register.v1', n_classes: 29, closed: 0, closed_share: 0 } } },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    const tile = await screen.findByTestId('tile-value')
+    await waitFor(() => expect(tile).toHaveTextContent('0.21 per £'))
+    expect(tile).toHaveTextContent('n =94')
+    expect(tile).toHaveTextContent('apparatus 2.2 · blind · estimate')
+    // the range is the product of two Wilson bounds: never labelled a 95% interval (P-027)
+    expect(tile).toHaveTextContent('range 0.06–0.54 per £ (the product of two 95% Wilson bounds, not itself a 95% interval)')
+    expect(tile).not.toHaveTextContent('95% range')
+    // n counts attempts; the tasks under them say how independent they are (P-025)
+    expect(tile).toHaveTextContent('n = 94 attempts on 37 tasks')
+    expect(tile).toHaveTextContent('about £4.85 per working change')
+    expect(tile).toHaveTextContent('precision from reviews (n = 13)')
+    // the deployment's north star: every repository, never scoped to the kicker's repository
+    expect(calls.find((c) => c.path === '/value')?.url).not.toContain('repo=')
+    await expectHintOpens(tile, 'stat.home.value')
+  })
+
+  it('an unmeasured or refused north star is an honest empty tile, never a zero', async () => {
+    const empty = { label: 'x', per_pound: null, per_pound_low: null, per_pound_high: null, pounds_per_working: null, pounds_per_working_low: null, pounds_per_working_high: null, working_rate: null, working_rate_low: null, working_rate_high: null, working_estimate: null, n_attempts: 0, n_valid: 0, clean: 0, clean_rate: { k: 0, n: 0, point: null, ci_low: null, ci_high: null }, precision_basis: 'none', precision: { k: 0, n: 0, point: null, ci_low: null, ci_high: null }, spend_usd: 0, spend_gbp: 0, usd_per_gbp: 1.35, method: 'estimate' }
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
+      'GET /value': { schema: 'crb.value.v1', repo: null, apparatus: '2.2', apparatus_versions: [], pooled: false, rows: 0, usd_per_gbp: 1.35, north_star: empty, learning_curve: { source: 's', attempts: 0, register: { source: 's', n_classes: 0, closed: 0, closed_share: null } } },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    const tile = await screen.findByTestId('tile-value')
+    await waitFor(() => expect(tile).toHaveTextContent('No blind attempt with a precision yet'))
+    expect(tile).not.toHaveTextContent('0.00')
+    vi.unstubAllGlobals()
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /repos': { items: [], total: 0, limit: 500, offset: 0 }, 'GET /value': () => envelope(409, 'false_q1_refused', 'x') })
+    renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getAllByTestId('tile-value').at(-1)).toHaveTextContent('Not available: the API refused the scorecard.'))
   })
 
   it('every task tag, the kicker, the summary, the banner and Continue carry a hint; the Measure tag opens on hover with the registry copy', async () => {

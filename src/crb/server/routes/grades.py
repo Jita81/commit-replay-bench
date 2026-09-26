@@ -13,6 +13,12 @@ still go through ``GradeRow`` and therefore refuse with ``409 false_q1_refused``
 SHA-256 of the body equals the key it was stored under (and, for a native pack, its
 own ``pack_hash`` field).
 
+Kept patches (ADR-0006 amendment of 2026-09-25). Every graded attempt keeps its patch at
+grade time (:mod:`crb.core.patches`): redacted, capped, content-addressed under
+``<home>/evidence/patches`` and named in the pack's ``notes.patch``. ``/grades/{row_hash}/patch``
+serves those kept bytes FIRST (``X-CRB-Patch-Source: store``) — no worktree needed — and
+falls back to a retained worktree only for a row that kept none.
+
 Retained artefacts (ADR-0006 amendment). A run queued with ``retain.worktrees`` /
 ``retain.transcripts`` leaves the graded worktree under the worker's scratch and the
 redacted transcript under ``<home>/transcripts/<run>``; nothing is stored twice.
@@ -38,19 +44,23 @@ What it does: Serves ledger rows exactly as stored (column by column, without th
               procedure and says in headers whether it still hashes to the pack's anchor;
               refuses any transcript reference outside the transcripts directory.
 How:          Filtered ``select(Grade)`` pages → ``grade_to_dict``; ``retained_status``
-              decides reachability with a reason per artefact; ``build_retained_patch`` =
-              ``retained_patch_text`` → hash → redact → cap → headers.
+              decides reachability with a reason per artefact (the kept patch first);
+              ``kept_patch`` reads ``notes.patch`` → ``PatchStore.get``;
+              ``build_retained_patch`` = ``retained_patch_text`` → hash → redact → cap → headers.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/core/ledger.py (``GradeRow`` field order = ``ROW_FIELDS``),
-              src/crb/core/evidence.py (``verify_pack``, canonical hashing),
+              src/crb/core/evidence.py (``verify_pack``, canonical hashing; ``pack_diff_sha256``
+              in src/crb/core/review.py is the review's anchor),
               src/crb/core/workspace.py (``diff_stats`` — the procedure the patch route
-              must match byte-for-byte), src/crb/core/review.py (``pack_diff_sha256``, the
-              anchor), src/crb/server/routes/reviews.py (attests to the served patch),
+              must match byte-for-byte), src/crb/core/patches.py (the kept patch it serves
+              first), src/crb/server/routes/reviews.py (attests to the served patch),
               src/crb/server/routes/ledger.py (reuses ``grade_to_dict`` for verify / export),
-              ui/src/screens/Runs (the evidence drill-down), docs/API.md#tasks--grades--evidence
-Tested by:    tests/test_server_routes_grades.py, tests/test_server_routes_reviews.py
+              ui/src/screens/Runs (the evidence drill-down; its contract is
+              docs/API.md#tasks--grades--evidence)
+Tested by:    tests/test_server_routes_grades.py, tests/test_server_routes_reviews.py,
+              tests/test_patches.py
 Touch when:   never for a new repository; when ``Workspace.diff_stats`` changes how it
               assembles the hashed text (``retained_patch_text`` must change identically —
               the reviews test is the drift guard); when ``GradeRow`` gains a field (the
@@ -74,6 +84,7 @@ from sqlalchemy.orm import Session
 from crb.core.evidence import canonical_json, sha256_text, verify_pack
 from crb.core.git import GitError, GitRepo
 from crb.core.ledger import GradeRow
+from crb.core.patches import PatchStore, kept_patch_note
 from crb.core.redact import redact
 from crb.core.review import pack_diff_sha256
 from crb.core.spec import TaskSpec
@@ -103,7 +114,11 @@ HDR_VERIFIED = "X-CRB-Patch-Verified"  # the two are equal
 HDR_REDACTED = "X-CRB-Redacted"  # redaction changed the served bytes
 HDR_TRUNCATED = "X-CRB-Truncated"  # the cap changed the served bytes
 HDR_SERVED_SHA = "X-CRB-Served-SHA256"  # what the served bytes hash to
+HDR_SOURCE = "X-CRB-Patch-Source"  # "store" (kept at grade time) | "worktree" (retained)
 PATCH_MEDIA_TYPE = "text/x-diff; charset=utf-8"
+#: Where a served patch came from.
+SOURCE_STORE = "store"
+SOURCE_WORKTREE = "worktree"
 
 #: The hashed body of a row, in ``GradeRow`` field order (``labels`` is stored as ``labels_json``).
 ROW_FIELDS: tuple[str, ...] = tuple(GradeRow.__dataclass_fields__)
@@ -323,10 +338,11 @@ class RetainedPatch:
     def served_sha256(self) -> str:
         return sha256_text(self.body)
 
-    def headers(self) -> dict[str, str]:
+    def headers(self, source: str = SOURCE_WORKTREE) -> dict[str, str]:
         """The hash check as response headers, so a client can trust (or not) the body
         without re-reading the pack."""
         return {
+            HDR_SOURCE: source,
             HDR_DIFF_SHA: self.diff_sha256,
             HDR_PATCH_SHA: self.patch_sha256,
             HDR_SERVED_SHA: self.served_sha256,
@@ -351,6 +367,41 @@ def build_retained_patch(
     if truncated:
         body = raw[:cap].decode("utf-8", errors="ignore")
     return RetainedPatch(diff_sha256, full_hash, body, redacted, truncated)
+
+
+def kept_patch(home: Path, pack: dict[str, Any] | None) -> tuple[RetainedPatch | None, str]:
+    """The patch kept at grade time (crb.core.patches) for ``pack``, as a
+    :class:`RetainedPatch`, or ``(None, reason)``. The stored bytes must hash to the
+    ``stored_sha256`` the pack recorded (the store refuses anything else); ``verified`` is
+    the pack's diff anchor equal to the full text's hash the pack recorded — for a red
+    attempt with no diff anchor the pack's own record is the anchor."""
+    note = kept_patch_note(pack)
+    stored = str(note.get("stored_sha256", "") or "")
+    if not note:
+        return (
+            None,
+            "the evidence pack kept no patch (written before patches were kept, or the store is off)",
+        )
+    if not stored:
+        return (
+            None,
+            f"the patch could not be kept at grade time: {note.get('error', 'no hash recorded')}",
+        )
+    data = PatchStore.under(home / "evidence").get(stored)
+    if data is None:
+        return None, "the kept patch is missing or no longer hashes to the name the pack recorded"
+    anchor = pack_diff_sha256(pack) if pack else ""
+    full = str(note.get("sha256", "") or "")
+    return (
+        RetainedPatch(
+            diff_sha256=anchor or full,
+            patch_sha256=full,
+            body=data.decode("utf-8", errors="replace"),
+            redacted=bool(note.get("redacted")),
+            truncated=bool(note.get("truncated")),
+        ),
+        "",
+    )
 
 
 def _grade_by_hash(session: Session, row_hash: str) -> Grade:
@@ -411,6 +462,21 @@ def retained_status(session: Session, home: Path, g: Grade) -> RetainedArtefactS
     diff_sha = pack_diff_sha256(pack) if pack else ""
     wt, tr = _run_retention(session, g.run_id)
     root = _worktree_of(home, g)
+    kept, kept_reason = kept_patch(home, pack)
+    if kept is not None:
+        tpath, treason = _transcript_file(home, _transcript_ref(pack))
+        return RetainedArtefactStatus(
+            row_hash=g.row_hash,
+            run_id=g.run_id,
+            retain_worktrees=wt,
+            retain_transcripts=tr,
+            patch_available=True,
+            patch_reason="",
+            transcript_available=tpath is not None,
+            transcript_reason=treason,
+            diff_sha256=kept.diff_sha256,
+            extra={"patch_source": SOURCE_STORE},
+        )
     if pack is None:
         patch_ok, patch_reason = (
             False,
@@ -434,6 +500,8 @@ def retained_status(session: Session, home: Path, g: Grade) -> RetainedArtefactS
         patch_ok, patch_reason = False, "the retained directory is not a git worktree"
     else:
         patch_ok, patch_reason = True, ""
+    if not patch_ok and pack is not None:
+        patch_reason = f"{patch_reason}; {kept_reason}"
     tpath, treason = _transcript_file(home, _transcript_ref(pack))
     return RetainedArtefactStatus(
         row_hash=g.row_hash,
@@ -445,7 +513,7 @@ def retained_status(session: Session, home: Path, g: Grade) -> RetainedArtefactS
         transcript_available=tpath is not None,
         transcript_reason=treason,
         diff_sha256=diff_sha,
-        extra={"worktree": str(root)} if patch_ok else {},
+        extra={"worktree": str(root), "patch_source": SOURCE_WORKTREE} if patch_ok else {},
     )
 
 
@@ -469,12 +537,13 @@ def get_grade_retained(
         401: _ERR,
         404: _ERR,
     },
-    summary="The retained worktree's unified diff (computed on demand, redacted, ≤ 1 MiB); headers carry the hash check",
+    summary="The attempt's unified diff — kept at grade time, else from a retained worktree (redacted, ≤ 1 MiB); headers carry the hash check",
 )
 def get_grade_patch(row_hash: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> Response:
     del viewer
     g = _grade_by_hash(db, row_hash)
-    status = retained_status(db, Path(settings.home), g)
+    home = Path(settings.home)
+    status = retained_status(db, home, g)
     if not status.patch_available:
         raise ApiError(
             404,
@@ -482,7 +551,14 @@ def get_grade_patch(row_hash: str, viewer: ViewerDep, db: DbDep, settings: Setti
             status.patch_reason,
             detail={"reason": status.patch_reason, **status.model_dump(exclude={"extra"})},
         )
-    root = _worktree_of(Path(settings.home), g)
+    if status.extra.get("patch_source") == SOURCE_STORE:
+        pack_row = db.get(EvidencePackRow, g.evidence_pack_hash)
+        kept, _ = kept_patch(home, dict(pack_row.body_json or {}) if pack_row else None)
+        if kept is not None:
+            return Response(
+                content=kept.body, media_type=PATCH_MEDIA_TYPE, headers=kept.headers(SOURCE_STORE)
+            )
+    root = _worktree_of(home, g)
     try:
         patch = build_retained_patch(root, status.diff_sha256)
     except GitError as exc:
@@ -532,6 +608,7 @@ __all__ = [
     "HDR_PATCH_SHA",
     "HDR_REDACTED",
     "HDR_SERVED_SHA",
+    "HDR_SOURCE",
     "HDR_TRUNCATED",
     "HDR_VERIFIED",
     "PATCH_MAX_BYTES",
@@ -541,6 +618,7 @@ __all__ = [
     "evidence_out",
     "grade_out",
     "grade_to_dict",
+    "kept_patch",
     "pack_verified",
     "retained_patch_text",
     "retained_status",

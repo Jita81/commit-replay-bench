@@ -11,7 +11,10 @@
  *               unsigned structural gap on a factory item is a row for the approver, that
  *               a review verdict of accept-with-edit / reject is a rework row, that a clean
  *               build with no PR whose last event is `delivery.refused` is "delivery
- *               withheld", that an unmeasured cell (n = 0) never appears, and the order.
+ *               withheld", that an unmeasured cell (n = 0) never appears, the order, and
+ *               the prevention loop's rows: a filed item nobody registered is "a prevention
+ *               needs an owner" for an operator, a reopened class and a change retired for
+ *               harm are rows anyone may read — each linking to the class on the Learn page.
  * How:          Plain unit tests over hand-built map cells, sign-offs and factory tasks.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
@@ -22,6 +25,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { CapabilityCell, FactoryTask, Signoff } from '../../api/types'
+import { REGISTER } from '../Learn/register.fixture'
 import { decisionsFor, evidenceStats } from './decisions'
 
 function cell(over: Partial<CapabilityCell>): CapabilityCell {
@@ -87,5 +91,30 @@ describe('decisionsFor', () => {
     ])
     expect(rows[0]).toMatchObject({ role: 'approver', act: 'Sign a gap', href: '/factory?repo=alpha&item=I-1', evidence: 'method_path, response_shape' })
     expect(rows[0]?.title).toBe('I-1 Divide is blocked on 2 structural gaps')
+  })
+
+  it('a prevention with no owner is a decision', () => {
+    const rows = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], register: REGISTER })
+    const prev = rows.filter((r) => r.kind === 'prevention')
+    // two unregistered items that can go on the backlog; the product-scoped one never becomes a row
+    expect(prev).toHaveLength(2)
+    expect(prev.every((r) => r.act === 'Register' && r.role === 'operator')).toBe(true)
+    expect(prev.map((r) => r.href)).toContain('/learn?repo=alpha&class=protocol%3Anetwork%3Ago%20mod#prevention')
+    expect(prev.some((r) => r.title.includes('Record a command'))).toBe(false)
+    expect(prev[0]?.title).toMatch(/^A prevention needs an owner — /)
+    // once registered, it is no longer waiting on anybody
+    const registered = { ...REGISTER, entries: REGISTER.entries.map((e) => ({ ...e, proposals: e.proposals.map((p) => ({ ...p, registered: { registered_id: p.item_id } })) })) }
+    expect(decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], register: registered }).filter((r) => r.kind === 'prevention')).toHaveLength(0)
+  })
+
+  it('a reopened class is a decision', () => {
+    const e = REGISTER.entries[0]!
+    const reopened = { ...REGISTER, entries: [{ ...e, proposals: [], qualifiers: ['reopened'], history: [...e.history, { kind: 'decided', record_id: 'r9', row_hash: '9'.repeat(64), created: '', actor: 'loop', on_behalf_of: 'op-1', summary: 'harm' }] }] }
+    const rows = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], register: reopened })
+    expect(rows.map((r) => [r.title, r.act, r.role])).toEqual([
+      ['A change for protocol:network:go mod was retired for harm', 'Read why', 'viewer'],
+      ['protocol:network:go mod reopened after it was closed', 'Read why', 'viewer'],
+    ])
+    expect(rows[0]?.href).toBe('/learn?repo=alpha&class=protocol%3Anetwork%3Ago%20mod#prevention')
   })
 })

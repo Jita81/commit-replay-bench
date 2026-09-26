@@ -200,6 +200,11 @@ worker:
   sandbox: { mode: dind }
   nodeSelector: { crb.dev/pool: worker }
   tolerations: [{ key: crb.dev/worker, operator: Exists, effect: NoSchedule }]
+# the default secretsStore claim (ReadWriteOnce) puts the api on the worker's node, so the api
+# needs the same placement; the chart refuses a difference (§3.2)
+api:
+  nodeSelector: { crb.dev/pool: worker }
+  tolerations: [{ key: crb.dev/worker, operator: Exists, effect: NoSchedule }]
 networkPolicy:
   postgres: { cidrs: ["10.10.1.4/32"] }        # Flexible Server private endpoint
   modelEndpoint: { cidrs: ["10.10.2.4/32"] }   # Azure OpenAI private endpoint
@@ -228,7 +233,26 @@ seccomp, no service-account token mount, default-deny NetworkPolicy for every cr
 explicit allowlists (DNS; ingress-controller → api; api/worker/migrate → PostgreSQL;
 worker → model endpoint; api → OIDC), resource requests/limits on every container, a
 `Recreate` strategy for the worker (it owns its RWO work volume), and a PVC with
-`helm.sh/resource-policy: keep` so worktrees survive an uninstall.
+`helm.sh/resource-policy: keep` so worktrees survive an uninstall. The stored credentials
+(Settings → Claude Code login, the tracker token) live in `secretsStore`: one claim that the
+API, which writes them and checks them when a run is submitted, and the worker, which reads
+them at build time, both mount at `CRB_SECRETS_DIR` (`/srv/crb-secrets/store`). The default
+ReadWriteOnce claim pins both pods to one node; name a ReadWriteMany claim of your own
+(`secretsStore.existingClaim`, `secretsStore.accessMode: ReadWriteMany`) to lift the pin.
+Because of the pin, the api must be able to run wherever the worker runs: with a
+ReadWriteOnce claim the chart refuses to render unless `api.nodeSelector`,
+`api.tolerations` and `api.affinity` are the same as `worker.nodeSelector`,
+`worker.tolerations` and `worker.affinity`. Affinity counts as placement: a worker kept on
+its pool by required node affinity (rather than a node selector) would otherwise follow an
+api scheduled on a general node that its own rule forbids, and stay pending; pod affinity
+and pod anti-affinity can forbid a node in the same way. The chart compares your values
+before it adds its own pin. A worker on the dedicated, tainted pool of §4.4 therefore takes
+the api with it (the example in §3.1), or the store moves to a ReadWriteMany claim on a file system that keeps POSIX
+permissions (the store refuses a directory that its group can read).
+The claim has no `keep` policy, so a stored credential does not outlive the release.
+The chart also refuses an `api.podLabels`, `worker.podLabels`, `api.podAnnotations` or
+`worker.podAnnotations` key that it sets itself (the pin's `crb.dev/secrets-store` label,
+the selector labels, `checksum/config`): the pod would carry the key twice.
 
 ### 3.3 PostgreSQL
 
@@ -373,8 +397,17 @@ bound (2 CPU / 2 GB per sandbox by default): size the pool for the concurrency y
 ## 5. Backup and restore
 
 State: the database (everything that matters, including the append-only `grades` /
-`events` / `signoffs` / `evidence` tables) and the worker's work volume (reproducible from
-the repositories; convenient to keep).
+`events` / `signoffs` / `evidence` tables), the worker's work volume (`worker.workDir`;
+reproducible from the repositories, convenient to keep) and the secrets store
+(`secretsStore`: the stored Claude Code login and the tracker token, §3.2).
+
+* **Secrets store**: choose one of two, and write the choice down.
+  * Back the claim up with a volume snapshot (or a copy of `/srv/crb-secrets/store`) held
+    with the same protection as the Kubernetes Secret — it holds live credentials — and
+    restore it before the api and the worker start.
+  * Or do not back it up, and after a restore supply the credentials again before any run:
+    Settings → Claude Code login, and the tracker token. Until then a run whose builder needs
+    the Claude Code login is refused when it is submitted.
 
 * **Managed PostgreSQL**: PITR is the primary backup; take a logical `pg_dump -Fc` before
   every upgrade and monthly for off-platform retention.
@@ -388,9 +421,9 @@ the repositories; convenient to keep).
   `crb ledger verify` walks the core JSONL ledger at `$CRB_HOME/ledger.jsonl`, not the
   database — it cannot prove a database copy.
 
-Restore order: database (on an *empty* target) → work volume → `migrate` (no-op at head; it
-re-asserts the triggers) → api/worker → ledger verify → the `migrations` and `append_only`
-probes on `/api/v1/health`.
+Restore order: database (on an *empty* target) → work volume → secrets store (restored, or
+supplied again once the api is up) → `migrate` (no-op at head; it re-asserts the triggers) →
+api/worker → ledger verify → the `migrations` and `append_only` probes on `/api/v1/health`.
 
 ### 5.1 Backup and restore (SQLite)
 

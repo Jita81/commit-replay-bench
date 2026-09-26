@@ -62,7 +62,8 @@ What it does: Constructs rows that cannot be clean with a failed belt, without a
               pack, or under a belt set their apparatus could not have recorded; chains each
               row to the previous one by SHA-256 and verifies a chain; names why every
               non-clean row failed by ONE rule; reduces rows to a cell's ``n``, clean count,
-              Wilson interval, failure split and false-Q1 count (which must read 0).
+              Wilson interval, failure split and false-Q1 count (which must read 0); refuses
+              to reduce rows of two ``checks`` arms to one cell and keeps one arm on request.
 How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to a row and
               pins its failure kind and cost-known labels → ``GradeRow.__post_init__``
               asserts the invariants → ``JsonlLedger.append`` chains on the last row's hash
@@ -70,15 +71,17 @@ How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to
               ``failure_split`` / ``cell_stats`` group eligible rows by ``CellKey``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
-Works with:   src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
+              docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0024-working-by-construction.md
+Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
+              src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
               src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
               src/crb/store/ledger.py (the database ledger — same rows, same chain),
               src/crb/core/routing.py (consumes CellStats), src/crb/core/capability.py (the
               map built from the rows), src/crb/core/legacy.py (census import — the only
               writer of v3-legacy rows), src/crb/core/stats.py (the Wilson interval)
 Tested by:    tests/test_ledger.py, tests/test_store_ledger.py, tests/test_census_gate.py,
-              tests/test_run.py
+              tests/test_run.py, tests/test_grade_api_belt.py, tests/test_checks_pooling.py
 Touch when:   never for a new repository; adding a belt, a failure kind, a cell-key field or a
               hashed label changes what the chain commits to — needs an ADR, an apparatus bump
               (src/crb/core/version.py), a store migration (as
@@ -103,8 +106,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, arm_from_label
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
 from crb.core.grade import (
+    BELT_API_STABLE,
     BELT_NAMES,
     CORE_BELT_NAMES,
     OPTIONAL_BELT_NAMES,
@@ -181,6 +186,9 @@ FAILURE_BUILDER_RED = "builder_red"
 #: The model wrote WORKING but NON-CONFORMING code: belts 1–4 held and only belt 5
 #: (the repository's own formatter/linter) rejected the changed files (ADR-0011).
 FAILURE_LINT = "lint"
+#: The model wrote WORKING code that CHANGES THE PUBLIC API in a way the maintainers' own
+#: commit did not: belts 1–4 held and belt 6 ``api_stable`` (opt-in, ADR-0024) failed.
+FAILURE_API = "api"
 #: The builder's :class:`Budget` was exhausted (wall clock, turns, tool calls, tokens or
 #: cost) before it finished — neither the model failing nor an instrument error.
 FAILURE_BUDGET = "budget"
@@ -203,6 +211,7 @@ FAILURE_KINDS: tuple[str, ...] = (
     FAILURE_CLEAN,
     FAILURE_BUILDER_RED,
     FAILURE_LINT,
+    FAILURE_API,
     FAILURE_BUDGET,
     FAILURE_PROTOCOL,
     FAILURE_HARNESS,
@@ -242,7 +251,7 @@ def is_outage_error(error: str) -> bool:
 
 #: The kinds where the model finished and was judged on its own terms (the
 #: denominator of ``model_point`` together with clean).
-MODEL_FAILURE_KINDS: tuple[str, ...] = (FAILURE_BUILDER_RED, FAILURE_LINT)
+MODEL_FAILURE_KINDS: tuple[str, ...] = (FAILURE_BUILDER_RED, FAILURE_LINT, FAILURE_API)
 #: The kinds that are the INSTRUMENT's doing (the model never got a fair attempt).
 INSTRUMENT_FAILURE_KINDS: tuple[str, ...] = (FAILURE_PROTOCOL, FAILURE_HARNESS)
 
@@ -271,10 +280,21 @@ COST_UNKNOWN_MARK = "cost unknown"
 LABEL_FAILURE_KIND = "failure_kind"
 LABEL_COST_KNOWN = "cost_known"
 LABEL_STOP_REASON = "stop_reason"
+#: Belt 6 (ADR-0024) is recorded as this hashed label — ``true`` / ``false`` / ``none``
+#: (switched on, not evaluated) — and is absent when the belt was switched off.
+LABEL_API_STABLE = BELT_API_STABLE
+#: The belt-6 findings as one compact line (``kind:unit:symbol;…``, capped).
+LABEL_API_FINDINGS = "api_findings"
 
 
 class LedgerIntegrityError(RuntimeError):
     """The hash chain does not verify."""
+
+
+class ChecksArmsPooled(ValueError):
+    """Rows graded under two ``checks`` arms reached one cell (ADR-0024): a row graded with
+    the format step or belt 6 on answers a different question from one graded without, so
+    a reader must choose one arm (:func:`rows_for_checks`) before it reduces a cell."""
 
 
 @dataclass(frozen=True)
@@ -337,6 +357,7 @@ def derive_failure_kind(
     builder_error: str = "",
     stop_reason: str = "",
     lint_only: bool = False,
+    api_only: bool = False,
 ) -> str:
     """THE rule that names why a row is not clean. Deterministic; first match wins.
 
@@ -353,10 +374,14 @@ def derive_failure_kind(
        a linter that could not run)
     5. ``stop_reason`` in :data:`BUDGET_STOP_REASONS`       → ``budget``
        (the attempt was cut short by its own Budget; the belts judged a partial patch)
-    6. ``lint_only`` — belts 1–4 all ``True`` and belt 5
+    6. ``api_only`` — belts 1–4 all ``True`` and belt 6
+       ``False`` (opt-in, ADR-0024)                          → ``api``
+       (the model wrote working code that changes the public API in a way the
+       maintainers' own commit did not)
+    7. ``lint_only`` — belts 1–4 all ``True`` and belt 5
        ``False``                                            → ``lint``
        (the model wrote working code the repository's own linter rejects)
-    7. otherwise                                            → ``builder_red``
+    8. otherwise                                            → ``builder_red``
        (the builder finished on its own terms and the belts failed it)
 
     Instrument causes come before ``budget`` because an errored grade is not a
@@ -364,6 +389,9 @@ def derive_failure_kind(
     ``builder_red`` because a patch the model never finished is not evidence the
     model cannot finish it; ``lint`` is named only when the code otherwise works —
     a patch that fails a core belt is ``builder_red`` whatever the linter said.
+    ``api`` outranks ``lint`` when both belts failed: a formatter fixes a lint finding
+    mechanically, while an API break changes what callers compile against and needs a
+    person or a repair turn — the row names the more serious reason.
     ``protocol`` outranks ``harness``: a refusal happened first and is the reason
     the row exists.
     """
@@ -379,9 +407,20 @@ def derive_failure_kind(
         return FAILURE_OUTAGE if is_outage_error(error) else FAILURE_HARNESS
     if stop_reason in BUDGET_STOP_REASONS:
         return FAILURE_BUDGET
+    if api_only:
+        return FAILURE_API
     if lint_only:
         return FAILURE_LINT
     return FAILURE_BUILDER_RED
+
+
+def api_only_failure(belts: Mapping[str, Any]) -> bool:
+    """``True`` iff belts 1–4 all held and belt 6 rejected — the ``api`` kind's input.
+    ``belts[BELT_API_STABLE]`` may be a bool (a grade) or the row label's string."""
+    value = belts.get(BELT_API_STABLE)
+    return (value is False or value == "false") and all(
+        belts.get(b) is True for b in CORE_BELT_NAMES
+    )
 
 
 def lint_only_failure(belts: Mapping[str, Any]) -> bool:
@@ -519,6 +558,13 @@ class GradeRow:
         """Belts 1–4 held and belt 5 rejected (the ``lint`` failure kind)."""
         return lint_only_failure({b: getattr(self, b) for b in self.recorded_belts()})
 
+    def api_only(self) -> bool:
+        """Belts 1–4 held and belt 6 — recorded as the ``api_stable`` label — rejected
+        (the ``api`` failure kind)."""
+        belts: dict[str, Any] = {b: getattr(self, b) for b in self.recorded_belts()}
+        belts[BELT_API_STABLE] = self.labels.get(LABEL_API_STABLE)
+        return api_only_failure(belts)
+
     def assert_invariants(self) -> None:
         """The write-time gate (ADR-0001, ADR-0002): false-Q1 = 0, no pack ⇒ no Q1, a
         pinned ``failure_kind`` that agrees with ``clean`` / ``disqualified``, a
@@ -537,6 +583,12 @@ class GradeRow:
             if not self.evidence_pack_hash:
                 raise FalseQ1Violation(
                     f"ledger refuses clean row {self.task_id[:10]}: no evidence pack (no pack ⇒ no Q1)"
+                )
+            # belt 6 lives in a label (ADR-0024): a clean row that records it failed is a
+            # false-Q1 by the one route the column checks above cannot see
+            if self.labels.get(LABEL_API_STABLE) == "false":
+                raise FalseQ1Violation(
+                    f"ledger refuses clean row {self.task_id[:10]}: belt 6 api_stable=false"
                 )
         kind = self.labels.get(LABEL_FAILURE_KIND)
         if kind is not None:
@@ -578,6 +630,16 @@ class GradeRow:
 
     # --- derived classification --------------------------------------------------
     @property
+    def checks_arm(self) -> str:
+        """The arm this row pools in (ADR-0024): read from its hashed ``checks`` stamp and
+        belt 6's own label — ``off`` for a row graded with neither grader-side switch on,
+        which is every row written before the switchboard."""
+        return arm_from_label(
+            self.labels.get(LABEL_CHECKS, ""),
+            belt6_recorded=LABEL_API_STABLE in self.labels,
+        )
+
+    @property
     def stop_reason(self) -> str:
         """The builder's stop reason when the row recorded it (new rows), else ``""``."""
         return self.labels.get(LABEL_STOP_REASON, "")
@@ -605,6 +667,7 @@ class GradeRow:
             builder_error=self.labels.get("builder_error", ""),
             stop_reason=self.stop_reason,
             lint_only=self.lint_only(),
+            api_only=self.api_only(),
         )
 
     @property
@@ -754,6 +817,9 @@ def grade_row_from_result(
         builder_error=builder_error,
         stop_reason=stop_reason,
         lint_only=lint_only_failure(result.belts.to_dict()),
+        api_only=api_only_failure(
+            {**result.belts.to_dict(), BELT_API_STABLE: result.belts.api_stable}
+        ),
     )
     cost_known = derive_cost_known(
         cost_usd=b.cost_usd,
@@ -817,8 +883,20 @@ def grade_row_from_result(
                 else {}
             ),
             **({LABEL_STOP_REASON: stop_reason} if stop_reason else {}),
+            **_api_labels(result),
         },
     )
+
+
+def _api_labels(result: GradeResult) -> dict[str, str]:
+    """Belt 6's hashed labels — only when the belt was switched on for the grade."""
+    run = result.api_run
+    if run is None:
+        return {}
+    out = {LABEL_API_STABLE: run.label}
+    if run.findings:
+        out[LABEL_API_FINDINGS] = run.summary()
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -981,6 +1059,8 @@ class FailureSplit:
     cost_unknown: int
     lint: int = 0
     lint_evaluated: int = 0
+    #: Belt 6 (opt-in, ADR-0024): working code that changed the public API unlike the gold.
+    api: int = 0
     #: Provider outages (usage limit, 429, dead credential): the call never happened.
     #: Counted over all rows, outside ``n`` — like ``disqualified``.
     outage: int = 0
@@ -988,7 +1068,7 @@ class FailureSplit:
     def __post_init__(self) -> None:
         # the split must partition n exactly: a kind that is dropped or double-counted
         # would let a rate be quoted over a denominator nobody can reconstruct
-        kinds = self.clean + self.builder_red + self.lint + self.budget + self.protocol
+        kinds = self.clean + self.builder_red + self.lint + self.api + self.budget + self.protocol
         if self.n != kinds + self.harness:
             raise ValueError("a FailureSplit's n must equal the sum of its eligible kinds")
 
@@ -1005,7 +1085,7 @@ class FailureSplit:
     @property
     def model_n(self) -> int:
         """Rows where the model finished and was judged on its own terms."""
-        return self.clean + self.builder_red + self.lint
+        return self.clean + self.builder_red + self.lint + self.api
 
     @property
     def model_point(self) -> float:
@@ -1028,6 +1108,7 @@ class FailureSplit:
             "clean": self.clean,
             "builder_red": self.builder_red,
             "lint": self.lint,
+            "api": self.api,
             "budget": self.budget,
             "protocol": self.protocol,
             "harness": self.harness,
@@ -1069,6 +1150,7 @@ def failure_split(rows: Iterable[GradeRow]) -> FailureSplit:
         cost_unknown=sum(1 for r in eligible if not r.cost_known),
         lint=kinds[FAILURE_LINT],
         lint_evaluated=sum(1 for r in eligible if r.repo_lint_clean is not None),
+        api=kinds[FAILURE_API],
         outage=sum(1 for r in rs if r.failure_kind == FAILURE_OUTAGE),
     )
 
@@ -1106,6 +1188,10 @@ class CellStats:
     model_ci: Interval = field(default_factory=lambda: Interval(0.0, 1.0))
     n_lint: int = 0
     n_lint_evaluated: int = 0
+    #: belt 6 (opt-in, ADR-0024): working code that changed the public API unlike the gold
+    n_api: int = 0
+    #: The ``checks`` arm every row of the cell was graded under (ADR-0024) — one, always.
+    checks_arm: str = ARM_OFF
 
     @property
     def n_disqualified(self) -> int:
@@ -1137,6 +1223,7 @@ class CellStats:
             "apparatus_versions": list(self.apparatus_versions),
             "n_builder_red": self.n_builder_red,
             "n_lint": self.n_lint,
+            "n_api": self.n_api,
             "n_budget": self.n_budget,
             "n_protocol": self.n_protocol,
             "n_harness": self.n_harness,
@@ -1147,6 +1234,7 @@ class CellStats:
             "model_point": round(self.model_point, 4),
             "model_ci_low": round(self.model_ci.low, 4),
             "model_ci_high": round(self.model_ci.high, 4),
+            "checks_arm": self.checks_arm,
         }
 
 
@@ -1157,6 +1245,13 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
     rs = list(rows)
     if not rs:
         raise ValueError("cell_stats needs at least one row")
+    arms = sorted({r.checks_arm for r in rs}, key=ARMS.index)
+    if len(arms) > 1:
+        raise ChecksArmsPooled(
+            f"one cell holds rows graded under the checks arms {', '.join(arms)}: a row graded "
+            "with the format step or belt 6 on is a different measurement from one graded "
+            "without (ADR-0024) — choose one arm with rows_for_checks before reducing a cell"
+        )
     cell = rs[0].cell
     eligible = [r for r in rs if r.eligible]
     n = len(eligible)
@@ -1194,7 +1289,18 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         model_ci=split.model_ci,
         n_lint=split.lint,
         n_lint_evaluated=split.lint_evaluated,
+        n_api=split.api,
+        checks_arm=arms[0],
     )
+
+
+def rows_for_checks(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
+    """The rows graded under one ``checks`` arm (ADR-0024) — the read filter every reader
+    that reduces cells applies, as it applies the mode and the apparatus version. There is
+    no pooled view: ``arm`` is one of :data:`crb.core.checks.ARMS`."""
+    if arm not in ARMS:
+        raise ValueError(f"unknown checks arm {arm!r}; expected one of {ARMS}")
+    return [r for r in rows if r.checks_arm == arm]
 
 
 def group_by_cell(
@@ -1210,8 +1316,10 @@ def group_by_cell(
 
 
 def all_cell_stats(rows: Iterable[GradeRow]) -> list[CellStats]:
-    """One :class:`CellStats` per full cell key present in ``rows``."""
-    return [cell_stats(g) for g in group_by_cell(rows).values()]
+    """One :class:`CellStats` per full cell key and ``checks`` arm present in ``rows`` — two
+    arms of one key are two cells, never one (ADR-0024)."""
+    rs = list(rows)
+    return [cell_stats(g) for arm in ARMS for g in group_by_cell(rows_for_checks(rs, arm)).values()]
 
 
 def false_q1_total(rows: Iterable[GradeRow]) -> int:
