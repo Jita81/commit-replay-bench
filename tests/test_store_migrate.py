@@ -794,3 +794,80 @@ def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
     assert "task_qualifications" not in set(inspect(backend.engine).get_table_names())
     migrate.upgrade(backend.url)  # and back up at head, equal to init_db
     assert migrate.current(backend.url) == "0011" and _autogen_diff(backend.engine) == []
+
+
+def test_0011_downgrade_refuses_while_a_measured_qualification_exists(backend: Backend) -> None:
+    """From apparatus 2.3 every measured grade row cites its ``qualification_id``: a
+    downgrade that dropped a measured record would leave evidence citing nothing, and an
+    append-only table's rows are never dropped. So 0011's downgrade refuses while any record
+    but the back-fill's ``legacy`` ones exists (0002's pattern), and drops a table that holds
+    only the back-fill (CodeRabbit on PR #56)."""
+    from crb.core.qualify import Qualification
+    from crb.store import qualifications as sq
+
+    migrate.upgrade(backend.url)
+    factory = make_session_factory(backend.engine)
+    with factory() as s:
+        sq.append(
+            s,
+            Qualification(
+                qualification_id="",
+                repo="calc",
+                task_id="a" * 40,
+                posture_id="pst_" + "1" * 24,
+                posture={"posture_class": "docker/copy/sealed"},
+                state="qualified",
+            ),
+        )
+    cfg = migrate.alembic_config(backend.url)
+    with (
+        pytest.raises(RuntimeError, match="refusing to downgrade 0011"),
+        backend.engine.begin() as connection,
+    ):
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0008")
+    assert "task_qualifications" in set(inspect(backend.engine).get_table_names())
+    assert migrate.current(backend.url) == "0011"
+
+
+def test_no_released_revision_imports_the_application_runtime() -> None:
+    """A released revision is immutable, so what it writes must not move when the product's
+    code does: a revision imports nothing of ``crb`` but the store's one trigger helper
+    (``crb.store.migrate``) — never ``crb.core`` records, rules or version strings, whose
+    later changes would change (or break) what an old revision writes (CodeRabbit on PR
+    #56, revision 0011's back-fill)."""
+    import ast
+
+    allowed = {"crb.store.migrate"}
+    versions = Path(migrate.__file__).parent / "migrations" / "versions"
+    offenders: list[str] = []
+    for path in sorted(versions.glob("v*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names: list[str] = []
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            elif isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            offenders += [
+                f"{path.name}: {n}" for n in names if n.split(".")[0] == "crb" and n not in allowed
+            ]
+    assert offenders == []
+
+
+def test_0011_backfills_the_legacy_record_the_runtime_reads() -> None:
+    """The back-fill's frozen body is a record the product reads back unchanged, and its
+    fingerprint is the product's own rule applied to the same facts (a copy that drifted
+    would make a legacy record look like a different oracle)."""
+    import importlib
+
+    from crb.core.qualify import Qualification, fingerprint_of
+
+    m = importlib.import_module("crb.store.migrations.versions.v0011_task_qualifications")
+    body = m.legacy_body(
+        "calc", "a" * 40, {"baseline_failing": ["b", "a", "a"], "gold_clean": True}, "q1", "t"
+    )
+    q = Qualification.from_dict(body)
+    assert q.state == "legacy" and q.posture_id == "pst_legacy" and not q.is_qualified
+    assert q.baseline_failing == ("a", "b") and q.gold == {"clean": True, "note": "", "lint": None}
+    assert body["fingerprint"] == fingerprint_of(q) == q.fingerprint
+    assert body["provenance"] == "migrated_unverified" and body["apparatus_version"] == "2.3"

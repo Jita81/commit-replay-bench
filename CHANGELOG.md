@@ -59,6 +59,13 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **Revision 0011 is immutable in what it writes, and its downgrade keeps cited evidence**
+  (product.posture.43; CodeRabbit on PR #56). The back-fill built each legacy record with
+  the runtime's `Qualification`, so a later change to that class would have changed, or
+  broken, what a released revision writes; it now writes a shape frozen in the revision,
+  and a ratchet test refuses any revision that imports the product's runtime. The downgrade
+  dropped the table although every 2.3 grade row cites a `qualification_id`; it now
+  refuses while any measured (non-legacy) record exists.
 - **A probe that raised always updates the repository's probe status** (product.posture.42;
   CodeRabbit on PR #56). A provisioning stop during a probe (`PROVISION_DISABLED`, raised
   before the probe's own error handling) failed the run but left `probe_status` at its last

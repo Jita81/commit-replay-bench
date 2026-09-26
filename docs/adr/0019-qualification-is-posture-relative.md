@@ -206,7 +206,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
 10. **Migration.** Nothing is rewritten.
     - **Grade rows** keep their stamps, and 2.2 stays readable. A row stamped before 2.3 by the docker executor (read from its run's apparatus stamp) was graded against a baseline measured somewhere else. It is excluded from every rate and counted beside the cell as `unqualified_posture`. That covers run `0c44ff24…` without editing it.
     - **Task specs** keep their shape, and the new fields are written only when set.
-    - **A store migration** adds `task_qualifications`, which is append-only like `grades`. It back-fills 1 `legacy` row per task, for the record.
+    - **A store migration** adds `task_qualifications`, which is append-only like `grades`. It back-fills 1 `legacy` row per task, for the record. The revision writes that row from a shape frozen in the revision itself and imports nothing of the product's runtime, and its downgrade refuses while any measured record exists, because grade rows cite them (PR #56).
     - **A legacy row** never satisfies the gate. Every repository therefore qualifies once, for no model money, before its next replay. With `qualify_first` on, the replay does this itself.
     - **Sign-offs** made on 2.2 cells go stale at 2.3 (ADR-0015).
 
