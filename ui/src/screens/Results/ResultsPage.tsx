@@ -352,6 +352,15 @@ export function ResultsPage() {
                 data-testid="tile-pool-window"
               />
               <StatTile label="False-Q1" value={String(mapData.summary.false_q1_total)} n={mapData.summary.n_total} apparatus={apparatus} tone={mapData.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />
+              <StatTile
+                label="Posture"
+                value={mapData.summary.posture_class || '—'}
+                n={mapData.summary.n_total}
+                apparatus={`every rate here was graded in this posture · ${mapData.summary.unqualified_posture ?? 0} unqualified-posture rows excluded`}
+                hint="stat.results.posture"
+                footer={mapData.summary.excluded_posture_divergent ? `${mapData.summary.excluded_posture_divergent} rows left out: their tests differ between postures` : undefined}
+                data-testid="tile-posture"
+              />
             </div>
           </Card>
 

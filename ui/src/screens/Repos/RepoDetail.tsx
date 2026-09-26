@@ -5,7 +5,7 @@
  * Navigation
  * ----------
  * What it is:   The screen at /repos/:name with four tabs: Overview (task counts, probe,
- *               next steps), Change profile (class × size histogram), Tasks (the mined
+ *               the posture panel — qualified N of M, ADR-0019 — and next steps), Change profile (class × size histogram), Tasks (the mined
  *               `TaskSpec`s) and Configuration.
  * What it does: Shows what the instrument knows about one repository: whether it can run the
  *               repo's tests (the probe pill with the runner's own summary), how many
@@ -52,6 +52,7 @@ import { useAuth } from '../../lib/auth'
 import { fmtDate, fmtInt, fmtPct, shortId, wilson } from '../../lib/format'
 import { probeDisplay } from '../../lib/verdict'
 import { RunNewDialog } from '../Runs/RunNewDialog'
+import { PosturePanel } from './PosturePanel'
 import { RepoConfigTab } from './RepoConfigTab'
 
 /** The four tabs. */
@@ -186,6 +187,7 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
           </div>
         )}
       </Card>
+      <PosturePanel name={repo.name} />
       <Card title="Next steps">
         <div className="flex flex-wrap gap-2">
           {can('operator') && (

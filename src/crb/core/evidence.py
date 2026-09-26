@@ -93,13 +93,18 @@ class ApparatusStamp:
     corpus_sha: str = ""
     policy_version: str = ""
     extra: Mapping[str, Any] = field(default_factory=dict)
+    #: The posture the verdict was graded in (``Posture.to_dict()``, ADR-0019) — part of
+    #: the instrument. Written only when set, so a pack from before it existed hashes as
+    #: it always did.
+    posture: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "executor", dict(self.executor))
         object.__setattr__(self, "extra", dict(self.extra))
+        object.__setattr__(self, "posture", dict(self.posture))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "apparatus_version": self.apparatus_version,
             "crb_version": self.crb_version,
             "grader": self.grader,
@@ -109,6 +114,9 @@ class ApparatusStamp:
             "policy_version": self.policy_version,
             "extra": dict(self.extra),
         }
+        if self.posture:
+            d["posture"] = dict(self.posture)
+        return d
 
 
 @dataclass(frozen=True)

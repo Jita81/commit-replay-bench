@@ -7,9 +7,10 @@ that each of them is fit for :class:`~crb.core.execution.DockerExecutor` — the
 that ships, through the real runner of that language on that language's fixture:
 
 * the image's own default user is uid 65534, and so is the user the executor runs;
-* the root filesystem is read-only from inside (``/usr`` refuses a write), ``/tmp`` — the
-  tmpfs the executor provides — accepts one, and the worktree at ``/work`` refuses one that
-  never appears on the host;
+* the root filesystem is read-only from inside (``/usr`` refuses a write) and so is the
+  worktree at ``/src``; ``/work`` — the throwaway copy every command runs in (ADR-0019 §7) —
+  and ``/tmp`` accept one, and nothing a test writes reaches the host; the image carries the
+  ``sh`` and GNU ``tar`` that copy needs;
 * no setuid/setgid file is in the image (the bases' ``su``, ``mount``, ``passwd`` … have the
   bits stripped by the Dockerfile) — inert under the executor anyway, held regardless;
 * the network is off: a test that asserts ``example.com:443`` is reachable FAILS, attributed
@@ -35,8 +36,9 @@ Navigation
 What it is:   The suite for the shipped reference sandbox images (deploy/sandbox), one
               parametrisation per language, against a real daemon.
 What it does: Pins, per image, that the default and the executor's user are uid 65534, that
-              the root filesystem and the worktree are read-only from inside while ``/tmp``
-              is writable, that no setuid/setgid file is in the image, that ``/tmp`` is
+              the root filesystem and the worktree (``/src``) are read-only from inside while
+              the throwaway ``/work`` copy and ``/tmp`` are writable and the host tree stays
+              byte-identical, that ``sh`` and GNU ``tar`` are present, that no setuid/setgid file is in the image, that ``/tmp`` is
               ``noexec`` except for the Go runner's command, that a network probe FAILS
               through the language's runner, that an absent image is ``SandboxUnavailable``
               rather than a pull, that the language
@@ -65,6 +67,7 @@ Touch when:   a reference image is added under deploy/sandbox (add its language 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -78,12 +81,12 @@ import pytest
 
 from crb.core.execution import Command, DockerExecutor, DockerSettings, SandboxUnavailable
 from crb.core.git import GitRepo
-from crb.core.grade import grade
 from crb.core.mine import Candidate, qualify
 from crb.core.runners import get_runner
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from fixtures.posture import grade_adhoc as grade
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -338,20 +341,57 @@ def test_runs_as_nobody(executor: DockerExecutor, image: str, trial: Workspace):
     assert r.ok and r.stdout.strip() == "65534", r.combined
 
 
-def test_root_and_worktree_are_read_only_and_tmp_is_not(executor: DockerExecutor, trial):
-    """``/usr`` and ``/work`` refuse a write (``Read-only file system``), nothing reaches the
-    host, and ``/tmp`` — where every runner's scratch goes — accepts one."""
+def _tree_hashes(root: Path) -> dict[str, str]:
+    """``{relative path: sha256}`` of every regular file (symlinks by their target)."""
+    out: dict[str, str] = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        for name in filenames:
+            f = Path(dirpath) / name
+            rel = os.path.relpath(f, root)
+            out[rel] = (
+                "link:" + os.readlink(f)
+                if f.is_symlink()
+                else hashlib.sha256(f.read_bytes()).hexdigest()
+            )
+    return out
+
+
+def test_a_test_can_write_its_tree_and_nothing_reaches_the_host(executor: DockerExecutor, trial):
+    """ADR-0019 §7 (the D5 finding): ``/usr`` and the worktree at ``/src`` refuse a write
+    (``Read-only file system``); ``/work`` — the throwaway copy the command runs in — and
+    ``/tmp`` accept one; and the host tree is byte-identical afterwards."""
+    before = _tree_hashes(trial.root)
     root = executor.run(Command(("sh", "-c", "echo owned > /usr/hacked"), trial.root, timeout=60))
     assert not root.ok and "Read-only file system" in root.combined, root.combined
-    work = executor.run(
-        Command(("sh", "-c", "echo owned > /work/hacked.txt"), trial.root, timeout=60)
+    src = executor.run(
+        Command(("sh", "-c", "echo owned > /src/hacked.txt"), trial.root, timeout=60)
     )
-    assert not work.ok and "Read-only file system" in work.combined, work.combined
-    assert not (trial.root / "hacked.txt").exists()
+    assert not src.ok and "Read-only file system" in src.combined, src.combined
+    work = executor.run(
+        Command(
+            ("sh", "-c", "echo owned > /work/hacked.txt && cat /work/hacked.txt && pwd"),
+            trial.root,
+            timeout=60,
+        )
+    )
+    assert work.ok and work.stdout.split() == ["owned", "/work"], work.combined
     tmp = executor.run(
         Command(("sh", "-c", "echo scratch > /tmp/probe && cat /tmp/probe"), trial.root, timeout=60)
     )
     assert tmp.ok and tmp.stdout.strip() == "scratch", tmp.combined
+    assert not (trial.root / "hacked.txt").exists()
+    assert _tree_hashes(trial.root) == before
+
+
+def test_the_images_carry_sh_and_tar(image: str):
+    """The throwaway tree is made by ``/bin/sh`` and GNU ``tar`` inside the image (the
+    copy's ``--warning`` option is GNU's): every shipped image must carry both."""
+    r = _docker(
+        "run", "--rm", "--network=none", image, "/bin/sh", "-c", "command -v tar && tar --version"
+    )
+    assert r.returncode == 0, r.stderr
+    assert "GNU tar" in r.stdout, r.stdout
 
 
 def test_no_setuid_or_setgid_binary_in_the_image(executor: DockerExecutor, trial: Workspace):
@@ -468,3 +508,84 @@ def test_gold_grades_clean_and_leaves_the_host_untouched(
     assert trial.touched_files() == sorted({*task.src_files, *task.test_files})
     stray = {p.name for p in trial.root.iterdir()} - top_before - lang.allowed_host_writes
     assert not stray, f"sandboxed run left {sorted(stray)} on the host"
+
+
+# ---------------------------------------------------------------------------
+# The D5 regression: a test that writes into its own package directory
+# ---------------------------------------------------------------------------
+
+
+def test_a_test_that_writes_its_package_reads_the_same_on_the_host_and_in_the_copy() -> None:
+    """ADR-0019 §7 on ``gorepo_deps`` (cobra's ``TestDeadcodeElimination`` shape), with its
+    module dependency provisioned from a ``file://`` mirror into one sealed cache:
+
+    * at the parent the tree-writing test passes on the host AND in the throwaway copy —
+      the two baselines are equal, so nothing the posture does is charged to a builder;
+    * on the ``readonly`` tree it fails; measured in that posture it sits in the baseline,
+      so the gold graded in that posture has no new failure — and only a baseline measured
+      somewhere else (the host) would have charged it as one: the D5 defect, reproduced."""
+    reason = langs.docker_unavailable_reason()
+    if reason:
+        pytest.skip(reason)
+    if not langs.has_tool("go"):
+        pytest.skip("go not on PATH (the host posture needs it)")
+    import importlib
+
+    from crb.core.execution import LocalExecutor
+    from crb.provision import SealedProvider
+    from crb.provision.config import ProvisionConfig
+    from crb.provision.store import remove_tree
+
+    gorepo_deps = langs.fixture_module("gorepo_deps")
+    goproxy = importlib.import_module("fixtures.goproxy")
+    image = langs.ensure_shipped_sandbox_image("go")
+    root = langs.CACHE_DIR / "sandbox" / f"d5-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        mirror = goproxy.build(root / "mirror")
+        repo_root, feat = gorepo_deps.build(root / "repo")
+        repo = GitRepo(repo_root)
+        cfg = gorepo_deps.config()
+        provider = SealedProvider(
+            ProvisionConfig(
+                enabled=True, env="dev", store=root / "deps", go_proxy=f"file://{mirror}"
+            )
+        )
+        deps = provider.resolve(repo, cfg, gold=feat)
+        runner = get_runner(cfg)
+        cand = langs.feat_candidate(repo, cfg, feat)
+        postures = {
+            "host": LocalExecutor(),
+            "copy": DockerExecutor(DockerSettings(image=image)),
+            "readonly": DockerExecutor(DockerSettings(image=image, tree="readonly")),
+        }
+
+        def measure(sources: tuple[str, ...]) -> dict[str, frozenset[str]]:
+            ws = langs.trial_worktree(
+                repo, cand, root / f"t-{uuid.uuid4().hex[:6]}", cfg, sources=sources
+            )
+            try:
+                out = {}
+                with runner.deps_bound(deps.binding_for(ws.root)):
+                    for name, ex in postures.items():
+                        run = runner.run(ex, ws.root, ())
+                        assert not run.env_error, (name, run.tail)
+                        out[name] = run.failing
+                assert not (ws.root / "writer" / "generated.txt").exists()
+                return out
+            finally:
+                ws.remove()
+
+        baseline = measure(())
+        gold = measure(("go.mod", "go.sum", gorepo_deps.SRC_BYE))
+        writer = gorepo_deps.WRITER_TEST_ID
+        assert writer not in baseline["host"] and baseline["host"] == baseline["copy"]
+        assert writer in baseline["readonly"]
+        assert gold["host"] == gold["copy"] == frozenset(), gold
+        # belt 3 in the readonly posture against ITS OWN baseline: no new failure …
+        assert gold["readonly"] == frozenset({writer})
+        assert gold["readonly"] - baseline["readonly"] == frozenset()
+        # … and against a baseline measured on the host, the D5 misattribution
+        assert gold["readonly"] - baseline["host"] == frozenset({writer})
+    finally:
+        remove_tree(root)

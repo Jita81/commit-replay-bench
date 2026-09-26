@@ -111,6 +111,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import threading
 import time
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -127,6 +128,7 @@ from crb.core.version import APPARATUS_VERSION, __version__
 from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
+from crb.provision.probe import probe_provision
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
 from crb.server.secrets import SecretsFile
@@ -531,6 +533,47 @@ def probe_sandbox(settings: Settings, role: str = ROLE_ALL, *, request_id: str =
     )
 
 
+#: How long ``/health`` reuses a worker's provisioning probe: it inspects three images and
+#: a network and starts a container, which a readiness poll every few seconds must not do
+#: each time (CodeRabbit on PR #56). A result that is not ``ok`` is reused for less, so a
+#: fixed store is seen soon; ``crb doctor`` always probes afresh.
+PROVISION_PROBE_TTL_S = 300.0
+PROVISION_PROBE_DOWN_TTL_S = 30.0
+_monotonic = time.monotonic
+_provision_cache: dict[str, tuple[float, ProbeResult]] = {}
+_provision_lock = threading.Lock()
+
+
+def probe_provision_role(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:
+    """Dependency provisioning (ADR-0019), as seen from a process of ``role``: the worker
+    fetches, so an ``api`` process reports ``skipped``; a worker reports ``skipped`` when
+    provisioning is off, otherwise whether the store is visible to the daemon and the fetch
+    images and the egress network are present (``crb.provision.probe``) — reused for
+    :data:`PROVISION_PROBE_TTL_S` (``ok``) or :data:`PROVISION_PROBE_DOWN_TTL_S` (anything
+    else) per configuration."""
+    if role == ROLE_API:
+        return ProbeResult(
+            "provision",
+            SKIPPED,
+            f"not probed here: provisioning is the worker's ({ROLE_ENV}={ROLE_API})",
+            {"enabled": settings.provision.enabled, "role": role},
+        )
+    config = settings.provision_config
+    if not config.enabled:
+        return probe_provision(config)
+    key = repr(sorted(config.view().items(), key=lambda kv: kv[0]))
+    now = _monotonic()
+    with _provision_lock:
+        hit = _provision_cache.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    result = probe_provision(config)
+    ttl = PROVISION_PROBE_TTL_S if result.status == OK else PROVISION_PROBE_DOWN_TTL_S
+    with _provision_lock:
+        _provision_cache[key] = (now + ttl, result)
+    return result
+
+
 def probe_intake(
     factory: sessionmaker[Session], settings: Settings, *, request_id: str = ""
 ) -> ProbeResult:
@@ -690,6 +733,7 @@ def collect_health(
         probes.run_probe(
             "sandbox", lambda: probe_sandbox(settings, role, request_id=rid), request_id=rid
         ),
+        probes.run_probe("provision", lambda: probe_provision_role(settings, role), request_id=rid),
         probes.run_probe("toolchains", probes.probe_toolchains, request_id=rid),
         probes.run_probe("builders", probes.probe_builders, request_id=rid),
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
@@ -788,6 +832,7 @@ __all__ = [
     "ledger_counts",
     "migrations_result",
     "probe_migrations",
+    "probe_provision_role",
     "probe_worker",
     "process_role",
     "refresh_ledger_gauges",

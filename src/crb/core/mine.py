@@ -39,7 +39,8 @@ How:          ``iter_candidates`` (git log + changed files + layout rules) → `
               ``TaskSpec``) → ``gold_check`` (``overlay_sources`` → target → belt → lint) →
               ``mine`` drives the loop to ``target_count`` and emits ``mine.*`` events.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/core/spec.py (RepoConfig layout rules, TaskSpec, size tiers, path
               class), src/crb/core/workspace.py (the worktree and overlays),
               src/crb/core/runners/base.py (target scope, belt scope, oracle validity, lint
@@ -63,9 +64,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from crb.core.deps import SCOPE_RUN, DepsProvider, NullDepsProvider, ProvisionRefused, TaskDeps
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.lint import LintRun, run_plan
+from crb.core.posture import Posture, resolve_posture
+from crb.core.qualify import (
+    QUAL_BASELINE_TIMEOUT,
+    QUAL_BASELINE_UNATTRIBUTED,
+    QUAL_ENV_UNLOADABLE,
+    QUAL_NOT_RED,
+    QUAL_RED_TIMEOUT,
+    QUAL_TREE_COPY_FAILED,
+    Qualification,
+    qualify_task,
+)
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import (
     POOL_HARD,
@@ -153,6 +166,10 @@ class MineOutcome:
     task: TaskSpec | None
     skipped_reason: str = ""
     duration_s: float = 0.0
+    #: The candidate's qualification in the mine's own posture (ADR-0019 §2): the record
+    #: the task's discovery fields were read from, kept whether it qualified or not.
+    #: ``None`` when the mine ran without the gold check (discovery values only).
+    qualification: Qualification | None = None
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
@@ -172,8 +189,17 @@ def qualify(
     gold: bool = True,
     timeout: int = 0,
     on_event: EventFn | None = None,
+    posture: Posture | None = None,
+    deps: TaskDeps | DepsProvider | None = None,
+    run_id: str = "",
 ) -> MineOutcome:
     """RED-check + baseline (+ gold) one candidate in a fresh worktree.
+
+    With the gold check (the default) the facts are measured by
+    :func:`crb.core.qualify.qualify_task` in the mine's own posture (``posture``, resolved
+    live when not given) and the outcome carries that :class:`Qualification`: the
+    discovery ``TaskSpec``'s RED, baseline and gold fields are read from it (ADR-0019 §2).
+    Without it, the discovery values are measured as before and no record is made.
 
     Every test run is bound to the commit's author date (``authored``) so a declared
     service (:mod:`crb.core.services`) answers in the era variant that commit was
@@ -199,6 +225,27 @@ def qualify(
                 sha, None, "no test file defines a test (support only)", time.monotonic() - started
             )
         target_scope = runner.target_scope(oracles)
+        if gold:
+            discovery = _discovery_spec(
+                repo, config, cand, runner, target_scope=target_scope, pool=pool
+            )
+    if gold:
+        return _qualified_outcome(
+            repo,
+            config,
+            discovery,
+            runner=runner,
+            executor=executor,
+            scratch=scratch,
+            timeout=timeout,
+            on_event=on_event,
+            posture=posture,
+            deps=deps,
+            run_id=run_id,
+            started=started,
+        )
+    with Workspace.create(repo, sha, dest, config=config) as ws:
+        ws.overlay_tests(cand.test_files)
         red = runner.run_for(
             executor, ws.root, target_scope, timeout=timeout, authored=repo.author_date(cand.sha)
         )
@@ -250,11 +297,139 @@ def qualify(
             cls=task.capability_class,
             baseline_failing=len(task.baseline_failing),
         )
-        if gold:
-            task = gold_check(
-                ws, task, runner=runner, executor=executor, timeout=timeout, on_event=on_event
-            )
     return MineOutcome(sha, task, "", time.monotonic() - started)
+
+
+#: The skip reason each qualification refusal of the PARENT reads as in a mine report
+#: (the words ``crb mine`` has always printed for the same facts).
+_SKIP_REASON: dict[str, str] = {
+    QUAL_NOT_RED: "target green at parent",
+    QUAL_RED_TIMEOUT: "target timeout at parent",
+    QUAL_BASELINE_TIMEOUT: "baseline timeout",
+}
+#: Refusals about the PARENT: the candidate is not a task in this posture at all.
+_PARENT_CODES: frozenset[str] = frozenset(
+    {
+        QUAL_NOT_RED,
+        QUAL_RED_TIMEOUT,
+        QUAL_BASELINE_TIMEOUT,
+        QUAL_BASELINE_UNATTRIBUTED,
+        QUAL_ENV_UNLOADABLE,
+        QUAL_TREE_COPY_FAILED,
+    }
+)
+
+
+def _discovery_spec(
+    repo: GitRepo,
+    config: RepoConfig,
+    cand: Candidate,
+    runner: BaseRunner,
+    *,
+    target_scope: tuple[str, ...],
+    pool: str,
+) -> TaskSpec:
+    """The candidate's shape as a ``TaskSpec`` before anything is measured."""
+    sha = cand.sha
+    # size is the SOURCE churn only: the tests are the oracle, not the change
+    churn = repo.numstat_churn(f"{sha}~1", sha, list(cand.src_files))
+    return TaskSpec(
+        task_id=sha,
+        repo=config.name,
+        subject=repo.subject(sha)[:160],
+        authored=repo.author_date(sha),
+        test_files=cand.test_files,
+        src_files=cand.src_files,
+        target_tests=target_scope,
+        belt_scope=runner.belt_scope(target_scope, cand.test_files),
+        pool=pool,
+        src_churn=churn,
+        size=size_tier(churn),
+        path_class=classify_commit(list(cand.src_files)),
+        intent=None,
+        language=config.language.value,
+    )
+
+
+def _qualified_outcome(
+    repo: GitRepo,
+    config: RepoConfig,
+    discovery: TaskSpec,
+    *,
+    runner: BaseRunner,
+    executor: Executor,
+    scratch: Path,
+    timeout: int,
+    on_event: EventFn | None,
+    posture: Posture | None,
+    deps: TaskDeps | DepsProvider | None,
+    run_id: str,
+    started: float,
+) -> MineOutcome:
+    """Qualify ``discovery`` in the mine's posture and read the task's fields from it."""
+    provider: TaskDeps | DepsProvider = deps if deps is not None else NullDepsProvider()
+    if posture is None:
+        mode = (
+            provider.mode(config, executor.name)
+            if not isinstance(provider, TaskDeps)
+            else NullDepsProvider().mode(config, executor.name)
+        )
+        posture = resolve_posture(executor, runner, deps_mode=mode, root=repo.path)
+    q = qualify_task(
+        repo,
+        config,
+        discovery,
+        posture=posture,
+        deps=provider,
+        runner=runner,
+        executor=executor,
+        scratch=scratch,
+        timeout=timeout,
+        run_id=run_id,
+        on_event=on_event,
+    )
+    sha = discovery.task_id
+    if q.code in _PARENT_CODES:
+        reason = _SKIP_REASON.get(q.code, f"{q.code}: {q.message}")[:300]
+        said = "target green at parent (not RED)" if q.code == QUAL_NOT_RED else reason
+        _emit(on_event, "mine.skip", sha=sha, reason=said, code=q.code)
+        return MineOutcome(sha, None, reason, time.monotonic() - started, q)
+    labels = {"posture_id": q.posture_id, "posture_class": q.posture_class}
+    if q.red.get("baseline_parse_error"):
+        labels["baseline_parse_error"] = str(q.red["baseline_parse_error"])
+    if q.is_qualified:
+        task = discovery.with_(
+            baseline_failing=sorted(q.baseline),
+            red_checked=True,
+            gold_clean=True,
+            gold_note="",
+            labels={**discovery.labels, **labels},
+        )
+    else:
+        task = discovery.with_(
+            baseline_failing=sorted(q.baseline),
+            red_checked=True,
+            gold_clean=False,
+            gold_note=(q.gold.get("note") or f"{q.code}: {q.message}")[:300],
+            labels={**discovery.labels, **labels, "qualification_code": q.code},
+        )
+    _emit(
+        on_event,
+        "mine.red",
+        sha=sha,
+        size=task.size,
+        cls=task.capability_class,
+        baseline_failing=len(task.baseline_failing),
+    )
+    _emit(
+        on_event,
+        "mine.gold",
+        sha=sha,
+        clean=bool(task.gold_clean),
+        note=task.gold_note,
+        lint=q.gold.get("lint"),
+    )
+    return MineOutcome(sha, task, "", time.monotonic() - started, q)
 
 
 def gold_check(
@@ -361,6 +536,9 @@ def _read_gold_lint(lint_run: LintRun | None) -> tuple[bool, str]:
 
 #: A run stops after this many candidates IN A ROW fail on a harness error.
 MAX_CONSECUTIVE_HARNESS_ERRORS = 3
+#: A mine stops after this many candidates IN A ROW cannot load their dependencies in the
+#: mine's posture (ADR-0019): the posture, not history, is the problem.
+MAX_CONSECUTIVE_UNLOADABLE = 3
 
 
 def mine(
@@ -379,6 +557,9 @@ def mine(
     timeout: int = 0,
     ref: str = "HEAD",
     on_event: EventFn | None = None,
+    posture: Posture | None = None,
+    deps: TaskDeps | DepsProvider | None = None,
+    run_id: str = "",
 ) -> Iterator[MineOutcome]:
     """Yield qualification outcomes until ``target_count`` tasks are found or
     ``max_candidates`` candidates were examined (``only``: just these shas).
@@ -392,7 +573,14 @@ def mine(
         config.mining.get("target_valid" if pool == POOL_STANDARD else "hard_target", 25)
     )
     cap = max_candidates or int(config.mining.get("max_candidates", 1000))
-    found = examined = consecutive_errors = 0
+    found = examined = consecutive_errors = unloadable = 0
+    if gold and posture is None:
+        provider = deps if deps is not None else NullDepsProvider()
+        mode = NullDepsProvider().mode(config, executor.name)
+        if not isinstance(provider, TaskDeps):
+            mode = provider.mode(config, executor.name)
+        # one posture for the whole mine: every candidate is qualified in the same one
+        posture = resolve_posture(executor, runner, deps_mode=mode, root=repo.path)
     for cand in iter_candidates(repo, config, pool=pool, ref=ref, skip=known, only=only):
         if found >= want or examined >= cap:
             break
@@ -410,9 +598,19 @@ def mine(
                 gold=gold,
                 timeout=timeout,
                 on_event=on_event,
+                posture=posture,
+                deps=deps,
+                run_id=run_id,
             )
         except SandboxUnavailable:
             raise  # infrastructure: nothing else will qualify either
+        except ProvisionRefused as exc:
+            if exc.refusal.scope != SCOPE_RUN:  # pragma: no cover — qualify_task records it
+                raise
+            # a deployment setting: nothing in this posture will provision either
+            raise RuntimeError(
+                f"{exc.refusal.code}: {exc.refusal.message} — what to do: {exc.refusal.fix}"
+            ) from exc
         except Exception as exc:
             # a harness error on ONE candidate (its dependency era would not install,
             # its service is missing) skips that candidate; MAX_CONSECUTIVE_HARNESS_ERRORS
@@ -429,7 +627,15 @@ def mine(
             yield MineOutcome(cand.sha, None, reason, time.monotonic() - started)
             continue
         consecutive_errors = 0
+        q = outcome.qualification
+        unloadable = unloadable + 1 if q is not None and q.code == QUAL_ENV_UNLOADABLE else 0
         if outcome.task is not None:
             found += 1
         yield outcome
+        if unloadable >= MAX_CONSECUTIVE_UNLOADABLE:
+            raise RuntimeError(
+                f"{QUAL_ENV_UNLOADABLE}: {unloadable} candidates in a row could not load their "
+                "dependencies offline — this posture cannot load the module graph — switch "
+                "provisioning on and qualify"
+            )
     _emit(on_event, "mine.done", repo=config.name, pool=pool, found=found, examined=examined)

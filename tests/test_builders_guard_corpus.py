@@ -73,6 +73,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
 from fixtures import pyrepo as pr
 from fixtures.leakage import RecordingSpawn, leaks
+from fixtures.posture import witnessed_context_for
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 if str(_FIXTURES) not in sys.path:
@@ -357,6 +358,14 @@ def test_where_am_i_is_honest_shell_and_reveals_no_fragment_of_the_task_sha(
         ledger=JsonlLedger(tmp_path / "ledger.jsonl"),
         evidence_dir=tmp_path / "evidence",
         ladder=("claude_code:claude-opus-5",),
+        # ADR-0019 (PR #56): every run grades each task in its own posture context
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=runner,
+            executor=executor,
+            scratch=tmp_path / "scratch",
+        ),
     )
     spawn = RecordingSpawn(WHERE_AM_I)
     transcripts = tmp_path / "transcripts"

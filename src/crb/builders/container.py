@@ -49,7 +49,9 @@ What it does: Makes archaeology impossible rather than forbidden — the builder
 How:          ``SealedCheckout.create``: ``git archive <parent>`` → ``git init`` + one commit
               → overlay tests (a dangling oracle commit for byte-identity checks) → replicate
               harness fix-ups. ``ContainerSession.__enter__``: verify images → per-attempt
-              ``--internal`` network → sidecar on the egress network → wait for ``READY``.
+              ``--internal`` network → sidecar on the egress network → wait for ``READY``
+              (``EgressSidecar``). ``run_args`` mounts the task's BUILDER dependency set —
+              the parent's, never the gold's — read-only under ``/deps`` (ADR-0019).
               ``spawn``/``tools_executor`` hand the builder a container-bound transport;
               ``unconfirmed_kills`` names the containers this session spawned — the build
               streams AND the tool-loop executors' commands — whose enforced kill the
@@ -59,15 +61,15 @@ How:          ``SealedCheckout.create``: ``git archive <parent>`` → ``git init
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
-Works with:   src/crb/builders/egress_proxy.py (the sidecar's script, mounted read-only),
+Works with:   src/crb/builders/sidecar.py (the internal network and the proxy container),
+              src/crb/builders/egress_proxy.py (the sidecar's script, mounted read-only),
               src/crb/builders/adapter.py (the caller: ``sealed_build``),
               src/crb/core/execution.py (``DockerExecutor``/``DockerStream``/``DockerSettings``;
               the bounded kill confirmation ``unconfirmed_kills`` reads),
               src/crb/server/reaper.py (reaps what ``unconfirmed_kills`` names),
               src/crb/core/workspace.py (the source worktree and ``touched_files``),
               src/crb/builders/claude_code.py and src/crb/builders/openai_agent.py (receive
-              ``overrides_for``), src/crb/server/settings.py (mirrors ``CRB_BUILDER__*``),
-              deploy/Dockerfile.builder (the image the settings name)
+              ``overrides_for``), src/crb/core/deps.py (the builder binding it mounts)
 Tested by:    tests/test_builders_container.py, tests/test_builders_container_docker.py
 Touch when:   onboarding a repository whose tests need a toolchain cache — add it to
               ``CRB_BUILDER__*`` ``extra_ro_mounts`` / the builder image, never a mount of
@@ -90,7 +92,6 @@ import stat
 import subprocess
 import tarfile
 import tempfile
-import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -98,6 +99,14 @@ from pathlib import Path
 from typing import Any
 
 from crb.builders import egress_proxy
+from crb.builders.sidecar import (
+    PROXY_ALIAS,
+    PROXY_PORT,
+    PROXY_SCRIPT_INSIDE,
+    PROXY_START_TIMEOUT_S,
+    EgressSidecar,
+)
+from crb.core.deps import ROLE_BUILDER, BundleMount, DepsBinding, TaskDeps
 from crb.core.execution import (
     CancelFn,
     DockerExecutor,
@@ -105,19 +114,15 @@ from crb.core.execution import (
     DockerStream,
     SandboxUnavailable,
     UnconfirmedKill,
+    bundle_mount_args,
 )
 from crb.core.git import GitError, GitRepo
 from crb.core.workspace import HARNESS_SYMLINK, Workspace
 
 #: Where the sealed checkout is mounted inside the builder container.
 WORKDIR = "/work"
-#: The sidecar's name on the internal network and the port it listens on.
-PROXY_ALIAS = "proxy"
-PROXY_PORT = 3128
-#: Where the proxy script is mounted inside the sidecar.
-PROXY_SCRIPT_INSIDE = "/opt/crb/egress_proxy.py"
-#: Seconds to wait for the sidecar's ``READY`` line before failing closed.
-PROXY_START_TIMEOUT_S = 30.0
+#: The sidecar's alias and port, the script's mount point and the READY wait live with the
+#: sidecar (src/crb/builders/sidecar.py) and are re-exported here.
 DEFAULT_ALLOW_HOSTS: tuple[str, ...] = ("api.anthropic.com",)
 
 ENV_PREFIX = "CRB_BUILDER__"
@@ -680,6 +685,28 @@ def _mode(p: Path) -> int:
 # ---------------------------------------------------------------------------
 
 
+def builder_deps_view(binding: DepsBinding) -> tuple[list[BundleMount], dict[str, str]]:
+    """The builder's view of a sealed set: every mount moved under ``/deps/`` (the sealed
+    checkout owns ``/work``, so ``/work/node_modules`` becomes ``/deps/node_modules``) and
+    the binding's offline environment re-pointed to match. Refuses any binding that is not
+    the task's BUILDER set — the parent's; the gold's is never shown to a builder (its module
+    list is part of the answer: ADR-0012 amendment, ADR-0019)."""
+    if binding.role != ROLE_BUILDER:
+        raise SandboxUnavailable(
+            f"a builder may be given the parent's dependency set only, not the {binding.role!r} set"
+        )
+    mounts: list[BundleMount] = []
+    env = dict(binding.env)
+    for m in binding.mounts:
+        inside = m.container_path
+        if inside.startswith(WORKDIR + "/"):
+            moved = "/deps/" + inside[len(WORKDIR) + 1 :]
+            env = {k: v.replace(inside, moved) for k, v in env.items()}
+            inside = moved
+        mounts.append(BundleMount(host_path=m.host_path, container_path=inside, key=m.key))
+    return mounts, env
+
+
 def builder_run_args(
     settings: BuilderContainerSettings,
     *,
@@ -688,13 +715,20 @@ def builder_run_args(
     timeout_s: int,
     network: str,
     extra_ro_mounts: Mapping[str, str] | None = None,
+    deps: DepsBinding | None = None,
 ) -> list[str]:
     """The ``docker run`` options for the builder container (tests assert on these).
 
     ``network`` is the internal network's name, or ``"none"``. Secret-named variables
-    are passed as ``--env NAME`` so their values never appear on a command line.
+    are passed as ``--env NAME`` so their values never appear on a command line. ``deps``
+    — the task's BUILDER binding, the parent's sealed set — is mounted read-only with its
+    offline environment (:func:`builder_deps_view`); the egress allowlist is untouched.
     """
     s = settings
+    deps_mounts: list[BundleMount] = []
+    if deps is not None and deps.sealed:
+        deps_mounts, deps_env = builder_deps_view(deps)
+        env = {**deps_env, **env}
     args: list[str] = [
         "--init",
         f"--network={network}",
@@ -715,6 +749,7 @@ def builder_run_args(
     mounts.update(extra_ro_mounts or {})
     for host, inside in mounts.items():
         args += ["--mount", f"type=bind,src={host},dst={inside},readonly"]
+    args += bundle_mount_args(deps_mounts)
     for k, v in sorted(env.items()):
         args += ["--env", k if is_secret_env_name(k) else f"{k}={v}"]
     args += ["--workdir", WORKDIR, f"--stop-timeout={max(1, int(timeout_s))}", s.image]
@@ -765,9 +800,12 @@ class ContainerSession:
         cancel: CancelFn | None = None,
         executor: DockerExecutor | None = None,
         label: str = "",
+        deps: TaskDeps | None = None,
     ) -> None:
         self.settings = settings
         self.checkout = checkout
+        #: the task's dependencies (ADR-0019); the builder is only ever given ``deps.builder``
+        self.deps = deps
         self.cancel = cancel
         self.executor = executor or DockerExecutor(
             DockerSettings(
@@ -786,10 +824,7 @@ class ContainerSession:
         self.network = f"crb-b-{self.id}" if settings.networked else "none"
         self.proxy_name = f"crb-proxy-{self.id}"
         self.build_name = f"crb-build-{self.id}"
-        self._script: Path | None = None
-        self._network_created = False
-        self._proxy_started = False
-        self.proxy_log = ""
+        self.sidecar: EgressSidecar | None = None
         #: Every stream :meth:`spawn` returned, for :meth:`unconfirmed_kills`.
         self.streams: list[DockerStream] = []
         #: Every executor :meth:`tools_executor` handed out (the ``openai_agent`` tool
@@ -844,99 +879,31 @@ class ContainerSession:
         return self
 
     def _start_proxy(self) -> None:
-        """Create the internal network, start the sidecar on the egress network, join it to
-        the internal one as ``proxy`` and wait for its ``READY`` line — fail closed at
-        every step."""
+        """Start the egress sidecar (src/crb/builders/sidecar.py): the internal network, the
+        proxy on the egress network joined to it as ``proxy``, its ``READY`` line — fail
+        closed at every step."""
         s = self.settings
-        script = self.checkout.root.parent / f"crb-egress-{self.id}.py"
-        script.write_bytes(Path(egress_proxy.__file__).read_bytes())
-        script.chmod(0o444)
-        self._script = script
-        self._must(
-            "network",
-            "create",
-            "--internal",
-            "--driver",
-            "bridge",
-            self.network,
-            what="builder network create failed",
+        self.sidecar = EgressSidecar(
+            self._docker,
+            network=self.network,
+            proxy_name=self.proxy_name,
+            allow_hosts=s.allow_hosts,
+            egress_network=s.egress_network,
+            proxy_image=s.proxy_image,
+            user=s.user,
+            script=self.checkout.root.parent / f"crb-egress-{self.id}.py",
         )
-        self._network_created = True
-        # a failed `docker run -d` can still leave a created container behind: mark
-        # it for removal BEFORE the attempt (rm -f on a missing name is harmless)
-        self._proxy_started = True
-        self._must(
-            "run",
-            "-d",
-            "--name",
-            self.proxy_name,
-            f"--network={s.egress_network}",
-            "--memory=256m",
-            "--cpus=1",
-            "--pids-limit=64",
-            f"--user={s.user}",
-            "--cap-drop=ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--read-only",
-            "--tmpfs",
-            "/tmp:rw,nosuid,nodev,size=16m",
-            "--mount",
-            f"type=bind,src={script},dst={PROXY_SCRIPT_INSIDE},readonly",
-            "--env",
-            "PYTHONUNBUFFERED=1",
-            s.proxy_image,
-            "python3",
-            PROXY_SCRIPT_INSIDE,
-            "--listen",
-            f"0.0.0.0:{PROXY_PORT}",  # inside the sidecar; reachable only on the internal network
-            "--allow",
-            ",".join(s.allow_hosts),
-            what="egress proxy start failed",
-        )
-        self._must(
-            "network",
-            "connect",
-            "--alias",
-            PROXY_ALIAS,
-            self.network,
-            self.proxy_name,
-            what="egress proxy could not join the builder network",
-        )
-        deadline = time.monotonic() + PROXY_START_TIMEOUT_S
-        while True:
-            logs = self._docker("logs", self.proxy_name, timeout=30)
-            text = (logs.stdout or "") + (logs.stderr or "")
-            if "READY " in text:
-                return
-            state = self._docker(
-                "inspect", "--format", "{{.State.Running}}", self.proxy_name, timeout=30
-            )
-            if state.stdout.strip() != "true" or time.monotonic() >= deadline:
-                raise SandboxUnavailable(
-                    "egress proxy unhealthy (no READY line): " + text.strip()[-400:]
-                )
-            time.sleep(0.2)
+        self.sidecar.start(what="builder")
+
+    @property
+    def proxy_log(self) -> str:
+        """The sidecar's log tail (its allow / deny decisions), kept after close."""
+        return self.sidecar.log if self.sidecar is not None else ""
 
     def close(self) -> None:
-        """Tear down; never raises (a failure to clean up is logged into ``proxy_log``)."""
-        if self._proxy_started:
-            with contextlib.suppress(OSError, subprocess.SubprocessError):
-                logs = self._docker("logs", self.proxy_name, timeout=30)
-                self.proxy_log = ((logs.stdout or "") + (logs.stderr or ""))[-4000:]
-            with contextlib.suppress(OSError, subprocess.SubprocessError):
-                self._docker("rm", "-f", self.proxy_name, timeout=60)
-            self._proxy_started = False
-        if self._network_created:
-            for _ in range(3):
-                with contextlib.suppress(OSError, subprocess.SubprocessError):
-                    if self._docker("network", "rm", self.network, timeout=60).returncode == 0:
-                        break
-                time.sleep(1.0)
-            self._network_created = False
-        if self._script is not None:
-            self._script.unlink(missing_ok=True)
-            self._script = None
+        """Tear down; never raises (the proxy's log tail stays readable as ``proxy_log``)."""
+        if self.sidecar is not None:
+            self.sidecar.close()
 
     def __exit__(self, *exc: object) -> None:
         self.close()
@@ -951,6 +918,7 @@ class ContainerSession:
             timeout_s=timeout_s,
             network=self.network,
             extra_ro_mounts=self.ro_mounts,
+            deps=self.deps.builder if self.deps is not None else None,
         )
 
     def spawn(
@@ -1067,6 +1035,8 @@ __all__ = [
     "EXECUTOR_HOST",
     "PROXY_ALIAS",
     "PROXY_PORT",
+    "PROXY_SCRIPT_INSIDE",
+    "PROXY_START_TIMEOUT_S",
     "SEALABLE_BUILDERS",
     "WORKDIR",
     "BuilderContainerSettings",
@@ -1076,6 +1046,7 @@ __all__ = [
     "SealedCheckout",
     "SessionFactory",
     "UnconfirmedKill",
+    "builder_deps_view",
     "builder_run_args",
     "client_env",
     "container_env",

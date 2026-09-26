@@ -289,3 +289,44 @@ describe('RunNewDialog', () => {
     expect(submit).toBeEnabled()
   })
 })
+
+describe('RunNewDialog — posture (ADR-0019)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('says how many tasks are qualified under this posture; switching qualify first off is sent as false', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'GET /repos/httpx/posture': { repo: 'httpx', executor: 'docker', image_ref: 'i', posture_id: 'pst_x', posture_class: 'docker/readonly/sealed', posture: {}, provisioning: {}, qualified: 4, total: 9, refusals_by_code: [], delta: [], stale_reason: '' },
+      'POST /runs': () => json({ id: 'run-9' }, 201),
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+    await waitFor(() => expect(screen.getByTestId('run-posture-line')).toHaveTextContent('Qualified 4 of 9 under this posture (docker/readonly/sealed).'))
+    const toggle = screen.getByLabelText(/Qualify first — no model spend/)
+    expect(toggle).toBeChecked()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'editblock')
+    await user.type(screen.getByLabelText(/^Model/), 'm')
+    await user.click(toggle)
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(api.calls)
+    expect(body.qualify_first).toBe(false)
+  })
+
+  it('leaves qualify_first out while it is on, and says so when nothing is qualified yet', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'GET /repos/httpx/posture': { repo: 'httpx', executor: 'local', image_ref: '', posture_id: '', posture_class: '', posture: {}, provisioning: {}, qualified: 0, total: 3, refusals_by_code: [], delta: [], stale_reason: 'x' },
+      'POST /runs': () => json({ id: 'run-9' }, 201),
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+    await waitFor(() => expect(screen.getByTestId('run-posture-line')).toHaveTextContent('No task is qualified under this posture yet (3 to measure).'))
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'editblock')
+    await user.type(screen.getByLabelText(/^Model/), 'm')
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(api.calls)
+    expect('qualify_first' in body).toBe(false)
+  })
+})

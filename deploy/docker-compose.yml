@@ -161,6 +161,23 @@ services:
       # `local` runs untrusted repository tests inside THIS container — development only.
       CRB_SANDBOX__EXECUTOR: ${CRB_SANDBOX__EXECUTOR:-docker}
       CRB_SANDBOX__IMAGE: ${CRB_SANDBOX__IMAGE:-}
+      # ADR-0019 §7: tests run in a throwaway copy of the read-only worktree (`readonly`: the
+      # worktree itself, a different posture).
+      CRB_SANDBOX__TREE: ${CRB_SANDBOX__TREE:-copy}
+      CRB_SANDBOX__WORK_SIZE: ${CRB_SANDBOX__WORK_SIZE:-1g}
+      # Dependency provisioning (ADR-0019, docs/DEPLOYMENT.md §3.4) — OFF by default. On: each
+      # task's dependencies are fetched outside the test container through the allowlisting
+      # proxy, sealed under /srv/crb/deps and mounted read-only. Point the registries at your
+      # mirror (CRB_ENV=prod refuses a public registry unless ALLOW_PUBLIC).
+      CRB_PROVISION__ENABLED: ${CRB_PROVISION__ENABLED:-false}
+      CRB_PROVISION__GO_PROXY: ${CRB_PROVISION__GO_PROXY:-https://proxy.golang.org}
+      CRB_PROVISION__GO_SUMDB: ${CRB_PROVISION__GO_SUMDB:-sum.golang.org}
+      CRB_PROVISION__PYPI_INDEX: ${CRB_PROVISION__PYPI_INDEX:-https://pypi.org/simple}
+      CRB_PROVISION__PYPI_FILES_HOST: ${CRB_PROVISION__PYPI_FILES_HOST:-files.pythonhosted.org}
+      CRB_PROVISION__NPM_REGISTRY: ${CRB_PROVISION__NPM_REGISTRY:-https://registry.npmjs.org}
+      CRB_PROVISION__EXTRA_ALLOW_HOSTS: ${CRB_PROVISION__EXTRA_ALLOW_HOSTS:-}
+      CRB_PROVISION__ALLOW_PUBLIC: ${CRB_PROVISION__ALLOW_PUBLIC:-false}
+      CRB_PROVISION__PROXY_IMAGE: ${CRB_PROVISION__PROXY_IMAGE:-}
       CRB_WORKER_ID: ${CRB_WORKER_ID:-worker-1}
       # The worker's own Prometheus exposition (docs/DEPLOYMENT.md §9). The build / grade /
       # cost / delivery series are recorded in THIS process; the api's /metrics carries the

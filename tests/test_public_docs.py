@@ -155,7 +155,11 @@ def _stops(monkeypatch: pytest.MonkeyPatch, *, found: bool) -> int:
     monkeypatch.setattr(mine_mod, "qualify", qualify)
     config = RepoConfig(name="p", language=Language.PYTHON)
     unused: Any = None  # qualify is patched: no git, no runner, no sandbox is touched
-    outcomes = mine_mod.mine(unused, config, runner=unused, executor=unused, scratch=ROOT)
+    # a stand-in posture, so the miner resolves none (ADR-0019, PR #56) — qualify is patched
+    posture: Any = object()
+    outcomes = mine_mod.mine(
+        unused, config, runner=unused, executor=unused, scratch=ROOT, posture=posture
+    )
     return sum(1 for _ in outcomes)
 
 

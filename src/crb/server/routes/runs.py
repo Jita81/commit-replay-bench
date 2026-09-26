@@ -75,6 +75,7 @@ from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
+from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
 from crb.server.schemas import (
     BUILD_KINDS,
     TERMINAL_STATUSES,
@@ -572,6 +573,10 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["retain"] = body.retain.model_dump()
     if body.outage_stop is not None:
         params["outage_stop"] = body.outage_stop
+    if body.qualify_first is not None:
+        params["qualify_first"] = bool(body.qualify_first)
+    if body.env_stop is not None:
+        params["env_stop"] = body.env_stop
     if body.preflight is True:
         params["preflight"] = True
     elif isinstance(body.preflight, PreflightIn):
@@ -596,7 +601,7 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     "/runs",
     response_model=RunOut,
     status_code=status.HTTP_201_CREATED,
-    responses={401: _ERR, 403: _ERR, 404: _ERR, 422: _ERR, 503: _ERR},
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 503: _ERR},
     summary="Enqueue a run (status queued); the worker executes it",
 )
 def create_run(
@@ -646,6 +651,21 @@ def create_run(
             require_role_now(operator, "approver")
             params["deliver_override_by"] = operator.id
         run.params_json = params
+    if body.qualify_first is False:
+        # ADR-0019 §3: a build run with nothing qualified where it would be graded can only
+        # fail POSTURE_UNQUALIFIED on the worker — refuse it here, with the fix
+        repo_row = db.get(Repo, body.repo)
+        if repo_row is None:  # pragma: no cover — refused 404 above
+            raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+        executor = deployment_executor(settings, body.executor)
+        refuse_unqualified(
+            db,
+            repo_row,
+            kind=body.kind,
+            task_ids=list(body.task_ids),
+            executor=executor,
+            image_ref=deployment_image(settings, repo_row),
+        )
     run = api.enqueue(factory, run)
     stored = db.get(Run, run.id)
     return run_out(db, stored if stored is not None else run)

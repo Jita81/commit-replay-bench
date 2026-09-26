@@ -102,6 +102,7 @@ from crb.core.run import RunSpec, run
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.workspace import HARNESS_SYMLINK, Workspace, sha256_bytes
 from fixtures import pyrepo as pr
+from fixtures.posture import witnessed_context_for
 
 TESTS_DIR = Path(__file__).resolve().parent
 #: A named non-root uid:gid: the settings under test never depend on who runs the suite.
@@ -1273,6 +1274,13 @@ def _spec(
         ledger=ledger,
         evidence_dir=tmp_path / "evidence",
         ladder=adapter.ladder_labels(ladder),
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=PytestRunner(pyrepo.config),
+            executor=LocalExecutor(),
+            scratch=tmp_path / "scratch",
+        ),
     )
     return spec, ledger
 
@@ -1437,3 +1445,81 @@ def test_container_settings_from_env_is_the_worker_hook(monkeypatch: pytest.Monk
     monkeypatch.setenv("CRB_BUILDER__USER", NON_ROOT)
     s = adapter.container_settings_from_env()
     assert s is not None and s.image == "crb-builder:local"
+
+
+# ---------------------------------------------------------------------------
+# ADR-0019 (amends ADR-0012): the parent's dependency set, never the gold's
+# ---------------------------------------------------------------------------
+
+
+def test_builder_cell_mounts_the_parent_set_never_the_gold(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from crb.builders.container import builder_deps_view
+    from crb.core.deps import DepsBinding, TaskDeps
+    from crb.core.execution import DockerExecutor, DockerSettings
+    from crb.provision import go as go_recipe
+    from crb.provision import node as node_recipe
+    from crb.provision.store import BundleStore
+
+    store = BundleStore(tmp_path / "deps")
+    keys = {"parent": "dep_" + "1" * 64, "gold": "dep_" + "2" * 64}
+    for key in keys.values():
+        st = store.stage()
+        (st / "out" / "gomod").mkdir()
+        store.seal(st, {"lang": "go", "key": key})
+
+    def binding(role: str, key: str) -> DepsBinding:
+        m = store.mount(key, "go", "gomod", go_recipe.INSIDE)
+        return DepsBinding(
+            role=role,
+            lang="go",
+            scheme="go.modcache.v1",
+            key=key,
+            mounts=(m,),
+            env=go_recipe.binding_env(),
+        )
+
+    parent = binding("parent", keys["parent"])
+    gold = binding("gold", keys["gold"])
+    builder = binding("builder", keys["parent"])
+    deps = TaskDeps("sealed", "go", parent=parent, gold=gold, builder=builder)
+    s = BuilderContainerSettings(image="crb-builder:local", user="10001:10001")
+    session = ContainerSession(
+        s,
+        SimpleNamespace(root=tmp_path / "sealed", link_targets={}),  # type: ignore[arg-type]
+        executor=DockerExecutor(
+            DockerSettings(image="crb-builder:local", docker_binary="/usr/bin/true"),
+            verify_daemon=False,
+        ),
+        deps=deps,
+    )
+    args = session.run_args({"HOME": "/tmp"}, timeout_s=60)
+    parent_src = (store.root / "go" / keys["parent"] / "gomod").resolve()
+    gold_src = (store.root / "go" / keys["gold"]).resolve()
+    assert f"type=bind,src={parent_src},dst=/deps/gomod,readonly" in args
+    assert str(gold_src) not in " ".join(args), "the gold's set is part of the answer"
+    envs = [args[i + 1] for i, a in enumerate(args) if a == "--env"]
+    assert "GOPROXY=off" in envs and "GOMODCACHE=/deps/gomod" in envs
+    assert s.allow_hosts == ("api.anthropic.com",)  # the allowlist does not change
+    # only the BUILDER binding may ever reach a builder
+    for wrong in (parent, gold):
+        with pytest.raises(SandboxUnavailable, match="parent's dependency set only"):
+            builder_run_args(s, checkout=tmp_path, env={}, timeout_s=60, network="none", deps=wrong)
+    # a Node set moves under /deps (the sealed checkout owns /work) with its env re-pointed
+    st = store.stage()
+    (st / "out" / "app" / "node_modules" / ".bin").mkdir(parents=True)
+    nkey = "dep_" + "3" * 64
+    store.seal(st, {"lang": "node", "key": nkey})
+    nm = store.mount(nkey, "node", node_recipe.SUB, node_recipe.INSIDE)
+    nb = DepsBinding(
+        role="builder",
+        lang="node",
+        scheme="node.modules.v1",
+        key=nkey,
+        mounts=(nm,),
+        env={"NODE_PATH": node_recipe.INSIDE, "PATH": f"{node_recipe.INSIDE}/.bin:/usr/bin"},
+    )
+    mounts, env = builder_deps_view(nb)
+    assert [m.container_path for m in mounts] == ["/deps/node_modules"]
+    assert env == {"NODE_PATH": "/deps/node_modules", "PATH": "/deps/node_modules/.bin:/usr/bin"}

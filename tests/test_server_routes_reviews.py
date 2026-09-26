@@ -52,7 +52,7 @@ from sqlalchemy import select, text
 from crb.builders.adapter import as_run_ledger
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import LocalExecutor
-from crb.core.grade import Belts, GradeResult
+from crb.core.grade import Belts
 from crb.core.ledger import GradeRow, grade_row_from_result
 from crb.core.run import BuildAttempt, RunSpec, run_task
 from crb.core.runners.pytest_runner import PytestRunner
@@ -75,6 +75,7 @@ from crb.store.events import DbEventSink
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, EvidencePackRow, Run, Task
 from fixtures import pyrepo as pr
+from fixtures.posture import posture_result, witnessed_context_for
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
 
 RETAINED_RUN = "9" * 32
@@ -195,7 +196,7 @@ class Retained:
             tpath = tdir / f"{task.short_id}-editblock-deadbeef.json"
             tpath.write_text(json.dumps({"task_id": task.task_id, "outcome": {"transcript": []}}))
             tref = str(tpath)
-        result = GradeResult(
+        result = posture_result(
             task_id=task.task_id,
             repo=ALPHA,
             mode="sighted",
@@ -431,15 +432,21 @@ class TestRetainedPatch:
                     s.commit()
                 return ledger.append(row)
 
+        runner, executor = PytestRunner(repo.config), LocalExecutor()
+        scratch = Path(env.settings.home) / "scratch"
         spec = RunSpec(
             run_id=RETAINED_RUN,
             config=repo.config,
-            runner=PytestRunner(repo.config),
-            executor=LocalExecutor(),
-            scratch=Path(env.settings.home) / "scratch",
+            runner=runner,
+            executor=executor,
+            scratch=scratch,
             ledger=as_run_ledger(_PackThenRow()),
             evidence_dir=evidence,
             keep_worktrees=True,
+            # ADR-0019 (PR #56): every run grades in a posture, each task in its own context
+            context_for=witnessed_context_for(
+                repo.repo, repo.config, runner=runner, executor=executor, scratch=scratch
+            ),
         )
         emitter = Emitter(DbEventSink(env.factory), trace_id=RETAINED_RUN, repo=ALPHA)
         rows: list[GradeRow] = []

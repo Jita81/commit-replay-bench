@@ -444,7 +444,11 @@ def test_cancel_between_tasks_keeps_partial_counts(h: Harness) -> None:
         authored=h.pyrepo.repo.author_date(green_sha),
     )
     h.add_task(second)
-    run = h.enqueue("replay")
+    # ADR-0019: both qualified in this posture (the second as it was before its oracle went
+    # green), so the gate admits two and the cancel decides how many are built
+    _seed_qualified(h, h.pyrepo.feat_task())
+    _seed_qualified(h, second)
+    run = h.enqueue("replay", params_json={"canary": False})
 
     def cancel_during_first_build(_ws: Workspace, _brief: BuildBrief) -> None:
         got = h.queue.request_cancel(run.id, actor="tester")
@@ -575,7 +579,9 @@ def test_unconfirmed_kill_is_recorded_on_the_run_and_queued_for_the_reaper(
             authored=h.pyrepo.repo.author_date(green_sha),
         )
     )
-    run = h.enqueue("replay")
+    _seed_qualified(h, h.pyrepo.feat_task())
+    _seed_qualified(h, h.pyrepo.feat_task(task_id=green_sha, baseline_failing=[]))
+    run = h.enqueue("replay", params_json={"canary": False})
 
     def cancel_during_build(_ws: Workspace, _brief: BuildBrief) -> None:
         h.queue.request_cancel(run.id, actor="tester")
@@ -718,10 +724,16 @@ class _UnconfirmedGradeExecutor(LocalExecutor):
         self.report = on_kill_unconfirmed
         self.request_cancel = request_cancel
         self.commands: list[tuple[str, ...]] = []
+        self.scripted = False
         _UnconfirmedGradeExecutor.instances.append(self)
 
     def run(self, cmd: Any) -> ExecResult:
         self.commands.append(tuple(cmd.argv))
+        # the posture probe (`python -V`) runs as it would; the FIRST test run — the grade
+        # stage's — is the one whose container kill goes unconfirmed
+        if "pytest" not in " ".join(cmd.argv) or self.scripted:
+            return super().run(cmd)
+        self.scripted = True
         self.request_cancel()
         self.report(UnconfirmedKill(container=self.container, bound_s=10.0))
         return ExecResult(
@@ -749,7 +761,9 @@ def test_grade_stage_unconfirmed_kill_is_recorded_under_the_task_and_queued(
             authored=h.pyrepo.repo.author_date(green_sha),
         )
     )
-    run = h.enqueue("replay")
+    _seed_qualified(h, h.pyrepo.feat_task())
+    _seed_qualified(h, h.pyrepo.feat_task(task_id=green_sha, baseline_failing=[]))
+    run = h.enqueue("replay", params_json={"canary": False})
     real = worker_mod.make_executor
 
     def scripted(kind: str, **kw: Any) -> Any:
@@ -853,6 +867,37 @@ def test_probe_run_sets_status(h: Harness) -> None:
     assert repo.probe_status == "ok"
     actions = [e.action for e in h.events(done.id)]
     assert "probe.start" in actions and "probe.done" in actions and "run.executor" in actions
+
+
+def test_a_provisioning_stop_during_a_probe_is_recorded_on_the_repository(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A probe whose dependencies are refused (``PROVISION_DISABLED`` for a docker
+    repository with dependencies while provisioning is off) fails the run AND the
+    repository's probe status — a probe that passed earlier must not keep reading ``ok``
+    (CodeRabbit on PR #56)."""
+    from crb.core.deps import ProvisionRefused
+
+    h.enqueue("probe")
+    assert h.run_one().status == STATUS_SUCCEEDED and h.repo_row().probe_status == "ok"
+
+    class _Refusing:
+        def resolve(self, *a: Any, **k: Any) -> Any:
+            raise ProvisionRefused("PROVISION_DISABLED", "fx declares python dependencies")
+
+    monkeypatch.setattr(h.worker, "_deps_provider", lambda executor: _Refusing())
+    h.enqueue("probe")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    repo = h.repo_row()
+    assert repo.probe_status == "failed"
+    assert repo.probe_detail.startswith("PROVISION_DISABLED: fx declares python dependencies")
+    assert "CRB_PROVISION__ENABLED" in repo.probe_detail  # the fix travels with it
+    # the class, not the one exception: anything a probe raises is recorded the same way
+    h.enqueue("probe")
+    monkeypatch.setattr(h.worker, "_deps_provider", lambda executor: None)  # AttributeError
+    assert h.run_one().status == STATUS_FAILED
+    assert h.repo_row().probe_detail.startswith("probe error: AttributeError")
 
 
 def test_probe_failure_is_recorded(tmp_path: Path, pyrepo: pr.PyRepo) -> None:
@@ -1152,7 +1197,16 @@ def test_controls_violation_fails_the_gate(h: Harness) -> None:
         gold_clean=True,
     )
     h.add_task(bad_task)
+    # measured in this posture, the bad gold is refused before any control runs …
     h.enqueue("controls", params_json={"task_ids": [bad], "controls": [nc.GOLD, nc.NOOP]})
+    refused = h.run_one()
+    assert refused.status == STATUS_FAILED and refused.error.startswith("POSTURE_UNQUALIFIED")
+    # … and a task qualified before its gold broke is caught by the GOLD control
+    _seed_qualified(h, bad_task)
+    h.enqueue(
+        "controls",
+        params_json={"task_ids": [bad], "controls": [nc.GOLD, nc.NOOP], "canary": False},
+    )
     done = h.run_one()
     assert done.status == STATUS_FAILED and "gate FAILED" in done.error
     assert done.counts_json["violations"] == 1 and done.counts_json["passed"] is False
@@ -1383,6 +1437,31 @@ def test_main_rejects_bad_kinds_and_bad_db(
     )
     assert rc == worker_main.EXIT_ERROR
     assert "error" in json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+
+
+def test_the_sandbox_tree_and_copy_size_hold_without_a_default_image(tmp_path: Path) -> None:
+    """A deployment may leave the worker's image empty (each repository names its own
+    ``sandbox_image``); ``CRB_SANDBOX__TREE`` and ``__WORK_SIZE`` still decide the posture
+    of every docker run — never a silent ``copy`` with the default size — and a tree that
+    is not one of the sandbox's trees stops the worker at start-up (CodeRabbit on PR #56)."""
+    from crb.core.execution import TREE_READONLY
+    from crb.core.spec import Language, RepoConfig
+
+    args = worker_main.build_parser().parse_args(["--once"])
+    env = {
+        "CRB_HOME": str(tmp_path / "h"),
+        "CRB_SANDBOX__EXECUTOR": "docker",
+        "CRB_SANDBOX__TREE": "ReadOnly",
+        "CRB_SANDBOX__WORK_SIZE": "3g",
+    }
+    s = worker_main.settings_from_args(args, env)
+    assert s.docker is None
+    assert s.sandbox_tree == TREE_READONLY and s.sandbox_work_size == "3g"
+    repo_cfg = RepoConfig(name="r", language=Language.PYTHON, sandbox_image="repo:3")
+    d = docker_settings_for(repo_cfg, None, {}, tree=s.sandbox_tree, work_size=s.sandbox_work_size)
+    assert d.image == "repo:3" and d.tree == TREE_READONLY and d.work_size == "3g"
+    with pytest.raises(ValueError, match="CRB_SANDBOX__TREE"):
+        worker_main.settings_from_args(args, {**env, "CRB_SANDBOX__TREE": "copyy"})
 
 
 def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
@@ -1830,3 +1909,268 @@ def test_a_dev_worker_stamps_no_override_on_a_factory_run(
     done = h.run_one()
     assert done.status == STATUS_SUCCEEDED, done.error
     assert "unsealed_prod_override" not in done.apparatus_json
+
+
+# --- ADR-0019: the posture gate --------------------------------------------------------------
+
+
+def _live_posture(h: Harness) -> Any:
+    from crb.core.deps import NullDepsProvider
+    from crb.server.posture_gate import resolve_run_posture
+
+    runner = PytestRunner(h.pyrepo.config)
+    return resolve_run_posture(
+        LocalExecutor(), runner, h.pyrepo.config, NullDepsProvider(), root=h.pyrepo.path
+    )
+
+
+def _seed_qualified(h: Harness, task: TaskSpec, *, posture_id: str = "", **kw: Any) -> Any:
+    """Append a ``qualified`` record for ``task`` (in the live posture unless named)."""
+    from crb.core.qualify import STATE_QUALIFIED, Qualification
+    from crb.store import qualifications as sq
+
+    posture = _live_posture(h)
+    q = Qualification(
+        qualification_id="",
+        repo=task.repo,
+        task_id=task.task_id,
+        posture_id=posture_id or posture.posture_id,
+        posture=posture.to_dict(),
+        state=STATE_QUALIFIED,
+        red={"kind": "tests_failed", "failing": []},
+        baseline_failing=task.baseline_failing,
+        gold={"clean": True, "lint": None},
+        **kw,
+    )
+    with h.factory() as s:
+        sq.append(s, q)
+    return q
+
+
+def _records(h: Harness) -> list[Any]:
+    from crb.core.qualify import Qualification
+    from crb.store.models import TaskQualification
+
+    with h.factory() as s:
+        rows = s.execute(select(TaskQualification).order_by(TaskQualification.seq)).scalars().all()
+        return [Qualification.from_dict(r.body_json) for r in rows]
+
+
+def test_replay_with_no_qualified_task_fails_before_spend(h: Harness) -> None:
+    run = h.enqueue("replay", params_json={"qualify_first": False})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("POSTURE_UNQUALIFIED: 0 of 1 task(s) qualified")
+    assert "crb repo qualify" in done.error and "no model money" in done.error
+    assert FakeBuilder.briefs == []  # no builder was called
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    ev = h.events(run.id)
+    refused = next(e for e in ev if e.action == "run.posture_refused")
+    assert refused.payload["code"] == "POSTURE_UNQUALIFIED"
+    assert refused.payload["refusals"][0]["code"] == "POSTURE_UNQUALIFIED"
+    assert refused.payload["refusals"][0]["fix"]
+    assert any(e.action == "run.posture" for e in ev)
+
+
+def test_qualify_first_qualifies_then_replays_only_the_qualified(h: Harness) -> None:
+    green = h.pyrepo.add_green_commit()
+    h.add_task(
+        h.pyrepo.feat_task(
+            task_id=green,
+            test_files=[pr.TEST_CALC],
+            target_tests=[pr.TEST_CALC],
+            baseline_failing=[],
+            subject="refactor: green at parent",
+        )
+    )
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.counts_json["tasks"] == 1 and done.counts_json["clean"] == 1
+    assert done.counts_json["refusals"] == {"QUAL_NOT_RED": 1}
+    records = _records(h)
+    assert sorted(q.state for q in records) == ["qualified", "unqualified"]
+    (row,) = list(h.worker.ledger.rows(run_id=run.id))
+    assert row.labels["qualification_id"] == next(
+        q.qualification_id for q in records if q.is_qualified
+    )
+    assert row.labels["posture_id"] == _live_posture(h).posture_id
+    ev = h.events(run.id)
+    canary = next(e for e in ev if e.action == "run.canary")
+    assert canary.payload["clean"] is True
+    assert sum(1 for e in ev if e.action == "qualify.task") == 2
+
+
+def test_posture_drift_fails_at_zero_spend(h: Harness) -> None:
+    _seed_qualified(h, h.pyrepo.feat_task(), posture_id="pst_" + "d" * 24)
+    run = h.enqueue("replay", params_json={"qualify_first": False})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and done.error.startswith("POSTURE_DRIFT:")
+    assert "qualify again" in done.error
+    assert FakeBuilder.briefs == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
+
+
+def test_canary_not_clean_fails_before_the_first_build(h: Harness) -> None:
+    bad = h.pyrepo.add_bad_gold_commit()
+    task = h.pyrepo.feat_task(
+        task_id=bad,
+        test_files=[pr.TEST_MULTIPLY],
+        target_tests=[pr.TEST_MULTIPLY],
+        baseline_failing=[],
+        subject="feat: add multiply (breaks add)",
+    )
+    with h.factory() as s:
+        s.query(Task).delete()
+        s.commit()
+    h.add_task(task)
+    # qualified here once — the posture then moved under it (the gold now breaks belt 3)
+    _seed_qualified(h, task)
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and done.error.startswith("POSTURE_CANARY_FAILED:")
+    assert FakeBuilder.briefs == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
+    canary = next(e for e in h.events(run.id) if e.action == "run.canary")
+    assert canary.payload["clean"] is False
+
+
+def test_two_environment_rows_stop_the_run_and_revoke_the_qualifications(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from crb.core.grade import BLAME_GOLD_GREEN, ControlRun
+    from crb.server import posture_gate
+
+    class RedGold:
+        def __init__(self, *a: Any, **k: Any) -> None:
+            pass
+
+        def control(self, scope: Any, *, why: str, allow_failing: Any = None) -> ControlRun:
+            return ControlRun(BLAME_GOLD_GREEN, tuple(scope), False, rc=1, tail="lookup failed")
+
+    monkeypatch.setattr(posture_gate, "GoldWitness", RedGold)
+    monkeypatch.setitem(
+        builders_pkg._REGISTRY, "fake", lambda **cfg: FakeBuilder(behaviour="noop", **cfg)
+    )
+    bad = h.pyrepo.add_bad_gold_commit()
+    second = h.pyrepo.feat_task(
+        task_id=bad,
+        test_files=[pr.TEST_MULTIPLY],
+        target_tests=[pr.TEST_MULTIPLY],
+        baseline_failing=[],
+    )
+    h.add_task(second)
+    _seed_qualified(h, h.pyrepo.feat_task())
+    _seed_qualified(h, second)
+    run = h.enqueue(
+        "replay",
+        ladder_json=["fake:m0", "fake:m1"],
+        params_json={"canary": False, "task_ids": [h.pyrepo.feat_sha, bad]},
+    )
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and done.error.startswith("environment: 2 consecutive")
+    rows = list(h.worker.ledger.rows(run_id=run.id))
+    assert len(rows) == 2 and all(r.failure_kind == "harness" for r in rows)
+    assert all(r.labels["env_code"] == "GOLD_CONTROL_RED" for r in rows)
+    assert all(r.trial == "r1" for r in rows)  # each ladder stopped at its first rung
+    states = [q.state for q in _records(h)]
+    assert states.count("revoked") == 2  # both qualifications revoked, as new records
+    assert any(e.action == "run.environment_stop" for e in h.events(run.id))
+
+
+def test_only_a_control_that_ran_red_revokes_a_qualification(tmp_path: Path) -> None:
+    """QUAL_ENV_WITNESS_RED says the gold failed here during a replay, so only a row whose
+    control RAN red (``env_code`` ``GOLD_CONTROL_RED``) may revoke. An environment row no
+    control witnessed (``TEST_RUN_ENVIRONMENT``) leaves the record in force."""
+    from types import SimpleNamespace
+
+    from crb.core.execution import LocalExecutor
+    from crb.server.posture_gate import PostureGate
+    from fixtures.posture import discovery_qualification
+
+    task = pr.build(tmp_path / "repo").feat_task()
+    q = discovery_qualification(task, LocalExecutor())
+    gate = PostureGate(
+        repo=None,  # type: ignore[arg-type]  # on_environment reads none of these
+        config=None,  # type: ignore[arg-type]
+        runner=None,  # type: ignore[arg-type]
+        executor=None,  # type: ignore[arg-type]
+        scratch=tmp_path,
+        provider=None,  # type: ignore[arg-type]
+        posture=None,  # type: ignore[arg-type]
+    )
+    gate.qualifications[task.task_id] = q
+    unwitnessed = SimpleNamespace(
+        error="environment: tree_copy_failed", labels={"env_code": "TEST_RUN_ENVIRONMENT"}
+    )
+    gate.on_environment(task, unwitnessed)  # type: ignore[arg-type]
+    assert gate.qualifications[task.task_id] is q and q.is_qualified
+    red = SimpleNamespace(
+        error="environment: gold control red in pst_x: belt 2",
+        labels={"env_code": "GOLD_CONTROL_RED"},
+    )
+    gate.on_environment(task, red)  # type: ignore[arg-type]
+    revoked = gate.qualifications[task.task_id]
+    assert revoked.state == "revoked" and revoked.code == "QUAL_ENV_WITNESS_RED"
+
+
+def test_qualify_run_spends_nothing(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(*a: Any, **k: Any) -> Any:
+        raise AssertionError("a qualify run constructed a builder")
+
+    monkeypatch.setattr(builders_pkg, "get_builder", refuse)
+    monkeypatch.setattr(builders_pkg, "builder_for_rung", refuse)
+    run = h.enqueue("qualify")
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.counts_json["qualified"] == 1 and done.counts_json["unqualified"] == 0
+    assert done.counts_json["cost_usd"] == 0.0 and done.counts_json["by_code"] == {}
+    assert done.counts_json["posture_id"] == _live_posture(h).posture_id
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []  # no grade row: nothing was built
+    (q,) = _records(h)
+    assert q.is_qualified and q.run_id == run.id
+    assert any(e.action == "qualify.done" for e in h.events(run.id))
+
+
+def test_mine_in_docker_without_provisioning_says_what_to_do(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sealed posture as shipped cannot load a module graph (ADR-0019 D1): the mine's
+    qualification refuses each candidate QUAL_ENV_UNLOADABLE and the run stops with what to
+    do, instead of mining tasks every replay would then charge to the model. (The real
+    sealed image is exercised in tests/test_posture_docker.py.)"""
+    import sys as _sys
+
+    from crb.core.execution import Command
+
+    def unloadable(self: Any, root: Path, scope: Any, *, executor: Any, timeout: int) -> Command:
+        return Command((_sys.executable, "-c", "import sys; sys.exit(1)"), root, timeout=timeout)
+
+    monkeypatch.setattr(PytestRunner, "env_probe_command", unloadable)
+    for i in range(3):
+        pr._write(h.pyrepo.path, pr.SRC, pr.SRC_FEAT.replace("A tiny calculator.", f"v{i}."))
+        pr._write(
+            h.pyrepo.path,
+            pr.TEST_CALC,
+            pr.TEST_CALC_SRC + f"\n\ndef test_zero_{i}():\n    assert add(0, 0) == 0\n",
+        )
+        pr._commit(h.pyrepo.path, f"refactor: v{i}")
+    run = h.enqueue("mine", params_json={"target": 5})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert "QUAL_ENV_UNLOADABLE" in done.error
+    assert "switch provisioning on and qualify" in done.error
+    skips = [e for e in h.events(run.id) if e.action == "mine.skip"]
+    assert skips and all(e.payload.get("code") == "QUAL_ENV_UNLOADABLE" for e in skips)
+
+
+def test_route_gate_reads_the_deployment_posture_only(h: Harness) -> None:
+    """ADR-0019 §8: a cell measured in another posture never licenses a delivery here. The
+    same factory rows read under the worker's own class count; under another class, none."""
+    home, item, _ = _multiply_backlog(h)
+    first = h.enqueue("factory", ladder_json=["fake:m0"])
+    assert h.run_one().status == STATUS_SUCCEEDED
+    rows = [r for r in h.worker.ledger.rows(repo=pr.REPO_NAME) if r.run_id == first.id]
+    assert rows and all(r.posture_class == "local/inplace/host-env" for r in rows)
+    here = h.worker._route_lookup(pr.REPO_NAME)(item)  # this worker: local/inplace/host-env
+    assert here is not None and here["n"] == len(rows)
+    assert h.worker._route_lookup(pr.REPO_NAME, "", "docker/copy/sealed")(item) is None
+    del home

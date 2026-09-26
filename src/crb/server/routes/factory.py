@@ -134,7 +134,13 @@ from crb.server.intake import (
     poll_repository,
     register_approved,
 )
-from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
+from crb.server.routes.capability import (
+    POSTURE_DEPLOYMENT,
+    filter_posture,
+    rows_for_apparatus,
+    rows_for_mode,
+    signed_map,
+)
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.runs import append_system_event, system_trace_id
@@ -942,7 +948,7 @@ def list_tasks(
     get_repo_or_404(db, repo)
     home = _home(settings, repo)
     views = home.task_views()
-    routes = _cell_routes(db, factory, repo) if views else {}
+    routes = _cell_routes(db, factory, repo, settings) if views else {}
     # G-904 — the stopped item's own record, so its way forward can carry the superseding
     # item already drafted; ``taken`` keeps that draft's id off one the register route
     # would refuse. A repository whose backlog has gone serves the way forward without it.
@@ -972,13 +978,17 @@ def list_tasks(
     return out
 
 
-def _cell_routes(db: DbDep, factory: SessionFactoryDep, repo: str) -> dict[str, CellRouteOut]:
+def _cell_routes(
+    db: DbDep, factory: SessionFactoryDep, repo: str, settings: object
+) -> dict[str, CellRouteOut]:
     """``class|size`` → the map's decision, from exactly the reading the worker's delivery
     gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows on the current
     apparatus, the repo's latest controls verdict, sign-offs overlaid."""
     rows = rows_for_apparatus(
         rows_for_mode(DbLedger(factory).rows(repo=repo), "sighted"), "current"
     )
+    # ADR-0019 §8: the same posture filter the worker's delivery gate applies
+    rows = filter_posture(db, repo, rows, POSTURE_DEPLOYMENT, settings).rows
     cmap, _ = signed_map(
         rows, PROJECTION_CLASS_SIZE, db, repo, controls=latest_controls_verdict(db, repo)
     )
@@ -1472,7 +1482,7 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
     listener, tracker = _consented_tracker(
         row, settings, secrets, act="switch it on before reading the column"
     )
-    routes = _cell_routes(db, factory, repo)
+    routes = _cell_routes(db, factory, repo, settings)
     home = _home(settings, repo)
     budget_s = float(settings.intake.poll_budget_s)
     # poll_repository writes the served view itself, so this route reads it back through

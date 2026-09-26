@@ -220,6 +220,17 @@ export function PosturePage() {
           hint: 'summary.posture.production',
           value: postureValue(health.data?.posture, health.isError, admin),
         },
+        {
+          key: 'Dependency provisioning',
+          hint: 'summary.posture.provisioning',
+          value: s
+            ? adminOnly(
+                s.raw?.provision?.enabled
+                  ? 'on — each task’s dependencies are fetched outside the test container and mounted read-only'
+                  : 'off — a repository whose tests need a third-party module cannot be qualified in the sealed sandbox, and the Posture panel says so instead of blaming the model',
+              )
+            : adminOnly(undefined),
+        },
         { key: 'Builder posture', hint: 'summary.posture.builder', value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : adminOnly(undefined) },
         { key: 'Toolchains', hint: 'summary.posture.toolchains', value: probeText('toolchains') },
         {

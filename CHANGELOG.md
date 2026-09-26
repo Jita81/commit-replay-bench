@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Qualification is posture-relative; the sealed posture runs a repository with dependencies**
+  ([#56](https://github.com/Jita81/commit-replay-bench/pull/56)). Apparatus 2.2 → 2.3 (ADR-0019,
+  DL-060): a posture is a hashed identity whose class rates pool on, a task is qualified per posture
+  for no model money (`task_qualifications`, revision 0011, `crb repo qualify`), and a verdict that
+  would blame the model first runs a witness control in the same posture — red makes the row
+  `harness`. Nothing is built for an unqualified task. The map, route gate and sign-off overlay read
+  the deployment's posture class, never a blend. `crb.core.deps` and `crb.provision` fetch and seal
+  each task's dependencies; the throwaway copy is the sandbox's default tree. The current map starts
+  empty and 2.2 sign-offs go stale.
+
 - **The factory reviews before it delivers; an operator approves what a ticket asks**
   ([#55](https://github.com/Jita81/commit-replay-bench/pull/55)). Only an `accept` opens a pull
   request, and an earlier run's open one is closed naming the verdict (ADR-0021). A ready ticket

@@ -784,3 +784,58 @@ class TestPool:
         assert env.get(f"/repos/{ALPHA}/pool").status_code == 200
         assert env.get("/repos/nope/pool").status_code == 404
         assert_rbac(env, "GET", f"/repos/{ALPHA}/pool", min_role="viewer")
+
+
+# --- ADR-0019: the repository's posture ---------------------------------------------------------
+
+
+def test_posture_view_counts_and_explains_refusals(env: Env) -> None:
+    from crb.core.qualify import STATE_QUALIFIED, STATE_UNQUALIFIED, Qualification
+    from crb.store import qualifications as sq
+    from crb.store.models import Task
+    from fixtures.server_seed import task_id
+
+    empty = env.get(f"/repos/{ALPHA}/posture")
+    assert empty.status_code == 200, empty.text
+    body = empty.json()
+    assert body["posture_id"] == "" and body["qualified"] == 0
+    assert "qualify the repository" in body["stale_reason"]
+    assert body["provisioning"] == {"enabled": False}
+
+    with env.factory() as s:
+        total = s.query(Task).filter(Task.repo == ALPHA).count()
+    here = "pst_" + "6" * 24
+    posture = {"executor": "local", "posture_class": "local/inplace/host-env", "posture_id": here}
+    host = "pst_" + "7" * 24
+
+    def rec(tid: str, pid: str, state: str, code: str = "", base: tuple[str, ...] = ()) -> None:
+        q = Qualification(
+            qualification_id="",
+            repo=ALPHA,
+            task_id=tid,
+            posture_id=pid,
+            posture={**posture, "posture_id": pid},
+            state=state,
+            code=code,
+            baseline_failing=base,
+        )
+        with env.factory() as s:
+            sq.append(s, q)
+
+    rec(task_id(1), host, STATE_QUALIFIED)  # an older posture
+    rec(task_id(1), here, STATE_QUALIFIED, base=("pkg::TestWritesIntoItsPackage",))
+    rec(task_id(2), here, STATE_UNQUALIFIED, "QUAL_ENV_UNLOADABLE")
+    got = env.get(f"/repos/{ALPHA}/posture").json()
+    assert got["posture_id"] == here and got["posture_class"] == "local/inplace/host-env"
+    assert got["qualified"] == 1 and got["total"] == total and got["stale_reason"] == ""
+    codes = {r["code"]: r for r in got["refusals_by_code"]}
+    assert codes["QUAL_ENV_UNLOADABLE"]["n"] == 1
+    assert "provisioning" in codes["QUAL_ENV_UNLOADABLE"]["fix"]
+    assert codes["QUAL_ENV_UNLOADABLE"]["doc"].startswith("docs/OPERATOR.md#7a")
+    assert codes["POSTURE_UNQUALIFIED"]["n"] == total - 2  # never measured here
+    (delta,) = got["delta"]
+    assert delta["task_id"] == task_id(1) and delta["reference_posture_id"] == host
+    assert delta["only_here"] == ["pkg::TestWritesIntoItsPackage"]
+    assert env.get("/repos/nope/posture").status_code == 404
+    login(env.client, "viewer")
+    assert env.get(f"/repos/{ALPHA}/posture").status_code == 200  # a viewer reads it

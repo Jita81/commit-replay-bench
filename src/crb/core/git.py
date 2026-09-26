@@ -268,6 +268,23 @@ class GitRepo:
         r = self.run("show", f"{sha}:{path}")
         return r.stdout if r.ok else None
 
+    def show_blob(self, sha: str, path: str) -> bytes | None:
+        """``path``'s exact BYTES at ``sha`` (no newline translation), or ``None`` when the
+        commit has no such blob. Dependency inputs are hashed from these bytes, so a key
+        computed from the object store equals one computed from the same file on disk."""
+        argv = [self.git_binary, "-C", str(self.path), "cat-file", "blob", f"{sha}:{path}"]
+        try:
+            p = subprocess.run(argv, capture_output=True, timeout=self.timeout, check=False)
+        except subprocess.TimeoutExpired as e:
+            raise GitError(argv, 124, f"timed out after {self.timeout}s") from e
+        return p.stdout if p.returncode == 0 else None
+
+    def tree_names(self, sha: str, directory: str = "") -> list[str]:
+        """The entry names directly under ``directory`` (the root when empty) at ``sha``."""
+        spec = f"{sha}:{directory}" if directory else sha
+        r = self.run("ls-tree", "--name-only", spec)
+        return r.lines if r.ok else []
+
     # --- mutations (worktree-scoped) --------------------------------------------
     def checkout_paths(self, sha: str, paths: list[str], *, cwd: str | Path) -> None:
         """Overlay ``paths`` from ``sha`` into the worktree at ``cwd``."""

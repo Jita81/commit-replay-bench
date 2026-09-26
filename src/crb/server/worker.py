@@ -169,6 +169,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -192,8 +193,16 @@ from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
+from crb.core.deps import DepsProvider, ProvisionRefused
 from crb.core.evidence import utc_now_iso
-from crb.core.execution import DockerSettings, Executor, SandboxUnavailable, make_executor
+from crb.core.execution import (
+    TREE_COPY,
+    DockerExecutor,
+    DockerSettings,
+    Executor,
+    SandboxUnavailable,
+    make_executor,
+)
 from crb.core.git import (
     DEFAULT_CLONE_TIMEOUT_S,
     CloneUrlError,
@@ -219,6 +228,8 @@ from crb.core.oracle.mutation import (
     aggregate_by_cell,
     score_task,
 )
+from crb.core.posture import expected_posture_class
+from crb.core.qualify import Qualification
 from crb.core.redact import redact_and_cap
 from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
@@ -243,6 +254,8 @@ from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
 from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
+from crb.provision import make_deps_provider
+from crb.provision.config import ProvisionConfig
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
@@ -256,8 +269,15 @@ from crb.server.intake import (
     poll_repository,
     post_outcomes_to_tickets,
 )
+from crb.server.posture_gate import DEFAULT_ENV_STOP, PostureGate, resolve_run_posture
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
-from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
+from crb.server.routes.capability import (
+    legacy_executor_lookup,
+    rows_for_apparatus,
+    rows_for_mode,
+    rows_for_posture,
+    signed_map,
+)
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
 from crb.server.settings import (
@@ -266,6 +286,7 @@ from crb.server.settings import (
     GitHubAppSettings,
     IntakeSettings,
 )
+from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
 from crb.store.jobs import (
@@ -276,6 +297,7 @@ from crb.store.jobs import (
     KIND_MINE,
     KIND_ORACLE,
     KIND_PROBE,
+    KIND_QUALIFY,
     KIND_REPLAY,
     KIND_SETUP,
     STATUS_CANCELLED,
@@ -451,6 +473,11 @@ class WorkerSettings:
     home: Path = Path(".crb")
     executor: str = "local"
     docker: DockerSettings | None = None
+    #: The sandbox's tree and copy size (``CRB_SANDBOX__TREE`` / ``__WORK_SIZE``), kept
+    #: when there is no default image (each repository names its own): they decide the
+    #: posture of every docker run, image or no image (ADR-0019 §7).
+    sandbox_tree: str = TREE_COPY
+    sandbox_work_size: str = "1g"
     worker_id: str = ""
     poll_s: float = 2.0
     heartbeat_s: float = 10.0
@@ -496,6 +523,10 @@ class WorkerSettings:
     #: handed a host worktree), so in ``prod`` a factory run is refused unless the override is
     #: set, and one run under it is stamped (ADR-0023, ``_run_factory``).
     env: str = "dev"
+    #: Dependency provisioning for the sealed posture (``CRB_PROVISION__*``, ADR-0019):
+    #: off by default; the worker's dependency provider is chosen from it
+    #: (:meth:`crb.provision.config.ProvisionConfig.from_env`, read by the entrypoint).
+    provision: ProvisionConfig = field(default_factory=ProvisionConfig)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", Path(self.home).expanduser())
@@ -708,6 +739,7 @@ class Worker:
             KIND_CONTROLS: self._run_controls,
             KIND_LABEL: self._run_label,
             KIND_FACTORY: self._run_factory,
+            KIND_QUALIFY: self._run_qualify,
         }
 
     # --- layout ---------------------------------------------------------------
@@ -1118,6 +1150,11 @@ class Worker:
             counts = dict(ctx.counts) if ctx else {}
             _LOG.exception("run %s failed", run.id[:8])
             emitter.error("system", "run.error", exc)
+            if run.kind == KIND_PROBE:
+                # ONE place records a probe that raised, whatever raised it — a provisioning
+                # stop included — so a probe that passed earlier never keeps reading "ok"
+                # (CodeRabbit on PR #56)
+                self._set_probe(run.repo, PROBE_FAILED, probe_failure_detail(exc))
         finally:
             hb_stop.set()
             hb.join(timeout=5)
@@ -1477,7 +1514,13 @@ class Worker:
             )
         docker: DockerSettings | None = None
         if kind == "docker":
-            docker = docker_settings_for(ctx.config, self.settings.docker, ctx.params)
+            docker = docker_settings_for(
+                ctx.config,
+                self.settings.docker,
+                ctx.params,
+                tree=self.settings.sandbox_tree,
+                work_size=self.settings.sandbox_work_size,
+            )
         # The cancel token: a requested cancel kills the running test process (local) or
         # container (docker) instead of waiting for the wall-clock timeout. A docker kill
         # the daemon never confirms is reported the same way a sealed attempt's is.
@@ -1489,6 +1532,67 @@ class Worker:
         )
         ctx.emit("system", "run.executor", **ctx._executor.describe())
         return ctx._executor
+
+    def _deps_provider(self, executor: Executor) -> DepsProvider:
+        """The deployment's dependency provider for ``executor`` (ADR-0019): provisioning
+        off → the host's environment locally and ``PROVISION_DISABLED`` for a repository
+        with dependencies in the sandbox; on → fetched, sealed and bound per task. A
+        production refusal (a public registry, an unpinned fetch image, a store the daemon
+        cannot see) raises here, before anything is qualified or built."""
+        probe_image = executor.settings.image if isinstance(executor, DockerExecutor) else ""
+        return make_deps_provider(
+            self.settings.provision,
+            executor_kind=executor.name,
+            probe_image=probe_image,
+        )
+
+    def _posture_gate(self, ctx: RunContext, runner: BaseRunner, executor: Executor) -> PostureGate:
+        """The run's posture gate (ADR-0019): the posture resolved live, stamped and
+        announced (``run.posture``) before anything is qualified or built."""
+        provider = self._deps_provider(executor)
+        posture = resolve_run_posture(
+            executor, runner, ctx.config, provider, root=Path(ctx.git.path)
+        )
+        ctx.emit(
+            "system",
+            "run.posture",
+            posture_id=posture.posture_id,
+            posture_class=posture.posture_class,
+            posture=posture.to_dict(),
+        )
+        return PostureGate(
+            repo=ctx.git,
+            config=ctx.config,
+            runner=runner,
+            executor=executor,
+            scratch=self.scratch_dir,
+            provider=provider,
+            posture=posture,
+            timeout=ctx.timeout,
+            run_id=ctx.run.id,
+            on_event=ctx.on_event,
+            session_factory=self.factory,
+            actor=ctx.run.actor,
+        )
+
+    def _deployment_posture_class(self, repo: str = "") -> str:
+        """This worker's posture class for ``repo`` from its settings and the repository's
+        own ``sandbox_tree`` (the map's reading when no run has measured one) —
+        :func:`crb.core.posture.expected_posture_class`, the rule the API uses too."""
+        tree = ""
+        if repo:
+            with self.factory() as s:
+                row = s.get(Repo, repo)
+                tree = str(dict(row.config_json or {}).get("sandbox_tree") or "") if row else ""
+        if not tree:
+            tree = (
+                self.settings.docker.tree
+                if self.settings.docker is not None
+                else self.settings.sandbox_tree
+            )
+        return expected_posture_class(
+            self.settings.executor, tree=tree, provisioning=self.settings.provision.enabled
+        )
 
     def _stamp(self, ctx: RunContext, **extra: Any) -> None:
         apparatus = {
@@ -1531,7 +1635,7 @@ class Worker:
         return self.queue.is_cancel_requested(ctx.run.id)
 
     # --- tasks -------------------------------------------------------------------
-    def _select_tasks(self, ctx: RunContext) -> list[TaskSpec]:
+    def _select_tasks(self, ctx: RunContext, *, include_dirty: bool = False) -> list[TaskSpec]:
         """``params.task_ids`` in the order given (the core skips any that are not
         gold-clean, with an event), else every GOLD-CLEAN task of the repo; optionally
         filtered by ``params.pool`` and capped by ``params.limit``. Oldest-authored
@@ -1542,7 +1646,10 @@ class Worker:
         limit = int(p.get("limit") or 0)
         with self.factory() as s:
             q = select(Task).where(Task.repo == ctx.run.repo)
-            q = q.where(Task.task_id.in_(ids)) if ids else q.where(Task.gold_clean.is_(True))
+            if ids:
+                q = q.where(Task.task_id.in_(ids))
+            elif not include_dirty:
+                q = q.where(Task.gold_clean.is_(True))
             if pool:
                 q = q.where(Task.pool == pool)
             rows = s.execute(q.order_by(Task.authored, Task.task_id)).scalars().all()
@@ -1672,14 +1779,17 @@ class Worker:
                 return STATUS_FAILED, dict(ctx.counts), redact_and_cap(detail, max_chars=1000)
         scope: tuple[str, ...] = tuple(ctx.config.probe.split()) if ctx.config.probe else BARE
         ctx.emit("system", "probe.start", scope=list(scope), path=str(ctx.git.path))
-        try:
-            result = runner.run(executor, ctx.git.path, scope, timeout=ctx.timeout)
-        except SandboxUnavailable:
-            raise
-        except Exception as exc:
-            detail = f"probe error: {type(exc).__name__}: {exc}"
-            self._set_probe(ctx.run.repo, PROBE_FAILED, detail)
-            raise
+        # ADR-0019: the probe reads the clone's own dependencies the way a trial would
+        head = ctx.git.rev_parse("HEAD")
+        # anything this raises is recorded on the repository by execute(), whatever it is
+        binding = (
+            self._deps_provider(executor)
+            .resolve(ctx.git, ctx.config, parent=head, gold=head, executor_name=executor.name)
+            .parent
+        )
+        result = runner.run_for(
+            executor, ctx.git.path, scope, timeout=ctx.timeout, authored=None, deps=binding
+        )
         ok = result.green
         why = (
             "timed out"
@@ -1712,6 +1822,50 @@ class Worker:
             return STATUS_SUCCEEDED, counts, ""
         return STATUS_FAILED, counts, f"probe not green: {why}"
 
+    def _run_qualify(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
+        """ADR-0019: measure the repository's tasks in the posture that will grade them and
+        append each record — constructs no builder and calls no model. ``params.task_ids``
+        narrows it; every task is re-measured (a record is appended even when one exists)."""
+        runner = self._runner(ctx)
+        executor = self._executor(ctx)
+        gate = self._posture_gate(ctx, runner, executor)
+        self._stamp(ctx, posture=gate.posture.to_dict())
+        tasks = self._select_tasks(ctx, include_dirty=True)
+        total = len(tasks)
+        counts: dict[str, Any] = {
+            "qualified": 0,
+            "unqualified": 0,
+            "total": total,
+            "by_code": {},
+            "posture_id": gate.posture.posture_id,
+            "posture_class": gate.posture.posture_class,
+            "cost_usd": 0.0,
+        }
+        ctx.counts.update(counts)
+        self._progress(ctx, 0, total)
+        cancelled = False
+        for i, task in enumerate(tasks):
+            if self._cancelled(ctx):
+                cancelled = True
+                break
+            ctx.task_id = task.task_id
+            q = gate.qualify(task)
+            key = "qualified" if q.is_qualified else "unqualified"
+            counts[key] += 1
+            if q.code:
+                counts["by_code"][q.code] = counts["by_code"].get(q.code, 0) + 1
+            ctx.counts.update(counts)
+            self._progress(ctx, i + 1, total)
+        ctx.emit(
+            "system",
+            "qualify.done",
+            status=StepStatus.OK if counts["qualified"] else StepStatus.ERROR,
+            **counts,
+        )
+        if cancelled:
+            return STATUS_CANCELLED, counts, ""
+        return STATUS_SUCCEEDED, counts, ""
+
     def _run_mine(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         p = ctx.params
         pool = str(p.get("pool") or POOL_STANDARD)
@@ -1727,6 +1881,8 @@ class Worker:
         )
         runner = self._runner(ctx)
         executor = self._executor(ctx)
+        # ADR-0019: the mine qualifies each task in its OWN posture, in the same pass
+        gate = self._posture_gate(ctx, runner, executor) if gold else None
         self._stamp(ctx, pool=pool, gold=gold, ref=ref)
         known = self._known_task_ids(ctx.run.repo)
         # `task_ids` = RE-QUALIFY these commits (the miner changed: a new rule, a fixed
@@ -1773,6 +1929,9 @@ class Worker:
                 timeout=ctx.timeout,
                 ref=ref,
                 on_event=ctx.on_event,
+                posture=gate.posture if gate is not None else None,
+                deps=gate.provider if gate is not None else None,
+                run_id=ctx.run.id,
             )
             while True:
                 if self._cancelled(ctx):
@@ -1783,6 +1942,8 @@ class Worker:
                 except StopIteration:
                     break
                 counts["examined"] += 1
+                if out.qualification is not None and out.task is not None:
+                    self._record_qualification(out.qualification)
                 if out.task is None:
                     counts["skipped"] += 1
                 else:
@@ -1809,6 +1970,12 @@ class Worker:
             ctx.emit("mine", "mine.cancelled", **counts)
             return STATUS_CANCELLED, counts, ""
         return STATUS_SUCCEEDED, counts, ""
+
+    def _record_qualification(self, q: Qualification) -> None:
+        """Append a qualification record (the mine's own posture) — after the task row, so
+        the record names a task that exists."""
+        with self.factory() as s:
+            store_qualifications.append(s, q)
 
     def _task_pools(self, repo: str, task_ids: Sequence[str]) -> dict[str, str]:
         with self.factory() as s:
@@ -1887,6 +2054,29 @@ class Worker:
         retain = dict(p.get("retain") or {})
         runner = self._runner(ctx)
         executor = self._executor(ctx)
+        # ADR-0019: nothing is built for a task not qualified in the posture that grades it
+        gate = self._posture_gate(ctx, runner, executor)
+        decision = gate.prepare(
+            tasks,
+            qualify_first=bool(p.get("qualify_first", True)),
+            canary=bool(p.get("canary", True)),
+            stop=lambda: self._cancelled(ctx),
+        )
+        if gate.refusals:
+            ctx.counts["refusals"] = dict(gate.refusals)
+        if decision.stopped:
+            ctx.emit(
+                "system",
+                "run.posture_refused",
+                status=StepStatus.ERROR,
+                code=decision.code,
+                reason=decision.reason,
+                refusals=gate.refusals_view(),
+            )
+            return STATUS_FAILED, dict(ctx.counts), decision.reason
+        tasks = list(decision.tasks)
+        total = len(tasks)
+        ctx.counts["total"] = total
         run_ledger = _RunLedger(
             self.ledger,
             self.factory,
@@ -1915,6 +2105,9 @@ class Worker:
             keep_worktrees=bool(
                 p.get("keep_worktrees", retain.get("worktrees", self.settings.keep_worktrees))
             ),
+            context_for=gate.context_for,
+            posture=gate.posture.to_dict(),
+            on_environment=gate.on_environment,
             extra={
                 "worker": self.worker_id,
                 **self._override_stamp(),
@@ -1960,6 +2153,8 @@ class Worker:
             ),
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
+            # ADR-0019 (amends ADR-0012): a sealed builder reads the task's PARENT set
+            deps_for=gate.deps_for,
         )
         self._progress(ctx, 0, total)
 
@@ -1990,16 +2185,28 @@ class Worker:
         def tripped() -> bool:
             return outage_stop > 0 and streak["n"] >= outage_stop
 
+        # ADR-0019: two environment rows in a row mean the posture, not the tasks, is
+        # broken — stop before paying for more (``params.env_stop``; 0 disables)
+        env_stop = int(p.get("env_stop", DEFAULT_ENV_STOP) or 0)
+
+        def env_tripped() -> bool:
+            if env_stop <= 0:
+                return False
+            rows = list(self.ledger.rows(run_id=run.id))
+            return gate.environment_streak(rows) >= env_stop
+
         summary: RunSummary = core_run(
             spec,
             ctx.git,
             tracked(),
             metered_build,
             on_event=ctx.on_event,
-            stop=lambda: self._cancelled(ctx) or tripped(),
+            stop=lambda: self._cancelled(ctx) or tripped() or env_tripped(),
         )
         counts = summary.to_dict()
         counts["total"] = total
+        if gate.refusals:
+            counts["refusals"] = dict(gate.refusals)
         ctx.counts.clear()
         ctx.counts.update(counts)
         self._progress(ctx, summary.tasks, total)
@@ -2011,6 +2218,16 @@ class Worker:
             )
             counts["stopped_reason"] = reason
             ctx.emit("system", "run.outage_stop", status=StepStatus.ERROR, reason=reason)
+            return STATUS_FAILED, counts, reason
+        if env_tripped() and not self._cancelled(ctx):
+            reason = (
+                f"environment: {env_stop} consecutive attempts failed on the posture, not the "
+                f"patch (the gold control was red in {gate.posture.posture_id}); their "
+                "qualifications are revoked — qualify again (the cause is usually provisioning "
+                "or the image)"
+            )
+            counts["stopped_reason"] = reason
+            ctx.emit("system", "run.environment_stop", status=StepStatus.ERROR, reason=reason)
             return STATUS_FAILED, counts, reason
         if summary.stopped_reason == "cancelled":
             return STATUS_CANCELLED, counts, ""
@@ -2037,6 +2254,25 @@ class Worker:
         runner = self._runner(ctx)
         executor = self._executor(ctx)
         self._stamp(ctx, max_mutants=max_mutants)
+        # ADR-0019: a mutation score is measured only on a task proven in this posture
+        gate = self._posture_gate(ctx, runner, executor)
+        decision = gate.prepare(
+            tasks,
+            qualify_first=bool(ctx.params.get("qualify_first", True)),
+            canary=False,
+            stop=lambda: self._cancelled(ctx),
+        )
+        if decision.stopped:
+            ctx.emit(
+                "system",
+                "run.posture_refused",
+                status=StepStatus.ERROR,
+                code=decision.code,
+                reason=decision.reason,
+                refusals=gate.refusals_view(),
+            )
+            return STATUS_FAILED, dict(ctx.counts), decision.reason
+        tasks = list(decision.tasks)
         total = len(tasks)
         scores: list[CommitOracleScore] = []
         ctx.counts.update({"tasks": 0, "total": total, "scoreable": 0})
@@ -2053,16 +2289,21 @@ class Worker:
             with Workspace.create(ctx.git, task.task_id, dest, config=ctx.config) as ws:
                 ws.overlay_tests(task.test_files)
                 ws.overlay_sources(task.src_files)  # the GOLD state: target GREEN
-                score = score_task(
-                    ws,
-                    task,
-                    config=ctx.config,
-                    runner=runner,
-                    executor=executor,
-                    max_mutants=max_mutants,
-                    timeout=ctx.timeout,
-                    on_event=ctx.on_event,
-                )
+                previous_deps = runner.deps
+                runner.deps = gate.deps_for(task).gold  # the gold state's dependency set
+                try:
+                    score = score_task(
+                        ws,
+                        task,
+                        config=ctx.config,
+                        runner=runner,
+                        executor=executor,
+                        max_mutants=max_mutants,
+                        timeout=ctx.timeout,
+                        on_event=ctx.on_event,
+                    )
+                finally:
+                    runner.deps = previous_deps
             scores.append(score)
             body = score.to_dict()
             body.pop("task_id", None)  # lifted to the event envelope
@@ -2077,7 +2318,7 @@ class Worker:
         return (STATUS_CANCELLED if cancelled else STATUS_SUCCEEDED), counts, ""
 
     def _route_lookup(
-        self, repo: str, run_id: str = ""
+        self, repo: str, run_id: str = "", posture_class: str = ""
     ) -> Callable[[BacklogItem], dict[str, Any] | None]:
         """The capability map's decision for an item's (class × size) cell — computed once,
         lazily, from the same signed map ``GET /capability-map`` serves (sighted rows,
@@ -2087,14 +2328,26 @@ class Worker:
         Rows of ``run_id`` — THIS run's own graded builds — are excluded: the map that
         licenses a delivery is the map as it stood before the run, never one the run's own
         clean rows have nudged (B-1b finding 2: PR bodies said ``n=27`` where the freeze saw
-        26 → DL-045). Each decision also carries ``apparatus_versions`` for the record."""
+        26 → DL-045). Each decision also carries ``apparatus_versions`` for the record.
+
+        ADR-0019 §8: only rows of ``posture_class`` (the run's own, else this deployment's)
+        license a delivery — a cell measured in another posture never does."""
+        cls = posture_class or self._deployment_posture_class(repo)
         cache: dict[str, dict[str, Any] | None] = {}
         computed: dict[str, bool] = {}
 
         def compute() -> None:
             before = (r for r in self.ledger.rows(repo=repo) if not run_id or r.run_id != run_id)
-            rows = rows_for_apparatus(rows_for_mode(before, "sighted"), "current")
+            current = rows_for_apparatus(rows_for_mode(before, "sighted"), "current")
             with self.factory() as s:
+                rows = rows_for_posture(
+                    current,
+                    cls,
+                    fingerprints=lambda classes: store_qualifications.latest_fingerprints(
+                        s, repo, classes
+                    ),
+                    legacy_executor_of=legacy_executor_lookup(s),
+                ).rows
                 cmap, _ = signed_map(
                     rows, PROJECTION_CLASS_SIZE, s, repo, controls=latest_controls_verdict(s, repo)
                 )
@@ -2175,6 +2428,8 @@ class Worker:
         # stamped or spent, so a rung that is also on the build ladder is refused by
         # ``FactorySpec``'s existing identity check rather than found half-way through.
         test_author = self._test_author(ctx, ladder)
+        gate = self._posture_gate(ctx, runner, executor)
+        base_sha = ctx.git.rev_parse("HEAD")
         overrides = dict(p.get("builder_config") or {})
         builders: dict[str, Builder] = {}
 
@@ -2205,7 +2460,8 @@ class Worker:
             test_author=author_label(test_author) if test_author is not None else "",
             # F39 — the base every RED proof and build of this run starts from (the
             # default branch as fetched, or the clone's head when nothing was fetched)
-            base_sha=ctx.git.rev_parse("HEAD"),
+            base_sha=base_sha,
+            posture=gate.posture.to_dict(),
             **self._factory_override_stamp(),
         )
         # delivery through the GitHub App: the linked installation's token pushes the branch
@@ -2254,13 +2510,23 @@ class Worker:
             # the route gate: the same signed (class × size) map the API serves, under the
             # repo's latest controls verdict, sighted rows of the current apparatus — minus
             # this run's own rows (DL-045); the loop reads it once per item, at readiness
-            route_decision_for=self._route_lookup(run.repo, run.id),
+            route_decision_for=self._route_lookup(run.repo, run.id, gate.posture.posture_class),
             deliver_override_by=str(p.get("deliver_override_by", "") or ""),
             run_id=run.id,
             actor=run.actor,
             timeout=ctx.timeout,
             max_rework=int(p.get("max_rework", 1)),
             keep_workspaces=bool(retain.get("worktrees", False)),
+            # ADR-0019: every item is graded in the posture resolved for this run
+            posture=gate.posture,
+            deps=gate.provider.resolve(
+                ctx.git,
+                ctx.config,
+                parent=base_sha,
+                gold=base_sha,
+                executor_name=executor.name,
+                on_event=ctx.on_event,
+            ),
         )
         loop = FactoryLoop(spec, ctx.git, emitter=ctx.emitter)
         total = len(backlog.ordered())
@@ -2372,6 +2638,26 @@ class Worker:
         runner = self._runner(ctx)
         executor = self._executor(ctx)
         self._stamp(ctx, controls=list(controls))
+        # ADR-0019: the controls grade against the baseline measured in THIS posture, and
+        # a canary proves the posture can grade the first task's gold before any control
+        gate = self._posture_gate(ctx, runner, executor)
+        decision = gate.prepare(
+            tasks,
+            qualify_first=bool(ctx.params.get("qualify_first", True)),
+            canary=bool(ctx.params.get("canary", True)),
+            stop=lambda: self._cancelled(ctx),
+        )
+        if decision.stopped:
+            ctx.emit(
+                "system",
+                "run.posture_refused",
+                status=StepStatus.ERROR,
+                code=decision.code,
+                reason=decision.reason,
+                refusals=gate.refusals_view(),
+            )
+            return STATUS_FAILED, dict(ctx.counts), decision.reason
+        tasks = list(decision.tasks)
         total = len(tasks)
         rows: list[ControlRow] = []
         ctx.counts.update({"tasks": 0, "total": total, "rows": 0})
@@ -2393,6 +2679,7 @@ class Worker:
                     controls=controls,
                     timeout=ctx.timeout,
                     on_event=ctx.on_event,
+                    context=gate.context_for(task),
                 )
             )
             ctx.counts.update({"tasks": i + 1, "rows": len(rows)})
@@ -2600,31 +2887,39 @@ def trial_labels_for(ladder: EscalationLadder, base: Budget) -> dict[str, dict[s
     }
 
 
+def probe_failure_detail(exc: BaseException) -> str:
+    """What a repository's probe status says when the probe raised: a provisioning stop
+    with its code and its fix, anything else by its type."""
+    if isinstance(exc, ProvisionRefused):
+        return redact_and_cap(f"{exc.code}: {exc.message} — {exc.fix}", max_chars=1000)
+    return redact_and_cap(f"probe error: {type(exc).__name__}: {exc}", max_chars=1000)
+
+
 def docker_settings_for(
-    config: RepoConfig, base: DockerSettings | None, params: Mapping[str, Any]
+    config: RepoConfig,
+    base: DockerSettings | None,
+    params: Mapping[str, Any],
+    *,
+    tree: str = TREE_COPY,
+    work_size: str = "1g",
 ) -> DockerSettings:
     """The sandbox settings for one run: ``params.image`` > the repo's ``sandbox_image``
     > the worker's configured image (``CRB_SANDBOX__IMAGE`` — the DEFAULT for a repository
     that names none, as docs/DEPLOYMENT.md §2.1 says; until 2026-09-21 it silently overrode
     every repository's own image, which is wrong the moment two toolchains share a worker);
     caps come from the worker's settings. No image anywhere → :class:`SandboxUnavailable`
-    (raised by ``DockerSettings``)."""
+    (raised by ``DockerSettings``). With no default image (``base`` is ``None``) the
+    worker's ``tree`` and ``work_size`` still apply — they are the deployment's posture,
+    not the image's."""
     image = str(params.get("image") or "") or config.sandbox_image or (base.image if base else "")
-    if base is not None and image == base.image:
+    # ADR-0019 §7: the repository may choose how the tree is presented (a different posture)
+    tree = config.sandbox_tree or (base.tree if base is not None else tree)
+    if base is not None and image == base.image and tree == base.tree:
         return base
     if base is None:
-        return DockerSettings(image=image)
-    return DockerSettings(
-        image=image,
-        memory=base.memory,
-        cpus=base.cpus,
-        pids_limit=base.pids_limit,
-        user=base.user,
-        workdir=base.workdir,
-        tmp_size=base.tmp_size,
-        extra_ro_mounts=dict(base.extra_ro_mounts),
-        docker_binary=base.docker_binary,
-    )
+        return DockerSettings(image=image, tree=tree, work_size=work_size)
+    # every other field — caps, user, the copy's size (ADR-0019) — is the worker's
+    return dataclass_replace(base, image=image, tree=tree)
 
 
 def _oracle_counts(scores: Sequence[CommitOracleScore], *, total: int) -> dict[str, Any]:

@@ -423,10 +423,19 @@ backlog F51 in [the front-end review](reviews/2026-09-17-enterprise-front-end.md
 
 ### 7.4 Versioning
 
-`crb.core.version.__version__` is the package version; `APPARATUS_VERSION` (currently `2.2`) is the version of the **measuring instrument** — belt semantics, size table, class
+`crb.core.version.__version__` is the package version; `APPARATUS_VERSION` (currently `2.3`) is the version of the **measuring instrument** — belt semantics, size table, class
 taxonomy, routing rule. Changing any of those bumps `APPARATUS_VERSION` and needs an ADR.
 Rows and packs from different apparatus versions are never blended in a claim
 ([EVIDENCE-AND-CLAIMS §4](EVIDENCE-AND-CLAIMS.md)).
+
+**2.3 (ADR-0019) — qualification is posture-relative.** A task's RED, baseline and gold are
+measured per *posture* (`crb.core.posture`: executor, image by content id, exact toolchain,
+tree, network, dependency mode, limits, runner environment) and kept append-only in
+`task_qualifications` (`crb.core.qualify`, `crb.store.qualifications`). `grade()` takes a
+required `GradeContext`; belt 3 subtracts the in-posture baseline; a verdict that blames the
+builder needs a witness run in the same posture (`MisattributionViolation` at construction
+and at the ledger); the worker admits only tasks qualified in the live posture
+(`crb.server.posture_gate`). Posture is a stamp and a read filter, never a cell-key field.
 
 ### 7.5 Change class: two axes, one resolved value
 

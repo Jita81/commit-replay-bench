@@ -80,10 +80,12 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from crb.builders.base import Budget, Builder, Rung
+from crb.core.deps import TaskDeps
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger
+from crb.core.posture import Posture
 from crb.core.redact import redact_and_cap, redact_and_cap_head
 from crb.core.routing import ROUTE_DELIVER as ROUTE_DELIVER_WORD
 from crb.core.runners.base import BaseRunner
@@ -229,6 +231,11 @@ class FactorySpec:
     #: Empty = no override (the default).
     deliver_override_by: str = ""
     keep_workspaces: bool = False
+    #: The posture the run grades in and the dependency bindings its items build with
+    #: (ADR-0019). ``None`` resolves the posture live per build and uses the null
+    #: provider's bindings for the executor.
+    posture: Posture | None = None
+    deps: TaskDeps | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ladder", tuple(self.ladder))
@@ -480,6 +487,8 @@ class FactoryLoop:
             timeout=s.timeout,
             trial_prefix=trial_prefix,
             on_event=self._cb(item.id),
+            posture=s.posture,
+            deps=s.deps,
         )
         for res in results:
             s.evidence.record_build(

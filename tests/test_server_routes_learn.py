@@ -86,7 +86,12 @@ def _add_protocol_row(env: Env) -> None:
             "source_changed": None,
             "evidence_pack_hash": "",
             "error": ERR_NHS,
-            "labels": {"builder_error": ERR_NHS[:300], LABEL_FAILURE_KIND: FAILURE_PROTOCOL},
+            # the template's posture labels stay (ADR-0019: a 2.3 row names its posture)
+            "labels": {
+                **template.labels,
+                "builder_error": ERR_NHS[:300],
+                LABEL_FAILURE_KIND: FAILURE_PROTOCOL,
+            },
             "row_id": "",
             "prev_hash": "",
             "row_hash": "",
