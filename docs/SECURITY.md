@@ -334,14 +334,24 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   link) is refused for every role. The same check runs again where the path is used — the
   worker before it reads a clone, and the profile walk — because a path that did not exist
   at registration can gain a link later (for example from another repository's clone).
-  The worker applies it to its own clone destination (`$CRB_HOME/repos/<name>`) as well,
-  before any git process starts; git is then pointed at the resolved path that was checked;
+  The worker's own clone destination (`$CRB_HOME/repos/<name>`) has a stricter rule, checked
+  before any git process starts: it must be exactly that directory, or nothing yet, and never
+  a symbolic link — whether the link leads outside the directory or to another repository's
+  clone inside it. git is then pointed at the resolved path that was checked;
   `clone_repo` refuses a destination that is a symbolic link; and a structural test holds
   every place that opens a stored clone to the one use-time function
   (`confined_clone_path`).
-  [measured] `tests/test_server_routes_repos.py::TestClonePathConfinement`,
+  **[measured — n = 26 tests, all passing on this change (PR #52); method: pytest on the
+  node ids below, which include a link at the destination in five shapes (outside the
+  directory, to another clone inside it, to an empty directory, dangling, and chained). The
+  tests were written before the code they check: 8 of the 9 clone-path tests added first
+  failed on `main` at 8ab88ad (the ninth is the control that must pass), and 8 of the 10 destination-shape tests failed on 7d5a619 (the
+  other 2, the outside shape, already passed there); apparatus 2.2. A count of tests, not a
+  rate, so no interval]** `tests/test_server_routes_repos.py::TestClonePathConfinement`,
   `tests/test_worker_clone.py::test_a_clone_path_that_escapes_the_root_at_use_time_fails_the_run`,
   `tests/test_worker_clone.py::test_a_link_at_the_clone_destination_is_refused_before_any_git_command`,
+  `tests/test_worker_clone.py::test_every_link_at_the_clone_destination_is_refused_before_any_git_command`,
+  `tests/test_worker_clone.py::test_the_destination_rule_is_identity_not_containment`,
   `tests/test_worker_clone.py::test_git_opens_only_the_confined_path_at_every_use_site`,
   `tests/test_git_clone.py::test_clone_refuses_a_destination_that_is_a_symbolic_link`,
   `tests/test_mcp_server.py::test_register_repo_tool_is_confined_to_the_repos_root`
