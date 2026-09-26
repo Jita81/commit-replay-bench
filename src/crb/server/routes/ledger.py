@@ -56,7 +56,7 @@ import csv
 import datetime as _dt
 import io
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
 from fastapi import APIRouter, Query, UploadFile
@@ -422,7 +422,8 @@ def _existing(db: Session, column: Any, values: list[str]) -> set[str]:
     wanted = sorted(set(values))
     for i in range(0, len(wanted), IN_CHUNK):
         chunk = wanted[i : i + IN_CHUNK]
-        found.update(str(v) for v in db.execute(select(column).where(column.in_(chunk))).scalars())
+        present: Iterable[object] = db.execute(select(column).where(column.in_(chunk))).scalars()
+        found.update(str(v) for v in present)
     return found
 
 
