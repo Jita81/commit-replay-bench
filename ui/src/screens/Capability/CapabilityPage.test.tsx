@@ -21,7 +21,8 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Capability/CapabilityPage.tsx (the code under test),
  *               ui/src/screens/Capability/contract.ts (the fixture shapes),
- *               ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`)
+ *               ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`),
+ *               ui/src/test/source-ratchets.ts (`queryDataReads`, the `currentData` ratchet)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx
  * Touch when:   a cell field or controls state is added — extend the fixtures and assert its
  *               rendering here.
@@ -29,6 +30,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'
+import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { CapabilityPage } from './CapabilityPage'
 import pageSource from './CapabilityPage.tsx?raw'
@@ -325,6 +327,6 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
   it('the page reads every query only through currentData', () => {
     // a `<query>.data` read outside QueryBoundary shows an old value after a failed refetch
     // (PR #54 review), so the page's source may not contain one
-    expect(pageSource.match(/\b\w+\.data\b/g) ?? []).toEqual([])
+    expect(queryDataReads(pageSource)).toEqual([])
   })
 })

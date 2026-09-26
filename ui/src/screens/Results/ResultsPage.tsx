@@ -27,7 +27,8 @@
  *               signed and no licence sentence; sign-offs or a backlog that did not load mean
  *               the "waiting on a person" list says so rather than "nothing is waiting"; a
  *               repository that did not load means the page says it cannot tell whether a
- *               measurement is running. Every
+ *               measurement is running; a run whose poll failed is said to be unreadable, with a
+ *               Try again, never announced as queued or running. Every
  *               element a reader meets —
  *               the in-flight banner's line, each tile, the map's headers and cells, the
  *               licence heading, the throughput callout, every door button and each
@@ -143,19 +144,44 @@ function FailedNotice({ title, children, onRetry, testId }: { title: string; chi
 }
 
 /**
+ * What the pool tile renders. `ci` is required, not optional, so no state of the tile can
+ * render without its interval field: the value is never a sampled rate, so every state says
+ * "95% CI —" and, where a number stands, the footer says why (PR #54 review).
+ */
+interface PoolTileView {
+  value: string
+  n: number | null
+  ci: null
+  apparatus: string
+  footer: string
+}
+
+/**
  * The pool-window tile (assessment 2026-09-25, B4): its value, its n, its interval, its method
  * line and its footer, from one place so the n is always the denominator of the value shown —
  * the share is `window_commits / history_commits`, so its n is `history_commits`, and the tasks
- * are counted in the method line (PR #54 review).
+ * are counted in the method line (PR #54 review). No tasks and tasks without a readable author
+ * date are two states: the second has tasks, and says how many.
  */
-function poolTile(pool: RepoPool | undefined, pending: boolean, failed: boolean): { value: string; n: number | null; ci?: null; apparatus: string; footer: string } {
+function poolTile(pool: RepoPool | undefined, pending: boolean, failed: boolean): PoolTileView {
   const method = 'the mined tasks’ author dates against the clone’s history'
-  if (failed) return { value: NOT_LOADED, n: null, apparatus: method, footer: '' }
-  if (!pool) return { value: pending ? '…' : 'unknown', n: null, apparatus: method, footer: '' }
-  if (pool.n_tasks === 0 || !pool.oldest_authored) return { value: 'no tasks', n: 0, apparatus: 'nothing mined yet', footer: 'mine the repository to see where its tasks come from' }
+  if (failed) return { value: NOT_LOADED, n: null, ci: null, apparatus: method, footer: '' }
+  if (!pool) return { value: pending ? '…' : 'unknown', n: null, ci: null, apparatus: method, footer: '' }
+  if (pool.n_tasks === 0) {
+    return { value: 'no tasks', n: 0, ci: null, apparatus: 'nothing mined yet', footer: 'no interval: nothing has been mined, so there is nothing to count · mine the repository to see where its tasks come from' }
+  }
+  if (!pool.oldest_authored) {
+    return {
+      value: 'dates not known',
+      n: pool.n_tasks,
+      ci: null,
+      apparatus: `${pool.n_tasks} tasks, none with an author date this server can read`,
+      footer: 'no interval: a count of the mined tasks, not a sample · without an author date the tasks cannot be placed in the history',
+    }
+  }
   const range = `${pool.n_tasks} tasks authored ${day(pool.oldest_authored)} – ${day(pool.newest_authored)}`
   if (pool.share === null || pool.history_unavailable || pool.history_commits === null) {
-    return { value: 'not known', n: null, apparatus: range, footer: pool.history_unavailable ? POOL_UNAVAILABLE[pool.history_unavailable] : '' }
+    return { value: 'not known', n: null, ci: null, apparatus: range, footer: pool.history_unavailable ? POOL_UNAVAILABLE[pool.history_unavailable] : '' }
   }
   return {
     value: pct(pool.share),
@@ -204,8 +230,11 @@ export function ResultsPage() {
   const activeReplayId = lastRun && lastRun.kind === 'replay' && !isRunTerminal(lastRun.status) ? lastRun.id : ''
   const run = useRun(activeReplayId)
   const runData = currentData(run)
+  // a poll that failed cannot back a queued or running banner: the page says the run did not
+  // load, with a retry, instead (PR #54 review)
+  const runFailed = Boolean(activeReplayId) && run.isError
   // the poll sees the run finish before the repo's `last_run` is re-read: the banner goes with it
-  const replayRunning = Boolean(activeReplayId) && !(runData && isRunTerminal(runData.status))
+  const replayRunning = Boolean(activeReplayId) && !runFailed && !(runData && isRunTerminal(runData.status))
   // queued wording until the poll says `running`: a queued run has graded nothing, whatever
   // `progress` still carries (a reclaimed run keeps its old counts while it waits)
   const replayQueued = replayRunning && (runData ? runData.status === 'queued' : lastRun?.status === 'queued')
@@ -276,6 +305,11 @@ export function ResultsPage() {
                 <Link to={`/runs/${encodeURIComponent(activeReplayId)}`}>Open the run</Link>
               </Hint>
             </NotificationBanner>
+          )}
+          {runFailed && (
+            <FailedNotice testId="run-failed" title="Could not read the measurement in progress" onRetry={() => void run.refetch()}>
+              The repository says a measurement is {lastRun?.status ?? 'in flight'}, but the run did not load, so this page cannot show its progress and the numbers below may still be moving.
+            </FailedNotice>
           )}
           {repoDetail.isError && (
             <FailedNotice testId="repo-failed" title="Could not check whether a measurement is running" onRetry={() => void repoDetail.refetch()}>

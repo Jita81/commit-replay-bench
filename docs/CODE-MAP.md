@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-476 files with a header · 1 exempt (listed at the end).
+478 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -578,11 +578,13 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`ui/src/screens/Signoff/SignoffPage.tsx`](../ui/src/screens/Signoff/SignoffPage.tsx) | The screen at /signoff: the gate (criteria derived from the server's preview), the evidence panel (what you would be signing), the attestation form (name an accepted row, affirm you read it, a statement) and the table of recorded attestations with their snapshots. The header says in two sentences what the screen is for; the refusal clauses sit behind a Details ("Why a sign-off can be refused") with each term defined, because the gate and the refusal list below already explain every clause with observed vs threshold. | [`ui/src/screens/Signoff/SignoffPage.test.tsx`](../ui/src/screens/Signoff/SignoffPage.test.tsx), [`ui/src/help/hints-ratchet.test.tsx`](../ui/src/help/hints-ratchet.test.tsx) (every element resolves to a registry id), [`ui/e2e/walkthrough/08-signoff.spec.ts`](../ui/e2e/walkthrough/08-signoff.spec.ts) (a thin cell refused with observed vs threshold; a policy-clearing cell signed with an attestation), [`ui/e2e/walkthrough/05-replay-fake.spec.ts`](../ui/e2e/walkthrough/05-replay-fake.spec.ts) | a refusal clause or a policy threshold is added ([`src/crb/core/signoff.py`](../src/crb/core/signoff.py)) — add the gate row in `criteriaFor` and the vocabulary in [`ui/src/screens/Signoff/contract.ts`](../ui/src/screens/Signoff/contract.ts); never for a new repository. |
 | [`ui/src/screens/Signoff/contract.ts`](../ui/src/screens/Signoff/contract.ts) | The UI's reading of `signoff-policy.v2`: the policy, preview, refusal and attestation types, the hooks (`useSignoffPreview`, `useSignoffPolicy`, `useCreateSignoffWithAttestation`) and the refusal display vocabulary. | [`ui/src/screens/Signoff/SignoffPage.test.tsx`](../ui/src/screens/Signoff/SignoffPage.test.tsx), [`ui/e2e/walkthrough/08-signoff.spec.ts`](../ui/e2e/walkthrough/08-signoff.spec.ts) | a refusal clause is added ([`src/crb/core/signoff.py`](../src/crb/core/signoff.py); [`docs/API.md`](../docs/API.md) "POST /signoffs") — extend `RefusalCode` and `REFUSAL_DISPLAY` here and the gate row in [`ui/src/screens/Signoff/SignoffPage.tsx`](../ui/src/screens/Signoff/SignoffPage.tsx); never for a new repository. |
 
-## `ui/src/test` (2 files)
+## `ui/src/test` (4 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
 | [`ui/src/test/setup.ts`](../ui/src/test/setup.ts) | The vitest `setupFiles` entry ([`ui/vite.config.ts`](../ui/vite.config.ts)). | [`ui/src/test/setup.ts`](../ui/src/test/setup.ts) (runs before every vitest file) | a global matcher or polyfill is needed by every UI test; never for a new repository. |
+| [`ui/src/test/source-ratchets.test.ts`](../ui/src/test/source-ratchets.test.ts) | Tests for `queryDataReads`, the matcher behind the "reads every query only through currentData" ratchets on the Results and Capability pages. | (this is a test file) | a new syntax for reading a property appears in TypeScript, or the matcher is found to miss one (add the case here first). |
+| [`ui/src/test/source-ratchets.ts`](../ui/src/test/source-ratchets.ts) | `queryDataReads(source)`: every place a source reads a query's `data` directly, in any syntax, rather than through `currentData`. | [`ui/src/test/source-ratchets.test.ts`](../ui/src/test/source-ratchets.test.ts) | a syntax for reading a property is found that the matcher misses (add the case to the test first), or a new screen adopts the ratchet. |
 | [`ui/src/test/utils.tsx`](../ui/src/test/utils.tsx) | `mockApi` (a `fetch` double that dispatches on `${METHOD} ${path}`), `json` / `envelope` response builders, `PRINCIPAL` (an approver), `renderApp` and `expectHintOpens` (hover a trigger, the bubble opens with the registry text). | every `*.test.tsx` under [`ui/src/screens`](../ui/src/screens) (they all render through this) | the API prefix or the provider stack changes; never for a new repository. |
 
 ## Exempt (no header, by design)

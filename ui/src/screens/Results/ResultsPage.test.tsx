@@ -23,7 +23,12 @@
  *               succeeded, so a failed refetch never leaves an old value shown as current — the
  *               sign-offs (no cell signed, no licence sentence), the backlog (no decision
  *               list, never "nothing is waiting") and the repository (no in-flight banner)
- *               included; and that the page's source reads no `<query>.data` at all.
+ *               included; that the pool tile tells "no tasks" (n = 0) from tasks with no
+ *               readable author date (n = the tasks) and gives every state its interval
+ *               field; that a run poll that fails shows "Could not read the measurement in
+ *               progress" with a Try again, never a queued or running banner; that every
+ *               query the page reads has a test for its failure state; and that the page's
+ *               source reads no query's `data` directly in any syntax (`queryDataReads`).
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`; `qc.refetchQueries()` for a
  *               refetch; the page's own source as `?raw` text for the `currentData` ratchet.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -32,7 +37,8 @@
  *               ui/src/components/RepoPicker.tsx (`defaultToLatest`),
  *               ui/src/components/StatTile.tsx (the tile anatomy asserted),
  *               ui/src/help/hints.ts (the copy the hover test expects),
- *               ui/src/help/hints-collector.ts (`unhinted`)
+ *               ui/src/help/hints-collector.ts (`unhinted`),
+ *               ui/src/test/source-ratchets.ts (`queryDataReads`)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx
  * Touch when:   a headline fact or the deliver wording changes.
  */
@@ -41,9 +47,11 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
+import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { ResultsPage } from './ResultsPage'
 import pageSource from './ResultsPage.tsx?raw'
+import testSource from './ResultsPage.test.tsx?raw'
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
 const HUMAN = { ...CELL, size: 'S', n: 13, n_tasks: 11, clean: 11, point: 0.846, ci_low: 0.578, ci_high: 0.957, route: 'human', reason: 'oracle strength 0.76 < 0.80', reason_code: 'oracle_weak' }
@@ -280,6 +288,29 @@ describe('ResultsPage', () => {
     expect(tile).toHaveTextContent('no clone of the repository on this host')
   })
 
+  it('an empty pool says "no tasks" with n = 0 and an interval field that says why it is empty (PR #54 review)', async () => {
+    const empty = { ...POOL, n_tasks: 0, oldest_authored: null, newest_authored: null, window_commits: null, share: null }
+    mockApi({ ...ROUTES, 'GET /repos/alpha/pool': empty })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const tile = await screen.findByTestId('tile-pool-window')
+    await waitFor(() => expect(within(tile).getByText('no tasks')).toBeInTheDocument())
+    expect(tile).toHaveTextContent('n =0')
+    expect(tile).toHaveTextContent('95% CI—')
+    expect(tile).toHaveTextContent('no interval: nothing has been mined, so there is nothing to count')
+  })
+
+  it('tasks with no author date are not "no tasks": the count is shown and the dates are said to be unknown (PR #54 review)', async () => {
+    const undated = { ...POOL, n_tasks: 5, oldest_authored: null, newest_authored: null, window_commits: null, share: null }
+    mockApi({ ...ROUTES, 'GET /repos/alpha/pool': undated })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const tile = await screen.findByTestId('tile-pool-window')
+    await waitFor(() => expect(within(tile).getByText('dates not known')).toBeInTheDocument())
+    expect(tile).not.toHaveTextContent('no tasks')
+    expect(tile).toHaveTextContent('n =5')
+    expect(tile).toHaveTextContent('95% CI—')
+    expect(tile).toHaveTextContent('5 tasks, none with an author date this server can read')
+  })
+
   it('a failed pool request says so and offers a retry, never "unknown" (PR #54 review)', async () => {
     let calls = 0
     mockApi({
@@ -411,10 +442,51 @@ describe('ResultsPage', () => {
     expect(screen.queryByRole('region', { name: 'A measurement is running' })).toBeNull()
   })
 
+  it('a run poll that fails says so with a retry, never a queued or running banner it cannot back (PR #54 review)', async () => {
+    let calls = 0
+    const run = { id: 'run1', repo: 'alpha', kind: 'replay', status: 'running', cost_usd: 0.42, progress: { done: 3, total: 8, current_task_id: null }, counts: {} }
+    mockApi({
+      ...ROUTES,
+      'GET /repos/alpha': { ...REPO, last_run: { id: 'run1', kind: 'replay', status: 'running', finished: null } },
+      'GET /runs/run1': () => (++calls === 1 ? envelope(500, 'internal', 'boom') : json(run)),
+    })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const failed = await screen.findByTestId('run-failed')
+    expect(failed).toHaveTextContent('Could not read the measurement in progress')
+    expect(failed).toHaveTextContent('the numbers below may still be moving')
+    expect(screen.queryByRole('region', { name: 'A measurement is running' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'A measurement is queued' })).toBeNull()
+    await userEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(screen.getByRole('region', { name: 'A measurement is running' })).toHaveTextContent('attempt 4 of 8'))
+    expect(screen.queryByTestId('run-failed')).toBeNull()
+    expect(calls).toBe(2)
+  })
+
+  // Each query the page reads, and the test that pins what the page shows when that query
+  // fails. The run poll had no such test, so a failed poll still showed a running banner
+  // (PR #54 review): a query read through `currentData` with no entry here fails the ratchet
+  // below, so the next query cannot arrive with its failure state unwritten.
+  const FAILURE_PINNED: Record<string, string> = {
+    map: 'a map that fails on a refetch shows the error',
+    controls: 'every instrument tile tells a failed request from a missing report',
+    oracle: 'every instrument tile tells a failed request from a missing report',
+    pool: 'a failed pool request says so and offers a retry',
+    signoffs: 'sign-offs that fail on a refetch',
+    tasks: 'factory tasks that fail on a refetch',
+    repoDetail: 'a repository that fails on a refetch',
+    run: 'a run poll that fails says so with a retry',
+  }
+
+  it('every query the page reads has a test for what the page shows when it fails', () => {
+    const read = [...pageSource.matchAll(/currentData\((\w+)\)/g)].map((m) => m[1]).sort()
+    expect(read).toEqual(Object.keys(FAILURE_PINNED).sort())
+    for (const name of Object.values(FAILURE_PINNED)) expect(testSource).toContain(`it('${name}`)
+  })
+
   it('the page reads every query only through currentData', () => {
     // the ratchet behind the refetch cases above, for the whole class and not a list of
     // names: any `<query>.data` read would show an old value after a failed refetch, so the
     // page's source may not contain one (PR #54 review)
-    expect(pageSource.match(/\b\w+\.data\b/g) ?? []).toEqual([])
+    expect(queryDataReads(pageSource)).toEqual([])
   })
 })
