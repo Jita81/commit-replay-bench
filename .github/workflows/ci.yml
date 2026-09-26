@@ -159,6 +159,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # The fence reader is a CommonMark parser, not a hand-rolled one: PR #54's review found
+      # five ways a line-by-line reader let a fence hide real review actions. Pinned to the
+      # version the tests run against; pyproject's dev extra carries the same package.
+      - name: Install the CommonMark parser the fence reader uses
+        run: python -m pip install -q 'markdown-it-py==4.2.0'
       # The pages covered are scripts/claims_check.py's ALLOWLIST; the rest of the
       # documentation is ungated and the gap analysis (G-929) says so.
       - name: Every claim on a covered page carries what its tag requires

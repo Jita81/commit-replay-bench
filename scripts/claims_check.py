@@ -59,7 +59,8 @@ because leaving is how a gate quietly stops gating.
 
 Navigation
 ----------
-What it is:   The claim-tag gate over the public pages (stdlib only; CI's ``claims`` job).
+What it is:   The claim-tag gate over the public pages (CI's ``claims`` job; needs only the
+              stdlib and markdown-it-py, which reads where a fenced code block ends).
 What it does: Parses each allowlisted Markdown page into blocks, finds quantified sentences,
               and reports any that carry no permitted tag — and any ``[measured]`` tag
               without an n, a method or an apparatus version; reports every numbered action
@@ -95,6 +96,8 @@ import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+
+from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -259,12 +262,9 @@ _CODE_RE = re.compile(r"`[^`]*`")
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
-#: A fence line as CommonMark §4.5 reads it: at most three spaces of indentation (four make
-#: an indented code block), a run of three or more backticks or tildes, then whatever follows
-#: it — which, after backticks, may not itself hold a backtick (that line is inline code).
-_FENCE_RE = re.compile(
-    r"^ {0,3}(?:(?P<marker>`{3,})(?P<rest>[^`]*)|(?P<marker2>~{3,})(?P<rest2>.*))$"
-)
+#: The CommonMark parser that decides where a fenced code block starts and ends. Tables are
+#: on because GitHub renders a review's Actions table as one.
+_MARKDOWN = MarkdownIt("commonmark").enable("table")
 _ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
 _CHECKLIST_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -300,30 +300,28 @@ def _strip_markup(text: str) -> str:
 
 
 def _lines_with_fences(text: str) -> Iterator[tuple[int, str, bool]]:
-    """``(line number, line, fenced)`` for every line; ``fenced`` is true for a fence's own
-    delimiters and everything between them. A fence closes only on the marker that opened it
-    (a ``~~~`` inside a backtick fence is content), as CommonMark reads it: the closing line
-    is the opener's character, at least as many of them, and nothing after it — so
-    ```` ```text ```` and a shorter run inside a longer fence are content (PR #54 review).
-    Opener and closer are indented at most three spaces: a four-space ``~~~`` is an indented
-    code block and cannot hide the rows after it (``FENCE_OPENS`` pins §4.5). Every reader of a page's structure goes through here, so a fenced example is never read
-    as prose or as a review's action."""
-    marker = ""
-    for number, raw in enumerate(text.splitlines(), start=1):
-        line = raw.rstrip()
-        m = _FENCE_RE.match(line)
-        run = (m.group("marker") or m.group("marker2")) if m else ""
-        rest = (m.group("rest") or m.group("rest2") or "") if m else ""
-        if run and not marker:
-            marker = run
-            yield number, line, True
-        elif (
-            run and marker and run[0] == marker[0] and len(run) >= len(marker) and not rest.strip()
-        ):
-            marker = ""
-            yield number, line, True
-        else:
-            yield number, line, bool(marker)
+    """``(line number, line, fenced)`` for every line; ``fenced`` is true for a fenced code
+    block's own delimiters and everything between them, exactly as a CommonMark parser with
+    GitHub's tables on reads the page. Every reader of a page's structure goes through here,
+    so a fenced example is never read as prose or as a review's action.
+
+    The spans come from ``markdown-it-py``, not from a line-by-line reading of §4.5. PR #54's
+    review found five places where a hand-rolled reader disagreed with CommonMark — the
+    closer's character, its info string, its indent, a marker inside an HTML comment, and a
+    fence inside a list item — and each one let a fence swallow real Actions rows so that
+    ``--check`` passed without their records. A fence's extent depends on the containers
+    around it (lists, blockquotes, HTML blocks), so the only reader that cannot drift from
+    CommonMark is a CommonMark parser."""
+    lines = re.sub(r"\r\n?", "\n", text).split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()  # a final newline ends the last line; it does not start another
+    fenced = [False] * len(lines)
+    for token in _MARKDOWN.parse(text):
+        if token.type == "fence" and token.map:
+            for i in range(token.map[0], min(token.map[1], len(lines))):
+                fenced[i] = True
+    for number, raw in enumerate(lines, start=1):
+        yield number, raw.rstrip(), fenced[number - 1]
 
 
 def blocks_of(text: str) -> list[Block]:

@@ -456,6 +456,32 @@ def test_an_indented_fence_marker_does_not_hide_a_real_action(tree: Path) -> Non
     assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
 
 
+#: A fence marker that CommonMark does not read as an open fence, placed in the Actions
+#: section above the table (second review of PR #54). Each hid both rows from a line-based
+#: reader, so ``--check`` passed a review whose actions had no record.
+CONTAINED_MARKERS = {
+    # an HTML block (type 2) holds its lines verbatim: a ``` in a comment opens nothing
+    "an HTML comment": "<!-- the old layout was:\n```\n-->\n\n",
+    # a fence inside a list item closes when the item ends, with or without a closing marker
+    "a list item": "- the old layout was:\n\n  ```\n  | 9 | old |\n\n",
+    # the same for a blockquote: the fence ends with the quote
+    "a blockquote": "> the old layout was:\n> ```\n\n",
+}
+
+
+@pytest.mark.parametrize("container", sorted(CONTAINED_MARKERS))
+def test_a_fence_marker_inside_a_container_does_not_hide_a_real_action(
+    tree: Path, container: str
+) -> None:
+    review = REVIEW.replace("| # | Action |", CONTAINED_MARKERS[container] + "| # | Action |", 1)
+    assert [n for n, _ in cc.review_actions(review)] == [1, 2], container
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed. |\n")
+    _write(tree, "docs/reviews/2026-09-13-friend.md", review)
+    assert [f.reason for f in cc.check_review_actions(tree)] == [
+        "review action #2 has no record"
+    ], container
+
+
 @pytest.mark.parametrize(("opener", "inner", "fenced"), FENCE_CLOSES)
 def test_a_fence_closes_only_on_a_commonmark_closing_fence(
     opener: str, inner: str, fenced: bool
@@ -465,14 +491,22 @@ def test_a_fence_closes_only_on_a_commonmark_closing_fence(
 
 
 #: The reference reader for the differential test below: CommonMark itself, not our reading
-#: of it. The tables above pin the cases a review found; this pins the rule, so the next
-#: divergence is found by the test rather than by a reviewer (review of PR #54, which found
-#: three fence divergences in turn: the closer's character, its info string, its indent).
+#: of it. The tables above pin the cases a review found; this pins the rule (review of PR #54,
+#: which found three fence divergences in turn: the closer's character, its info string, its
+#: indent). The reader now takes its spans from markdown-it-py with tables on, and this
+#: reference uses the plain CommonMark preset, so the test also fails if the reader is ever
+#: swapped back for a hand-rolled one or if turning tables on changes where a fence ends.
+#: A second review found two more that this alphabet could not generate — a fence marker in
+#: an HTML comment, and one in a list item — so the alphabet now holds containers too: list
+#: and blockquote prefixes, and HTML comment openers and closers.
+_PREFIXES = st.sampled_from(["", "", "- ", "1. ", "> ", "  "])
 _INDENTS = st.sampled_from(["", " ", "  ", "   ", "    ", "     ", "\t"])
 _RUNS = st.sampled_from(["``", "```", "````", "`````", "~~", "~~~", "~~~~"])
 _INFOS = st.sampled_from(["", " ", "   ", "text", " text", " a`b"])
-_FENCE_LINES = st.builds(lambda i, r, f: i + r + f, _INDENTS, _RUNS, _INFOS)
-_OTHER_LINES = st.sampled_from(["", "prose", "| 7 | example |"])
+_FENCE_LINES = st.builds(lambda p, i, r, f: p + i + r + f, _PREFIXES, _INDENTS, _RUNS, _INFOS)
+_OTHER_LINES = st.sampled_from(
+    ["", "prose", "| 7 | example |", "<!--", "<!-- note", "-->", "- item", "> quoted"]
+)
 
 
 def _commonmark_fenced(text: str) -> list[bool]:
