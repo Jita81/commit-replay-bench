@@ -153,6 +153,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
    **Go, Python and Node.**
    - **Go** keeps one module cache for the parent's and the gold's modules together. That closes D4.
    - **Python and Node** keep one set per lockfile. A trial is graded with the set its own manifests select.
+   - A Python set's manifest lists what pip installed. A pin whose environment marker excluded it on the fetch image is recorded as `marker_skipped`, never as a package the environment probe requires (PR #56).
    - A trial whose manifests select anything outside the task's closure is **disqualified** under belt 1b. In a provisioned posture, the closure is part of the ground the oracle stands on. The selector reads the builder's tree, so it reads nothing outside it: a manifest that is a link, or a local `replace` that leaves the tree, is itself a violation.
 
    **At test time.**

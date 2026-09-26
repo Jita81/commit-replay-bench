@@ -54,8 +54,13 @@ _FEAT = {
 }
 
 
-def build(tmp_path: Path) -> tuple[Path, str]:
-    return two_commit_repo(Path(tmp_path) / "pyrepo_deps", _INITIAL, _FEAT)
+def build(tmp_path: Path, *, parent_requirements: str = "") -> tuple[Path, str]:
+    """The two-commit repository; ``parent_requirements`` replaces the parent's lock (a
+    marker line, say) when given."""
+    initial = dict(_INITIAL)
+    if parent_requirements:
+        initial["requirements.txt"] = parent_requirements
+    return two_commit_repo(Path(tmp_path) / "pyrepo_deps", initial, _FEAT)
 
 
 def config() -> RepoConfig:

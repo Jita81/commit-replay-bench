@@ -41,6 +41,7 @@ Touch when:   a Python repository's lock is refused — commit a pinned requirem
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -146,6 +147,34 @@ def install_plan(inputs: LockInputs, *, key: str, image: str) -> FetchPlan:
     )
 
 
+def _dist_name(dist_info: str) -> str:
+    """The normalised distribution name of a ``<name>-<version>.dist-info`` directory."""
+    name = dist_info[: -len(".dist-info")].rsplit("-", 1)[0]
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def installed_manifest(inputs: LockInputs, site: Path) -> tuple[dict[str, list[str]], list[str]]:
+    """``(packages, marker_skipped)`` for a set pip installed into ``site``.
+
+    pip ignores a pin whose environment marker excludes the fetch image's Python (a
+    pip-compile backport line, ``tomli==… ; python_version < "3.11"``), at fetch and at
+    install; such a pin with no ``*.dist-info`` in the site is ``marker_skipped``, never a
+    package the set must hold — the environment probe requires every package, so recording
+    it would refuse every task ``QUAL_ENV_UNLOADABLE`` (CodeRabbit on PR #56). A pin with
+    NO marker stays in ``packages`` whether or not it is there: a set that lost it is the
+    probe's to report, never this function's to hide."""
+    present = {_dist_name(d.name) for d in Path(site).glob("*.dist-info") if d.is_dir()}
+    packages: dict[str, list[str]] = {}
+    skipped: list[str] = []
+    for p in inputs.py_pins:
+        pin = p.norm + "==" + p.version
+        if p.marker and p.norm not in present:
+            skipped.append(pin)
+        else:
+            packages[pin] = list(p.hashes)
+    return packages, sorted(skipped)
+
+
 def _wheel_hashes(wheels: Path) -> dict[str, str]:
     return {
         p.name: "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
@@ -178,6 +207,7 @@ def resolve(
             wheels = _wheel_hashes(stage / "out" / "wheels")
             provider.fetch(install_plan(inputs, key=key, image=image), stage)
             remove_tree(stage / "out" / "wheels")
+            packages, marker_skipped = installed_manifest(inputs, stage / "out" / SUB)
             return {
                 "recipe": RECIPE_PY,
                 "inputs": [describe_inputs(inputs)],
@@ -186,7 +216,8 @@ def resolve(
                 "registry_hosts": list(plan.registry_hosts),
                 "mirror": str(plan.mirror or ""),
                 "egress_denies": list(res.denied),
-                "packages": {p.norm + "==" + p.version: list(p.hashes) for p in inputs.py_pins},
+                "packages": packages,
+                "marker_skipped": marker_skipped,
                 "wheels": wheels,
                 "hashes": "committed" if inputs.require_hashes else "recorded",
             }
@@ -220,4 +251,12 @@ def resolve(
 
 RECIPES[LANG_PYTHON] = resolve
 
-__all__ = ["INSIDE", "SUB", "fetch_plan", "install_plan", "lock_text", "resolve"]
+__all__ = [
+    "INSIDE",
+    "SUB",
+    "fetch_plan",
+    "install_plan",
+    "installed_manifest",
+    "lock_text",
+    "resolve",
+]

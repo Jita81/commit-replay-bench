@@ -198,3 +198,59 @@ def _parent_tree(repo: GitRepo, feat: str, dest: Path, cfg):  # type: ignore[no-
     from crb.core.workspace import Workspace
 
     return Workspace.create(repo, feat, dest, config=cfg)
+
+
+#: A pin whose environment marker excludes it on every supported Python: pip ignores the
+#: line at fetch and at install, and the package is on no index at all.
+_MARKER_LOCK = 'cfxdep==1.0.0\nnotonindex==9.9.9 ; python_version < "3.0"\n'
+
+
+def test_the_manifest_holds_what_pip_installed_never_a_pin_its_marker_skipped(
+    tmp_path: Path,
+) -> None:
+    """``installed_manifest``: a pin with a marker and no ``*.dist-info`` in the site was
+    skipped by pip on the fetch image — it is recorded as ``marker_skipped``, never as a
+    package the set must hold; a pin WITHOUT a marker stays whether or not it is there, so
+    the environment probe still reports a set that lost it (CodeRabbit on PR #56)."""
+    root, feat = pyrepo_deps.build(tmp_path, parent_requirements=_MARKER_LOCK)
+    repo = GitRepo(root)
+    parent = LockInputs.from_git(repo, repo.parent(feat), pyrepo_deps.config())
+    site = tmp_path / "site"
+    (site / "cfxdep-1.0.0.dist-info").mkdir(parents=True)
+    packages, skipped = py_recipe.installed_manifest(parent, site)
+    assert packages == {"cfxdep==1.0.0": []} and skipped == ["notonindex==9.9.9"]
+    (site / "cfxdep-1.0.0.dist-info").rmdir()  # a marker-less pin pip lost: kept, probed
+    packages, skipped = py_recipe.installed_manifest(parent, site)
+    assert "cfxdep==1.0.0" in packages and skipped == ["notonindex==9.9.9"]
+
+
+@pytest.mark.docker
+@pytest.mark.slow
+@pytest.mark.sandbox_images
+def test_a_pin_its_marker_excludes_never_fails_the_environment_probe(scratch: Path) -> None:
+    """The pip-compile shape (``tomli==… ; python_version < "3.11"``): pip skips the line on
+    the 3.12 image at fetch and at install, so the sealed set does not hold it — and the
+    probe must not require it, or every task in the repository is ``QUAL_ENV_UNLOADABLE``
+    (CodeRabbit on PR #56)."""
+    image = langs.ensure_shipped_sandbox_image("python")
+    index = pkgmirror.build_pypi(scratch / "simple")
+    root, feat = pyrepo_deps.build(scratch / "repo", parent_requirements=_MARKER_LOCK)
+    repo = GitRepo(root)
+    cfg = pyrepo_deps.config()
+    provider = SealedProvider(
+        ProvisionConfig(
+            enabled=True, env="dev", store=scratch / "deps", pypi_index=f"file://{index}"
+        )
+    )
+    deps = provider.resolve(repo, cfg, gold=feat)
+    assert deps.parent.manifest == ("cfxdep==1.0.0",)
+    parent_set = provider.store.verify(deps.parent.key)
+    assert parent_set.manifest["marker_skipped"] == ["notonindex==9.9.9"]
+    ws = _parent_tree(repo, feat, scratch / "t-parent", cfg)
+    try:
+        runner = get_runner(cfg)
+        with runner.deps_bound(deps.binding_for(ws.root)):
+            probe = runner.probe_environment(DockerExecutor(DockerSettings(image=image)), ws.root)
+        assert probe is not None and probe.ok, probe.combined if probe else ""
+    finally:
+        ws.remove()

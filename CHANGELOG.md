@@ -59,6 +59,14 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **A Python pin its marker excludes no longer refuses the task** (product.posture.36;
+  CodeRabbit on PR #56). The sealed set's manifest listed every pin, but pip skips a line
+  whose environment marker excludes the fetch image's Python (a pip-compile backport such
+  as `tomli==… ; python_version < "3.11"`), so the environment probe reported it missing and
+  every task in such a repository was `QUAL_ENV_UNLOADABLE`. The manifest now holds what pip
+  installed and records the rest as `marker_skipped`; a pin with no marker is still required.
+  A set sealed before this change keeps its old manifest: delete it and the next run fetches
+  it again.
 - **A local sealed Node posture uses the sealed set** (product.posture.35; CodeRabbit on
   PR #56). On the host executor Node resolves `./node_modules` before `NODE_PATH`, and the
   worktree's link still pointed at the clone's install, so `local/inplace/sealed` graded
