@@ -168,7 +168,7 @@ class BuildBrief:
     #: patch and the fixers could not clear it. Set on a SECOND, bounded build call: the
     #: builder is told the findings and asked to fix only those. Empty on a first build.
     repair_note: str = ""
-    #: Finish gate (ADR-0021, opt-in ``checks.finish_gate``): the repository's own check
+    #: Finish gate (ADR-0024, opt-in ``checks.finish_gate``): the repository's own check
     #: commands as a short numbered checklist (``crb.core.finish_gate.checklist``). Operating
     #: facts only — never a target test, never anything derived from the gold.
     finish_checks: tuple[str, ...] = ()

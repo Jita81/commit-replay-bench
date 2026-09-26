@@ -75,6 +75,7 @@ from crb.cli.commands import (
 )
 from crb.cli.commands.route import load_policy
 from crb.core.capability import PROJECTIONS, build_capability_map
+from crb.core.checks import ARM_OFF, ARMS
 from crb.core.learn import (
     OracleTaskScore,
     RefusalDecision,
@@ -89,7 +90,7 @@ from crb.core.learn import (
     strengthening_backlog,
     triage_refusals,
 )
-from crb.core.ledger import JsonlLedger
+from crb.core.ledger import JsonlLedger, rows_for_checks
 from crb.core.prevention import JsonlPreventionStore, Register, build_register, tick
 from crb.core.review import JsonlReviewLedger
 from crb.core.routing import ControlsVerdict
@@ -223,8 +224,16 @@ def _usage(parser: argparse.ArgumentParser) -> int:
 
 
 def _ledger_args(p: argparse.ArgumentParser) -> None:
-    """``--path`` and ``--policy-json`` — the same pair ``crb route`` takes."""
+    """``--path`` and ``--policy-json`` — the same pair ``crb route`` takes — and ``--checks``,
+    the one arm whose rows are read (a cell never pools two, ADR-0024)."""
     p.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
+    p.add_argument(
+        "--checks",
+        default=ARM_OFF,
+        choices=ARMS,
+        help="read only rows graded under this 'clean means working' arm (default off: the "
+        "format step and belt 6 both off) — rows of two arms never share a cell",
+    )
     p.add_argument(
         "--policy-json",
         default="",
@@ -236,7 +245,9 @@ def _rows(args: argparse.Namespace) -> tuple[Path, list[Any]]:
     """``(ledger path, rows)`` for the command line."""
     wd = workdir_of(args)
     path = Path(args.path).expanduser() if args.path else wd.ledger_path
-    return path, list(JsonlLedger(path).rows())
+    rows = list(JsonlLedger(path).rows())
+    arm = getattr(args, "checks", None)
+    return path, rows if arm is None else rows_for_checks(rows, arm)
 
 
 def _read_json(spec: str, *, what: str) -> Any:

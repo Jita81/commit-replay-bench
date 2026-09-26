@@ -21,7 +21,8 @@ What it does: Reads and appends ``learn.prevention.recorded`` events as a verifi
               builds a repository's register from its ledger rows, standing reviews, factory
               outcome events and (for belt-5 rows) evidence packs; gives a run the snapshot the
               switch allows under the team's own configuration; runs one tick and commits what
-              it appends, retrying on a concurrent append, never raising.
+              it appends, retrying on a concurrent append, never raising; names the checks arm
+              a repository's next run grades under (the arm its cells are read in).
 How:          ``EventsPreventionStore`` (select by trace + action, ordered by ``seq`` →
               ``PreventionRecord.from_dict`` → ``verify_records``; append = chain on the head →
               ``append_system_event``) → ``register_for`` → ``learning_snapshot`` /
@@ -36,7 +37,8 @@ Works with:   src/crb/core/prevention.py (the engine: register, rule, tick, snap
               chain), src/crb/store/ledger.py (the rows, reviews and packs), src/crb/server/
               factory_state.py (the factory's outcome events), src/crb/core/spend.py and
               src/crb/core/checks.py (the K and W mechanisms the loop may switch on)
-Tested by:    tests/test_worker_learning.py, tests/test_server_routes_prevention.py
+Tested by:    tests/test_worker_learning.py, tests/test_server_routes_prevention.py,
+              tests/test_checks_pooling.py
 Touch when:   never for a new repository; a new process mechanism ships (``mechanisms`` is
               THE seam — add it to ``SHIPPED`` and a ``WRITABLE`` row); a new source of
               classes (bind it into ``register_for``).
@@ -55,6 +57,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.builders.base import Budget
 from crb.core.checks import RepoChecks
+from crb.core.checks import resolve as resolve_checks
 from crb.core.ledger import GENESIS_HASH, GradeRow
 from crb.core.playbook import RepoFacts
 from crb.core.prevention import (
@@ -366,6 +369,27 @@ def empty_for(repo: str) -> LearningSnapshot:
     return empty_snapshot(repo)
 
 
+def current_checks_arm(factory: sessionmaker[Session], repo: str) -> str:
+    """The ``checks`` arm ``repo``'s next run grades under when the run overrides nothing:
+    the repository's own ``checks`` block under the loop's overlay (the team's keys win),
+    resolved exactly as the worker resolves a run (ADR-0024). It is what a reader of the
+    repository's cells sees by default, so a switch turned on starts its cells afresh rather
+    than lending them the rows of the instrument it replaced. A chain that cannot be read is
+    ``learn: off`` (as for a run); a block the configuration refuses is no switch at all."""
+    try:
+        snap = learning_snapshot(factory, repo)
+    except Exception as exc:  # a read path never fails on the loop's chain
+        log.warning("prevention: snapshot for %s unreadable (%s); learn=off", repo, exc)
+        snap = empty_snapshot(repo)
+    with factory() as s:
+        base = base_config(s.get(Repo, repo)).get(W_SECTION)
+    try:
+        checks = RepoChecks.from_config(snap.config_section(W_SECTION, base))
+    except ValueError:
+        checks = RepoChecks()
+    return resolve_checks(checks, None).arm
+
+
 __all__ = [
     "ACTION",
     "SHIPPED",
@@ -375,6 +399,7 @@ __all__ = [
     "all_prevention_records",
     "base_config",
     "calibratable_for",
+    "current_checks_arm",
     "empty_for",
     "learn_trace_id",
     "learning_snapshot",

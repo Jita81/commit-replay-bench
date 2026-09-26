@@ -563,7 +563,7 @@ def build_fn_for(
         builder returned or raised. Without it the kill is still on the outcome and
         the pack, and logged; the container is nobody's to reap.
     checks:
-        The resolved "clean means working" switches (ADR-0021; run > repository >
+        The resolved "clean means working" switches (ADR-0024; run > repository >
         OFF): the format step and the finish gate run here, around the build; belt 6
         runs in the grader. Every attempt's row carries ``labels.checks`` (the switches,
         their sources and the configuration version) and, when a step ran, its record
@@ -842,7 +842,7 @@ def build_fn_for(
         *,
         sealed: bool,
     ) -> BuildOutcome:
-        """The format step and the finish gate (ADR-0021) after an honest build; the
+        """The format step and the finish gate (ADR-0024) after an honest build; the
         labels say what ran, what it changed, or why it was skipped. Never raises into
         the grade (a ``SandboxUnavailable`` excepted)."""
         assert checks is not None

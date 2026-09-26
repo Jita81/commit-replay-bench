@@ -42,7 +42,7 @@ How:          ``checklist(plan, commands, test_command)`` → the brief's ``fini
               one ``Command`` per declared check → ``GateRun.passed`` / ``label`` /
               ``findings``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md
+ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/checks.py (the ``finish_gate`` switch and declared commands),
               src/crb/core/lint.py (the plan the gate re-runs), src/crb/builders/adapter.py
               (brief → build → verify → repair), src/crb/builders/base.py (``finish_checks`` /

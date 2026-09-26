@@ -3,7 +3,7 @@
 **What this is.** For each repository the operator's stack measures, what the product derives
 (belt 5's plan, the format step's formatter, the finish gate's derived commands, the test
 harness command) set against what the repository's own CI runs on every pull request — and
-what was fixed where they disagreed. It is the evidence behind ADR-0021's amendment to
+what was fixed where they disagreed. It is the evidence behind ADR-0024's amendment to
 ADR-0011's detectors.
 
 **How it was measured.** `scripts/audit_runner_commands.py` over a shallow clone of each

@@ -354,7 +354,7 @@ class RepoConfig:
         = the defaults; a run's own parameter wins. The surface the prevention loop writes
         to apply a budget or an escalation change to one repository.
     checks:
-        "Clean means working" switches for this repository (ADR-0021): ``format_step``,
+        "Clean means working" switches for this repository (ADR-0024): ``format_step``,
         ``finish_gate``, ``api_stable`` (belt 6), declared ``commands`` and ``formatter``.
         Empty (the default) ⇒ every switch OFF. The ONE surface the prevention loop writes;
         validated by :meth:`crb.core.checks.RepoChecks.from_config`.

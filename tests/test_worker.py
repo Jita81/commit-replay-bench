@@ -1716,7 +1716,7 @@ def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> N
     assert worker._delivery_credentials({"url": linked["url"]}, linked["url"]) is None
 
 
-# --- the "clean means working" switchboard (ADR-0021) ----------------------------------------
+# --- the "clean means working" switchboard (ADR-0024) ----------------------------------------
 
 
 def test_repository_checks_and_run_overrides_reach_the_row_and_belt_six(

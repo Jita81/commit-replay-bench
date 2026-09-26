@@ -24,7 +24,7 @@ How:          ``tests/prevention_fixtures.py`` (the chained fixture ledger), the
               half uses ``Harness`` and ``FakeBuilder`` from tests/test_worker.py. No model call.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0020-a-bug-is-closed-by-prevention.md (the loop),
-              docs/adr/0021-working-by-construction.md (the W switches)
+              docs/adr/0024-working-by-construction.md (the W switches)
 Works with:   src/crb/server/prevention_state.py (``mechanisms`` — the seam under test),
               src/crb/core/prevention.py (register, rule, snapshot), src/crb/core/value.py
               (``default_register``, the curve), src/crb/core/checks.py and

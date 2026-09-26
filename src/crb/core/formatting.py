@@ -37,7 +37,7 @@ How:          ``formatters_for(plan, root, declared)`` → ``(formatters, skip r
               ``run_formatters`` hashes each file, runs ``Command``s through the executor with
               the worktree writable, hashes again → ``FormatRun.label``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md, docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0024-working-by-construction.md, docs/adr/0011-repo-lint-belt.md
 Works with:   src/crb/core/lint.py (the plan whose formatter steps are reused),
               src/crb/core/checks.py (the ``format_step`` switch and ``checks.formatter``),
               src/crb/builders/adapter.py (runs the step after the build),

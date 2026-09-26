@@ -14,7 +14,7 @@ How:          Hermetic git fixture repositories (``tests/fixtures/langs``), the 
               ``lint_plan`` detection, ``formatters_for`` → ``run_formatters`` on a
               ``LocalExecutor``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md
+ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/formatting.py (under test), src/crb/core/lint.py (the plan the step
               reuses), tests/fixtures/langs/gorepo.py and tests/fixtures/langs/__init__.py
               (the repositories)

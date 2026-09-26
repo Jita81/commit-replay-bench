@@ -22,7 +22,7 @@ the repository's own lint gate where it configures one
 ([ADR-0001](adr/0001-four-belts-and-false-q1-at-write.md), [ADR-0011](adr/0011-repo-lint-belt.md)),
 and — switched on per run or per repository — the repository's formatter before grading, its
 own checks as a finish gate inside the attempt, and belt 6, public-API stability against the
-maintainers' commit ([ADR-0021](adr/0021-working-by-construction.md)).
+maintainers' commit ([ADR-0024](adr/0024-working-by-construction.md)).
 
 **In scope (this product):** mining replayable commits; sandboxed test execution; the
 four-belt grader; evidence packs; the append-only hash-chained ledger; cell statistics; the

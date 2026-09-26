@@ -12,7 +12,7 @@ What it does: Pins that the checklist is numbered, capped and made of operating 
 How:          The Go fixture repository with the Go runner's own belt-5 plan; declared commands
               as small shell commands in the worktree; ``LocalExecutor``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md
+ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/finish_gate.py (under test), src/crb/core/checks.py
               (``CheckCommand``), src/crb/core/lint.py (the plan), tests/fixtures/langs/gorepo.py
               (the Go repository the checks run in)

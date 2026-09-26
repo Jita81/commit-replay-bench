@@ -24,7 +24,7 @@ the trial to be credited ``clean`` — the four core belts are always evaluated:
    which is neither a pass nor a fail. ``False`` (rejected or timed out) is never
    clean; a linter that could not run is a harness error.
 6. ``api_stable``       — the public API of the units the builder changed is unchanged
-   unless the maintainers' own commit changes it the same way (ADR-0021;
+   unless the maintainers' own commit changes it the same way (ADR-0024;
    :mod:`crb.core.api_surface`). Evaluated only when the run or the repository switches
    it on (``checks.api_stable``) — OFF by default, recorded on the row as the hashed
    ``api_stable`` label rather than a column, so rows without it hash as they always did.
@@ -81,7 +81,7 @@ How:          Integrity check of the git view → tamper scan (target tests, tes
               (opt-in) → result.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
-              docs/adr/0021-working-by-construction.md
+              docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/workspace.py (the trial tree and its integrity), src/crb/core/lint.py
               (belt 5), src/crb/core/api_surface.py (belt 6, opt-in), src/crb/core/ledger.py
               (the row a result becomes), src/crb/core/runners/base.py (the test runs),
@@ -130,7 +130,7 @@ OPTIONAL_BELT_NAMES: tuple[str, ...] = ("repo_lint_clean",)
 #: Every belt, in belt order (1–5). The ledger's ``belt_set`` says how many a row
 #: recorded: ``v3-legacy`` the first three, ``v4`` the first four, ``v5`` all five.
 BELT_NAMES: tuple[str, ...] = (*CORE_BELT_NAMES, *OPTIONAL_BELT_NAMES)
-#: Belt 6 (ADR-0021): opt-in, and recorded on the ledger row as the hashed LABEL of this
+#: Belt 6 (ADR-0024): opt-in, and recorded on the ledger row as the hashed LABEL of this
 #: name (``true`` / ``false`` / ``none``) — not a column, so it is outside ``BELT_NAMES``
 #: and every row written without it hashes byte-for-byte as before.
 BELT_API_STABLE = "api_stable"
@@ -153,7 +153,7 @@ class Belts:
     no_new_failures: bool | None = None
     source_changed: bool | None = None
     repo_lint_clean: bool | None = None
-    #: belt 6 (opt-in, ADR-0021) — ``None`` = not evaluated; never in ``to_dict``'s
+    #: belt 6 (opt-in, ADR-0024) — ``None`` = not evaluated; never in ``to_dict``'s
     #: ``BELT_NAMES`` keys (the grade result adds it only when evaluated)
     api_stable: bool | None = None
 
@@ -200,7 +200,7 @@ class GradeResult:
     lint_run: LintRun | None = None
     duration_s: float = 0.0
     extra: Mapping[str, Any] = field(default_factory=dict)
-    #: belt 6's record when it was switched on (ADR-0021); ``None`` otherwise
+    #: belt 6's record when it was switched on (ADR-0024); ``None`` otherwise
     api_run: ApiRun | None = None
 
     def __post_init__(self) -> None:
@@ -328,7 +328,7 @@ def grade(
     predates the repo's linter as an instrument bug. Every builder trial keeps the
     default.
 
-    ``evaluate_api=True`` evaluates belt 6 (ADR-0021) once belts 1–4 have been judged;
+    ``evaluate_api=True`` evaluates belt 6 (ADR-0024) once belts 1–4 have been judged;
     OFF by default — the run or the repository's ``checks.api_stable`` switches it on.
     """
     if mode not in MODES:

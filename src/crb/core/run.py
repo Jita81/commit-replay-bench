@@ -137,7 +137,7 @@ class RunSpec:
     #: Asked before a non-clean, non-disqualified attempt climbs to the next rung
     #: (:func:`crb.core.spend.escalation_decision`); ``None`` climbs every rung (the old rule).
     escalation_gate: EscalationGate | None = None
-    #: belt 6 ``api_stable`` (ADR-0021): OFF unless the run or the repository's
+    #: belt 6 ``api_stable`` (ADR-0024): OFF unless the run or the repository's
     #: ``checks.api_stable`` switches it on (the worker resolves it)
     evaluate_api: bool = False
 

@@ -8,6 +8,22 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-26 — conformance with the external assessment (§0 rules, §F conditions)
+
+- **A row graded with the format step or belt 6 on is never counted with one graded without.**
+  Each row's "clean means working" arm (`off`, `fmt`, `api`, `fmt,api`) is read from its
+  hashed `checks` stamp; `cell_stats` refuses a cell of two arms, and every reader picks one.
+  The map, `/routes`, the delivery gate, the Factory page's cell routes, the Learn plans, the
+  forecast and the review cells read the repository's own arm by default, and
+  `?checks=<arm>` or `--checks` reads another. The worker's calibrated budget and escalation
+  yield read the run's own arm, the scorecard keys its cells and routing by arm, and the
+  abstract export carries `off` rows only. No apparatus bump: a stamp and a read filter, as
+  ADR-0019 makes posture (ADR-0024 §6). The finish gate pools; it never changes a belt.
+- **ADR-0021 "working by construction" is ADR-0024**: PR #55 carries ADR-0021 (factory
+  review before delivery), ADR-0022 (intake approval) and PR #53 ADR-0023.
+- **The assessment's five "trustworthy when" conditions head the product's definition of
+  done beside the VALUE criteria**, each unmet with its gap (G-660 to G-664).
+
 ### 2026-09-26 — the value merge's adversarial review: every finding fixed, every class stopped
 
 - **The loop cannot close a class it did not remove.** Displacement is measured against the
@@ -37,7 +53,7 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 - **Our own gates caught up.** Header width covers tests/ and ui/src by line identity;
   "Works with" is ratcheted to three to eight entries with reasons; CI job names cover
   `*.yaml` and unnamed matrix jobs; ADRs from 0020 on are wrapped and cite their decision-log
-  row (DL-054 added for ADR-0021). Nineteen classes are new rows in `docs/PREVENTION.md`
+  row (DL-054 added for ADR-0024). Nineteen classes are new rows in `docs/PREVENTION.md`
   (P-018 to P-036).
 
 ### 2026-09-25 — the value wave wired: a bug class meets a process lever, and the curve shows it
@@ -82,7 +98,7 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   them, n ≥ 8), recorded on the row. Off until a paired comparison measures it.
 - `scripts/spend_from_export.py` recomputes the budget-stop and escalation numbers from a
   ledger export with the product's own failure rule.
-### 2026-09-25 — "clean" means working, by construction (opt-in, ADR-0021)
+### 2026-09-25 — "clean" means working, by construction (opt-in, ADR-0024)
 
 Of the clean patches a person has reviewed, 4 of 13 would have been merged **[measured —
 n = 13 reviewed clean patches, method: the review records and the cobra critical-friend

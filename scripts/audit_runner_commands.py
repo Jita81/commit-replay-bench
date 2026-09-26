@@ -29,7 +29,7 @@ How:          ``get_runner(RepoConfig)`` → ``lint_plan`` / ``formatters_for`` 
               ``derived_commands`` / ``command(root, BARE)``; a regex per tool over the
               evidence files; a coverage table from tool → the step names that cover it.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
-ADRs:         docs/adr/0021-working-by-construction.md, docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0024-working-by-construction.md, docs/adr/0011-repo-lint-belt.md
 Works with:   src/crb/core/lint.py (the belt-5 detectors), src/crb/core/formatting.py (the format
               step), src/crb/core/finish_gate.py (derived commands), src/crb/core/runners/base.py
               (the harness command), docs/reviews/2026-09-25-runner-commands-audit.md (its output

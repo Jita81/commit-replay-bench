@@ -63,7 +63,7 @@ How:          ``units_for`` maps changed files to units → ``Trees`` reads each
               ``WorkspaceTrees`` over the parent, the worktree and the commit) → ``go_surface`` /
               ``python_surface`` / ``js_surface`` → ``compare`` → ``ApiRun``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md, docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0024-working-by-construction.md, docs/adr/0011-repo-lint-belt.md
 Works with:   src/crb/core/grade.py (folds ``ApiRun.ok`` into belt 6 when switched on),
               src/crb/core/checks.py (the per-repository switch ``api_stable``),
               src/crb/core/ledger.py (the ``api`` failure kind and the ``api_stable`` row label),
@@ -72,7 +72,7 @@ Tested by:    tests/test_api_surface.py, tests/test_grade_api_belt.py
 Touch when:   never for a new repository — switch the belt on per repository with
               ``checks: {api_stable: true}`` (docs/OPERATOR.md); a language gains an extractor
               here with fixture tests in tests/test_api_surface.py and a line in
-              docs/adr/0021-working-by-construction.md.
+              docs/adr/0024-working-by-construction.md.
 Claims:       ``api_stable = true`` means no trial API change went unmirrored by the gold, as
               far as the declaration scanners see — not that the API is well designed
               (docs/EVIDENCE-AND-CLAIMS.md).

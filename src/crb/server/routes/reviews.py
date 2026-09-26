@@ -87,7 +87,7 @@ from crb.core.review import (
 from crb.observability.events import StepStatus
 from crb.server.auth import AdminDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
-from crb.server.routes.capability import parse_by
+from crb.server.routes.capability import CHECKS_CURRENT, parse_by, rows_for_arm
 from crb.server.routes.grades import grade_to_dict
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.runs import append_system_event, system_trace_id
@@ -356,6 +356,8 @@ def reviews_stats(
             detail={"repo": repo},
         ) from exc
     reviews = list(DbReviewLedger(factory).records(repo=repo))
+    # the cells the map beside it shows: the repository's own checks arm (ADR-0024)
+    rows = rows_for_arm(factory, repo, rows, CHECKS_CURRENT)
     cells = review_cell_stats(rows, reviews, projection=projection)
     return ReviewStatsOut(
         repo=repo,

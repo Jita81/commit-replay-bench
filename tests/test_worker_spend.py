@@ -132,6 +132,16 @@ def test_a_rung_whose_prior_escalations_did_not_pay_is_not_climbed(h: Harness) -
     assert verify_chain(list(h.worker.ledger.rows())) == 13
 
 
+def test_the_escalation_yield_never_reads_another_checks_arm(h: Harness) -> None:
+    """ADR-0024: a run graded with belt 6 on measures its escalation yield on belt-6 rows
+    only — twelve failed escalations graded without it say nothing about its own arm."""
+    _prior(h, n=12, trial="r2", clean=False)
+    rows = _blind_ladder(h, checks={"api_stable": True})
+    assert [r.trial for r in rows] == ["r1", "r2"]
+    assert all(r.checks_arm == "api" for r in rows)
+    assert rows[0].labels[LABEL_ESCALATION_RULE].startswith("measured:insufficient:n=0<10")
+
+
 def test_escalation_always_per_run_climbs_every_rung(h: Harness) -> None:
     _prior(h, n=12, trial="r2", clean=False)
     rows = _blind_ladder(h, escalation="always")

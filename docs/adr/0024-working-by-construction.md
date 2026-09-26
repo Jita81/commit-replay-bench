@@ -1,13 +1,25 @@
-# ADR-0021 — "Clean" means working, by construction: the format step, the finish gate, belt 6 `api_stable`, and one switchboard
+# ADR-0024 — "Clean" means working, by construction: the format step, the finish gate, belt 6 `api_stable`, and one switchboard
 
 **Status:** Accepted (operator decision DL-054; built in the value wave, stream W)
 **Date:** 2026-09-25
-**Apparatus impact:** none while every mechanism is OFF (the default). Each is opt-in per run
-or per repository and recorded on every row it touches, so rows with and without it never
-pool silently. Making any of them a default is an apparatus change (bump
-`APPARATUS_VERSION`) and needs the paired A/B this ADR asks for. Adds the failure kind `api`
-(ranked between `budget` and `lint`) and amends ADR-0011's detectors (see *Runner-command
-audit*).
+**Apparatus impact:** none — no `APPARATUS_VERSION` bump and no new belt set; the checks
+are a hashed stamp and a read filter, as ADR-0019 makes posture (§6). The format step and
+belt 6 DO change what a clean row means when a repository or a run switches them on, and a
+row graded with either on was, before this amendment, counted in the same cell as one graded
+without **[measured — n = 1 reproduction: five rows with no `checks` stamp and three stamped
+`api=1` with belt 6 recorded `true`, one cell key; `cell_stats` read n = 8 and the capability
+map served one `bug.fix` cell of 8; method: `crb.core.ledger.cell_stats` and
+`crb.core.capability.build_capability_map` on feat/value at `e2fc00b`, 2026-09-26;
+apparatus 2.2]**. So every row carries its arm (§6), no reader reduces a cell across two arms
+(`cell_stats` refuses), and every reader picks one. A bump would not have kept the two apart:
+the switches are per repository and per run, so rows of both arms would share any version.
+It would also have split the default rows — which mean exactly what they meant under 2.2 —
+from their own history. The finish gate is not on the arm: the belts, not the gate, decide
+clean, so it pools like the budget profile and the playbook lines, recorded on the row.
+Making any switch a default IS an apparatus change and needs the paired A/B this ADR asks
+for. This ADR adds the failure kind `api` (ranked between `budget` and `lint`) and amends
+ADR-0011's detectors (see *Runner-command audit*). It lands after PR #56 (ADR-0019, which
+takes apparatus 2.3) and names no version of its own.
 
 ## Context
 
@@ -78,6 +90,22 @@ that programme, none yet measured under apparatus 2.2]**.
    carries `labels.checks` = `fmt=1:repo;gate=0:default;api=1:run;cfg=<12-hex version>`; the
    apparatus stamp carries `extra.checks`. **This is the surface the prevention loop
    (ADR-0020) writes** to switch a mechanism on for a repository whose failure class recurs.
+6. **The arm: a stamp and a read filter, never a pool.** A row's arm (`off`, `fmt`, `api` or
+   `fmt,api`; `GradeRow.checks_arm`) is read from its hashed `checks` stamp and from belt 6's
+   own label, so a row written before the switchboard is `off` and no row is re-derived. A
+   run's arm is `ResolvedChecks.arm`, the same word. `crb.core.ledger.rows_for_checks` keeps
+   one arm; there is no pooled view. `cell_stats` refuses rows of two arms
+   (`ChecksArmsPooled`), so no reader can reduce a mixed cell, and `all_cell_stats` returns
+   one cell per key and arm. The served readers use the arm the repository's next run grades
+   under, the same resolution the worker applies (`crb.server.prevention_state.
+   current_checks_arm`). That covers the capability map and `/routes` (where `?checks=<arm>`
+   selects another arm), the delivery gate and the Factory page's cell routes, the Learn
+   plans, the forecast and the review cells. The worker's calibrated budget and escalation
+   yield read the run's own arm. The CLI (`crb route`, `crb learn strengthen|remeasure`)
+   takes `--checks` (default `off`), and `crb ledger stats` prints one cell per key and arm.
+   The scorecard keys its cells and its prospective routing by arm. The abstract export
+   carries `off` rows only: a switched-on arm is a local experiment until an A/B makes it
+   the default, and an abstract cell has no field that could keep two arms apart.
 
 ## Runner-command audit (amends ADR-0011's detectors)
 
@@ -108,7 +136,14 @@ difference on every pack (`eslint(max-warnings=0)+prettier+stylelint+tsc:lint:ty
 - A repository can be switched to "clean means working" without a code change, and the switch
   is on the audit trail and on every row.
 - Rows remain comparable: nothing changes for a run with every switch OFF and a repository with
-  no `checks` block.
+  no `checks` block, and a row graded with the format step or belt 6 on is only ever counted
+  with rows of its own arm (§6).
+- Switching the format step or belt 6 on for a repository starts its cells afresh. By a
+  person or by the prevention loop (`learning.auto_apply: config`), the map, the routes and
+  the delivery gate then read the new arm, which has no rows yet, so its cells calibrate
+  until it is measured. The old arm's rows stay readable with `?checks=off`. A cell never
+  licenses a delivery on rows graded by an instrument the repository no longer uses.
+  Switching the finish gate changes no cell.
 - The finish gate costs up to `finish_repair_turns` extra builder calls per attempt, capped at
   the pre-flight repair's budget (10 turns, 15 tool calls, 300 s); both calls are one attempt's
   spend on the row.
@@ -125,6 +160,14 @@ difference on every pack (`eslint(max-warnings=0)+prettier+stylelint+tsc:lint:ty
   to rows written without it, and the ledger's invariant closes the false-Q1 route.
 - *Ask the model to format and to check the API in the brief.* Advisory text is the weakest
   prevention; the harness can do both deterministically.
-- *Rename the builder per switch (as the pre-flight does, `<name>+preflight`).* Fragments the
-  cells the router reads every time the prevention loop switches something on; the row label
-  records the arm instead, and a reader splits by it.
+- *Rename the builder per switch (as the pre-flight does, `<name>+preflight`).* The builder is
+  a cell-key field, so the full cells would split, but every projection that drops it (the
+  class × size map the delivery gate reads) would still pool the arms. The arm is a read
+  filter instead, applied before any projection (§6).
+- *Bump `APPARATUS_VERSION` (to 2.4, after ADR-0019's 2.3) and the belt set.* Rows of both
+  arms would carry the same version, because the switches are per repository and per run, so
+  the bump alone keeps nothing apart. It would also retire every default row's history for a
+  meaning that did not change. The version moves when a switch becomes a default.
+- *Put the finish gate on the arm.* It changes what the builder does before it says done, never
+  a belt, so a gate-on clean row means what a gate-off one means. Splitting on it would reset a
+  repository's cells whenever the loop applies its most-used process lever.

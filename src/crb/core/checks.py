@@ -1,6 +1,6 @@
 """``RepoConfig.checks`` — the ONE per-repository switchboard for "clean means working".
 
-Three mechanisms make a clean row mean working software by construction (ADR-0021):
+Three mechanisms make a clean row mean working software by construction (ADR-0024):
 
 * ``format_step`` — after the builder finishes and before the grade, the repository's OWN
   formatter rewrites the changed source files, so the graded patch is the formatted one
@@ -16,7 +16,9 @@ run (``params.checks``) or for the REPOSITORY (``RepoConfig.checks``, written th
 ``PUT /repos/{name}``, whose diff is appended to the repository's audit trail). The run
 beats the repository, the repository beats the default. Every row records the resolved
 switches, where each came from and the configuration version it saw (the ``checks``
-label), so rows with and without a mechanism never pool silently.
+label). The format step and belt 6 change what the grader judges, so they make the row's
+ARM (``off``, ``fmt``, ``api``, ``fmt,api``), and rows of two arms never share a cell
+(``crb.core.ledger.rows_for_checks``; ADR-0024 §6).
 
 This module is the surface the prevention loop writes: to switch a mechanism on for a
 repository whose failure class recurs, it writes this block — nothing else.
@@ -40,21 +42,23 @@ What it is:   The per-repository check configuration (``RepoChecks``), its per-r
               (``CheckCommand``) — the one surface the prevention loop switches.
 What it does: Validates the ``checks`` block (unknown key or wrong type → ``ValueError`` at
               config time); resolves each switch run > repository > default OFF and names the
-              source; hashes the block into a configuration version; renders the row label.
+              source; hashes the block into a configuration version; renders the row label;
+              names the arm a run's rows pool in and reads it back from a row's label.
 How:          ``RepoChecks.from_config`` parses and validates; ``resolve`` overlays
               ``params.checks``; ``ResolvedChecks.label`` is what the adapter stamps on every
               attempt's row.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md
+ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/spec.py (``RepoConfig.checks`` holds the raw block and validates it
               here), src/crb/core/formatting.py (the format step), src/crb/core/api_surface.py
               (belt 6), src/crb/builders/adapter.py (applies the switches around the build),
               src/crb/server/worker.py (resolves the run against the repository),
               src/crb/server/schemas.py (the API shapes that write it)
-Tested by:    tests/test_checks.py, tests/test_builders_finish_gate.py
+Tested by:    tests/test_checks.py, tests/test_builders_finish_gate.py,
+              tests/test_checks_pooling.py
 Touch when:   onboarding a repository whose check commands the runner cannot derive — declare
               them under ``checks.commands`` (docs/OPERATOR.md); adding a switch needs a test
-              here, a line in docs/adr/0021-working-by-construction.md and the row label.
+              here, a line in docs/adr/0024-working-by-construction.md and the row label.
 """
 
 from __future__ import annotations
@@ -78,11 +82,40 @@ SOURCE_DEFAULT = "default"
 #: The row label every attempt carries (hashed, like every label).
 LABEL_CHECKS = "checks"
 
+#: The ARM a row pools under — the switches that change what the GRADER judges: the format
+#: step (the graded patch is the formatted one) and belt 6 (a sixth belt). Rows of two arms
+#: never share a cell (ADR-0024 "Apparatus impact"; ``crb.core.ledger.rows_for_checks``). The
+#: finish gate is not on the arm: it changes what the builder does before it says done, and the
+#: belts, not the gate, decide clean — it pools like the budget profile and the playbook lines.
+ARM_SWITCHES: tuple[str, ...] = ("format_step", "api_stable")
+#: The arm of a row graded with neither switch on — every row written before the switchboard.
+ARM_OFF = "off"
+#: Every arm, in order; the words the ``checks`` read filter accepts.
+ARMS: tuple[str, ...] = (ARM_OFF, "fmt", "api", "fmt,api")
+
 _KEYS: frozenset[str] = frozenset({*SWITCHES, "commands", "formatter", "finish_repair_turns"})
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 MAX_COMMANDS = 8
 MAX_REPAIR_TURNS = 3
 DEFAULT_CHECK_TIMEOUT_S = 600
+
+
+def arm_of(*, format_step: bool, api_stable: bool) -> str:
+    """The arm a row graded under these switches pools in (:data:`ARMS`)."""
+    on = [_SHORT[s] for s, v in (("format_step", format_step), ("api_stable", api_stable)) if v]
+    return ",".join(on) or ARM_OFF
+
+
+def arm_from_label(label: str, *, belt6_recorded: bool = False) -> str:
+    """The arm a row's ``checks`` stamp names (``""`` — no stamp — is :data:`ARM_OFF`).
+    ``belt6_recorded``: the row carries belt 6's own label, so belt 6 was on whatever the
+    stamp says."""
+    fields = dict(p.split("=", 1) for p in label.split(";") if "=" in p)
+
+    def on(short: str) -> bool:
+        return fields.get(short, "0").split(":", 1)[0] == "1"
+
+    return arm_of(format_step=on("fmt"), api_stable=on("api") or belt6_recorded)
 
 
 def _bool(value: Any, what: str) -> bool:
@@ -249,6 +282,11 @@ class ResolvedChecks:
     def any_on(self) -> bool:
         return self.format_step or self.finish_gate or self.api_stable
 
+    @property
+    def arm(self) -> str:
+        """The arm this run's rows pool in — the word :func:`arm_from_label` reads back."""
+        return arm_of(format_step=self.format_step, api_stable=self.api_stable)
+
     def label(self) -> str:
         """``fmt=1:repo;gate=0:default;api=1:run;cfg=<version>`` — the ``checks`` row label."""
         parts = [
@@ -289,6 +327,9 @@ def resolve(repo: RepoChecks, run_params: Mapping[str, Any] | None) -> ResolvedC
 
 
 __all__ = [
+    "ARMS",
+    "ARM_OFF",
+    "ARM_SWITCHES",
     "LABEL_CHECKS",
     "SOURCE_DEFAULT",
     "SOURCE_REPO",
@@ -297,5 +338,7 @@ __all__ = [
     "CheckCommand",
     "RepoChecks",
     "ResolvedChecks",
+    "arm_from_label",
+    "arm_of",
     "resolve",
 ]

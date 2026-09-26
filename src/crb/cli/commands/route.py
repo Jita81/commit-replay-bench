@@ -37,7 +37,8 @@ from crb.cli.commands import (
     table,
     workdir_of,
 )
-from crb.core.ledger import JsonlLedger, all_cell_stats
+from crb.core.checks import ARM_OFF, ARMS
+from crb.core.ledger import JsonlLedger, all_cell_stats, rows_for_checks
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DO_NOT_SHIP, RoutingPolicy, route
 
 
@@ -49,6 +50,13 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         "--policy-json",
         default="",
         help="RoutingPolicy overrides: a JSON file path or inline JSON, e.g. '{\"min_n\": 20}'",
+    )
+    p.add_argument(
+        "--checks",
+        default=ARM_OFF,
+        choices=ARMS,
+        help="route only rows graded under this 'clean means working' arm (default off) — "
+        "rows of two arms never share a cell (ADR-0024)",
     )
     add_common(p)
     p.set_defaults(func=cmd_route)
@@ -89,7 +97,7 @@ def cmd_route(args: argparse.Namespace) -> int:
     wd = workdir_of(args)
     path = Path(args.path).expanduser() if args.path else wd.ledger_path
     policy = load_policy(args.policy_json)
-    rows = list(JsonlLedger(path).rows())
+    rows = rows_for_checks(JsonlLedger(path).rows(), args.checks)
     decisions = [route(s, policy=policy) for s in all_cell_stats(rows)]
     decisions.sort(key=lambda d: tuple(d.cell.values()))
     out: dict[str, Any] = {

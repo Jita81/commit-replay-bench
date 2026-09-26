@@ -1,7 +1,7 @@
 """Every recent ADR keeps the house shape: a decision-log row, the same headings, 100 columns.
 
 ADR-0020 (the value wave) left 120 paragraphs unwrapped, cited no decision-log row in its
-status, and its sibling ADR-0021 named its last section "Alternatives rejected" with no row in
+status, and its sibling ADR-0024 named its last section "Alternatives rejected" with no row in
 the decision log at all; nothing checked any of it (docs/PREVENTION.md P-036).
 
 Navigation

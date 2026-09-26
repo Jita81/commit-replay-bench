@@ -240,7 +240,7 @@ class _RepoConfigFields(BaseModel):
     def _spend_known(cls, v: dict[str, str] | None) -> dict[str, str] | None:
         return None if v is None else validate_spend_config(v)
 
-    #: "Clean means working" switches for the repository (ADR-0021) — the one surface the
+    #: "Clean means working" switches for the repository (ADR-0024) — the one surface the
     #: prevention loop writes: ``format_step``, ``finish_gate``, ``api_stable``, declared
     #: ``commands`` / ``formatter``. Validated by ``crb.core.checks.RepoChecks``; a
     #: change is a ``repo.updated`` event with its diff, like every config change.
@@ -558,7 +558,7 @@ class RunRetention(BaseModel):
 
 
 class RunChecksIn(BaseModel):
-    """``params.checks`` — this run's override of the repository's switches (ADR-0021).
+    """``params.checks`` — this run's override of the repository's switches (ADR-0024).
     ``null`` / absent = the repository's value (itself OFF by default)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -633,7 +633,7 @@ class RunCreateRequest(BaseModel):
     #: ``always`` climbs every rung. The decision and the rule are on the row.
     #: ``None`` = the repository's ``spend`` setting, else ``measured``.
     escalation: str | None = None
-    #: "Clean means working" for THIS run (ADR-0021): ``format_step`` (the repository's own
+    #: "Clean means working" for THIS run (ADR-0024): ``format_step`` (the repository's own
     #: formatter before grading), ``finish_gate`` (the repository's checks as the brief's
     #: checklist, verified, one repair turn) and ``api_stable`` (belt 6). Each overrides the
     #: repository's ``checks`` block; absent = the repository's (OFF by default). Stored as

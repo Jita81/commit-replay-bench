@@ -16,7 +16,7 @@ How:          Extractors on inline sources; ``evaluate`` over an in-memory ``Tre
               ``WorkspaceTrees`` on a hermetic two-commit git repository; a small ``go/ast``
               program run with ``go run`` as the cross-check oracle.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md
+ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/api_surface.py (under test), tests/fixtures/langs/__init__.py (the
               hermetic git helpers), tests/test_grade_api_belt.py (the belt inside the grader)
 Tested by:    tests/test_api_surface.py

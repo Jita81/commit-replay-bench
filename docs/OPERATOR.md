@@ -363,7 +363,7 @@ apparatus record of every row measured under it.
 ### 2.1b Clean means working — the `checks` switchboard
 
 A clean row says the repository's tests accept a patch. Three mechanisms make it also mean
-the repository's reviewers would (ADR-0021). Each is **off** until you switch it on, for one
+the repository's reviewers would (ADR-0024). Each is **off** until you switch it on, for one
 run or for the repository, and every row it touches records it.
 
 | switch | what it does | what the row records |
@@ -387,6 +387,15 @@ that already fails on the untouched parent is recorded `pre_existing` and never 
 attempt back. `go vet ./...` is added for you when `.golangci.yml` enables `govet` or the
 Makefile or CI runs it. `formatter: {"command": [...], "exts": [...]}` declares a formatter
 the detectors miss; `{"disabled": true}` switches the format step off for the repository.
+
+**Switching the format step or belt 6 on starts the repository's cells afresh.** A row graded
+with either on answers a different question from one graded without, so the two are never
+counted in one cell (ADR-0024 §6). The map, the routes and the delivery gate read the arm
+your next run grades under — `off`, `fmt`, `api` or `fmt,api` — so after the switch every
+cell calibrates until the new arm is measured, and a delivery is never licensed on rows the
+old instrument graded. The old rows stay on the ledger: `GET /capability-map?repo=…&checks=off`
+reads them, and the CLI takes `--checks`. The finish gate is not an arm (the belts, not the
+gate, decide clean): switching it changes no cell.
 
 To see what the product derives for a checkout against what its CI runs, and the gaps:
 

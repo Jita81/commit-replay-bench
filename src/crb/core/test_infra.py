@@ -528,7 +528,7 @@ _TOML_SECTIONS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("tool", "pytest"),
         ("project", "entry-points", "pytest11"),
         ("tool", "ruff"),  # belt 5 (ADR-0011): the whole [tool.ruff*] tree
-        ("tool", "black"),  # belt 5: black's check mode reads [tool.black] (ADR-0021 audit)
+        ("tool", "black"),  # belt 5: black's check mode reads [tool.black] (ADR-0024 audit)
     ),
     "cargo.toml": (
         ("dev-dependencies",),

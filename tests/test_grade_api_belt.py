@@ -14,7 +14,7 @@ How:          Fixture repositories from ``tests/fixtures`` (the gold adds ``Sub`
               / ``sub``); the trial is the gold plus an edit; ``grade(..., evaluate_api=True)``;
               ``grade_row_from_result`` for the row.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md,
+ADRs:         docs/adr/0024-working-by-construction.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/core/grade.py (belt 6 folded into clean), src/crb/core/api_surface.py
               (the extractors), src/crb/core/ledger.py (the ``api`` kind and the label

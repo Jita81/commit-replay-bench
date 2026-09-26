@@ -16,7 +16,7 @@ How:          ``adapter.build_fn_for(..., checks=resolve(...))`` driven by ``crb
               over ``tests/fixtures/pyrepo.py``; the formatter is the real ``ruff format``, the
               declared check a real shell command in the worktree; the builder is scripted.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0021-working-by-construction.md
+ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/builders/adapter.py (under test), src/crb/core/formatting.py (the
               format step it drives), src/crb/core/finish_gate.py (the gate it drives),
               src/crb/core/checks.py (the switchboard the run resolves), tests/fixtures/pyrepo.py

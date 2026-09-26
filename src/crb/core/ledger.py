@@ -62,7 +62,8 @@ What it does: Constructs rows that cannot be clean with a failed belt, without a
               pack, or under a belt set their apparatus could not have recorded; chains each
               row to the previous one by SHA-256 and verifies a chain; names why every
               non-clean row failed by ONE rule; reduces rows to a cell's ``n``, clean count,
-              Wilson interval, failure split and false-Q1 count (which must read 0).
+              Wilson interval, failure split and false-Q1 count (which must read 0); refuses
+              to reduce rows of two ``checks`` arms to one cell and keeps one arm on request.
 How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to a row and
               pins its failure kind and cost-known labels → ``GradeRow.__post_init__``
               asserts the invariants → ``JsonlLedger.append`` chains on the last row's hash
@@ -70,15 +71,17 @@ How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to
               ``failure_split`` / ``cell_stats`` group eligible rows by ``CellKey``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
-Works with:   src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
+              docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0024-working-by-construction.md
+Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
+              src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
               src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
               src/crb/store/ledger.py (the database ledger — same rows, same chain),
               src/crb/core/routing.py (consumes CellStats), src/crb/core/capability.py (the
               map built from the rows), src/crb/core/legacy.py (census import — the only
               writer of v3-legacy rows), src/crb/core/stats.py (the Wilson interval)
 Tested by:    tests/test_ledger.py, tests/test_store_ledger.py, tests/test_census_gate.py,
-              tests/test_run.py, tests/test_grade_api_belt.py
+              tests/test_run.py, tests/test_grade_api_belt.py, tests/test_checks_pooling.py
 Touch when:   never for a new repository; adding a belt, a failure kind, a cell-key field or a
               hashed label changes what the chain commits to — needs an ADR, an apparatus bump
               (src/crb/core/version.py), a store migration (as
@@ -103,6 +106,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, arm_from_label
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
 from crb.core.grade import (
     BELT_API_STABLE,
@@ -183,7 +187,7 @@ FAILURE_BUILDER_RED = "builder_red"
 #: (the repository's own formatter/linter) rejected the changed files (ADR-0011).
 FAILURE_LINT = "lint"
 #: The model wrote WORKING code that CHANGES THE PUBLIC API in a way the maintainers' own
-#: commit did not: belts 1–4 held and belt 6 ``api_stable`` (opt-in, ADR-0021) failed.
+#: commit did not: belts 1–4 held and belt 6 ``api_stable`` (opt-in, ADR-0024) failed.
 FAILURE_API = "api"
 #: The builder's :class:`Budget` was exhausted (wall clock, turns, tool calls, tokens or
 #: cost) before it finished — neither the model failing nor an instrument error.
@@ -276,7 +280,7 @@ COST_UNKNOWN_MARK = "cost unknown"
 LABEL_FAILURE_KIND = "failure_kind"
 LABEL_COST_KNOWN = "cost_known"
 LABEL_STOP_REASON = "stop_reason"
-#: Belt 6 (ADR-0021) is recorded as this hashed label — ``true`` / ``false`` / ``none``
+#: Belt 6 (ADR-0024) is recorded as this hashed label — ``true`` / ``false`` / ``none``
 #: (switched on, not evaluated) — and is absent when the belt was switched off.
 LABEL_API_STABLE = BELT_API_STABLE
 #: The belt-6 findings as one compact line (``kind:unit:symbol;…``, capped).
@@ -285,6 +289,12 @@ LABEL_API_FINDINGS = "api_findings"
 
 class LedgerIntegrityError(RuntimeError):
     """The hash chain does not verify."""
+
+
+class ChecksArmsPooled(ValueError):
+    """Rows graded under two ``checks`` arms reached one cell (ADR-0024): a row graded with
+    the format step or belt 6 on answers a different question from one graded without, so
+    a reader must choose one arm (:func:`rows_for_checks`) before it reduces a cell."""
 
 
 @dataclass(frozen=True)
@@ -365,7 +375,7 @@ def derive_failure_kind(
     5. ``stop_reason`` in :data:`BUDGET_STOP_REASONS`       → ``budget``
        (the attempt was cut short by its own Budget; the belts judged a partial patch)
     6. ``api_only`` — belts 1–4 all ``True`` and belt 6
-       ``False`` (opt-in, ADR-0021)                          → ``api``
+       ``False`` (opt-in, ADR-0024)                          → ``api``
        (the model wrote working code that changes the public API in a way the
        maintainers' own commit did not)
     7. ``lint_only`` — belts 1–4 all ``True`` and belt 5
@@ -574,7 +584,7 @@ class GradeRow:
                 raise FalseQ1Violation(
                     f"ledger refuses clean row {self.task_id[:10]}: no evidence pack (no pack ⇒ no Q1)"
                 )
-            # belt 6 lives in a label (ADR-0021): a clean row that records it failed is a
+            # belt 6 lives in a label (ADR-0024): a clean row that records it failed is a
             # false-Q1 by the one route the column checks above cannot see
             if self.labels.get(LABEL_API_STABLE) == "false":
                 raise FalseQ1Violation(
@@ -619,6 +629,16 @@ class GradeRow:
             )
 
     # --- derived classification --------------------------------------------------
+    @property
+    def checks_arm(self) -> str:
+        """The arm this row pools in (ADR-0024): read from its hashed ``checks`` stamp and
+        belt 6's own label — ``off`` for a row graded with neither grader-side switch on,
+        which is every row written before the switchboard."""
+        return arm_from_label(
+            self.labels.get(LABEL_CHECKS, ""),
+            belt6_recorded=LABEL_API_STABLE in self.labels,
+        )
+
     @property
     def stop_reason(self) -> str:
         """The builder's stop reason when the row recorded it (new rows), else ``""``."""
@@ -1039,7 +1059,7 @@ class FailureSplit:
     cost_unknown: int
     lint: int = 0
     lint_evaluated: int = 0
-    #: Belt 6 (opt-in, ADR-0021): working code that changed the public API unlike the gold.
+    #: Belt 6 (opt-in, ADR-0024): working code that changed the public API unlike the gold.
     api: int = 0
     #: Provider outages (usage limit, 429, dead credential): the call never happened.
     #: Counted over all rows, outside ``n`` — like ``disqualified``.
@@ -1168,8 +1188,10 @@ class CellStats:
     model_ci: Interval = field(default_factory=lambda: Interval(0.0, 1.0))
     n_lint: int = 0
     n_lint_evaluated: int = 0
-    #: belt 6 (opt-in, ADR-0021): working code that changed the public API unlike the gold
+    #: belt 6 (opt-in, ADR-0024): working code that changed the public API unlike the gold
     n_api: int = 0
+    #: The ``checks`` arm every row of the cell was graded under (ADR-0024) — one, always.
+    checks_arm: str = ARM_OFF
 
     @property
     def n_disqualified(self) -> int:
@@ -1222,6 +1244,13 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
     rs = list(rows)
     if not rs:
         raise ValueError("cell_stats needs at least one row")
+    arms = sorted({r.checks_arm for r in rs}, key=ARMS.index)
+    if len(arms) > 1:
+        raise ChecksArmsPooled(
+            f"one cell holds rows graded under the checks arms {', '.join(arms)}: a row graded "
+            "with the format step or belt 6 on is a different measurement from one graded "
+            "without (ADR-0024) — choose one arm with rows_for_checks before reducing a cell"
+        )
     cell = rs[0].cell
     eligible = [r for r in rs if r.eligible]
     n = len(eligible)
@@ -1260,7 +1289,17 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_lint=split.lint,
         n_lint_evaluated=split.lint_evaluated,
         n_api=split.api,
+        checks_arm=arms[0],
     )
+
+
+def rows_for_checks(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
+    """The rows graded under one ``checks`` arm (ADR-0024) — the read filter every reader
+    that reduces cells applies, as it applies the mode and the apparatus version. There is
+    no pooled view: ``arm`` is one of :data:`crb.core.checks.ARMS`."""
+    if arm not in ARMS:
+        raise ValueError(f"unknown checks arm {arm!r}; expected one of {ARMS}")
+    return [r for r in rows if r.checks_arm == arm]
 
 
 def group_by_cell(
@@ -1276,8 +1315,10 @@ def group_by_cell(
 
 
 def all_cell_stats(rows: Iterable[GradeRow]) -> list[CellStats]:
-    """One :class:`CellStats` per full cell key present in ``rows``."""
-    return [cell_stats(g) for g in group_by_cell(rows).values()]
+    """One :class:`CellStats` per full cell key and ``checks`` arm present in ``rows`` — two
+    arms of one key are two cells, never one (ADR-0024)."""
+    rs = list(rows)
+    return [cell_stats(g) for arm in ARMS for g in group_by_cell(rows_for_checks(rs, arm)).values()]
 
 
 def false_q1_total(rows: Iterable[GradeRow]) -> int:

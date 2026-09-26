@@ -189,7 +189,7 @@ from crb.builders.budget import budget_for_rung
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
-from crb.core.checks import RepoChecks
+from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
 from crb.core.evidence import utc_now_iso
@@ -203,7 +203,7 @@ from crb.core.git import (
     redact_url,
 )
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED
-from crb.core.ledger import GradeRow, false_q1_total, is_outage_error
+from crb.core.ledger import GradeRow, false_q1_total, is_outage_error, rows_for_checks
 from crb.core.mine import MineOutcome, mine
 from crb.core.oracle.controls import (
     CONTROLS,
@@ -256,7 +256,13 @@ from crb.server.intake import (
 )
 from crb.server.prevention_state import learning_snapshot, learning_tick
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
-from crb.server.routes.capability import rows_for_apparatus, rows_for_mode, signed_map
+from crb.server.routes.capability import (
+    CHECKS_CURRENT,
+    rows_for_apparatus,
+    rows_for_arm,
+    rows_for_mode,
+    signed_map,
+)
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.settings import FactorySettings, GitHubAppSettings, IntakeSettings
 from crb.server.spend import SpendHooks, build_spend_hooks, pack_turns
@@ -1801,6 +1807,7 @@ class Worker:
         *,
         mode: str,
         repo_spend: Mapping[str, Any] | None = None,
+        checks_arm: str = ARM_OFF,
     ) -> SpendHooks:
         """The spend rules bound to this run from the ledger as it stands now (prior rows
         only): the escalation gate and, when the run or the repository asks for
@@ -1809,9 +1816,11 @@ class Worker:
         nothing: the rules then see no history — the ladder climbs as before and a
         calibrated attempt keeps its floor — and the trace says why. ``repo_spend`` is the
         repository's ``spend`` block under the prevention loop's overlay (the team's keys
-        win); ``None`` reads the configuration as stored."""
+        win); ``None`` reads the configuration as stored. Only rows of the run's own
+        ``checks`` arm are read: a calibrated cap or an escalation yield never pools rows
+        graded with the format step or belt 6 set otherwise (ADR-0024)."""
         try:
-            rows = list(self.ledger.rows())
+            rows = rows_for_checks(self.ledger.rows(), checks_arm)
         except Exception as exc:  # the rules are advisory spend, never a reason to fail a run
             rows = []
             ctx.emit(
@@ -1866,14 +1875,18 @@ class Worker:
         preflight = Preflight.from_params(p.get("preflight"))
         # the loop's configuration levers (ADR-0020) reach the run through the same two
         # surfaces a person writes — K's ``spend`` and W's ``checks`` — under the team's keys
-        spend = self._spend_hooks(
-            ctx, ladder, mode=mode, repo_spend=learning.config_section(K_SECTION, ctx.config.spend)
-        )
-        # "clean means working" (ADR-0021): the run's switches over the repository's
+        # "clean means working" (ADR-0024): the run's switches over the repository's
         # ``checks`` block — each OFF unless one of them says otherwise; stamped below
         checks = resolve_checks(
             RepoChecks.from_config(learning.config_section(W_SECTION, ctx.config.checks)),
             p.get("checks"),
+        )
+        spend = self._spend_hooks(
+            ctx,
+            ladder,
+            mode=mode,
+            repo_spend=learning.config_section(K_SECTION, ctx.config.spend),
+            checks_arm=checks.arm,
         )
         spec = RunSpec(
             run_id=run.id,
@@ -2089,13 +2102,21 @@ class Worker:
         Rows of ``run_id`` — THIS run's own graded builds — are excluded: the map that
         licenses a delivery is the map as it stood before the run, never one the run's own
         clean rows have nudged (B-1b finding 2: PR bodies said ``n=27`` where the freeze saw
-        26 → DL-045). Each decision also carries ``apparatus_versions`` for the record."""
+        26 → DL-045). Each decision also carries ``apparatus_versions`` for the record.
+
+        ADR-0024: only rows of the repository's own ``checks`` arm license a delivery — a
+        cell measured with the format step or belt 6 set otherwise never does."""
         cache: dict[str, dict[str, Any] | None] = {}
         computed: dict[str, bool] = {}
 
         def compute() -> None:
             before = (r for r in self.ledger.rows(repo=repo) if not run_id or r.run_id != run_id)
-            rows = rows_for_apparatus(rows_for_mode(before, "sighted"), "current")
+            rows = rows_for_arm(
+                self.factory,
+                repo,
+                rows_for_apparatus(rows_for_mode(before, "sighted"), "current"),
+                CHECKS_CURRENT,
+            )
             with self.factory() as s:
                 cmap, _ = signed_map(
                     rows, PROJECTION_CLASS_SIZE, s, repo, controls=latest_controls_verdict(s, repo)

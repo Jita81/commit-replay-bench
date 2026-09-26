@@ -13,7 +13,7 @@ What it does: Pins that every switch is OFF by default; that the run beats the r
 How:          The dataclasses directly; the seeded server (``fixtures.server_seed``) for the
               routes, with the queue faked.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0021-working-by-construction.md
+ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/checks.py (under test), src/crb/core/spec.py (``RepoConfig.checks``),
               src/crb/server/schemas.py (the request shapes), src/crb/server/routes/repos.py and
               src/crb/server/routes/runs.py (the writers)

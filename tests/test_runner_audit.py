@@ -19,7 +19,7 @@ How:          Temporary checkouts shaped like each repository's configuration; s
               stand-ins for tools that are not installed on the host (the plan and the exit-code
               table under test are the real ones); ``run_plan`` on a ``LocalExecutor``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0021-working-by-construction.md
+ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/lint.py (the detectors), src/crb/core/finish_gate.py
               (``derived_commands``), scripts/audit_runner_commands.py (the audit),
               docs/reviews/2026-09-25-runner-commands-audit.md (the findings)

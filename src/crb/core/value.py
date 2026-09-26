@@ -50,7 +50,8 @@ What it is:   The value scorecard — pure functions from ledger rows and review
 What it does: Reduces rows (``ValueRow``, adapted from ``GradeRow`` or read from an export) and
               verdicts to a ``ValueReport`` whose every rate carries k, n and a Wilson
               interval, whose unmeasured figures are null, whose apparatus scope defaults to the
-              current version (pooling is explicit and flagged), and whose time-ordered
+              current version (pooling is explicit and flagged), whose cells never pool two checks
+              arms, and whose time-ordered
               measures use only prior data. Never writes, never calls a model.
 How:          ``select_rows`` (repo, apparatus) → ``north_star`` (``Rate`` × ``precision``) →
               ``process_loss`` → ``learning_curve`` (``BugRegister.class_of`` per attempt,
@@ -65,7 +66,7 @@ Works with:   src/crb/core/ledger.py (the rows, the failure kinds, ``CellStats``
               scripts/value_baseline.py (the same report over an exported ledger),
               src/crb/core/prevention.py (the register behind the learning curve)
 Tested by:    tests/test_value.py, tests/test_server_routes_value.py,
-              tests/test_value_baseline_script.py
+              tests/test_value_baseline_script.py, tests/test_checks_pooling.py
 Touch when:   never for a new repository; the register's inputs change — change
               ``default_register`` only; a new belt that decides "working" joins
               ``proxy_working`` (and the docstring above); a new failure kind that is a process
@@ -80,6 +81,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from crb.core.checks import ARM_OFF
 from crb.core.ledger import (
     FAILURE_BUDGET,
     FAILURE_CLEAN,
@@ -167,6 +169,8 @@ class ValueRow:
     builder: str = ""
     model: str = ""
     provider: str = ""
+    #: The ``checks`` arm the row was graded under (ADR-0024): a cell never pools two
+    checks_arm: str = ARM_OFF
     grade: GradeRow | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -256,6 +260,7 @@ def value_row_from_grade(row: GradeRow) -> ValueRow:
         builder=row.builder,
         model=row.model,
         provider=row.provider,
+        checks_arm=row.checks_arm,
         grade=row,
     )
 
@@ -886,7 +891,7 @@ def prospective_routing(
     for r in _ordered(rows):
         if not r.eligible:
             continue
-        key = (r.repo, r.mode, *r.cell.to_tuple())
+        key = (r.repo, r.mode, r.checks_arm, *r.cell.to_tuple())
         st = running.setdefault(key, _Running())
         ci = wilson_interval(st.clean, st.n)
         stats = CellStats(
@@ -902,6 +907,7 @@ def prospective_routing(
             latency_s_mean=0.0,
             oracle_strength_mean=mean(st.strengths) if st.strengths else None,
             apparatus_versions=tuple(sorted(st.apparatus)),
+            checks_arm=r.checks_arm,
         )
         decision = route(stats, policy=policy)
         decisions[decision.route] += 1
@@ -1005,12 +1011,13 @@ _SIZE_ORDER = {s: i for i, s in enumerate(("XS", "S", "M", "L", "XL"))}
 
 
 def _cells(rows: Sequence[ValueRow], usd_per_gbp: float) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, str], list[ValueRow]] = {}
+    groups: dict[tuple[str, str, str, str], list[ValueRow]] = {}
     for r in rows:
-        groups.setdefault((r.capability_class, r.size, r.mode), []).append(r)
+        groups.setdefault((r.capability_class, r.size, r.mode, r.checks_arm), []).append(r)
     out = []
-    for (cls, size, mode), rs in sorted(
-        groups.items(), key=lambda kv: (kv[0][0], _SIZE_ORDER.get(kv[0][1], 9), kv[0][1], kv[0][2])
+    for (cls, size, mode, arm), rs in sorted(
+        groups.items(),
+        key=lambda kv: (kv[0][0], _SIZE_ORDER.get(kv[0][1], 9), kv[0][1], kv[0][2], kv[0][3]),
     ):
         rate = _rate(rs)
         usd = sum(r.cost_usd for r in rs)
@@ -1019,6 +1026,7 @@ def _cells(rows: Sequence[ValueRow], usd_per_gbp: float) -> list[dict[str, Any]]
                 "capability_class": cls,
                 "size": size,
                 "mode": mode,
+                "checks": arm,
                 "attempts": len(rs),
                 "n_valid": rate.n,
                 "clean": rate.to_dict(),

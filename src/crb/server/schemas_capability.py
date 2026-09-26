@@ -100,7 +100,7 @@ class FailureSplitOut(BaseModel):
     lint_evaluated: int = 0
     #: Provider outages (usage limit / 429 / dead credential): outside n, like DQ.
     outage: int = 0
-    #: Belt 6 (opt-in, ADR-0021): working code that changed the public API unlike the gold.
+    #: Belt 6 (opt-in, ADR-0024): working code that changed the public API unlike the gold.
     api: int = 0
 
 

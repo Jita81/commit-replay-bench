@@ -50,6 +50,7 @@ from crb.core.forecast import (
 from crb.core.routing import DEFAULT_POLICY
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
+from crb.server.routes.capability import CHECKS_CURRENT, rows_for_arm
 from crb.server.routes.repos import cached_profile, get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
 from crb.server.schemas import (
@@ -132,8 +133,9 @@ def forecast_build_route(
     get_repo_or_404(db, repo)
     parsed = parse_mix(mix)
     # All rows, every mode and apparatus: the core forecast applies its own filters and
-    # reports ``unmeasured`` for what it cannot price.
-    rows = list(DbLedger(factory).rows(repo=repo))
+    # reports ``unmeasured`` for what it cannot price — in the repository's own checks arm,
+    # because a cell never pools two (ADR-0024).
+    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
     f = forecast_build(
         parsed, rows, policy=DEFAULT_POLICY, signoffs=load_signoff_records(db, repo), repo=repo
     )
@@ -194,7 +196,7 @@ def forecast_readiness_route(
         profile = RepoChangeProfile.from_dict(dict(cached["profile"]))
         parsed = {(cls, size): n for (cls, size), n in profile.ranked()}
         source = "profile"
-    rows = list(DbLedger(factory).rows(repo=repo))
+    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
     r = assess_readiness(
         parsed,
         rows,
