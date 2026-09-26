@@ -753,3 +753,90 @@ def test_the_link_rule_scan_sees_an_aliased_import(tmp_path: Path) -> None:
     (tmp_path / "server").mkdir()
     (tmp_path / "server" / "aliased.py").write_text(_ALIASED_SERVER_MODULE, encoding="utf-8")
     assert _link_rule_callers(tmp_path) == {("server/aliased.py", "aliased_link_rule")}
+
+
+# PR #52 review (fifth): the aliases were one name per alias, and the last import found
+# won. One alias bound to two things in one module — a module-level import and a
+# function-local one — then hid whichever came first. Here each alias is bound twice,
+# the dangerous binding first. A scan that looks for a git opener or the link rule must
+# see a call if ANY binding makes it one (a false alarm is the safe side); the use-site
+# ratchet may count a path as confined only if EVERY binding is a confiner.
+_COLLIDING_ALIAS_MODULE = """
+from crb.core.git import GitRepo as G
+from crb.server.routes.repos import clone_path_escapes as esc
+from os.path import join as j
+
+
+def hidden(p):
+    return G(p)
+
+
+def shadowing(p):
+    from pathlib import Path as G
+
+    return G(p)
+
+
+def link_rule(p, root):
+    return esc(p, root)
+
+
+def link_shadow(p):
+    from os.path import join as esc
+
+    return esc(p, "x")
+
+
+def joined_not_confined(row):
+    ok = j(row.clone_path, "x")
+    return G(ok)
+
+
+def confining(row, home):
+    from crb.server.routes.repos import confined_clone_path as j
+
+    ok = j(row.clone_path, home)
+    return G(ok)
+"""
+
+
+def test_the_git_opener_discovery_sees_every_binding_of_a_colliding_alias(
+    tmp_path: Path,
+) -> None:
+    server = tmp_path / "server"
+    server.mkdir()
+    (server / "colliding.py").write_text(_COLLIDING_ALIAS_MODULE, encoding="utf-8")
+    found = {fn for _, fn in _git_openers_in(server)}
+    # ``shadowing`` opens a Path, not git: reported anyway, the safe direction
+    assert found == {"hidden", "shadowing", "joined_not_confined", "confining"}
+
+
+def test_the_link_rule_scan_sees_every_binding_of_a_colliding_alias(tmp_path: Path) -> None:
+    (tmp_path / "server").mkdir()
+    (tmp_path / "server" / "colliding.py").write_text(_COLLIDING_ALIAS_MODULE, encoding="utf-8")
+    found = {fn for _, fn in _link_rule_callers(tmp_path)}
+    # ``link_shadow`` calls os.path.join: reported anyway, the safe direction
+    assert found == {"link_rule", "link_shadow"}
+
+
+@pytest.mark.parametrize("function", ["joined_not_confined", "confining"])
+def test_the_use_site_ratchet_confines_only_when_every_binding_is_a_confiner(
+    function: str,
+) -> None:
+    """``confining`` really is confined, but its confiner's alias also names
+    ``os.path.join`` in the same module: the ratchet cannot tell which, so it refuses both
+    (a false alarm, fixed by renaming the alias, is the safe direction)."""
+    opened = _git_opens(_COLLIDING_ALIAS_MODULE, function)
+    assert [(arg, ok) for _, arg, ok in opened] == [("ok", False)]
+
+
+def test_the_use_site_ratchet_reports_an_opener_called_without_its_path() -> None:
+    """With an alias bound to two things, a call can match an opener but not carry that
+    opener's positional path argument; it is reported as unconfined, not a crash."""
+    source = (
+        "from crb.core.git import clone_repo as c\n"
+        "def f(p):\n"
+        "    from os.path import join as c\n"
+        "    return c(p)\n"
+    )
+    assert [ok for _, _, ok in _git_opens(source, "f")] == [False]
