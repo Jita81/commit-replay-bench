@@ -565,6 +565,9 @@ def test_no_test_builds_builder_settings_on_the_hosts_uid() -> None:
 
 _RATCHET_SAMPLE = """\
 import os
+import os as system
+
+from crb.builders import container
 
 
 def test_reads_the_uid():
@@ -590,8 +593,27 @@ def test_sets_getuid_on_another_dotted_name(monkeypatch):
     BuilderContainerSettings(image="i")  # another module's getuid pins nothing
 
 
+def test_sets_getuid_on_the_os_attribute_of_another_object(monkeypatch):
+    class Fake:
+        class os:
+            pass
+
+    monkeypatch.setattr(Fake.os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # Fake.os is not the os module: pins nothing
+
+
+def test_sets_getuid_on_a_dotted_os_that_is_not_the_module(monkeypatch):
+    monkeypatch.setattr("Fake.os.getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # Fake.os is not the os module: pins nothing
+
+
 def test_pins_the_uid(monkeypatch):
     monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_through_an_alias_of_os(monkeypatch):
+    monkeypatch.setattr(system, "getuid", lambda: 10001)
     BuilderContainerSettings(image="i")
 
 
@@ -669,7 +691,10 @@ def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
     depends on the machine, and the ratchet must still see it (PR #51 review). A pin covers
     only what runs after it in the test's own body: settings built, or the executor set,
     before the pin or after an undo, and a pin inside a helper the test never calls or
-    nested in a block that may not run or may undo it, are still reported (PR #51 review)."""
+    nested in a block that may not run or may undo it, are still reported (PR #51 review).
+    A pin counts only on the ``os`` module itself, found through the file's imports: ``getuid``
+    set on ``Fake.os`` or on ``"Fake.os.getuid"`` is still reported, and an alias of ``os`` is
+    still a pin (PR #51 review)."""
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     sample = tests_dir / "test_sample.py"
@@ -684,7 +709,7 @@ def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
         for i, line in enumerate(_RATCHET_SAMPLE.splitlines(), start=1)
         if "pins nothing" in line
     }
-    assert len(unpinned) == 10
+    assert len(unpinned) == 12
     assert _settings_on_the_hosts_uid(sample) == unpinned
 
 
