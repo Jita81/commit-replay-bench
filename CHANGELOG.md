@@ -12,6 +12,23 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 mypy and ruff are pinned exactly (Dependabot moves them) and CI runs daily on `main` because a SQLAlchemy release, not a commit, turned eight untyped query results into mypy errors; the eight are annotated. The suite no longer depends on the uid it runs as, a docker daemon or the network: tests name a non-root builder user (a ratchet refuses one that does not), the doctor tests never ask the host's daemon, and a `network` test is skipped with the host and the reason when the host is unreachable (and fails instead under `CRB_TEST_STRICT_WARMUP=1`, as in CI, where an unreachable host is a defect). The ratchet exempts only settings built after the test pins `os.getuid` in its own body. `.coverage` and `coverage.xml` are ignored. The pins fix the tools, not the verdict — every other dependency still resolves fresh, which is what the daily run is for — and `docs/CONTRIBUTING.md` now says so and has joined the claims gate's allowlist (assessment 2026-09-25 §E1–E2, DL-053).
 
+### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
+
+SQLAlchemy 2.1.1 reached PyPI on 2026-09-25, and the `server` extra's `sqlalchemy>=2.0` has
+no ceiling, so a fresh install (CI's `types` job) resolves it. In 2.1, `Result` and `Select`
+are typed with a variadic `TypeVarTuple`. When mypy cannot see through a statement (a
+`text(...)` query, or one passed through an `Any`-typed helper), `.scalars()` and
+`.scalar_one()` now infer `Never` where 2.0 gave `Any`. `mypy --strict` reported eight
+`[var-annotated]` errors on an unchanged `main`. Each of the eight sites now states the type
+it already had at runtime. A comprehension variable cannot be annotated in place, so those
+results go into an annotated local first. Python never evaluates a local annotation, so
+nothing changes at runtime.
+
+2.1.1 changes nothing at runtime here, so the dependency is not pinned [measured — mypy clean
+on 2.0.52 and 2.1.1; the full suite (`-m "not sandbox_images"`) under 2.1.1, 3972 passed, 72
+skipped, 0 failed; the store suite on SQLite and PostgreSQL 16, 111 passed and none skipped,
+under both versions].
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real
