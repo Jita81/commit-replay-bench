@@ -2,6 +2,32 @@
 
 Run with PYTHONPATH=<worktree>/src and the provisioning environment set (see the review).
 Prints one JSON object per step to stdout; writes the whole record to proof.json.
+
+Navigation
+----------
+What it is:   The sealed-posture review's proof script — the worker's own posture gate,
+              qualifier, grader and run loop driven on one real task, with no builder and no
+              model.
+What it does: Qualifies cobra 746ef07 in docker/copy/sealed with its modules fetched and
+              sealed, replays the gold clean through the run's gate, empties the sealed cache
+              and shows the run stop BUNDLE_INTEGRITY before any builder call, grades a trial
+              past the gate as harness (never builder_red) and re-qualifies it
+              QUAL_ENV_UNLOADABLE. It spends nothing and writes only under its CRB_HOME.
+How:          The environment crbp.sh exports → ``make_deps_provider`` and ``PostureGate``
+              → ``qualify_task`` → ``run`` with a gold build function and a counting one →
+              one JSON line per step, the whole record in proof.json.
+Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
+ADRs:         docs/adr/0019-qualification-is-posture-relative.md
+Works with:   docs/reviews/2026-09-25-sealed-posture.md (the review that cites each step),
+              docs/reviews/2026-09-25-sealed-posture/crbp.sh (the environment it runs under),
+              docs/reviews/2026-09-25-sealed-posture/proof.json (its recorded output),
+              src/crb/server/posture_gate.py (the gate it drives), src/crb/core/qualify.py
+              (``qualify_task``), src/crb/core/run.py (the run loop)
+Tested by:    untested — a one-off proof on the operator's stack; its output is committed as
+              docs/reviews/2026-09-25-sealed-posture/proof.json and re-ran exactly on a
+              throwaway CRB_HOME
+Touch when:   never — it is the record of a review; a new proof is a new file beside a new
+              review.
 """
 
 from __future__ import annotations
