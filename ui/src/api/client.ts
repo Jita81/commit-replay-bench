@@ -20,9 +20,10 @@
  *               failure and a non-envelope body are `timeout` / `network` /
  *               `invalid_response`, never a hang or a fabricated body. An upstream abort
  *               (React Query cancelling) is re-thrown untouched so it never reads as a failure.
- * How:          Arm a timeout on an AbortController and chain the caller's signal to it → fetch
- *               with `credentials: 'include'` → on non-2xx parse the error envelope → on 2xx
- *               parse JSON (204 / empty body → undefined).
+ * How:          `api` builds the headers and body, then calls `fetchBounded` — the one place a
+ *               timeout is armed on an AbortController and the caller's signal chained to it,
+ *               with `credentials: 'include'` → on non-2xx `errorFromResponse` parses the
+ *               envelope → on 2xx parse JSON (204 / empty body → undefined).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (every query and mutation calls `api`), ui/src/api/types.ts
@@ -129,10 +130,6 @@ export function qs(params: Record<string, string | number | boolean | undefined 
 }
 
 /**
- * Fetch `${API_BASE}${path}` and return the parsed JSON body as `T`.
- * 204 / empty bodies resolve to `undefined as T`.
- */
-/**
  * `fetch` with the client's two guarantees, for the one caller that needs raw bytes
  * (`fetchRetainedPatch`) as well as `api<T>`: a stall is bounded by `timeoutMs` and
  * surfaces as `ApiError('timeout')`, and a caller-initiated abort is rethrown raw so React
@@ -182,30 +179,12 @@ export async function errorFromResponse(res: Response, path: string): Promise<Ap
   return new ApiError(res.status, 'invalid_response', res.statusText || `HTTP ${res.status}`, { path })
 }
 
+/**
+ * Fetch `${API_BASE}${path}` and return the parsed JSON body as `T`.
+ * 204 / empty bodies resolve to `undefined as T`.
+ */
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
-  const timeoutMs = options.timeoutMs ?? API_TIMEOUT_MS
-
-  const controller = new AbortController()
-  let timedOut = false
-  const timer = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, timeoutMs)
-
-  // One controller aborts the fetch for either reason: our timeout, or the caller's
-  // signal (React Query cancels a query when its component unmounts). `timedOut`
-  // tells the two apart in the catch below.
-  const upstream = options.signal
-  let onUpstreamAbort: (() => void) | undefined
-  if (upstream) {
-    if (upstream.aborted) controller.abort()
-    else {
-      onUpstreamAbort = () => controller.abort()
-      upstream.addEventListener('abort', onUpstreamAbort)
-    }
-  }
-
   const headers: Record<string, string> = { Accept: 'application/json', ...options.headers }
   let body: BodyInit | undefined
   if (options.body instanceof FormData) {
@@ -222,45 +201,9 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     if (token) headers[CSRF_HEADER] = token
   }
 
-  let res: Response
-  try {
-    res = await fetch(`${API_BASE}${path}`, {
-      method,
-      headers,
-      body,
-      credentials: 'include',
-      signal: controller.signal,
-    })
-  } catch (err) {
-    if (timedOut) {
-      throw new ApiError(0, 'timeout', `The server did not answer within ${Math.round(timeoutMs / 1000)} s.`, {
-        path,
-        timeout_ms: timeoutMs,
-      })
-    }
-    // A caller-initiated abort is not a failure: rethrow the raw AbortError so React
-    // Query treats it as a cancellation, not an error to render.
-    if (upstream?.aborted) throw err
-    throw new ApiError(0, 'network', 'Could not reach the server.', {
-      path,
-      cause: err instanceof Error ? err.message : String(err),
-    })
-  } finally {
-    clearTimeout(timer)
-    if (upstream && onUpstreamAbort) upstream.removeEventListener('abort', onUpstreamAbort)
-  }
-
-  if (!res.ok) {
-    let parsed: unknown = null
-    try {
-      parsed = await res.json()
-    } catch {
-      parsed = null
-    }
-    const env = parseEnvelope(parsed)
-    if (env) throw new ApiError(res.status, env.code, env.message, env.detail ?? {})
-    throw new ApiError(res.status, 'invalid_response', res.statusText || `HTTP ${res.status}`, { path })
-  }
+  // The timeout, the caller's abort and a network failure are handled once, in fetchBounded.
+  const res = await fetchBounded(path, { method, headers, body }, { timeoutMs: options.timeoutMs, signal: options.signal })
+  if (!res.ok) throw await errorFromResponse(res, path)
 
   if (res.status === 204) return undefined as T
   const text = await res.text()

@@ -51,6 +51,9 @@ dev = [
   "mypy>=1.11",
   "import-linter>=2.0",
   "hypothesis>=6.100",
+  # the CommonMark parser scripts/claims_check.py reads fence spans with (CI's claims
+  # job installs the same package)
+  "markdown-it-py>=3.0",
 ]
 all = ["commit-replay-bench[openai,claude,server,postgres,mcp,dev]"]
 

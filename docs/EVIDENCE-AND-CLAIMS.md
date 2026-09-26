@@ -34,7 +34,11 @@ pages on its allowlist, finds the sentences that quantify something, and fails w
 carries no tag — or when a `[measured]` one carries no `n`, no method and no apparatus
 version. It checks the *shape* of the evidence, never whether a figure is sound, and it
 reads only the pages on the allowlist; the script's docstring states both limits and the
-gap analysis names the pages still ungated.
+gap analysis names the pages still ungated. The same job holds a review to its own actions:
+every numbered row of a review's *Actions* table needs a line in the
+[decision log](DECISION-LOG.md) that names the review, the action and its state (`closed`,
+`open`, `declined` or `[gap]`), and every such record needs its action still in the table,
+so an action a reviewer set cannot quietly disappear from either side (DL-053).
 
 A claim moves from `[hypothesis]` to `[measured]` only by a pre-registered measurement whose
 interval excludes a trivial effect and that has been replicated or independently re-run;
@@ -253,6 +257,19 @@ sources, on repositories whose suite runs in the sandbox. Every rate from it is 
 
 A claim that steps outside this population (a throughput headline, "AI can do our
 engineering", a rate on XL work) is not licensed by anything in the ledger.
+
+**The selection rule, and the bias it carries.** By default the miner
+(`crb.core.mine.iter_candidates`, then `mine`) takes the newest 3,000 non-merge commits from
+`HEAD`, keeps those that touch both source and test files within the caps (the standard pool:
+1–3 source files), and stops once 25 tasks are found or 1,000 candidates have been examined;
+the repository's `mining` configuration moves the window, the task target and the candidate
+cap; the file caps are fixed per pool. The pool therefore over-represents
+recent work and work that was tested at the time, and holds nothing older than the window
+**[hypothesis — that a recent, tested-commits-only pool is easier than the repository's other
+work is untested; a pool mined from an older window under the same builder and budget would
+confirm or refute it]**. `GET /repos/{name}/pool` and the Results screen's oracle card show
+each pool's date range and the share of the repository's non-merge history it covers, so a
+reader sees the window before quoting a rate from it.
 
 ### 6c. The evidence ladder — the chain proves integrity, not truth
 

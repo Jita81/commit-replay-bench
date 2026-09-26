@@ -22,7 +22,9 @@ What it does: Validates every config through ``RepoConfig.from_dict`` (an invali
               never stored), records each change as a ``system/repo.updated`` event
               carrying the redacted field diff, enqueues a probe run, computes and caches
               the change profile (measurement INPUT, never a verdict), and pages mined
-              tasks. Also the home of ``get_repo_or_404`` and ``cached_profile`` that
+              tasks; serves the pool window (the mined tasks' date range and the share of
+              the clone's non-merge history since the oldest — the miner's recency bias,
+              shown). Also the home of ``get_repo_or_404`` and ``cached_profile`` that
               other route modules import.
 How:          ``_validated_config`` → ``Repo`` row + ``append_system_event`` on the repo's
               system trace; ``compute_profile`` walks the clone with ``profile_repo`` and
@@ -49,6 +51,7 @@ Touch when:   THIS is the route a new repository goes through — but adding one
 from __future__ import annotations
 
 import datetime as _dt
+import functools
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -79,6 +82,7 @@ from crb.server.schemas import (
     RepoCreateRequest,
     RepoDetail,
     RepoLastRun,
+    RepoPool,
     RepoProbe,
     RepoProfile,
     RepoSummary,
@@ -501,6 +505,106 @@ def get_profile(
         repo.config_json = {**dict(repo.config_json or {}), PROFILE_KEY: cached}
         db.commit()
     return _profile_out(name, cached)
+
+
+def _epoch(iso: str) -> float | None:
+    """An ISO-8601 author date as epoch seconds, or ``None`` when it does not parse."""
+    try:
+        d = _dt.datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=_dt.UTC)
+    return d.timestamp()
+
+
+#: How many (clone, HEAD, shallow boundary) history reads are kept. Each is one int per
+#: non-merge commit.
+POOL_HISTORY_CACHE = 32
+
+
+@functools.lru_cache(maxsize=POOL_HISTORY_CACHE)
+def _history_at(path: str, head: str, shallow: str) -> tuple[int, ...]:
+    """The author timestamps of every non-merge commit reachable from ``head`` in the clone
+    at ``path``. Cached on everything the walk reads: the pool route is open to any viewer,
+    and a full history walk per request would let one viewer make the server walk a large
+    clone over and over. A new commit moves ``head``; deepening a shallow clone moves
+    ``shallow`` (its boundary commits, empty for a full clone) at the same ``head`` — so the
+    share is never stale. ``shallow`` is part of the key only; the walk reads the clone."""
+    del shallow
+    out = (
+        GitRepo(Path(path), timeout=60)
+        .run("log", "--no-merges", "--format=%at", head, check=True)
+        .stdout
+    )
+    return tuple(int(x) for x in out.split())
+
+
+def _clone_history(path: str) -> tuple[list[int] | None, str]:
+    """``(author timestamps, "")`` for the clone at ``path``, or ``(None, reason)``. Every
+    git call of the read sits in one ``try``: a git call that times out raises ``GitError``
+    even when it is not checked (``GitRepo.run``), so a call outside it would turn a slow
+    clone into a server error instead of ``git_failed``."""
+    if not Path(path).is_dir():
+        return None, "clone_unavailable"
+    git = GitRepo(Path(path), timeout=60)
+    try:
+        if not git.is_repo():
+            return None, "clone_unavailable"
+        head = git.run("rev-parse", "--verify", "HEAD", check=True).stdout.strip()
+        rel = git.run("rev-parse", "--git-path", "shallow", check=True).stdout.strip()
+        boundary = Path(path) / rel
+        shallow = boundary.read_text(encoding="utf-8") if boundary.is_file() else ""
+        return list(_history_at(str(Path(path).resolve()), head, shallow)), ""
+    except (GitError, ValueError, OSError):
+        return None, "git_failed"
+
+
+def pool_window(session: Session, repo: Repo) -> RepoPool:
+    """The mined tasks' date range, and the share of the clone's non-merge history since the
+    oldest of them (``None`` with the reason when the clone cannot be read here)."""
+    dated = sorted(
+        (ts, iso)
+        for (iso,) in session.execute(select(Task.authored).where(Task.repo == repo.name))
+        if iso and (ts := _epoch(iso)) is not None
+    )
+    n_tasks = int(
+        session.execute(select(func.count(Task.task_id)).where(Task.repo == repo.name)).scalar_one()
+    )
+    oldest = dated[0] if dated else None
+    path = _config_of(repo).path or repo.clone_path
+    history, unavailable = _clone_history(path) if path else (None, "no_clone_path")
+    window = (
+        sum(1 for ts in history if ts >= oldest[0])
+        if history is not None and oldest is not None
+        else None
+    )
+    return RepoPool(
+        repo=repo.name,
+        n_tasks=n_tasks,
+        oldest_authored=oldest[1] if oldest else None,
+        newest_authored=dated[-1][1] if dated else None,
+        history_commits=len(history) if history is not None else None,
+        history_first_authored=(
+            _dt.datetime.fromtimestamp(min(history), _dt.UTC).isoformat() if history else None
+        ),
+        window_commits=window,
+        share=round(window / len(history), 4) if window is not None and history else None,
+        history_unavailable=unavailable,
+    )
+
+
+@router.get(
+    "/repos/{name}/pool",
+    response_model=RepoPool,
+    responses={401: _ERR, 404: _ERR},
+    summary="The mined tasks' date range and the share of non-merge history it covers",
+)
+def get_pool(name: str, viewer: ViewerDep, db: DbDep) -> RepoPool:
+    # The history walk is cached against the clone's HEAD and shallow boundary
+    # (``_history_at``): a repeat read costs two `git rev-parse` calls, and a new commit or a
+    # deepened clone changes the key, so the share is never stale.
+    return pool_window(db, get_repo_or_404(db, name))
 
 
 @router.get(

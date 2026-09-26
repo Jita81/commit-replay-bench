@@ -14,8 +14,14 @@ it **routes** each class of change to `deliver` / `calibrate` / `granularize` / 
 manufactures new work under the same governance.
 
 **What the product is** (DL-044): the **factory** — new changes delivered as branches and
-pull requests only in the cells the evidence licenses — and the **self-improvement loop**
-that turns every refusal, review and re-measurement back into a better next run. Connecting
+pull requests only in the cells the evidence licenses — and the **learning loop** around it.
+On `main` today the loop **proposes** and a **named person** acts: `crb learn` and the
+`/learn` screen derive from the ledger the guard refusals worth a corpus line, the cells whose
+oracle needs strengthening and the re-measurements an apparatus change makes due — the
+refusals with what each one cost, the re-measurements with an estimate, the strengthening
+items without a price; a person accepts the refusal line, registers the strengthening item
+or queues the re-measurement, and the product does none of those on its own
+([LEARNING-LOOP](docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate)). Connecting
 a repository, measuring it and signing a cell off is the on-ramp that earns the baseline
 those two run on. And the end state is a framework the teams using it improve: every
 builder, runner, control, review probe, readiness slot and policy is a documented seam, the
@@ -53,13 +59,13 @@ abstract cells, never code.
 
 | You are… | Read, in this order |
 |---|---|
-| **Anyone** — what is this and what does it claim? | the one-page [**explainer for practitioners**](https://claude.ai/artifact/DUaMMWkMXGk25djQYLfZQk) (how it works, the mechanics an expert will ask about, what has been measured, what it refuses to claim) → this page → [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → the [NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md) |
+| **Anyone** — what is this and what does it claim? | the [**two-page summary**](docs/SUMMARY.md) (what it is, what it measures, what it refuses to claim, what onboarding a repository costs, what the current evidence licenses and the open gaps — written for an NHS engineering and assurance reader) → this page → [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → the [NHS measurement](docs/reviews/2026-09-14-nhs-public-repos.md) |
 | **A developer** taking it to a client's repository | [Onboarding a repository](docs/ONBOARDING-A-REPO.md) (or the UI's *Connect* walk) → [Operator guide](docs/OPERATOR.md) → [API](docs/API.md) → [MCP server](docs/MCP.md) (drive it from Claude Code) → [Code map](docs/CODE-MAP.md) |
 | **A developer** changing the product | [Architecture](docs/ARCHITECTURE.md) → [ADRs](docs/adr/README.md) → [Code map](docs/CODE-MAP.md) (every file's header says what it is, what proves it, when you touch it) → [Contributing](docs/CONTRIBUTING.md) |
 | **Governance / assurance** | [Evidence & claims](docs/EVIDENCE-AND-CLAIMS.md) → [Security](docs/SECURITY.md) → [Data retention](docs/DATA-RETENTION.md) → [Licensing](docs/LICENSING.md) → the [decision log](docs/DECISION-LOG.md) and the [reviews](docs/reviews/) (an independent critical-friend review, two independent decider passes, an [external assessment answered from the source](docs/reviews/2026-09-16-external-assessment.md), the [instrument pointed at its own repository](docs/reviews/2026-09-16-dogfood.md) the [enterprise front-end research brief](docs/reviews/2026-09-17-enterprise-front-end.md) the [persona walkthrough on a live stack](docs/reviews/2026-09-17-persona-walkthrough.md) an [assessment of four external documents](docs/reviews/2026-09-17-external-documents-assessment.md) and the [first real factory pull requests](docs/reviews/2026-09-19-b1b-first-factory-pull-request.md) are on record) |
 | **An operator** deploying it | [Deployment](docs/DEPLOYMENT.md) → [Operator guide](docs/OPERATOR.md) |
 
-Related documents: [Explainer for practitioners](https://claude.ai/artifact/DUaMMWkMXGk25djQYLfZQk) ·
+Related documents: [Two-page summary](docs/SUMMARY.md) ·
 [Architecture](docs/ARCHITECTURE.md) ·
 [Evidence & claims policy](docs/EVIDENCE-AND-CLAIMS.md) · [ADRs](docs/adr/README.md) ·
 [Operator guide](docs/OPERATOR.md) · [Onboarding a repository](docs/ONBOARDING-A-REPO.md) · [MCP server](docs/MCP.md) ·
@@ -132,7 +138,19 @@ In **neither** mode does the builder see the regression belt or the grader. See
 ## The instrument in six steps
 
 1. **Mine** — walk the repository's history for commits that couple a source change with a
-   test change within the pool's size caps (`standard` / `hard`).
+   test change within the pool's size caps (`standard` / `hard`). The selection rule, by
+   default: take the newest 3,000 non-merge commits from `HEAD`, keep those that touch both
+   source and test files within the caps (the standard pool: 1–3 source files and at most six
+   language files in all, more on the JVM), and stop once 25 tasks are found or 1,000
+   candidates have been examined (`mining` in the repository's configuration moves the
+   window, the task target and the candidate cap; the file caps are fixed per pool). So the pool
+   leaves out merge and root commits, anything older than that window, changes made without a
+   test, and changes larger than the caps: a rate from it describes recent, tested, small work
+   in that repository, not its history as a whole **[hypothesis — that this recency and
+   tested-commits-only selection makes a pool easier than the repository's other work is
+   untested; a pool mined from an older window, graded under the same builder and budget,
+   would confirm or refute it. The Results screen shows each pool's date range and the share
+   of history it covers]**.
 2. **Prep** — create a disposable git worktree at the commit's **parent**; overlay the
    commit's test files.
 3. **RED / baseline / GOLD check** — the target tests must **fail** at the parent (and not

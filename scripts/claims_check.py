@@ -36,24 +36,51 @@ thereby tagged the sentence around it.
 - any file not on ``ALLOWLIST``: everything else in ``docs/``, the reviews and the book are
   ungated, and the gap analysis says so.
 
+**A review's actions are records, not prose.** A review under ``docs/reviews/`` that ends in
+an *Actions* table (a heading containing "Actions", then rows whose first cell is a number)
+sets work that must not disappear: every numbered action needs a line in
+``docs/DECISION-LOG.md`` that starts a run of records with the review's file stem in
+backticks and then states each action and its state —
+```` `2026-09-13-critical-friend` action #1: closed …; action #8: [gap] … ```` — where the
+state is the whole word ``closed``, ``open``, ``declined`` or ``[gap]``. The gate reads both
+ways: a review action with no record fails, and so does a record whose review no longer
+lists that action (a deleted row, a renamed *Actions* heading, a deleted review file), so
+neither side can vanish alone. A fenced example inside the section is not an action. A
+review in a folder under ``docs/reviews/`` is read too, and two reviews may not share a
+file stem, because the record names its review by stem. The check reads the record's
+*shape*, not whether the state is true; a person still reads the log.
+Two of the critical friend's ten actions (#8, an independent human review of the core; #9,
+rotating a pasted token) sat for twelve days with no record at all, which is what this rule
+stops.
+
 **How a file opts in.** Add its repository-relative path to ``ALLOWLIST`` below and make it
 pass in the same change. The list only grows: a page that has been cleaned never leaves it,
 because leaving is how a gate quietly stops gating.
 
 Navigation
 ----------
-What it is:   The claim-tag gate over the public pages (stdlib only; CI's ``claims`` job).
+What it is:   The claim-tag gate over the public pages (CI's ``claims`` job; needs only the
+              stdlib and markdown-it-py, which reads where a fenced code block ends).
 What it does: Parses each allowlisted Markdown page into blocks, finds quantified sentences,
               and reports any that carry no permitted tag — and any ``[measured]`` tag
-              without an n, a method or an apparatus version; --check exits non-zero.
+              without an n, a method or an apparatus version; reports every numbered action
+              in a review's Actions table that has no stated record in the decision log,
+              and every record whose review no longer lists the action or is no longer on
+              disk; --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
-              qualifying a plural noun → look for a permitted tag in the block's cover.
+              qualifying a plural noun → look for a permitted tag in the block's cover. Then
+              each docs/reviews/**/*.md Actions table (fenced examples skipped) and each review
+              the log names → its action numbers ⇄ the records in
+              docs/DECISION-LOG.md, each under a head that names the review's stem in
+              backticks, then ``action #N: <state>``.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
-              README.md and docs/RELEASING.md (the pages on the allowlist),
+              README.md, docs/RELEASING.md and docs/SUMMARY.md (the pages on the allowlist),
+              docs/DECISION-LOG.md (where a review action's record lives),
+              docs/reviews/2026-09-13-critical-friend.md (the review whose actions it holds),
               .github/workflows/ci.yml (the claims job that runs --check),
               scripts/code_map.py (the same gate idiom: parse, validate, --check)
 Tested by:    tests/test_claims_check.py
@@ -66,8 +93,11 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+
+from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -75,7 +105,14 @@ ROOT = Path(__file__).resolve().parent.parent
 ALLOWLIST: tuple[str, ...] = (
     "README.md",
     "docs/RELEASING.md",
+    "docs/SUMMARY.md",
 )
+
+#: Where reviews live, and where a review action's record must be.
+REVIEWS_DIR = "docs/reviews"
+DECISION_LOG = "docs/DECISION-LOG.md"
+#: The states a review action's record may declare.
+ACTION_STATES: tuple[str, ...] = ("closed", "open", "declined", "[gap]")
 
 #: The permitted tags — docs/EVIDENCE-AND-CLAIMS.md §1.
 TAGS: tuple[str, ...] = ("measured", "hypothesis", "aspiration", "gap")
@@ -225,7 +262,9 @@ _CODE_RE = re.compile(r"`[^`]*`")
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+#: The CommonMark parser that decides where a fenced code block starts and ends. Tables are
+#: on because GitHub renders a review's Actions table as one.
+_MARKDOWN = MarkdownIt("commonmark").enable("table")
 _ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
 _CHECKLIST_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -260,6 +299,31 @@ def _strip_markup(text: str) -> str:
     return text.replace("**", "").replace("*", "").replace("> ", " ")
 
 
+def _lines_with_fences(text: str) -> Iterator[tuple[int, str, bool]]:
+    """``(line number, line, fenced)`` for every line; ``fenced`` is true for a fenced code
+    block's own delimiters and everything between them, exactly as a CommonMark parser with
+    GitHub's tables on reads the page. Every reader of a page's structure goes through here,
+    so a fenced example is never read as prose or as a review's action.
+
+    The spans come from ``markdown-it-py``, not from a line-by-line reading of §4.5. PR #54's
+    review found five places where a hand-rolled reader disagreed with CommonMark — the
+    closer's character, its info string, its indent, a marker inside an HTML comment, and a
+    fence inside a list item — and each one let a fence swallow real Actions rows so that
+    ``--check`` passed without their records. A fence's extent depends on the containers
+    around it (lists, blockquotes, HTML blocks), so the only reader that cannot drift from
+    CommonMark is a CommonMark parser."""
+    lines = re.sub(r"\r\n?", "\n", text).split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()  # a final newline ends the last line; it does not start another
+    fenced = [False] * len(lines)
+    for token in _MARKDOWN.parse(text):
+        if token.type == "fence" and token.map:
+            for i in range(token.map[0], min(token.map[1], len(lines))):
+                fenced[i] = True
+    for number, raw in enumerate(lines, start=1):
+        yield number, raw.rstrip(), fenced[number - 1]
+
+
 def blocks_of(text: str) -> list[Block]:
     """The page's prose blocks, each with the text that may tag it.
 
@@ -267,7 +331,6 @@ def blocks_of(text: str) -> list[Block]:
     list item's cover is its own text plus the paragraph that introduced the list.
     """
     out: list[Block] = []
-    fenced = False
     paragraph: list[str] = []
     start = 0
     intro = ""
@@ -288,14 +351,10 @@ def blocks_of(text: str) -> list[Block]:
             out.append(Block(item_start, body, f"{intro} {body}"))
             item = []
 
-    for number, raw in enumerate(text.splitlines(), start=1):
-        line = raw.rstrip()
-        if _FENCE_RE.match(line):
+    for number, line, fenced in _lines_with_fences(text):
+        if fenced:
             close_paragraph()
             close_item()
-            fenced = not fenced
-            continue
-        if fenced:
             continue
         stripped = line.strip()
         quoted = stripped[2:].strip() if stripped.startswith("> ") else stripped
@@ -412,6 +471,118 @@ def check_tree(root: Path, allow: tuple[str, ...]) -> list[Finding]:
     return findings
 
 
+_ACTIONS_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s.*\bActions\b")
+_ACTION_ROW_RE = re.compile(r"^\s*\|\s*(\d+)\s*\|")
+_ACTION_STATE_RE = re.compile(
+    r"\baction\s+#(\d+)\s*[:\u2014\u2013-]\s*("
+    + "|".join(re.escape(s) for s in ACTION_STATES)
+    # a state is a whole word: "opening" is not "open"; "[gap]" ends in "]", so the
+    # boundary is a lookahead for a non-word character rather than ``\b``
+    + r")(?!\w)",
+    re.I,
+)
+
+
+def review_actions(text: str) -> list[tuple[int, int]]:
+    """``(action number, line)`` for every row of the review's Actions table(s). A fenced
+    example is skipped: its rows are not actions and its headings open no section."""
+    out: list[tuple[int, int]] = []
+    inside = False
+    for number, line, fenced in _lines_with_fences(text):
+        if fenced:
+            continue
+        if _HEADING_RE.match(line):
+            inside = bool(_ACTIONS_HEADING_RE.match(line))
+            continue
+        if inside:
+            m = _ACTION_ROW_RE.match(line)
+            if m:
+                out.append((int(m.group(1)), number))
+    return out
+
+
+#: A record's head: the review's file stem in backticks, directly before ``action #``.
+#: Every record after it on the line belongs to that review until the next head — so a
+#: stem that a record merely mentions (a path in its evidence) never claims the record.
+_RECORD_HEAD_RE = re.compile(r"`([^`\s]+)`\s+(?=action\s+#)", re.I)
+
+
+def _records(line: str) -> Iterator[tuple[str, int]]:
+    """``(review stem, action number)`` for every stated record on one decision-log line."""
+    heads = [(m.start(), m.group(1)) for m in _RECORD_HEAD_RE.finditer(line)]
+    for m in _ACTION_STATE_RE.finditer(line):
+        owner = [stem for start, stem in heads if start < m.start()]
+        if owner:
+            yield owner[-1], int(m.group(1))
+
+
+def recorded_actions(log_text: str, stem: str) -> set[int]:
+    """The action numbers of review ``stem`` that a decision-log line states a state for,
+    under a head that names it (`` `<stem>` action #N: <state>``)."""
+    return {n for line in log_text.splitlines() for owner, n in _records(line) if owner == stem}
+
+
+def _record_line(log_text: str, stem: str, action: int) -> int:
+    """The first decision-log line that records ``stem``'s action ``action`` (1-based)."""
+    for number, line in enumerate(log_text.splitlines(), start=1):
+        if (stem, action) in set(_records(line)):
+            return number
+    return 0
+
+
+def check_review_actions(root: Path) -> list[Finding]:
+    """A finding for every numbered review action with no stated record in the decision log,
+    and for every recorded action its review no longer lists. Checking both ways means
+    neither side can vanish alone: a deleted row or a renamed Actions heading leaves records
+    pointing at nothing, which is a finding against the decision log. The reviews read are
+    the ones on disk AND the ones the log names, so deleting a review file leaves its records
+    as findings rather than taking them out of the check."""
+    reviews = root / REVIEWS_DIR
+    log_path = root / DECISION_LOG
+    log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    log_rel = log_path.relative_to(root).as_posix()
+    on_disk: dict[str, Path] = {}
+    findings: list[Finding] = []
+    # every review under the folder, nested ones too; a record names its review by stem, so
+    # two reviews that share one are refused rather than one silently taking the other's place
+    for p in sorted(reviews.rglob("*.md")) if reviews.is_dir() else []:
+        first = on_disk.setdefault(p.stem, p)
+        if first != p:
+            findings.append(
+                Finding(
+                    p.relative_to(root).as_posix(),
+                    1,
+                    "",
+                    f"another review has the stem {p.stem} "
+                    f"({first.relative_to(root).as_posix()}); a record could not say which it "
+                    "closes",
+                )
+            )
+    named = {stem for line in log_text.splitlines() for stem, _ in _records(line)}
+    for stem in sorted(set(on_disk) | named):
+        path = on_disk.get(stem)
+        actions = review_actions(path.read_text(encoding="utf-8")) if path else []
+        recorded = recorded_actions(log_text, stem)
+        if path is not None:
+            rel = path.relative_to(root).as_posix()
+            for action, line in actions:
+                if action not in recorded:
+                    findings.append(
+                        Finding(rel, line, "", f"review action #{action} has no record")
+                    )
+        listed = {action for action, _ in actions}
+        for action in sorted(recorded - listed):
+            findings.append(
+                Finding(
+                    log_rel,
+                    _record_line(log_text, stem, action),
+                    "",
+                    f"{stem} action #{action} is recorded but the review has no such action",
+                )
+            )
+    return findings
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--check", action="store_true", help="exit non-zero on any finding (CI)")
@@ -427,7 +598,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     root = Path(args.root).resolve() if args.root else ROOT
     allow = tuple(args.allow) if args.allow else ALLOWLIST
-    findings = check_tree(root, allow)
+    findings = check_tree(root, allow) + check_review_actions(root)
     stream = sys.stderr if args.check else sys.stdout
     for f in findings:
         where = f"{f.path}:{f.line}" if f.line else f.path

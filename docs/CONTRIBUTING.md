@@ -121,6 +121,14 @@ imports (`sqlalchemy`, `openai`, …) are visible to the forbidden contract.
 Conventional Commits: `feat(core): …`, `fix(runners): …`, `docs: …`, `ci: …`, `test: …`,
 `refactor: …`, `chore: …`. Scope is the package or area. Subject in the imperative, ≤ 72
 characters; body explains *why*. Breaking apparatus changes use `!` and reference the ADR.
+CI's `commit-subjects` job enforces the subject rule on every non-merge commit of a pull
+request and on the pull request's title, because a squash merge writes that title as the
+subject on `main` (`scripts/check_commit_subject.py --range BASE..HEAD --title …`; run it
+locally with `--range origin/main..HEAD`). It lives in its own workflow,
+`.github/workflows/commit-subjects.yml`, which also runs when a title is edited, and on a
+push to `main` it checks the subjects that landed there. Its imperative check is a heuristic — it refuses
+a subject that starts with an article, a past tense, a gerund or a third-person verb —
+and the script's docstring says what it cannot catch.
 End commit messages with the attribution line required by the session/tooling that
 authored them, when one is in force.
 
@@ -162,5 +170,17 @@ reviewer cannot provide.
 
 - Every number in the docs carries its tag and its method (see EVIDENCE-AND-CLAIMS).
 - Cross-link rather than duplicate; ARCHITECTURE is the map, ADRs are the decisions.
-- `CHANGELOG.md` follows Keep a Changelog; add an entry under *Unreleased* in the PR.
+- `CHANGELOG.md` follows Keep a Changelog and grows by **one paragraph per pull request**: a
+  bullet under *Unreleased* with a bold title, a link to the pull request (until the number
+  exists, a link to the pull-request search for the branch) and at most 120 words saying what
+  changed for a reader. The narrative of a wave — what was built, why and what it found — goes
+  in a dated report under `docs/reviews/` (`<date>-wave-report-<scope>.md`), not in the
+  changelog. `tests/test_public_docs.py` holds the shape.
 - Decisions taken by the owner/operator go in `docs/DECISION-LOG.md` (one line, dated).
+- A review that sets numbered actions (an *Actions* table under `docs/reviews/`) gets one
+  record per action in `docs/DECISION-LOG.md`, written as
+  `` `<review file stem>` action #N: <state> `` with the state `closed`, `open`, `declined`
+  or `[gap]` and the evidence; further records on the same line may drop the stem
+  (`action #N: <state>`) until another `` `<stem>` `` head. The `claims` job fails while any
+  action has no record, and while any record names an action its review no longer lists — so
+  deleting a row or renaming the *Actions* heading fails too (DL-053).

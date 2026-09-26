@@ -12,12 +12,17 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               year, a leading-zero identifier — are not claims; that a count written without
               digit grouping (``1200``) and a result standing beside a confidence interval
               *are*; that a tag written inside inline code does not cover the claim around it;
-              and that ``--check`` exits non-zero while the default report exits zero.
+              that ``--check`` exits non-zero while the default report exits zero; and that
+              every numbered action in a review's Actions table has a record in
+              docs/DECISION-LOG.md that names the review, the action and its state — so an
+              action cannot disappear without one (the critical friend's #8 and #9 did);
+              and that the fence reader agrees with a CommonMark parser line for line.
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
-Works with:   scripts/claims_check.py (the code under test), docs/EVIDENCE-AND-CLAIMS.md
+Works with:   scripts/claims_check.py (the code under test), markdown-it-py (the CommonMark
+              reference the fence reader is compared with), docs/EVIDENCE-AND-CLAIMS.md
               (the claim-tag rule these tests enforce a shape for), .github/workflows/ci.yml
               (the claims job that runs --check)
 Tested by:    (this is a test file)
@@ -28,11 +33,15 @@ Touch when:   a tag is added to the policy, the heuristic changes, or a file joi
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -205,3 +214,354 @@ def test_the_repository_itself_passes_the_gate() -> None:
     """The allowlist is not aspirational: every file on it is clean on this tree."""
     assert cc.check_tree(ROOT, cc.ALLOWLIST) == []
     assert all((ROOT / rel).exists() for rel in cc.ALLOWLIST)
+
+
+def test_every_page_that_counts_the_allowlist_states_its_current_length() -> None:
+    """A page that measures the allowlist ("n = 3 entries on `ALLOWLIST`") goes stale the day
+    a page joins it: docs/dod/PLAN.md still said two after docs/SUMMARY.md made it three
+    (second review of PR #54). Every such count under docs/ must equal ``len(ALLOWLIST)``."""
+    count = re.compile(r"n = (\d+) entries on `ALLOWLIST`")
+    stated = {
+        (page.relative_to(ROOT).as_posix(), int(n))
+        for page in (ROOT / "docs").rglob("*.md")
+        for n in count.findall(page.read_text(encoding="utf-8"))
+    }
+    assert stated, "no page counts the allowlist; the pattern above no longer matches"
+    assert {(page, n) for page, n in stated if n != len(cc.ALLOWLIST)} == set()
+
+
+# ─── a review's actions never disappear without a record ────────────────────────────────
+
+REVIEW = (
+    "# A review\n\n## 8. Actions, in priority order\n\n"
+    "| # | Action | Kind | Owner |\n|---|---|---|---|\n"
+    "| 1 | Extend belt 1. | product | core |\n"
+    "| 2 | Rotate the token. | security | operator |\n\n"
+    "## 9. What the evidence licenses\n\n| 3 | not an action | x | y |\n"
+)
+
+
+def _review_tree(tree: Path, log_rows: str) -> None:
+    (tree / "docs" / "reviews").mkdir(parents=True, exist_ok=True)
+    _write(tree, "docs/reviews/2026-09-13-friend.md", REVIEW)
+    _write(
+        tree, "docs/DECISION-LOG.md", f"# Decision log\n\n| Id | Decision |\n|---|---|\n{log_rows}"
+    )
+
+
+def test_a_review_action_without_a_record_is_a_finding(tree: Path) -> None:
+    _review_tree(tree, "| DL-001 | Something else entirely. |\n")
+    findings = cc.check_review_actions(tree)
+    assert [(f.path, f.reason) for f in findings] == [
+        ("docs/reviews/2026-09-13-friend.md", "review action #1 has no record"),
+        ("docs/reviews/2026-09-13-friend.md", "review action #2 has no record"),
+    ]
+    # only the Actions table is read: row 3 sits under the next heading
+    assert all("#3" not in f.reason for f in findings)
+
+
+def test_a_record_names_the_review_the_action_and_its_state(tree: Path) -> None:
+    rows = (
+        "| DL-002 | `2026-09-13-friend` action #1: closed (ADR-0001); "
+        "action #2: [gap] no dated rotation is on record. |\n"
+    )
+    _review_tree(tree, rows)
+    assert cc.check_review_actions(tree) == []
+
+    # a mention without a state is not a record: "action #2" alone says nothing about it
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2 is noted. |\n")
+    assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
+
+    # the record must name the review it closes: another review's #2 is not this one's
+    _review_tree(
+        tree,
+        "| DL-002 | `2026-09-13-friend` action #1: closed. |\n"
+        "| DL-003 | `2026-09-14-other` action #2: closed. |\n",
+    )
+    assert [f.reason for f in cc.check_review_actions(tree)] == [
+        "review action #2 has no record",
+        # and a record for a review that is not on disk is itself a finding (PR #54 review)
+        "2026-09-14-other action #2 is recorded but the review has no such action",
+    ]
+
+
+def test_main_fails_on_an_unrecorded_review_action(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(tree, "README.md", "# t\n\nNothing quantified here.\n")
+    _review_tree(tree, "| DL-001 | nothing |\n")
+    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 1
+    assert "review action #1 has no record" in capsys.readouterr().err
+
+
+def test_every_review_action_in_the_repository_has_a_record() -> None:
+    """The critical friend's ten actions (2026-09-13 §8) each carry a dated state."""
+    assert cc.check_review_actions(ROOT) == []
+
+
+def test_a_state_is_a_whole_word(tree: Path) -> None:
+    """``opening`` is not ``open``: a state must stand as a word, or any prose passes."""
+    rows = "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: opening soon. |\n"
+    _review_tree(tree, rows)
+    assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
+
+
+def test_a_recorded_action_that_left_its_review_is_a_finding(tree: Path) -> None:
+    """The record and the table are checked both ways, so neither can vanish alone: an
+    action recorded in the log but gone from the review's Actions table (a deleted row, a
+    renamed heading) is a finding against the decision log."""
+    rows = (
+        "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open; "
+        "action #3: [gap] a third action. |\n"
+    )
+    _review_tree(tree, rows)
+    assert [(f.path, f.reason) for f in cc.check_review_actions(tree)] == [
+        (
+            "docs/DECISION-LOG.md",
+            "2026-09-13-friend action #3 is recorded but the review has no such action",
+        ),
+    ]
+
+    # renaming the heading empties the table as the checker reads it: every record now
+    # points at an action the review no longer lists
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n")
+    renamed = REVIEW.replace("## 8. Actions, in priority order", "## 8. Next steps")
+    _write(tree, "docs/reviews/2026-09-13-friend.md", renamed)
+    assert [f.reason for f in cc.check_review_actions(tree)] == [
+        "2026-09-13-friend action #1 is recorded but the review has no such action",
+        "2026-09-13-friend action #2 is recorded but the review has no such action",
+    ]
+
+
+#: The critical friend's Actions table (2026-09-13 §8) as it was reviewed: ten actions.
+#: Deleting a row AND its record together passes the two-way check, so the set is pinned.
+CRITICAL_FRIEND = "2026-09-13-critical-friend"
+
+
+def test_the_critical_friends_ten_actions_are_all_still_listed() -> None:
+    text = (ROOT / "docs" / "reviews" / f"{CRITICAL_FRIEND}.md").read_text(encoding="utf-8")
+    assert [n for n, _ in cc.review_actions(text)] == list(range(1, 11))
+    log = (ROOT / "docs" / "DECISION-LOG.md").read_text(encoding="utf-8")
+    assert cc.recorded_actions(log, CRITICAL_FRIEND) == set(range(1, 11))
+
+
+def test_a_review_the_record_only_mentions_does_not_claim_it(tree: Path) -> None:
+    """A record belongs to the review named in its head (`` `<stem>` action #``); a path to
+    another review inside the evidence neither credits nor debits that other review."""
+    _review_tree(
+        tree,
+        "| DL-002 | `2026-09-13-friend` action #1: closed (see "
+        "`docs/reviews/2026-09-12-guide.md`); action #2: [gap] (as the guide asks). |\n",
+    )
+    _write(tree, "docs/reviews/2026-09-12-guide.md", "# A guide\n\nNo actions here.\n")
+    assert cc.check_review_actions(tree) == []
+    assert (
+        cc.recorded_actions(
+            (tree / "docs" / "DECISION-LOG.md").read_text(encoding="utf-8"), "2026-09-12-guide"
+        )
+        == set()
+    )
+
+
+def test_a_fenced_example_in_an_actions_section_is_not_an_action(tree: Path) -> None:
+    """A review may show what an Actions table looks like inside a fence; a numbered row
+    there is an example, not work a reviewer set (review of PR #54). The fence rule is the
+    one ``blocks_of`` already uses, so a heading inside a fence cannot open or close the
+    Actions section either, and a fence closes only on its own marker."""
+    fenced = REVIEW.replace(
+        "| 2 | Rotate the token. | security | operator |\n",
+        "| 2 | Rotate the token. | security | operator |\n\n"
+        "An example of a row, for the next reviewer:\n\n"
+        "```markdown\n| 7 | An example action. | kind | owner |\n~~~\n"
+        "## 9. Not the next section\n| 8 | Still an example. | kind | owner |\n```\n",
+    )
+    assert [n for n, _ in cc.review_actions(fenced)] == [1, 2]
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n")
+    _write(tree, "docs/reviews/2026-09-13-friend.md", fenced)
+    assert cc.check_review_actions(tree) == []
+
+
+def test_a_record_whose_review_file_was_deleted_is_a_finding(tree: Path) -> None:
+    """Deleting the review file must not let its records outlive it: the two-way check reads
+    every review the decision log names, not only the reviews still on disk (review of
+    PR #54)."""
+    rows = "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n"
+    _review_tree(tree, rows)
+    assert cc.check_review_actions(tree) == []
+    (tree / "docs" / "reviews" / "2026-09-13-friend.md").unlink()
+    assert [(f.path, f.line, f.reason) for f in cc.check_review_actions(tree)] == [
+        (
+            "docs/DECISION-LOG.md",
+            5,
+            "2026-09-13-friend action #1 is recorded but the review has no such action",
+        ),
+        (
+            "docs/DECISION-LOG.md",
+            5,
+            "2026-09-13-friend action #2 is recorded but the review has no such action",
+        ),
+    ]
+
+
+#: A fence closes only on a line that CommonMark reads as its closing fence: the opener's
+#: character, at least as many of them, and nothing after but spaces (review of PR #54).
+#: Each case is ``(opener, inner line, still fenced after the inner line)``.
+FENCE_CLOSES = [
+    ("```", "```", False),
+    ("```", "````", False),  # a longer run of the same character closes
+    ("```", "```   ", False),  # trailing spaces are allowed
+    ("```", "```text", True),  # an info string makes it an opener, not a closer
+    ("```", "``` text", True),
+    ("````", "```", True),  # shorter than the opener: content
+    ("```", "~~~", True),  # the other character: content
+    ("~~~", "```", True),
+    ("~~~~", "~~~~~", False),
+    ("```", "   ```", False),  # a closer may be indented up to three spaces
+    ("```", "    ```", True),  # four spaces: content, not a closer (CommonMark §4.5)
+]
+
+#: Whether a line OPENS a fence, pinned to CommonMark §4.5 (review of PR #54): at most three
+#: spaces of indentation (four make it an indented code block), and a backtick opener's info
+#: string may not itself contain a backtick. Each case is ``(line, opens a fence)``.
+FENCE_OPENS = [
+    ("```", True),
+    ("~~~", True),
+    ("   ```text", True),
+    ("   ~~~", True),
+    ("    ~~~", False),  # four spaces: an indented code block
+    ("    ```", False),
+    ("\t```", False),  # a tab indents to column four
+    ("``", False),  # two is not a fence
+    ("``` a`b", False),  # a backtick in a backtick fence's info string: inline code
+    ("~~~ a`b", True),  # a tilde fence's info string may hold a backtick
+]
+
+
+@pytest.mark.parametrize(("line", "opens"), FENCE_OPENS)
+def test_a_fence_opens_only_where_commonmark_opens_one(line: str, opens: bool) -> None:
+    lines = list(cc._lines_with_fences(f"{line}\n| 7 | example |\n"))
+    assert lines[1][2] is opens, line
+
+
+def test_an_indented_fence_marker_does_not_hide_a_real_action(tree: Path) -> None:
+    """A four-space-indented ``~~~`` is an indented code block, not a fence: the numbered row
+    after it is a real action and must still need its record (review of PR #54)."""
+    indented = REVIEW.replace(
+        "| 2 | Rotate the token. | security | operator |\n",
+        "    ~~~\n| 2 | Rotate the token. | security | operator |\n",
+    )
+    assert [n for n, _ in cc.review_actions(indented)] == [1, 2]
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed. |\n")
+    _write(tree, "docs/reviews/2026-09-13-friend.md", indented)
+    assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
+
+
+#: A fence marker that CommonMark does not read as an open fence, placed in the Actions
+#: section above the table (second review of PR #54). Each hid both rows from a line-based
+#: reader, so ``--check`` passed a review whose actions had no record.
+CONTAINED_MARKERS = {
+    # an HTML block (type 2) holds its lines verbatim: a ``` in a comment opens nothing
+    "an HTML comment": "<!-- the old layout was:\n```\n-->\n\n",
+    # a fence inside a list item closes when the item ends, with or without a closing marker
+    "a list item": "- the old layout was:\n\n  ```\n  | 9 | old |\n\n",
+    # the same for a blockquote: the fence ends with the quote
+    "a blockquote": "> the old layout was:\n> ```\n\n",
+}
+
+
+@pytest.mark.parametrize("container", sorted(CONTAINED_MARKERS))
+def test_a_fence_marker_inside_a_container_does_not_hide_a_real_action(
+    tree: Path, container: str
+) -> None:
+    review = REVIEW.replace("| # | Action |", CONTAINED_MARKERS[container] + "| # | Action |", 1)
+    assert [n for n, _ in cc.review_actions(review)] == [1, 2], container
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed. |\n")
+    _write(tree, "docs/reviews/2026-09-13-friend.md", review)
+    assert [f.reason for f in cc.check_review_actions(tree)] == [
+        "review action #2 has no record"
+    ], container
+
+
+@pytest.mark.parametrize(("opener", "inner", "fenced"), FENCE_CLOSES)
+def test_a_fence_closes_only_on_a_commonmark_closing_fence(
+    opener: str, inner: str, fenced: bool
+) -> None:
+    lines = list(cc._lines_with_fences(f"{opener}markdown\n{inner}\n| 7 | example |\n"))
+    assert lines[2][2] is fenced, (opener, inner)
+
+
+#: The reference reader for the differential test below: CommonMark itself, not our reading
+#: of it. The tables above pin the cases a review found; this pins the rule (review of PR #54,
+#: which found three fence divergences in turn: the closer's character, its info string, its
+#: indent). The reader now takes its spans from markdown-it-py with tables on, and this
+#: reference uses the plain CommonMark preset, so the test also fails if the reader is ever
+#: swapped back for a hand-rolled one or if turning tables on changes where a fence ends.
+#: A second review found two more that this alphabet could not generate — a fence marker in
+#: an HTML comment, and one in a list item — so the alphabet now holds containers too: list
+#: and blockquote prefixes, and HTML comment openers and closers.
+_PREFIXES = st.sampled_from(["", "", "- ", "1. ", "> ", "  "])
+_INDENTS = st.sampled_from(["", " ", "  ", "   ", "    ", "     ", "\t"])
+_RUNS = st.sampled_from(["``", "```", "````", "`````", "~~", "~~~", "~~~~"])
+_INFOS = st.sampled_from(["", " ", "   ", "text", " text", " a`b"])
+_FENCE_LINES = st.builds(lambda p, i, r, f: p + i + r + f, _PREFIXES, _INDENTS, _RUNS, _INFOS)
+_OTHER_LINES = st.sampled_from(
+    ["", "prose", "| 7 | example |", "<!--", "<!-- note", "-->", "- item", "> quoted"]
+)
+
+
+def _commonmark_fenced(text: str) -> list[bool]:
+    """Which lines a CommonMark parser puts inside a fenced code block, delimiters included."""
+    fenced = [False] * len(text.splitlines())
+    for token in MarkdownIt("commonmark").parse(text):
+        if token.type == "fence" and token.map:
+            for i in range(token.map[0], min(token.map[1], len(fenced))):
+                fenced[i] = True
+    return fenced
+
+
+@settings(max_examples=500, deadline=None, derandomize=True)
+@given(st.lists(st.one_of(_FENCE_LINES, _OTHER_LINES), min_size=1, max_size=10))
+def test_the_fence_reader_agrees_with_commonmark_line_for_line(lines: list[str]) -> None:
+    text = "\n".join(lines) + "\n"
+    ours = [fenced for _, _, fenced in cc._lines_with_fences(text)]
+    assert ours == _commonmark_fenced(text), lines
+
+
+def test_a_fence_line_with_an_info_string_keeps_the_example_rows_out(tree: Path) -> None:
+    """A fenced example that shows a second fence with an info string (```` ```text ````)
+    must not close the first: the rows after it are still the example, never actions."""
+    fenced = REVIEW.replace(
+        "| 2 | Rotate the token. | security | operator |\n",
+        "| 2 | Rotate the token. | security | operator |\n\n"
+        "````markdown\n```text\n| 7 | An example action. | kind | owner |\n```\n"
+        "| 8 | Still an example. | kind | owner |\n````\n",
+    )
+    assert [n for n, _ in cc.review_actions(fenced)] == [1, 2]
+
+
+def test_a_review_in_a_folder_under_reviews_is_read(tree: Path) -> None:
+    """The rule covers every review under ``docs/reviews/``, not only its direct children: a
+    review kept in a folder with its evidence still has its actions checked (review of
+    PR #54)."""
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n")
+    (tree / "docs" / "reviews" / "b1b").mkdir()
+    _write(tree, "docs/reviews/b1b/2026-09-19-nested.md", REVIEW)
+    assert [(f.path, f.reason) for f in cc.check_review_actions(tree)] == [
+        ("docs/reviews/b1b/2026-09-19-nested.md", "review action #1 has no record"),
+        ("docs/reviews/b1b/2026-09-19-nested.md", "review action #2 has no record"),
+    ]
+
+
+def test_two_reviews_with_one_stem_are_a_finding(tree: Path) -> None:
+    """A record names its review by file stem, so two reviews that share a stem could each
+    claim the other's records. The gate refuses the pair rather than pick one."""
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n")
+    (tree / "docs" / "reviews" / "old").mkdir()
+    _write(tree, "docs/reviews/old/2026-09-13-friend.md", REVIEW)
+    assert [(f.path, f.reason) for f in cc.check_review_actions(tree)] == [
+        (
+            "docs/reviews/old/2026-09-13-friend.md",
+            "another review has the stem 2026-09-13-friend (docs/reviews/2026-09-13-friend.md);"
+            " a record could not say which it closes",
+        ),
+    ]

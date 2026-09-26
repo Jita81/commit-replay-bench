@@ -220,6 +220,8 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
       'GET /capability-map': MAP,
       'GET /oracle/alpha/controls': CONTROLS,
       'GET /oracle/alpha': ORACLE,
+      // REPO has no clone path, so the pool contract serves no history share (PR #54 review)
+      'GET /repos/alpha/pool': { repo: 'alpha', n_tasks: 8, oldest_authored: '2026-08-01T12:00:00+00:00', newest_authored: '2026-08-08T12:00:00+00:00', history_commits: null, history_first_authored: null, window_commits: null, share: null, history_unavailable: 'no_clone_path' },
       'GET /signoffs': { items: [STALE], total: 1, limit: 50, offset: 0 },
       'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
     },

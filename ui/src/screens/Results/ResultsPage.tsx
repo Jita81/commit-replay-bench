@@ -19,14 +19,25 @@
  *               and a queued replay says it is waiting, with no attempt number. A
  *               reader is offered only the acts their role can take (Decisions' rule): a
  *               viewer reads, and sees who acts. Reached without `?repo=`, the screen chooses
- *               the most recently updated repository itself. Every element a reader meets —
+ *               the most recently updated repository itself. A tile whose request failed says
+ *               "not loaded" with a Try again, because a failed request is not the API saying
+ *               a number is unknown (only a 404 on controls or oracle is "not run"). Every query
+ *               is read through `currentData`, so a refetch that fails never leaves an old
+ *               value shown as current: sign-offs that did not load mean no cell reads
+ *               signed and no licence sentence; sign-offs or a backlog that did not load mean
+ *               the "waiting on a person" list says so rather than "nothing is waiting"; a
+ *               repository that did not load means the page says it cannot tell whether a
+ *               measurement is running; a run whose poll failed is said to be unreadable, with a
+ *               Try again, never announced as queued or running. Every
+ *               element a reader meets —
  *               the in-flight banner's line, each tile, the map's headers and cells, the
  *               licence heading, the throughput callout, every door button and each
  *               decision's kind pill and act — is a hint trigger (`stat.results.*`,
  *               `banner.results.*`, `button.results.*`, `pill.results.decision_kind`), so
  *               what a number counts and what its value means opens on hover, focus and tap.
  * How:          `useRepoParam({ defaultToLatest })` + `RepoPicker`; `useCapabilityMap`
- *               (summary + cells), `useOracleControls`, `useOracle`, `useSignoffs`,
+ *               (summary + cells), `useOracleControls`, `useOracle`, `useRepoPool` (where
+ *               the tasks come from — the miner's recency bias, shown), `useSignoffs`,
  *               `useFactoryTasks` → `decisionsFor` for the "waiting on a person" panel;
  *               `useRepo` → `last_run` + `useRun` (polling) for the in-flight banner;
  *               `StatTile`s for the headline; links to the existing detail screens.
@@ -45,12 +56,12 @@
  *               means changes (EVIDENCE-AND-CLAIMS §6 first).
  */
 
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRun, useSignoffs } from '../../api/hooks'
+import { currentData, useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
 import { isApiError } from '../../api/client'
-import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell } from '../../api/types'
-import { LinkButton } from '../../components/Button'
+import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryTask, type RepoPool } from '../../api/types'
+import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
@@ -82,6 +93,107 @@ function pct(x: number): string {
   return `${(x * 100).toFixed(0)}%`
 }
 
+/** An author date as a day, in UTC so the range reads the same in every time zone: "1 Aug 2026". */
+function day(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
+
+/** Why the share of history is unknown, in the words a reader can act on. */
+const POOL_UNAVAILABLE: Record<Exclude<RepoPool['history_unavailable'], ''>, string> = {
+  no_clone_path: 'no clone of the repository on this host, so the share of its history is not known',
+  clone_unavailable: 'the clone path is not a git repository on this host, so the share is not known',
+  git_failed: 'git could not read the clone’s history, so the share is not known',
+}
+
+/** A tile's value when its request failed: said as a failure, never as "unknown" (PR #54 review). */
+const NOT_LOADED = 'not loaded'
+/** A 404 on the factory's tasks is "no backlog yet": an empty list, not a failure. */
+const NO_TASKS: FactoryTask[] = []
+
+/**
+ * The line under a tile whose request failed, with the retry: a failed request is not the
+ * API saying the number is unknown, so the reader is told which it is and can ask again.
+ */
+function RetryLine({ onRetry }: { onRetry: () => void }) {
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <span>the request failed, so no value is shown</span>
+      <Button size="sm" variant="ghost" hint="button.results.retry_tile" onClick={onRetry}>
+        Try again
+      </Button>
+    </span>
+  )
+}
+
+/**
+ * A section whose request failed: what did not load, what the page therefore does not show,
+ * and a Try again. A failed request is never shown as an empty answer or an old one.
+ */
+function FailedNotice({ title, children, onRetry, testId }: { title: string; children: ReactNode; onRetry: () => void; testId: string }) {
+  return (
+    <div role="alert" data-testid={testId} className="mb-4 rounded-[var(--radius-card)] border border-status-red/40 bg-status-red-soft px-4 py-3 text-sm text-on-surface">
+      <p className="m-0 font-semibold">{title}</p>
+      <p className="m-0 mt-1">{children}</p>
+      <div className="mt-1">
+        <RetryLine onRetry={onRetry} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * What the pool tile renders. `ci` is required, not optional, so no state of the tile can
+ * render without its interval field: the value is never a sampled rate, so every state says
+ * "95% CI —" and, where a number stands, the footer says why (PR #54 review).
+ */
+interface PoolTileView {
+  value: string
+  n: number | null
+  ci: null
+  apparatus: string
+  footer: string
+}
+
+/**
+ * The pool-window tile (assessment 2026-09-25, B4): its value, its n, its interval, its method
+ * line and its footer, from one place so the n is always the denominator of the value shown —
+ * the share is `window_commits / history_commits`, so its n is `history_commits`, and the tasks
+ * are counted in the method line (PR #54 review). No tasks and tasks without a readable author
+ * date are two states: the second has tasks, and says how many.
+ */
+function poolTile(pool: RepoPool | undefined, pending: boolean, failed: boolean): PoolTileView {
+  const method = 'the mined tasks’ author dates against the clone’s history'
+  if (failed) return { value: NOT_LOADED, n: null, ci: null, apparatus: method, footer: '' }
+  if (!pool) return { value: pending ? '…' : 'unknown', n: null, ci: null, apparatus: method, footer: '' }
+  if (pool.n_tasks === 0) {
+    return { value: 'no tasks', n: 0, ci: null, apparatus: 'nothing mined yet', footer: 'no interval: nothing has been mined, so there is nothing to count · mine the repository to see where its tasks come from' }
+  }
+  if (!pool.oldest_authored) {
+    return {
+      value: 'dates not known',
+      n: pool.n_tasks,
+      ci: null,
+      apparatus: `${pool.n_tasks} tasks, none with an author date this server can read`,
+      footer: 'no interval: a count of the mined tasks, not a sample · without an author date the tasks cannot be placed in the history',
+    }
+  }
+  const range = `${pool.n_tasks} tasks authored ${day(pool.oldest_authored)} – ${day(pool.newest_authored)}`
+  if (pool.share === null || pool.history_unavailable || pool.history_commits === null) {
+    return { value: 'not known', n: null, ci: null, apparatus: range, footer: pool.history_unavailable ? POOL_UNAVAILABLE[pool.history_unavailable] : '' }
+  }
+  return {
+    value: pct(pool.share),
+    n: pool.history_commits,
+    ci: null,
+    // an author-date cut: every non-merge commit authored on or after the oldest task, which
+    // is not "the newest N" in history order when author dates and commit order disagree
+    apparatus: `${range} · ${pool.window_commits} of ${pool.history_commits} non-merge commits authored since the oldest task`,
+    footer: 'no interval: an exact count of the clone’s commits, not a sample · older work, merges and changes made without a test are not in the pool',
+  }
+}
+
 /** The controls report's own stamp: `apparatus 2.2 · controls.v3`; the keys the report writes (crb.core.oracle.controls). */
 function controlsApparatus(stamp: Record<string, unknown>): string {
   const v = typeof stamp.apparatus_version === 'string' ? stamp.apparatus_version : '—'
@@ -95,22 +207,41 @@ export function ResultsPage() {
   const map = useCapabilityMap(repo, ['capability_class', 'size'])
   const controls = useOracleControls(repo)
   const oracle = useOracle(repo)
+  const pool = useRepoPool(repo)
   const signoffs = useSignoffs(repo)
   const tasks = useFactoryTasks(repo)
   const repoDetail = useRepo(repo)
+  // a request that failed after an earlier success keeps the earlier data: every query on
+  // this page — the numbers, the sign-offs that allow delivery, the backlog and the run — is
+  // read only through `currentData`, so an old value is never shown as current, and a source
+  // ratchet in the page's test refuses any `<query>.data` read (PR #54 review)
+  const mapData = currentData(map)
+  const controlsData = currentData(controls)
+  const oracleData = currentData(oracle)
+  const poolData = currentData(pool)
+  const signoffsData = currentData(signoffs)
+  const tasksNoBacklog = tasks.isError && isApiError(tasks.error) && tasks.error.status === 404
+  const tasksData = tasksNoBacklog ? NO_TASKS : currentData(tasks)
+  const repoData = currentData(repoDetail)
+  // without the sign-offs or the backlog the page cannot say what waits on a person
+  const decisionsFailed = signoffs.isError || (tasks.isError && !tasksNoBacklog)
   // a replay still queued or running: the numbers below move as each attempt is graded
-  const lastRun = repoDetail.data?.last_run
+  const lastRun = repoData?.last_run
   const activeReplayId = lastRun && lastRun.kind === 'replay' && !isRunTerminal(lastRun.status) ? lastRun.id : ''
   const run = useRun(activeReplayId)
+  const runData = currentData(run)
+  // a poll that failed cannot back a queued or running banner: the page says the run did not
+  // load, with a retry, instead (PR #54 review)
+  const runFailed = Boolean(activeReplayId) && run.isError
   // the poll sees the run finish before the repo's `last_run` is re-read: the banner goes with it
-  const replayRunning = Boolean(activeReplayId) && !(run.data && isRunTerminal(run.data.status))
+  const replayRunning = Boolean(activeReplayId) && !runFailed && !(runData && isRunTerminal(runData.status))
   // queued wording until the poll says `running`: a queued run has graded nothing, whatever
   // `progress` still carries (a reclaimed run keeps its old counts while it waits)
-  const replayQueued = replayRunning && (run.data ? run.data.status === 'queued' : lastRun?.status === 'queued')
-  const replayProgress = run.data && run.data.status === 'running' ? kOfN(run.data.progress.done, run.data.progress.total) : null
+  const replayQueued = replayRunning && (runData ? runData.status === 'queued' : lastRun?.status === 'queued')
+  const replayProgress = runData && runData.status === 'running' ? kOfN(runData.progress.done, runData.progress.total) : null
   const q = `repo=${encodeURIComponent(repo)}`
 
-  const measured: CapabilityCell[] = useMemo(() => (map.data?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0), [map.data])
+  const measured: CapabilityCell[] = useMemo(() => (mapData?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0), [mapData])
   const byRoute = useMemo(() => {
     const out: Record<string, { cells: number; n: number }> = {}
     for (const c of measured) {
@@ -121,11 +252,13 @@ export function ResultsPage() {
     }
     return out
   }, [measured])
+  // null until the map, the sign-offs and the backlog have all loaded: "nothing is waiting"
+  // is said only when it is known
   const decisions = useMemo(
-    () => (map.data && signoffs.data ? decisionsFor({ repo, cells: map.data.cells, signoffs: signoffs.data.items, tasks: tasks.data ?? [] }) : []),
-    [repo, map.data, signoffs.data, tasks.data],
+    () => (mapData && signoffsData && tasksData ? decisionsFor({ repo, cells: mapData.cells, signoffs: signoffsData.items, tasks: tasksData }) : null),
+    [repo, mapData, signoffsData, tasksData],
   )
-  const licence = useMemo(() => (map.data ? licenseSentence(repo, map.data, signoffs.data?.items ?? []) : null), [repo, map.data, signoffs.data])
+  const licence = useMemo(() => (mapData && signoffsData ? licenseSentence(repo, mapData, signoffsData.items) : null), [repo, mapData, signoffsData])
   const economics = useMemo(() => {
     const n = measured.reduce((a, c) => a + c.n, 0)
     const clean = measured.reduce((a, c) => a + c.clean, 0)
@@ -139,12 +272,16 @@ export function ResultsPage() {
   }, [measured])
   const controlsNotRun = controls.isError && isApiError(controls.error) && controls.error.status === 404
   const oracleNotRun = oracle.isError && isApiError(oracle.error) && oracle.error.status === 404
-  const verdict = controls.data?.verdict
-  const apparatus = map.data ? `apparatus ${map.data.summary.apparatus_versions.join(', ') || '—'} · Wilson 95%` : '—'
-  const oracleMean = oracle.data && oracle.data.tasks.length > 0 ? oracle.data.tasks.reduce((a, t) => a + (t.strength ?? 0), 0) / oracle.data.tasks.length : null
+  const verdict = controlsData?.verdict
+  const apparatus = mapData ? `apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'} · Wilson 95%` : '—'
+  const oracleMean = oracleData && oracleData.tasks.length > 0 ? oracleData.tasks.reduce((a, t) => a + (t.strength ?? 0), 0) / oracleData.tasks.length : null
   // the bar is the policy in force, never a constant; the apparatus is the report's own
-  const oracleBar = map.data ? map.data.policy.min_oracle_strength : null
-  const oracleApparatus = oracle.data ? `apparatus ${oracle.data.apparatus_versions.join(', ') || '—'} · mean of per-task mutation scores${oracleBar !== null ? ` · ≥ ${pct(oracleBar)} per cell to deliver` : ''}` : 'one mutation score per task, from the oracle run'
+  const oracleBar = mapData ? mapData.policy.min_oracle_strength : null
+  // a failed request is not a missing report: only a 404 on controls / oracle means "not run"
+  const controlsFailed = controls.isError && !controlsNotRun
+  const oracleFailed = oracle.isError && !oracleNotRun
+  const poolView = poolTile(poolData, pool.isPending, pool.isError)
+  const oracleApparatus = oracleData ? `apparatus ${oracleData.apparatus_versions.join(', ') || '—'} · mean of per-task mutation scores${oracleBar !== null ? ` · ≥ ${pct(oracleBar)} per cell to deliver` : ''}` : 'one mutation score per task, from the oracle run'
 
   return (
     <>
@@ -156,43 +293,64 @@ export function ResultsPage() {
       {!repo && <EmptyState title="Choose a repository" reason="Results are per repository — a cell says nothing about a repository it was not measured on." action={<LinkButton to="/connect">Connect one</LinkButton>} />}
       {repo && map.isPending && <p className="text-sm text-on-surface-muted">Loading the baseline for {repo}…</p>}
       {repo && map.isError && <ErrorState error={map.error} onRetry={() => void map.refetch()} />}
-      {repo && map.data && (
+      {repo && mapData && (
         <>
           {replayRunning && (
             <NotificationBanner title={replayQueued ? 'A measurement is queued' : 'A measurement is running'}>
               <Hint as="p" id="banner.results.replay_running" className="m-0">
                 {replayQueued
-                  ? `A measurement is waiting for a worker${(run.data?.progress?.done ?? 0) > 0 ? ` — ${run.data?.progress?.done} attempt(s) were graded before it went back to the queue` : '; nothing has been graded yet'}.`
-                  : `A measurement is running${replayProgress ? `: attempt ${replayProgress}, $${(run.data?.cost_usd ?? 0).toFixed(2)} spent so far` : ''}.`}{' '}
+                  ? `A measurement is waiting for a worker${(runData?.progress?.done ?? 0) > 0 ? ` — ${runData?.progress?.done} attempt(s) were graded before it went back to the queue` : '; nothing has been graded yet'}.`
+                  : `A measurement is running${replayProgress ? `: attempt ${replayProgress}, $${(runData?.cost_usd ?? 0).toFixed(2)} spent so far` : ''}.`}{' '}
                 The numbers on this page change as each attempt is graded.{' '}
                 <Link to={`/runs/${encodeURIComponent(activeReplayId)}`}>Open the run</Link>
               </Hint>
             </NotificationBanner>
           )}
+          {runFailed && (
+            <FailedNotice testId="run-failed" title="Could not read the measurement in progress" onRetry={() => void run.refetch()}>
+              The repository says a measurement is {lastRun?.status ?? 'in flight'}, but the run did not load, so this page cannot show its progress and the numbers below may still be moving.
+            </FailedNotice>
+          )}
+          {repoDetail.isError && (
+            <FailedNotice testId="repo-failed" title="Could not check whether a measurement is running" onRetry={() => void repoDetail.refetch()}>
+              The repository did not load, so this page cannot say whether the numbers below are still moving.
+            </FailedNotice>
+          )}
           <Card title="Is the instrument trustworthy here?" eyebrow="the gates every number below stands under">
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatTile
                 label="Negative controls"
-                value={verdict ? verdict.state : controlsNotRun ? 'not run' : controls.isPending ? '…' : 'unknown'}
-                n={controls.data?.n_rows ?? null}
-                apparatus={controls.data ? controlsApparatus(controls.data.apparatus) : 'seven deliberate cheats the grader must catch'}
+                value={verdict ? verdict.state : controlsNotRun ? 'not run' : controls.isPending ? '…' : controlsFailed ? NOT_LOADED : 'unknown'}
+                n={controlsData?.n_rows ?? null}
+                apparatus={controlsData ? controlsApparatus(controlsData.apparatus) : 'seven deliberate cheats the grader must catch'}
                 tone={verdict ? CONTROLS_TONE[verdict.state] : 'muted'}
                 hint="stat.results.controls"
-                footer={controls.data ? `${controls.data.violations} violations · ${controls.data.escapes} escapes · ${controls.data.not_constructible} not constructible` : verdict ? undefined : 'run the controls from Connect'}
+                footer={controlsData ? `${controlsData.violations} violations · ${controlsData.escapes} escapes · ${controlsData.not_constructible} not constructible` : controlsFailed ? <RetryLine onRetry={() => void controls.refetch()} /> : verdict ? undefined : 'run the controls from Connect'}
                 data-testid="tile-negative-controls"
               />
               <StatTile
                 label="Oracle strength"
-                value={oracleMean === null ? (oracleNotRun ? 'not scored' : oracle.isPending ? '…' : 'unknown') : pct(oracleMean)}
-                n={oracle.data?.tasks.length ?? null}
+                value={oracleMean === null ? (oracleNotRun ? 'not scored' : oracle.isPending ? '…' : oracleFailed ? NOT_LOADED : 'unknown') : pct(oracleMean)}
+                n={oracleData?.tasks.length ?? null}
                 ci={null}
                 apparatus={oracleApparatus}
                 tone={oracleMean === null ? 'muted' : oracleBar !== null && oracleMean >= oracleBar ? 'green' : 'amber'}
                 hint="stat.results.oracle_strength"
-                footer="no interval: a mean of per-task scores, not a rate"
+                footer={oracleFailed ? <RetryLine onRetry={() => void oracle.refetch()} /> : 'no interval: a mean of per-task scores, not a rate'}
                 data-testid="tile-oracle-strength"
               />
-              <StatTile label="False-Q1" value={String(map.data.summary.false_q1_total)} n={map.data.summary.n_total} apparatus={apparatus} tone={map.data.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />
+              <StatTile
+                label="Where the tasks come from"
+                value={poolView.value}
+                n={poolView.n}
+                ci={poolView.ci}
+                apparatus={poolView.apparatus}
+                tone="muted"
+                hint="stat.results.pool_window"
+                footer={pool.isError ? <RetryLine onRetry={() => void pool.refetch()} /> : poolView.footer || undefined}
+                data-testid="tile-pool-window"
+              />
+              <StatTile label="False-Q1" value={String(mapData.summary.false_q1_total)} n={mapData.summary.n_total} apparatus={apparatus} tone={mapData.summary.false_q1_total === 0 ? 'green' : 'red'} hint="stat.results.false_q1" footer="must be zero; refused at write" />
             </div>
           </Card>
 
@@ -215,13 +373,18 @@ export function ResultsPage() {
                   ))}
                 </div>
                 <p className="mt-3 max-w-[80ch] text-sm text-on-surface-body">
-                  <strong>deliver</strong> means the cell clears the published bar (n ≥ {map.data.policy.min_n}, point ≥ {pct(map.data.policy.min_point)}, Wilson-low ≥ {pct(map.data.policy.min_ci_low)}, false-Q1 = 0, oracle ≥ {pct(map.data.policy.min_oracle_strength)}, controls passed) so the factory may open a branch and a pull request for that class of change under human review. It never means a change is safe to merge or deploy.
+                  <strong>deliver</strong> means the cell clears the published bar (n ≥ {mapData.policy.min_n}, point ≥ {pct(mapData.policy.min_point)}, Wilson-low ≥ {pct(mapData.policy.min_ci_low)}, false-Q1 = 0, oracle ≥ {pct(mapData.policy.min_oracle_strength)}, controls passed) so the factory may open a branch and a pull request for that class of change under human review. It never means a change is safe to merge or deploy.
                 </p>
                 <h3 className="mb-2 mt-6 text-[24px] font-bold leading-[1.3]">What it can do, by class and size</h3>
                 <p className="m-0 mb-4 max-w-[44em] text-[16px] leading-[1.5] text-on-surface-body">
                   Each cell carries its own <code>n</code>, its point estimate and its Wilson interval. An empty cell says "not measured" — it does not say zero.
                 </p>
-                <MapTable map={map.data} signoffs={signoffs.data?.items ?? []} repo={repo} canSign={can('approver')} />
+                {signoffs.isError && (
+                  <FailedNotice testId="signoffs-failed" title="The sign-offs did not load" onRetry={() => void signoffs.refetch()}>
+                    Until they load, no cell is shown as signed and no licence sentence is shown.
+                  </FailedNotice>
+                )}
+                <MapTable map={mapData} signoffs={signoffsData?.items ?? null} repo={repo} canSign={can('approver')} />
                 {licence && (
                   <InsetText>
                     <Hint as="h3" id="banner.results.licence" className="m-0 mb-2 text-[19px] font-bold leading-[1.4]">
@@ -257,8 +420,21 @@ export function ResultsPage() {
             )}
           </Card>
 
-          <Card title="Waiting on a person" eyebrow={`${decisions.length} for this repository`} eyebrowHint="stat.results.waiting_count" actions={<LinkButton size="sm" to="/decisions" hint="button.results.all_decisions">All decisions</LinkButton>}>
-            {decisions.length === 0 ? (
+          <Card title="Waiting on a person" eyebrow={decisions ? `${decisions.length} for this repository` : decisionsFailed ? NOT_LOADED : 'loading'} eyebrowHint="stat.results.waiting_count" actions={<LinkButton size="sm" to="/decisions" hint="button.results.all_decisions">All decisions</LinkButton>}>
+            {decisionsFailed ? (
+              <FailedNotice
+                testId="decisions-failed"
+                title="What is waiting on a person did not load"
+                onRetry={() => {
+                  if (signoffs.isError) void signoffs.refetch()
+                  if (tasks.isError && !tasksNoBacklog) void tasks.refetch()
+                }}
+              >
+                The sign-offs or the factory&rsquo;s backlog did not load, so this list is not shown rather than shown out of date.
+              </FailedNotice>
+            ) : !decisions ? (
+              <p className="m-0 text-sm text-on-surface-muted">Loading what is waiting on a person…</p>
+            ) : decisions.length === 0 ? (
               <EmptyState compact glyph="✓" title="Nothing is waiting on a person here" />
             ) : (
               <ul className="m-0 list-none divide-y divide-border p-0" aria-label={`Decisions for ${repo}`}>

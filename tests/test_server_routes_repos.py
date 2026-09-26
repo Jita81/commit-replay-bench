@@ -8,8 +8,12 @@ What it does: Pins the list shape (probe, counts, last run), pagination, viewer 
               401, detail with config and 404, create RBAC / validation / the recorded event /
               duplicate 409 / invalid config 422, update RBAC with a redacted diff event, the
               per-repo audit trail newest first, probe RBAC and enqueue (queue unavailable
-              handled), profile computed / cached / refreshed and 409 without a clone, and the
-              task list with filters.
+              handled), profile computed / cached / refreshed and 409 without a clone, the
+              task list with filters, and the pool window: the mined tasks' date range from
+              the store and the share of the clone's non-merge history since the oldest task —
+              unknown, with the reason, when the clone is not on this host; the walk cached
+              on HEAD and the shallow boundary (a deepened shallow clone is re-read); any git
+              failure on the read answers ``git_failed``, never a server error.
 How:          ``make_env`` over the seed; ``fake_jobs`` stands in for ``crb.store.jobs`` and
               persists the run so the API can read it back.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -26,6 +30,7 @@ Touch when:   a ``RepoConfig`` field is added (a validation case and the redacte
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import types
 from collections.abc import Iterator
@@ -434,3 +439,192 @@ class TestTasks:
         r = env.client.get("/repos")
         assert r.status_code == 404 or r.headers["content-type"].startswith("text/html")
         assert env.client.get(f"{API_PREFIX}/repos").status_code == 200
+
+
+def _dated_repo(root: Path, dates: list[str]) -> Path:
+    """A git repository with one non-merge commit per author date, oldest first."""
+    root.mkdir(parents=True)
+
+    def git(*args: str, date: str = "") -> None:
+        env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else None
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, env=env)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "t")
+    git("config", "commit.gpgsign", "false")
+    for i, date in enumerate(dates):
+        (root / f"f{i}.txt").write_text(date)
+        git("add", "-A")
+        git("commit", "-q", "-m", f"chore: commit {i}", date=date)
+    return root
+
+
+def _git(root: Path, *args: str, date: str = "") -> None:
+    env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else None
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, env=env)
+
+
+def _commit(root: Path, date: str) -> None:
+    """One more non-merge commit on the current branch, authored at ``date``."""
+    (root / f"c-{date[:10]}.txt").write_text(date)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"chore: {date}", date=date)
+
+
+def _merge_side_commit(root: Path, date: str) -> None:
+    """A side-branch commit brought back with a real merge commit (``--no-ff``)."""
+    _git(root, "checkout", "-q", "-b", "side")
+    _commit(root, date)
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "-m", "Merge side", "side", date=date)
+
+
+class TestPool:
+    """``GET /repos/{name}/pool`` — the pool's date range and the share of history it covers
+    (assessment 2026-09-25, B4: the miner's recency bias is shown where the oracle is)."""
+
+    def test_date_range_from_the_store_and_no_history_without_a_clone(self, env: Env) -> None:
+        r = env.get(f"/repos/{ALPHA}/pool")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["repo"] == ALPHA and body["n_tasks"] == 8
+        assert body["oldest_authored"] == "2026-08-01T12:00:00+00:00"
+        assert body["newest_authored"] == "2026-08-08T12:00:00+00:00"
+        # no clone on this host: the share is unknown, and the answer says why — never a guess
+        assert body["history_commits"] is None and body["window_commits"] is None
+        assert body["share"] is None and body["history_unavailable"] == "no_clone_path"
+        # a repository with no tasks has no range
+        empty = env.get(f"/repos/{BETA}/pool").json()
+        assert empty["n_tasks"] == 0 and empty["oldest_authored"] is None and empty["share"] is None
+
+    def test_share_counts_the_non_merge_commits_since_the_oldest_task(self, tmp_path: Path) -> None:
+        clone = _dated_repo(
+            tmp_path / "dated",
+            [
+                "2026-06-01T12:00:00+00:00",
+                "2026-07-01T12:00:00+00:00",
+                "2026-08-01T12:00:00+00:00",  # the seed's oldest task is authored at this instant
+                "2026-08-04T12:00:00+00:00",
+                "2026-08-08T12:00:00+00:00",
+            ],
+        )
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            assert body["history_unavailable"] == ""
+            assert body["history_commits"] == 5 and body["window_commits"] == 3
+            assert body["share"] == 0.6
+            assert body["history_first_authored"] == "2026-06-01T12:00:00+00:00"
+
+    def test_a_clone_path_that_is_not_a_repository_says_so(self, tmp_path: Path) -> None:
+        (tmp_path / "plain").mkdir()
+        with make_env(tmp_path, clone_path=str(tmp_path / "plain")) as env:
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            assert body["history_unavailable"] == "clone_unavailable" and body["share"] is None
+
+    def test_a_merge_commit_is_not_counted_as_history(self, tmp_path: Path) -> None:
+        """The miner walks non-merge commits only, so the share must too: a merge commit in
+        the window would otherwise inflate both counts and understate the recency bias."""
+        clone = _dated_repo(
+            tmp_path / "merged",
+            ["2026-07-01T12:00:00+00:00", "2026-08-01T12:00:00+00:00"],
+        )
+        _merge_side_commit(clone, "2026-08-05T12:00:00+00:00")
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            # three authored commits (two on main, one on the side branch) and one merge
+            assert body["history_commits"] == 3 and body["window_commits"] == 2
+
+    def test_the_history_walk_runs_once_per_clone_head(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Any viewer may read the pool, so the full-history walk is cached against the
+        clone's HEAD: a repeat read does not walk again, and a new commit does."""
+        from crb.core.git import GitRepo
+
+        walks: list[tuple[str, ...]] = []
+        real_run = GitRepo.run
+
+        def counting_run(self: GitRepo, *args: str, **kw: Any) -> Any:
+            if args and args[0] in ("log", "rev-list"):
+                walks.append(args)
+            return real_run(self, *args, **kw)
+
+        monkeypatch.setattr(GitRepo, "run", counting_run)
+        clone = _dated_repo(
+            tmp_path / "cached",
+            ["2026-07-01T12:00:00+00:00", "2026-08-01T12:00:00+00:00"],
+        )
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            first = env.get(f"/repos/{ALPHA}/pool").json()
+            second = env.get(f"/repos/{ALPHA}/pool").json()
+            assert first == second and first["history_commits"] == 2
+            assert len(walks) == 1, walks
+            _commit(clone, "2026-08-09T12:00:00+00:00")
+            third = env.get(f"/repos/{ALPHA}/pool").json()
+            assert third["history_commits"] == 3 and len(walks) == 2
+
+    def test_deepening_a_shallow_clone_is_read_although_head_did_not_move(
+        self, tmp_path: Path
+    ) -> None:
+        """A shallow clone deepened by ``git fetch --deepen`` has more history at the same
+        HEAD, so HEAD alone cannot key the cache: the shallow boundary is part of the key
+        (review of PR #54). Everything the walk reads is in the key."""
+        origin = _dated_repo(
+            tmp_path / "origin",
+            [
+                "2026-06-01T12:00:00+00:00",
+                "2026-07-01T12:00:00+00:00",
+                "2026-08-01T12:00:00+00:00",
+                "2026-08-04T12:00:00+00:00",
+                "2026-08-08T12:00:00+00:00",
+            ],
+        )
+        clone = tmp_path / "shallow"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "2", f"file://{origin}", str(clone)],
+            check=True,
+            capture_output=True,
+        )
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            assert env.get(f"/repos/{ALPHA}/pool").json()["history_commits"] == 2
+            _git(clone, "fetch", "-q", "--deepen=2")
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            assert body["history_commits"] == 4 and body["window_commits"] == 3
+
+    @pytest.mark.parametrize(
+        "failing",
+        [("rev-parse", "--is-inside-work-tree"), ("rev-parse", "--verify"), ("log",)],
+        ids=["is_repo", "head", "walk"],
+    )
+    def test_a_git_failure_anywhere_on_the_read_is_git_failed_not_a_500(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing: tuple[str, ...]
+    ) -> None:
+        """A git call that times out raises ``GitError`` even without ``check=True``; the
+        repository check once ran outside the ``try`` and a timeout there escaped as a server
+        error (review of PR #54). Every git call the pool read makes sits in one ``try``, so
+        any of them failing answers ``git_failed`` with null history fields."""
+        from crb.core.git import GitError, GitRepo
+
+        real_run = GitRepo.run
+
+        def failing_run(self: GitRepo, *args: str, **kw: Any) -> Any:
+            if args[: len(failing)] == failing:
+                raise GitError(list(args), 124, "timed out after 60s")
+            return real_run(self, *args, **kw)
+
+        monkeypatch.setattr(GitRepo, "run", failing_run)
+        clone = _dated_repo(tmp_path / "slow", ["2026-08-01T12:00:00+00:00"])
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            r = env.get(f"/repos/{ALPHA}/pool")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["history_unavailable"] == "git_failed"
+            assert body["history_commits"] is None and body["share"] is None
+            assert body["oldest_authored"] == "2026-08-01T12:00:00+00:00"
+
+    def test_viewer_reads_anonymous_401_unknown_404(self, env: Env) -> None:
+        login(env.client, "viewer")
+        assert env.get(f"/repos/{ALPHA}/pool").status_code == 200
+        assert env.get("/repos/nope/pool").status_code == 404
+        assert_rbac(env, "GET", f"/repos/{ALPHA}/pool", min_role="viewer")
