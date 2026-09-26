@@ -281,9 +281,12 @@ GONE_WITHIN_S = 15.0
 def _gone(name: str, within_s: float = GONE_WITHIN_S) -> bool:
     """``True`` once a SUCCESSFUL ``docker ps -a`` no longer lists ``name``; ``False`` if it
     is still listed at ``within_s`` seconds — a leaked container, which the tests refuse.
-    Every query is bounded by the time left, and a failed or unanswered query fails the
-    test: empty output from a daemon that did not answer is not proof of removal."""
+    Every query is bounded by the time left. A failed query fails the test, and so does a
+    daemon that never answered: empty output from it is not proof of removal. A query that
+    times out after the daemon has already listed the container reads as still listed —
+    it ran to the deadline, which is where a container that stays behind always ends."""
     deadline = time.monotonic() + within_s
+    seen_listed = False
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -297,11 +300,14 @@ def _gone(name: str, within_s: float = GONE_WITHIN_S) -> bool:
                 timeout=remaining,
             )
         except subprocess.TimeoutExpired:
+            if seen_listed:
+                return False
             pytest.fail(f"docker ps did not answer within {within_s:g}s while checking {name}")
         if q.returncode != 0:
             pytest.fail(f"docker ps failed (rc={q.returncode}) checking {name}: {q.stderr.strip()}")
         if q.stdout.strip() == "":
             return True
+        seen_listed = True
         time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
 
 
@@ -357,7 +363,9 @@ def test_the_gone_check_still_catches_a_container_that_is_left_behind():
     )
     assert started.returncode == 0, started.stderr
     try:
-        assert _gone(name, within_s=1.0) is False
+        # a real docker ps under a loaded CI runner can take longer than a second; the
+        # container sleeps 30 s, so 10 s still proves "left behind reads as leaked"
+        assert _gone(name, within_s=10.0) is False
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=60)
     assert _gone(name) is True
@@ -389,3 +397,33 @@ def test_the_gone_check_never_waits_past_its_bound(monkeypatch):
     assert _gone("crb-any", within_s=0.6) is False
     assert time.monotonic() - started < 1.2
     assert timeouts and all(0 < t <= 0.6 for t in timeouts), timeouts
+
+
+def test_a_slow_last_query_reads_as_still_listed_not_as_a_silent_daemon(monkeypatch):
+    """A container that stays listed keeps the check polling to its deadline, so the last
+    query only gets the time left and can time out on a loaded runner (CI on PR #60). The
+    daemon already answered that the container was there, so the reading is "still listed
+    at the deadline" (False), never a failure blaming a daemon that did answer."""
+    calls = {"n": 0}
+
+    def listed_then_slow(argv, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return subprocess.CompletedProcess(argv, 0, "abc123\n", "")
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", listed_then_slow)
+    assert _gone("crb-any", within_s=1.0) is False
+    assert calls["n"] == 2
+
+
+def test_a_daemon_that_never_answers_still_fails_the_check(monkeypatch):
+    """With no answer at all there is no reading to report, listed or gone: the check fails
+    the test naming the silent daemon, as before."""
+
+    def silent(argv, **kw):
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", silent)
+    with pytest.raises(pytest.fail.Exception, match="did not answer"):
+        _gone("crb-any", within_s=1.0)
