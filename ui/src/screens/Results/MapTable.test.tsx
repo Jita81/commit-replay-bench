@@ -12,7 +12,8 @@
  *               sentence names repo, apparatus, belt set, gate, n, class × size, rate with
  *               interval, builder/model (EVIDENCE-AND-CLAIMS §7), approver and date, and says
  *               nothing about anything else; and that every header and every line of a cell
- *               carries a hint, with the numbers out of the tab order and the route tag in it.
+ *               carries a hint, with the numbers out of the tab order and the route tag in it; and
+ *               that with no sign-offs loaded no cell reads signed or due (PR #54 review).
  * How:          Pure renders over hand-built cells and sign-offs.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
@@ -103,6 +104,20 @@ describe('MapTable', () => {
     const due = screen.getByTestId('cell-refactor-XS')
     expect(due).toHaveTextContent('sign-off due')
     expect(due.querySelector('a')).toBeNull()
+  })
+
+  it('with no sign-offs loaded, no cell reads signed or due, and none links to the form (PR #54 review)', () => {
+    render(
+      <MemoryRouter>
+        <MapTable map={MAP([cell({}), cell({ capability_class: 'refactor', size: 'XS', n: 14, n_tasks: 7, clean: 10, point: 0.71, ci_low: 0.45, ci_high: 0.88 })])} signoffs={null} repo="cobra" canSign />
+      </MemoryRouter>,
+    )
+    for (const id of ['cell-bug.fix-XS', 'cell-refactor-XS']) {
+      const c = screen.getByTestId(id)
+      expect(c).toHaveTextContent('sign-off not loaded')
+      expect(c).not.toHaveTextContent(/signed|sign-off due/)
+      expect(c.querySelector('a')).toBeNull()
+    }
   })
 
   it('the licence sentence quotes the STAMPED snapshot with every qualifier, says when the cell has moved on, and is null with no signed cell', () => {
