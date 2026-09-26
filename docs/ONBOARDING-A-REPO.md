@@ -30,6 +30,21 @@ knows about). Run `GET /health`: every probe must be `ok` except `sandbox` (whic
 up like one), who the approvers are, and whether builder transcripts are retained
 ([DATA-RETENTION.md](DATA-RETENTION.md): default zero raw retention).
 
+## Sign in and find your way (everyone, once)
+
+Before anyone connects a repository, each person signs in and finds their way. The sign-in page
+says what the product is; Home (`/home`) says where the deployment has got to and names the next
+task; the glossary (`/help`) defines every word a screen uses; and each guide — this one included
+— and each decision record is built into the deployment and opens at the section a screen points
+to. Every screen carries "About this screen": what it is for and what your role does next.
+
+**Time and money.** It spends nothing: no screen on the way can start a run or call a model.
+**[measured — n = 1 scripted pass of the six steps (sign in, the index, Home, a term, its guide
+section, an unknown address) and sign-out; method: `ui/e2e/walkthrough/13-orient.spec.ts`, timed
+by the spec on the tier-1 walkthrough stack on 2026-09-26; apparatus 2.3]** the scripted pass
+took 0.9 seconds, with nothing read. **[hypothesis]** A person reading each screen as they
+go takes about five minutes.
+
 ## Step 1 — Register the repository (developer, 30 minutes)
 
 Repos → *Add a repository* (or `crb repo add`, [OPERATOR §2](OPERATOR.md#2-configure-a-repository)).

@@ -6,48 +6,30 @@
  * What it is:   The `/help` screen: Glossary and guides.
  * What it does: Lists every term the screens use as a definition list with an `id` per term
  *               (so `<Term>` and the About block can link to `/help#wilson`), the eight
- *               bundled guides with one line each, and the ADR index by title (ADRs are not
- *               bundled; they live in the repository under docs/adr). Nothing here reads the
- *               API beyond the session.
- * How:          `TERM_IDS` / `TERMS`, `DOC_NAMES` / `DOC_TITLES`; on load it scrolls to
- *               `location.hash` so a term link lands on its entry.
+ *               bundled guides with one line each, and every decision record as a link to its
+ *               bundled copy at /help/docs/ADR-nnnn (G-156; the list is `ADR_TITLES`, which a
+ *               test holds to docs/adr — G-157). Nothing here reads the API beyond the session.
+ * How:          `TERM_IDS` / `TERMS`, `DOC_NAMES` / `DOC_TITLES`, `ADR_TITLES`; on load it
+ *               scrolls to `location.hash` so a term link lands on its entry.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none
+ * ADRs:         none (DL-077)
  * Works with:   ui/src/help/glossary.ts (the terms), ui/src/help/docs.ts (the guides),
+ *               ui/src/help/adrs.ts (the decision records),
  *               ui/src/screens/Help/DocPage.tsx (where a guide link lands),
  *               ui/src/components/Help.tsx (`Term` links here), ui/src/components/Layout.tsx
  *               (Help in the top bar and footer), ui/src/App.tsx (the route)
  * Tested by:    ui/src/screens/Help/HelpPage.test.tsx
- * Touch when:   a guide or a term is added (edit the registries, not this page); an ADR is
- *               added (add its row to `ADRS`).
+ * Touch when:   a guide, a term or a decision record is added (edit the registries —
+ *               glossary.ts, docs.ts, adrs.ts — not this page).
  */
 import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router'
 import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Lede } from '../../components/govuk'
+import { ADR_TITLES, adrHref } from '../../help/adrs'
 import { DOC_NAMES, DOC_TITLES, docHref } from '../../help/docs'
 import { TERM_IDS, TERMS } from '../../help/glossary'
-
-/** The ADR index (docs/adr/README.md) by number and title — not bundled, so listed, not linked. */
-const ADRS: Array<[string, string]> = [
-  ['0001', 'Four belts and false-Q1 = 0 enforced at write'],
-  ['0002', 'Append-only, hash-chained ledger'],
-  ['0003', 'One routing rule'],
-  ['0004', 'Builder registry; sighted and blind modes'],
-  ['0005', 'Fail-closed Docker sandbox for every test run'],
-  ['0006', 'Zero raw retention by default; evidence packs'],
-  ['0007', 'Cross-organisation learning: abstract cell export only'],
-  ['0008', 'Standard-library core and downward-only layers'],
-  ['0009', 'Text-level mutators for the non-Python languages'],
-  ['0010', 'Polyglot negative controls'],
-  ['0011', 'Belt 5: the repository’s own formatter or linter'],
-  ['0012', 'The builder runs in a sealed container'],
-  ['0013', 'An external reviewer’s verdict is recorded and advisory'],
-  ['0014', 'The GitHub App is the connection'],
-  ['0015', 'A sign-off expires with the apparatus'],
-  ['0016', 'The two-person rule is a policy clause, not an apparatus move'],
-]
 
 export function HelpPage() {
   const { hash } = useLocation()
@@ -99,11 +81,13 @@ export function HelpPage() {
       </section>
       <section aria-labelledby="decisions-heading" id="decisions" className="space-y-4">
         <h2 id="decisions-heading">Decisions (ADRs)</h2>
-        <p className="m-0 max-w-[44em] text-[16px] leading-[1.5]">The architecture decision records are in the repository under docs/adr. They are listed here by title so a screen can name one.</p>
+        <p className="m-0 max-w-[44em] text-[16px] leading-[1.5]">The architecture decision records live in the repository under docs/adr. Each is built into this deployment and opens here, read-only, so you can follow a decision a screen names.</p>
         <ul className="m-0 max-w-[44em] list-none border-t border-border p-0">
-          {ADRS.map(([num, title]) => (
+          {ADR_TITLES.map(([num, title]) => (
             <li key={num} className="border-b border-border py-2 text-[16px] leading-[1.5]">
-              <span className="font-mono">ADR-{num}</span> — {title}
+              <Hint as={Link} id="link.help.adr" to={adrHref(num)} className="underline underline-offset-4">
+                <span className="font-mono">ADR-{num}</span> — {title}
+              </Hint>
             </li>
           ))}
         </ul>

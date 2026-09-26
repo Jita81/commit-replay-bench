@@ -276,6 +276,26 @@ export function useRepo(name: string): UseQueryResult<RepoDetail, ApiError> {
   })
 }
 
+/**
+ * Tells the server, once per repository per mount, that this person has the repository's
+ * baseline in front of them (`POST /repos/{name}/baseline-read` → a `repo.baseline_read`
+ * event, once per person). The Baseline screen calls it when the map of a repository with
+ * rows has loaded; the repository is then re-read, so Home's task 6 "Read the baseline"
+ * completes on a recorded read rather than only on a sign-off (G-165, DL-078). A failed record
+ * changes nothing the reader sees — Home keeps reading the task as not yet done.
+ */
+export function useRecordBaselineRead(repo: string, ready: boolean): void {
+  const qc = useQueryClient()
+  const sent = useRef<string | null>(null)
+  useEffect(() => {
+    if (!ready || !repo || sent.current === repo) return
+    sent.current = repo
+    api<unknown>(`/repos/${enc(repo)}/baseline-read`, { method: 'POST' })
+      .then(() => qc.invalidateQueries({ queryKey: keys.repo(repo) }))
+      .catch(() => undefined)
+  }, [repo, ready, qc])
+}
+
 /** `POST /repos`; invalidates the list. */
 export function useCreateRepo(): UseMutationResult<RepoDetail, ApiError, RepoCreateRequest> {
   const qc = useQueryClient()

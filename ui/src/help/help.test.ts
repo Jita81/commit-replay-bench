@@ -4,8 +4,9 @@
  * Navigation
  * ----------
  * What it is:   The help registry's ratchet test.
- * What it does: Pins that (1) every path in the app's route table except `/login` and `*`
- *               has a `helpFor()` hit and the two help routes have none; (2) every
+ * What it does: Pins that (1) every path in the app's route table — `/login`, the help
+ *               pages and `*` included — has a `helpFor()` hit that is its OWN entry, and the
+ *               catch-all is declared once and last (G-926); (2) every
  *               `readMore.to` and every term's `readMore` names a bundled guide and, when it
  *               carries a slug, a heading in that file slugifies to it; (3) every `terms[]` id
  *               is in `TERMS`; (4) copy lint — purpose / next / numbers use "cell",
@@ -79,18 +80,23 @@ const LINT: Array<[RegExp, TermId]> = [
 ]
 
 describe('HELP ratchet', () => {
-  it('every route in App.tsx except /login and * has an entry; the help routes have none', () => {
+  it('every route in App.tsx has an entry of its own — /login, the help pages and the catch-all included', () => {
     const paths = appRoutePaths()
     expect(paths.length).toBeGreaterThan(20)
     for (const p of paths) {
-      if (p === '/login' || p === '*') continue
-      if (p.startsWith('/help')) {
-        expect(helpFor(concrete(p)), p).toBeUndefined()
-        continue
-      }
-      expect(helpFor(concrete(p)), `no HELP entry matches ${p}`).toBeDefined()
+      // the catch-all answers for any address the table does not route
+      const pathname = p === '*' ? '/nowhere/at/all' : concrete(p)
+      // its OWN entry, never the catch-all's: a route that fell through to `*` would show the
+      // 404's help on a real screen, so "has an entry" alone would pass and prove nothing
+      expect(helpFor(pathname)?.route, `no HELP entry of its own for ${p}`).toBe(p)
     }
-    expect(helpFor('/nowhere')).toBeUndefined()
+  })
+
+  it('the catch-all is declared once and last, so it never answers for a routed screen', () => {
+    expect(HELP.filter((h) => h.route === '*')).toHaveLength(1)
+    expect(HELP.at(-1)?.route).toBe('*')
+    expect(helpFor('/nowhere')?.route).toBe('*')
+    expect(helpFor('/home')?.route).toBe('/home')
   })
 
   it('helpFor matches in declaration order and returns the most specific declared entry', () => {

@@ -189,7 +189,7 @@ export const HINTS = {
   'task.home.measure':
     'Whether a first sighted measurement has run. This is the task that spends model budget; it says how much before it starts.',
   'task.home.read_baseline':
-    'Incomplete once the map has rows; Completed once someone has acted on the baseline (any active sign-off on this repository).',
+    'Incomplete once the map has rows; Completed once the server has recorded a person opening this repository’s baseline, or a sign-off on it is active. Unavailable when the map or the sign-offs could not be read.',
   'task.home.invite_approver':
     'Whether an account with the approver role exists. Only an admin can add one; the operator who queues runs should not be the approver who signs them.',
   'task.home.deliver':
@@ -1569,6 +1569,8 @@ export const HINTS = {
     'Return to the glossary and the list of guides, at the place this guide is listed.',
   'link.help.index':
     'Open the glossary and the list of bundled guides, to find the one you meant.',
+  'link.help.adr':
+    'Open this decision record: a read-only copy of the repository’s file, built into this deployment, that says what was decided and why.',
   'button.notfound.home':
     'Return to Home, the start of the journey, with the navigation intact.',
 } as const satisfies Record<string, string>

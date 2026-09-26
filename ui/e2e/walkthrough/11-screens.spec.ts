@@ -6,8 +6,8 @@
  * operator / approver / admin) it visits every route at desktop (1280×900) and phone
  * (375×812) widths, waits for the page to settle (load + bounded network-idle + the main
  * heading), writes a full-page PNG named `<persona>__<route-slug>__<width>.png` under
- * `<CRB_E2E_OUTPUT_DIR>/screens/`, and asserts that every authenticated route except the
- * help pages renders the "About this screen" block (`data-testid="about-this-screen"`) —
+ * `<CRB_E2E_OUTPUT_DIR>/screens/`, and asserts that every authenticated route — the help
+ * pages and the 404 included (G-926) — renders the "About this screen" block (`data-testid="about-this-screen"`) —
  * the one help mechanism, mounted once in the shell, must reach every screen for every role.
  * On every route it also samples up to five hinted elements (`data-hint`: first, last and
  * three evenly spaced), opens each one's bubble — hover at desktop width, a touch
@@ -46,7 +46,7 @@
  *               task to anchor the detail routes, then for each persona × width signs in
  *               through the form, visits every route, saves a full-page screenshot under
  *               `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block is present on
- *               every route that is not a help page or the unknown address and, at 375 px,
+ *               every route, the help pages and the unknown address included, and, at 375 px,
  *               that the top bar is at most two rows (a wrapped "Sign out" is a phone-width
  *               defect) and the document does not scroll sideways (or is on the shrinking
  *               `SIDEWAYS_SCROLL_RATCHET` with its gap); opens a sample of
@@ -118,7 +118,7 @@ interface Ctx {
 
 const ctx: Ctx = { repo: primary().name, runId: '', taskId: '' }
 
-/** Every authenticated route; `about: false` marks the help pages, which are the help and carry no About block. */
+/** Every authenticated route; `about: false` would mark a route with no About block — since G-926 there is none. */
 function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
   const r = c.repo
   const list: Array<[string, string, boolean?]> = [
@@ -143,12 +143,12 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     ['/learn', 'learn'],
     ['/ledger', 'ledger'],
     ['/settings', 'settings'],
-    ['/help', 'help', false],
-    ['/help/docs/OPERATOR', 'help-docs-operator', false],
+    // the help pages and the 404 carry an About block like every other screen (G-926)
+    ['/help', 'help'],
+    ['/help/docs/OPERATOR', 'help-docs-operator'],
     // an unknown address: the 404 renders inside the shell, so it is captured, hint-sampled
-    // and axe-swept for every persona at both widths like any other route. No About block —
-    // `helpFor` matches no HELP entry for a path the product does not route (G-918).
-    ['/nowhere/at/all', 'not-found', false],
+    // and axe-swept for every persona at both widths like any other route (G-918)
+    ['/nowhere/at/all', 'not-found'],
   ]
   return list.map(([path, slug, about]) => ({ path, slug, about: about ?? true }))
 }

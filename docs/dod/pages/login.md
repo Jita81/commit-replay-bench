@@ -24,8 +24,8 @@ default `/home`); the organisation button hands off to `GET /auth/oidc/start?nex
 when `GET /version` says `oidc_enabled`. A visitor who already has a session is sent to `next`
 without seeing the form.
 
-**Non-goals.** The page does not create accounts, reset or change passwords, choose a role or
-show an About block (it renders outside the shell, so `AboutThisScreen` never mounts). Accounts
+**Non-goals.** The page does not create accounts, reset or change passwords or choose a role. (It
+renders outside the shell, so it mounts its own About block rather than the shell's — G-926.) Accounts
 and passwords are an admin's job (Settings → Users, `OPERATOR.md` §9) or the host operator's (`crb users`).
 
 ## Definition of done

@@ -348,6 +348,7 @@ export const ACTION_HELP: Record<string, string> = {
   // audit traces — out-of-band records, never rendered in the log but named for completeness
   'repo.created': 'The repository was registered.',
   'repo.updated': 'The repository’s configuration was changed; the diff is recorded.',
+  'repo.baseline_read': 'A person read the repository’s baseline for the first time; Home’s task 6 completes on it.',
   'repo.github_linked': 'The repository was linked to a GitHub App installation; its clone URL changed and both URLs are recorded.',
   'repo.clone_path.outside_home': 'An admin registered or moved the clone outside the deployment’s repositories directory; the path and where it resolves are recorded.',
   'github.installation.recorded': 'A GitHub App installation was recorded for this deployment.',

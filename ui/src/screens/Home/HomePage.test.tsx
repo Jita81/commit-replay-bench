@@ -22,7 +22,11 @@
  *               element carries a hint whose copy opens on hover (the task-5 status tag); and
  *               that the north-star tile shows working changes per £ with n, its range in
  *               pounds and its apparatus, reads every repository, and is an honest empty tile
- *               when unmeasured or refused.
+ *               when unmeasured or refused; that an approver reads the progress report, not
+ *               "Get started" (G-911); that a recorded read of the baseline completes task 6
+ *               with no sign-off (G-165); and that a failed read is an error envelope with
+ *               Retry and "Unavailable" on the tasks that stand on it, never "no repository
+ *               yet", "Cannot start yet" or "Incomplete" (G-164).
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -35,6 +39,7 @@
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
@@ -283,6 +288,112 @@ describe('HomePage', () => {
     mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /repos': { items: [], total: 0, limit: 500, offset: 0 }, 'GET /value': () => envelope(409, 'false_q1_refused', 'x') })
     renderApp(<HomePage />, { route: '/home' })
     await waitFor(() => expect(screen.getAllByTestId('tile-value').at(-1)).toHaveTextContent('Not available: the API refused the scorecard.'))
+  })
+
+  it('an approver reads the progress report the About block promises — never "Get started" or "Continue to task n"', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'approver' },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 30 } },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    // the approver's own lede, once the session has loaded (before it, every role reads the viewer's)
+    expect(await screen.findByText(/an approver reads what the evidence says and signs what is waiting on them/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/The operators have completed \d of 8 tasks\./)).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Where this deployment is' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Get started' })).not.toBeInTheDocument()
+    // the approver's next press is the baseline (the About block's "Read the baseline meanwhile"), not an operator's task
+    expect(screen.queryByRole('link', { name: /^Continue to task/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Continue to the baseline for alpha' })).toHaveAttribute('href', '/results?repo=alpha')
+  })
+
+  it('a baseline a person has read completes "Read the baseline" with no sign-off behind it (the server’s record of the read)', async () => {
+    const read = { ...REPO, baseline_read: { at: '2026-09-26T09:00:00Z', by: 'ada' } }
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /repos': { items: [read], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': read,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 30 } },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    const rows = await waitFor(() => {
+      const r = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+      expect(r[5]).toHaveTextContent('Completed')
+      return r
+    })
+    expect(rows[5]).toHaveTextContent('Read the baseline')
+    expect(screen.queryByRole('link', { name: 'Continue to task 6: Read the baseline' })).not.toBeInTheDocument()
+  })
+
+  it('a failed read shows the error envelope with Retry and tags the tasks that depend on it "Unavailable" — never "no repository yet"', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'admin' },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /repos': () => envelope(500, 'internal', 'database unavailable'),
+      'GET /health': () => envelope(503, 'unavailable', 'health unreadable'),
+      'GET /users': () => envelope(500, 'internal', 'users unreadable'),
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Part of this deployment’s state could not be read')
+    expect(alert).toHaveTextContent('the repositories')
+    expect(alert).toHaveTextContent('the deployment’s health')
+    await waitFor(() => expect(alert).toHaveTextContent('the user accounts'))
+    expect(document.body).not.toHaveTextContent('no repository yet')
+    expect(screen.getByText('repositories unavailable')).toBeInTheDocument()
+    const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    for (const i of [1, 2, 3, 4, 5, 6, 7]) expect(rows[i], `task ${i + 1}`).toHaveTextContent('Unavailable')
+    expect(rows[6]).not.toHaveTextContent('Not known yet')
+    // Retry asks again for every read that failed, and only for those
+    const before = calls.filter((c) => c.path === '/repos').length
+    await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/repos').length).toBeGreaterThan(before))
+    expect(calls.some((c) => c.path === '/users' && c.method === 'GET')).toBe(true)
+  })
+
+  it('a failed capability map or sign-off read makes the tasks that read it "Unavailable", never "Cannot start yet" or "Incomplete"', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': () => envelope(500, 'internal', 'ledger unreadable'),
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
+      'GET /signoffs': () => envelope(500, 'internal', 'signoffs unreadable'),
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    const alert = await screen.findByRole('alert')
+    await waitFor(() => expect(alert).toHaveTextContent('the sign-offs'))
+    expect(alert).toHaveTextContent('the capability map')
+    const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    expect(rows[4]).toHaveTextContent('Unavailable')
+    expect(rows[5]).toHaveTextContent('Unavailable')
+    expect(rows[7]).toHaveTextContent('Unavailable')
+    // the tasks that do not read the failed reads keep their honest status
+    expect(rows[1]).toHaveTextContent('Completed')
+    expect(rows[3]).toHaveTextContent('Completed')
   })
 
   it('every task tag, the kicker, the summary, the banner and Continue carry a hint; the Measure tag opens on hover with the registry copy', async () => {

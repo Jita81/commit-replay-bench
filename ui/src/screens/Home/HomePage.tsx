@@ -15,14 +15,20 @@
  *               what to do next and what it costs; nothing here spends money without a
  *               queued run they can see and cancel (tasks 1–4 cost nothing). Statuses are
  *               never kept locally: the GitHub App info, the repositories, the chosen
- *               repository's stages (`stagesFor`), a sign-off the API flags `active` and not
- *               `stale` (task 6 — a stale one lifts nothing, so completes nothing), the users
- *               list (task 7) and the active factory run (task 8: "Backlog frozen — run the
- *               factory" until a run exists, then "In progress — item k of n") decide them.
+ *               repository's stages (`stagesFor`), the server's record that a person read the
+ *               baseline (`baseline_read`) or a sign-off the API flags `active` and not
+ *               `stale` (task 6 — a stale one lifts nothing, so completes nothing; DL-078),
+ *               the users list (task 7) and the active factory run (task 8: "Backlog frozen —
+ *               run the factory" until a run exists, then "In progress — item k of n") decide
+ *               them. A read that fails is never read as absence (G-164): one error envelope
+ *               names every read that failed, with Retry, and each task that stands on one
+ *               reads "Unavailable" rather than "Incomplete" or "Cannot start yet".
  *               Continue points at the first task that is neither Completed nor Cannot
  *               start yet, so the first press never lands on an empty screen. A viewer
- *               (sponsor, auditor) gets the same list read as a progress report — "Where
- *               this deployment is" — not as their to-do list; a measurement in flight
+ *               (sponsor, auditor) and an approver get the same list read as a progress
+ *               report — "Where this deployment is" — not as their to-do list: an approver
+ *               outranks an operator but works none of the tasks, so the operators' view is
+ *               gated on operator or admin (G-911, DL-078); a measurement in flight
  *               reads "In progress", and the baseline opens as soon as any row exists.
  *               Every element a reader meets — the kicker, the sandbox banner's lead line,
  *               the "n of 8" summary, each task's status tag and Continue — is a hint
@@ -33,19 +39,22 @@
  *               recently updated) → `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6; `useUsers`
  *               (admin) or the principal's role for task 7; `useFactoryBacklog` +
- *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`.
+ *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`; every
+ *               query's error state feeds the one `ErrorState`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-042, DL-044)
+ * ADRs:         none (DL-042, DL-044, DL-078)
  * Works with:   ui/src/components/govuk.tsx (TaskList, NotificationBanner, InsetText),
+ *               ui/src/components/ErrorState.tsx (the failed reads, with Retry),
  *               ui/src/help/hints.ts (the `task.home.*` copy; the trigger is `Hint`),
  *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`),
  *               ui/src/screens/Connect/connection.ts (the connection state each task reads),
  *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead: with Connect
  *               and Results, the routes in ui/src/App.tsx),
- *               ui/src/screens/Posture/PosturePage.tsx (the health banner's target),
- *               ui/src/screens/Home/ValueTile.tsx (the scorecard tile)
+ *               ui/src/screens/Home/ValueTile.tsx (the scorecard tile),
+ *               src/crb/server/routes/repos.py (`baseline_read` on the repository — task 6)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
- *               (every element resolves to a registry id)
+ *               (every element resolves to a registry id), ui/e2e/walkthrough/13-orient.spec.ts
+ *               (task tags against the live stack — G-166)
  * Touch when:   a task is added to the walk (connection.ts first; its `task.home.*` hint in
  *               hints.ts second).
  */
@@ -54,6 +63,7 @@ import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useSignoffs, useUsers } from '../../api/hooks'
 import { isApiError } from '../../api/client'
+import { ErrorState } from '../../components/ErrorState'
 import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, type TagTone, TaskList, type TaskItem } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
@@ -67,6 +77,19 @@ const LABEL: Record<StageStatus, string> = { done: 'Completed', warn: 'Completed
 function notRun(err: unknown): boolean {
   return isApiError(err) && err.status === 404
 }
+
+/** A read that failed for any reason but "not run yet" (a 404 on a stage that has not run). */
+function failedRead(q: { isError: boolean; error: unknown }): boolean {
+  return q.isError && !notRun(q.error)
+}
+
+/** "a", "a and b", "a, b and c" — the reads that failed, in words. */
+function inWords(items: string[]): string {
+  return items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
+}
+
+/** The tag of a task whose evidence could not be read: never "Incomplete" or "Cannot start yet". */
+const UNAVAILABLE = { status: 'Unavailable', tone: 'grey' as TagTone }
 
 export type FactoryStatus = 'delivered' | 'running' | 'frozen' | 'ready' | 'no_deliver_cell' | 'blocked' | 'unknown'
 const FACTORY_LABEL: Record<FactoryStatus, string> = {
@@ -151,11 +174,16 @@ export function HomePage() {
   const measured = measureStage === 'done'
   const measuring = measureStage === 'running'
   // the baseline is readable from the first row, whether or not a run is still adding to it;
-  // it counts as read once someone has acted on it — a sign-off the API itself calls active:
-  // a stale one (the apparatus moved on, ADR-0015) lifts nothing, so it completes nothing
+  // it counts as read once the server has recorded a person reading it (`baseline_read`, the
+  // `repo.baseline_read` event the Baseline screen writes — DL-078), or once someone has acted
+  // on it — a sign-off the API itself calls active: a stale one (the apparatus moved on,
+  // ADR-0015) lifts nothing, so it completes nothing
   const anyRows = (map.data?.summary.n_total ?? 0) > 0
-  const baselineActed = (signoffs.data?.items ?? []).some((s) => s.active && !s.stale)
-  const operator = can('operator')
+  const baselineActed = Boolean(repo.data?.baseline_read) || (signoffs.data?.items ?? []).some((s) => s.active && !s.stale)
+  // the operators' view is for the roles that work the tasks: an operator and an admin. An
+  // approver outranks an operator (ROLE_ORDER) but works none of the eight tasks, so they read
+  // the progress report their About block describes (G-911, DL-078)
+  const operator = can('operator') && me?.role !== 'approver'
   const approverKnown = users.data ? users.data.items.some((u) => u.role === 'approver' || u.role === 'admin') : me?.role === 'approver' || me?.role === 'admin' ? true : undefined
 
   const q = chosen ? `?repo=${encodeURIComponent(chosen)}` : ''
@@ -171,18 +199,38 @@ export function HomePage() {
   const progress = factoryRun.data?.progress
   const item = progress ? kOfN(progress.done, progress.total) : null
   const factoryLabel = factoryStatus === 'running' && item ? `In progress — item ${item}` : FACTORY_LABEL[factoryStatus]
+  // every read the tasks stand on; one that failed is shown as failed (G-164), never as absence
+  const reads = [
+    { label: 'the repositories', q: repos, failed: repos.isError },
+    { label: 'the repository’s record', q: repo, failed: repo.isError },
+    { label: 'the oracle report', q: oracle, failed: failedRead(oracle) },
+    { label: 'the negative controls', q: controls, failed: failedRead(controls) },
+    { label: 'the capability map', q: map, failed: map.isError },
+    { label: 'the sign-offs', q: signoffs, failed: signoffs.isError },
+    { label: 'the user accounts', q: users, failed: users.isError },
+    { label: 'the factory backlog', q: backlog, failed: failedRead(backlog) },
+    { label: 'the factory items', q: factoryTasks, failed: factoryTasks.isError },
+    { label: 'the deployment’s health', q: health, failed: health.isError },
+  ]
+  const unread = reads.filter((r) => r.failed)
+  const reposUnread = repos.isError
+  const repoUnread = reposUnread || repo.isError
+  const proveUnread = repoUnread || failedRead(oracle) || failedRead(controls)
+  const mapUnread = repoUnread || map.isError
   const tasks: TaskItem[] = [
     { num: 1, name: 'Connect GitHub', status: ghStatus.status, tone: ghStatus.tone, to: '/connect', hint: 'task.home.connect_github' },
-    { num: 2, name: 'Choose a repository', status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue', to: '/connect', hint: 'task.home.choose_repo' },
-    { num: 3, name: 'Confirm its shape', status: stage('probe') === 'done' ? 'Completed' : hasRepo ? LABEL[stage('probe') ?? 'todo'] : 'Cannot start yet', tone: stage('probe') === 'done' ? 'pale' : hasRepo ? TONE[stage('probe') ?? 'todo'] : 'grey', to: chosen ? `/repos/${encodeURIComponent(chosen)}` : '/connect', hint: 'task.home.confirm_shape' },
-    { num: 4, name: 'Prove the instrument (£0)', status: LABEL[proveStatus], tone: TONE[proveStatus], to: walk, hint: 'task.home.prove_instrument' },
-    { num: 5, name: 'Measure — spends money', status: measured ? 'Completed' : measuring ? 'In progress' : proveDone ? 'Incomplete' : 'Cannot start yet', tone: measured ? 'pale' : measuring || proveDone ? 'blue' : 'grey', to: measuring && chosen ? `/connect/${encodeURIComponent(chosen)}` : chosen ? `/connect/${encodeURIComponent(chosen)}/measure` : '/connect', hint: 'task.home.measure' },
-    { num: 6, name: 'Read the baseline', status: baselineActed ? 'Completed' : anyRows ? 'Incomplete' : 'Cannot start yet', tone: baselineActed ? 'pale' : anyRows ? 'blue' : 'grey', to: `/results${q}`, hint: 'task.home.read_baseline' },
+    { num: 2, name: 'Choose a repository', ...(reposUnread ? UNAVAILABLE : { status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue' }), to: '/connect', hint: 'task.home.choose_repo' },
+    { num: 3, name: 'Confirm its shape', ...(repoUnread ? UNAVAILABLE : { status: stage('probe') === 'done' ? 'Completed' : hasRepo ? LABEL[stage('probe') ?? 'todo'] : 'Cannot start yet', tone: stage('probe') === 'done' ? 'pale' : hasRepo ? TONE[stage('probe') ?? 'todo'] : 'grey' }), to: chosen ? `/repos/${encodeURIComponent(chosen)}` : '/connect', hint: 'task.home.confirm_shape' },
+    { num: 4, name: 'Prove the instrument (£0)', ...(proveUnread ? UNAVAILABLE : { status: LABEL[proveStatus], tone: TONE[proveStatus] }), to: walk, hint: 'task.home.prove_instrument' },
+    { num: 5, name: 'Measure — spends money', ...(mapUnread ? UNAVAILABLE : { status: measured ? 'Completed' : measuring ? 'In progress' : proveDone ? 'Incomplete' : 'Cannot start yet', tone: measured ? 'pale' : measuring || proveDone ? 'blue' : 'grey' }), to: measuring && chosen ? `/connect/${encodeURIComponent(chosen)}` : chosen ? `/connect/${encodeURIComponent(chosen)}/measure` : '/connect', hint: 'task.home.measure' },
+    // a recorded read or an active sign-off is Completed whatever else failed; otherwise a
+    // failed read of the map or the sign-offs leaves the task unknown, not "Incomplete"
+    { num: 6, name: 'Read the baseline', ...(baselineActed ? { status: 'Completed', tone: 'pale' as TagTone } : mapUnread || signoffs.isError ? UNAVAILABLE : { status: anyRows ? 'Incomplete' : 'Cannot start yet', tone: anyRows ? 'blue' : 'grey' }), to: `/results${q}`, hint: 'task.home.read_baseline' },
     // only an admin can invite; everyone else reads a state (not an instruction), is not sent
     // to a page that refuses them, and gets the note under the list
-    { num: 7, name: 'Invite an approver', status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey', to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
+    { num: 7, name: 'Invite an approver', ...(users.isError ? UNAVAILABLE : { status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey' }), to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
     // the destination (DL-044): the factory delivers a change under the baseline the walk earned
-    { num: 8, name: 'Deliver your first change', status: factoryLabel, tone: FACTORY_TONE[factoryStatus], to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory', hint: 'task.home.deliver' },
+    { num: 8, name: 'Deliver your first change', ...(factoryStatus !== 'delivered' && (reposUnread || map.isError || failedRead(backlog) || factoryTasks.isError) ? UNAVAILABLE : { status: factoryLabel, tone: FACTORY_TONE[factoryStatus] }), to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory', hint: 'task.home.deliver' },
   ]
   const completed = tasks.filter((t) => t.status === 'Completed').length
   // the operator's next press: the first task they can act on now; all done → the factory
@@ -192,13 +240,22 @@ export function HomePage() {
   return (
     <>
       <Hint id="stat.home.kicker">
-        <Kicker>{chosen ? `${chosen} · ${measured ? 'measured' : measuring ? 'measuring' : 'trial'}` : 'no repository yet'}</Kicker>
+        <Kicker>{reposUnread ? 'repositories unavailable' : chosen ? `${chosen} · ${measured ? 'measured' : measuring ? 'measuring' : 'trial'}` : 'no repository yet'}</Kicker>
       </Hint>
       <PageTitle>{operator ? 'Get started' : 'Where this deployment is'}</PageTitle>
       {!operator && (
         <Lede className="mb-4">
           You can read everything here and change nothing. The tasks below are the operators' progress from an empty deployment to a signed cell; the capability map and Decisions are where {me?.role === 'approver' ? 'an approver reads what the evidence says and signs what is waiting on them' : 'a viewer reads what the evidence says and what is waiting on a person'}.
         </Lede>
+      )}
+      {unread.length > 0 && (
+        <div className="mb-6 max-w-[44em]">
+          <ErrorState error={unread[0]!.q.error} title="Part of this deployment’s state could not be read" onRetry={() => unread.forEach((r) => void r.q.refetch())}>
+            <p className="m-0 text-sm">
+              Not read: {inWords(unread.map((r) => r.label))}. The tasks that depend on them read “Unavailable” until a retry succeeds — nothing here is shown as missing when it could not be read.
+            </p>
+          </ErrorState>
+        </div>
       )}
       {sandbox && sandbox.status !== 'ok' && (
         <NotificationBanner title="Important">

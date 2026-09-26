@@ -29,6 +29,9 @@ n, interval and apparatus, the licence sentence, and one of the doors: Open the 
 **Non-goals.** No repository-wide rate and no "the AI can do X%". No throughput or
 cost-per-accepted-change headline: the ledger records neither human hours nor merge outcomes,
 and the page says so. No act is taken here; every act is a link to the page that records it.
+Opening the map of a repository with rows records, once per person, that its baseline was read
+(`repo.baseline_read`, DL-078) — the one thing the page writes; it changes no number and is
+what Home's task 6 reads.
 Economics tiles are means only until the API serves an interval.
 
 ## Definition of done
