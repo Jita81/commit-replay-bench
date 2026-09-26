@@ -114,6 +114,24 @@ describe('CapabilityPage', () => {
     expect(screen.getByTestId('cell-measured').textContent).toContain('92.5%')
   })
 
+  it('the posture tile carries its apparatus and says no interval applies; every tile names the apparatus (PR #56 review)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, summary: { ...MAP.summary, posture_class: 'docker/copy/sealed', unqualified_posture: 3, excluded_posture_divergent: 1 } },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const posture = await screen.findByTestId('tile-posture')
+    expect(posture).toHaveTextContent('docker/copy/sealed')
+    expect(posture).toHaveTextContent('apparatus 2.0')
+    expect(posture).toHaveTextContent('95% CI—')
+    expect(posture).toHaveTextContent('no interval: a posture and row counts, not a rate')
+    // the class, not the instance: every headline tile on the page carries the map's apparatus
+    for (const tile of document.querySelectorAll('[data-component="stat-tile"]')) {
+      expect(tile.textContent, tile.getAttribute('data-testid') ?? tile.textContent ?? '').toContain('apparatus 2.0')
+    }
+  })
+
   it('shows the designed empty state when no repo is chosen; its action is Connection, not the repo list (J-HEL-14)', async () => {
     mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /repos': { items: [], total: 0, limit: 50, offset: 0 } })
     renderApp(<CapabilityPage />, { route: '/capability' })

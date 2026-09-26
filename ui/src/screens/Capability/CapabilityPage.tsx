@@ -399,7 +399,7 @@ export function CapabilityPage() {
                   hint="stat.capability.false_q1"
                   value={String(s.false_q1_total ?? 0)}
                   n={s.n_total ?? nTotal}
-                  apparatus="clean rows with a failed belt, across the map — must be 0"
+                  apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'} · clean rows with a failed belt, across the map — must be 0`}
                   tone={(s.false_q1_total ?? 0) > 0 || badCells > 0 ? 'red' : 'green'}
                   data-testid="tile-false-q1"
                 />
@@ -409,7 +409,9 @@ export function CapabilityPage() {
                   hint="stat.capability.posture"
                   value={s.posture_class || '—'}
                   n={s.n_total ?? nTotal}
-                  apparatus={`${fmtInt(s.unqualified_posture ?? 0)} unqualified-posture rows excluded · ${fmtInt(s.excluded_posture_divergent ?? 0)} rows left out where the task's tests differ between postures`}
+                  ci={null}
+                  apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'} · ${fmtInt(s.unqualified_posture ?? 0)} unqualified-posture rows excluded · ${fmtInt(s.excluded_posture_divergent ?? 0)} rows left out where the task's tests differ between postures`}
+                  footer="no interval: a posture and row counts, not a rate"
                   data-testid="tile-posture"
                 />
               </div>
