@@ -98,7 +98,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Read each stage’s status and detail line. The Baseline button opens the baseline once any stage has produced rows; a stage that reads Done, with a finding names what deliver is waiting on.',
       operator: 'Press Run on the next stage that reads Not started. A Failed stage says so; open run gives the log and the error, fix the cause, then Retry. Measure… is the only stage that spends.',
     },
-    numbers: 'Stage detail lines carry counts (tasks mined, controls constructed, mutants killed). They are counts, not rates: the rates, with n and a Wilson interval, appear on the Baseline.',
+    numbers: 'Stage detail lines carry counts (tasks mined, controls constructed, mutants killed). They are counts, not rates: the rates, with n and a Wilson interval, appear on the Baseline. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['negative_controls', 'oracle_strength', 'sighted', 'wilson', 'apparatus', 'belt', 'cell'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-3--prove-the-instrument-on-this-repository-operator-0', label: 'Prove the instrument for £0' },
@@ -113,7 +113,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'If a gate is amber, go back to the walk and run what is missing. If a cell reads calibrate, more attempts move it; if it reads human, more attempts will not.',
       approver: 'A cell that routes deliver and is not yet signed appears under Waiting on a person; Attest takes you to the sign-off form.',
     },
-    numbers: 'Every rate carries n (attempts), a 95 % Wilson interval and the apparatus version that produced it. The interval is the claim, not the point. Economics tiles are means only: the API does not yet serve an interval for cost or latency.',
+    numbers: 'Every rate carries n (attempts), a 95 % Wilson interval and the apparatus version that produced it. The interval is the claim, not the point. Economics tiles are means only: the API does not yet serve an interval for cost or latency. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['cell', 'wilson', 'apparatus', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'calibrate', 'human', 'granularize', 'belt'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-5--read-the-map-everyone', label: 'Read the map' },
@@ -143,7 +143,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Only an approver can sign. The attestations table shows every sign-off and revocation for this repository.',
       approver: 'Choose the cell, choose the accepted row you read, read the diff shown, tick the affirmation, write what you read and why it is acceptable, then Sign off. The green panel gives you a reference.',
     },
-    numbers: 'Each gate row shows the observed value against the policy threshold (n, point, Wilson lower bound, oracle strength, controls constructed and escaped). The policy version and apparatus are stamped on the record and served back verbatim.',
+    numbers: 'Each gate row shows the observed value against the policy threshold (n, point, Wilson lower bound, oracle strength, controls constructed and escaped). The policy version and apparatus are stamped on the record and served back verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['signoff', 'cell', 'wilson', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'controls_escape', 'apparatus', 'belt'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-7--sign-off-approver', label: 'Sign off' },
@@ -159,7 +159,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a deliver cell today; the rest are built and withheld.',
       approver: 'Items blocked on a structural gap wait for your signature. Overriding the route gate is recorded on the chain under your name.',
     },
-    numbers: '“k of m items sit in a cell that routes deliver” is read from the map at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim.',
+    numbers: '“k of m items sit in a cell that routes deliver” is read from the map at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['red_proof', 'route_gate', 'cell', 'deliver', 'evidence_pack', 'apparatus', 'belt', 'wilson'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted', label: 'Forward mode' },
@@ -188,7 +188,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Print it, or send the URL. “Shown to admins” marks a value the API only returns to an admin.',
       admin: 'If Sign-in reads Local accounts only, configure OpenID Connect; if Test executor is not docker, nothing measured is evidence.',
     },
-    numbers: 'Ledger rows, chain state and false-Q1 total come from the live verification; the belt set and policy names are the versions in force.',
+    numbers: 'Ledger rows, chain state and false-Q1 total come from the live verification; the belt set and policy names are the versions in force. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['apparatus', 'belt', 'false_q1', 'cell'],
     readMore: [
       { to: 'SECURITY#2-trust-boundaries', label: 'Trust boundaries' },

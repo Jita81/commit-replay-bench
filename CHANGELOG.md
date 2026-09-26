@@ -12,6 +12,13 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Each value stream measures its own flow**
+  ([stream M, G-925](https://github.com/Jita81/commit-replay-bench/pulls?q=head%3Afeat%2Fns1-m)).
+  `GET /flow?repo=` derives each stream's lead time, spend and counts from records the product
+  already keeps, and each stream's screen shows its own. An unmeasured figure is null, never
+  zero; an unpriced row is never counted as $0 and the reading says how many rows it leaves out;
+  a figure nothing records is named with the gap that would close it.
+
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile
   score working changes per pound, blind, and VALUE heads the definition of done. A bug class is
