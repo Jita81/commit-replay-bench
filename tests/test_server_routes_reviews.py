@@ -20,8 +20,9 @@ What it does: Pins, on a REAL retained worktree, that the served patch hashes to
               diff cannot be reviewed, a regression is never mergeable, redaction, verify
               reporting tamper and a lost anchor, stats joining the standing verdict onto cells
               and refusing a false-Q1 repo, and the table being append-only. The retained
-              worktree is found through the run's ``prep.start`` event (its name is opaque and
-              never rebuilt from the sha); a malformed name is never a path.
+              worktree is named by the row's own pack (``notes.worktree``), never by the run's
+              events or the sha, so each attempt of a reclaimed trial serves its own patch; a
+              malformed name is never a path.
 How:          ``Retained`` builds a graded row with a real ``pyrepo`` trial (a source edit and
               an untracked new file) under the API's home; ``make_env`` over the seed.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -43,16 +44,20 @@ import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from sqlalchemy import select, text
 
+from crb.builders.adapter import as_run_ledger
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
+from crb.core.execution import LocalExecutor
 from crb.core.grade import Belts, GradeResult
 from crb.core.ledger import GradeRow, grade_row_from_result
+from crb.core.run import BuildAttempt, RunSpec, run_task
+from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.workspace import opaque_dest
+from crb.observability.events import Emitter
 from crb.server.routes.grades import (
     HDR_DIFF_SHA,
     HDR_PATCH_SHA,
@@ -65,8 +70,10 @@ from crb.server.routes.grades import (
     worktree_name,
     worktree_path,
 )
+from crb.server.worker import evidence_pack_from_file
+from crb.store.events import DbEventSink
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, Run, Task
+from crb.store.models import Event, EvidencePackRow, Run, Task
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
 
@@ -114,7 +121,7 @@ class Retained:
         *,
         secret: bool = False,
         transcript: bool = True,
-        event: bool = True,
+        named: bool = True,
     ):
         self.env = env
         repo = pr.build(tmp_path / "pyrepo")
@@ -151,8 +158,8 @@ class Retained:
                 )
             )
             s.commit()
-        # the worktree exactly where run_task leaves it: an opaque name, mapped to the task
-        # and trial by the run's own prep.start event (assessment 2026-09-25 B1)
+        # the worktree exactly where run_task leaves it: an opaque name (assessment 2026-09-25
+        # B1), logged by the run's prep.start event and bound to the row by its pack's notes
         scratch = Path(env.settings.home) / "scratch"
         self.worktree = opaque_dest(scratch, "run", avoid=(task.task_id,)).name
         with env.factory() as s:
@@ -166,12 +173,9 @@ class Retained:
                     action="prep.start",
                     status="in_progress",
                     task_id=task.task_id,
-                    payload_json={
-                        "trial": "r1",
-                        "rung": "r1",
-                        # event=False: a run whose events name no worktree (pre-B1)
-                        **({"worktree": self.worktree} if event else {}),
-                    },
+                    # the event names the worktree even when the pack does not: the route
+                    # must never take it from here (PR #53 review, fifth round)
+                    payload_json={"trial": "r1", "rung": "r1", "worktree": self.worktree},
                 )
             )
             s.commit()
@@ -201,6 +205,11 @@ class Retained:
             changed_files=list(diff.files),
         )
         builder = BuilderRef(name="editblock", model="m", provider="p", transcript_ref=tref)
+        notes: dict[str, Any] = {"rung": "r1"}
+        if tref:
+            notes["transcript_ref"] = tref
+        if named:  # named=False: a pack that names no worktree (a run from before PR #53)
+            notes["worktree"] = self.worktree
         pack = EvidencePack(
             task=task,
             grade=result,
@@ -209,7 +218,7 @@ class Retained:
             run_id=RETAINED_RUN,
             trial="r1",
             actor="worker-1",
-            notes={"rung": "r1", "transcript_ref": tref} if tref else {"rung": "r1"},
+            notes=notes,
         )
         ledger = DbLedger(env.factory)
         ledger.store_pack(pack)
@@ -339,13 +348,14 @@ class TestRetainedPatch:
         res = env.get(f"/grades/{legacy.row_hash}/patch")
         assert res.status_code == 404 and envelope(res)["code"] == "patch_unavailable"
 
-    def test_a_run_whose_events_name_no_worktree_says_so(self, env: Env, tmp_path: Path) -> None:
-        """The name is never rebuilt from the sha: without the event there is no path."""
-        r = Retained(env, tmp_path, event=False)
-        assert r.ws.root.is_dir()  # the directory is there; nothing maps the row to it
+    def test_a_pack_that_names_no_worktree_says_so(self, env: Env, tmp_path: Path) -> None:
+        """The name is never rebuilt from the sha, nor taken from the run's events: the
+        directory exists and a ``prep.start`` names it, but the row's pack does not."""
+        r = Retained(env, tmp_path, named=False)
+        assert r.ws.root.is_dir()  # the directory is there; nothing on the row maps to it
         res = r.patch()
         assert res.status_code == 404
-        assert "name no worktree" in envelope(res)["detail"]["reason"]
+        assert "names no worktree" in envelope(res)["detail"]["reason"]
 
     def test_a_malformed_worktree_name_is_never_turned_into_a_path(self) -> None:
         scratch = Path("/srv/crb/scratch")
@@ -353,62 +363,107 @@ class TestRetainedPatch:
         for bad in ("", "../../etc", "run-0123456789ab/..", "run-pyrepo-6dbaf3a727-x-r1"):
             assert worktree_path(scratch, bad) is None, bad
 
-    def test_the_latest_prep_start_of_a_trial_names_its_worktree(self, env: Env) -> None:
-        """A reclaimed run re-runs its in-flight task: a second ``prep.start`` for the same
-        trial names a new opaque worktree. The row was written by the LATER attempt, so the
-        later event must win; the crashed attempt's worktree is stale."""
-        run_id, task_id = "7e" * 16, "d" * 40
-        stale, live = "run-" + "a" * 12, "run-" + "b" * 12
-        with env.factory() as s:
-            for seq, name in ((1, stale), (2, live)):
-                s.add(
-                    Event(
-                        event_id=f"{seq:032d}",
-                        trace_id=run_id,
-                        seq=seq,
-                        timestamp=f"2026-09-25T10:0{seq}:00+00:00",
-                        stage="build",
-                        action="prep.start",
-                        status="in_progress",
-                        task_id=task_id,
-                        payload_json={"trial": "r1", "rung": "r1", "worktree": name},
-                    )
-                )
-            s.commit()
-        row = SimpleNamespace(run_id=run_id, task_id=task_id, trial="r1")
-        with env.factory() as s:
-            assert worktree_name(s, row) == live  # type: ignore[arg-type]
-
-    @pytest.mark.parametrize("latest", [{}, {"worktree": ""}], ids=["missing", "empty"])
-    def test_a_latest_prep_start_that_names_no_worktree_names_none(
-        self, env: Env, latest: dict[str, str]
+    @pytest.mark.parametrize(
+        ("pack", "name"),
+        [
+            ({"notes": {"worktree": "run-" + "a" * 12}}, "run-" + "a" * 12),
+            ({"notes": {"worktree": ""}}, ""),
+            ({"notes": {"rung": "r1"}}, ""),
+            ({"notes": "run-" + "a" * 12}, ""),
+            ({}, ""),
+            (None, ""),
+        ],
+        ids=["named", "empty", "missing", "notes-not-a-map", "no-notes", "no-pack"],
+    )
+    def test_a_rows_worktree_is_named_by_its_own_pack_only(
+        self, pack: dict[str, Any] | None, name: str
     ) -> None:
-        """PR #53 review: the lookup skipped a latest ``prep.start`` that named no worktree
-        and fell back to an OLDER attempt's, serving that stale patch for the row the later
-        attempt wrote. The latest attempt's event is the only one that may answer; when it
-        names nothing, nothing is named."""
-        run_id, task_id = "7f" * 16, "e" * 40
-        stale = "run-" + "c" * 12
-        payloads = [{"worktree": stale}, latest]
+        """The row's pack, written once per attempt, is the only thing that names its
+        worktree; a pack without a name names none (never an event's, never a guess)."""
+        assert worktree_name(pack) == name
+
+    def test_each_attempt_of_a_reclaimed_trial_serves_its_own_patch(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        """PR #53 review, fifth round: a reclaimed run re-runs every task from the start
+        (``Worker._run_replay`` does not skip graded ones), so the ledger holds two rows for
+        one run, task and trial, one per attempt. Resolving a row's worktree through the
+        LATEST ``prep.start`` gave the first row the second attempt's worktree, and served
+        a patch that row never graded. Here the real ``run_task`` runs the trial twice,
+        with the worker's event and pack path; each row must serve its own verified patch."""
+        repo = pr.build(tmp_path / "pyrepo")
+        task = repo.feat_task(repo=ALPHA)
         with env.factory() as s:
-            for seq, extra in enumerate(payloads, start=1):
-                s.add(
-                    Event(
-                        event_id=f"{seq + 10:032d}",
-                        trace_id=run_id,
-                        seq=seq,
-                        timestamp=f"2026-09-25T11:0{seq}:00+00:00",
-                        stage="build",
-                        action="prep.start",
-                        status="in_progress",
-                        task_id=task_id,
-                        payload_json={"trial": "r1", "rung": "r1", **extra},
-                    )
+            s.add(
+                Run(
+                    id=RETAINED_RUN,
+                    repo=ALPHA,
+                    kind="replay",
+                    status="succeeded",
+                    builder="fixture",
+                    model="m",
+                    provider="p",
+                    ladder_json=["r1"],
+                    params_json={"retain": {"worktrees": True}},
+                    actor="op1",
                 )
+            )
             s.commit()
-        row = SimpleNamespace(run_id=run_id, task_id=task_id, trial="r1")
-        with env.factory() as s:
-            assert worktree_name(s, row) == ""  # type: ignore[arg-type]
+        ledger = DbLedger(env.factory)
+        evidence = tmp_path / "evidence"
+
+        class _PackThenRow:
+            """``_RunLedger``'s write order: the pack into the DB, then the row."""
+
+            def append(self, row: GradeRow) -> GradeRow:
+                body = evidence_pack_from_file(evidence, row.evidence_pack_hash)
+                assert body is not None
+                with env.factory() as s:
+                    s.add(
+                        EvidencePackRow(
+                            pack_hash=row.evidence_pack_hash,
+                            repo=row.repo,
+                            task_id=row.task_id,
+                            run_id=row.run_id,
+                            body_json=body,
+                        )
+                    )
+                    s.commit()
+                return ledger.append(row)
+
+        spec = RunSpec(
+            run_id=RETAINED_RUN,
+            config=repo.config,
+            runner=PytestRunner(repo.config),
+            executor=LocalExecutor(),
+            scratch=Path(env.settings.home) / "scratch",
+            ledger=as_run_ledger(_PackThenRow()),
+            evidence_dir=evidence,
+            keep_worktrees=True,
+        )
+        emitter = Emitter(DbEventSink(env.factory), trace_id=RETAINED_RUN, repo=ALPHA)
+        rows: list[GradeRow] = []
+        for attempt in ("before_reclaim", "after_reclaim"):
+
+            def build_fn(ws: Any, t: Any, mode: str, rung: str, name: str = attempt) -> Any:
+                pr.apply_gold(ws)
+                pr.write_files(ws, [(f"src/calc/{name}.py", f"NAME = {name!r}\n")])
+                return BuildAttempt(BuilderRef(name="fixture", model="m", provider="p"))
+
+            out = run_task(spec, repo.repo, task, build_fn, on_event=emitter.on_event("build"))
+            rows += out.rows
+        assert [r.trial for r in rows] == ["r1", "r1"] and rows[0].row_hash != rows[1].row_hash
+        for row, own, other in zip(
+            rows,
+            ("before_reclaim", "after_reclaim"),
+            ("after_reclaim", "before_reclaim"),
+            strict=True,
+        ):
+            res = env.get(f"/grades/{row.row_hash}/patch")
+            assert res.status_code == 200, res.text
+            assert res.headers[HDR_VERIFIED] == "true", own
+            assert f"+++ b/src/calc/{own}.py" in res.text
+            assert f"src/calc/{other}.py" not in res.text
 
     def test_not_retained_worktree_reason(self, env: Env, tmp_path: Path) -> None:
         r = Retained(env, tmp_path)

@@ -12,8 +12,8 @@ What it does: Pins that ``run_task`` disqualifies a worktree whose builder commi
               that an honest gold still grades clean under the same pre-flight. Pins that no
               fragment of the held-out commit's sha reaches the builder (worktree path, ``.git``
               pointer, environment, prompt; assessment 2026-09-25 B1), that the run's events map
-              the opaque name back to the task, and that no worktree destination in the source
-              tree is built from a commit sha.
+              the opaque name back to the task and each pack names the worktree its row graded,
+              and that no worktree destination in the source tree is built from a commit sha.
 How:          A ``RunSpec`` over ``pyrepo`` with a ``BuildAttempt`` that performs the edit; the
               ledger row is read back and the chain verified. The leakage cases drive the real
               ``claude_code`` adapter with a recording spawn (tests/fixtures/leakage.py) and scan
@@ -34,6 +34,7 @@ Touch when:   a new integrity violation is added to the workspace (mirror the ca
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -236,6 +237,38 @@ def test_every_attempt_gets_its_own_opaque_worktree(
     for root in seen:
         assert leaks(feat_task.task_id, root.name) == []
         assert spec.run_id not in root.name
+
+
+def test_every_pack_names_the_worktree_its_row_graded(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """PR #53 review, fifth round: the route found a row's worktree through the latest
+    ``prep.start`` of its run, task and trial, but a reclaimed run writes two rows under
+    one trial, so that key does not name one attempt. The pack is written once per
+    attempt and its hash is on the row: ``notes.worktree`` there binds the row to the
+    worktree it graded. A builder's own notes cannot replace it."""
+    seen: list[str] = []
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        seen.append(ws.root.name)
+        return BuildAttempt(
+            BuilderRef(name="fixture", model="m", provider="p", mode="sighted"),
+            notes={"worktree": "run-" + "0" * 12},  # a builder naming another worktree
+        )
+
+    events: list[tuple[str, dict[str, Any]]] = []
+    spec = _spec(pyrepo, runner, executor, tmp_path)
+    outcome = run_task(
+        spec, pyrepo.repo, feat_task, build_fn, on_event=lambda a, p: events.append((a, dict(p)))
+    )
+    named = [p["worktree"] for a, p in events if a == "prep.start"]
+    packs = [json.loads((spec.evidence_dir / f"{h}.json").read_text()) for h in outcome.packs]
+    assert len(packs) == 2
+    assert [p["notes"]["worktree"] for p in packs] == named == seen
 
 
 #: Where a worktree destination is built: a path joined with an f-string.
