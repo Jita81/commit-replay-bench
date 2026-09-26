@@ -381,3 +381,67 @@ def test_a_record_whose_review_file_was_deleted_is_a_finding(tree: Path) -> None
             "2026-09-13-friend action #2 is recorded but the review has no such action",
         ),
     ]
+
+
+#: A fence closes only on a line that CommonMark reads as its closing fence: the opener's
+#: character, at least as many of them, and nothing after but spaces (review of PR #54).
+#: Each case is ``(opener, inner line, still fenced after the inner line)``.
+FENCE_CLOSES = [
+    ("```", "```", False),
+    ("```", "````", False),  # a longer run of the same character closes
+    ("```", "```   ", False),  # trailing spaces are allowed
+    ("```", "```text", True),  # an info string makes it an opener, not a closer
+    ("```", "``` text", True),
+    ("````", "```", True),  # shorter than the opener: content
+    ("```", "~~~", True),  # the other character: content
+    ("~~~", "```", True),
+    ("~~~~", "~~~~~", False),
+]
+
+
+@pytest.mark.parametrize(("opener", "inner", "fenced"), FENCE_CLOSES)
+def test_a_fence_closes_only_on_a_commonmark_closing_fence(
+    opener: str, inner: str, fenced: bool
+) -> None:
+    lines = list(cc._lines_with_fences(f"{opener}markdown\n{inner}\n| 7 | example |\n"))
+    assert lines[2][2] is fenced, (opener, inner)
+
+
+def test_a_fence_line_with_an_info_string_keeps_the_example_rows_out(tree: Path) -> None:
+    """A fenced example that shows a second fence with an info string (```` ```text ````)
+    must not close the first: the rows after it are still the example, never actions."""
+    fenced = REVIEW.replace(
+        "| 2 | Rotate the token. | security | operator |\n",
+        "| 2 | Rotate the token. | security | operator |\n\n"
+        "````markdown\n```text\n| 7 | An example action. | kind | owner |\n```\n"
+        "| 8 | Still an example. | kind | owner |\n````\n",
+    )
+    assert [n for n, _ in cc.review_actions(fenced)] == [1, 2]
+
+
+def test_a_review_in_a_folder_under_reviews_is_read(tree: Path) -> None:
+    """The rule covers every review under ``docs/reviews/``, not only its direct children: a
+    review kept in a folder with its evidence still has its actions checked (review of
+    PR #54)."""
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n")
+    (tree / "docs" / "reviews" / "b1b").mkdir()
+    _write(tree, "docs/reviews/b1b/2026-09-19-nested.md", REVIEW)
+    assert [(f.path, f.reason) for f in cc.check_review_actions(tree)] == [
+        ("docs/reviews/b1b/2026-09-19-nested.md", "review action #1 has no record"),
+        ("docs/reviews/b1b/2026-09-19-nested.md", "review action #2 has no record"),
+    ]
+
+
+def test_two_reviews_with_one_stem_are_a_finding(tree: Path) -> None:
+    """A record names its review by file stem, so two reviews that share a stem could each
+    claim the other's records. The gate refuses the pair rather than pick one."""
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed; action #2: open. |\n")
+    (tree / "docs" / "reviews" / "old").mkdir()
+    _write(tree, "docs/reviews/old/2026-09-13-friend.md", REVIEW)
+    assert [(f.path, f.reason) for f in cc.check_review_actions(tree)] == [
+        (
+            "docs/reviews/old/2026-09-13-friend.md",
+            "another review has the stem 2026-09-13-friend (docs/reviews/2026-09-13-friend.md);"
+            " a record could not say which it closes",
+        ),
+    ]

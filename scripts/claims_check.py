@@ -45,9 +45,10 @@ backticks and then states each action and its state —
 state is the whole word ``closed``, ``open``, ``declined`` or ``[gap]``. The gate reads both
 ways: a review action with no record fails, and so does a record whose review no longer
 lists that action (a deleted row, a renamed *Actions* heading, a deleted review file), so
-neither side can vanish alone. A fenced example inside the section is not an action. The
-check reads the record's *shape*, not whether the state is true; a person still reads the
-log.
+neither side can vanish alone. A fenced example inside the section is not an action. A
+review in a folder under ``docs/reviews/`` is read too, and two reviews may not share a
+file stem, because the record names its review by stem. The check reads the record's
+*shape*, not whether the state is true; a person still reads the log.
 Two of the critical friend's ten actions (#8, an independent human review of the core; #9,
 rotating a pasted token) sat for twelve days with no record at all, which is what this rule
 stops.
@@ -69,7 +70,7 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
               qualifying a plural noun → look for a permitted tag in the block's cover. Then
-              each docs/reviews/*.md Actions table (fenced examples skipped) and each review
+              each docs/reviews/**/*.md Actions table (fenced examples skipped) and each review
               the log names → its action numbers ⇄ the records in
               docs/DECISION-LOG.md, each under a head that names the review's stem in
               backticks, then ``action #N: <state>``.
@@ -258,7 +259,8 @@ _CODE_RE = re.compile(r"`[^`]*`")
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+#: A fence line: its run of backticks or tildes (three or more), then whatever follows it.
+_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
 _CHECKLIST_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -296,9 +298,11 @@ def _strip_markup(text: str) -> str:
 def _lines_with_fences(text: str) -> Iterator[tuple[int, str, bool]]:
     """``(line number, line, fenced)`` for every line; ``fenced`` is true for a fence's own
     delimiters and everything between them. A fence closes only on the marker that opened it
-    (a ``~~~`` inside a backtick fence is content), as CommonMark reads it. Every reader of a
-    page's structure goes through here, so a fenced example is never read as prose or as a
-    review's action."""
+    (a ``~~~`` inside a backtick fence is content), as CommonMark reads it: the closing line
+    is the opener's character, at least as many of them, and nothing after it — so
+    ```` ```text ```` and a shorter run inside a longer fence are content (PR #54 review).
+    Every reader of a page's structure goes through here, so a fenced example is never read
+    as prose or as a review's action."""
     marker = ""
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.rstrip()
@@ -306,7 +310,12 @@ def _lines_with_fences(text: str) -> Iterator[tuple[int, str, bool]]:
         if m and not marker:
             marker = m.group(1)
             yield number, line, True
-        elif m and m.group(1) == marker:
+        elif (
+            m
+            and m.group(1)[0] == marker[0]
+            and len(m.group(1)) >= len(marker)
+            and not m.group(2).strip()
+        ):
             marker = ""
             yield number, line, True
         else:
@@ -530,9 +539,24 @@ def check_review_actions(root: Path) -> list[Finding]:
     log_path = root / DECISION_LOG
     log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
     log_rel = log_path.relative_to(root).as_posix()
-    on_disk = {p.stem: p for p in sorted(reviews.glob("*.md"))} if reviews.is_dir() else {}
-    named = {stem for line in log_text.splitlines() for stem, _ in _records(line)}
+    on_disk: dict[str, Path] = {}
     findings: list[Finding] = []
+    # every review under the folder, nested ones too; a record names its review by stem, so
+    # two reviews that share one are refused rather than one silently taking the other's place
+    for p in sorted(reviews.rglob("*.md")) if reviews.is_dir() else []:
+        first = on_disk.setdefault(p.stem, p)
+        if first != p:
+            findings.append(
+                Finding(
+                    p.relative_to(root).as_posix(),
+                    1,
+                    "",
+                    f"another review has the stem {p.stem} "
+                    f"({first.relative_to(root).as_posix()}); a record could not say which it "
+                    "closes",
+                )
+            )
+    named = {stem for line in log_text.splitlines() for stem, _ in _records(line)}
     for stem in sorted(set(on_disk) | named):
         path = on_disk.get(stem)
         actions = review_actions(path.read_text(encoding="utf-8")) if path else []
