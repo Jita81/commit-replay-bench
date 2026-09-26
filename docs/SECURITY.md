@@ -393,23 +393,49 @@ machine:
   unless `CRB_ENV=dev` (the default `prod`, and any other value, refuses) and unless
   `CRB_BIND_HOST` is a loopback address; `crb serve` checks the address it is about to bind
   again, so `--host 0.0.0.0` is refused too (`dev_autologin_refusal_for`,
-  `crb.server.main.serve`). There is no override flag. [measured — n = 13 test cases under
+  `crb.server.main.serve`). The container image's entrypoint refuses to run any role with the
+  variable set, because a container is never a development stack on one machine
+  (`deploy/entrypoint.sh`). There is no override flag. [measured — n = 13 test cases under
   apparatus 2.2 in `tests/test_server_dev_autologin.py::TestSettings`: off by default; `prod`
   refuses, as an argument and from the environment (2); four non-loopback binds refuse and
   four loopback binds admit (8); a malformed username refuses; `serve` refuses `--host
-  0.0.0.0` before uvicorn starts; pass/fail, not a rate]
+  0.0.0.0` before uvicorn starts; pass/fail, not a rate] [measured — n = 4 test cases under
+  apparatus 2.2 in `tests/test_server_dev_autologin.py::TestTheContainerImage`: the
+  entrypoint refuses `serve`, `worker` and `migrate` with the variable set before anything
+  runs, and runs `serve` as before without it; pass/fail, not a rate]
+- **What the start-up check cannot see.** A process manager that runs the app factory itself
+  (`uvicorn --factory crb.server.app:create_app --host …`, or gunicorn) binds an address the
+  settings never see, so `crb` cannot refuse that bind at start-up. On that path only the
+  per-request checks below apply. One of them is the address each connection arrived on, so a
+  server bound to every interface still refuses a request that arrives on a network interface.
 - **Admitted per request only when the request is plainly local**
   (`crb.server.auth.dev_autologin_refusal`): the TCP peer is loopback (`127.0.0.0/8`, `::1`);
-  no forwarding header is present (`Forwarded`, any `X-Forwarded-*`, `X-Real-IP`, `Via`); the
-  `Host` header names this machine; an `Origin`, when sent, is a loopback origin; and the
-  browser did not mark the request `cross-site`. Anything else is answered exactly as if the
-  setting were off (404 `dev_autologin_off`), with the reason in the API log. [measured —
-  n = 17 refused cases under apparatus 2.2 in
-  `tests/test_server_dev_autologin.py::TestWhoIsSignedIn`: four remote peers, seven
+  the connection arrived on a loopback address (the ASGI `server` address); no forwarding
+  header is present (`Forwarded`, any `X-Forwarded-*`, `X-Real-IP`, `Via`, and the
+  client-address headers `True-Client-IP`, `CF-Connecting-IP`, `X-Client-IP`, `Client-IP`,
+  `X-Original-Forwarded-For`, `X-Cluster-Client-IP`, `Fastly-Client-IP` and
+  `X-Envoy-External-Address`); the `Host` header names this machine; an `Origin`, when sent,
+  is a loopback origin; and the browser did not mark the request `cross-site`. Anything else
+  is answered exactly as if the setting were off (404 `dev_autologin_off`), with the reason
+  in the API log. [measured — n = 29 refused cases under apparatus 2.2 in
+  `tests/test_server_dev_autologin.py::TestWhoIsSignedIn`: four remote peers, fifteen
   forwarding headers (`X-Forwarded-For` twice, once naming `127.0.0.1`), three foreign `Host`
-  values and three cross-site signals each get 404 with no session cookie; the same class
-  admits three loopback peers, five loopback host names and a same-origin request; pass/fail,
-  not a rate]
+  values, three non-loopback local addresses, one connection with no local address and three
+  cross-site signals are each refused with no session; the same class admits three loopback
+  peers, five loopback host names and a same-origin request; pass/fail, not a rate]
+- **The project's own dev proxy marks what it forwards.** The Vite dev server and
+  `vite preview` (`npm run dev`, `ui/vite.config.ts`) forward `/api` to the API from
+  `127.0.0.1` and pass on the `Host` header the client sent. Without a mark, a request from
+  another machine would look local: with the dev server started with `--host`, anyone on the
+  network could send `Host: localhost` by hand and be signed in. The proxy therefore adds
+  `X-Forwarded-For` to every request whose client is not on this machine, or whose address is
+  unknown (`ui/src/dev/apiProxy.ts`), and the check above refuses it. [measured — n = 21
+  cases under apparatus 2.2 in `ui/src/dev/apiProxy.test.ts`, including the real
+  `ui/vite.config.ts` loaded as Vite loads it; pass/fail, not a rate] [measured — one
+  hand-made `POST /api/v1/auth/dev-autologin` with `Host: localhost:5173` through the real Vite
+  8.0.8 dev server bound to `fe80::1%lo0` (a client address that is not loopback) got 404, and
+  the API logged the `x-forwarded-for` header as the reason; the same request through Vite on
+  `127.0.0.1` got 200; n = 1 run each, apparatus 2.2, 2026-09-26]
 - **An ordinary session.** It issues the same signed session and CSRF cookies as a password
   sign-in (`set_session_cookie`, `set_csrf_cookie`), bound to the account's credential
   version, so the CSRF double-submit, the role ladder, sign-out and a password change behave
@@ -419,16 +445,22 @@ machine:
   (actor = the account, `payload.client` = the peer) and logs one warning line; start-up logs
   a warning; `crb doctor` shows `warn  dev_autologin`; `GET /health` and `GET /version` report
   `dev_autologin`; and the UI shows a banner on every page, the sign-in page included.
-  [measured — `tests/test_server_dev_autologin.py::TestAuditAndReporting` and
+  `/health` and `/version` say `on` only to a caller the route would sign in. Anyone else
+  reads `off`, the same as a stack without it, so another machine cannot tell whether it is
+  on. `crb doctor` reads the settings directly, so the operator is never told `off` while it
+  is on. [measured — `tests/test_server_dev_autologin.py::TestAuditAndReporting`, four
+  callers that could not sign in each read `off` on both routes, and
   `ui/src/components/DevAutologinBanner.test.tsx`, apparatus 2.2]
 
 **Who can reach it.** Anyone who can open a TCP connection to the API from the machine
 itself: every local user account and every local process, not only the person who switched
 it on. On a shared machine that is everyone logged in to it, which is why it is for a
 personal development machine only. A reverse proxy on the same machine connects from
-loopback too; the forwarding header it adds is what refuses the request, so a proxy that
-strips or never sets those headers would expose it — do not put one in front of a stack with
-automatic sign-in on. A web page in the person's own browser cannot use it: a cross-site
+loopback too; the forwarding header it adds is what refuses the request, so a proxy or tunnel
+that strips or never sets those headers would expose it — do not put one in front of a stack
+with automatic sign-in on. The project's own Vite dev and preview proxy is one such proxy; it
+marks every request from another machine, but do not start it with `--host` while automatic
+sign-in is on all the same. A web page in the person's own browser cannot use it: a cross-site
 request is refused, and a page that re-points its own host name at `127.0.0.1` (DNS
 rebinding) arrives with its own name in `Host` and is refused.
 
@@ -454,7 +486,7 @@ rebinding) arrives with its own name in `Host` and is refused.
 | T9 | A false pass is recorded because a runner could not attribute a failure | grade | fail-closed parse rule (`unattributed failure` ⇒ belt 3 false), harness errors ⇒ not clean |
 | T10 | A green with no real change is credited (build-cache ghost) | grade | belt 4 `source_changed` |
 | T11 | Session hijack / CSRF / privilege escalation | API | 3.3 cookies, CSRF, 3.4 RBAC |
-| T11a | Automatic sign-in (`CRB_AUTH__DEV_AUTOLOGIN`) is used from another machine, through a proxy, by a hostile web page, or left on in production | API | 3.8: refused at start-up outside `CRB_ENV=dev` and on a non-loopback bind (no override); per request only a loopback peer with no forwarding header, a loopback `Host`, no foreign `Origin` and not `cross-site` — anything else is answered as "off"; an ordinary session (CSRF and roles unchanged); an audit event and a log line per sign-in; `/health`, `crb doctor` and a banner on every page say it is on. Residual: every local user and process on the machine can use it, and a same-host proxy that strips forwarding headers would expose it |
+| T11a | Automatic sign-in (`CRB_AUTH__DEV_AUTOLOGIN`) is used from another machine, through a proxy, by a hostile web page, or left on in production | API | 3.8: refused at start-up outside `CRB_ENV=dev` and on a non-loopback bind (no override); the container entrypoint refuses any role with it set; per request only a loopback peer, arriving on a loopback address, with no forwarding header, a loopback `Host`, no foreign `Origin` and not `cross-site` — anything else is answered as "off"; the project's Vite dev and preview proxy adds `X-Forwarded-For` for any client not on this machine; an ordinary session (CSRF and roles unchanged); an audit event and a log line per sign-in; `crb doctor` and a banner on every page say it is on, and `/health` and `/version` say so only to a caller that could use it. Residual: every local user and process on the machine can use it; a same-host proxy or tunnel that strips forwarding headers would expose it; a process manager that runs `uvicorn --factory` binds an address `crb` cannot check at start-up, so only the per-request checks apply there |
 | T12 | Cross-organisation data leakage via the federated export | export | allowlist of abstract fields only, k-anonymity, opt-in; consumption not implemented (`crb.core.federated`) |
 | T13 | A weak oracle lets a semantically wrong patch pass | grade | not a mechanical false-Q1; measured and gated by oracle strength (`crb.core.oracle`), routed to `human` below 0.8 |
 

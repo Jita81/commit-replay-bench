@@ -16,7 +16,8 @@
 # Navigation
 # ----------
 # What it is:   The container entrypoint: one image, the role chosen by the first argument.
-# What it does: ``serve`` runs uvicorn on the app factory (optionally migrating first under
+# What it does: Refuses to run any role while ``CRB_AUTH__DEV_AUTOLOGIN`` is set (ADR-0027);
+#               ``serve`` runs uvicorn on the app factory (optionally migrating first under
 #               ``CRB_MIGRATE_ON_START=1`` — single-host convenience only), ``worker`` the queue
 #               consumer, ``migrate`` / ``check`` the Alembic CLI, ``shell`` a debugging shell,
 #               anything else is exec'd verbatim. Every role is ``exec``'d so it is PID 1 and
@@ -24,18 +25,29 @@
 # How:          A ``case`` on ``$1``; the bind host / port, worker count, forwarded IPs and graceful
 #               timeout come from ``CRB_*`` environment variables with safe defaults.
 # Layer:        deploy — docs/ARCHITECTURE.md#6-deployment-view
-# ADRs:         none
+# ADRs:         docs/adr/0027-dev-autologin-on-loopback.md (the automatic sign-in refusal)
 # Works with:   deploy/Dockerfile (installs it as ``crb-entrypoint`` and sets it as ENTRYPOINT),
 #               deploy/docker-compose.yml and deploy/helm/crb/templates/api-deployment.yaml (pass
 #               the role), src/crb/server/app.py (``create_app``), src/crb/server/worker_main.py,
 #               src/crb/store/migrate.py, docs/DEPLOYMENT.md (the image and its roles, §2)
-# Tested by:    untested — no unit test; the container smoke in .github/workflows/ci.yml runs the
+# Tested by:    tests/test_server_dev_autologin.py (the automatic sign-in refusal, with uvicorn
+#               and python stubbed); the container smoke in .github/workflows/ci.yml runs the
 #               ``migrate upgrade`` and ``migrate current`` roles through the built image
 # Touch when:   a role is added to the image (a ``case`` arm, docs/DEPLOYMENT.md and the Helm
 #               template that runs it); a uvicorn flag changes (keep ``--proxy-headers`` scoped to
 #               ``CRB_FORWARDED_ALLOW_IPS``).
 
 set -eu
+
+# Automatic sign-in (ADR-0027) is for a development stack on one machine. A container is
+# never that, and `uvicorn --factory --host` binds an address the settings never see, so the
+# image refuses to run any role with it set, whatever CRB_BIND_HOST says. No override.
+if [ -n "${CRB_AUTH__DEV_AUTOLOGIN:-}" ]; then
+    echo "crb-entrypoint: refusing to start: CRB_AUTH__DEV_AUTOLOGIN is set, and automatic" \
+        "sign-in is for a development stack on one machine, never a container" \
+        "(docs/adr/0027-dev-autologin-on-loopback.md). Unset it." >&2
+    exit 64
+fi
 
 role="${1:-serve}"
 if [ "$#" -gt 0 ]; then

@@ -27,8 +27,8 @@
   the default is ``viewer``. Users are upserted by ``(issuer, subject)``.
 * **Automatic sign-in** (development stacks only, ADR-0027) — :func:`dev_autologin_refusal`
   decides whether a request may be signed in as ``CRB_AUTH__DEV_AUTOLOGIN``'s account: a
-  loopback TCP peer, no forwarding header, a loopback ``Host``, no foreign ``Origin`` and not
-  ``cross-site``. The session it leads to is an ordinary one from :func:`set_session_cookie`.
+  loopback TCP peer, a loopback local address, no forwarding header, a loopback ``Host``, no
+  foreign ``Origin`` and not ``cross-site``. The session it leads to is an ordinary one from :func:`set_session_cookie`.
 * **Login rate limit** — 5 failures per minute per ``(username, ip)``, in memory.
   It bounds online guessing on one node; a multi-node deployment fronts this with the
   proxy's limiter as well.
@@ -495,8 +495,25 @@ def csrf_matches(cookie_token: str | None, header_token: str | None) -> bool:
 
 #: Header names a proxy adds. Any one of them on a request means it did not come straight
 #: from a browser on this machine, whatever the TCP peer says: a reverse proxy on the same
-#: host connects from loopback, and this is what tells its requests apart.
-FORWARDING_HEADERS: frozenset[str] = frozenset({"forwarded", "x-real-ip", "via"})
+#: host connects from loopback, and this is what tells its requests apart. Beyond the
+#: standard three, the client-address headers some proxies, CDNs and tunnels set on their
+#: own. The project's Vite dev and preview proxy adds ``X-Forwarded-For`` for a client that
+#: is not on this machine (``ui/src/dev/apiProxy.ts``).
+FORWARDING_HEADERS: frozenset[str] = frozenset(
+    {
+        "forwarded",
+        "x-real-ip",
+        "via",
+        "true-client-ip",
+        "cf-connecting-ip",
+        "x-client-ip",
+        "client-ip",
+        "x-original-forwarded-for",
+        "x-cluster-client-ip",
+        "fastly-client-ip",
+        "x-envoy-external-address",
+    }
+)
 FORWARDING_HEADER_PREFIX = "x-forwarded-"
 
 
@@ -511,16 +528,23 @@ def _host_name(value: str) -> str:
 def dev_autologin_refusal(request: Request) -> str | None:
     """Why this request may NOT be signed in automatically, or ``None`` when it may.
 
-    All five must hold: the TCP peer is loopback (``127.0.0.0/8`` or ``::1``); no forwarding
-    header is present (``Forwarded``, ``X-Forwarded-*``, ``X-Real-IP``, ``Via``); the ``Host``
-    header names this machine (a page on another name whose DNS was pointed at 127.0.0.1 —
-    DNS rebinding — arrives from a loopback peer but with its own name); an ``Origin``, when
-    sent, is a loopback origin; and the browser did not mark the request ``cross-site``. The
+    All six must hold: the TCP peer is loopback (``127.0.0.0/8`` or ``::1``); the connection
+    arrived on a loopback address (ASGI ``server`` — so a server bound to every interface by a
+    process manager, whose bind address ``crb`` never sees, still refuses what arrives on a
+    network interface); no forwarding header is present (``Forwarded``, ``X-Forwarded-*``,
+    ``X-Real-IP``, ``Via`` and the others in :data:`FORWARDING_HEADERS`); the ``Host`` header
+    names this machine (a page on another name whose DNS was pointed at 127.0.0.1 — DNS
+    rebinding — arrives from a loopback peer but with its own name); an ``Origin``, when sent,
+    is a loopback origin; and the browser did not mark the request ``cross-site``. The
     sentence names the first condition that failed; it is for the log, never the response.
     """
     peer = request.client.host if request.client else ""
     if not is_loopback_host(peer):
         return f"the TCP peer {peer or 'unknown'!s} is not loopback"
+    server = request.scope.get("server")
+    local = str(server[0]) if server else ""
+    if not is_loopback_host(local):
+        return f"the request arrived on {local or 'an unknown address'!r}, not a loopback address"
     forwarded = sorted(
         name
         for name in {k.lower() for k in request.headers}

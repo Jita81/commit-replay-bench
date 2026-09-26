@@ -1,4 +1,3 @@
-// @vitest-environment node
 /**
  * apiProxy.ts and its wiring in vite.config.ts — a request that reached the dev or preview
  * server from another machine never looks, to the API, like a browser on this one.
@@ -22,6 +21,7 @@
  * Touch when:   the dev proxy changes; never to drop the mark for a client that is not on
  *               this machine.
  */
+// @vitest-environment node — the config is loaded the way Vite loads it, in Node
 import { loadConfigFromFile } from 'vite'
 import type { ProxyOptions } from 'vite'
 import { describe, expect, it } from 'vitest'

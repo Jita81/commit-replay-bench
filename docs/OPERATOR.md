@@ -809,20 +809,32 @@ What still works as normal:
 
 It does not sign anyone in when:
 
-- the browser is on another computer — only a connection from `127.0.0.1` or `::1` counts;
+- the browser is on another computer — only a connection from `127.0.0.1` or `::1`, arriving
+  on a loopback address, counts;
 - the request came through a proxy, even one on the same computer (any `Forwarded`,
-  `X-Forwarded-*`, `X-Real-IP` or `Via` header turns it off for that request);
+  `X-Forwarded-*`, `X-Real-IP` or `Via` header, or a client-address header such as
+  `CF-Connecting-IP`, turns it off for that request);
 - the address in the browser is not `localhost`, `127.0.0.1` or `[::1]`;
 - the account does not exist or is deactivated — the API log says which.
 
-**Why production refuses it.** The server will not start with `CRB_AUTH__DEV_AUTOLOGIN` set
+**The UI dev server.** If you run the UI with `npm run dev` (or `vite preview`) instead of
+the UI that `crb serve` serves, open `http://localhost:5173` on the same computer. Do not start
+the dev server with `--host` while automatic sign-in is on: that lets other computers on your
+network reach it. The dev server marks every request from another computer as proxied, so
+the API refuses to sign it in, but there is no reason to rely on that.
+
+**Why production refuses it.** `crb serve` will not start with `CRB_AUTH__DEV_AUTOLOGIN` set
 unless `CRB_ENV=dev` and it binds a loopback address (`127.0.0.1`, `::1` or `localhost`).
-`crb serve --host 0.0.0.0` is refused too. There is no flag to override this. In a container
-the API binds `0.0.0.0`, so a container stack cannot use it — sign in there as usual.
+`crb serve --host 0.0.0.0` is refused too. There is no flag to override this. The container
+image refuses to start any role with the variable set, so a container stack cannot use it —
+sign in there as usual. If you run the app yourself with `uvicorn --factory` or another
+process manager, `crb` cannot see the address it binds and cannot refuse it at start-up; only
+the checks on each request apply, so use `crb serve` for a stack with automatic sign-in on.
 
 **How to tell it is on.** Start-up logs a warning that begins `AUTOMATIC SIGN-IN IS ON`.
 `crb doctor` shows `warn  dev_autologin` with the account named. `GET /health` and
-`GET /version` report `dev_autologin`. Every automatic sign-in logs one warning line and
+`GET /version` report `dev_autologin` — `on` only to a browser on this computer that it would
+sign in; anyone else sees `off`, as on a stack without it. Every automatic sign-in logs one warning line and
 writes an `auth.dev_autologin` event on the account's trace, with the account as the actor
 and the client address. To switch it off, remove the variable and restart. The design and its
 limits are in [ADR-0027](adr/0027-dev-autologin-on-loopback.md) and

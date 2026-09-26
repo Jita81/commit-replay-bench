@@ -2,6 +2,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { markOffMachineRequest } from './src/dev/apiProxy'
 
 /**
  * Vite config for the crb UI.
@@ -9,7 +10,11 @@ import tailwindcss from '@tailwindcss/vite'
  * - Dev proxy: every `/api/*` call is forwarded to the crb server on
  *   127.0.0.1:8000 (override with CRB_API_ORIGIN). Cookies stay same-origin,
  *   so the `crb_session` / `crb_csrf` cookies work unchanged in dev, and the
- *   SSE stream at `/api/v1/runs/{id}/events` is passed through unbuffered.
+ *   SSE stream at `/api/v1/runs/{id}/events` is passed through unbuffered. The proxy
+ *   connects from 127.0.0.1, so a request that reached it from another machine (the dev
+ *   server started with `--host`) is marked with `X-Forwarded-For` before it is forwarded
+ *   (`src/dev/apiProxy.ts`); the API then never treats it as a browser on this machine, which
+ *   is what keeps automatic sign-in (ADR-0027) off it. `vite preview` inherits this proxy.
  * - Docs: the eight user-facing guides under `../docs` are bundled into the UI as
  *   lazy chunks (`ui/src/help/docs.ts`); `server.fs.allow` lets the dev server (and
  *   vitest) read them from outside `ui/` — the production build needs no such setting.
@@ -36,6 +41,8 @@ export default defineConfig({
         target: apiOrigin,
         changeOrigin: false,
         configure: (proxy) => {
+          // before the incoming headers are copied into the forwarded request (ADR-0027)
+          proxy.on('start', (req) => markOffMachineRequest(req))
           proxy.on('proxyRes', (proxyRes) => {
             if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
               proxyRes.headers['cache-control'] = 'no-cache'

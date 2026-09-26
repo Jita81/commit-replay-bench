@@ -7,13 +7,13 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-475 files with a header · 1 exempt (listed at the end).
+477 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
-| [`deploy/entrypoint.sh`](../deploy/entrypoint.sh) | The container entrypoint: one image, the role chosen by the first argument. | untested — no unit test; the container smoke in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs the ``migrate upgrade`` and ``migrate current`` roles through the built image | a role is added to the image (a ``case`` arm, [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) and the Helm template that runs it); a uvicorn flag changes (keep ``--proxy-headers`` scoped to ``CRB_FORWARDED_ALLOW_IPS``). |
+| [`deploy/entrypoint.sh`](../deploy/entrypoint.sh) | The container entrypoint: one image, the role chosen by the first argument. | [`tests/test_server_dev_autologin.py`](../tests/test_server_dev_autologin.py) (the automatic sign-in refusal, with uvicorn and python stubbed); the container smoke in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs the ``migrate upgrade`` and ``migrate current`` roles through the built image | a role is added to the image (a ``case`` arm, [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) and the Helm template that runs it); a uvicorn flag changes (keep ``--proxy-headers`` scoped to ``CRB_FORWARDED_ALLOW_IPS``). |
 | [`deploy/verify-image.sh`](../deploy/verify-image.sh) | The operator's release-verification script: keyless signature, SBOM attestation and (optionally) the tag → digest pin, before an image is run. | [`tests/test_release_verify_image.py`](../tests/test_release_verify_image.py) | the image repository, issuer or identity pattern changes (change release.yml, the Helm values and this script together — the test enforces it); cosign's CLI changes. |
 
 ## `scripts` (5 files)
@@ -451,6 +451,13 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`ui/src/components/VerdictPill.tsx`](../ui/src/components/VerdictPill.tsx) | The `VerdictPill` for a route (or the absence of one). | [`ui/src/components/VerdictPill.test.tsx`](../ui/src/components/VerdictPill.test.tsx), [`ui/src/screens/Capability/CapabilityPage.test.tsx`](../ui/src/screens/Capability/CapabilityPage.test.tsx) (`cell-measured` / `cell-not-measured`) | a route is added to `crb.core.routing` (an ADR) — extend `Route` in [`ui/src/api/types.ts`](../ui/src/api/types.ts) and the table in [`ui/src/lib/verdict.ts`](../ui/src/lib/verdict.ts); never for a new repository. |
 | [`ui/src/components/govuk.test.tsx`](../ui/src/components/govuk.test.tsx) | Tests for the GOV.UK / NHS pattern components and the Posture page. | [`ui/src/components/govuk.test.tsx`](../ui/src/components/govuk.test.tsx) | a pattern is added. |
 | [`ui/src/components/govuk.tsx`](../ui/src/components/govuk.tsx) | `Tag` (the solid status label), `TaskList` (numbered tasks with a status tag and "You have completed n of m"), `SummaryList` (key / value / change rows — the "check your answers" grammar), `NotificationBanner` ("Important" with a blue frame), `WarningCallout` (yellow, for what is NOT requested / NOT meant), `InsetText` (the blue-railed aside), `BackLink`, `ConfirmationPanel` (the green "recorded" panel with a reference), `StartButton` (green with the 4px shadow), `WarningButton` (red — spends money / irreversible) and `Details` (the GOV.UK details: a native `<details>` whose summary is the one line shown, for the why behind a screen). | [`ui/src/components/govuk.test.tsx`](../ui/src/components/govuk.test.tsx), [`ui/src/help/hints-ratchet.test.tsx`](../ui/src/help/hints-ratchet.test.tsx) (the hint contract) | a pattern is added (name it after the GOV.UK/NHS component it is). |
+
+## `ui/src/dev` (2 files)
+
+| File | What it is | Tested by | Touch when |
+|---|---|---|---|
+| [`ui/src/dev/apiProxy.test.ts`](../ui/src/dev/apiProxy.test.ts) | Tests for the Vite dev / preview proxy's forwarding mark (ADR-0027). | [`ui/src/dev/apiProxy.test.ts`](../ui/src/dev/apiProxy.test.ts) | the dev proxy changes; never to drop the mark for a client that is not on this machine. |
+| [`ui/src/dev/apiProxy.ts`](../ui/src/dev/apiProxy.ts) | `markOffMachineRequest`, the hook `[`ui/vite.config.ts`](../ui/vite.config.ts)` runs on every `/api` request its proxy is about to forward, and `isLoopbackAddress`, the test it uses. | [`ui/src/dev/apiProxy.test.ts`](../ui/src/dev/apiProxy.test.ts) | the dev proxy changes; never to drop the mark for a client that is not on this machine. |
 
 ## `ui/src/help` (16 files)
 

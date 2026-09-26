@@ -72,7 +72,8 @@ What it does: Readiness aggregates the store probes (db, migrations at head, app
               ``failure_detail`` naming the request id, the exception logged, never served;
               liveness checks the database only; ``/metrics``
               refreshes the ledger gauges then renders the shared registry; ``/health`` and
-              ``/version`` say whether automatic sign-in is on (never which account), and
+              ``/version`` say whether automatic sign-in is on (never which account, and
+              ``on`` only to a caller that could use it), and
               ``probe_dev_autologin`` is the doctor line that warns while it is.
 How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the
               request id → ``probes.aggregate`` → stamp;
@@ -87,6 +88,8 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0027-dev-autologin-on-loopback.md (the ``dev_autologin`` field)
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
               ``failure_detail`` and ``aggregate``),
+              src/crb/server/auth.py (``dev_autologin_refusal`` — who is told automatic
+              sign-in is on),
               src/crb/store/migrate.py (``head_status_on`` — the one head check),
               src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``
               and ``probe_worker``),
@@ -127,6 +130,7 @@ from crb.core.version import APPARATUS_VERSION, __version__
 from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
+from crb.server.auth import dev_autologin_refusal
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
 from crb.server.secrets import SecretsFile
@@ -645,11 +649,22 @@ def probe_intake(
     return probes.run_probe("intake", _read, request_id=request_id)
 
 
-def dev_autologin_state(settings: Settings) -> str:
+def dev_autologin_state(settings: Settings, request: Request | None = None) -> str:
     """``on`` / ``off``: whether automatic sign-in is switched on (ADR-0027). ``/health``
     says it at the top level — beside the probes, not as one, so a development stack's
-    readiness is not lowered by a setting the operator chose — and names no account."""
-    return "on" if settings.auth.dev_autologin else "off"
+    readiness is not lowered by a setting the operator chose — and names no account.
+
+    Given the ``request``, it says ``on`` only to a caller the route would sign in
+    (:func:`crb.server.auth.dev_autologin_refusal` finds nothing); any other caller — another
+    machine, a proxied request, another host name — reads ``off``, exactly what a stack
+    without it serves, so the answer tells a caller that cannot use it nothing. ``crb doctor``
+    reads the settings directly (:func:`probe_dev_autologin`), so the operator is never told
+    ``off`` while it is on."""
+    if not settings.auth.dev_autologin:
+        return "off"
+    if request is not None and dev_autologin_refusal(request) is not None:
+        return "off"
+    return "on"
 
 
 def probe_dev_autologin(settings: Settings | None) -> ProbeResult:
@@ -686,9 +701,11 @@ def collect_health(
     *,
     role: str | None = None,
     request_id: str = "",
+    request: Request | None = None,
 ) -> dict[str, Any]:
     """The deep probe (readiness). ``role`` defaults to :func:`process_role``;
-    ``request_id`` is what a failed read's detail names (the route passes the middleware's).
+    ``request_id`` is what a failed read's detail names (the route passes the middleware's);
+    ``request`` decides who is told that automatic sign-in is on (:func:`dev_autologin_state`).
     Every probe runs under :func:`probes.run_probe` — the observability probes here too,
     so no probe in the body can serve an exception."""
     role = process_role() if role is None else role
@@ -707,7 +724,7 @@ def collect_health(
         probe_intake(factory, settings, request_id=rid),
     ]
     out = _stamp(probes.aggregate(results), role)
-    out["dev_autologin"] = dev_autologin_state(settings)
+    out["dev_autologin"] = dev_autologin_state(settings, request)
     return out
 
 
@@ -732,7 +749,7 @@ def health(
     request: Request, response: Response, factory: SessionFactoryDep, settings: SettingsDep
 ) -> dict[str, Any]:
     """Readiness: 503 only on ``down`` — ``degraded`` still serves (with caveats)."""
-    out = collect_health(factory, settings, request_id=request_id(request))
+    out = collect_health(factory, settings, request_id=request_id(request), request=request)
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return out
@@ -780,8 +797,9 @@ def version(request: Request) -> dict[str, Any]:
         # page both need before anyone is signed in; it names no provider and no secret
         "oidc_enabled": getattr(request.app.state, "oidc_client", None) is not None,
         # the banner every page shows while automatic sign-in is on must render on the
-        # sign-in page too, before anyone has a role; it names no account (ADR-0027)
-        "dev_autologin": bool(request.app.state.settings.auth.dev_autologin),
+        # sign-in page too, before anyone has a role; it names no account, and only a caller
+        # the route would sign in is told it is on (ADR-0027)
+        "dev_autologin": dev_autologin_state(request.app.state.settings, request) == "on",
     }
 
 

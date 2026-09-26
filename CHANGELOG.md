@@ -8,6 +8,18 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-26 — a development stack can sign in a browser on its own machine without a password
+
+`CRB_AUTH__DEV_AUTOLOGIN=<username>` (off by default, ADR-0027) signs a browser on the same
+computer in as one local account. `crb serve` refuses it unless `CRB_ENV=dev` and the API binds
+a loopback address, and the container image refuses to start with it set. Each request must
+come from a loopback peer, arrive on a loopback address, carry no forwarding header and name
+this machine in `Host`; anything else is answered as if it were off. The session is an
+ordinary one, so CSRF, roles and sign-out work as after a typed password. Every sign-in is an
+`auth.dev_autologin` event and a warning line, and every page shows a banner while it is on.
+A security review found that the UI's own Vite dev proxy made a request from another machine
+look local; the proxy now marks such requests with `X-Forwarded-For`, and the API refuses them.
+
 ### 2026-09-25 — the gate tools are pinned, and the suite no longer depends on the machine it runs on
 
 mypy and ruff are pinned exactly (Dependabot moves them) and CI runs daily on `main` because a SQLAlchemy release, not a commit, turned eight untyped query results into mypy errors; the eight are annotated. The suite no longer depends on the uid it runs as, a docker daemon or the network: tests name a non-root builder user (a ratchet refuses one that does not), the doctor tests never ask the host's daemon, and a `network` test is skipped with the host and the reason when the host is unreachable (and fails instead under `CRB_TEST_STRICT_WARMUP=1`, as in CI, where an unreachable host is a defect). The ratchet exempts only settings built after the test pins `os.getuid` in its own body, and only a pin on the `os` module itself, found through the file's imports (`Fake.os` is not `os`). The local pytest gate in `docs/CONTRIBUTING.md` now measures branch coverage as CI does, and a test fails when a documented gate command drifts from `ci.yml`. `.coverage` and `coverage.xml` are ignored. The pins fix the tools, not the verdict — every other dependency still resolves fresh, which is what the daily run is for — and `docs/CONTRIBUTING.md` now says so and has joined the claims gate's allowlist (assessment 2026-09-25 §E1–E2, DL-053).

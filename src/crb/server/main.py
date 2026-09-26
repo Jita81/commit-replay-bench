@@ -7,7 +7,9 @@ process managers that prefer to own the server loop.
 Access logging is ours (JSON, redacted, with request ids) so uvicorn's own access
 log is off. Proxy headers are honoured only from ``CRB_TRUSTED_PROXIES``. With
 ``CRB_AUTH__DEV_AUTOLOGIN`` set, ``serve`` refuses to bind anything but a loopback address
-(ADR-0027) — including an address given as ``--host``, which the settings never see.
+(ADR-0027) — including an address given as ``--host``, which the settings never see. The
+``--factory`` entry cannot see the address its process manager binds, so there only the
+per-request checks apply.
 
 Navigation
 ----------
@@ -47,7 +49,12 @@ log = logging.getLogger("crb.server")
 
 
 def build_app() -> FastAPI:
-    """Factory for ``uvicorn --factory``: settings from the environment."""
+    """Factory for ``uvicorn --factory``: settings from the environment.
+
+    The address uvicorn binds on this path is never visible here, so the bind half of the
+    automatic sign-in refusal (ADR-0027) cannot run; the per-request checks in
+    :func:`crb.server.auth.dev_autologin_refusal` — the local address included — still do,
+    and the container entrypoint refuses to start with the variable set."""
     settings = Settings()
     configure_logging(fmt=settings.log_format, level=settings.log_level)
     return create_app(settings)
