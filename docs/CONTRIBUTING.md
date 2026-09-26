@@ -47,13 +47,18 @@ builds the reference sandbox images, and CI's `sandbox-images` job runs it on it
 CI additionally runs `gitleaks` (secrets), `pip-audit` (known vulnerabilities in the
 resolved environment) and produces a CycloneDX SBOM.
 
-No test may fail because of the machine it runs on: running as root, with no docker daemon or
-with no network changes which tests run, not whether the suite passes **[measured — n = 1
-whole-suite run at `b5e2b7f`, `-m "not sandbox_images"`, with uid 0 simulated by patching
-`os.getuid`, `DOCKER_HOST` pointing at nothing and HTTPS sent to a dead proxy: 3957 passed,
-97 skipped, 1 failed, and that one a wall-clock test that also passed 3 times of 3 alone under
-the same settings, on a host with a load average near 10; method: pytest, 2026-09-26;
-apparatus 2.2]**. A test that needs something the machine may not have is
+No test may fail because of the machine it runs on. Running as root, with no docker daemon or
+with no network is meant to change which tests run, not their results: builder settings in
+tests name a non-root user, the doctor tests never ask the host's daemon, and a test that needs
+a daemon or a network host is skipped with the reason when it is absent (under
+`CRB_TEST_STRICT_WARMUP=1` an unreachable host is a failure instead, below). One whole-suite
+run under all three conditions still had one failure, from timing rather than the host
+**[measured — n = 1 whole-suite run at `b5e2b7f`, `-m "not sandbox_images"`, with uid 0
+simulated by patching `os.getuid`, `DOCKER_HOST` pointing at nothing and HTTPS sent to a dead
+proxy: 3957 passed, 97 skipped, 1 failed, and that one a wall-clock test that also passed 3
+times of 3 alone under the same settings, on a host with a load average near 10; method:
+pytest, 2026-09-26; apparatus 2.2]**, so this is a rule the suite is held to, not a guarantee
+that it passes on every host. A test that needs something the machine may not have is
 marked, and skipped with the reason when it is absent:
 
 - `docker` — a docker daemon that answers `docker info`
