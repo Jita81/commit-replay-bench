@@ -346,3 +346,32 @@ def test_the_gone_check_still_catches_a_container_that_is_left_behind():
     finally:
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=60)
     assert _gone(name) is True
+
+
+def test_the_gone_check_fails_when_docker_ps_itself_fails(monkeypatch):
+    """A ``docker ps`` that fails prints nothing — that is not proof the container went.
+    The check fails the test with the daemon's error instead of reading it as removal."""
+
+    def failing(argv, **kw):
+        return subprocess.CompletedProcess(argv, 1, "", "Cannot connect to the Docker daemon")
+
+    monkeypatch.setattr(subprocess, "run", failing)
+    with pytest.raises(pytest.fail.Exception, match="docker ps failed"):
+        _gone("crb-any", within_s=1.0)
+
+
+def test_the_gone_check_never_waits_past_its_bound(monkeypatch):
+    """Every query is bounded by the time left, so a stalled daemon cannot stretch the
+    check past ``within_s``; a container still listed at the deadline reads as leaked."""
+    timeouts: list[float] = []
+
+    def still_listed(argv, **kw):
+        timeouts.append(kw["timeout"])
+        return subprocess.CompletedProcess(argv, 0, "abc123\n", "")
+
+    monkeypatch.setattr(subprocess, "run", still_listed)
+    started = time.monotonic()
+    assert _gone("crb-any", within_s=0.6) is False
+    assert time.monotonic() - started < 1.2
+    assert timeouts and all(0 < t <= 0.6 for t in timeouts), timeouts
+
