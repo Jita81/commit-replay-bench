@@ -35,7 +35,8 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 - **The Helm chart refuses two placements that could not run.** With the default
   ReadWriteOnce `secretsStore`, `api.nodeSelector`, `api.tolerations` and `api.affinity`
   must equal the worker's, so the API can follow a worker on a dedicated, tainted pool,
-  whether a selector or node affinity keeps the worker there (P-046); a pod label
+  whether a selector or node affinity keeps the worker there, and a required pod
+  anti-affinity that selects the api or the worker pod is refused (P-046); a pod label
   or annotation the chart sets can no longer be set again in `podLabels` / `podAnnotations`
   (P-047). DEPLOYMENT §5 now backs up the secrets store or has the credentials supplied
   again after a restore (P-048), with one restore order for each choice: when the

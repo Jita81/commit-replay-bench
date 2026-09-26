@@ -92,7 +92,9 @@ secretsStore:
   # api.affinity / worker.affinity you set). The render then refuses an api.nodeSelector,
   # api.tolerations or api.affinity that differs from the worker's: a worker on a tainted
   # pool (by selector or node affinity) the api cannot follow would leave one pod pending
-  # (P-046). ReadWriteMany lifts the pin. Back the claim up,
+  # (P-046). It also refuses a required podAntiAffinity that selects the api or the worker
+  # pod: the same on both pods, it still forbids the node the pin chooses. ReadWriteMany
+  # lifts the pin. Back the claim up,
   # or supply the credentials again after a restore (docs/DEPLOYMENT.md §5).
   accessMode: ReadWriteOnce
 

@@ -17,7 +17,9 @@ What it does: Renders the chart and, for the API and the worker Deployments, res
               name the same directory on the same persistent claim; that a ReadWriteOnce claim
               pins both pods to one node (merged with any affinity the operator sets) and is
               refused when the API could not follow the worker's placement — a difference in
-              ``nodeSelector``, ``tolerations`` or any kind of ``affinity`` (P-046); that an
+              ``nodeSelector``, ``tolerations`` or any kind of ``affinity`` — or a required
+              pod anti-affinity, the same on both pods, that selects a pod carrying the
+              store (P-046); that an
               operator's own claim replaces the chart's; that no pod label or annotation the
               chart sets can be set again in ``podLabels`` / ``podAnnotations`` (P-047); and
               that every claim the chart makes is named in DEPLOYMENT §5, the recovery
@@ -456,3 +458,108 @@ def test_a_read_write_once_store_refuses_opposing_required_node_affinities() -> 
         args += ["--set", f"{pod}.{term}.values={{{zone}}}"]
     err = _refused(*args)
     assert "api.affinity" in err and "ReadWriteMany" in err, err
+
+
+def _anti(*term: str) -> list[str]:
+    """``--set`` arguments that give BOTH pods the same required pod anti-affinity term (so
+    the same-placement guard passes); ``term`` is ``key=value`` under the term."""
+    return [
+        arg
+        for pod in ("api", "worker")
+        for kv in term
+        for arg in ("--set", f"{pod}.affinity.podAntiAffinity.{_TERM}[0].{kv}")
+    ]
+
+
+#: Required anti-affinity terms that select a pod the store pin must place beside the other:
+#: the same on both pods, but each forbids the node the pin sends the other pod to (the
+#: adversarial check on PR #57; the guard's own "give the api the worker's placement" leads
+#: here). Each selects a label the chart (or the operator's podLabels) puts on a store pod.
+REPELLING_ANTI_AFFINITY = {
+    "the worker's component": (
+        "labelSelector.matchLabels.app\\.kubernetes\\.io/component=worker",
+        f"topologyKey={HOSTNAME}",
+    ),
+    "the api's component": (
+        "labelSelector.matchLabels.app\\.kubernetes\\.io/component=api",
+        f"topologyKey={HOSTNAME}",
+    ),
+    "the store label": (
+        "labelSelector.matchLabels.crb\\.dev/secrets-store=shared",
+        f"topologyKey={HOSTNAME}",
+    ),
+    "a selector label, by expression": (
+        "labelSelector.matchExpressions[0].key=app\\.kubernetes\\.io/instance",
+        "labelSelector.matchExpressions[0].operator=Exists",
+        f"topologyKey={HOSTNAME}",
+    ),
+    # one node is one zone, so a zone-wide rule repels the pod beside it just the same
+    "the worker's component, zone-wide": (
+        "labelSelector.matchExpressions[0].key=app\\.kubernetes\\.io/component",
+        "labelSelector.matchExpressions[0].operator=In",
+        "labelSelector.matchExpressions[0].values={worker}",
+        "topologyKey=topology.kubernetes.io/zone",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(REPELLING_ANTI_AFFINITY))
+def test_a_read_write_once_store_refuses_anti_affinity_that_repels_a_store_pod(case: str) -> None:
+    """The pin puts every pod that mounts the store on the node of the first one scheduled. A
+    required pod anti-affinity that selects one of those pods forbids exactly that node, and
+    Kubernetes applies a placed pod's anti-affinity to new pods too, so whichever pod is
+    scheduled second stays pending [hypothesis — inferred from Kubernetes' scheduling rules;
+    no cluster was run]. The values are the same on both pods, so comparing them cannot catch
+    it: the render refuses the term itself (the adversarial check on PR #57, P-046)."""
+    err = _refused(*_anti(*REPELLING_ANTI_AFFINITY[case]))
+    assert "podAntiAffinity" in err and "ReadWriteMany" in err, err
+    assert "give the api the worker's placement" not in err, err
+    # ... and a claim that many nodes can mount needs no pin, so the same term renders
+    rwx = (
+        "--set",
+        "secretsStore.existingClaim=kv",
+        "--set",
+        "secretsStore.accessMode=ReadWriteMany",
+    )
+    assert not _node_pins(_deployment(_render(*_anti(*REPELLING_ANTI_AFFINITY[case]), *rwx), "api"))
+
+
+def test_an_operators_pod_label_counts_as_a_store_pods_label() -> None:
+    """``worker.podLabels`` is on the worker pod, so an anti-affinity that selects it repels the
+    worker just as a chart label does."""
+    labels = ("--set", "worker.podLabels.team=builds")
+    err = _refused(
+        *labels, *_anti("labelSelector.matchLabels.team=builds", f"topologyKey={HOSTNAME}")
+    )
+    assert "podAntiAffinity" in err, err
+
+
+#: Negative controls: required anti-affinity terms that select no store pod render.
+NON_REPELLING_ANTI_AFFINITY = {
+    "another app": ("labelSelector.matchLabels.app=noisy", f"topologyKey={HOSTNAME}"),
+    "neither component": (
+        "labelSelector.matchExpressions[0].key=app\\.kubernetes\\.io/component",
+        "labelSelector.matchExpressions[0].operator=NotIn",
+        "labelSelector.matchExpressions[0].values={api,worker}",
+        f"topologyKey={HOSTNAME}",
+    ),
+    "a label no store pod carries": (
+        "labelSelector.matchExpressions[0].key=crb\\.dev/other",
+        "labelSelector.matchExpressions[0].operator=Exists",
+        f"topologyKey={HOSTNAME}",
+    ),
+    "the worker's component in another namespace": (
+        "labelSelector.matchLabels.app\\.kubernetes\\.io/component=worker",
+        "namespaces={elsewhere}",
+        f"topologyKey={HOSTNAME}",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(NON_REPELLING_ANTI_AFFINITY))
+def test_anti_affinity_that_selects_no_store_pod_renders(case: str) -> None:
+    docs = _render(*_anti(*NON_REPELLING_ANTI_AFFINITY[case]))
+    for component in ("api", "worker"):
+        d = _deployment(docs, component)
+        assert _node_pins(d), component
+        assert d["spec"]["template"]["spec"]["affinity"]["podAntiAffinity"], component

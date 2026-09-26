@@ -246,7 +246,11 @@ ReadWriteOnce claim the chart refuses to render unless `api.nodeSelector`,
 its pool by required node affinity (rather than a node selector) would otherwise follow an
 api scheduled on a general node that its own rule forbids, and stay pending; pod affinity
 and pod anti-affinity can forbid a node in the same way. The chart compares your values
-before it adds its own pin. A worker on the dedicated, tainted pool of §4.4 therefore takes
+before it adds its own pin. Matching values are not enough on their own: a required pod
+anti-affinity that selects the api or the worker (a chart label such as
+`app.kubernetes.io/component` or `crb.dev/secrets-store`, or one of your `podLabels`) forbids
+the node the pin puts both pods on, whatever its topology key, so the chart refuses it too.
+Make such a rule preferred, or use a ReadWriteMany claim. A worker on the dedicated, tainted pool of §4.4 therefore takes
 the api with it (the example in §3.1), or the store moves to a ReadWriteMany claim on a file system that keeps POSIX
 permissions (the store refuses a directory that its group can read).
 The claim has no `keep` policy, so a stored credential does not outlive the release.

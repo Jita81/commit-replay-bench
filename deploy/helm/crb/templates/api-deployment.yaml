@@ -114,7 +114,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with include "crb.secretsStore.affinity" (dict "root" $ "affinity" .Values.api.affinity) }}
+      {{- with include "crb.secretsStore.affinity" (dict "root" $ "affinity" .Values.api.affinity "labels" (merge ($labels | fromYaml) (.Values.api.podLabels | default dict)) "what" "api") }}
       {{- . | nindent 6 }}
       {{- end }}
 ---

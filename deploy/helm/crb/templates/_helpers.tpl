@@ -143,6 +143,8 @@ difference in nodeSelector, tolerations or affinity (node affinity, pod affinity
 anti-affinity: each can forbid the node the other pod took). The operator's own values are
 compared, before the chart adds the pin (docs/PREVENTION.md P-046). A placement field added
 to a pod template must be added here: tests/test_deploy_secrets_store.py fails until it is.
+The same rule on both pods can still contradict the pin itself; crb.secretsStore.noRepel,
+below, refuses that.
 */}}
 {{- define "crb.secretsStore.samePlacement" -}}
 {{- $api := dict "nodeSelector" (.api.nodeSelector | default dict) "tolerations" (.api.tolerations | default list) "affinity" (.api.affinity | default dict) -}}
@@ -178,16 +180,64 @@ crb.dev/secrets-store: shared
 {{- end -}}
 
 {{/*
+Comparing values (samePlacement) cannot catch a rule that is the same on both pods but
+contradicts the pin itself: a required pod anti-affinity that selects a pod carrying the
+store forbids the very node the pin sends the other pod to (a node lies in one domain of
+every topology key, so a zone-wide rule repels just the same). Kubernetes applies a placed
+pod's anti-affinity to new pods too, and the placements are the same, so each pod's terms are
+checked against that pod's own labels (the chart's and its podLabels): a match is refused
+(docs/PREVENTION.md P-046). A term reaches the pod unless it names only other `namespaces`;
+matchLabels and matchExpressions (In, NotIn, Exists, DoesNotExist) are evaluated; a term with
+a namespaceSelector is treated as reaching the pod, since namespace labels are not known here.
+Call with (dict "root" $ "affinity" <the operator's> "labels" <the pod's labels, a map>
+"what" "api").
+*/}}
+{{- define "crb.secretsStore.noRepel" -}}
+{{- $labels := .labels -}}
+{{- $ns := .root.Release.Namespace -}}
+{{- $what := .what -}}
+{{- $anti := get (.affinity | default dict) "podAntiAffinity" | default dict -}}
+{{- range $i, $t := (get $anti "requiredDuringSchedulingIgnoredDuringExecution" | default list) }}
+{{- $sel := get $t "labelSelector" -}}
+{{- $hit := kindIs "map" $sel -}}
+{{- $names := get $t "namespaces" | default list -}}
+{{- if and $names (not (hasKey $t "namespaceSelector")) (not (has $ns $names)) }}
+{{- $hit = false -}}
+{{- end }}
+{{- if $hit }}
+{{- range $k, $v := (get $sel "matchLabels" | default dict) }}
+{{- if or (not (hasKey $labels $k)) (ne (toString (get $labels $k)) (toString $v)) }}
+{{- $hit = false -}}
+{{- end }}
+{{- end }}
+{{- range $e := (get $sel "matchExpressions" | default list) }}
+{{- $has := hasKey $labels $e.key -}}
+{{- $in := and $has (has (toString (get $labels $e.key)) ($e.values | default list | toStrings)) -}}
+{{- if and (eq $e.operator "In") (not $in) }}{{ $hit = false }}{{ end }}
+{{- if and (eq $e.operator "NotIn") $in }}{{ $hit = false }}{{ end }}
+{{- if and (eq $e.operator "Exists") (not $has) }}{{ $hit = false }}{{ end }}
+{{- if and (eq $e.operator "DoesNotExist") $has }}{{ $hit = false }}{{ end }}
+{{- end }}
+{{- end }}
+{{- if $hit }}
+{{- fail (printf "secretsStore.accessMode=ReadWriteOnce puts every pod that mounts the store on one node, but %s.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[%d] (%s) selects the %s pod, which mounts the store. The pin puts every such pod on one node and the same term is on each pod, so it forbids that node and one pod would stay pending. Either remove the term (or make it preferred), or name a ReadWriteMany claim (secretsStore.existingClaim, secretsStore.accessMode=ReadWriteMany), which needs no pin — docs/DEPLOYMENT.md §3.1" $what $i (toJson $t) $what) }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
 A pod's affinity: the operator's (api.affinity / worker.affinity), plus — for a
 ReadWriteOnce store, which attaches to one node — a required pod affinity that puts every
 pod carrying the store label on the node of the first one scheduled. Call with
-(dict "root" $ "affinity" .Values.<component>.affinity).
+(dict "root" $ "affinity" .Values.<component>.affinity "labels" <the pod's labels, a map>
+"what" "<component>").
 */}}
 {{- define "crb.secretsStore.affinity" -}}
 {{- $root := .root -}}
 {{- $aff := deepCopy (.affinity | default dict) -}}
 {{- if eq $root.Values.secretsStore.accessMode "ReadWriteOnce" -}}
 {{- include "crb.secretsStore.samePlacement" $root.Values -}}
+{{- include "crb.secretsStore.noRepel" . -}}
 {{- $match := merge (include "crb.selectorLabels" $root | fromYaml) (include "crb.secretsStore.podLabel" $root | fromYaml) -}}
 {{- $term := dict "labelSelector" (dict "matchLabels" $match) "topologyKey" "kubernetes.io/hostname" -}}
 {{- $pa := deepCopy (get $aff "podAffinity" | default dict) -}}
