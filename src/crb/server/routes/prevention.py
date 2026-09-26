@@ -131,19 +131,34 @@ def _chain(db: Session, repo: str) -> list[PreventionRecord]:
         ) from exc
 
 
-def _append(db: Session, repo: str, record: PreventionRecord) -> PreventionRecord:
+#: How many times a route chains a record before a concurrent writer is reported.
+APPEND_ATTEMPTS = 3
+
+
+def _append(
+    db: Session, repo: str, record: PreventionRecord, *, detail: dict[str, Any] | None = None
+) -> PreventionRecord:
     """Chain, add and commit one record; on a concurrent append on the trace (a collision on
-    ``uq_events_trace_seq`` or a head that moved under the read), roll back and re-chain."""
-    for _ in range(2):
+    ``uq_events_trace_seq`` or a head that moved under the read), roll back and re-chain.
+    Every attempt is inside the handler: when the last one collides too, the session is
+    rolled back and the caller gets 409 ``prevention_concurrent_append`` (with ``detail``,
+    e.g. what was already written elsewhere), never a 500 over a failed session."""
+    last: Exception | None = None
+    for _ in range(APPEND_ATTEMPTS):
         try:
             rec = _store(db, repo).append(record)
             db.commit()
             return rec
-        except (IntegrityError, ConcurrentAppend):
+        except (IntegrityError, ConcurrentAppend) as exc:
             db.rollback()
-    rec = _store(db, repo).append(record)
-    db.commit()
-    return rec
+            last = exc
+    raise ApiError(
+        409,
+        "prevention_concurrent_append",
+        f"the prevention chain of {repo!r} kept moving while a {record.kind!r} record was "
+        f"chained ({APPEND_ATTEMPTS} attempts); nothing was recorded — retry the act",
+        detail={"kind": record.kind, **(detail or {})},
+    ) from last
 
 
 def _record(
@@ -287,7 +302,8 @@ def learn_register_item(
     repo: str = Query(min_length=1, max_length=64),
 ) -> dict[str, Any]:
     get_repo_or_404(db, repo)
-    prop = proposals(_chain(db, repo)).get(item_id)
+    chain = _chain(db, repo)
+    prop = proposals(chain).get(item_id)
     if prop is None:
         raise ApiError(404, "not_found", f"no filed prevention item {item_id!r} on {repo!r}")
     if prop.scope == "product":
@@ -323,8 +339,19 @@ def learn_register_item(
     )
     home = FactoryHome(settings.home, repo)
     active = home.load_backlog()
+    recorded = {
+        str(r.payload.get("registered_id", ""))
+        for r in chain
+        if r.kind == "registered" and r.payload.get("item_id") == item_id
+    }
+    orphan = _unrecorded_registration(active, item_id, recorded)
     try:
-        if active is None:
+        if orphan is not None and active is not None:
+            # an earlier call wrote the backlog and then failed to record it: record THAT
+            # registration, never register the same item again as a new version
+            reg = active
+            how, registered_id, supersedes = "recovered", orphan.id, orphan.supersedes
+        elif active is None:
             reg = home.register_backlog([item], actor=operator.id)
             how, registered_id, supersedes = "frozen", item.id, ""
         else:
@@ -356,6 +383,13 @@ def learn_register_item(
             who=operator.id,
             reason=f"registered {item_id} onto {repo}'s factory backlog ({how})",
         ),
+        detail={
+            "item_id": item_id,
+            "registered_id": registered_id,
+            "backlog_hash": reg.backlog_hash,
+            "evolutions_hash": reg.evolutions_hash,
+            "retry": "registering again records this registration; it does not add another",
+        },
     )
     return {
         "repo": repo,
@@ -367,6 +401,22 @@ def learn_register_item(
         "evolutions_hash": reg.evolutions_hash,
         "record": rec.to_dict(),
     }
+
+
+def _unrecorded_registration(
+    backlog: Backlog | None, item_id: str, recorded: set[str]
+) -> BacklogItem | None:
+    """An item of ``item_id``'s lineage on the active backlog that no ``registered`` record
+    names (``recorded``: the ids the chain names): the backlog write of an earlier call
+    whose record failed. ``None`` when every one of them is on the record."""
+    if backlog is None:
+        return None
+    mine = [
+        i
+        for i in backlog.all_items()
+        if i.labels.get("prevention_item") == item_id and i.id not in recorded
+    ]
+    return mine[-1] if mine else None
 
 
 @router.post(

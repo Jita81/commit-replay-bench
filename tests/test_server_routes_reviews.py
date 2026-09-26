@@ -458,6 +458,43 @@ class TestMergeableFlag:
         again = env.post("/reviews/corrections/mergeable", json={"apply": True}).json()
         assert again["corrections"] == []  # idempotent
 
+    def test_a_refused_correction_never_loses_the_evidence_of_the_ones_before_it(
+        self, env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Each correction commits to the review chain on its own; its ``review.corrected``
+        event was only committed after the LAST one, so a later refusal (422) dropped the
+        events of corrections already on the chain (CodeRabbit, PR #57). Every appended
+        correction keeps its event."""
+        from crb.core.review import ReviewRefused
+        from crb.server.routes import reviews as reviews_route
+        from crb.store.ledger import DbReviewLedger
+
+        r = Retained(env, tmp_path)
+        self._legacy(env, r)
+        real_plan = reviews_route.mergeable_flag_corrections
+        monkeypatch.setattr(
+            reviews_route,
+            "mergeable_flag_corrections",
+            lambda records, corrector: real_plan(records, corrector=corrector) * 2,
+        )
+        real_append = DbReviewLedger.append
+        calls: list[int] = []
+
+        def second_refused(self: Any, record: Any, **kw: Any) -> Any:
+            calls.append(1)
+            if len(calls) == 2:
+                raise ReviewRefused("refused", code="row_mismatch", expected="a", observed="b")
+            return real_append(self, record, **kw)
+
+        monkeypatch.setattr(DbReviewLedger, "append", second_refused)
+        login(env.client, "admin")
+        res = env.post("/reviews/corrections/mergeable", json={"apply": True})
+        assert res.status_code == 422, res.text
+        assert len(env.get("/reviews").json()["items"]) == 2  # the first is on the chain
+        with env.factory() as s:
+            events = s.execute(select(Event).where(Event.action == "review.corrected")).scalars()
+            assert len(list(events)) == 1  # ... and so is its evidence event
+
 
 class TestRetainedTranscript:
     def test_served_from_inside_the_transcripts_dir_only(self, env: Env, tmp_path: Path) -> None:

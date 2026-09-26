@@ -72,6 +72,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from crb.core.execution import DockerSettings, SandboxUnavailable
@@ -265,37 +266,25 @@ def _shared_settings(env: dict[str, str] | None = None) -> _SharedWithApi:
 
 def _keys_for(env: dict[str, str]) -> dict[str, Any]:
     """The subset of an explicit ``env`` mapping that ``_SharedWithApi`` reads, as its
-    field values (pydantic-settings only reads ``os.environ`` on its own)."""
+    field values (pydantic-settings only reads ``os.environ`` on its own). Derived from the
+    model's own fields — ``CRB_<FIELD>`` for a value, ``CRB_<FIELD>__<KEY>`` for a block —
+    so a block added to ``_SharedWithApi`` is read here too (``CRB_RETENTION__*`` was not,
+    and the patch-retention opt-out was ignored: CodeRabbit, PR #57)."""
+    upper = {k.upper(): v for k, v in env.items()}
     out: dict[str, Any] = {}
-    if METRICS_ENABLED_ENV in env:
-        out["metrics_enabled"] = env[METRICS_ENABLED_ENV]
-    if METRICS_HOST_ENV in env:
-        out["metrics_host"] = env[METRICS_HOST_ENV]
-    if METRICS_PORT_ENV in env:
-        out["metrics_port"] = env[METRICS_PORT_ENV]
-    github = {
-        k.removeprefix("CRB_GITHUB__").lower(): v
-        for k, v in env.items()
-        if k.upper().startswith("CRB_GITHUB__")
-    }
-    if github:
-        out["github"] = github
-    factory = {
-        k.removeprefix("CRB_FACTORY__").lower(): v
-        for k, v in env.items()
-        if k.upper().startswith("CRB_FACTORY__")
-    }
-    if factory:
-        out["factory"] = factory
-    intake = {
-        k.removeprefix("CRB_INTAKE__").lower(): v
-        for k, v in env.items()
-        if k.upper().startswith("CRB_INTAKE__")
-    }
-    if intake:
-        out["intake"] = intake
-    if PUBLIC_URL_ENV in env:
-        out["public_url"] = env[PUBLIC_URL_ENV]
+    for name, info in _SharedWithApi.model_fields.items():
+        key = f"CRB_{name.upper()}"
+        kind = info.annotation
+        if isinstance(kind, type) and issubclass(kind, BaseModel):
+            block = {
+                k.removeprefix(f"{key}__").lower(): v
+                for k, v in upper.items()
+                if k.startswith(f"{key}__")
+            }
+            if block:
+                out[name] = block
+        elif key in upper:
+            out[name] = upper[key]
     return out
 
 

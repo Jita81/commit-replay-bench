@@ -525,7 +525,10 @@ def correct_mergeable_flags(
     statement quotes the original and names it), appended through the same ledger and
     anchor as ``POST /reviews``, so the standing verdict per row becomes the corrected
     one and the original stays in the chain. ``apply: false`` only lists them.
-    Idempotent: a second apply finds nothing to correct."""
+    Idempotent: a second apply finds nothing to correct. Each correction and its
+    ``review.corrected`` event are committed together, one by one: a refusal part-way
+    (422) leaves the ones before it applied WITH their evidence, and a second apply picks
+    up the rest."""
     ledger = DbReviewLedger(factory)
     records = list(ledger.records())
     standing = latest_reviews(records)
@@ -561,6 +564,9 @@ def correct_mergeable_flags(
                     "row_hash": chained.row_hash,
                 },
             )
+            # the correction is already on the review chain (its own commit): its evidence
+            # event is committed with it, so a later refusal cannot drop it
+            db.commit()
         out.append(
             MergeableCorrectionOut(
                 review_id=original.review_id,
@@ -572,8 +578,6 @@ def correct_mergeable_flags(
                 correction_review_id=correction_id,
             )
         )
-    if body.apply:
-        db.commit()
     return MergeableCorrectionsOut(applied=body.apply, corrections=out)
 
 

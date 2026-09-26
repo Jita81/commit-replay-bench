@@ -48,6 +48,7 @@ Touch when:   a run kind is added (``stage_for``, a run case here and the queue'
 from __future__ import annotations
 
 import json
+import os
 import stat
 import threading
 import time
@@ -1674,6 +1675,54 @@ def test_github_settings_read_only_their_own_keys_and_refuse_a_malformed_one(
     monkeypatch.setenv("CRB_GITHUB__API_URL", "ftp://not-https")
     with pytest.raises(pydantic.ValidationError):
         worker_main._shared_settings()
+
+
+def test_the_patch_retention_opt_out_reaches_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``settings_from_args`` reads an explicit environment through ``_keys_for``, which
+    mapped no ``CRB_RETENTION__*`` key: ``CRB_RETENTION__PATCHES=false`` handed in that way
+    was ignored and the worker kept patches in a deployment that must hold no code
+    (CodeRabbit, PR #57, CWE-1188). The process environment reached it only because
+    pydantic-settings also reads ``os.environ`` on its own."""
+    for key in [k for k in os.environ if k.startswith("CRB_")]:
+        monkeypatch.delenv(key, raising=False)
+    args = worker_main.build_parser().parse_args([])
+    off = {"CRB_RETENTION__PATCHES": "false"}
+    assert worker_main.settings_from_args(args, env=off).store_patches is False
+    assert worker_main._shared_settings(off).retention.patches is False
+    assert worker_main._shared_settings({}).retention.patches is True  # the default keeps them
+    monkeypatch.setenv("CRB_RETENTION__PATCHES", "false")
+    assert worker_main.settings_from_args(args).store_patches is False
+
+
+@pytest.mark.parametrize("name", sorted(worker_main._SharedWithApi.model_fields))
+def test_every_shared_setting_is_read_from_an_explicit_environment(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The class of that bug, ratcheted: every field the worker shares with the API is read
+    from an explicit environment — a block added to ``_SharedWithApi`` cannot be skipped by
+    ``_keys_for`` and fall back to its default."""
+    import pydantic
+    from pydantic import BaseModel
+
+    for key in [k for k in os.environ if k.startswith("CRB_")]:
+        monkeypatch.delenv(key, raising=False)
+    kind = worker_main._SharedWithApi.model_fields[name].annotation
+    if isinstance(kind, type) and issubclass(kind, BaseModel):
+        sub = next(
+            f for f, info in kind.model_fields.items() if info.annotation in (bool, int, str)
+        )
+        sub_kind = kind.model_fields[sub].annotation
+        value = "false" if sub_kind is bool else "7" if sub_kind is int else "x"
+        env = {f"CRB_{name.upper()}__{sub.upper()}": value}
+    else:
+        value = "false" if kind is bool else "7" if kind is int else "https://crb.example"
+        env = {f"CRB_{name.upper()}": value}
+    default = getattr(worker_main._shared_settings({}), name)
+    try:
+        read = getattr(worker_main._shared_settings(env), name)
+    except pydantic.ValidationError:
+        return  # the value reached the field and was judged: it was read
+    assert read != default, env
 
 
 def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> None:

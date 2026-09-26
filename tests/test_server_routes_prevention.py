@@ -356,3 +356,78 @@ def test_a_concurrent_append_rechains(env: Env, monkeypatch: pytest.MonkeyPatch)
     recs = _records(env)  # verifies the chain: one line, no fork
     assert [x.payload["auto_apply"] for x in recs] == ["off", "context", "config"]
     assert recs[2].prev_hash == recs[1].row_hash
+
+
+def test_a_chain_append_that_keeps_colliding_is_a_409_not_a_500(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The last of the three attempts ran outside the retry's ``try``: a third collision
+    left the session failed and answered a bare 500 (CodeRabbit, PR #57). It is a 409 that
+    names the cause, and the session is rolled back."""
+
+    def always_collides(self: Any, record: PreventionRecord) -> PreventionRecord:
+        raise prevention_state.ConcurrentAppend("the learn trace moved")
+
+    monkeypatch.setattr(EventsPreventionStore, "append", always_collides)
+    r = env.put(f"/learn/switch?repo={ALPHA}", json={"auto_apply": "context", "reason": "race"})
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "prevention_concurrent_append"
+    monkeypatch.undo()
+    r = env.put(f"/learn/switch?repo={ALPHA}", json={"auto_apply": "context", "reason": "again"})
+    assert r.status_code == 200, r.text  # nothing half-written blocks the next act
+
+
+def test_a_registration_whose_record_failed_is_recorded_on_retry_never_registered_twice(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backlog is written before the chain's ``registered`` record. When that append
+    failed, the item sat on the backlog with no record, and a retry registered it again as
+    ``-v2`` (CodeRabbit, PR #57). The failure is a 409 naming the backlog hash, and the
+    retry records the registration that is already there instead of making another."""
+    _seed(env, _proposal("prevent-aaaaaaaaaaaa", "infra"))
+    real = EventsPreventionStore.append
+
+    def fails_once(self: Any, record: PreventionRecord) -> PreventionRecord:
+        raise prevention_state.ConcurrentAppend("the learn trace moved")
+
+    monkeypatch.setattr(EventsPreventionStore, "append", fails_once)
+    r = env.post(f"/learn/items/prevent-aaaaaaaaaaaa/register?repo={ALPHA}")
+    assert r.status_code == 409, r.text
+    err = envelope(r)
+    assert err["code"] == "prevention_concurrent_append"
+    backlog = FactoryHome(env.settings.home, ALPHA).load_backlog()
+    assert backlog is not None and err["detail"]["backlog_hash"] == backlog.backlog_hash
+    assert [x.kind for x in _records(env)] == ["proposed"]
+    monkeypatch.setattr(EventsPreventionStore, "append", real)
+    r = env.post(f"/learn/items/prevent-aaaaaaaaaaaa/register?repo={ALPHA}")
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert (body["how"], body["registered_id"], body["supersedes"]) == (
+        "recovered",
+        "prevent-aaaaaaaaaaaa",
+        "",
+    )
+    after = FactoryHome(env.settings.home, ALPHA).load_backlog()
+    assert after is not None and [i.id for i in after.all_items()] == ["prevent-aaaaaaaaaaaa"]
+    assert [x.kind for x in _records(env)] == ["proposed", "registered"]
+    # once on the record, a further registration evolves it as before
+    r = env.post(f"/learn/items/prevent-aaaaaaaaaaaa/register?repo={ALPHA}")
+    assert r.status_code == 201 and r.json()["registered_id"] == "prevent-aaaaaaaaaaaa-v2"
+
+
+def test_the_seq_check_reads_the_whole_trace_so_another_action_never_forks_or_blocks(
+    env: Env,
+) -> None:
+    """Why ``append`` reads ``max(seq)`` over the whole learn trace and the chain head over
+    the prevention records only: ``append_system_event`` numbers the TRACE, so a head taken
+    from the records alone would refuse every append after any other event on the trace."""
+    _seed(env, _rec("switched", {"auto_apply": "off"}, i=1))
+    with env.factory() as s:
+        append_system_event(
+            s, trace_id=learn_trace_id(ALPHA), action="learn.noted", repo=ALPHA, payload={}
+        )
+        s.commit()
+    written = _seed(env, _rec("switched", {"auto_apply": "context"}, i=2))
+    recs = _records(env)
+    assert [x.row_hash for x in recs][-1] == written[0].row_hash
+    assert recs[1].prev_hash == recs[0].row_hash
