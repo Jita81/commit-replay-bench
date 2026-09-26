@@ -41,7 +41,13 @@ from crb.core import ledger as lg
 from crb.core.grade import FalseQ1Violation
 from crb.core.stats import wilson_interval
 from crb.core.version import APPARATUS_VERSION
-from fixtures.posture import posture_result, with_posture_labels
+from fixtures.posture import (
+    TEST_POSTURE_CLASS,
+    TEST_POSTURE_ID,
+    TEST_QUALIFICATION_ID,
+    posture_result,
+    with_posture_labels,
+)
 
 SHA = "b7c6251293a287542ac8568cad7505b710fa3532"
 PACK = "c" * 64
@@ -355,7 +361,14 @@ def test_labels_are_copied_and_cell_key() -> None:
     labels = {"k": "v"}
     r = row(labels=labels)
     labels["k"] = "changed"
-    assert r.labels["k"] == "v"
+    # the whole mapping, exactly: the copy, plus the posture labels a 2.3 row carries and
+    # nothing else — a clean row must never gain a witness (CodeRabbit on PR #56)
+    assert r.labels == {
+        "k": "v",
+        "posture_id": TEST_POSTURE_ID,
+        "posture_class": TEST_POSTURE_CLASS,
+        "qualification_id": TEST_QUALIFICATION_ID,
+    }
     assert r.cell == lg.CellKey(
         "replay", "bug.fix", "XS", "python", "agentic", "gpt-oss-120b", "cerebras"
     )
