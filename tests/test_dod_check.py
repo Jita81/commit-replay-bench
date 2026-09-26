@@ -689,6 +689,28 @@ def test_the_prevention_register_refuses_an_entry_without_a_working_artefact(
     assert error in capsys.readouterr().out
 
 
+def test_the_register_refuses_a_gap_id_defined_twice_with_different_text(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """STANDARD §2: one id is one piece of work. The artefacts refused a gap id defined twice
+    in one file; the register's parser let the second line overwrite the first, so a
+    pending row rendered the wrong "what is missing" (CodeRabbit, PR #57). Both parsers
+    now record a gap through one function, and the same line twice is still accepted."""
+    mod, root = tree
+    _write_all(root)
+    same = REGISTER + "- **G-701** — clean patches are not kept · store the graded patch · server\n"
+    (root / "docs/PREVENTION.md").write_text(same, encoding="utf-8")
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    capsys.readouterr()
+    other = REGISTER + "- **G-701** — transcripts are thrown away · keep them · server\n"
+    (root / "docs/PREVENTION.md").write_text(other, encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    out = capsys.readouterr().out
+    assert "PREVENTION.md:" in out and "gap G-701 is defined twice" in out
+    _rows, gaps, _ = mod.parse_prevention(root / "docs/PREVENTION.md")
+    assert gaps["G-701"].startswith("clean patches are not kept")  # the first line stands
+
+
 def test_the_register_must_exist_and_its_counts_reach_the_gap_analysis(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:

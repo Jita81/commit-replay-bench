@@ -226,6 +226,20 @@ class Artefact:
 # ------------------------------------------------------------------ parsing
 
 
+def record_gap(gaps: dict[str, str], gid: str, body: str, where: str, errors: list[str]) -> None:
+    """Record one ``## Gaps`` line — the ONE place every parser does it (the artefacts and
+    the prevention register). The same id twice in one file with different text is refused
+    and the FIRST line stands: an overwrite silently dropped a gap nobody had closed, or
+    rendered the wrong "what is missing" (STANDARD §2: one id is one piece of work)."""
+    if gid in gaps and gaps[gid] != body:
+        errors.append(
+            f"{where}: gap {gid} is defined twice in this file with different text — one id "
+            "is one piece of work; renumber one of them"
+        )
+        return
+    gaps[gid] = body
+
+
 def parse_artefact(path: Path) -> tuple[Artefact, list[str]]:
     errors: list[str] = []
     text = path.read_text(encoding="utf-8")
@@ -267,16 +281,7 @@ def parse_artefact(path: Path) -> tuple[Artefact, list[str]]:
             m = re.match("^- \\*\\*(G-\\d{3})\\*\\*\\s*\u2014\\s*(.+)$", s)
             if m:
                 body = m.group(2).strip()
-                if m.group(1) in gaps and gaps[m.group(1)] != body:
-                    # the cross-artefact check below compares files; without this one, the
-                    # SAME id twice in ONE file silently overwrote the first line and the
-                    # register dropped a gap nobody had closed (STANDARD §2: one id is one
-                    # piece of work)
-                    errors.append(
-                        f"{path.name}:{n}: gap {m.group(1)} is defined twice in this file with "
-                        "different text — one id is one piece of work; renumber one of them"
-                    )
-                gaps[m.group(1)] = body
+                record_gap(gaps, m.group(1), body, f"{path.name}:{n}", errors)
                 fields = body.split(" · ")
                 if len(fields) < 3:
                     errors.append(
@@ -588,7 +593,7 @@ def parse_prevention(path: Path) -> tuple[list[Prevention], dict[str, str], list
                     f"PREVENTION.md:{n}: gap {m.group(1)} must read "
                     f"'what is missing · the smallest change that closes it · owner' ({OWNERS})"
                 )
-            gaps[m.group(1)] = body
+            record_gap(gaps, m.group(1), body, f"PREVENTION.md:{n}", errors)
     if not rows and not errors:
         errors.append("PREVENTION.md: no rows under '## Register'")
     return rows, gaps, errors
