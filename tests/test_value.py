@@ -368,6 +368,7 @@ def test_a_first_sighting_is_new_and_only_a_later_one_recurs() -> None:
     w0 = lc["windows"][0]
     # window 0: protocol (new), clean, protocol (recurs — seen at attempt 1), budget (new)
     assert (w0["n"], w0["new"], w0["recurrences"]) == (4, 2, 1)
+    assert w0["classes_known"] == 0  # nothing is known before the first attempt
     assert lc["windows"][1]["recurrences"] == 3 and lc["windows"][1]["classes_known"] == 2
     prot = next(c for c in lc["classes"] if c["signature"] == "protocol:network")
     assert prot["first_seen"] == 1 and prot["occurrences"] == 6 and prot["counts"][0] == 1
@@ -385,10 +386,17 @@ def test_a_class_is_per_repository() -> None:
 
 
 def test_the_curve_never_looks_ahead() -> None:
+    """A later attempt never changes an earlier window — the tail brings classes the head never
+    saw, so a curve that counted known classes over ALL attempts would differ (P-026)."""
     rows = _curve_rows()
-    full = learning_curve(rows, window=4, register=KindRegister()).to_dict()
+    tail = [vr(12, kind=FAILURE_LINT), vr(13, kind=FAILURE_DISQUALIFIED), vr(14, kind=FAILURE_LINT)]
+    full = learning_curve(rows + tail, window=4, register=KindRegister()).to_dict()
     head = learning_curve(rows[:8], window=4, register=KindRegister()).to_dict()
     assert full["windows"][:2] == head["windows"][:2]
+    assert [w["classes_known"] for w in full["windows"][:2]] == [0, 2]
+    # and the classes first seen later are first seen where they arrived, not before
+    first = {c["signature"]: c["first_seen"] for c in full["classes"]}
+    assert min(v for k, v in first.items() if k.startswith(FAILURE_LINT)) == 13
 
 
 def test_the_curve_skips_outage_rows_and_orders_by_time() -> None:
@@ -487,3 +495,53 @@ def test_the_report_carries_cells_and_repositories() -> None:
     assert cell["n_valid"] == 6 and cell["clean"]["k"] == 3 and cell["mode"] == "blind"
     one = value_report(rows, [], repo="beta", apparatus="all").to_dict()
     assert one["repo"] == "beta" and one["rows"] == 3 and one["repos"] == []
+
+
+# --- every figure names what it counts (docs/PREVENTION.md P-024, P-025) ------------------
+
+
+def _working_rates(d: object, path: str = "") -> list[tuple[str, dict, str]]:
+    """Every served rate whose key says ``working`` — (path, parent, key)."""
+    out: list[tuple[str, dict, str]] = []
+    if isinstance(d, dict):
+        for k, v in d.items():
+            if "working" in k and isinstance(v, dict) and {"k", "n"} <= set(v):
+                out.append((f"{path}.{k}", d, k))
+            out += _working_rates(v, f"{path}.{k}")
+    elif isinstance(d, list):
+        for i, v in enumerate(d):
+            out += _working_rates(v, f"{path}[{i}]")
+    return out
+
+
+def test_every_served_working_rate_names_its_basis_beside_it() -> None:
+    rows = [vr(i, kind=FAILURE_CLEAN, mode="sighted") for i in range(30)]
+    rep = value_report(rows, [], apparatus="all").to_dict()
+    found = _working_rates(rep)
+    assert found, "the report serves no working rate — the ratchet has nothing to hold"
+    for path, parent, key in found:
+        assert f"{key}_basis" in parent, f"{path} is served with no basis beside it"
+    assert rep["routing"]["deliver_working_basis"] == BASIS_PROXY
+    assert "PROXY" in rep["routing"]["method"]
+
+
+def test_n_counts_attempts_and_the_tasks_behind_them_are_served() -> None:
+    rows = [
+        dataclasses.replace(
+            vr(i, kind=FAILURE_CLEAN if i < 4 else FAILURE_BUILDER_RED), task_id=f"t{i % 3}"
+        )
+        for i in range(9)
+    ]
+    rep = value_report(rows, [], apparatus="all").to_dict()
+    ns = rep["north_star"]
+    assert (ns["n_valid"], ns["n_tasks"], ns["clean"], ns["clean_tasks"]) == (9, 3, 4, 3)
+    assert (rep["rates"]["blind"]["n_tasks"], rep["rates"]["blind"]["k_tasks"]) == (3, 3)
+    assert rep["cells"][0]["clean"]["n_tasks"] == 3
+    assert "not a 95% interval" in ns["method"] and "n_tasks" in ns["method"]
+
+
+def test_deliver_decisions_are_served_by_mode() -> None:
+    rows = [vr(i, kind=FAILURE_CLEAN, mode="sighted") for i in range(30)]
+    rt = value_report(rows, [], apparatus="all").to_dict()["routing"]
+    assert rt["deliver"]["n"] > 0
+    assert rt["deliver_by_mode"] == {"sighted": rt["deliver"]["n"]}

@@ -22,6 +22,7 @@
  * Works with:   ui/src/screens/Learn/LearnPage.tsx (the code under test),
  *               ui/src/screens/Learn/PreventionSection.tsx (the register card),
  *               ui/src/screens/Learn/register.fixture.ts (the register), ui/src/test/utils.tsx
+ *               (renders the page with a mocked API)
  * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx
  * Touch when:   a fourth report is added.
  */

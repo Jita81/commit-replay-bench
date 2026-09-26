@@ -40,8 +40,8 @@
  *               ui/src/help/hints.ts (the `task.home.*` copy; the trigger is `Hint`),
  *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`),
  *               ui/src/screens/Connect/connection.ts (the connection state each task reads),
- *               ui/src/screens/Connect/ConnectPage.tsx, ui/src/screens/Results/ResultsPage.tsx,
- *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead),
+ *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead: with Connect
+ *               and Results, the routes in ui/src/App.tsx),
  *               ui/src/screens/Posture/PosturePage.tsx (the health banner's target),
  *               ui/src/screens/Home/ValueTile.tsx (the scorecard tile)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx

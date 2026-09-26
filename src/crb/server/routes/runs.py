@@ -73,6 +73,7 @@ from starlette.concurrency import run_in_threadpool
 from crb.builders.claude_code import credential_missing as claude_code_credential_missing
 from crb.builders.claude_code import default_auth as claude_code_default_auth
 from crb.builders.claude_code import default_model as claude_code_default_model
+from crb.builders.openai_client import credential_missing as openai_credential_missing
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.observability.events import StepEvent, StepStatus
@@ -605,8 +606,18 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     )
 
 
-#: The builders whose credential ``POST /runs`` can check by presence, and how.
-CREDENTIAL_CHECKS: dict[str, Callable[..., str]] = {"claude_code": claude_code_credential_missing}
+#: The builders whose credential ``POST /runs`` can check by presence, and how. Every
+#: registered builder is here or in :data:`CREDENTIAL_EXEMPT` —
+#: tests/test_server_routes_runs.py holds that, so a new builder cannot skip the check.
+CREDENTIAL_CHECKS: dict[str, Callable[..., str]] = {
+    "claude_code": claude_code_credential_missing,
+    "openai_agent": openai_credential_missing,
+    "editblock": openai_credential_missing,
+}
+#: Builders that need no credential, each with why.
+CREDENTIAL_EXEMPT: dict[str, str] = {
+    "fixture_gold": "the test-only fixture builder applies the gold diff and calls no model",
+}
 
 
 def run_builders(run: Run) -> list[str]:
@@ -642,7 +653,11 @@ def credential_refusal(run: Run, settings: Any) -> None:
                 422,
                 "builder_credential_missing",
                 why + " — nothing was queued",
-                detail={"builder": name, "auth": auth.strip() or claude_code_default_auth()},
+                detail={
+                    "builder": name,
+                    "auth": auth.strip()
+                    or (claude_code_default_auth() if name == "claude_code" else "api_key"),
+                },
             )
 
 

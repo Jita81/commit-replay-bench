@@ -19,7 +19,8 @@ How:          ``test_worker``'s ``Harness`` and ``FakeBuilder``; prior rows appe
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/server/worker.py (``_spend_hooks``, ``_RunLedger._stamp``),
-              src/crb/server/spend.py, src/crb/core/spend.py, src/crb/core/run.py,
+              src/crb/server/spend.py (the hooks' policy), src/crb/core/spend.py (the rules),
+              src/crb/core/run.py (the replay the hooks sit in),
               src/crb/builders/adapter.py (``budget_for_task``), tests/test_spend.py (the rules)
 Tested by:    tests/test_worker_spend.py
 Touch when:   a spend label or the apparatus record changes; the gate moves out of ``run_task``.

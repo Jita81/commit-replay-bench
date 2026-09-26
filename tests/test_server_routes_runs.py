@@ -72,6 +72,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # cases are about everything else, so the worker's key is PRESENT — a placeholder, never
     # a real key; TestCredentialPresence removes it on purpose.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-placeholder-not-a-key")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk-test-placeholder-not-a-key")
 
 
 @pytest.fixture
@@ -597,6 +598,83 @@ class TestCredentialPresence:
         r = self._post(env, builder_config={"auth": "cli"})
         assert r.status_code == 201, r.text
         assert "x" * 20 not in r.text
+
+    def test_an_openai_compatible_builder_with_no_key_is_refused_at_submit(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same class as run 8d9c5e55 on the other builders: ``openai_agent`` and
+        ``editblock`` refused only at build time, after the run was queued."""
+        monkeypatch.delenv("CEREBRAS_API_KEY")
+        for builder in ("openai_agent", "editblock"):
+            r = self._post(env, builder=builder, model="gpt-oss-120b")
+            assert r.status_code == 422, r.text
+            err = envelope(r)
+            assert err["code"] == "builder_credential_missing"
+            assert "CEREBRAS_API_KEY" in err["message"]
+            assert err["detail"] == {"builder": builder, "auth": "api_key"}
+        assert jobs.enqueued == []
+        monkeypatch.setenv("CEREBRAS_API_KEY", "csk-present")
+        r = self._post(env, builder="openai_agent", model="gpt-oss-120b")
+        assert r.status_code == 201 and "csk-present" not in r.text
+
+    def test_the_check_asks_for_the_variable_the_build_needs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from crb.builders.openai_client import (
+            MissingCredential,
+            credential_missing,
+            key_env,
+            make_chat,
+        )
+
+        monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+        name = key_env()
+        assert name in credential_missing()
+        with pytest.raises((MissingCredential, RuntimeError)) as caught:
+            make_chat("gpt-oss-120b")
+        if isinstance(caught.value, MissingCredential):
+            assert name in str(caught.value)
+
+    def test_every_registered_builder_is_checked_or_exempt_by_name(self) -> None:
+        """A new builder cannot skip the submit-time check (P-003's class, ratcheted)."""
+        from crb.builders import _REGISTRY
+        from crb.server.routes.runs import CREDENTIAL_CHECKS, CREDENTIAL_EXEMPT
+
+        names = {*_REGISTRY, "fixture_gold"}
+        assert not set(CREDENTIAL_CHECKS) & set(CREDENTIAL_EXEMPT)
+        for name in names:
+            assert name in CREDENTIAL_CHECKS or name in CREDENTIAL_EXEMPT, name
+        assert all(why.strip() for why in CREDENTIAL_EXEMPT.values())
+
+    def test_the_stored_token_is_never_read_only_its_presence(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """PRESENCE ONLY: a stored token the process cannot read (mode 000), with every read
+        of the secrets directory made to raise, is still accepted — so a check that read the
+        secret would fail here."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
+        secrets = tmp_path / "secrets"
+        monkeypatch.setenv("CRB_SECRETS_DIR", str(secrets))
+        secrets.mkdir(mode=0o700)
+        token = secrets / "claude_code_oauth_token"
+        token.write_text("x" * 80, encoding="utf-8")
+        token.chmod(0o000)
+        real_open = Path.open
+
+        def guarded(self: Path, *a: Any, **kw: Any) -> Any:
+            if str(self).startswith(str(secrets)):
+                raise AssertionError(f"a secret was read: {self}")
+            return real_open(self, *a, **kw)
+
+        monkeypatch.setattr(Path, "open", guarded)
+        monkeypatch.setattr(Path, "read_text", lambda self, *a, **kw: guarded(self).read())
+        monkeypatch.setattr(Path, "read_bytes", lambda self: guarded(self, "rb").read())
+        try:
+            r = self._post(env, builder_config={"auth": "cli"})
+        finally:
+            token.chmod(0o600)
+        assert r.status_code == 201, r.text
 
     def test_a_build_free_kind_is_never_checked(
         self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch

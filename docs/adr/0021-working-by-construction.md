@@ -1,6 +1,6 @@
 # ADR-0021 — "Clean" means working, by construction: the format step, the finish gate, belt 6 `api_stable`, and one switchboard
 
-**Status:** Accepted
+**Status:** Accepted (operator decision DL-054; built in the value wave, stream W)
 **Date:** 2026-09-25
 **Apparatus impact:** none while every mechanism is OFF (the default). Each is opt-in per run
 or per repository and recorded on every row it touches, so rows with and without it never
@@ -118,7 +118,7 @@ difference on every pack (`eslint(max-warnings=0)+prettier+stylelint+tsc:lint:ty
   blind campaign (Phase B: the same tasks with the switches OFF and ON) decides; until then each
   stays OFF by default **[gap — no paired rows exist yet]**.
 
-## Alternatives rejected
+## Alternatives considered
 
 - *Belt 6 as a ledger column.* Needs a store migration, a new belt set and an apparatus bump
   before a single measurement exists; the hashed label records the same fact with no change

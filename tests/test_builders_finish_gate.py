@@ -17,8 +17,10 @@ How:          ``adapter.build_fn_for(..., checks=resolve(...))`` driven by ``crb
               declared check a real shell command in the worktree; the builder is scripted.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0021-working-by-construction.md
-Works with:   src/crb/builders/adapter.py (under test), src/crb/core/formatting.py,
-              src/crb/core/finish_gate.py, src/crb/core/checks.py, tests/fixtures/pyrepo.py
+Works with:   src/crb/builders/adapter.py (under test), src/crb/core/formatting.py (the
+              format step it drives), src/crb/core/finish_gate.py (the gate it drives),
+              src/crb/core/checks.py (the switchboard the run resolves), tests/fixtures/pyrepo.py
+              (the repository graded for real)
 Tested by:    tests/test_builders_finish_gate.py
 Touch when:   the adapter's order of steps (build → format → gate → pre-flight → grade) or a
               row label changes.
@@ -57,6 +59,9 @@ RUFF = shutil.which("ruff") or str(Path(__file__).resolve().parents[1] / ".venv"
 
 #: The gold, written the way a model might: correct, and not how ``ruff format`` writes it.
 UGLY_SUBTRACT = "\n\ndef subtract(a,b):\n    return a-b\n"
+#: A test file the builder adds, as unformatted as the source.
+UGLY_TEST = "tests/test_extra.py"
+UGLY_TEST_SRC = "def test_extra( ):\n    assert  True\n"
 
 
 class ScriptedBuilder:
@@ -99,6 +104,9 @@ class ScriptedBuilder:
             if self.behaviour == "todo":
                 text += "# TODO\n"
             src.write_text(text, encoding="utf-8")
+            if self.behaviour == "newtest":
+                # a NEW test file, unformatted: the format step must never touch it
+                (workspace.root / UGLY_TEST).write_text(UGLY_TEST_SRC, encoding="utf-8")
         return BuildOutcome(
             **base, done=True, stop_reason=STOP_DONE, cost_usd=0.01, latency_s=0.1, budget=budget
         )
@@ -184,6 +192,18 @@ def test_the_format_step_makes_the_graded_patch_the_formatted_one(
     assert row.builder == "scripted"  # the same arm name: the label, not the name, records it
     assert any(a == "builder.format_step" for a, _ in events)
     assert len(ScriptedBuilder.briefs) == 1 and not ScriptedBuilder.briefs[0].finish_checks
+
+
+@needs_ruff
+def test_the_format_step_never_touches_a_test_file_the_builder_wrote(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The format step's file list excludes test files at the adapter, not only by what the
+    workspace reports: a builder's own new test file is never formatted (P-032)."""
+    _, events = _run(pyrepo, tmp_path, "newtest", None, run_checks={"format_step": True})
+    (fmt,) = [p for a, p in events if a == "builder.format_step"]
+    assert fmt["ran"] == ["ruff-format"]
+    assert fmt["changed"] == [pr.SRC]
 
 
 @needs_ruff

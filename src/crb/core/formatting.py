@@ -82,6 +82,12 @@ SKIP_DISABLED = "disabled"
 SKIP_NO_FILES = "no_changed_source_files"
 SKIP_NOT_CONFIGURED = "no_formatter_configured"
 SKIP_NOT_INSTALLED = "formatter_not_installed"
+#: The plan refuses the tool (a binary outside the repository's pin): never run it.
+SKIP_REFUSED = "formatter_refused"
+#: A formatter that cannot be held to the changed files — ``cargo fmt`` formats the whole
+#: crate, test targets included — is skipped by name until a file-scoped call is built.
+SKIP_NOT_FILE_SCOPED = "formatter_not_file_scoped"
+NOT_FILE_SCOPED: frozenset[str] = frozenset({"cargo-fmt"})
 
 DEFAULT_FORMAT_TIMEOUT_S = 300
 
@@ -181,19 +187,31 @@ def formatters_for(
         exts = tuple(str(e) for e in (decl.get("exts") or ()))
         return [Formatter(str(decl.get("name") or "declared"), argv, exts)], ""
     out: list[Formatter] = []
+    held: list[str] = []
     if plan is not None:
         for tool in plan.tools:
             write = FORMATTER_WRITE.get(tool.name)
             if write is None:
                 continue
+            if tool.refuse:
+                # the same binary belt 5 refuses to judge with (docs/PREVENTION.md P-031)
+                held.append(f"{SKIP_REFUSED}:{tool.name}")
+                continue
+            if tool.name in NOT_FILE_SCOPED:
+                held.append(f"{SKIP_NOT_FILE_SCOPED}:{tool.name}")
+                continue
             binary = tool.argv[0]
             out.append(Formatter(tool.name, (binary, *write), tool.exts))
-    has_py_formatter = any(f.name in ("ruff-format", "black") for f in out)
+    has_py_formatter = any(f.name in ("ruff-format", "black") for f in out) or any(
+        h.endswith(":ruff-format") for h in held
+    )
     if not has_py_formatter and black_configured(root):
         black_bin = black or shutil.which("black")
         if not black_bin:
             return out, "" if out else f"{SKIP_NOT_INSTALLED}:black"
         out.append(Formatter("black", (black_bin, "-q"), (".py", ".pyi")))
+    if not out and held:
+        return [], "+".join(held)[:120]
     if not out and prettier_configured(root):
         # configured but the plan could not resolve the binary (no node_modules/.bin)
         return [], f"{SKIP_NOT_INSTALLED}:prettier"
@@ -256,8 +274,10 @@ __all__ = [
     "FORMATTER_WRITE",
     "SKIP_DISABLED",
     "SKIP_NOT_CONFIGURED",
+    "SKIP_NOT_FILE_SCOPED",
     "SKIP_NOT_INSTALLED",
     "SKIP_NO_FILES",
+    "SKIP_REFUSED",
     "FormatRun",
     "Formatter",
     "black_configured",

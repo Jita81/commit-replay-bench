@@ -164,12 +164,41 @@ def test_nothing_in_src_reads_the_namespace_package_file() -> None:
         f"{p.relative_to(ROOT)}:{node.lineno}"
         for p in (ROOT / "src").rglob("*.py")
         for node in ast.walk(ast.parse(p.read_text(encoding="utf-8")))
-        if isinstance(node, ast.Attribute)
-        and node.attr == "__file__"
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "crb"
+        if reads_namespace_file(node)
     ]
     assert offenders == []
+
+
+def reads_namespace_file(node: ast.AST) -> bool:
+    """``crb.__file__`` or ``getattr(crb, "__file__"…)`` — both read the namespace
+    package's ``None``."""
+    if isinstance(node, ast.Attribute):
+        return (
+            node.attr == "__file__"
+            and isinstance(node.value, ast.Name)
+            and (node.value.id == "crb")
+        )
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        args = node.args
+        return (
+            node.func.id == "getattr"
+            and len(args) >= 2
+            and isinstance(args[0], ast.Name)
+            and args[0].id == "crb"
+            and isinstance(args[1], ast.Constant)
+            and args[1].value == "__file__"
+        )
+    return False
+
+
+def test_the_namespace_guard_catches_the_attribute_and_the_getattr_form() -> None:
+    def hits(src: str) -> int:
+        return sum(reads_namespace_file(n) for n in ast.walk(ast.parse(src)))
+
+    assert hits("import crb\nx = crb.__file__\n") == 1
+    assert hits("import crb\nx = getattr(crb, '__file__', None)\n") == 1
+    assert hits("import crb.core.version as v\nx = v.__file__\n") == 0
+    assert hits("x = getattr(obj, '__file__')\n") == 0
 
 
 def test_the_source_commit_variable_wins_and_the_process_commit_is_captured_once(

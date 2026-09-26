@@ -8,6 +8,38 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-26 — the value merge's adversarial review: every finding fixed, every class stopped
+
+- **The loop cannot close a class it did not remove.** Displacement is measured against the
+  before window's non-target failure rate, so the same attempts failing as another class read
+  `displaced`, not `closed`; a class still recurring on tasks the change never reached (runs
+  opted out, or a team override) is never kept or closed; a quiet (`dormant`) class is never
+  given a lever, deterministic or not; a run's own `budget_profile` outranks the loop's switch
+  and its rows are never counted as exposed (ADR-0020 §6.6, §6.10, §6.14).
+- **Every ladder ends in a filed item, and only climbs.** A class no specific code item admits
+  (`lint`, `format`, `builder_red:no_source_change`, `harness:other`…) files
+  `item:prevent-class` when nothing the loop may apply is left, and a retired switch never
+  falls back to a playbook line (ADR-0020 §5, §9).
+- **No builder code reaches a brief as a "rule".** Each belt-5 rule parser reads a rule id only
+  where its tool prints one (ruff, tsc, clippy, checkstyle, standard), never from a message or
+  a source snippet.
+- **The scorecard reads what Learn reads.** `GET /value` hands the register the evidence
+  packs, so a `format:gofmt` class is the same class on both; the report names its review
+  source (`reviews_source: "store"`), serves `n_tasks` beside every attempt count, labels
+  `routing.deliver_working` as the proxy and serves deliver decisions by mode. Home's tile no
+  longer calls the per-pound range a 95% interval.
+- **`POST /runs` checks every builder's credential.** `openai_agent` and `editblock` with no
+  key are refused at submit like `claude_code`; every registered builder is checked or
+  exempt by name, and a test makes a read of the stored token fail.
+- **Belt 6 and the format step stay in their remit.** A Go `doc/` package is public API; a
+  stdlib or `__future__` import in a package `__init__.py` is not a re-export; a ruff the
+  repository's pin forbids never formats, and `cargo fmt` (crate-wide) is a named skip.
+- **Our own gates caught up.** Header width covers tests/ and ui/src by line identity;
+  "Works with" is ratcheted to three to eight entries with reasons; CI job names cover
+  `*.yaml` and unnamed matrix jobs; ADRs from 0020 on are wrapped and cite their decision-log
+  row (DL-054 added for ADR-0021). Nineteen classes are new rows in `docs/PREVENTION.md`
+  (P-018 to P-036).
+
 ### 2026-09-25 — the value wave wired: a bug class meets a process lever, and the curve shows it
 
 - **The loop's configuration levers now reach a run.** `crb.server.prevention_state.mechanisms`

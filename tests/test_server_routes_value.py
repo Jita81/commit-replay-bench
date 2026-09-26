@@ -147,3 +147,56 @@ def test_a_false_q1_row_refuses(env: Env) -> None:
         s.commit()
     r = env.get(f"/value?repo={ALPHA}")
     assert r.status_code == 409 and envelope(r)["code"] == "false_q1_refused"
+
+
+def test_the_curve_classes_a_belt_5_row_from_its_evidence_pack(env: Env) -> None:
+    """The route hands the register the store's packs, as the Learn page's does: a gofmt
+    rejection is ``format:gofmt`` on the scorecard too, never ``lint:*`` (P-022)."""
+    from crb.store.models import EvidencePackRow
+
+    pack_hash = "d" * 64
+    with env.factory() as s:
+        s.add(
+            EvidencePackRow(
+                pack_hash=pack_hash,
+                repo=ALPHA,
+                task_id="e" * 40,
+                body_json={
+                    "grade": {
+                        "lint_run": {
+                            "steps": [{"tool": "gofmt", "verdict": False, "tail": "a.go\n"}]
+                        }
+                    }
+                },
+            )
+        )
+        s.commit()
+    ledger = DbLedger(env.factory)
+    template = next(r for r in ledger.rows(repo=ALPHA) if r.clean)
+    d = template.to_dict()
+    d.update(
+        {
+            "row_id": "",
+            "prev_hash": "",
+            "row_hash": "",
+            "task_id": "e" * 40,
+            "clean": False,
+            "repo_lint_clean": False,
+            "evidence_pack_hash": pack_hash,
+        }
+    )
+    d.pop("failure_kind", None)
+    d.pop("cost_known", None)
+    ledger.append(GradeRow.from_dict(d))
+    r = env.get(f"/value?repo={ALPHA}")
+    assert r.status_code == 200, r.text
+    sigs = {c["signature"] for c in r.json()["learning_curve"]["classes"]}
+    assert "format:gofmt" in sigs and "lint:*" not in sigs
+
+
+def test_the_report_says_its_reviews_come_from_the_store(env: Env) -> None:
+    """The route reads only the review store; the baseline page read an export plus the
+    critical-friend page. The report names its source so the two are never read as one
+    figure (P-035)."""
+    d = env.get(f"/value?repo={ALPHA}").json()
+    assert d["reviews_source"] == "store"

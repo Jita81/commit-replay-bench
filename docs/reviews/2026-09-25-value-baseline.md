@@ -19,31 +19,35 @@ products of two measured rates and are labelled as estimates wherever they appea
 
 **About 7% of blind attempts would produce a change a maintainer would merge, which is about
 one working change for every £5 spent on blind attempts [measured — n = 94 valid blind
-attempts under apparatus 2.2 × n = 13 reviewed clean patches; method: blind clean rate ×
-reviewed clean → mergeable rate, the interval the product of the two Wilson bounds; apparatus
-2.2].** The range is wide — from about £1.84 to about £17 per working change — because the
-review sample is small. The figures under apparatus 2.2 are:
+attempts on 37 tasks under apparatus 2.2 × n = 13 reviewed clean patches; method: blind clean
+rate × reviewed clean → mergeable rate, the range the product of the two Wilson bounds;
+apparatus 2.2].** The range is wide — from about £1.84 to about £17 per working change —
+because the review sample is small, and it is not a 95% interval: it multiplies two 95% bounds,
+so its coverage is only known to be at least about 90%. It is also narrower than the evidence
+supports, because n counts attempts: the 94 blind attempts were made on 37 tasks, and the 22
+clean ones on 15, so repeat attempts on one ticket are counted as if they were independent.
+The figures under apparatus 2.2 are:
 
 | measure | value | n / method / apparatus 2.2 |
 |---|---|---|
 | rows / valid observations | 518 / 259 | n = 518 rows; valid = not outage, harness, disqualified or a failed gold; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, all valid | 155 / 259 = 59.9% (Wilson 95% 53.8%-65.6%) | n = 259; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, sighted | 133 / 165 = 80.6% (Wilson 95% 73.9%-85.9%) | n = 165; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind | 22 / 94 = 23.4% (Wilson 95% 16.0%-32.9%) | n = 94; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind XS | 13 / 23 = 56.5% (Wilson 95% 36.8%-74.4%) | n = 23; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind S | 7 / 30 = 23.3% (Wilson 95% 11.8%-40.9%) | n = 30; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind M | 2 / 24 = 8.3% (Wilson 95% 2.3%-25.9%) | n = 24; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind L | 0 / 17 = 0.0% (Wilson 95% 0.0%-18.4%) | n = 17; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, all valid | 155 / 259 = 59.8% (Wilson 95% 53.8%-65.6%) | n = 259 attempts on 81 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, sighted | 133 / 165 = 80.6% (Wilson 95% 73.9%-85.9%) | n = 165 attempts on 81 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind | 22 / 94 = 23.4% (Wilson 95% 16.0%-32.9%) | n = 94 attempts on 37 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind XS | 13 / 23 = 56.5% (Wilson 95% 36.8%-74.4%) | n = 23 attempts on 16 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind S | 7 / 30 = 23.3% (Wilson 95% 11.8%-40.9%) | n = 30 attempts on 10 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind M | 2 / 24 = 8.3% (Wilson 95% 2.3%-25.8%) | n = 24 attempts on 6 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind L | 0 / 17 = 0.0% (Wilson 95% 0.0%-18.4%) | n = 17 attempts on 5 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
 | non-clean valid by kind | builder_red 43, budget 41, protocol 13, lint 7 | n = 104 non-clean valid rows; method: the product's failure rule (`derive_failure_kind`) over the export |
 | spend on budget-stopped attempts | $25.86 of $94.25; 11 at the 900 s wall clock | n = 41 budget rows; cost as recorded on the row |
 | escalation rungs r2 / r3, clean | 2 / 40 | n = 40 valid rows on rungs r2-r3; method: the product's failure rule (`derive_failure_kind`) over the export |
 | process loss (budget + protocol + harness + outage) | 309 of 518 rows (59.7%); $37.88 of $94.25 (40.2%) = £28.06 | n = 518 rows; £ at 1.35 USD per GBP (fixed) |
 | budget + protocol, share of valid failures | 51.9% | n = 104 non-clean valid rows; method: the product's failure rule (`derive_failure_kind`) over the export |
-| reviewed clean patches judged mergeable | 4 / 13 = 30.8% (Wilson 95% 12.7%-57.6%) | n = 13 reviews (by verdict: api_change 2, defect 4, ok 4, style 3); 2 stored flag(s) corrected from the statement |
-| proxy: clean patches lint-clean with no API break | 153 / 155 = 98.7% (Wilson 95% 95.4%-99.7%); 2 unknown (belt 5 not recorded) | n = 155 clean valid rows; method: the deterministic proxy, unknown counted as not working |
-| **working rate, blind** (clean x precision) | 7.2% (2.0%-19.0%) | n = 94 blind valid x n = 13 review verdicts; method: product of two rates and of their Wilson bounds — an estimate |
-| **working changes per pound, blind** | 0.2063 per £ (0.0581-0.5433); ≈ 6.77 working of 94 valid for £32.81 | n = 260 blind attempts (all spend counted); £ at 1.35 USD per GBP (fixed) |
-| deliver decisions made prospectively, clean | 17 / 20 = 85.0% (Wilson 95% 64.0%-94.8%) | n = 274 rows routed from prior rows only (`routing.v1`, controls not evaluated) |
+| reviewed clean patches judged mergeable | 4 / 13 = 30.8% (Wilson 95% 12.7%-57.6%) | n = 13 reviews (by verdict: api_change 2, defect 4, ok 4, style 3); 2 stored flag(s) corrected from the statement; reviews from the export file, not the live store |
+| proxy: clean patches lint-clean with no API break | 153 / 155 = 98.7% (Wilson 95% 95.4%-99.6%); 2 unknown (belt 5 not recorded) | n = 155 clean valid rows; method: the deterministic proxy, unknown counted as not working |
+| **working rate, blind** (clean x precision) | 7.2% (2.0%-19.0%) | n = 94 blind valid attempts on 37 tasks x n = 13 review verdicts; method: product of two rates and of their Wilson bounds — an estimate, and the range is not a 95% interval |
+| **working changes per pound, blind** | 0.2063 per £ (0.0581-0.5433); ≈ 6.77 working of 94 valid for £32.81; about £4.85 per working change (£1.84-£17.21) | n = 260 blind attempts (all spend counted), 94 valid on 37 tasks (22 clean on 15 tasks); £ at 1.35 USD per GBP (fixed); range = product of two Wilson bounds, not a 95% interval |
+| deliver decisions made prospectively, clean | 17 / 20 = 85.0% (Wilson 95% 64.0%-94.8%); by mode: sighted 20 | n = 274 rows routed from prior rows only (`routing.v1`, controls not evaluated) |
 | bug classes closed (register: `crb.prevention.register.v1`) | 0 of 29 | n = 29 classes; the prevention loop's register at family level (an export carries no error text); a class closes only after an applied change the attempts prove, and none has been applied |
 
 Recurrence of previously-seen bug classes per window of 50 attempts (n = 278 attempts, time-ordered, prior data only; apparatus 2.2):
@@ -52,7 +56,7 @@ Recurrence of previously-seen bug classes per window of 50 attempts (n = 278 att
 |---|---|---|---|---|
 | 1 | 1-50 | 7 | 7 | 7 / 50 = 14.0% (Wilson 95% 7.0%-26.2%) |
 | 2 | 51-100 | 2 | 15 | 15 / 50 = 30.0% (Wilson 95% 19.1%-43.8%) |
-| 3 | 101-150 | 4 | 33 | 33 / 50 = 66.0% (Wilson 95% 52.1%-77.6%) |
+| 3 | 101-150 | 4 | 33 | 33 / 50 = 66.0% (Wilson 95% 52.2%-77.6%) |
 | 4 | 151-200 | 12 | 6 | 6 / 50 = 12.0% (Wilson 95% 5.6%-23.8%) |
 | 5 | 201-250 | 2 | 16 | 16 / 50 = 32.0% (Wilson 95% 20.8%-45.8%) |
 | 6 | 251-278 (partial) | 2 | 14 | 14 / 28 = 50.0% (Wilson 95% 32.6%-67.4%) |
@@ -64,23 +68,23 @@ pooled, which the product never does by default].**
 | measure | value | n / method / apparatus 2.0, 2.1, 2.2 (pooled) |
 |---|---|---|
 | rows / valid observations | 618 / 318 | n = 618 rows; valid = not outage, harness, disqualified or a failed gold; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, all valid | 187 / 318 = 58.8% (Wilson 95% 53.3%-64.1%) | n = 318; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, sighted | 161 / 200 = 80.5% (Wilson 95% 74.5%-85.4%) | n = 200; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind | 26 / 118 = 22.0% (Wilson 95% 15.5%-30.3%) | n = 118; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind XS | 15 / 34 = 44.1% (Wilson 95% 28.9%-60.6%) | n = 34; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind S | 8 / 35 = 22.9% (Wilson 95% 12.1%-39.0%) | n = 35; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind M | 3 / 30 = 10.0% (Wilson 95% 3.5%-25.6%) | n = 30; method: the product's failure rule (`derive_failure_kind`) over the export |
-| clean, blind L | 0 / 19 = 0.0% (Wilson 95% 0.0%-16.8%) | n = 19; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, all valid | 187 / 318 = 58.8% (Wilson 95% 53.3%-64.1%) | n = 318 attempts on 82 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, sighted | 161 / 200 = 80.5% (Wilson 95% 74.5%-85.4%) | n = 200 attempts on 82 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind | 26 / 118 = 22.0% (Wilson 95% 15.5%-30.3%) | n = 118 attempts on 39 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind XS | 15 / 34 = 44.1% (Wilson 95% 28.9%-60.5%) | n = 34 attempts on 17 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind S | 8 / 35 = 22.9% (Wilson 95% 12.1%-39.0%) | n = 35 attempts on 11 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind M | 3 / 30 = 10.0% (Wilson 95% 3.5%-25.6%) | n = 30 attempts on 6 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
+| clean, blind L | 0 / 19 = 0.0% (Wilson 95% 0.0%-16.8%) | n = 19 attempts on 5 tasks; method: the product's failure rule (`derive_failure_kind`) over the export |
 | non-clean valid by kind | builder_red 50, budget 47, protocol 27, lint 7 | n = 131 non-clean valid rows; method: the product's failure rule (`derive_failure_kind`) over the export |
 | spend on budget-stopped attempts | $28.87 of $120.21; 14 at the 900 s wall clock | n = 47 budget rows; cost as recorded on the row |
 | escalation rungs r2 / r3, clean | 2 / 40 | n = 40 valid rows on rungs r2-r3; method: the product's failure rule (`derive_failure_kind`) over the export |
 | process loss (budget + protocol + harness + outage) | 370 of 618 rows (59.9%); $50.38 of $120.21 (41.9%) = £37.32 | n = 618 rows; £ at 1.35 USD per GBP (fixed) |
 | budget + protocol, share of valid failures | 56.5% | n = 131 non-clean valid rows; method: the product's failure rule (`derive_failure_kind`) over the export |
-| reviewed clean patches judged mergeable | 4 / 13 = 30.8% (Wilson 95% 12.7%-57.6%) | n = 13 reviews (by verdict: api_change 2, defect 4, ok 4, style 3); 2 stored flag(s) corrected from the statement |
+| reviewed clean patches judged mergeable | 4 / 13 = 30.8% (Wilson 95% 12.7%-57.6%) | n = 13 reviews (by verdict: api_change 2, defect 4, ok 4, style 3); 2 stored flag(s) corrected from the statement; reviews from the export file, not the live store |
 | proxy: clean patches lint-clean with no API break | 153 / 187 = 81.8% (Wilson 95% 75.7%-86.7%); 34 unknown (belt 5 not recorded) | n = 187 clean valid rows; method: the deterministic proxy, unknown counted as not working |
-| **working rate, blind** (clean x precision) | 6.8% (2.0%-17.5%) | n = 118 blind valid x n = 13 review verdicts; method: product of two rates and of their Wilson bounds — an estimate |
-| **working changes per pound, blind** | 0.1903 per £ (0.0552-0.4907); ≈ 8.0 working of 118 valid for £42.03 | n = 303 blind attempts (all spend counted); £ at 1.35 USD per GBP (fixed) |
-| deliver decisions made prospectively, clean | 21 / 24 = 87.5% (Wilson 95% 69.0%-95.7%) | n = 348 rows routed from prior rows only (`routing.v1`, controls not evaluated) |
+| **working rate, blind** (clean x precision) | 6.8% (2.0%-17.5%) | n = 118 blind valid attempts on 39 tasks x n = 13 review verdicts; method: product of two rates and of their Wilson bounds — an estimate, and the range is not a 95% interval |
+| **working changes per pound, blind** | 0.1903 per £ (0.0552-0.4907); ≈ 8.0 working of 118 valid for £42.03; about £5.25 per working change (£2.04-£18.12) | n = 303 blind attempts (all spend counted), 118 valid on 39 tasks (26 clean on 17 tasks); £ at 1.35 USD per GBP (fixed); range = product of two Wilson bounds, not a 95% interval |
+| deliver decisions made prospectively, clean | 21 / 24 = 87.5% (Wilson 95% 69.0%-95.7%); by mode: sighted 24 | n = 348 rows routed from prior rows only (`routing.v1`, controls not evaluated) |
 | bug classes closed (register: `crb.prevention.register.v1`) | 0 of 39 | n = 39 classes; the prevention loop's register at family level (an export carries no error text); a class closes only after an applied change the attempts prove, and none has been applied |
 
 Recurrence of previously-seen bug classes per window of 50 attempts (n = 352 attempts, time-ordered, prior data only; apparatus 2.0, 2.1, 2.2 (pooled)):
@@ -89,7 +93,7 @@ Recurrence of previously-seen bug classes per window of 50 attempts (n = 352 att
 |---|---|---|---|---|
 | 1 | 1-50 | 13 | 16 | 16 / 50 = 32.0% (Wilson 95% 20.8%-45.8%) |
 | 2 | 51-100 | 14 | 11 | 11 / 50 = 22.0% (Wilson 95% 12.8%-35.2%) |
-| 3 | 101-150 | 1 | 4 | 4 / 50 = 8.0% (Wilson 95% 3.1%-18.8%) |
+| 3 | 101-150 | 1 | 4 | 4 / 50 = 8.0% (Wilson 95% 3.2%-18.8%) |
 | 4 | 151-200 | 2 | 30 | 30 / 50 = 60.0% (Wilson 95% 46.2%-72.4%) |
 | 5 | 201-250 | 3 | 21 | 21 / 50 = 42.0% (Wilson 95% 29.4%-55.8%) |
 | 6 | 251-300 | 4 | 23 | 23 / 50 = 46.0% (Wilson 95% 33.0%-59.6%) |
@@ -140,8 +144,13 @@ patches; by each review's headline verdict it is style 3, defect 4 and public in
 `deliver` at the time — each cell routed from the rows before it only — 17 of 20 came out
 clean [measured — n = 20 prospective deliver decisions over n = 274 routed rows; method:
 `prospective_routing`, numeric clauses only, negative controls not evaluated; apparatus 2.2].
-Clean is not working, so this is an upper bound on the share that would merge **[hypothesis —
-confirmed or refuted by reviewing the patches those rows produced, once they are kept]**.
+All 20 were sighted cobra attempts, 11 of size XS and 9 of size S; no blind cell ever reached
+`deliver`, so this says nothing yet about routing a blind ticket [measured — n = 20 deliver
+decisions; method: the same replay, grouped by repository, mode and size (`routing.
+deliver_by_mode` serves the mode); apparatus 2.2]. Clean is not working, so this is an upper
+bound on the share that would merge **[hypothesis — confirmed or refuted by reviewing the
+patches those rows produced, once they are kept]**. `GET /value` serves the same rows'
+`deliver_working` too, and labels it: it is the deterministic proxy, not a review.
 
 ## Today's prevention register — cobra, click and koa
 
@@ -167,7 +176,7 @@ campaign and is never closed by recurrence.
 | `budget:unrecorded` | 5 (1 / 4) | 4 of 80 sighted (apparatus 2.2) | 3 | $4.91 | no | `budget_calibrated` (mistake-proofing) | `item:budget-handoff` | open (dormant) |
 | `protocol:network:-` | 3 (3 / 0) | 3 of 19 blind (apparatus 2.2) | 3 | $4.40 | yes | `finish_gate` (mistake-proofing) | `item:refused-call` | open (suspended) |
 | `lint:*` | 1 (0 / 1) | 1 of 63 sighted (apparatus 2.2) | 1 | $0.46 | no | `finish_gate` (gate) | — | open (watch) |
-| `harness:other` | 0 (0 / 0) | 0 of 19 blind (apparatus 2.2) | 1 | $0.44 | no | none the loop may apply | — | open (watch) |
+| `harness:other` | 0 (0 / 0) | 0 of 19 blind (apparatus 2.2) | 1 | $0.44 | no | none the loop may apply | `item:prevent-class` | open (watch) |
 
 **click** — 70 first attempts (17 blind, 53 sighted); the largest blind class is `protocol:network:-` (5 first attempts) [measured — n = 70 first attempts; method: the register over the export; apparatus 2.0–2.2].
 
@@ -178,7 +187,7 @@ campaign and is never closed by recurrence.
 | `harness:env-network:pip` | 5 (1 / 4) | 0 of 43 sighted (apparatus 2.2) | 4 | $2.67 | no | none the loop may apply | `item:env-provision` | open (watch) |
 | `builder_red:target_red` | 4 (4 / 0) | 3 of 11 blind (apparatus 2.2) | 2 | $2.47 | yes | `finish_gate` (gate) | — | open (capability, suspended) |
 | `lint:*` | 2 (0 / 2) | 2 of 39 sighted (apparatus 2.2) | 2 | $0.32 | yes | `finish_gate` (gate) | — | open (suspended) |
-| `harness:other` | 1 (0 / 1) | 0 of 43 sighted (apparatus 2.2) | 1 | $0.31 | no | none the loop may apply | — | open (watch) |
+| `harness:other` | 1 (0 / 1) | 0 of 43 sighted (apparatus 2.2) | 1 | $0.31 | no | none the loop may apply | `item:prevent-class` | open (watch) |
 | `protocol:archaeology:-` | 0 (0 / 0) | 0 of 11 blind (apparatus 2.2) | 1 | $1.52 | no | `finish_gate` (mistake-proofing) | `item:refused-call` | open (watch) |
 
 **koa** — 47 first attempts (13 blind, 34 sighted); the largest blind class is `builder_red:target_red` (4 first attempts) [measured — n = 47 first attempts; method: the register over the export; apparatus 2.0–2.2].
@@ -216,8 +225,13 @@ campaign runs **[gap — `docs/dod/streams/learn.md` G-537]**.
   are counted without checking which apparatus graded the patch they read.
 - The export carries no stop reason and no `source_changed` belt, so the reader infers both
   **[gap — the store's rows carry them; a JSONL export read through `GradeRow` needs no
-  inference]**: a budget stop at or beyond 900 seconds is named the wall clock, and a
-  lint-only failure is read from belts 1 to 3 and belt 5.
+  inference]**: which rows are budget stops is taken from the export's own `failure_kind`
+  column (every other kind is recomputed with the product's rule), a budget stop at or beyond
+  900 seconds is named the wall clock, and a lint-only failure is read from belts 1 to 3 and
+  belt 5.
+- Every n above counts attempts, not tasks. Where a table gives both, the tasks say how many
+  independent tickets stand behind the attempts; the Wilson intervals treat every attempt as
+  independent, so they are narrower than the tasks alone would support.
 - Pounds are dollars at a fixed 1.35 dollars to the pound, not a market rate **[gap — the
   product has no exchange-rate source; the rate is a parameter of `GET /value` and of the
   script]**. The ledger records dollars and every figure above can be read in them.
@@ -230,9 +244,17 @@ PYTHONPATH=src python scripts/value_baseline.py \
 PYTHONPATH=src python scripts/value_baseline.py \
   --ledger ledger-2026-09-25.psv --reviews reviews-2026-09-25.psv --apparatus all
 PYTHONPATH=src python scripts/prevention_from_export.py ledger-2026-09-25.psv \
-  --repos cobra,click,koa
+  --repos cobra,click,koa --md
 ```
 
 On a running deployment the same report is `GET /value` (docs/API.md, Value), and Home shows
-its north star. After the paired campaign with the loop off and on, this page gains a second
+its north star — but the route reads only the review store, so it does not serve this page's
+0.2063 until two things are done. Today it would read the ten stored reviews without the three
+cobra verdicts, which exist only on the critical-friend page; with the two contradicting flags
+corrected that gives about 0.27 working changes per pound [measured — n = 94 valid blind
+attempts × n = 10 stored reviews; method: `scripts/value_baseline.py --no-critical-friend`
+over the export; apparatus 2.2], and lower still while the flags stand uncorrected. To make
+Home match this page, an administrator appends the flag corrections
+(`POST /reviews/corrections/mergeable` with `apply: true`) and records the three
+critical-friend verdicts as reviews on their graded rows. After the paired campaign with the loop off and on, this page gains a second
 reading beside the first **[aspiration — `docs/dod/product.md` G-653]**.

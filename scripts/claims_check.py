@@ -53,8 +53,8 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
-              README.md, docs/RELEASING.md and docs/reviews/2026-09-25-value-baseline.md (the
-              pages on the allowlist),
+              README.md (a page on the allowlist), docs/RELEASING.md (a page on the
+              allowlist), docs/reviews/2026-09-25-value-baseline.md (a page on the allowlist),
               .github/workflows/ci.yml (the claims job that runs --check),
               scripts/code_map.py (the same gate idiom: parse, validate, --check)
 Tested by:    tests/test_claims_check.py

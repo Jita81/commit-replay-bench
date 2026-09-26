@@ -34,6 +34,7 @@ import pytest
 
 from crb.core import lint as lint_mod
 from crb.core.ledger import GradeRow
+from crb.core.lint import LINT_TAIL_CHARS
 from crb.core.prevention import (
     FORMATTER_TOOLS,
     SIGNATURE_RULES,
@@ -45,6 +46,7 @@ from crb.core.prevention import (
     make_signature,
     primary_signature,
     review_signatures,
+    rule_ids,
     signatures,
 )
 from crb.core.review import Finding, ReviewRecord
@@ -188,6 +190,46 @@ def test_format_and_lint_signatures_read_rule_ids_from_the_pack() -> None:
     assert signatures(row, pack=ruff) == ("lint:ruff:e501", "lint:ruff:f401")
     # the message's words never become a class
     assert all("canary" not in s for s in signatures(row, pack=ruff) + lint_signatures(eslint))
+
+
+def test_each_parser_reads_a_rule_only_where_its_tool_prints_one() -> None:
+    """A rule-shaped word in the builder's code (quoted in a snippet or a message) is never
+    a rule: each parser is anchored to its tool's own output position (P-018)."""
+    cases = {
+        "ruff": (
+            "F401 [*] `x.CNRY1234` imported but unused\n --> a.py:1:1\n  |\n"
+            "1 | from x import CNRY1234\n  |\nCNRY9 note\n"
+            "a.py:2:1: E501 Line too long (CNRY4321)\n",
+            ["F401", "E501"],
+        ),
+        "tsc": (
+            "src/a.ts(3,7): error TS2304: Cannot find name 'TS9999'.\n"
+            "src/b.ts:4:2 - error TS2322: Type 'TS1111' is wrong.\n"
+            "  const TS8888 = 1\n",
+            ["TS2304", "TS2322"],
+        ),
+        "clippy": (
+            "warning: unneeded `return`\n --> src/a.rs:3:5\n  |\n"
+            "3 |     #[allow(clippy::canary_rule)] return x;\n  |\n"
+            "  = note: `#[warn(clippy::needless_return)]` on by default\n",
+            ["clippy::needless_return"],
+        ),
+        "checkstyle": (
+            "[ERROR] /w/A.java:3:5: Name 'x' must match pattern [CanaryRule]. [MemberName]\n"
+            "  code line ending in [CanaryTwo]\n",
+            ["MemberName"],
+        ),
+        "standard": (
+            "  /w/a.js:3:7: 'x' is assigned a value but never used. (no-unused-vars)\n"
+            "  const y = f(canary-thing)\n",
+            ["no-unused-vars"],
+        ),
+    }
+    for tool, (tail, want) in cases.items():
+        assert rule_ids(tool, tail) == want, tool
+    # a tail capped tail-first may begin mid-line, inside a snippet: its first line is dropped
+    capped = ("CNRY1234 rest of a cut line\n" + "a.py:1:1: E501 x\n") + "x" * LINT_TAIL_CHARS
+    assert rule_ids("ruff", capped) == ["E501"]
 
 
 def test_formatter_tools_are_tools_the_lint_plan_runs() -> None:

@@ -12,8 +12,8 @@ What it does: Pins that each export line is re-classified by the product's failu
 How:          A synthetic export written under ``tmp_path``; the script loaded by path.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
-Works with:   scripts/spend_from_export.py (under test), src/crb/core/spend.py,
-              src/crb/core/ledger.py (``derive_failure_kind``)
+Works with:   scripts/spend_from_export.py (under test), src/crb/core/spend.py (the rules
+              it applies), src/crb/core/ledger.py (``derive_failure_kind``)
 Tested by:    tests/test_spend_from_export.py
 Touch when:   the export's columns change.
 """

@@ -290,3 +290,55 @@ def test_no_template_exists_for_budget_capability_review_or_factory() -> None:
             )
         assert not any(lv.family == "context" and lv.admits_sig(sig) for lv in LEVERS)
         assert choose_lever(sig, switch=AUTO_CONTEXT).family != "context"
+
+
+#: ruff 0.15 ``check --no-fix`` output, full and concise, around a builder's code that holds
+#: a rule-shaped identifier (``CNRY1234``) in the message, the source snippet and the fix
+#: diff. Only ``F401`` and ``E501`` are rules (docs/PREVENTION.md P-018).
+RUFF_TAIL_WITH_CODE = (
+    "F401 [*] `.fmt.CNRY1234` imported but unused\n"
+    " --> pkg/m.py:1:19\n"
+    "  |\n"
+    "1 | from .fmt import CNRY1234\n"
+    "  |                  ^^^^^^^^\n"
+    "2 | CNRY5678 = 1\n"
+    "  |\n"
+    "help: Remove unused import: `.fmt.CNRY1234`\n"
+    "  |\n"
+    "  - from .fmt import CNRY1234\n"
+    "\n"
+    "pkg/m.py:2:89: E501 Line too long (CNRY4321 is 129 > 88)\n"
+    "Found 2 errors.\n"
+    "[*] 1 fixable with the `--fix` option.\n"
+)
+CNRY = re.compile(r"cnry", re.I)
+
+
+def test_a_rule_shaped_word_in_a_builders_code_never_becomes_a_rule_or_a_line() -> None:
+    rows = [
+        attempt(i=i, task_id=task(i % 10), kind="lint" if i % 3 == 1 else "clean")
+        for i in range(30)
+    ]
+    rows = ledger(rows)
+    pack = lint_pack([{"tool": "ruff", "verdict": False, "tail": RUFF_TAIL_WITH_CODE}])
+    store = MemoryPreventionStore()
+    store.append(switched(AUTO_CONTEXT, i=40))
+    reg = build_register(rows, [], records=store.records(), repo=REPO, packs={"c" * 64: pack}.get)
+    sigs = [e.signature for e in reg.entries]
+    assert "lint:ruff:f401" in sigs and "lint:ruff:e501" in sigs
+    assert not any(CNRY.search(s) for s in sigs), sigs
+    for r in tick(reg, store.records(), now=at(50)):
+        store.append(r)
+    applied = [r for r in store.records() if r.kind == "applied"]
+    assert applied, "the scenario must apply at least one line"
+    assert not any(CNRY.search(str(r.payload)) for r in applied)
+    texts, _ids, _ = snapshot(store.records(), repo=REPO).lines_for(task(99))
+    brief = BuildBrief(
+        subject="Fix it",
+        message="Fix it",
+        repo=REPO,
+        language="python",
+        mode="blind",
+        playbook=tuple(texts),
+    )
+    assert not CNRY.search(brief.task_text())

@@ -52,9 +52,8 @@ Works with:   src/crb/core/grade.py (the belts), src/crb/core/ledger.py (the row
               src/crb/core/workspace.py (one worktree per attempt), src/crb/builders/adapter.py
               (turns a Builder into a BuildFn), src/crb/core/patches.py (the kept patch),
               src/crb/core/spend.py (the escalation gate), src/crb/server/worker.py (the
-              server's caller — a replay run's ``counts_json`` is the RunSummary),
-              src/crb/cli/commands/grade.py (``crb grade``: the same ``grade()`` over a
-              worktree the operator supplies)
+              server's caller — a replay run's ``counts_json`` is the RunSummary; ``crb
+              grade`` calls the same ``grade()`` over a worktree the operator supplies)
 Tested by:    tests/test_run.py, tests/test_builders_adapter.py, tests/test_worker.py,
               tests/test_worker_budget_ladder.py, tests/test_patches.py, tests/test_worker_spend.py
 Touch when:   never for a new repository (mode, ladder and budget are run settings); adding a

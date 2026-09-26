@@ -24,9 +24,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from crb.core.ledger import GradeRow
-from crb.core.prevention import STATUSES, PreventionRegister
-from prevention_fixtures import NET_SIG, REPO, attempt, task
-from test_prevention_rule import _ladder_to_closed
+from crb.core.prevention import AUTO_CONFIG, STATUSES, Mechanisms, PreventionRegister
+from crb.core.value import default_register
+from prevention_fixtures import NET_SIG, REPO, attempt, change_labels, task
+from test_prevention_rule import FMT_PACK, Loop, _ladder_to_closed
 
 
 @dataclass(frozen=True)
@@ -68,3 +69,28 @@ def test_statuses_carry_status_and_lever_in_the_scorecards_vocabulary() -> None:
     by = {(s.repo, s.signature): s for s in got}
     assert (by[(REPO, NET_SIG)].status, by[(REPO, NET_SIG)].lever) == ("closed", "process")
     assert by[("other", "budget:wall_clock")].status == "open"
+
+
+def test_the_scorecard_and_the_learn_register_agree_on_a_format_class() -> None:
+    """Both read the evidence packs: without them the scorecard would read every belt-5 row
+    as ``lint:*`` open while Learn shows ``format:gofmt`` closed (P-022)."""
+    rows = [attempt(i=i, task_id=task(i), kind="clean") for i in range(12)]
+    rows.append(attempt(i=12, task_id=task(12), kind="lint"))
+    packs = {"c" * 64: FMT_PACK}
+    loop = Loop(rows, mechanisms=Mechanisms(shipped=frozenset({"format_step"})), packs=packs)
+    loop.switch(AUTO_CONFIG, 20)
+    loop.tick(30)
+    cid = loop.applied("format_step", "format:gofmt").payload["change_id"]
+    loop.add(
+        [attempt(i=31 + j, task_id=task(40 + j), labels=change_labels(cid)) for j in range(20)]
+    )
+    loop.tick(60)
+    learn = {(e.signature, e.status, e.lever_kind) for e in loop.register().entries}
+    assert ("format:gofmt", "closed", "process") in learn
+    seam = PreventionRegister(loop.records(), mechanisms=loop.mech, packs=packs.get)
+    got = {(s.signature, s.status, s.lever) for s in seam.statuses(loop.rows)}
+    assert got == learn
+    assert seam.class_of(loop.rows[12]) == "format:gofmt"
+    # and through the scorecard's own seam (what GET /value builds)
+    card = default_register(loop.records(), mechanisms=loop.mech, packs=packs.get)
+    assert {(s.signature, s.status, s.lever) for s in card.statuses(loop.rows)} == learn

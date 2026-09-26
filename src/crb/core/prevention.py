@@ -113,6 +113,7 @@ from crb.core.ledger import (
     jsonl_last_line,
     parse_apparatus_version,
 )
+from crb.core.lint import LINT_TAIL_CHARS
 from crb.core.playbook import (
     MAX_CHARS,
     MAX_LINES,
@@ -471,8 +472,15 @@ def harness_cause(error: str) -> tuple[str, str]:
 # --- belt 5 -----------------------------------------------------------------------------
 
 _RULE_GRAMMAR = re.compile(r"^[A-Za-z@][A-Za-z0-9@/_:.-]{0,63}$")
+#: ``path:line:col: `` — where a linter's concise output puts the location before the rule.
+_LOC = r"[^\s:][^:\n]*:\d+:\d+:"
+#: Each parser reads a rule id ONLY from the position its tool prints one: never anywhere a
+#: message or a source snippet (the builder's own code) could put a rule-shaped word. ruff's
+#: full output prints ``CODE message`` at the start of a line and quotes the code beneath it
+#: in a numbered gutter; its concise output prints ``path:line:col: CODE message``
+#: (docs/PREVENTION.md P-018).
 _RULE_PARSERS: dict[str, tuple[re.Pattern[str], ...]] = {
-    "ruff": (re.compile(r"\b([A-Z]{1,4}\d{2,4})\b"),),
+    "ruff": (re.compile(rf"^(?:{_LOC} )?([A-Z]{{1,4}}\d{{2,4}})(?= |$)", re.M),),
     "eslint": (
         re.compile(
             r"^\s*\d+:\d+\s+(?:error|warning)\s+.+?\s{2,}(@?[a-z0-9-]+(?:/[a-z0-9-]+)?)\s*$",
@@ -480,15 +488,19 @@ _RULE_PARSERS: dict[str, tuple[re.Pattern[str], ...]] = {
         ),
     ),
     "standard": (
-        re.compile(r"\((@?[a-z0-9-]+(?:/[a-z0-9-]+)?)\)\s*$", re.M),
+        re.compile(rf"^\s*{_LOC}\s.*\((@?[a-z0-9-]+(?:/[a-z0-9-]+)?)\)\s*$", re.M),
         re.compile(
             r"^\s*\d+:\d+\s+(?:error|warning)\s+.+?\s{2,}(@?[a-z0-9-]+(?:/[a-z0-9-]+)?)\s*$",
             re.M,
         ),
     ),
-    "tsc": (re.compile(r"\b(TS\d{3,5})\b"),),
-    "clippy": (re.compile(r"\b(clippy::[a-z_]+)\b"),),
-    "checkstyle": (re.compile(r"\[([A-Z][A-Za-z]+)\]\s*$", re.M),),
+    "tsc": (
+        re.compile(
+            r"^(?:[^\s(][^(\n]*\(\d+,\d+\): |[^\s:][^:\n]*:\d+:\d+ - |)error (TS\d{3,5}):", re.M
+        ),
+    ),
+    "clippy": (re.compile(r"^\s*= note: .*?#\[(?:warn|deny|forbid)\((clippy::[a-z_]+)\)\]", re.M),),
+    "checkstyle": (re.compile(r"^\[(?:ERROR|WARN|WARNING)\] .*\[([A-Z][A-Za-z]+)\]\s*$", re.M),),
 }
 #: At most this many rule signatures from one row.
 RULES_PER_ROW = 8
@@ -509,8 +521,12 @@ def rule_ids(tool: str, tail: str) -> list[str]:
     """The rule ids a tool's step tail names, in order, deduplicated, grammar-checked —
     parsed by the tool's own output shape, never from a message's words."""
     out: list[str] = []
+    text = tail or ""
+    if len(text) >= LINT_TAIL_CHARS:
+        # capped tail-first, so its first line may begin mid-line — inside a snippet
+        text = text.split("\n", 1)[1] if "\n" in text else ""
     for pat in _RULE_PARSERS.get(tool, ()):
-        for m in pat.finditer(tail or ""):
+        for m in pat.finditer(text):
             rule = m.group(1)
             if _RULE_GRAMMAR.match(rule) and rule not in out:
                 out.append(rule)
@@ -628,6 +644,16 @@ def signatures(row: GradeRow, *, pack: Mapping[str, Any] | None = None) -> tuple
     return tuple(dict.fromkeys(out))
 
 
+def pack_of(
+    row: GradeRow, packs: Callable[[str], Mapping[str, Any] | None] | None
+) -> Mapping[str, Any] | None:
+    """The pack a row's signatures read — only a belt-5 row's, the one place a pack refines
+    the class (``format:<tool>`` / ``lint:<tool>:<rule>``). Every register reads it here."""
+    if packs is None or row.failure_kind != FAILURE_LINT or not row.evidence_pack_hash:
+        return None
+    return packs(row.evidence_pack_hash)
+
+
 def primary_signature(row: GradeRow, *, pack: Mapping[str, Any] | None = None) -> str | None:
     """A row's first signature (its primary class), or ``None`` for a working row."""
     sigs = signatures(row, pack=pack)
@@ -723,6 +749,8 @@ class Lever:
     expected_effect: str = ""
     template_id: str = ""
     level_overrides: tuple[tuple[str, str], ...] = ()
+    #: filed only when no other code lever admits the class — the end of every ladder
+    fallback: bool = False
 
     def admits_sig(self, signature: str) -> bool:
         return any(fnmatch.fnmatchcase(signature, p) for p in self.admits)
@@ -928,6 +956,18 @@ LEVERS: tuple[Lever, ...] = (
         title="Strengthen the target tests so the grade refuses what the review found "
         "(the strengthening report names the test.add items)",
         expected_effect="a defect a reviewer found is refused by the oracle next time",
+    ),
+    Lever(
+        "item:prevent-class",
+        "code",
+        "gate",
+        "product",
+        ("*",),
+        scope="product",
+        fallback=True,
+        title="Build the prevention this class needs: every lever the loop may apply was "
+        "tried and the class still recurs (the evidence rows say where)",
+        expected_effect="a person builds the gate or the construction the catalogue lacks",
     ),
     Lever(
         "item:credential-link",
@@ -1271,7 +1311,9 @@ class Change:
             return True
         if self.family == "context":
             return str(self.what.get("line_id", "")) in _split_ids(row.labels.get(LABEL_LINES, ""))
-        return self.change_id in _split_ids(row.labels.get(LABEL_CHANGES, ""))
+        if self.change_id not in _split_ids(row.labels.get(LABEL_CHANGES, "")):
+            return False
+        return mechanism_ran(self.lever_id, row.labels)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1500,6 +1542,31 @@ def decisions_for(
     ]
 
 
+#: A switch's own row label, and the value that says the mechanism ran: a row whose label
+#: says otherwise ran under something else (a run's own parameter won) and was never exposed
+#: (docs/PREVENTION.md P-021).
+_MECHANISM_LABELS: dict[str, tuple[str, str]] = {
+    "budget_calibrated": ("budget_profile", "calibrated"),
+    "format_step": ("checks", "fmt=1"),
+    "finish_gate": ("checks", "gate=1"),
+}
+
+
+def mechanism_ran(lever_id: str, labels: Mapping[str, str]) -> bool:
+    """Did the row run under the switch's mechanism? ``True`` when the row carries no label
+    for it (a row written before the label existed); otherwise its own label decides."""
+    spec = _MECHANISM_LABELS.get(lever_id)
+    if spec is None:
+        return True
+    label, want = spec
+    got = labels.get(label)
+    if got is None:
+        return True
+    if label == "checks":  # ``fmt=1:repo;gate=0:default;api=1:run;cfg=<version>``
+        return want in {part.split(":", 1)[0] for part in str(got).split(";")}
+    return str(got) == want
+
+
 def _switch_allows(switch: str, family: str) -> bool:
     if family == "context":
         return switch in (AUTO_CONTEXT, AUTO_CONFIG)
@@ -1526,6 +1593,19 @@ def overridden(change: Change, *sources: Mapping[str, Mapping[str, Any]] | None)
     return any(_base_value(src, w.section, w.key) is not _MISSING for src in sources)
 
 
+def run_overrides(run_params: Mapping[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """A run's own settings as section → key → value: its mapping sections (``checks``) and
+    every top-level parameter a switch writes (``budget_profile``, a plain value on
+    ``POST /runs``). Either is the run's own choice, so it outranks the loop's switch."""
+    p = run_params or {}
+    out: dict[str, dict[str, Any]] = {k: dict(v) for k, v in p.items() if isinstance(v, Mapping)}
+    for w in WRITABLE:
+        v = p.get(w.key)
+        if v is not None and not isinstance(v, Mapping):
+            out.setdefault(w.section, {})[w.key] = v
+    return out
+
+
 def in_force(
     chs: Iterable[Change] | Mapping[str, Change],
     *,
@@ -1536,7 +1616,7 @@ def in_force(
     """The changes a run is given: ``off`` → none; ``context`` → lines; ``config`` → lines
     and switches, less any switch whose key the team's configuration or the run sets."""
     items = list(chs.values()) if isinstance(chs, Mapping) else list(chs)
-    run_sections = {k: v for k, v in (run_params or {}).items() if isinstance(v, Mapping)}
+    run_sections = run_overrides(run_params)
     out: list[Change] = []
     for ch in items:
         if ch.state != "in_force" or ch.family not in ("context", "config"):
@@ -1648,6 +1728,12 @@ class Measurement:
     outage_n_after: int
     clean_before: float
     nonclean_before: float
+    #: the before window's non-clean rate less the target's own rows — the displacement bar
+    nontarget_before: float = 0.0
+    #: comparable first attempts after the change that it never reached (an opt-out or a
+    #: team override) on tasks no exposed attempt ran, and how many of them recurred
+    withheld_k: int = 0
+    withheld_n: int = 0
 
     @property
     def exposed_n(self) -> int:
@@ -1707,6 +1793,7 @@ class Measurement:
             },
             "unexposed_n": self.unexposed_n,
             "concurrent": {"k": self.concurrent_k, "n": self.concurrent_n},
+            "withheld": {"k": self.withheld_k, "n": self.withheld_n},
             "not_comparable": self.key_moved,
             "decisive_n": self.decisive_n,
             "looks": [self.decisive_n, 2 * self.decisive_n],
@@ -1754,6 +1841,7 @@ def before_window(
     k0 = sum(1 for r in window if signature in sigs(r))
     n0 = len(window)
     clean_k = sum(1 for r in window if r.clean)
+    other_k = sum(1 for r in window if not r.clean and signature not in sigs(r))
     first = window[0].created if window else ""
     in_span = [r for r in span if (not first or _ts(r.created) >= _ts(first))]
     outage = sum(1 for r in in_span if r.failure_kind == FAILURE_OUTAGE)
@@ -1767,6 +1855,7 @@ def before_window(
         "clean_k": clean_k,
         "clean_n": n0,
         "nonclean_k": n0 - clean_k,
+        "nonclean_other_k": other_k,
         "outage_k": outage,
         "outage_n": len(in_span),
         "decisive_n": decisive_n(p0, deterministic=deterministic),
@@ -1802,6 +1891,8 @@ def measure(
     refs: list[str] = []
     prim: list[str] = []
     unexposed = conc_k = conc_n = moved = out_k = out_n = 0
+    not_reached: list[tuple[str, bool]] = []
+    exposed_tasks: set[str] = set()
     for r in rows:
         if r.mode != mode or not is_first_attempt(r.trial) or _ts(r.created) <= applied:
             continue
@@ -1826,7 +1917,9 @@ def measure(
             nonclean.append(not r.clean)
             refs.append(r.row_hash)
             prim.append(s[0] if s else "")
+            exposed_tasks.add(r.task_id)
         elif comparable:
+            not_reached.append((r.task_id, signature in s))
             # a row from a run that opted out (or ran with the switch off) is the
             # concurrent comparison — for reading, never for deciding
             if r.labels.get(LABEL_LEARN, AUTO_OFF) == AUTO_OFF:
@@ -1836,6 +1929,11 @@ def measure(
                 unexposed += 1
     clean_before = (int(b.get("clean_k", 0) or 0) / n0) if n0 else 0.0
     nonclean_before = (int(b.get("nonclean_k", 0) or 0) / n0) if n0 else 0.0
+    if "nonclean_other_k" in b:
+        nontarget_before = (int(b.get("nonclean_other_k", 0) or 0) / n0) if n0 else 0.0
+    else:  # a change applied before the field existed: its target rows were all non-clean
+        nontarget_before = max(0.0, nonclean_before - p0)
+    withheld = [hit for task_id, hit in not_reached if task_id not in exposed_tasks]
     outage_before = (
         int(b.get("outage_k", 0) or 0) / int(b.get("outage_n", 0) or 1)
         if b.get("outage_n")
@@ -1865,6 +1963,9 @@ def measure(
         outage_n_after=out_n,
         clean_before=clean_before,
         nonclean_before=nonclean_before,
+        nontarget_before=nontarget_before,
+        withheld_k=sum(withheld),
+        withheld_n=len(withheld),
     )
 
 
@@ -1907,6 +2008,23 @@ def _inconclusive(m: Measurement) -> str:
         if after > OUTAGE_SPIKE * max(m.outage_share_before, OUTAGE_FLOOR):
             return f"the outage share more than doubled ({m.outage_share_before:.2f} → {after:.2f})"
     return ""
+
+
+def _withheld(m: Measurement) -> str:
+    """Why a keep or a close must wait: the class still recurs, at or above its before rate,
+    on tasks the change never reached (runs opted out, or a team override) — so running the
+    loop only where the class does not live can never close it (ADR-0020 §6.11;
+    docs/PREVENTION.md P-020). An honest A/B runs the same tasks in both arms, so its control
+    arm is never withheld."""
+    if m.withheld_n < HARM_AT or not m.withheld_k:
+        return ""
+    rate = m.withheld_k / m.withheld_n
+    if rate < m.p0:
+        return ""
+    return (
+        f"the class recurs on {m.withheld_k} of {m.withheld_n} first attempts on tasks the "
+        f"change never reached ({rate:.2f} ≥ p0 {m.p0:.2f})"
+    )
 
 
 def _successor(m: Measurement, start: int) -> str:
@@ -1963,6 +2081,8 @@ def due_decisions(
             if _harmful(m, dn):
                 return [{**base, **_stats(m, dn), "look": "1", "verdict": "harm"}]
             verdict = "keep" if _kept_at(m, dn) else "continue"
+            if verdict == "keep" and _withheld(m):
+                return out
             out.append({**base, **_stats(m, dn), "look": "1", "verdict": verdict})
             kept = verdict == "keep"
         if not kept and n1 >= 2 * dn and "2" not in looks:
@@ -1970,6 +2090,8 @@ def due_decisions(
                 out.append({**base, **_stats(m, 2 * dn), "look": "2", "verdict": "harm"})
                 return out
             verdict = "keep" if _kept_at(m, 2 * dn) else "retire"
+            if verdict == "keep" and _withheld(m):
+                return out
             out.append({**base, **_stats(m, 2 * dn), "look": "2", "verdict": verdict})
             kept = verdict == "keep"
             if not kept:
@@ -1999,10 +2121,15 @@ def due_decisions(
                 }
             )
         return out
+    if _withheld(m):
+        return out
     window = m.closing_window
     if n1 >= window and n1 > last_n and not any(m.flags[n1 - window : n1]):
         after_rate = sum(m.nonclean_flags[n1 - window : n1]) / window
-        if after_rate <= m.nonclean_before + DISPLACEMENT:
+        # the bar is the before window's NON-TARGET failure rate: the target's own share
+        # must leave the non-clean rate, or the same attempts only fail as something else
+        # (ADR-0020 §6.10; docs/PREVENTION.md P-019)
+        if after_rate <= m.nontarget_before + DISPLACEMENT:
             out.append(
                 {**base, **_stats(m, n1), "look": "close", "verdict": "closed", "window": window}
             )
@@ -2105,7 +2232,11 @@ class LeverChoice:
 
 
 def _ordered(signature: str) -> list[Lever]:
-    admitted = [lv for lv in LEVERS if lv.family != "containment" and lv.admits_sig(signature)]
+    admitted = [
+        lv
+        for lv in LEVERS
+        if lv.family != "containment" and not lv.fallback and lv.admits_sig(signature)
+    ]
     return sorted(
         admitted, key=lambda lv: (_LEVEL_RANK[lv.level_for(signature)], _LEVER_INDEX[lv.lever_id])
     )
@@ -2135,13 +2266,20 @@ def choose_lever(
     passed: list[tuple[str, str, str]] = []
     best: Lever | None = None
     best_allowed: Lever | None = None
+    # a switch that failed escalates to the filed item, never down to a checklist line
+    # (ADR-0020 §9; docs/PREVENTION.md P-023)
+    config_retired = any(
+        (signature, lv.lever_id, apparatus) in retired for lv in ordered if lv.family == "config"
+    )
     for lv in ordered:
         level = lv.level_for(signature)
         if lv.family == "code":
             passed.append((lv.lever_id, level, "a filed item: code a person builds"))
             continue
         why_not = ""
-        if (signature, lv.lever_id) in vetoes:
+        if lv.family == "context" and config_retired:
+            why_not = "a process switch for this class was retired: escalate to the filed item"
+        elif (signature, lv.lever_id) in vetoes:
             why_not = "a person reverted it for this class"
         elif (signature, lv.lever_id, apparatus) in retired:
             why_not = f"retired for this class under apparatus {apparatus}"
@@ -2173,6 +2311,19 @@ def choose_lever(
         passed.append((lv.lever_id, level, f"the switch is {switch}"))
     chosen = best_allowed or best
     code = [lv for lv in ordered if lv.family == "code" and (signature, lv.lever_id) not in vetoes]
+    if (
+        not code
+        and (best is None or escalate)
+        and signature not in CAPABILITY_CLASSES
+        and _family(signature) != "factory"
+    ):
+        # no specific item admits the class and nothing the loop may apply is left (or the
+        # change in force was reopened): the ladder still ends in a filed item
+        code = [
+            lv
+            for lv in LEVERS
+            if lv.fallback and lv.admits_sig(signature) and (signature, lv.lever_id) not in vetoes
+        ]
     propose: tuple[str, ...] = ()
     if code:
         strongest_is_code = bool(ordered) and ordered[0].family == "code"
@@ -2513,12 +2664,7 @@ def build_register(
     standing = dict(latest_reviews(r for r in reviews if r.repo == repo))
     sig_map: dict[str, tuple[str, ...]] = {}
     for r in rs:
-        pack = (
-            packs(r.evidence_pack_hash)
-            if packs and r.failure_kind == FAILURE_LINT and r.evidence_pack_hash
-            else None
-        )
-        s = signatures(r, pack=pack)
+        s = signatures(r, pack=pack_of(r, packs))
         rev = standing.get(r.row_hash)
         if rev is not None:
             s = tuple(dict.fromkeys((*s, *review_signatures(rev))))
@@ -2964,6 +3110,8 @@ def tick(
             choice.lever_id
             and LEVER_BY_ID[choice.lever_id].deterministic
             and entry.first_attempts > 0
+            # a quiet class is never credited, deterministic lever or not (ADR-0020 §6.14)
+            and "dormant" not in entry.qualifiers
         )
         if not eligible:
             continue
@@ -3308,16 +3456,21 @@ class PreventionRegister:
         reviews: Iterable[ReviewRecord] = (),
         factory_events: Iterable[Mapping[str, Any]] = (),
         mechanisms: Mechanisms | None = None,
+        packs: Callable[[str], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self.records = list(records)
         self.reviews = list(reviews)
         self.factory_events = list(factory_events)
         self.mechanisms = mechanisms or Mechanisms()
+        #: the evidence packs, read exactly as the Learn page's register reads them — without
+        #: them every belt-5 row would read ``lint:*`` here while Learn shows ``format:gofmt``
+        #: closed (docs/PREVENTION.md P-022)
+        self.packs = packs
 
     def class_of(self, row: Any) -> str | None:
         g = _grade_of(row)
         if g is not None:
-            return primary_signature(g)
+            return primary_signature(g, pack=pack_of(g, self.packs))
         if getattr(row, "clean", False):
             return None
         kind = str(getattr(row, "failure_kind", "") or "")
@@ -3347,6 +3500,7 @@ class PreventionRegister:
                 self.records,
                 repo=repo,
                 mechanisms=self.mechanisms,
+                packs=self.packs,
             )
             out.extend(
                 RegisterStatus(e.signature, repo, e.status, e.lever_kind) for e in reg.entries

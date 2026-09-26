@@ -1546,6 +1546,8 @@ export interface PreventionMeasurement {
   exposed: { k: number; n: number; clean_k: number; clean_ci_low: number; clean_ci_high: number }
   unexposed_n: number
   concurrent: { k: number; n: number }
+  /** Attempts the change never reached, on tasks no exposed attempt ran: while the class recurs there at or above p0, it is never kept or closed. */
+  withheld?: { k: number; n: number }
   not_comparable: number
   decisive_n: number
   looks: number[]
@@ -1635,6 +1637,9 @@ export interface ValueRate {
   point: number | null
   ci_low: number | null
   ci_high: number | null
+  /** Distinct tasks under `n` and `k` — `n` counts attempts, and repeats on a task are not independent. */
+  n_tasks?: number
+  k_tasks?: number
 }
 
 /** `north_star` — working changes per pound, blind: an estimate (clean rate × precision). */
@@ -1652,7 +1657,10 @@ export interface ValueNorthStar {
   working_estimate: number | null
   n_attempts: number
   n_valid: number
+  /** Distinct tasks under `n_valid` (attempts): the independence the intervals assume is at most this. */
+  n_tasks?: number | null
   clean: number
+  clean_tasks?: number | null
   clean_rate: ValueRate
   precision_basis: 'review' | 'review_pooled' | 'proxy' | 'none'
   precision: ValueRate

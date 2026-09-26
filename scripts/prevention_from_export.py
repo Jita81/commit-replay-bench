@@ -294,6 +294,37 @@ def render(summaries: list[dict[str, Any]], shipped: list[str]) -> list[str]:
     return lines
 
 
+def render_md(summaries: list[dict[str, Any]]) -> list[str]:
+    """The register tables exactly as the value baseline page carries them — the page's
+    register section is this output, pasted, never retyped (docs/PREVENTION.md P-015)."""
+    lines: list[str] = []
+    for s in summaries:
+        big = s["largest_blind_class"]
+        lines += [
+            f"**{s['repo']}** — {s['first_attempts']} first attempts "
+            f"({s['blind_first_attempts']} blind, {s['sighted_first_attempts']} sighted); the "
+            f"largest blind class is `{big['signature'] or '-'}` ({big['first_attempts']} first "
+            f"attempts) [measured — n = {s['first_attempts']} first attempts; method: the register "
+            "over the export; apparatus 2.0\u20132.2].",
+            "",
+            "| class | first attempts (blind / sighted) | stratum | tasks | spend | actionable | "
+            "lever the loop would apply | would file | status |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for c in s["classes"]:
+            by = c["first_attempts_by_mode"]
+            lever = f"`{c['lever']}` ({c['level']})" if c["lever"] else "none the loop may apply"
+            filed = ", ".join(f"`{x}`" for x in c["would_file"]) or "—"
+            quals = f" ({', '.join(c['qualifiers'])})" if c["qualifiers"] else ""
+            lines.append(
+                f"| `{c['signature']}` | {c['first_attempts']} ({by.get('blind', 0)} / "
+                f"{by.get('sighted', 0)}) | {c['stratum']} | {c['tasks']} | ${c['cost_usd']:.2f} | "
+                f"{'yes' if c['actionable'] else 'no'} | {lever} | {filed} | {c['status']}{quals} |"
+            )
+        lines.append("")
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("ledger", type=Path)
@@ -306,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         "(finish_gate, format_step, budget_calibrated)",
     )
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--md", action="store_true", help="the value baseline page's tables")
     args = ap.parse_args(argv)
     raw = read_export(args.ledger)
     rows = [row_from_export(d, i) for i, d in enumerate(raw)]
@@ -326,6 +358,9 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
         sys.stdout.write("\n")
+        return 0
+    if args.md:
+        sys.stdout.write("\n".join(render_md(summaries)))
         return 0
     for line in render(summaries, shipped):
         print(line)

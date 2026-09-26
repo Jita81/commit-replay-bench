@@ -245,7 +245,7 @@ describe('HomePage', () => {
   })
 
   it('the north star tile shows working changes per £ with its n, its range in pounds and its apparatus, and opens its hint', async () => {
-    const ns = { label: 'working changes per pound, blind', per_pound: 0.2063, per_pound_low: 0.0581, per_pound_high: 0.5433, pounds_per_working: 4.85, pounds_per_working_low: 1.84, pounds_per_working_high: 17.21, working_rate: 0.072, working_rate_low: 0.02, working_rate_high: 0.19, working_estimate: 6.77, n_attempts: 260, n_valid: 94, clean: 22, clean_rate: { k: 22, n: 94, point: 0.234, ci_low: 0.16, ci_high: 0.329 }, precision_basis: 'review', precision: { k: 4, n: 13, point: 0.308, ci_low: 0.127, ci_high: 0.576 }, spend_usd: 44.3, spend_gbp: 32.81, usd_per_gbp: 1.35, method: 'estimate' }
+    const ns = { label: 'working changes per pound, blind', per_pound: 0.2063, per_pound_low: 0.0581, per_pound_high: 0.5433, pounds_per_working: 4.85, pounds_per_working_low: 1.84, pounds_per_working_high: 17.21, working_rate: 0.072, working_rate_low: 0.02, working_rate_high: 0.19, working_estimate: 6.77, n_attempts: 260, n_valid: 94, n_tasks: 37, clean: 22, clean_tasks: 15, clean_rate: { k: 22, n: 94, point: 0.234, ci_low: 0.16, ci_high: 0.329 }, precision_basis: 'review', precision: { k: 4, n: 13, point: 0.308, ci_low: 0.127, ci_high: 0.576 }, spend_usd: 44.3, spend_gbp: 32.81, usd_per_gbp: 1.35, method: 'estimate' }
     const { calls } = mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
@@ -256,7 +256,11 @@ describe('HomePage', () => {
     await waitFor(() => expect(tile).toHaveTextContent('0.21 per £'))
     expect(tile).toHaveTextContent('n =94')
     expect(tile).toHaveTextContent('apparatus 2.2 · blind · estimate')
-    expect(tile).toHaveTextContent('95% range 0.06–0.54 per £')
+    // the range is the product of two Wilson bounds: never labelled a 95% interval (P-027)
+    expect(tile).toHaveTextContent('range 0.06–0.54 per £ (the product of two 95% Wilson bounds, not itself a 95% interval)')
+    expect(tile).not.toHaveTextContent('95% range')
+    // n counts attempts; the tasks under them say how independent they are (P-025)
+    expect(tile).toHaveTextContent('n = 94 attempts on 37 tasks')
     expect(tile).toHaveTextContent('about £4.85 per working change')
     expect(tile).toHaveTextContent('precision from reviews (n = 13)')
     // the deployment's north star: every repository, never scoped to the kicker's repository

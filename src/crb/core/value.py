@@ -76,7 +76,7 @@ Claims:       The north star is an ESTIMATE (a product of two rates) and says so
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -114,6 +114,10 @@ BASIS_REVIEW = "review"
 BASIS_REVIEW_POOLED = "review_pooled"
 BASIS_PROXY = "proxy"
 BASIS_NONE = "none"
+#: Where a report's review verdicts came from — served beside the figures they move.
+REVIEWS_FROM_STORE = "store"
+REVIEWS_FROM_EXPORT = "export"
+REVIEWS_FROM_CALLER = "caller"
 #: The failure kinds that are process losses — attempts that produced nothing because of
 #: how they were run (turns/time, a refused command, the instrument, the provider).
 LOSS_KINDS: tuple[str, ...] = (FAILURE_BUDGET, FAILURE_PROTOCOL, FAILURE_HARNESS, FAILURE_OUTAGE)
@@ -313,10 +317,16 @@ def verdicts_from_reviews(
 
 @dataclass(frozen=True)
 class Rate:
-    """``k`` of ``n`` with its Wilson 95% interval; unmeasured (``n == 0``) serialises null."""
+    """``k`` of ``n`` with its Wilson 95% interval; unmeasured (``n == 0``) serialises null.
+    ``n`` and ``k`` count ATTEMPTS; when the rows are known, ``n_tasks`` / ``k_tasks`` count
+    the distinct tasks under them — repeat attempts on one ticket are not independent draws,
+    so the interval is narrower than ``n_tasks`` tasks can support (docs/PREVENTION.md
+    P-025)."""
 
     k: int
     n: int
+    k_tasks: int | None = None
+    n_tasks: int | None = None
 
     @property
     def point(self) -> float | None:
@@ -328,18 +338,27 @@ class Rate:
 
     def to_dict(self) -> dict[str, Any]:
         measured = self.n > 0
-        return {
+        out: dict[str, Any] = {
             "k": self.k,
             "n": self.n,
             "point": round(self.k / self.n, 4) if measured else None,
             "ci_low": round(self.ci.low, 4) if measured else None,
             "ci_high": round(self.ci.high, 4) if measured else None,
         }
+        if self.n_tasks is not None:
+            out["n_tasks"] = self.n_tasks
+            out["k_tasks"] = self.k_tasks
+        return out
+
+
+def _tasks(rows: Iterable[ValueRow]) -> int:
+    return len({(r.repo, r.task_id) for r in rows})
 
 
 def _rate(rows: Iterable[ValueRow]) -> Rate:
     rs = [r for r in rows if r.valid]
-    return Rate(sum(1 for r in rs if r.clean), len(rs))
+    clean = [r for r in rs if r.clean]
+    return Rate(len(clean), len(rs), k_tasks=_tasks(clean), n_tasks=_tasks(rs))
 
 
 def _r(x: float | None, nd: int = 4) -> float | None:
@@ -410,6 +429,7 @@ def default_register(
     reviews: Iterable[ReviewRecord] = (),
     factory_events: Iterable[Mapping[str, Any]] = (),
     mechanisms: Mechanisms | None = None,
+    packs: Callable[[str], Mapping[str, Any] | None] | None = None,
 ) -> BugRegister:
     """The register the server and the scripts use: stream L's prevention register
     (``crb.prevention.register.v1``) over the loop's chain ``records``, the standing
@@ -418,7 +438,11 @@ def default_register(
     reference stub the tests compare against."""
     return LoopRegister(
         PreventionRegister(
-            records, reviews=reviews, factory_events=factory_events, mechanisms=mechanisms
+            records,
+            reviews=reviews,
+            factory_events=factory_events,
+            mechanisms=mechanisms,
+            packs=packs,
         )
     )
 
@@ -590,7 +614,10 @@ class NorthStar:
             else None,
             "n_attempts": self.n_attempts,
             "n_valid": n,
+            # n counts attempts, not tasks: the tasks behind them say how independent they are
+            "n_tasks": self.clean_rate.n_tasks,
             "clean": self.clean_rate.k,
+            "clean_tasks": self.clean_rate.k_tasks,
             "clean_rate": self.clean_rate.to_dict(),
             "precision_basis": self.precision.basis,
             "precision": self.precision.chosen.to_dict(),
@@ -601,7 +628,10 @@ class NorthStar:
                 "blind clean rate (valid attempts; Wilson 95%) x clean→working precision "
                 f"({self.precision.basis}; Wilson 95%) x blind valid attempts ÷ pounds spent on "
                 "every blind attempt; interval = product of the two Wilson bounds, spend treated "
-                "as known — an estimate, not a count"
+                "as known — an estimate, not a count, and not a 95% interval (its coverage is "
+                "at least about 0.95² and its width is not calibrated); n counts attempts, and "
+                "repeat attempts on one task (n_tasks) are not independent, so the bounds are "
+                "narrower than the evidence supports"
             ),
         }
 
@@ -823,6 +853,7 @@ class RoutingPrecision:
     deliver: Rate
     deliver_working: Rate
     policy_version: str
+    deliver_by_mode: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -830,13 +861,17 @@ class RoutingPrecision:
             "controls": "not evaluated",
             "method": (
                 "rows in time order; before each row its cell (repository x mode x cell key) is "
-                "routed from the rows before it only; precision = clean (and working) among the "
-                "rows attempted under a deliver decision"
+                "routed from the rows before it only; deliver = clean among the rows attempted "
+                "under a deliver decision; deliver_working = the deterministic PROXY (clean, "
+                "lint-clean, no public-API break) among the same rows — no review is read"
             ),
             "rows_scored": self.rows_scored,
             "decisions": dict(self.decisions),
             "deliver": self.deliver.to_dict(),
+            "deliver_by_mode": dict(sorted(self.deliver_by_mode.items())),
             "deliver_working": self.deliver_working.to_dict(),
+            # every served "working" rate names its basis beside it (docs/PREVENTION.md P-024)
+            "deliver_working_basis": BASIS_PROXY,
         }
 
 
@@ -878,12 +913,16 @@ def prospective_routing(
         if r.oracle_strength is not None:
             st.strengths.append(r.oracle_strength)
         st.apparatus.add(r.apparatus_version)
+    by_mode: dict[str, int] = {}
+    for r in delivered:
+        by_mode[r.mode] = by_mode.get(r.mode, 0) + 1
     return RoutingPrecision(
         rows_scored=scored,
         decisions=decisions,
         deliver=Rate(sum(1 for r in delivered if r.clean), len(delivered)),
         deliver_working=Rate(sum(1 for r in delivered if proxy_working(r) is True), len(delivered)),
         policy_version=policy.version,
+        deliver_by_mode=by_mode,
     )
 
 
@@ -936,11 +975,15 @@ class ValueReport:
     cells: list[dict[str, Any]]
     repos: list[dict[str, Any]]
     usd_per_gbp: float
+    reviews_source: str = REVIEWS_FROM_CALLER
 
     def to_dict(self) -> dict[str, Any]:
         versions = sorted({r.apparatus_version for r in self.rows})
         return {
             "schema": VALUE_SCHEMA,
+            # where the verdicts behind the precision came from: two reports with the same
+            # rows but different review sources are different figures (P-035)
+            "reviews_source": self.reviews_source,
             "repo": self.repo,
             "apparatus": self.apparatus,
             "apparatus_versions": versions,
@@ -997,6 +1040,7 @@ def value_report(
     window: int = DEFAULT_WINDOW,
     usd_per_gbp: float = DEFAULT_USD_PER_GBP,
     policy: RoutingPolicy = DEFAULT_POLICY,
+    reviews_source: str = REVIEWS_FROM_CALLER,
 ) -> ValueReport:
     """The scorecard over one scope. Pure: the same rows and verdicts give the same report."""
     if usd_per_gbp <= 0:
@@ -1043,6 +1087,7 @@ def value_report(
         cells=_cells(scoped, usd_per_gbp),
         repos=repos,
         usd_per_gbp=usd_per_gbp,
+        reviews_source=reviews_source,
     )
 
 
@@ -1057,6 +1102,9 @@ __all__ = [
     "LEVERS",
     "LOSS_KINDS",
     "MIN_REVIEWS_FOR_REVIEW_BASIS",
+    "REVIEWS_FROM_CALLER",
+    "REVIEWS_FROM_EXPORT",
+    "REVIEWS_FROM_STORE",
     "VALUE_SCHEMA",
     "BugRegister",
     "ClassStatus",

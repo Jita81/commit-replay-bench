@@ -18,8 +18,9 @@ ADRs:         docs/adr/0021-working-by-construction.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/core/grade.py (belt 6 folded into clean), src/crb/core/api_surface.py
               (the extractors), src/crb/core/ledger.py (the ``api`` kind and the label
-              invariant), tests/fixtures/langs/gorepo.py, tests/fixtures/pyrepo.py and
-              tests/fixtures/langs/noderepo.py (the repositories)
+              invariant), tests/fixtures/langs/gorepo.py (the Go repository),
+              tests/fixtures/pyrepo.py (the Python repository), tests/fixtures/langs/noderepo.py
+              (the JS repository)
 Tested by:    tests/test_grade_api_belt.py
 Touch when:   the clean rule, the failure-kind order or belt 6's recording changes.
 """

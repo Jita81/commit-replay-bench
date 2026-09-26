@@ -1341,7 +1341,9 @@ def fix_commands(plan: LintPlan, files: Sequence[str]) -> list[tuple[str, tuple[
     out: list[tuple[str, tuple[str, ...]]] = []
     for tool in plan.tools:
         fix = _FIXERS.get(tool.name)
-        if fix is None:
+        if fix is None or tool.refuse:
+            # a binary belt 5 refuses to judge with (outside the repository's pin) never
+            # rewrites the builder's files either (docs/PREVENTION.md P-031)
             continue
         scoped = [f for f in files if not tool.exts or f.endswith(tool.exts)]
         if not scoped:

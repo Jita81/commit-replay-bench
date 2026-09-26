@@ -19,7 +19,9 @@ Two ledger shapes are read:
   product's rule (``crb.core.ledger.derive_failure_kind``) from the error class (``ERRCLASS``),
   the budget stop, the lint belt and the disqualification flag. The projection carries no
   ``source_changed`` column, so a lint-only failure is read as belts 1–3 held and belt 5
-  failed; it carries no stop reason, so a budget stop at or over 900 s is named
+  failed; it carries no stop reason, so which rows are budget stops is taken from the
+  export's own ``failure_kind`` column — the one thing read from it, because nothing else in
+  the projection says a builder hit its budget — and a budget stop at or over 900 s is named
   ``wall_clock`` and any other ``other_cap``.
 
 Reviews come from the review store's projection (``repo|task|grade_clean|verdict|
@@ -40,7 +42,8 @@ What it does: Recomputes every row's failure kind with the product's rule (never
               and its apparatus.
 How:          ``read_ledger`` (JSONL → ``GradeRow`` → ``value_row_from_grade``; PSV →
               ``ERRCLASS`` → ``derive_failure_kind``) + ``read_reviews`` → ``value_report`` →
-              ``render_markdown`` / ``json.dumps``.
+              ``render_markdown`` / ``json.dumps``. Every percentage is formatted once, from
+              the exact ``k / n`` and Wilson bounds — never from a rounded figure.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   src/crb/core/value.py (the report), src/crb/core/ledger.py (the failure rule),
@@ -63,9 +66,12 @@ from pathlib import Path
 
 from crb.core.ledger import BUDGET_STOP_REASONS, GradeRow, derive_failure_kind
 from crb.core.review import statement_mergeable
+from crb.core.stats import wilson_interval
 from crb.core.value import (
     DEFAULT_USD_PER_GBP,
     DEFAULT_WINDOW,
+    LOSS_KINDS,
+    REVIEWS_FROM_EXPORT,
     ReviewVerdict,
     ValueRow,
     value_report,
@@ -89,7 +95,8 @@ ERRCLASS: dict[str, tuple[str, str]] = {
 }
 #: A budget stop at or beyond this many seconds hit the builder's wall clock.
 WALL_CLOCK_S = 900.0
-#: docs/reviews/2026-09-13-critical-friend.md §3.1–3.3: three clean cobra patches, none mergeable.
+#: docs/reviews/2026-09-13-critical-friend.md §3.1–3.3: three clean cobra patches, none
+#: mergeable.
 CRITICAL_FRIEND: tuple[ReviewVerdict, ...] = (
     ReviewVerdict("", "cobra", "#2241", True, False, "defect", ("defect",)),
     ReviewVerdict("", "cobra", "#1559", True, False, "defect", ("defect", "style")),
@@ -192,13 +199,41 @@ def read_reviews(
 
 
 def _pct(x: float | None) -> str:
+    """One rounding only: pass the exact value, never a figure the report already rounded
+    (docs/PREVENTION.md P-028)."""
     return "—" if x is None else f"{100 * x:.1f}%"
 
 
+def _frac(k: float, n: float) -> float | None:
+    return k / n if n else None
+
+
 def _rate(d: dict[str, object]) -> str:
-    if not d.get("n"):
+    """``k / n = p% (Wilson 95% lo-hi)`` from the exact counts — the served point and bounds
+    are rounded to 4 places, and formatting them again would round twice."""
+    k, n = int(d.get("k") or 0), int(d.get("n") or 0)  # type: ignore[call-overload]
+    if not n:
         return "— (n = 0)"
-    return f"{d['k']} / {d['n']} = {_pct(d['point'])} (Wilson 95% {_pct(d['ci_low'])}-{_pct(d['ci_high'])})"  # type: ignore[arg-type]
+    ci = wilson_interval(k, n)
+    return f"{k} / {n} = {_pct(k / n)} (Wilson 95% {_pct(ci.low)}-{_pct(ci.high)})"
+
+
+def _n(d: dict[str, object], unit: str = "") -> str:
+    """``n = 94 attempts on 37 tasks`` — n counts attempts; the tasks say how independent."""
+    tasks = d.get("n_tasks")
+    what = f"{unit} attempts" if unit else "attempts"
+    return f"n = {d['n']} {what}" + (f" on {tasks} tasks" if tasks is not None else "")
+
+
+def _working(ns: dict[str, object]) -> tuple[float, float, float] | None:
+    """The working rate and its bounds, exact: the product of the two rates and of their
+    Wilson bounds (as ``NorthStar`` computes it), before any rounding."""
+    c, q = ns["clean_rate"], ns["precision"]
+    ck, cn, qk, qn = (int(x) for x in (c["k"], c["n"], q["k"], q["n"]))  # type: ignore[index]
+    if not cn or not qn:
+        return None
+    ci, qi = wilson_interval(ck, cn), wilson_interval(qk, qn)
+    return (ck / cn) * (qk / qn), ci.low * qi.low, ci.high * qi.high
 
 
 def render_markdown(
@@ -212,7 +247,12 @@ def render_markdown(
 ) -> str:
     """The scorecard as the Markdown the baseline page carries."""
     rep = value_report(
-        rows, verdicts, apparatus=apparatus, window=window, usd_per_gbp=usd_per_gbp
+        rows,
+        verdicts,
+        apparatus=apparatus,
+        window=window,
+        usd_per_gbp=usd_per_gbp,
+        reviews_source=REVIEWS_FROM_EXPORT,
     ).to_dict()
     scoped = [r for r in rows if apparatus == "all" or r.apparatus_version == rep["apparatus"]]
     app = f"apparatus {', '.join(rep['apparatus_versions']) or '—'}" + (
@@ -227,28 +267,33 @@ def render_markdown(
             kinds[r.failure_kind] = kinds.get(r.failure_kind, 0) + 1
     budget = [r for r in scoped if r.failure_kind == "budget"]
     rungs = [r for r in valid if r.trial in ("r2", "r3")]
+    all_usd = sum(r.cost_usd for r in scoped)
+    loss_usd = sum(r.cost_usd for r in scoped if r.failure_kind in LOSS_KINDS)
+    bp = kinds.get("budget", 0) + kinds.get("protocol", 0)
+    w = _working(ns)
+    modes = ", ".join(f"{m} {c}" for m, c in rt["deliver_by_mode"].items()) or "none"
     method = "method: the product's failure rule (`derive_failure_kind`) over the export"
     lines = [
         f"| measure | value | n / method / {app} |",
         "|---|---|---|",
         f"| rows / valid observations | {rep['rows']} / {rates['all']['n']} | n = {rep['rows']} rows; valid = not outage, harness, disqualified or a failed gold; {method} |",
-        f"| clean, all valid | {_rate(rates['all'])} | n = {rates['all']['n']}; {method} |",
-        f"| clean, sighted | {_rate(rates['sighted'])} | n = {rates['sighted']['n']}; {method} |",
-        f"| clean, blind | {_rate(rates['blind'])} | n = {rates['blind']['n']}; {method} |",
+        f"| clean, all valid | {_rate(rates['all'])} | {_n(rates['all'])}; {method} |",
+        f"| clean, sighted | {_rate(rates['sighted'])} | {_n(rates['sighted'])}; {method} |",
+        f"| clean, blind | {_rate(rates['blind'])} | {_n(rates['blind'])}; {method} |",
     ]
     for size, r in rates["blind_by_size"].items():
-        lines.append(f"| clean, blind {size} | {_rate(r)} | n = {r['n']}; {method} |")
+        lines.append(f"| clean, blind {size} | {_rate(r)} | {_n(r)}; {method} |")
     lines += [
         f"| non-clean valid by kind | {', '.join(f'{k} {v}' for k, v in sorted(kinds.items(), key=lambda kv: -kv[1]))} | n = {sum(kinds.values())} non-clean valid rows; {method} |",
         f"| spend on budget-stopped attempts | ${sum(r.cost_usd for r in budget):.2f} of ${pl['all_usd']:.2f}; {sum(1 for r in budget if r.detail == 'wall_clock')} at the {WALL_CLOCK_S:.0f} s wall clock | n = {len(budget)} budget rows; cost as recorded on the row |",
         f"| escalation rungs r2 / r3, clean | {sum(1 for r in rungs if r.clean)} / {len(rungs)} | n = {len(rungs)} valid rows on rungs r2-r3; {method} |",
-        f"| process loss (budget + protocol + harness + outage) | {pl['rows']} of {pl['all_rows']} rows ({_pct(pl['rows_share'])}); ${pl['usd']:.2f} of ${pl['all_usd']:.2f} ({_pct(pl['usd_share'])}) = £{pl['gbp']:.2f} | n = {pl['all_rows']} rows; £ at {usd_per_gbp} USD per GBP (fixed) |",
-        f"| budget + protocol, share of valid failures | {_pct(pl['budget_protocol_share_of_valid_failures'])} | n = {pl['valid_failures']} non-clean valid rows; {method} |",
-        f"| reviewed clean patches judged mergeable | {_rate(pr['review'])} | n = {pr['review']['n']} reviews (by verdict: {', '.join(f'{k} {v}' for k, v in pr['review']['by_verdict'].items())}); {corrected} stored flag(s) corrected from the statement |",
+        f"| process loss (budget + protocol + harness + outage) | {pl['rows']} of {pl['all_rows']} rows ({_pct(_frac(pl['rows'], pl['all_rows']))}); ${pl['usd']:.2f} of ${pl['all_usd']:.2f} ({_pct(_frac(loss_usd, all_usd))}) = £{pl['gbp']:.2f} | n = {pl['all_rows']} rows; £ at {usd_per_gbp} USD per GBP (fixed) |",
+        f"| budget + protocol, share of valid failures | {_pct(_frac(bp, pl['valid_failures']))} | n = {pl['valid_failures']} non-clean valid rows; {method} |",
+        f"| reviewed clean patches judged mergeable | {_rate(pr['review'])} | n = {pr['review']['n']} reviews (by verdict: {', '.join(f'{k} {v}' for k, v in pr['review']['by_verdict'].items())}); {corrected} stored flag(s) corrected from the statement; reviews from the {rep['reviews_source']} file, not the live store |",
         f"| proxy: clean patches lint-clean with no API break | {_rate(pr['proxy'])}; {pr['proxy']['unknown']} unknown (belt 5 not recorded) | n = {pr['proxy']['n']} clean valid rows; method: the deterministic proxy, unknown counted as not working |",
-        f"| **working rate, blind** (clean x precision) | {_pct(ns['working_rate'])} ({_pct(ns['working_rate_low'])}-{_pct(ns['working_rate_high'])}) | n = {ns['n_valid']} blind valid x n = {ns['precision']['n']} {ns['precision_basis']} verdicts; method: product of two rates and of their Wilson bounds — an estimate |",
-        f"| **working changes per pound, blind** | {ns['per_pound'] if ns['per_pound'] is not None else '—'} per £ ({ns['per_pound_low']}-{ns['per_pound_high']}); ≈ {ns['working_estimate']} working of {ns['n_valid']} valid for £{ns['spend_gbp']:.2f} | n = {ns['n_attempts']} blind attempts (all spend counted); £ at {usd_per_gbp} USD per GBP (fixed) |",
-        f"| deliver decisions made prospectively, clean | {_rate(rt['deliver'])} | n = {rt['rows_scored']} rows routed from prior rows only (`routing.v1`, controls not evaluated) |",
+        f"| **working rate, blind** (clean x precision) | {_pct(w[0] if w else None)} ({_pct(w[1] if w else None)}-{_pct(w[2] if w else None)}) | n = {ns['n_valid']} blind valid attempts on {ns['n_tasks']} tasks x n = {ns['precision']['n']} {ns['precision_basis']} verdicts; method: product of two rates and of their Wilson bounds — an estimate, and the range is not a 95% interval |",
+        f"| **working changes per pound, blind** | {ns['per_pound'] if ns['per_pound'] is not None else '—'} per £ ({ns['per_pound_low']}-{ns['per_pound_high']}); ≈ {ns['working_estimate']} working of {ns['n_valid']} valid for £{ns['spend_gbp']:.2f}; about £{ns['pounds_per_working']} per working change (£{ns['pounds_per_working_low']}-£{ns['pounds_per_working_high']}) | n = {ns['n_attempts']} blind attempts (all spend counted), {ns['n_valid']} valid on {ns['n_tasks']} tasks ({ns['clean']} clean on {ns['clean_tasks']} tasks); £ at {usd_per_gbp} USD per GBP (fixed); range = product of two Wilson bounds, not a 95% interval |",
+        f"| deliver decisions made prospectively, clean | {_rate(rt['deliver'])}; by mode: {modes} | n = {rt['rows_scored']} rows routed from prior rows only (`routing.v1`, controls not evaluated) |",
         f"| bug classes closed (register: `{lc['register']['source']}`) | {lc['register']['closed']} of {lc['register']['n_classes']} | n = {lc['register']['n_classes']} classes; the prevention loop's register at family level (an export carries no error text); a class closes only after an applied change the attempts prove, and none has been applied |",
     ]
     lines += [
@@ -285,6 +330,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             apparatus=args.apparatus,
             window=args.window,
             usd_per_gbp=args.usd_per_gbp,
+            reviews_source=REVIEWS_FROM_EXPORT,
         ).to_dict()
         rep["reviews_corrected"] = corrected
         print(json.dumps(rep, indent=2, sort_keys=True))

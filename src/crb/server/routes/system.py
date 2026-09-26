@@ -92,14 +92,14 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
               ``failure_detail`` and ``aggregate``), src/crb/observability/build_stamp.py
               (the ``build`` probe and the ``served`` block),
-              src/crb/store/migrate.py (``head_status_on`` — the one head check),
+              src/crb/store/migrate.py (``head_status_on`` — the one head check; the ledger
+              probe calls ``assert_append_only`` in src/crb/store/ledger.py),
               src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``
-              and ``probe_worker``),
-              src/crb/store/ledger.py (``assert_append_only``), src/crb/observability/metrics.py
+              and ``probe_worker``), src/crb/observability/metrics.py
               (the gauges and the registry — the API's series only; the worker serves its
               own, docs/DEPLOYMENT.md#9-observability), src/crb/server/worker.py (upserts
-              the ``workers`` rows the worker probe reads), src/crb/server/routes/signoffs.py
-              (the same false-Q1 predicate, kept in step), deploy/entrypoint.sh + deploy/Dockerfile
+              the ``workers`` rows the worker probe reads; the false-Q1 predicate is kept in
+              step with src/crb/server/routes/signoffs.py), deploy/entrypoint.sh + deploy/Dockerfile
               (``CRB_ROLE`` per container and the ``HEALTHCHECK`` on ``/health/live``),
               docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface (the
               ``migrations`` contract the other documents copy)

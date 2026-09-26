@@ -5,8 +5,9 @@
  * ----------
  * What it is:   The one scorecard tile on Home (`/home`): working changes per pound spent on
  *               blind attempts, across every repository, from `GET /value`.
- * What it does: Shows the estimate with the blind valid attempts behind it (n), its interval in
- *               the same unit (pounds, not a percentage), the apparatus it was measured under
+ * What it does: Shows the estimate with the blind valid attempts behind it (n, and the tasks
+ *               under them), its range in the same unit (pounds, not a percentage) labelled as
+ *               the product of two Wilson bounds — not a 95% interval — the apparatus
  *               and whether the precision came from reviews or the labelled proxy. While the
  *               number is unmeasured (no blind attempt, no precision) or the API refuses it, the
  *               tile is an honest empty tile with the reason, never a zero. The whole tile is the
@@ -47,7 +48,7 @@ export function ValueTile() {
     : !value.data
       ? 'Loading.'
       : measured && ns
-        ? `95% range ${fix(ns.per_pound_low)}–${fix(ns.per_pound_high)} per £ · about £${fix(ns.pounds_per_working)} per working change · precision from ${basis}`
+        ? `range ${fix(ns.per_pound_low)}–${fix(ns.per_pound_high)} per £ (the product of two 95% Wilson bounds, not itself a 95% interval) · about £${fix(ns.pounds_per_working)} per working change · n = ${ns.n_valid} attempts${typeof ns.n_tasks === 'number' ? ` on ${ns.n_tasks} tasks` : ''} · precision from ${basis}`
         : 'No blind attempt with a precision yet, so there is no number to show.'
   return (
     <StatTile

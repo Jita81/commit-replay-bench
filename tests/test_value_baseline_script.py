@@ -203,3 +203,140 @@ def test_the_baseline_page_quotes_its_own_tables_and_names_the_live_register() -
     assert (int(said.group(1)), int(said.group(2))) == (round(rates[0]), round(rates[-1]))
     named = set(re.findall(r"bug classes closed \(register: `([^`]+)`\)", page))
     assert named == {default_register().source}
+
+
+def _rows_of(table: str) -> dict[str, str]:
+    """``measure → value`` for one generated table (the page's first or second)."""
+    out: dict[str, str] = {}
+    for m in re.finditer(r"^\| ([^|]+) \| ([^|]+) \|", table, re.M):
+        out[m.group(1).strip()] = m.group(2).strip()
+    return out
+
+
+def test_every_figure_the_prose_quotes_is_in_the_generated_tables() -> None:
+    """P-015's class, beyond the curve sentence: the headline percentage, the pounds, the
+    task count, the routing, the proxy, the process loss and the rungs the prose quotes must
+    each be what the generated tables say (a hand-typed figure that drifts fails here)."""
+    page = (ROOT / "docs/reviews/2026-09-25-value-baseline.md").read_text(encoding="utf-8")
+    head, _sep, pooled = page.partition("**The same figures pooled")
+    t22, tall = _rows_of(head), _rows_of(pooled.partition("**Where this differs")[0])
+    prose = " ".join(page.split())
+
+    def said(pattern: str) -> tuple[str, ...]:
+        m = re.search(pattern, prose)
+        assert m is not None, f"the page no longer says: {pattern}"
+        return m.groups()
+
+    working = float(
+        re.match(r"([\d.]+)%", t22["**working rate, blind** (clean x precision)"]).group(1)
+    )  # type: ignore[union-attr]
+    assert int(said(r"About (\d+)% of blind attempts")[0]) == round(working)
+    per = t22["**working changes per pound, blind**"]
+    pounds, low, high = (
+        float(x)
+        for x in re.search(
+            r"about £([\d.]+) per working change \(£([\d.]+)-£([\d.]+)\)", per
+        ).groups()
+    )  # type: ignore[union-attr]
+    assert int(said(r"one working change for every £(\d+)")[0]) == round(pounds)
+    a, b = said(r"from about £([\d.]+) to about £(\d+) per working change")
+    assert (float(a), int(b)) == (low, round(high))
+    n, tasks = said(r"n = (\d+) valid blind attempts on (\d+) tasks")
+    assert f"n = {n} attempts on {tasks} tasks" in page
+    k_c, t_c = said(r"and the (\d+) clean ones on (\d+)")
+    assert f"{n} valid on {tasks} tasks ({k_c} clean on {t_c} tasks)" in head
+    k, d = said(r"— (\d+) of (\d+) came out clean")
+    assert t22["deliver decisions made prospectively, clean"].startswith(f"{k} / {d} =")
+    assert said(r"All (\d+) were sighted")[0] == d
+    assert f"by mode: sighted {d}" in t22["deliver decisions made prospectively, clean"]
+    pk, pn = said(r"called (\d+) of (\d+) clean patches working under apparatus 2.2")
+    assert t22["proxy: clean patches lint-clean with no API break"].startswith(f"{pk} / {pn} =")
+    bp, fails, wall = said(r"refusals are (\d+) of the (\d+) valid failures, and (\d+) budget")
+    kinds = {
+        kv.rsplit(" ", 1)[0]: int(kv.rsplit(" ", 1)[1])
+        for kv in tall["non-clean valid by kind"].split(", ")
+    }
+    assert int(bp) == kinds["budget"] + kinds["protocol"] and int(fails) == sum(kinds.values())
+    spend = tall["spend on budget-stopped attempts"]
+    assert f"; {wall} at the 900 s wall clock" in spend
+    usd, all_usd = said(r"cost \$([\d.]+) of the \$([\d.]+) spent")
+    assert spend.startswith(f"${usd} of ${all_usd}")
+    words = {"Two": 2, "forty": 40}
+    r2, r40 = said(r"(\w+) of (\w+) valid attempts on the second and third rungs")
+    assert t22["escalation rungs r2 / r3, clean"] == f"{words[r2]} / {words[r40]}"
+
+
+def test_a_percentage_is_rounded_once_from_the_exact_counts(vb: ModuleType) -> None:
+    """155 / 259 is 59.846…%: formatting the report's 4-place point (0.5985) again printed
+    59.9%. The page formats from k / n and the exact Wilson bounds (P-028)."""
+    from crb.core.stats import wilson_interval
+
+    for k, n in ((155, 259), (2, 24), (153, 155), (22, 94), (0, 17), (17, 20)):
+        ci = wilson_interval(k, n)
+        served = {
+            "k": k,
+            "n": n,
+            "point": round(k / n, 4),
+            "ci_low": round(ci.low, 4),
+            "ci_high": round(ci.high, 4),
+        }
+        want = (
+            f"{k} / {n} = {100 * k / n:.1f}% (Wilson 95% {100 * ci.low:.1f}%-{100 * ci.high:.1f}%)"
+        )
+        assert vb._rate(served) == want
+
+
+def test_only_the_baseline_page_quotes_the_generated_register() -> None:
+    """ADR-0020 once carried its own hand-made register table, and it drifted from the
+    generated one within the day (P-015's class on a second page). The register's tables are
+    printed by ``scripts/prevention_from_export.py --md`` and pasted into ONE page; any other
+    page points there."""
+    header = "| class | first attempts (blind / sighted) |"
+    quoting = sorted(
+        str(p.relative_to(ROOT))
+        for p in (ROOT / "docs").rglob("*.md")
+        if header in p.read_text(encoding="utf-8")
+    )
+    assert quoting == ["docs/reviews/2026-09-25-value-baseline.md"]
+    adr = (ROOT / "docs/adr/0020-a-bug-is-closed-by-prevention.md").read_text(encoding="utf-8")
+    section = adr.partition("### What the register would do today")[2].partition("\n## ")[0]
+    assert "2026-09-25-value-baseline.md" in section and "\n|" not in section
+
+
+def test_the_register_renderer_prints_the_pages_table_shape() -> None:
+    spec = importlib.util.spec_from_file_location(
+        "prevention_from_export", ROOT / "scripts" / "prevention_from_export.py"
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    summary = {
+        "repo": "cobra",
+        "first_attempts": 3,
+        "blind_first_attempts": 1,
+        "sighted_first_attempts": 2,
+        "largest_blind_class": {"signature": "harness:other", "first_attempts": 1},
+        "classes": [
+            {
+                "signature": "harness:other",
+                "first_attempts": 1,
+                "first_attempts_by_mode": {"blind": 1},
+                "stratum": "1 of 3 blind (apparatus 2.2)",
+                "tasks": 1,
+                "cost_usd": 0.44,
+                "actionable": False,
+                "lever": "",
+                "level": "",
+                "would_file": ["item:prevent-class"],
+                "status": "open",
+                "qualifiers": ["watch"],
+            }
+        ],
+    }
+    lines = mod.render_md([summary])
+    page = (ROOT / "docs/reviews/2026-09-25-value-baseline.md").read_text(encoding="utf-8")
+    assert lines[2] in page  # the header row the page carries
+    assert lines[4] == (
+        "| `harness:other` | 1 (1 / 0) | 1 of 3 blind (apparatus 2.2) | 1 | $0.44 | no | "
+        "none the loop may apply | `item:prevent-class` | open (watch) |"
+    )

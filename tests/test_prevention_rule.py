@@ -45,6 +45,7 @@ from crb.core.prevention import (
     ALPHA_LOOK,
     AUTO_CONFIG,
     AUTO_CONTEXT,
+    LEVERS,
     QUALIFIERS,
     STATUSES,
     Mechanisms,
@@ -55,6 +56,7 @@ from crb.core.prevention import (
     binom_cdf,
     binom_sf,
     build_register,
+    choose_lever,
     decisive_n,
     link_record,
     tick,
@@ -685,3 +687,198 @@ def test_statuses_are_the_scorecards_five() -> None:
         assert set(e.qualifiers) <= set(QUALIFIERS)
         assert e.lever_kind in ("process", "context", "")
     assert set(reg.counts) == set(STATUSES)
+
+
+# --- the loop cannot close a class it did not remove (docs/PREVENTION.md P-019 – P-023) ------
+
+
+def _nine_refusals_then_the_gate() -> tuple[Loop, dict[str, str]]:
+    """9 of 30 first attempts refused (tasks 0–9); the finish gate applied under config."""
+    rows = [
+        attempt(i=i, task_id=task(i % 10), kind="protocol" if i in LADDER_PROTOCOL else "clean")
+        for i in range(30)
+    ]
+    loop = Loop(rows, mechanisms=Mechanisms(shipped=frozenset({"finish_gate"})))
+    loop.switch(AUTO_CONFIG, 40)
+    loop.tick(50)
+    return loop, change_labels(loop.applied("finish_gate").payload["change_id"])
+
+
+def test_the_same_attempts_failing_as_another_class_is_displaced_not_closed() -> None:
+    loop, labels = _nine_refusals_then_the_gate()
+    # the attempts that were refusals now fail as budget, harness or no source change — the
+    # total non-clean rate is unchanged (30%), so nothing was removed: the class moved
+    swap = {0: "budget", 1: "harness", 2: "no_source_change"}
+    loop.add(
+        [
+            attempt(
+                i=51 + j,
+                task_id=task(20 + j % 10),
+                kind=swap[j % 3] if j % 10 in (0, 3, 6) else "clean",
+                error="sandbox exploded" if j % 3 == 1 else "",
+                labels=labels,
+            )
+            for j in range(30)
+        ]
+    )
+    loop.tick(90)
+    verdicts = [x["verdict"] for x in loop.decided()]
+    assert "closed" not in verdicts and verdicts[-1] == "displaced"
+    e = loop.register().entry(NET_SIG)
+    assert e is not None and e.status == "applied" and "displaced" in e.qualifiers
+    assert loop.register().counts["closed"] == 0
+
+
+def test_running_the_loop_only_where_the_class_does_not_live_never_closes_it() -> None:
+    loop, labels = _nine_refusals_then_the_gate()
+    # the tasks where the class lives run with learning off, and still recur 10 of 20
+    loop.add(
+        [
+            attempt(
+                i=51 + j,
+                task_id=task(j % 6),
+                kind="protocol" if j % 2 == 0 else "clean",
+                labels={"learn": "off"},
+                run="opted-out",
+            )
+            for j in range(20)
+        ]
+    )
+    # the loop runs only on new tasks, where nothing recurs
+    loop.add(exposed_to(start=71, n=20, recur=set(), first_task=100, labels=labels, run="on"))
+    loop.tick(100)
+    assert not any(x["verdict"] in ("keep", "closed") for x in loop.decided())
+    e = loop.register().entry(NET_SIG)
+    assert e is not None and e.status != "closed"
+    m = e.measurement
+    assert m is not None and (m.withheld_k, m.withheld_n) == (10, 20)
+    assert m.to_dict()["withheld"] == {"k": 10, "n": 20}
+
+
+def test_an_honest_ab_whose_control_arm_recurs_still_closes() -> None:
+    loop, labels = _nine_refusals_then_the_gate()
+    # the same tasks in both arms: the control (learning off) recurs, the loop's arm does not
+    for j in range(20):
+        t = task(100 + j % 10)
+        loop.add(
+            [
+                attempt(
+                    i=51 + 2 * j,
+                    task_id=t,
+                    kind="protocol" if j % 3 == 0 else "clean",
+                    labels={"learn": "off"},
+                    run="control",
+                ),
+                attempt(i=52 + 2 * j, task_id=t, labels=labels, run="loop"),
+            ]
+        )
+    loop.tick(100)
+    assert [x["verdict"] for x in loop.decided()] == ["keep", "closed"]
+    m = loop.register().entry(NET_SIG).measurement  # type: ignore[union-attr]
+    assert m is not None and m.withheld_n == 0 and m.concurrent_k > 0
+
+
+def test_a_dormant_format_class_is_never_applied_and_never_credited() -> None:
+    rows = [attempt(i=i, task_id=task(i), kind="lint") for i in range(3)]
+    rows += [attempt(i=10 + i, task_id=task(10 + i), kind="clean") for i in range(25)]
+    loop = Loop(
+        rows,
+        mechanisms=Mechanisms(shipped=frozenset({"format_step"})),
+        packs={"c" * 64: FMT_PACK},
+    )
+    loop.switch(AUTO_CONFIG, 50)
+    e = loop.register().entry("format:gofmt")
+    assert e is not None and (e.status, e.qualifiers) == ("open", ("dormant",))
+    assert loop.tick(60) == []
+    assert not loop.records("applied")
+    loop.add([attempt(i=61 + j, task_id=task(60 + j)) for j in range(20)])
+    loop.tick(90)
+    reg = loop.register()
+    assert reg.entry("format:gofmt").status == "open"  # type: ignore[union-attr]
+    assert reg.counts["closed"] == 0
+
+
+#: One class per family the catalogue knows, capability and factory classes aside (routed and
+#: strengthened, not prevented).
+EVERY_FAMILY = (
+    NET_SIG,
+    "protocol:archaeology:git log",
+    "budget:max_turns",
+    "lint:ruff:e501",
+    "lint:*",
+    "format:gofmt",
+    "api:changed",
+    "builder_red:no_source_change",
+    "builder_red:regression",
+    "disqualified:tests_modified",
+    "harness:other",
+    "harness:sandbox",
+    "harness:timeout",
+    "harness:runner-tool-missing:jest",
+    "review:style",
+    "review:api_change",
+)
+
+
+def test_every_familys_escalation_ends_in_a_filed_item() -> None:
+    for sig in EVERY_FAMILY:
+        applicable = {lv.lever_id for lv in LEVERS if lv.family in ("config", "context")}
+        retired = frozenset((sig, lid, "2.2") for lid in applicable)
+        choice = choose_lever(
+            sig,
+            apparatus="2.2",
+            switch=AUTO_CONFIG,
+            retired=retired,
+            mechanisms=Mechanisms(shipped=frozenset(applicable)),
+            escalate=True,
+        )
+        assert choice.lever_id == "" or not choice.allowed, sig
+        assert choice.propose, f"{sig}: every lever retired and nothing filed"
+
+
+def test_a_lint_class_whose_switch_failed_files_the_item_end_to_end() -> None:
+    pack = lint_pack([{"tool": "ruff", "verdict": False, "tail": "a.py:1:1: E501 x\n"}])
+    rows = [
+        attempt(i=i, task_id=task(i % 10), kind="lint" if i in LADDER_PROTOCOL else "clean")
+        for i in range(30)
+    ]
+    loop = Loop(
+        rows, mechanisms=Mechanisms(shipped=frozenset({"finish_gate"})), packs={"c" * 64: pack}
+    )
+    loop.switch(AUTO_CONFIG, 40)
+    loop.tick(50)
+    sig = "lint:ruff:e501"
+    labels = change_labels(loop.applied("finish_gate", sig).payload["change_id"])
+    loop.add(
+        [
+            attempt(
+                i=51 + j,
+                task_id=task(20 + j % 10),
+                kind="lint" if j % 3 == 0 else "clean",
+                labels=labels,
+            )
+            for j in range(40)
+        ]
+    )
+    loop.tick(100)
+    assert "retire" in [x["verdict"] for x in loop.decided(sig)]
+    e = loop.register().entry(sig)
+    assert e is not None and e.status == "escalated"
+    assert {p.lever_id for p in e.proposals} == {"item:prevent-class"}
+    # a retired switch never falls back to a checklist line (ADR-0020 §9)
+    assert not [r for r in loop.records("applied") if r.payload["family"] == "context"]
+    assert ("line:T-LINT", "advisory") in {(a, b) for a, b, _ in e.recommendation.passed_over}
+
+
+def test_a_retired_switch_escalates_to_the_item_not_down_to_a_line() -> None:
+    loop, labels = _nine_refusals_then_the_gate()
+    loop.add(
+        exposed_to(
+            start=51, n=24, recur={1, 5, 9, 14, 17, 21, 23}, first_task=20, labels=labels, run="r"
+        )
+    )
+    loop.tick(90)
+    assert "retire" in [x["verdict"] for x in loop.decided()]
+    assert not [r for r in loop.records("applied") if r.payload["family"] == "context"]
+    e = loop.register().entry(NET_SIG)
+    assert e is not None and e.status == "escalated" and e.lever_kind == ""

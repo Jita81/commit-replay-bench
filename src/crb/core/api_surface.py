@@ -34,8 +34,10 @@ What counts as public
   not API (only types are). ``package main``, ``internal/``, ``testdata/`` and ``vendor/``
   are not public units.
 * **Python** — module-level functions, classes (their public and dunder methods, class-level
-  annotated attributes), variables and — in ``__init__.py`` or when ``__all__`` names them —
-  re-exported imports; ``__all__`` when it is a literal decides the public names, else the
+  annotated attributes), variables and re-exported imports: every import ``__all__`` names,
+  and in an ``__init__.py`` without ``__all__`` an explicit ``X as X``, a relative import or a
+  third-party one (never ``__future__`` or the standard library, which a private change adds
+  freely); ``__all__`` when it is a literal decides the public names, else the
   leading-underscore convention does. Parameter names, kinds and whether a parameter has a
   default are API; annotations and default values are not. A module whose path has a
   ``_private`` component is not a public unit.
@@ -81,6 +83,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -106,7 +109,12 @@ TREE_GOLD = "gold"
 TREES: tuple[str, ...] = (TREE_PARENT, TREE_TRIAL, TREE_GOLD)
 
 _JS_EXTS: tuple[str, ...] = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx")
-#: Path components that never hold a public unit, in any language.
+#: Path components that never hold a public Go package — Go's own conventions only: a
+#: ``doc/`` or ``examples/`` directory is an importable package like any other (cobra's
+#: ``doc`` publishes ``GenMarkdownTree``; docs/PREVENTION.md P-029). ``package main`` is
+#: refused where the package is read; ``_`` and ``.`` directories are ignored by the go tool.
+_GO_NON_PUBLIC_DIRS: frozenset[str] = frozenset({"internal", "testdata", "vendor"})
+#: Path components that never hold a public unit in Python or JS/TS.
 _NON_PUBLIC_DIRS: frozenset[str] = frozenset(
     {
         "internal",
@@ -151,17 +159,19 @@ def is_public_path(rel: str) -> bool:
     ``docs/``… and not a tool/config script; a Python module with a ``_private`` path
     component is private by convention."""
     parts = PurePosixPath(rel).parts
+    lang = language_of(rel)
+    if lang == LANG_GO:
+        return not any(p in _GO_NON_PUBLIC_DIRS or p.startswith(("_", ".")) for p in parts[:-1])
     if any(p in _NON_PUBLIC_DIRS for p in parts[:-1]):
         return False
     name = parts[-1]
     if name in _NON_PUBLIC_FILES:
         return False
-    lang = language_of(rel)
     if lang == LANG_PYTHON:
         return not any(p.startswith("_") and p not in ("__init__.py", "__main__.py") for p in parts)
     if lang == LANG_JS:
         return _JS_CONFIG_RE.search(name) is None
-    return lang == LANG_GO
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -608,8 +618,32 @@ def _py_class(node: ast.ClassDef, out: Surface) -> None:
             out[f"{node.name}.{item.target.id}"] = "attr" + ("=" if item.value is not None else "")
 
 
+def _reexported(node: ast.Import | ast.ImportFrom, alias: ast.alias, explicit_only: bool) -> bool:
+    """Is this import a re-export? With ``__all__`` its names decide (every import counts);
+    in a package ``__init__.py`` without one, only an explicit re-export (``X as X``) or an
+    import from the package itself (a relative import) — never ``__future__`` or the standard
+    library, which a private change adds without touching the API (P-030)."""
+    if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+        return False
+    if not explicit_only:
+        return True
+    if alias.asname is not None and alias.asname == alias.name:
+        return True
+    if isinstance(node, ast.ImportFrom):
+        if node.level > 0:
+            return True
+        top = (node.module or "").split(".")[0]
+    else:
+        top = alias.name.split(".")[0]
+    return top not in sys.stdlib_module_names
+
+
 def _py_body(
-    body: Sequence[ast.stmt], out: Surface, public: Callable[[str], bool], reexports: bool
+    body: Sequence[ast.stmt],
+    out: Surface,
+    public: Callable[[str], bool],
+    reexports: bool,
+    explicit_only: bool = False,
 ) -> None:
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -634,16 +668,16 @@ def _py_body(
                 mod, level = node.module or "", "." * node.level
             for alias in node.names:
                 name = alias.asname or alias.name.split(".")[0]
-                if alias.name != "*" and public(name):
+                if alias.name != "*" and public(name) and _reexported(node, alias, explicit_only):
                     out[name] = f"import {level}{mod}:{alias.name}"
         elif isinstance(node, ast.If):
-            _py_body(node.body, out, public, reexports)
-            _py_body(node.orelse, out, public, reexports)
+            _py_body(node.body, out, public, reexports, explicit_only)
+            _py_body(node.orelse, out, public, reexports, explicit_only)
         elif isinstance(node, ast.Try):
-            _py_body(node.body, out, public, reexports)
+            _py_body(node.body, out, public, reexports, explicit_only)
             for h in node.handlers:
-                _py_body(h.body, out, public, reexports)
-            _py_body(node.orelse, out, public, reexports)
+                _py_body(h.body, out, public, reexports, explicit_only)
+            _py_body(node.orelse, out, public, reexports, explicit_only)
 
 
 def python_surface(text: str, *, is_package_init: bool = False) -> Surface:
@@ -655,7 +689,13 @@ def python_surface(text: str, *, is_package_init: bool = False) -> Surface:
         return name in declared if declared is not None else not name.startswith("_")
 
     out: Surface = {}
-    _py_body(tree.body, out, public, is_package_init or declared is not None)
+    _py_body(
+        tree.body,
+        out,
+        public,
+        is_package_init or declared is not None,
+        explicit_only=is_package_init and declared is None,
+    )
     return out
 
 

@@ -233,3 +233,42 @@ def test_the_teams_own_configuration_outranks_the_overlay() -> None:
     )
     e = reg.entry(NET_SIG)
     assert e is not None and "overridden" in e.qualifiers
+
+
+def test_a_runs_own_budget_profile_outranks_the_loop_and_is_never_exposure() -> None:
+    rows = [
+        attempt(i=i, task_id=task(i % 10), kind="budget" if i % 3 == 0 else "clean")
+        for i in range(30)
+    ]
+    loop = Loop(rows, mechanisms=Mechanisms(shipped=frozenset({"budget_calibrated"})))
+    loop.switch(AUTO_CONFIG, 40)
+    loop.tick(50)
+    sig = "budget:max_turns"
+    cid = loop.applied("budget_calibrated", sig).payload["change_id"]
+    assert snapshot(loop.records(), repo=REPO).run_labels()["learn_changes"] == cid
+    # POST /runs puts budget_profile at the top level, as a plain value: the run's own choice
+    ran = snapshot(loop.records(), repo=REPO, params={"budget_profile": "default"})
+    assert ran.changes == () and "learn_changes" not in ran.run_labels()
+    # a row that names the change but ran under another profile was never exposed to it
+    loop.add(
+        [
+            attempt(
+                i=51 + j,
+                task_id=task(20 + j),
+                labels={**change_labels(cid), "budget_profile": "default"},
+            )
+            for j in range(12)
+        ]
+    )
+    loop.add(
+        [
+            attempt(
+                i=70 + j,
+                task_id=task(40 + j),
+                labels={**change_labels(cid), "budget_profile": "calibrated"},
+            )
+            for j in range(3)
+        ]
+    )
+    m = loop.register().entry(sig).measurement  # type: ignore[union-attr]
+    assert m is not None and m.exposed_n == 3

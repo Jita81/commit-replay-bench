@@ -471,9 +471,38 @@ class EndpointConfig:
         )
 
 
+def resolved_endpoint(endpoint: EndpointConfig | None = None) -> EndpointConfig:
+    """The endpoint a builder with ``endpoint`` talks to — the one place it is decided, so
+    the submit-time credential check and the build ask for the same variable."""
+    return endpoint or EndpointConfig()
+
+
+def key_env(endpoint: EndpointConfig | None = None) -> str:
+    """The NAME of the environment variable a build against ``endpoint`` needs."""
+    ep = resolved_endpoint(endpoint)
+    return ep.azure.api_key_env if ep.azure is not None else ep.api_key_env
+
+
+def credential_missing(
+    auth: str = "", *, secrets_dir: Any = None, endpoint: EndpointConfig | None = None
+) -> str:
+    """Why an OpenAI-compatible build (``openai_agent``, ``editblock``) would have no
+    credential — ``""`` when its key variable is set. PRESENCE ONLY: the variable's name is
+    returned, never its value. ``auth`` and ``secrets_dir`` are accepted for the shape
+    ``POST /runs`` calls every check with (docs/PREVENTION.md P-003)."""
+    del auth, secrets_dir
+    name = key_env(endpoint)
+    if os.environ.get(name, "").strip():
+        return ""
+    return (
+        f"an OpenAI-compatible builder needs {name} in the worker's environment and it is not "
+        "set — set it (the provider's API key) before queuing the run"
+    )
+
+
 def make_chat(model: str, endpoint: EndpointConfig | None = None, **kw: Any) -> OpenAIChat:
     """Build a live :class:`OpenAIChat` for ``model`` against ``endpoint``."""
-    ep = endpoint or EndpointConfig()
+    ep = resolved_endpoint(endpoint)
     client = make_client(ep.base_url, ep.api_key_env, ep.azure, timeout_s=ep.timeout_s)
     pricing = price_for(f"azure:{model}" if ep.azure else model)
     # a caller's keyword (the labeller's max_tokens / temperature) overrides the endpoint's
@@ -506,8 +535,11 @@ __all__ = [
     "ModelTurn",
     "OpenAIChat",
     "ToolCall",
+    "credential_missing",
+    "key_env",
     "make_chat",
     "make_client",
     "parse_tool_calls",
+    "resolved_endpoint",
     "with_retries",
 ]

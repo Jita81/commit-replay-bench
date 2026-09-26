@@ -7,8 +7,9 @@
  * What it is:   The `ErrorState` alert every failed query or mutation renders through.
  * What it does: Shows the human message from the envelope under a heading chosen by code
  *               (`timeout`, `network`, `sandbox_unavailable`, `false_q1_refused`,
- *               `invalid_response`, `builder_credential_missing`) or by HTTP status (401 / 403 / 404 / 409 / 5xx), the
- *               `HTTP <status> · <code>` line in small mono, the structured `detail` behind a
+ *               `invalid_response`, `builder_credential_missing`) or by HTTP status
+ *               (401 / 403 / 404 / 409 / 5xx), the `HTTP <status> · <code>` line in small
+ *               mono, the structured `detail` behind a
  *               collapsed disclosure, and an optional Retry. No stack traces, no raw JSON in
  *               chrome (design law 4 in ui/README.md); a non-`ApiError` is shown by its
  *               message.

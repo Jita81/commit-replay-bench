@@ -125,6 +125,36 @@ def test_ruff_format_runs_only_where_the_repository_configures_it(tmp_path: Path
     assert detected is not None and "ruff-format" in {t.name for t in detected.tools}
 
 
+@pytest.mark.skipif(not Path(RUFF).exists(), reason="ruff not available")
+def test_a_ruff_outside_the_repositorys_pin_never_formats_and_says_so(tmp_path: Path) -> None:
+    """Belt 5 refuses to judge with a ruff the repository's pin forbids; the format step
+    and the preflight's fixers must not rewrite files with it either (P-031)."""
+    from crb.core.lint import fix_commands, python_plan
+
+    root = _python_repo(
+        tmp_path,
+        '[project]\nname = "pkg"\n\n[project.optional-dependencies]\ndev = ["ruff==0.0.1"]\n'
+        "\n[tool.ruff]\n\n[tool.ruff.format]\n",
+    )
+    plan = python_plan(root, str(Path(RUFF).resolve()))
+    assert plan is not None and all(t.refuse for t in plan.tools)
+    before = (root / "pkg/calc.py").read_bytes()
+    formatters, skipped = fm.formatters_for(plan, root)
+    assert formatters == [] and skipped == "formatter_refused:ruff-format"
+    run = fm.run_formatters(formatters, LocalExecutor(), root, ["pkg/calc.py"], skipped=skipped)
+    assert run.label() == "skipped=formatter_refused:ruff-format"
+    assert (root / "pkg/calc.py").read_bytes() == before
+    assert fix_commands(plan, ["pkg/calc.py"]) == []
+
+
+def test_cargo_fmt_formats_the_whole_crate_so_it_is_a_named_skip(tmp_path: Path) -> None:
+    """``cargo fmt`` formats every target of the crate, tests included — it cannot be held
+    to the changed source files, so it never runs as the format step (P-031)."""
+    plan = LintPlan((LintTool("cargo-fmt", ("cargo", "fmt", "--check"), paths="all"),), "cargo")
+    formatters, skipped = fm.formatters_for(plan, tmp_path)
+    assert formatters == [] and skipped == "formatter_not_file_scoped:cargo-fmt"
+
+
 def test_black_configured_but_not_installed_is_a_named_skip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

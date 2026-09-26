@@ -277,6 +277,29 @@ def test_python_all_decides_and_package_init_reexports_count() -> None:
     assert api.python_surface(init, is_package_init=True) == {"Command": "import .core:Command"}
 
 
+def test_a_private_import_in_a_package_init_without_all_is_not_a_finding() -> None:
+    """click's ``__init__.py`` has no ``__all__`` and re-exports with ``X as X``: adding
+    ``import os`` or ``from __future__ import annotations`` changes no API (P-030)."""
+    init = "from .core import Command as Command\n"
+    trial = (
+        "from __future__ import annotations\nimport os\nfrom typing import Any\n"
+        "from .core import Command as Command\n"
+    )
+    s = api.python_surface(trial, is_package_init=True)
+    assert s == {"Command": "import .core:Command"}
+    tree = {"src/click/__init__.py": init}
+    run = api.evaluate(
+        ["src/click/__init__.py"], _three(tree, {"src/click/__init__.py": trial}, tree)
+    )
+    assert run.ok is True and not run.findings
+    # a relative import and an explicit re-export are still the package's API
+    added = init + "from .types import Choice\nfrom json import dumps as dumps\n"
+    assert set(api.python_surface(added, is_package_init=True)) == {"Command", "Choice", "dumps"}
+    # with __all__ its names decide, whatever the import
+    declared = '__all__ = ["path"]\nimport os.path as path\n'
+    assert set(api.python_surface(declared, is_package_init=True)) == {"path"}
+
+
 # --- JavaScript / TypeScript ------------------------------------------------------------------
 
 
@@ -341,6 +364,25 @@ def test_units_skip_what_is_not_public_api() -> None:
         "README.md",
     ]
     assert set(api.units_for(changed)) == {"calc", "pkg/public.py", "src/header.mjs"}
+
+
+def test_a_go_doc_package_is_public_api() -> None:
+    """cobra publishes ``github.com/spf13/cobra/doc`` (``GenMarkdownTree``): for Go only the
+    go tool's own conventions make a directory private (P-029)."""
+    assert set(api.units_for(["doc/md_docs.go", "command.go", "examples/x/x.go"])) == {
+        "doc",
+        ".",
+        "examples/x",
+    }
+    assert api.units_for(["_hidden/a.go", ".tool/a.go", "vendor/v/a.go"]) == {}
+    parent = {
+        "doc/md_docs.go": "package doc\n\nfunc GenMarkdownTree(cmd *C, dir string) error { return nil }\n"
+    }
+    trial = {"doc/md_docs.go": "package doc\n\nfunc GenMarkdownTree(cmd *C) error { return nil }\n"}
+    run = api.evaluate(["doc/md_docs.go"], _three(parent, trial, parent))
+    assert run.ok is False and [f.label for f in run.findings] == ["changed:doc:GenMarkdownTree"]
+    # a Python or JS docs/ directory is still not a public unit
+    assert api.units_for(["docs/conf.py", "doc/helper.js"]) == {}
 
 
 def test_a_signature_change_is_a_finding_the_gold_mirroring_it_is_not() -> None:

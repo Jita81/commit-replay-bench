@@ -15,7 +15,8 @@ How:          Hand-built ``SpendObservation`` lists; no store, no worker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/core/spend.py (under test), tests/test_worker_spend.py (the same rules
-              bound to a run end to end)
+              bound to a run end to end), src/crb/core/ledger.py (the rows and failure kinds
+              the rules read), tests/test_spend_from_export.py (the same rules over the export)
 Tested by:    tests/test_spend.py
 Touch when:   a bar, a minimum n, the margin or the ceiling changes; a cap is added to Budget.
 """

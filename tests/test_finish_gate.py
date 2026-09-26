@@ -15,6 +15,7 @@ Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0021-working-by-construction.md
 Works with:   src/crb/core/finish_gate.py (under test), src/crb/core/checks.py
               (``CheckCommand``), src/crb/core/lint.py (the plan), tests/fixtures/langs/gorepo.py
+              (the Go repository the checks run in)
 Tested by:    tests/test_finish_gate.py
 Touch when:   the checklist's content or the gating rule changes.
 """

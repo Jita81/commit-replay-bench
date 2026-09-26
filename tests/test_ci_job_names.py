@@ -32,7 +32,10 @@ Touch when:   a workflow file is added (it is found by the glob); GitHub changes
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -76,7 +79,7 @@ def job_names(text: str) -> dict[str, str]:
             blocks[current].append(line)
     out: dict[str, str] = {}
     for job, body in blocks.items():
-        name = job
+        name = ""
         for line in body:
             nm = _JOB_NAME.match(line)
             if nm:
@@ -89,10 +92,19 @@ def job_names(text: str) -> dict[str, str]:
                 values = [_unquote(v) for v in ml.group(2).split(",") if v.strip()]
                 if values:
                     matrix[ml.group(1)] = max(values, key=len)
+        if not name:
+            # no name: GitHub renders the id, and for a matrix job appends the values —
+            # ``id (v1, v2, …)`` — so the longest values are the ones measured (P-001)
+            name = job + (f" ({', '.join(matrix.values())})" if matrix else "")
         out[job] = _MATRIX_EXPR.sub(
             lambda m, mx=matrix: mx.get(m.group(1), _UNKNOWN_MATRIX_VALUE), name
         )
     return out
+
+
+def workflow_files() -> list[Path]:
+    """Every workflow GitHub runs: ``.yml`` AND ``.yaml``."""
+    return sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")])
 
 
 def too_long(names: dict[str, str]) -> list[str]:
@@ -103,7 +115,7 @@ def too_long(names: dict[str, str]) -> list[str]:
 
 
 def test_every_ci_job_name_is_under_100_characters() -> None:
-    files = sorted(WORKFLOWS.glob("*.yml"))
+    files = workflow_files()
     assert files, "no workflow files found"
     offenders: list[str] = []
     for path in files:
@@ -138,3 +150,26 @@ def test_a_long_name_and_a_long_matrix_value_are_caught() -> None:
     assert names["unnamed-job-uses-its-id"] == "unnamed-job-uses-its-id"
     bad = too_long(names)
     assert [b.split(":")[0] for b in bad] == ["long", "matrixed"]
+
+
+def test_a_yaml_workflow_and_an_unnamed_matrix_job_are_measured_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GitHub runs ``*.yaml`` as well as ``*.yml``, and names an unnamed matrix job
+    ``id (values…)`` — both escaped the first version of this gate."""
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "a.yml").write_text("jobs:\n  ok:\n    runs-on: x\n", encoding="utf-8")
+    (wf / "extra.yaml").write_text(
+        f"jobs:\n  long:\n    name: {'y' * 120}\n    runs-on: x\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(sys.modules[__name__], "WORKFLOWS", wf)
+    assert [p.name for p in workflow_files()] == ["a.yml", "extra.yaml"]
+    matrixed = (
+        "jobs:\n  build-and-test:\n    strategy:\n      matrix:\n"
+        f'        os: [ubuntu-latest, "{"w" * 60}"]\n        py: ["3.12", "3.13"]\n'
+    )
+    name = job_names(matrixed)["build-and-test"]
+    assert name == f"build-and-test ({'w' * 60}, 3.12)"
+    assert len(name) < LIMIT
+    assert too_long(job_names(matrixed.replace("w" * 60, "w" * 95)))

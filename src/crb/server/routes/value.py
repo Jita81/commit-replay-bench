@@ -42,6 +42,7 @@ from crb.core.ledger import LedgerIntegrityError
 from crb.core.value import (
     DEFAULT_USD_PER_GBP,
     DEFAULT_WINDOW,
+    REVIEWS_FROM_STORE,
     default_register,
     value_report,
     value_row_from_grade,
@@ -97,6 +98,7 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
         records,
         reviews=reviews,
         mechanisms=mechanisms(rows=grades, repo=repo or ""),
+        packs=DbLedger(factory).get_pack,
     )
     return value_report(
         rows,
@@ -106,6 +108,7 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
         window=window,
         usd_per_gbp=usd_per_gbp,
         register=register,
+        reviews_source=REVIEWS_FROM_STORE,
     ).to_dict()
 
 

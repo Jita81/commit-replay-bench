@@ -51,12 +51,14 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/core/ledger.py (``GradeRow`` field order = ``ROW_FIELDS``),
-              src/crb/core/evidence.py (``verify_pack``, canonical hashing),
+              src/crb/core/evidence.py (``verify_pack``, canonical hashing; ``pack_diff_sha256``
+              in src/crb/core/review.py is the review's anchor),
               src/crb/core/workspace.py (``diff_stats`` — the procedure the patch route
               must match byte-for-byte), src/crb/core/patches.py (the kept patch it serves
-              first), src/crb/core/review.py (``pack_diff_sha256``, the anchor), src/crb/server/routes/reviews.py (attests to the served patch),
+              first), src/crb/server/routes/reviews.py (attests to the served patch),
               src/crb/server/routes/ledger.py (reuses ``grade_to_dict`` for verify / export),
-              ui/src/screens/Runs (the evidence drill-down), docs/API.md#tasks--grades--evidence
+              ui/src/screens/Runs (the evidence drill-down; its contract is
+              docs/API.md#tasks--grades--evidence)
 Tested by:    tests/test_server_routes_grades.py, tests/test_server_routes_reviews.py,
               tests/test_patches.py
 Touch when:   never for a new repository; when ``Workspace.diff_stats`` changes how it
