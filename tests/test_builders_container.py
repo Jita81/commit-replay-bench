@@ -39,7 +39,8 @@ What it does: Pins that a ``SealedCheckout`` holds exactly one reachable commit 
 How:          ``SealedCheckout`` on a ``pyrepo`` trial; a local HTTP upstream + the proxy on
               ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``;
               ``os.getuid`` / ``os.getgid`` monkeypatched to 0 after pytest's base temporary
-              directory exists; an ``ast`` walk of tests/ for the ratchet.
+              directory exists; an ``ast`` walk of tests/ for the ratchet, which resolves a
+              pin's receiver through the file's imports to decide it is the ``os`` module.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
@@ -58,6 +59,7 @@ from __future__ import annotations
 
 import ast
 import http.server
+import importlib
 import os
 import socket
 import subprocess
@@ -425,20 +427,66 @@ def test_the_default_user_is_the_workers_own_uid_and_root_is_refused(
     assert BuilderContainerSettings(image="i", user="10001:10001").user == "10001:10001"
 
 
-def _names_os(node: ast.AST) -> bool:
-    """True for the name ``os`` or an attribute chain that ends in ``.os``
-    (``container.os``): the objects whose ``getuid`` is the one the settings read."""
-    if isinstance(node, ast.Name):
-        return node.id == "os"
-    return isinstance(node, ast.Attribute) and node.attr == "os"
+_UNRESOLVED = object()
 
 
-def _pins_the_uid(node: ast.AST) -> bool:
+def _resolve(dotted: str) -> object:
+    """The object a dotted name names, found the way ``monkeypatch.setattr`` finds a string
+    target: import the longest importable prefix, then read the rest as attributes. A name
+    that does not resolve (``Fake.os``, a class local to a test) gives ``_UNRESOLVED``."""
+    parts = dotted.split(".")
+    for i in range(len(parts), 0, -1):
+        try:
+            obj: object = importlib.import_module(".".join(parts[:i]))
+        except (ImportError, ValueError):
+            continue
+        for part in parts[i:]:
+            obj = getattr(obj, part, _UNRESOLVED)
+        return obj
+    return _UNRESOLVED
+
+
+def _imports(tree: ast.AST) -> dict[str, str]:
+    """Each name an ``import`` binds in a file, mapped to the dotted module path it names:
+    ``import os as system`` → ``system: os``, ``from crb.builders import container`` →
+    ``container: crb.builders.container``, ``import crb.builders`` → ``crb: crb``."""
+    bound: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    bound[alias.asname] = alias.name
+                else:
+                    root = alias.name.split(".")[0]
+                    bound[root] = root
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                bound[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return bound
+
+
+def _is_the_os_module(node: ast.AST, imports: dict[str, str]) -> bool:
+    """True when ``node`` — a name or an attribute chain on one — is the ``os`` module the
+    settings read ``getuid`` from, judged by what the file imports, not by spelling: ``os``,
+    an alias of it (``import os as system``) or a module's ``os`` (``container.os``) are;
+    ``Fake.os`` on a class the test defines is not."""
+    attrs: list[str] = []
+    while isinstance(node, ast.Attribute):
+        attrs.insert(0, node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name) or node.id not in imports:
+        return False
+    return _resolve(".".join([imports[node.id], *attrs])) is os
+
+
+def _pins_the_uid(node: ast.AST, imports: dict[str, str]) -> bool:
     """True for a ``setattr`` call (``monkeypatch.setattr`` or the builtin) that replaces
-    ``os.getuid``: on ``os`` by attribute name (``setattr(os, "getuid", …)``, also through a
-    module's ``.os``) or by a dotted target whose last two parts are ``os.getuid``
-    (``setattr("os.getuid", …)``). ``getuid`` set on any other object pins nothing: the
-    settings still read the host's uid. Keyword forms are not recognised — the safe side."""
+    ``os.getuid``: on the ``os`` module by attribute name (``setattr(os, "getuid", …)``, also
+    through an alias or a module's ``.os``) or by a dotted target whose object before
+    ``getuid`` resolves to the ``os`` module (``setattr("os.getuid", …)``,
+    ``setattr("crb.builders.container.os.getuid", …)``). ``getuid`` set on any other object —
+    ``Fake``, ``Fake.os``, ``"shutil.getuid"`` — pins nothing: the settings still read the
+    host's uid. Keyword forms are not recognised — the safe side."""
     if not isinstance(node, ast.Call):
         return False
     callee = node.func
@@ -447,9 +495,14 @@ def _pins_the_uid(node: ast.AST) -> bool:
         return False
     first = node.args[0]
     if isinstance(first, ast.Constant) and isinstance(first.value, str):
-        return first.value.split(".")[-2:] == ["os", "getuid"]
+        owner, _, attr = first.value.rpartition(".")
+        return attr == "getuid" and bool(owner) and _resolve(owner) is os
     second = node.args[1] if len(node.args) > 1 else None
-    return _names_os(first) and isinstance(second, ast.Constant) and second.value == "getuid"
+    return (
+        isinstance(second, ast.Constant)
+        and second.value == "getuid"
+        and _is_the_os_module(first, imports)
+    )
 
 
 def _own_body(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
@@ -465,12 +518,16 @@ def _own_body(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
     return out
 
 
-def _top_level_pins(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+def _top_level_pins(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef, imports: dict[str, str]
+) -> list[ast.AST]:
     """The pins that are statements of ``fn``'s own body at its top level. A pin nested in a
     ``with``, ``if``, ``try`` or loop may never run (``if False:``) or may be undone when the
     block ends (``with monkeypatch.context() as m:``), so it pins nothing — the safe side."""
     return [
-        stmt.value for stmt in fn.body if isinstance(stmt, ast.Expr) and _pins_the_uid(stmt.value)
+        stmt.value
+        for stmt in fn.body
+        if isinstance(stmt, ast.Expr) and _pins_the_uid(stmt.value, imports)
     ]
 
 
@@ -503,7 +560,9 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
     in a nested helper, or is nested in a ``with``, ``if``, ``try`` or loop: such a pin may
     never run, or may be undone when its block ends. A function that only reads
     ``os.getuid()``, names it in a string, or sets ``getuid`` on some other object pins
-    nothing. Known limits, all on the safe side: a construction inside the same
+    nothing. Whether a receiver is the ``os`` module is decided by what the file imports and
+    what the name resolves to, never by its spelling: ``Fake.os`` is not ``os``, and an alias
+    (``import os as system``) is. Known limits, all on the safe side: a construction inside the same
     ``with monkeypatch.context()`` block as its pin is reported although it is pinned, and
     a construction inside a loop is judged by its place in the source, not by the order the
     loop runs it in.
@@ -511,6 +570,7 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
     found: set[str] = set()
     rel = path.relative_to(TESTS_DIR.parent).as_posix()
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    imports = _imports(tree)
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
@@ -518,7 +578,7 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
         strings = {
             n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)
         }
-        pins = [_at(n) for n in _top_level_pins(fn)]
+        pins = [_at(n) for n in _top_level_pins(fn, imports)]
         undos = [_at(n) for n in _own_body(fn) if _undoes(n)]
 
         def pinned_before(
