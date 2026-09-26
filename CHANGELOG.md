@@ -8,6 +8,31 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-26 — the CodeRabbit review of the value merge (PR #57)
+
+- **Every attempt of a checks-on run carries its `checks` stamp**, including a refusal
+  before spend and a builder that raised or could not be built: `build_fn_for` has one exit
+  that stamps it, so no row of such a run reads as arm `off` (ADR-0024 §6; P-038).
+- **A repair that fails to reach the model keeps the first build's patch.** A 429 or a dead
+  credential on the finish gate's or the pre-flight's repair call no longer turns an
+  admissible attempt into a model error whose edits are discarded; the label says
+  `repair_error=model_error` (P-039). The gate's parent-commit baseline is measured once per
+  task and mode, not before every rung.
+- **One endpoint resolver.** The OpenAI-compatible builders, the labeller, the test author and
+  the submit-time credential check all read `CRB_OPENAI_BASE_URL` / `CRB_AZURE_*` through
+  `resolved_endpoint` (P-040). A stored Claude Code token with group or world bits is refused
+  at submit, as the build refuses it.
+- **The worker reads every shared settings block from an explicit environment**, derived from
+  the model, so `CRB_RETENTION__PATCHES=false` is honoured on that path (P-041).
+- `crb route` names its checks arm and exits 1 when the ledger has rows but none of that arm.
+  Capability cells carry `checks_arm`. `/health` compares the bundle the app mounted, and an
+  unstamped served bundle is stale even when the source commit is unknown. A kept patch is
+  written through its own temporary file. `checks.formatter` is validated in full. A
+  calibration floor must be positive. "Not only mergeable" no longer reads as a negation.
+  Review corrections commit their evidence events one by one. A prevention append that keeps
+  colliding is a 409, and a registration whose record failed is recorded on retry, never
+  registered twice. The three learning reports are in `docs/API.md` and `docs/OPERATOR.md`.
+
 ### 2026-09-26 — conformance with the external assessment (§0 rules, §F conditions)
 
 - **A row graded with the format step or belt 6 on is never counted with one graded without.**

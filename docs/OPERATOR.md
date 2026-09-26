@@ -1049,3 +1049,25 @@ item or write on a board without a named person; re-apply a lever a person rever
 prevention_chain_broken` and nothing is written: restore the `events` table from the database
 backup (DEPLOYMENT §5). The chain lives in the database, never in `CRB_HOME`.
 
+## 13. The three learning reports
+
+The **Learn** page, beside the prevention register, shows three reports for one repository
+(any viewer; `GET /learn/refusals`, `/learn/strengthen` and `/learn/remeasure`, or `crb learn
+refusals|strengthen|remeasure` over exported files — [LEARNING-LOOP §2](LEARNING-LOOP.md#2-what-crbcorelearn-adds)).
+None of them spends anything or changes anything.
+
+**Refusals — read it when protocol rows rise.** It groups the attempts the guards refused into
+candidate lines for the guard corpus. Every verdict is `unsure` until a person writes one: if
+a group was an honest command, mark it `honest`; if it should stay refused, mark it `refused`;
+then apply the decisions with `crb learn refusals --apply` (a decision with no named decider is
+refused before anything is written).
+
+**Strengthen — read it when a cell is held back by its oracle.** Each item names a cell whose
+held-out tests are too weak to route, and the tests to strengthen. Strengthen them in the
+repository (the product never writes a customer's tests), score the oracle again
+(§3.1), re-run the controls, then re-measure the cell.
+
+**Re-measure — read it after an upgrade changes the apparatus.** Each cell stamped with an older
+apparatus shows how many rows it still needs, the estimated cost and the `POST /runs` bodies to
+queue. Queue the ones worth paying for from **Runs**; nothing is queued for you.
+
