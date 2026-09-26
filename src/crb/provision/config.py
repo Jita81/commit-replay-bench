@@ -33,6 +33,7 @@ Touch when:   a registry or limit becomes configurable (a field here, in ``Provi
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -72,6 +73,30 @@ def _host(url: str) -> str:
     if parts.scheme not in {"https", "http"} or not parts.hostname:
         return ""
     return f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname
+
+
+def parse_host_list(raw: str) -> tuple[str, ...]:
+    """``CRB_PROVISION__EXTRA_ALLOW_HOSTS`` as written: a JSON list (``["a:443"]``) or a
+    comma-separated string. The ONE parser of that variable — the API's validator
+    (:class:`crb.server.settings.ProvisionSettings`) and the worker's :meth:`ProvisionConfig.from_env`
+    both call it, so the two processes can never read one value two ways. A broken JSON
+    list is refused, never split on its commas."""
+    text = raw.strip()
+    if text.startswith("["):
+        try:
+            items = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"CRB_PROVISION__EXTRA_ALLOW_HOSTS is not a valid JSON list: {e.msg}"
+            ) from e
+        if not isinstance(items, list):
+            raise ValueError("CRB_PROVISION__EXTRA_ALLOW_HOSTS must be a list of host names")
+        parts = [str(h) for h in items]
+    elif text.startswith("{"):
+        raise ValueError("CRB_PROVISION__EXTRA_ALLOW_HOSTS must be a list of host names")
+    else:
+        parts = text.split(",")
+    return tuple(p.strip() for p in parts if p.strip())
 
 
 def _truthy(v: str) -> bool:
@@ -128,7 +153,7 @@ class ProvisionConfig:
             return str(e.get(f"{ENV_PREFIX}{name}", default)).strip()
 
         home = home or Path(str(e.get("CRB_HOME") or ".crb")).expanduser()
-        extra = tuple(h.strip() for h in get("EXTRA_ALLOW_HOSTS").split(",") if h.strip())
+        extra = parse_host_list(get("EXTRA_ALLOW_HOSTS"))
         return cls(
             enabled=_truthy(get("ENABLED", "false")),
             store=Path(get("STORE") or str(home / "deps")),
@@ -250,4 +275,5 @@ __all__ = [
     "ENV_PREFIX",
     "PUBLIC_HOSTS",
     "ProvisionConfig",
+    "parse_host_list",
 ]
