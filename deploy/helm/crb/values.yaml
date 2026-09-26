@@ -89,7 +89,10 @@ secretsStore:
   storageClassName: ""
   # ReadWriteOnce works with any storage class but attaches to one node, so the chart pins
   # the api and the worker pods to one node (a required pod affinity, added to any
-  # api.affinity / worker.affinity you set). ReadWriteMany lifts the pin.
+  # api.affinity / worker.affinity you set). The render then refuses an api.nodeSelector or
+  # api.tolerations that differs from the worker's: a worker on a tainted pool the api cannot
+  # follow would leave one pod pending (P-046). ReadWriteMany lifts the pin. Back the claim up,
+  # or supply the credentials again after a restore (docs/DEPLOYMENT.md §5).
   accessMode: ReadWriteOnce
 
 # ---------------------------------------------------------------------------------------

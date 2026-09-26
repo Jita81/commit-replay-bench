@@ -30,7 +30,7 @@ Key values (see `values.yaml` for all, every default is the secure choice):
 | `postgresql.mode` | `external` (managed server; URL in the Secret) or `embedded` (evaluation only) |
 | `worker.sandbox.mode` | `none` (fail-closed; runs `failed`, `sandbox unavailable`), `dind` (privileged sidecar, pod-scoped), `hostSocket` (node's docker.sock — dedicated node pool only) |
 | `worker.workDir` | PVC (default, resumable) or emptyDir |
-| `secretsStore` | the one claim the API and the worker both mount at `CRB_SECRETS_DIR` (the stored Claude Code login and tracker token): the chart makes a ReadWriteOnce claim and pins both pods to one node, or name your own ReadWriteMany claim (`existingClaim`, `accessMode: ReadWriteMany`) to lift the pin |
+| `secretsStore` | the one claim the API and the worker both mount at `CRB_SECRETS_DIR` (the stored Claude Code login and tracker token): the chart makes a ReadWriteOnce claim and pins both pods to one node, or name your own ReadWriteMany claim (`existingClaim`, `accessMode: ReadWriteMany`) to lift the pin. With the pin, `api.nodeSelector` / `api.tolerations` must equal the worker's (the render refuses a difference); back the claim up or supply the credentials again after a restore (docs/DEPLOYMENT.md §5) |
 | `networkPolicy.*` | `apiIngress` peers, `postgres.cidrs`, `modelEndpoint.cidrs` (worker), `oidc.cidrs` (api), `extraEgress` |
 | `ingress.*` | host, class, TLS secret |
 | `podSecurityContext` / `containerSecurityContext` | non-root 10001, read-only root, no capabilities, RuntimeDefault seccomp |

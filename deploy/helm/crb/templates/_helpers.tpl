@@ -135,6 +135,40 @@ and the store refuses a group-accessible directory; the first write creates it 0
     claimName: {{ include "crb.secretsStore.claim" . }}
 {{- end -}}
 
+{{/*
+The pin puts the api on the worker's node (and the worker on the api's). A worker on a
+dedicated, tainted pool (docs/DEPLOYMENT.md §4.4) that the api does not tolerate would leave
+whichever pod is scheduled second pending for ever, so a ReadWriteOnce store refuses any
+difference in nodeSelector or tolerations (docs/PREVENTION.md P-046).
+*/}}
+{{- define "crb.secretsStore.samePlacement" -}}
+{{- $api := dict "nodeSelector" (.api.nodeSelector | default dict) "tolerations" (.api.tolerations | default list) -}}
+{{- $worker := dict "nodeSelector" (.worker.nodeSelector | default dict) "tolerations" (.worker.tolerations | default list) -}}
+{{- if and .worker.enabled (ne (toJson $api) (toJson $worker)) }}
+{{- fail "secretsStore.accessMode=ReadWriteOnce puts the api and the worker on one node, so api.nodeSelector and api.tolerations must be the same as worker.nodeSelector and worker.tolerations (a worker on a dedicated, tainted pool needs the api there too). Either give the api the worker's placement, or name a ReadWriteMany claim (secretsStore.existingClaim, secretsStore.accessMode=ReadWriteMany), which needs no pin — docs/DEPLOYMENT.md §3.1" }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The operator's own pod labels or annotations (api.podLabels, worker.podAnnotations …), after
+the chart's. A key the chart already sets is refused: YAML would carry it twice, and the
+store's pin could stop selecting the pod or the Deployment's selector stop matching its own
+pods (docs/PREVENTION.md P-047). Call with
+(dict "owned" <the chart's lines, as YAML> "extra" <the values map> "what" "api.podLabels").
+*/}}
+{{- define "crb.podExtra" -}}
+{{- $owned := .owned | fromYaml -}}
+{{- $what := .what -}}
+{{- range $k, $_ := (.extra | default dict) }}
+{{- if hasKey $owned $k }}
+{{- fail (printf "%s sets %q, which the chart sets itself: the pod would carry the key twice. Use a key of your own" $what $k) }}
+{{- end }}
+{{- end }}
+{{- with .extra }}
+{{- toYaml . }}
+{{- end }}
+{{- end -}}
+
 {{/* The pod label the node pin selects: every pod that mounts the store carries it. */}}
 {{- define "crb.secretsStore.podLabel" -}}
 crb.dev/secrets-store: shared
@@ -150,6 +184,7 @@ pod carrying the store label on the node of the first one scheduled. Call with
 {{- $root := .root -}}
 {{- $aff := deepCopy (.affinity | default dict) -}}
 {{- if eq $root.Values.secretsStore.accessMode "ReadWriteOnce" -}}
+{{- include "crb.secretsStore.samePlacement" $root.Values -}}
 {{- $match := merge (include "crb.selectorLabels" $root | fromYaml) (include "crb.secretsStore.podLabel" $root | fromYaml) -}}
 {{- $term := dict "labelSelector" (dict "matchLabels" $match) "topologyKey" "kubernetes.io/hostname" -}}
 {{- $pa := deepCopy (get $aff "podAffinity" | default dict) -}}

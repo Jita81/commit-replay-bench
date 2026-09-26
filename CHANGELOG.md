@@ -32,6 +32,12 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
   Review corrections commit their evidence events one by one. A prevention append that keeps
   colliding is a 409, and a registration whose record failed is recorded on retry, never
   registered twice. The three learning reports are in `docs/API.md` and `docs/OPERATOR.md`.
+- **The Helm chart refuses two placements that could not run.** With the default
+  ReadWriteOnce `secretsStore`, `api.nodeSelector` and `api.tolerations` must equal the
+  worker's, so the API can follow a worker on a dedicated, tainted pool (P-046); a pod label
+  or annotation the chart sets can no longer be set again in `podLabels` / `podAnnotations`
+  (P-047). DEPLOYMENT §5 now backs up the secrets store or has the credentials supplied
+  again after a restore (P-048).
 
 ### 2026-09-26 — conformance with the external assessment (§0 rules, §F conditions)
 

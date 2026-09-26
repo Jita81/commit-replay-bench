@@ -19,19 +19,19 @@ spec:
       {{- include "crb.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: api
   template:
+    {{- $labels := printf "%s\napp.kubernetes.io/component: api\n%s" (include "crb.selectorLabels" .) (include "crb.secretsStore.podLabel" .) }}
+    {{- /* Roll the pods when configuration changes. */}}
+    {{- $annotations := printf "checksum/config: %s" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum) }}
     metadata:
       labels:
-        {{- include "crb.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: api
-        {{- include "crb.secretsStore.podLabel" . | nindent 8 }}
-        {{- with .Values.api.podLabels }}
-        {{- toYaml . | nindent 8 }}
+        {{- $labels | nindent 8 }}
+        {{- with include "crb.podExtra" (dict "owned" $labels "extra" .Values.api.podLabels "what" "api.podLabels") }}
+        {{- . | nindent 8 }}
         {{- end }}
       annotations:
-        # Roll the pods when configuration changes.
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- with .Values.api.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
+        {{- $annotations | nindent 8 }}
+        {{- with include "crb.podExtra" (dict "owned" $annotations "extra" .Values.api.podAnnotations "what" "api.podAnnotations") }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "crb.serviceAccountName" . }}
