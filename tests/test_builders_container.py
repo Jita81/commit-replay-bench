@@ -604,6 +604,31 @@ def test_pins_the_uid_only_in_a_helper_it_never_calls(monkeypatch):
         monkeypatch.setattr(os, "getuid", lambda: 10001)
 
     BuilderContainerSettings(image="i")  # an uncalled helper's pin pins nothing
+
+
+def test_pins_the_uid_in_a_context_it_then_leaves(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")  # the context undid its pin: pins nothing
+
+
+def test_pins_the_uid_in_a_branch_that_never_runs(monkeypatch):
+    if False:
+        monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")  # a pin that never ran pins nothing
+
+
+def test_undoes_the_pin_before_it_builds(monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    monkeypatch.undo()
+    BuilderContainerSettings(image="i")  # an undone pin pins nothing
+
+
+def test_pins_the_uid_again_after_an_undo(monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    monkeypatch.undo()
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
 """
 
 
@@ -629,7 +654,7 @@ def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
         for i, line in enumerate(_RATCHET_SAMPLE.splitlines(), start=1)
         if "pins nothing" in line
     }
-    assert len(unpinned) == 7
+    assert len(unpinned) == 10
     assert _settings_on_the_hosts_uid(sample) == unpinned
 
 
