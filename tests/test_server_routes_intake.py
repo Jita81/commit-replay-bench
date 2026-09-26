@@ -17,7 +17,11 @@ What it does: Pins that a viewer can read the column but only an operator can sw
               is the operator's account id, and — as prevention — that no route builds a
               tracker except through the listener check, that check re-applies the switch's
               readiness rule, and no approval identity (``approved_by`` / ``approver`` / an
-              ``operator:`` f-string) is built from a display name.
+              ``operator:`` f-string) is built from a display name. Since its re-review:
+              that a switch-off is refused while a pass holds the lease, that a pass which
+              read the switch before the lease reads and writes nothing, that Register reads
+              the live ticket and refuses one edited since the last poll, and — as prevention
+              — that every served pass hands over a fresh ``intake_lease``.
 How:          The shared ``make_env`` stack with ``CRB_ENABLE_FAKE_TRACKER`` set and the
               file-backed :class:`crb.intake.fake.FileTracker` as the deployment's tracker.
               **No real Azure DevOps or Jira is contacted by this suite or by CI.**
@@ -848,3 +852,218 @@ def test_every_board_route_rechecks_what_the_switch_checked() -> None:
         "put_intake": 1,
         "_consented_tracker": 1,
     }
+
+
+# --- PR #55 review: a switch-off never lands while a pass is reading or writing ---------
+
+
+class _RecordingTracker:
+    """A tracker that writes nothing and records every call a pass makes on it — so a
+    test can say "not one read, not one write reached the board"."""
+
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, method: str) -> Any:
+        def call(*args: Any, **kwargs: Any) -> Any:
+            """Records the call, then refuses it: nothing may reach the board."""
+            self.calls.append(method)
+            raise AssertionError(f"the board was reached: {method}")
+
+        return call
+
+
+def test_switching_the_listener_off_while_a_pass_holds_the_lease_is_refused(env: Env) -> None:
+    """The switch-off promises that nothing on the board is read or written afterwards.
+    It committed while a pass held the repository's lease, and that pass kept reading
+    and writing on the board. The switch-off now takes the same lease: while a pass holds
+    it the switch is refused (409 ``intake_busy``) and the listener stays on, so the
+    promise is never made while it cannot be kept."""
+    from crb.server.intake import intake_lease
+
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    held = intake_lease(env.factory, ALPHA, ttl_s=300)
+    assert held.acquire()
+    try:
+        r = _switch(env, False)
+        assert r.status_code == 409, r.text
+        assert envelope(r)["code"] == "intake_busy"
+        assert _get(env)["listener"]["enabled"] is True
+        switched = [e["payload"]["enabled"] for e in _events(env, "intake.listener.switched")]
+        assert switched == [True]
+    finally:
+        held.release()
+    assert _switch(env, False).status_code == 200
+    assert _get(env)["listener"]["enabled"] is False
+
+
+def test_a_pass_that_read_consent_before_a_switch_off_reads_and_writes_nothing(
+    env: Env, tmp_path: Path
+) -> None:
+    """Consent read before the lease is stale once the pass holds it: the poll route, the
+    Register act and the worker all read the listener, then take the lease. A switch-off
+    that landed in between left the pass free to read and write the board. Under the lease
+    the pass now asks the committed switch again: the poll reads nothing and writes
+    nothing, and the Register act is refused with ``intake_listener_off``."""
+    from crb.server.factory_state import FactoryHome
+    from crb.server.intake import (
+        ApprovalRefused,
+        IntakeStore,
+        ListenerState,
+        intake_lease,
+        item_url_for,
+        poll_repository,
+        register_approved,
+    )
+
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200
+    stale = ListenerState(enabled=True)  # what the pass read before the switch-off
+    assert _switch(env, False).status_code == 200
+    home = FactoryHome(env.settings.home, ALPHA)
+    board = fake_tracker_path(tmp_path)
+    before = (board.read_text(encoding="utf-8"), len(home.events()))
+    rows_before = IntakeStore(env.settings.home, ALPHA).rows()
+    tracker: Any = _RecordingTracker()
+    report = poll_repository(
+        ALPHA,
+        tracker=tracker,
+        listener=stale,
+        column="Ready for manufacture",
+        home=home,
+        route_for=lambda item: None,
+        item_url=item_url_for(env.settings.public_url, ALPHA),
+        lease=intake_lease(env.factory, ALPHA),
+    )
+    assert report.withdrawn and not report.busy
+    assert tracker.calls == []
+    with pytest.raises(ApprovalRefused) as refused:
+        register_approved(
+            ALPHA,
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=item_url_for(env.settings.public_url, ALPHA),
+            approver="operator:1",
+            lease=intake_lease(env.factory, ALPHA),
+        )
+    assert refused.value.code == "intake_listener_off"
+    assert tracker.calls == []
+    assert (board.read_text(encoding="utf-8"), len(home.events())) == before
+    assert IntakeStore(env.settings.home, ALPHA).rows() == rows_before
+    assert home.load_backlog() is None
+
+
+# --- PR #55 review: the Register act checks the live ticket, not only the last read ----
+
+
+def test_a_ticket_edited_after_the_last_poll_is_refused_at_register(
+    env: Env, tmp_path: Path
+) -> None:
+    """The Register act compared the operator's revision only with the reads on the
+    chain. A ticket edited after the last poll was invisible to it: the act froze the old
+    draft and labelled the edited ticket ``crb:queued``, as if its new words were on the
+    backlog. The act now reads the ticket under the lease and refuses (409
+    ``revision_moved``) when its content no longer matches the waiting draft — nothing
+    is registered and nothing is written on the board."""
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200
+    board = fake_tracker_path(tmp_path)
+    edited = json.loads(board.read_text(encoding="utf-8"))
+    edited["tickets"]["4711"]["title"] = "Fix the crash when the cart is empty or full"
+    edited["tickets"]["4711"]["revision"] = "2"
+    board.write_text(json.dumps(edited), encoding="utf-8")
+    before = board.read_text(encoding="utf-8")
+    r = _register(env, revision="1")
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "revision_moved"
+    assert "changed" in envelope(r)["message"]
+    assert board.read_text(encoding="utf-8") == before
+    assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
+    assert _events(env, "intake.approved") == []
+    # the next poll reads the new words, and THAT draft registers
+    assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200
+    assert _register(env, revision="2").status_code == 200
+
+
+def test_a_ticket_that_cannot_be_read_at_register_is_a_502_and_nothing_is_written(
+    env: Env, tmp_path: Path
+) -> None:
+    """The live read is part of the act: when the tracker cannot answer it, the act does
+    not fall back to the stored read. It is 502 ``tracker_error`` with the published
+    advice, and nothing is registered or written."""
+    login(env.client, "operator")
+    assert _switch(env, True).status_code == 200
+    assert env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll").status_code == 200
+    board = fake_tracker_path(tmp_path)
+    gone = json.loads(board.read_text(encoding="utf-8"))
+    del gone["tickets"]["4711"]
+    board.write_text(json.dumps(gone), encoding="utf-8")
+    r = _register(env, revision="1")
+    assert r.status_code == 502, r.text
+    assert envelope(r)["code"] == "tracker_error"
+    assert board.read_text(encoding="utf-8") == json.dumps(gone)
+    assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
+    assert _events(env, "intake.approved") == []
+
+
+def _passes_without_the_lease(source: str) -> list[str]:
+    """``function:line`` for every call of ``poll_repository`` / ``register_approved`` that
+    does not pass ``lease=intake_lease(...)`` — a pass without it never asks the switch
+    again under the lease."""
+    import ast
+
+    out: list[str] = []
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for n in ast.walk(fn):
+            if not isinstance(n, ast.Call):
+                continue
+            f = n.func
+            name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
+            if name not in {"poll_repository", "register_approved"}:
+                continue
+            lease = next((k.value for k in n.keywords if k.arg == "lease"), None)
+            ok = (
+                isinstance(lease, ast.Call)
+                and isinstance(lease.func, ast.Name)
+                and lease.func.id == "intake_lease"
+            )
+            if not ok:
+                out.append(f"{fn.name}:{n.lineno}")
+    return out
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f():\n    poll_repository('r', tracker=t)\n",
+        "def f():\n    register_approved('r', 'k', lease=None)\n",
+        "def f(held):\n    poll_repository('r', lease=held)\n",
+    ],
+)
+def test_the_lease_ratchet_catches_each_way_back(source: str) -> None:
+    assert _passes_without_the_lease(source) != []
+
+
+def test_every_served_pass_asks_the_switch_again_under_the_lease() -> None:
+    """The prevention for the class (PR #55 review): consent read before the lease can be
+    stale once the pass holds it. ``IntakeLease`` asks the committed switch again, so
+    every served call of a pass — the poll route, the Register act, the worker's timed
+    poll — must hand over a fresh ``intake_lease(...)``, and the switch-off must take one
+    before it commits."""
+    src = Path(__file__).resolve().parents[1] / "src" / "crb" / "server"
+    offenders = [
+        f"{p.name}::{hit}"
+        for p in (src / "worker.py", src / "routes" / "factory.py")
+        for hit in _passes_without_the_lease(p.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+    assert _calls_in(src / "routes" / "factory.py", "intake_lease")["put_intake"] == 1

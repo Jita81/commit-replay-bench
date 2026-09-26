@@ -31,6 +31,17 @@ and close now resolve the one repository key the loop holds. A model priced as a
 placeholder lost its dated aliases, so the same-model refusal failed open for it; every key
 in the pricing table now names a model, priced or not.
 
+Its re-review found four more, each pinned the same way. A switch-off committed while a pass
+still held the repository's lease, and a pass that read the switch before the lease kept
+reading and writing; the switch-off now takes the lease (409 `intake_busy` while a pass holds
+it), every pass asks the committed switch again under the lease, and the worker tells the
+tickets their outcomes before it lets the lease go. The Register act trusted the last poll's
+read; it now reads the ticket under the lease and refuses one edited since. The Intake screen
+said "the ticket has been told" when the tracker had refused the queued note; it now says the
+ticket could not be updated. A re-linked repository row let the factory push to, comment on
+or close the SAME-numbered pull request in the new repository, and the outcome sync read its
+fate; each delivery now records the repository beside the number and every reuse checks it.
+
 ### 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
 Four independent reviews read the intake path end to end against a fake board, the real

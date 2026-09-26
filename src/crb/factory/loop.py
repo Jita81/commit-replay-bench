@@ -689,6 +689,9 @@ class FactoryLoop:
             pack_hash=str(p.get("pack_hash", "")),
             body_sha256=str(p.get("body_sha256", "")),
             created=str(p.get("created", "")),
+            # the repository the pull request is in: the re-delivery and the close refuse
+            # any other (PR #55 review — a re-linked row once closed a stranger's PR)
+            repository=str(p.get("repository", "")),
         )
 
     def _withdraw(

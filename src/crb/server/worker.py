@@ -245,6 +245,7 @@ from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
     ApprovalPolicy,
     ListenerState,
+    PollReport,
     apply_outcome_map,
     build_tracker,
     intake_lease,
@@ -830,7 +831,31 @@ class Worker:
         # (an operator registers a ready ticket unless its author is allowlisted) and the
         # repository's lease (one pass at a time — a busy pass does nothing)
         budget_s = float(self.settings.intake.poll_budget_s)
-        report = poll_repository(
+
+        def tell_the_tickets(report: PollReport) -> None:
+            """What the loop did with the items this column produced, told to the tickets
+            that produced them: the pull request link when one opened, the refusal and its
+            way forward when the loop stopped, the merge's state move. Read from the
+            chain, posted once per marker — and run by ``poll_repository`` while the
+            repository's lease is still held, so a switch-off cannot land between the
+            column pass and these writes (PR #55 review)."""
+            del report
+            post_outcomes_to_tickets(
+                tracker,
+                home=home,
+                item_url=item_url,
+                evidence=home.evidence(actor="worker"),
+            )
+            apply_outcome_map(
+                tracker,
+                home=home,
+                outcome_map=dict(self.settings.intake.outcome_map),
+                evidence=home.evidence(actor="worker"),
+            )
+
+        # a busy pass (another holds the lease, and it posts the outcomes too) or a
+        # withdrawn one (the listener was switched off since it was listed) does nothing
+        poll_repository(
             repo,
             tracker=tracker,
             listener=state,
@@ -844,23 +869,7 @@ class Worker:
             budget_s=budget_s,
             approval=ApprovalPolicy.from_settings(self.settings.intake),
             lease=intake_lease(self.factory, repo, ttl_s=2 * budget_s + 60),
-        )
-        if report.busy:
-            return  # another pass holds this repository: it posts the outcomes too
-        # what the loop did with the items this column produced, told to the tickets that
-        # produced them: the pull request link when one opened, the refusal and its way
-        # forward when the loop stopped. Read from the chain, posted once per marker.
-        post_outcomes_to_tickets(
-            tracker,
-            home=home,
-            item_url=item_url,
-            evidence=home.evidence(actor="worker"),
-        )
-        apply_outcome_map(
-            tracker,
-            home=home,
-            outcome_map=dict(self.settings.intake.outcome_map),
-            evidence=home.evidence(actor="worker"),
+            then=tell_the_tickets,
         )
 
     def _factory_run_active(self, repo: str) -> bool:
@@ -2254,7 +2263,10 @@ class Worker:
             ctx.emitter.error("factory", "outcomes.synced", exc, checked=0)
             return
         report = sync_outcomes(
-            home, lambda n: app.pull_request(installation, full_name, n), actor=ctx.run.actor
+            home,
+            lambda n: app.pull_request(installation, full_name, n),
+            actor=ctx.run.actor,
+            repository=full_name,
         )
         ctx.emit(
             "factory",

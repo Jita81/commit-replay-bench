@@ -309,8 +309,18 @@ export function IntakePage() {
     register.mutate(
       { repo, key: row.key, revision: row.revision },
       {
-        onSuccess: () =>
-          say(`Registered ticket ${row.key} as ${row.item_id}. It is on the frozen backlog and queued for the factory, and the ticket has been told.`),
+        onSuccess: (next) => {
+          // PR #55 review: the act stands when the tracker refuses the queued label, note or
+          // link — the returned row carries that stop — so the message never claims the
+          // ticket was told when it was not
+          const after = next.rows.find((r) => r.key === row.key)
+          const registered = `Registered ticket ${row.key} as ${after?.item_id || row.item_id}. It is on the frozen backlog and queued for the factory`
+          say(
+            after?.stopped
+              ? `${registered}, but the ticket could not be updated to say so. ${after.stopped_advice}`
+              : `${registered}, and the ticket has been told.`,
+          )
+        },
       },
     )
   }

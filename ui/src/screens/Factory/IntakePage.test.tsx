@@ -280,9 +280,37 @@ describe('IntakePage — an operator registers a ready ticket (ADR-0022)', () =>
     expect(row.textContent).not.toContain('Registered as')
     await user.click(within(row).getByRole('button', { name: /Register this ticket/ }))
     await waitFor(() => expect(screen.getByTestId('intake-success').textContent).toContain('Registered ticket 4714 as ado-4714'))
+    expect(screen.getByTestId('intake-success').textContent).toContain('the ticket has been told')
     const post = api.calls.find((c) => c.method === 'POST')
     expect(post?.path).toBe('/factory/alpha/intake/4714/register')
     expect(JSON.parse(String(post?.init?.body))).toEqual({ revision: '5' })
+  })
+
+  it('a registration whose ticket could not be told says so, not that the ticket was told', async () => {
+    // PR #55 review: the tracker refused the queued label, note or link. The item IS on the
+    // backlog (the act stands), but the ticket was not told, and the message must not say it was.
+    const TOLD_NOTHING: Intake = {
+      ...ON,
+      rows: [
+        {
+          ...AWAITING_ROW,
+          registered: true,
+          awaiting_approval: false,
+          label: '',
+          stopped: 'refused',
+          stopped_advice: 'The tracker refused the write.',
+        },
+      ],
+    }
+    setup({ ...ON, rows: [AWAITING_ROW] }, { 'POST /factory/alpha/intake/4714/register': TOLD_NOTHING })
+    const user = userEvent.setup()
+    const row = await screen.findByTestId('intake-row-4714')
+    await user.click(within(row).getByRole('button', { name: /Register this ticket/ }))
+    await waitFor(() => expect(screen.getByTestId('intake-success').textContent).toContain('Registered ticket 4714 as ado-4714'))
+    const said = screen.getByTestId('intake-success').textContent ?? ''
+    expect(said).not.toContain('the ticket has been told')
+    expect(said).toContain('could not be updated')
+    expect(said).toContain('The tracker refused the write.')
   })
 
   it('a viewer sees the draft waiting and who can register it, with no Register button', async () => {

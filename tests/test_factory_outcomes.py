@@ -232,7 +232,7 @@ def test_sync_records_merged_and_closed_once_skips_open_and_reports_read_failure
             raise a
         return a  # type: ignore[no-any-return]
 
-    r1 = sync_outcomes(home, read_pr, actor="operator:1")
+    r1 = sync_outcomes(home, read_pr, actor="operator:1", repository="acme/calc")
     assert r1.to_dict() == {
         "checked": 3,
         "merged": 0,
@@ -253,7 +253,7 @@ def test_sync_records_merged_and_closed_once_skips_open_and_reports_read_failure
     answers[7] = PullRequest.from_api(PR_MERGED_API)
     answers[9] = PullRequest.from_api({**PR_OPEN_API, "number": 9})
     reads.clear()
-    r2 = sync_outcomes(home, read_pr, actor="worker")
+    r2 = sync_outcomes(home, read_pr, actor="worker", repository="acme/calc")
     assert reads == [7, 8, 9] and (r2.checked, r2.merged, r2.closed, r2.open) == (3, 1, 0, 1)
     merged = home.evidence().outcome_for("I-1", 7)
     assert merged is not None and merged.kind == fe.EV_DELIVERY_MERGED
@@ -268,7 +268,7 @@ def test_sync_records_merged_and_closed_once_skips_open_and_reports_read_failure
     answers[8] = PullRequest.from_api({**PR_MERGED_API, "number": 8})
     reads.clear()
     n_before = len(home.events())
-    r3 = sync_outcomes(home, read_pr, actor="worker")
+    r3 = sync_outcomes(home, read_pr, actor="worker", repository="acme/calc")
     assert reads == [8, 9] and (r3.checked, r3.merged, r3.closed, r3.open) == (2, 1, 0, 1)
     assert len(home.events()) == n_before + 1
     reopened = home.evidence().outcome_for("I-2", 8)
@@ -276,7 +276,7 @@ def test_sync_records_merged_and_closed_once_skips_open_and_reports_read_failure
     # a fourth sync with everything ended reads only what is still open, records nothing new
     reads.clear()
     n_before = len(home.events())
-    r4 = sync_outcomes(home, read_pr, actor="worker")
+    r4 = sync_outcomes(home, read_pr, actor="worker", repository="acme/calc")
     assert reads == [9] and (r4.checked, r4.open) == (1, 1) and len(home.events()) == n_before
     assert home.evidence().verify() == n_before
     # the summary Home's task 8 reads: newest wins — two merged deliveries, none closed
@@ -425,3 +425,32 @@ def test_register_evolution_needs_a_backlog(tmp_path: Path) -> None:
     with pytest.raises(LookupError, match="no backlog registered"):
         FactoryHome(tmp_path, "nothing").register_evolution(_item("I-1"), actor="x")
     assert replace(_item("I-1"), supersedes="").supersedes == ""
+
+
+# --- PR #55 review: a pull request's fate is read only in the repository it went to ------
+
+
+def test_the_sync_never_reads_a_pull_request_in_a_repository_the_row_was_relinked_to(
+    home: FactoryHome,
+) -> None:
+    """The sync read each delivered pull request by NUMBER in the repository the row is
+    linked to now. After a re-link it read pull request 7 of the new repository and
+    recorded that stranger's merge or close as this item's outcome. The sync now names
+    the repository it reads, and a delivery to another one is an error in the report —
+    never read, never recorded."""
+    ev = home.evidence(actor="worker")
+    ev.record_delivery(_delivery("I-1", 7))
+    reads: list[int] = []
+
+    def read_pr(n: int) -> PullRequest:
+        reads.append(n)
+        return PullRequest.from_api(PR_MERGED_API)
+
+    report = sync_outcomes(home, read_pr, actor="worker", repository="other/calc")
+    assert reads == [] and (report.checked, report.merged, report.closed) == (1, 0, 0)
+    (error,) = report.errors
+    assert "acme/calc" in error and "other/calc" in error
+    assert home.evidence().outcome_for("I-1", 7) is None
+    # the repository it went to: read, and recorded
+    again = sync_outcomes(home, read_pr, actor="worker", repository="Acme/Calc")
+    assert reads == [7] and again.merged == 1 and again.errors == []

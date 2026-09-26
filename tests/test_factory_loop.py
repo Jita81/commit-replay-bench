@@ -1163,7 +1163,8 @@ def _seed_open_delivery(rig: Rig, *, pr_number: int = 5) -> dict[str, Any]:
         "branch": delivery_branch_name(multiply_item()),
         "base": "main",
         "commit_sha": "c" * 40,
-        "pr_url": f"https://github.invalid/pr/{pr_number}",
+        # the shape GitHub answers with: the pull request's page in the repository it is in
+        "pr_url": f"https://github.com/acme/calc/pull/{pr_number}",
         "pr_number": pr_number,
         "pack_hash": "p" * 64,
         "body_sha256": "",
@@ -1383,3 +1384,47 @@ def test_an_accept_on_another_builds_pack_is_refused_before_anything_is_pushed(
         rig.loop()._deliver(multiply_item(), final, DELIVER_ROUTE, verdict=verdict)
     assert rig.pushes == [] and rig.prs == [] and rig.comments == []
     assert not rig.evidence.events_for("I-1")
+
+
+# --- PR #55 review: an earlier pull request is only ever touched in its own repository ------
+
+
+def _relinked() -> StaticProvider:
+    """Credentials for the repository the row is linked to NOW — another one than the
+    earlier run delivered to (``link_repository`` lets an operator re-link a row)."""
+    return StaticProvider(
+        GitCredentials(remote="https://github.com/other/calc.git", token="ghp_" + "b" * 36)
+    )
+
+
+def test_a_close_never_reaches_a_pull_request_in_a_repository_the_row_was_relinked_to(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The chain keeps the earlier pull request's number; the credentials name the
+    repository the row is linked to now. After a re-link, the close went to the SAME
+    NUMBER in the new repository — somebody else's pull request, commented on and
+    closed. The close now checks the repository the pull request was delivered to and
+    refuses a different one: nothing is called, the warning names both repositories,
+    and the chain records no close."""
+    rig, closed = _closing_rig(pyrepo, tmp_path, reviewer=RejectingReviewer(), creds=_relinked())
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_REJECTED
+    assert closed == [] and rig.pushes == [] and rig.comments == []
+    assert not rig.evidence.events_for("I-1", fe.EV_DELIVERY_CLOSED)
+    (warn,) = [e for e in rig.sink.events if e.action == "delivery.close_failed"]
+    said = warn.error_message or ""
+    assert "acme/calc" in said and "other/calc" in said
+
+
+def test_a_re_delivery_never_pushes_to_a_repository_the_row_was_relinked_to(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The accepted half: the re-delivery pushed the branch to the new repository and
+    commented on the same-numbered pull request there. It is now refused before any
+    push or comment, and the item stops as a failed delivery naming both repositories."""
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_relinked())
+    _seed_open_delivery(rig)
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_DELIVERY_FAILED
+    assert rig.pushes == [] and rig.prs == [] and rig.comments == []
+    assert "acme/calc" in out.error and "other/calc" in out.error

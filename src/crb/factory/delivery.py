@@ -490,6 +490,74 @@ def owner_repo_from_remote(remote: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def repository_of(remote: str) -> str:
+    """``owner/name`` of a remote URL (or of an ``owner/name`` string), lower-cased because
+    GitHub's names are case-insensitive; ``""`` when it cannot be parsed."""
+    try:
+        owner, name = owner_repo_from_remote(remote)
+    except DeliveryError:
+        return ""
+    return f"{owner}/{name}".lower()
+
+
+#: GitHub's address of a pull request: ``https://<host>/<owner>/<name>/pull/<n>``.
+_PR_URL_RE = re.compile(r"^https://[^/\s]+/([^/\s]+)/([^/\s]+)/pull/\d+/?$")
+
+
+def recorded_repository(repository: str, pr_url: str) -> str:
+    """The repository a recorded pull request is in, as ``owner/name``: the ``repository``
+    its delivery recorded; for a delivery recorded before that field existed, the
+    repository in GitHub's address of the pull request; otherwise ``""``, which
+    :func:`repository_mismatch` never takes to match anything."""
+    if repository.strip():
+        return repository.strip().lower()
+    m = _PR_URL_RE.match(pr_url.strip())
+    return f"{m[1]}/{m[2]}".lower() if m else ""
+
+
+def delivered_repository(previous: DeliveryResult) -> str:
+    """:func:`recorded_repository` of an earlier delivery."""
+    return recorded_repository(previous.repository, previous.pr_url)
+
+
+def repository_mismatch(*, repository: str, pr_url: str, remote: str, where: str) -> str:
+    """Why a recorded pull request (``where`` names it) must not be touched through
+    ``remote``, or ``""`` when it is in that repository (PR #55 review).
+
+    A pull request number means nothing without its repository, and an operator may
+    re-link a row to another one (``POST /repos/{name}/github-link``): the same number
+    there is somebody else's pull request. Every path that reuses a recorded pull
+    request asks this first — the re-delivery's push and comment and the close
+    (:func:`assert_same_repository`), and the outcome sync. An unknown repository on
+    either side is a reason, never assumed to match."""
+    was, now = recorded_repository(repository, pr_url), repository_of(remote)
+    if not was or not now:
+        return (
+            f"cannot tell which repository {where} is in (delivered to {was or 'unknown'}, "
+            f"linked now to {now or 'unknown'}): it is not touched"
+        )
+    if was != now:
+        return (
+            f"{where} is in {was}, and this repository is now linked to {now}: the factory "
+            "never touches a pull request in another repository — close or merge it there "
+            "by hand"
+        )
+    return ""
+
+
+def assert_same_repository(previous: DeliveryResult, remote: str) -> None:
+    """Refuse (:class:`DeliveryError`) to touch an earlier delivery's pull request through
+    ``remote`` unless the pull request is in that repository (:func:`repository_mismatch`)."""
+    why = repository_mismatch(
+        repository=previous.repository,
+        pr_url=previous.pr_url,
+        remote=remote,
+        where=f"pull request #{previous.pr_number} of {previous.item_id!r}",
+    )
+    if why:
+        raise DeliveryError(why)
+
+
 def _github_post(
     url: str,
     payload: Mapping[str, Any],
@@ -637,6 +705,9 @@ class DeliveryResult:
     previous_commit_sha: str = ""
     updated: bool = False
     comment_error: str = ""
+    #: ``owner/name`` of the repository the pull request is in (:func:`repository_of` of the
+    #: remote it was delivered through) — the number means nothing without it (PR #55 review).
+    repository: str = ""
 
     @property
     def pr_ref(self) -> str:
@@ -657,6 +728,7 @@ class DeliveryResult:
             "previous_commit_sha": self.previous_commit_sha,
             "updated": self.updated,
             "comment_error": self.comment_error,
+            "repository": self.repository,
         }
 
 
@@ -743,6 +815,8 @@ def deliver(
             raise DeliveryError("previous delivery carries no commit to lease against")
     provider = creds if creds is not None else NullProvider()
     credentials = provider.resolve(repo_id or str(repo.path))
+    if previous is not None:
+        assert_same_repository(previous, credentials.remote)
     if not build.clean:
         raise DeliveryRefused(
             f"build for {item.id} is not clean (belts={build.grade.belts.to_dict()}) — not deliverable"
@@ -814,6 +888,7 @@ def deliver(
             previous_commit_sha=previous.commit_sha,
             updated=True,
             comment_error=comment_error,
+            repository=repository_of(credentials.remote),
         )
     body = pr_body(item, build, pack_link=pack_link, route_decision=route_decision)
     push(repo, branch=branch, refspec=f"{branch}:{branch}", credentials=credentials, expected=None)
@@ -834,6 +909,7 @@ def deliver(
         pr_number=pr_number,
         pack_hash=build.pack_hash,
         body_sha256=sha256_text(body),
+        repository=repository_of(credentials.remote),
     )
 
 
@@ -872,8 +948,10 @@ def close_pull_request(
     delivery with no pull request, and a blank ``repo_id``; credentials fail closed like a
     delivery's. ``repo_id`` is REQUIRED and is the key a delivery of the same repository
     resolves its credentials with (the loop passes the one it holds) — never the item id,
-    which a provider keyed on the repository would resolve wrongly (PR #55 review).
-    Returns the comment posted (the caller records it)."""
+    which a provider keyed on the repository would resolve wrongly (PR #55 review). A pull
+    request in another repository than those credentials name is refused before the
+    forge is called (:func:`assert_same_repository`). Returns the comment posted (the
+    caller records it)."""
     if verdict == VERDICT_ACCEPT:
         raise DeliveryError("an accepted build is delivered, never closed")
     if previous.pr_number <= 0:
@@ -884,6 +962,7 @@ def close_pull_request(
         )
     provider = creds if creds is not None else NullProvider()
     credentials = provider.resolve(repo_id)
+    assert_same_repository(previous, credentials.remote)
     body = close_comment(previous, verdict=verdict, reason=reason)
     close = close_pr_fn if close_pr_fn is not None else github_close_pr_fn
     close(
@@ -914,10 +993,12 @@ __all__ = [
     "PushFn",
     "StaticProvider",
     "assert_not_default_branch",
+    "assert_same_repository",
     "close_comment",
     "close_pull_request",
     "commit_on_branch",
     "deliver",
+    "delivered_repository",
     "delivery_branch_name",
     "escape_markdown_line",
     "fenced",
@@ -929,6 +1010,9 @@ __all__ = [
     "legacy_delivery_branch_name",
     "owner_repo_from_remote",
     "pr_body",
+    "recorded_repository",
+    "repository_mismatch",
+    "repository_of",
     "rework_comment",
     "slugify",
 ]

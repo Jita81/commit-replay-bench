@@ -14,7 +14,10 @@ What it does: Pins that the default branch is refused (before any credential is 
               commit the first delivery pushed, opens no second pull request and posts the
               rework comment (a comment that fails after the push is ``comment_error`` on an
               ``updated`` result, never a refusal), with the lease semantics proven against a
-              REAL bare repository.
+              REAL bare repository. PR #55 review: a delivery records the repository its
+              pull request is in, a re-delivery or close through another repository is
+              refused before the forge is called, and a ratchet holds every reuse of a
+              recorded ``.pr_number`` in ``src/crb`` to that check.
 How:          ``Seams`` record the push, the PR and the comment calls instead of reaching a
               forge; the build comes from ``test_factory_build``'s harness; ``_ToBare`` runs
               ``git_push_fn``'s exact argv with the https remote swapped for a local bare repo.
@@ -31,6 +34,7 @@ Touch when:   a forge other than GitHub is supported (a PR + comment seam case; 
 
 from __future__ import annotations
 
+import ast
 import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -1097,3 +1101,176 @@ def test_a_pull_request_opened_under_the_old_branch_name_can_still_be_updated(
         build.close()
     assert res.updated and res.branch == legacy and res.pr_number == 3
     assert seams.pushes[-1]["branch"] == legacy and seams.prs == []
+
+
+# --- PR #55 review: a recorded pull request is only reused in its own repository ---------
+
+
+def _earlier(**over: Any) -> dv.DeliveryResult:
+    """An earlier run's delivery of ``I-1`` to ``acme/calc``, pull request 5."""
+    fields: dict[str, Any] = {
+        "item_id": "I-1",
+        "branch": "crb/i-1-add-multiply-to-calc",
+        "base": "main",
+        "commit_sha": "c" * 40,
+        "pr_url": "https://github.com/acme/calc/pull/5",
+        "pr_number": 5,
+        "pack_hash": "p" * 64,
+        "body_sha256": "",
+    }
+    fields.update(over)
+    return dv.DeliveryResult(**fields)
+
+
+RELINKED = "https://github.com/other/calc.git"
+
+
+def test_a_delivery_records_the_repository_it_went_to(harness: Harness) -> None:
+    """The pull request's number means nothing without its repository, so a delivery
+    records both: ``repository`` (``owner/name``, as the remote it pushed to names it)
+    travels on the chain beside ``pr_number``."""
+    seams = Seams()
+    build = _clean_build(harness)
+    try:
+        res = dv.deliver(
+            harness.repo.repo,
+            multiply_item(),
+            build,
+            creds=dv.StaticProvider(_creds()),
+            push_fn=seams.push,
+            open_pr_fn=seams.open_pr,
+            target_default_branch="main",
+            verdict="accept",
+        )
+    finally:
+        build.close()
+    assert res.repository == "acme/calc" and res.to_dict()["repository"] == "acme/calc"
+
+
+def test_the_repository_of_an_earlier_delivery_is_read_from_its_record() -> None:
+    """``repository`` when the delivery recorded it; for a delivery recorded before it
+    existed, the repository in GitHub's pull request address; otherwise nothing — and
+    nothing is never taken to match."""
+    assert dv.delivered_repository(_earlier(repository="Acme/Calc")) == "acme/calc"
+    assert dv.delivered_repository(_earlier()) == "acme/calc"
+    assert dv.delivered_repository(_earlier(pr_url="https://github.invalid/pr/5")) == ""
+    assert dv.delivered_repository(_earlier(pr_url="")) == ""
+    dv.assert_same_repository(_earlier(), REMOTE)
+    dv.assert_same_repository(_earlier(), "git@github.com:ACME/calc.git")
+    for record in (_earlier(pr_url=""), _earlier(pr_url="https://github.invalid/pr/5")):
+        with pytest.raises(dv.DeliveryError, match="cannot tell"):
+            dv.assert_same_repository(record, REMOTE)
+    with pytest.raises(dv.DeliveryError, match=r"acme/calc.*other/calc"):
+        dv.assert_same_repository(_earlier(), RELINKED)
+
+
+def test_a_re_delivery_to_another_repository_is_refused_before_any_push(
+    harness: Harness,
+) -> None:
+    """After an operator re-links the row, the credentials name the new repository and
+    the record still holds pull request 5 of the old one. The re-delivery pushed the
+    branch to the new repository and commented on ITS pull request 5. It is refused
+    before the push, and nothing reaches either repository."""
+    seams = Seams()
+    build = _clean_build(harness)
+    try:
+        with pytest.raises(dv.DeliveryError, match=r"acme/calc.*other/calc"):
+            dv.deliver(
+                harness.repo.repo,
+                multiply_item(),
+                build,
+                creds=dv.StaticProvider(dv.GitCredentials(remote=RELINKED, token=TOKEN)),
+                push_fn=seams.push,
+                open_pr_fn=seams.open_pr,
+                comment_pr_fn=seams.comment_pr,
+                target_default_branch="main",
+                previous=_earlier(),
+                verdict="accept",
+            )
+    finally:
+        build.close()
+    assert seams.pushes == [] and seams.prs == [] and seams.comments == []
+
+
+def test_a_close_in_another_repository_is_refused_before_the_forge_is_called() -> None:
+    """The close's half: pull request 5 of the new repository is somebody else's. The
+    close is refused before the seam is called."""
+    calls: list[dict[str, Any]] = []
+    with pytest.raises(dv.DeliveryError, match=r"acme/calc.*other/calc"):
+        dv.close_pull_request(
+            _earlier(),
+            verdict="reject",
+            reason="x",
+            creds=dv.StaticProvider(dv.GitCredentials(remote=RELINKED, token=TOKEN)),
+            close_pr_fn=lambda **kw: calls.append(kw),
+            repo_id="/repos/calc",
+        )
+    assert calls == []
+
+
+#: Calls that only RECORD a pull request number (never reach a forge): the chain's outcome
+#: row and the two value types that carry the number.
+_RECORDS_ONLY = frozenset({"DeliveryResult", "DeliveredPr", "record_delivery_outcome"})
+#: The checks that tie a recorded pull request number to the repository it is in.
+_REPOSITORY_CHECKS = frozenset({"assert_same_repository", "repository_mismatch"})
+
+
+def _call_name(node: ast.Call) -> str:
+    f = node.func
+    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+
+
+def _unchecked_pr_number_uses(source: str) -> list[str]:
+    """``function:line`` for every call that hands a RECORDED pull request number
+    (``<something>.pr_number``) to anything but a record, in a function that has not asked
+    a repository check on an earlier line."""
+    out: list[str] = []
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        checks = [
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and _call_name(n) in _REPOSITORY_CHECKS
+        ]
+        for n in ast.walk(fn):
+            if not isinstance(n, ast.Call) or _call_name(n) in _RECORDS_ONLY:
+                continue
+            args = [*n.args, *(k.value for k in n.keywords)]
+            if not any(isinstance(a, ast.Attribute) and a.attr == "pr_number" for a in args):
+                continue
+            if not any(line < n.lineno for line in checks):
+                out.append(f"{fn.name}:{n.lineno}")
+    return out
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # a new path that closes a recorded pull request with no check at all
+        "def f(previous, close):\n    close(pr_number=previous.pr_number)\n",
+        # a read of a recorded number, positionally
+        "def f(d, read_pr):\n    read_pr(d.pr_number)\n",
+        # a check asked AFTER the forge call is no check
+        "def f(p, comment, remote):\n"
+        "    comment(pr_number=p.pr_number)\n"
+        "    assert_same_repository(p, remote)\n",
+    ],
+)
+def test_the_repository_ratchet_catches_each_way_back(source: str) -> None:
+    assert _unchecked_pr_number_uses(source) != []
+
+
+def test_every_reuse_of_a_recorded_pull_request_checks_its_repository_first() -> None:
+    """The prevention for the class (PR #55 review): a recorded pull request NUMBER was
+    handed to the forge through whatever repository the row is linked to now — the
+    re-delivery's comment, the close, the outcome sync's read. Every call in ``src/crb``
+    that passes a recorded ``.pr_number`` to anything but a record now follows a
+    repository check in the same function, so a new path that reuses one cannot skip it."""
+    src = Path(__file__).resolve().parents[1] / "src" / "crb"
+    offenders = {
+        f"{p.relative_to(src)}::{hit}"
+        for p in sorted(src.rglob("*.py"))
+        for hit in _unchecked_pr_number_uses(p.read_text(encoding="utf-8"))
+    }
+    assert offenders == set()

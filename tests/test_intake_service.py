@@ -1063,10 +1063,17 @@ def test_two_overlapping_passes_register_once_because_the_pass_takes_a_lease(
     A pass now takes a per-repository lease row (the ``workers`` table); a second pass that
     finds it held does nothing at all: no tracker call, no chain event, no served view."""
     from crb.store import init_db, make_engine, make_session_factory
+    from crb.store.models import Repo
 
     engine = make_engine(f"sqlite:///{tmp_path / 'lease.db'}")
     init_db(engine)
     factory = make_session_factory(engine)
+    # the repository's switched-on listener: a pass under the lease asks the committed
+    # switch again (PR #55 review), so the store holds the row the served stack would
+    with factory() as s:
+        on = {sv.CONFIG_KEY: sv.ListenerState(enabled=True).to_dict()}
+        s.add(Repo(name="alpha", language="python", runner="pytest", config_json=on))
+        s.commit()
     tracker = _tracker(_ticket())
     inner: list[sv.PollReport] = []
     real_read = tracker.read

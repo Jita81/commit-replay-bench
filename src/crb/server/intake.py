@@ -90,7 +90,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -126,12 +126,12 @@ from crb.intake.client import (
     TrackerError,
     marker_for,
 )
-from crb.intake.draft import Draft, draft_from
+from crb.intake.draft import Draft, content_revision, draft_from
 from crb.intake.fake import FileTracker, fake_tracker_enabled, fake_tracker_path
 from crb.intake.feedback import render_delivered, render_feedback, render_queued, render_refusal
 from crb.intake.jira import JiraConfig, JiraTracker
 from crb.server.factory_state import FactoryHome
-from crb.store.models import LEASE_ROW_PREFIX, WorkerRow
+from crb.store.models import LEASE_ROW_PREFIX, Repo, WorkerRow
 
 log = logging.getLogger("crb.server.intake")
 
@@ -396,6 +396,10 @@ class PollReport:
     at: str = ""
     #: Another pass held the repository's lease: this one read and wrote nothing.
     busy: bool = False
+    #: The listener was switched off before this pass held the lease: it read and wrote
+    #: nothing (PR #55 review). Never served — the route answers 422
+    #: ``intake_listener_off`` and the worker moves on — so it is not in :meth:`to_dict`.
+    withdrawn: bool = False
 
     @property
     def ok(self) -> bool:
@@ -718,18 +722,50 @@ class DbLease:
         self.held = False
 
 
+class IntakeLease(DbLease):
+    """A repository's intake lease, which also answers whether its listener is STILL on.
+
+    Every caller reads the listener before it takes the lease — the poll route and the
+    Register act through the route's consent check, the worker when it lists the
+    switched-on repositories — so by the time the pass holds the lease that reading may
+    be stale: an operator can switch the listener off in between (PR #55 review). The
+    switch-off takes this same lease before it commits (``put_intake``), so a pass that
+    asks :meth:`consented` while holding the lease reads the switch as it stands, and no
+    switch-off can land while the pass is reading or writing the board.
+    """
+
+    def __init__(
+        self,
+        factory: sessionmaker[Session],
+        repo: str,
+        *,
+        ttl_s: float,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        super().__init__(factory, f"intake:{repo}", ttl_s=ttl_s, clock=clock)
+        self.repo = repo
+
+    def consented(self) -> bool:
+        """``True`` while the repository's listener is on in the COMMITTED configuration
+        (a fresh session, never a caller's cached row); ``False`` for an unknown row."""
+        with self.factory() as s:
+            row = s.execute(select(Repo).where(Repo.name == self.repo)).scalar_one_or_none()
+            return row is not None and ListenerState.from_config(row.config_json).enabled
+
+
 def intake_lease(
     factory: sessionmaker[Session],
     repo: str,
     *,
     ttl_s: float = 2 * DEFAULT_POLL_BUDGET_S + 60,
     clock: Callable[[], float] = time.time,
-) -> DbLease:
+) -> IntakeLease:
     """The lease every intake pass over ``repo`` takes — the worker's timed poll, the
-    on-demand poll route and the Register act alike. ``ttl_s`` must outlive the longest
-    pass (its budget plus the calls in flight), so the default is twice the default
-    budget plus a minute; a caller with a longer budget passes a longer one."""
-    return DbLease(factory, f"intake:{repo}", ttl_s=ttl_s, clock=clock)
+    on-demand poll route and the Register act alike — and the listener's switch-off. ``ttl_s``
+    must outlive the longest pass (its budget plus the calls in flight), so the default is
+    twice the default budget plus a minute; a caller with a longer budget passes a longer
+    one."""
+    return IntakeLease(factory, repo, ttl_s=ttl_s, clock=clock)
 
 
 # ---------------------------------------------------------------------------
@@ -764,15 +800,19 @@ def poll_repository(
     budget_s: float = DEFAULT_POLL_BUDGET_S,
     clock: Callable[[], float] = time.monotonic,
     approval: ApprovalPolicy | None = None,
-    lease: DbLease | None = None,
+    lease: IntakeLease | None = None,
+    then: Callable[[PollReport], None] | None = None,
 ) -> PollReport:
     """Read the watched column once and do whatever each ticket has earned.
 
     ``approval`` is who may register a ready ticket (ADR-0022); ``None`` is the safe
     default — every ready ticket waits for an operator's Register act. ``lease`` is the
     repository's :func:`intake_lease`: when another pass holds it this pass reads nothing,
-    writes nothing (not even the served view) and returns ``busy``. Every served caller
-    passes one.
+    writes nothing (not even the served view) and returns ``busy``; when the listener was
+    switched off before this pass held it (``listener`` is the caller's earlier reading)
+    it does the same and returns ``withdrawn``. Every served caller passes one. ``then``
+    runs after the column pass while the lease is still held — the worker's outcome
+    writes on the tickets, which must not land after a switch-off either.
 
     Never raises: a tracker failure is a :class:`PollReport` with ``stopped`` set and an
     ``intake.stopped`` event on the chain, and the next poll retries. Nothing is
@@ -802,6 +842,14 @@ def poll_repository(
             detail="another pass is reading this repository's column; this one did nothing",
         )
     try:
+        if lease is not None and not lease.consented():
+            return PollReport(
+                repo=repo,
+                column=column,
+                at=now(),
+                withdrawn=True,
+                detail="the listener was switched off before this pass began; it did nothing",
+            )
         report = _poll_column(
             repo,
             tracker=tracker,
@@ -826,6 +874,8 @@ def poll_repository(
             store_for(home).write(report)
         except OSError:  # a cache is not the record; the chain already has every step
             log.warning("intake state not written", extra={"repo": repo})
+        if then is not None:
+            then(report)
         return report
     finally:
         if lease is not None:
@@ -1373,15 +1423,17 @@ def register_approved(
     approver: str,
     approver_name: str = "",
     run_active: Callable[[], bool] = lambda: False,
-    lease: DbLease | None = None,
+    lease: IntakeLease | None = None,
 ) -> IntakeRow:
     """The operator's Register act (ADR-0022): register the draft waiting for ticket
     ``key``, as the operator read it at ``revision``.
 
     Refuses (:class:`ApprovalRefused`) — and registers nothing — when another pass holds
-    the repository's lease (``intake_busy``), when the ticket's content has moved since
-    the revision the operator read (``revision_moved``: a different draft is not what they
-    approved), when no draft is waiting (``nothing_to_register``), when a factory run
+    the repository's lease (``intake_busy``), when the listener was switched off before
+    this act held the lease (``intake_listener_off``), when the ticket's content has moved
+    since the revision the operator read (``revision_moved``: a different draft is not
+    what they approved — asked of the chain's reads AND of the ticket as the tracker
+    serves it now, read under the lease), when no draft is waiting (``nothing_to_register``), when a factory run
     holds the backlog (``factory_run_active``), when ``item_url`` would write a relative
     link (``no_public_url`` — this deployment has lost its address since the switch) or
     when the frozen record refuses it (``register_refused``). On success the chain carries
@@ -1397,6 +1449,12 @@ def register_approved(
             "intake_busy", "another pass is reading this repository's column: try again"
         )
     try:
+        if lease is not None and not lease.consented():
+            # the route read the switch before this act held the lease (PR #55 review)
+            raise ApprovalRefused(
+                "intake_listener_off",
+                "the listener was switched off: switch it on before registering a ticket from it",
+            )
         return _register_approved(
             key,
             revision=revision,
@@ -1466,6 +1524,18 @@ def _register_approved(
         # the same guard the poll applies, asked of the builder: the switch checked the
         # address, but consent outlives a restart without CRB_PUBLIC_URL (PR #55 review)
         raise ApprovalRefused(REASON_NO_PUBLIC_URL, STOP_ADVICE[REASON_NO_PUBLIC_URL])
+    # the chain only knows the ticket as the last poll read it: an edit made since is
+    # invisible to it, and registering the old draft would label the EDITED ticket queued
+    # as if its new words were on the backlog (PR #55 review). The ticket as the tracker
+    # serves it now must still be the draft's content; a read that fails raises
+    # TrackerError before any write.
+    live = content_revision(tracker.read(key))
+    if live != now_content:
+        raise ApprovalRefused(
+            "revision_moved",
+            f"ticket {key} has changed on the board since the column was last read: read "
+            "the column again, then register the new draft",
+        )
     item = BacklogItem.from_dict(dict(waiting.payload.get("item") or {}))
     evidence = home.evidence(actor=approver)
     try:
@@ -1760,6 +1830,7 @@ __all__ = [
     "ApprovalPolicy",
     "ApprovalRefused",
     "DbLease",
+    "IntakeLease",
     "IntakeRow",
     "IntakeStore",
     "ListenerState",

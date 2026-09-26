@@ -919,6 +919,7 @@ def sync_delivery_outcomes(
                 home,
                 lambda n: app.pull_request(installation_id, full_name, n),
                 actor=operator.id,
+                repository=full_name,
             )
         finally:
             client.close()
@@ -1288,6 +1289,7 @@ def put_intake(  # noqa: PLR0917 — FastAPI dependencies + path/body
     body: IntakeListenerIn,
     operator: OperatorDep,
     db: DbDep,
+    factory: SessionFactoryDep,
     settings: SettingsDep,
     secrets: SecretsDep,
 ) -> IntakeOut:
@@ -1305,10 +1307,50 @@ def put_intake(  # noqa: PLR0917 — FastAPI dependencies + path/body
     switching off and on again overwrites it, and without the event the writes made on
     somebody's tickets under the earlier consent would appear to have been consented by
     whoever switched it last.
+
+    Switching OFF takes the repository's intake lease before it commits (PR #55 review):
+    the switch-off promises that nothing on the board is read or written afterwards, and a
+    pass holding the lease is still reading and writing. While one does, the switch is
+    refused (409 ``intake_busy``) and the listener stays on; a pass that starts after it
+    asks the committed switch again under the lease (``IntakeLease.consented``).
     """
     row = get_repo_or_404(db, repo)
     if body.enabled:
         _refuse_unless_ready_to_listen(settings, secrets)
+        _commit_switch(repo, body, operator=operator, db=db, settings=settings, row=row)
+        return _intake_out(repo, settings, secrets, row)
+    lease = intake_lease(factory, repo, ttl_s=_SWITCH_LEASE_S)
+    if not lease.acquire():
+        raise ApiError(
+            409,
+            "intake_busy",
+            "a pass is reading or writing this repository's board right now, and the listener "
+            "cannot promise it stops until that pass ends. The pass stops within its time "
+            "budget: switch the listener off again in a minute",
+        )
+    try:
+        _commit_switch(repo, body, operator=operator, db=db, settings=settings, row=row)
+    finally:
+        lease.release()
+    return _intake_out(repo, settings, secrets, row)
+
+
+#: How long a switch-off may hold the intake lease: one commit, so a minute is generous;
+#: a crashed request's row is taken over after it.
+_SWITCH_LEASE_S = 60.0
+
+
+def _commit_switch(
+    repo: str,
+    body: IntakeListenerIn,
+    *,
+    operator: Principal,
+    db: DbDep,
+    settings: Settings,
+    row: Repo,
+) -> None:
+    """Store the switch on the repository row and record it on the system trace, in one
+    commit."""
     state = ListenerState(
         enabled=body.enabled,
         column=body.column.strip(),
@@ -1333,7 +1375,6 @@ def put_intake(  # noqa: PLR0917 — FastAPI dependencies + path/body
         },
     )
     db.commit()
-    return _intake_out(repo, settings, secrets, row)
 
 
 def _refuse_unless_ready_to_listen(settings: Any, secrets: Any) -> None:
@@ -1465,6 +1506,13 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
             "another pass is reading this repository's column right now (the worker's timer or "
             "another operator): nothing was read or written — try again in a minute",
         )
+    if report.withdrawn:
+        # switched off between the consent check above and the lease (PR #55 review)
+        raise ApiError(
+            422,
+            "intake_listener_off",
+            f"the intake listener for {repo!r} was switched off: nothing was read or written",
+        )
     return _intake_out(repo, settings, secrets, row)
 
 
@@ -1527,8 +1575,12 @@ def register_intake_ticket(
     except ApprovalRefused as exc:
         if exc.code == REASON_NO_PUBLIC_URL:  # the service's own guard behind the route's
             raise ApiError(422, "intake_no_public_url", exc.message) from exc
+        if exc.code == "intake_listener_off":  # switched off before the act held the lease
+            raise ApiError(422, "intake_listener_off", exc.message) from exc
         code = exc.code if exc.code in _REGISTER_REFUSALS else "register_refused"
         raise ApiError(409, code, exc.message) from exc
+    except TrackerError as exc:  # the live read of the ticket, before any write
+        raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc
     append_system_event(
         db,
         trace_id=system_trace_id("intake", repo),
