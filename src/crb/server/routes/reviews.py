@@ -74,6 +74,7 @@ from crb.core.grade import FalseQ1Violation
 from crb.core.ledger import GENESIS_HASH, GradeRow
 from crb.core.redact import redact
 from crb.core.review import (
+    OPTIONAL_HASHED,
     REVIEW_SCHEMA,
     Finding,
     ReviewRecord,
@@ -130,7 +131,7 @@ def review_body_from_stored(m: Review) -> dict[str, Any]:
     (whose constructor refuses an inconsistent row — a tampered one must be reported)."""
     d: dict[str, Any] = {}
     for k in REVIEW_FIELDS:
-        if k == "row_hash":
+        if k == "row_hash" or (k in OPTIONAL_HASHED and getattr(m, k) is None):
             continue
         d[k] = list(m.findings_json or []) if k == "findings" else getattr(m, k)
     return d
@@ -188,6 +189,7 @@ def review_out(m: Review, *, subject: str = "", grade_clean: bool | None = None)
             if isinstance(f, dict)
         ],
         mergeable=m.mergeable,
+        minutes=m.minutes,
         statement=m.statement,
         patch_sha256_reviewed=m.patch_sha256_reviewed,
         evidence_pack_hash=m.evidence_pack_hash,
@@ -466,6 +468,7 @@ def create_review(
             verdict=verdict,
             findings=findings,
             mergeable=body.mergeable,
+            minutes=body.minutes,
             patch_sha256_reviewed=body.patch_sha256,
             evidence_pack_hash=g.evidence_pack_hash,
             apparatus_version=g.apparatus_version,
@@ -502,6 +505,7 @@ def create_review(
             "verdict": chained.verdict,
             "findings": len(chained.findings),
             "mergeable": chained.mergeable,
+            "minutes": chained.minutes,
             "patch_sha256_reviewed": chained.patch_sha256_reviewed,
             "row_hash": chained.row_hash,
         },

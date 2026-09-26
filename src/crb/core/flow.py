@@ -155,6 +155,40 @@ def lead_time(
     )
 
 
+def stated_durations(
+    key: str,
+    label: str,
+    seconds: Iterable[float],
+    *,
+    reason: str = "",
+) -> LeadTime:
+    """Reduce durations a person STATED (not two stamps) to one :class:`LeadTime`.
+
+    The reviewer minutes of a review are such a figure: nobody derives them from
+    timestamps, so they arrive as seconds rather than pairs. A non-positive value is
+    dropped and counted, as a pair out of order is; ``reason`` is kept only while nothing
+    was measured.
+    """
+    kept: list[float] = []
+    dropped = 0
+    for v in seconds:
+        if v > 0:
+            kept.append(float(v))
+        else:
+            dropped += 1
+    if not kept:
+        return LeadTime(key=key, label=label, n=0, dropped=dropped, reason=reason)
+    return LeadTime(
+        key=key,
+        label=label,
+        n=len(kept),
+        median_s=median(kept),
+        min_s=min(kept),
+        max_s=max(kept),
+        dropped=dropped,
+    )
+
+
 @dataclass(frozen=True)
 class Spend:
     """What a stream spent, with how much of the money is missing.

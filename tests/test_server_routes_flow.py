@@ -10,7 +10,8 @@ What it does: Pins the reading's shape (six streams, the apparatus, the method s
               registration → first PASSED controls report (an escape does not count), the
               decide stream's attested row → signature, the manufacture chain's
               registered → opened → merged, an account recovery on the platform stream, the
-              four figures served as not captured with their gap ids, and the 404 / 401 / 409
+              reviewers' stated minutes, the spend counted once across the streams, the
+              figures served as not captured with their gap ids, and the 404 / 401 / 409
               answers.
 How:          ``make_env`` over the synthetic seed; events and a factory evidence chain are
               written directly for the cases the seed has no data for; a deliberately
@@ -37,6 +38,7 @@ from typing import Any
 
 import pytest
 
+from crb.core.review import ReviewRecord
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.evidence import (
     EV_BACKLOG_EVOLVED,
@@ -51,7 +53,7 @@ from crb.factory.evidence import (
 )
 from crb.server.factory_state import FactoryHome
 from crb.server.flow import measure
-from crb.store.ledger import DbLedger
+from crb.store.ledger import DbLedger, DbReviewLedger
 from crb.store.models import Event, Grade, User
 from fixtures.server_seed import (
     ALPHA,
@@ -326,13 +328,40 @@ class TestDecideAndLicense:
     def test_the_decisions_start_and_its_cost_are_not_invented(self, env: Env) -> None:
         s = stream(reading(env), "decide-and-license")
         figures = [nc["figure"] for nc in s["not_captured"]]
-        assert figures == [
-            "the moment a cell first routed deliver",
-            "the reviewer minutes each decision cost",
-        ]
+        assert figures == ["the moment a cell first routed deliver"]
         assert {nc["gap"] for nc in s["not_captured"]} == {"G-557"}
-        assert "POST /reviews" in s["not_captured"][1]["why"]
         assert s["spend"]["usd"] is None
+
+    def test_the_reviewers_stated_minutes_are_shown_with_their_n(self, env: Env) -> None:
+        s = stream(reading(env), "decide-and-license")
+        lt = lead(s, "review_minutes")
+        assert lt["n"] == 0 and lt["median_s"] is None and "minutes" in lt["reason"]
+        rows = env.info.rows
+        ledger = DbReviewLedger(env.factory)
+        for i, minutes in enumerate((12, None, 30)):
+            ledger.append(
+                ReviewRecord(
+                    grade_row_hash=rows[i].row_hash,
+                    repo=ALPHA,
+                    task_id=rows[i].task_id,
+                    reviewer="op",
+                    statement="looked, could not review",
+                    verdict="not_reviewed",
+                    evidence_pack_hash=rows[i].evidence_pack_hash,
+                    minutes=minutes,
+                )
+            )
+        s = stream(reading(env), "decide-and-license")
+        lt = lead(s, "review_minutes")
+        # two of three reviews stated their minutes; the third is not counted as zero
+        assert lt["n"] == 2 and lt["median_s"] == 21 * 60.0
+        assert (lt["min_s"], lt["max_s"]) == (720.0, 1800.0)
+        assert s["counts"]["human_reviews"] == 3
+        assert s["counts"]["reviews_with_minutes"] == 2
+        assert s["counts"]["review_minutes_total"] == 42
+        assert "the reviewer minutes each decision cost" not in [
+            nc["figure"] for nc in s["not_captured"]
+        ]
 
     def test_no_signoff_yet_reads_unmeasured_with_its_reason(self, env: Env) -> None:
         s = stream(reading(env), "decide-and-license")

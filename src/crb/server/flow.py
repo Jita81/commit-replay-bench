@@ -14,7 +14,8 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 |---|---|
 | connect-and-prove | repository registered → its first controls report that passed |
 | measure | run queued → its last row graded; a cell's first row → its tenth |
-| decide-and-license | the attested row graded clean (accepted) → the cell signed |
+| decide-and-license | the attested row graded clean (accepted) → the cell signed; and the |
+| | minutes each review took, as the reviewer stated them on ``POST /reviews`` |
 | manufacture-and-deliver | item registered → pull request opened → merged |
 | learn | a refusal raised → the strengthening item that supersedes it registered |
 | run-the-platform | an admin set an account's password → that account signed in again |
@@ -28,9 +29,9 @@ spend, which the parts add up to. The sums use the product's one spend rule
 **What it refuses to invent.** Four figures those criteria ask for are not recorded anywhere,
 so they are served as :class:`~crb.core.flow.NotCaptured` — named, with why and with the gap
 that would close them — and never derived from a neighbouring number: the developer hours of
-the guide's "real work" (G-556), the reviewer minutes a decision cost (G-557), the moment the
-deployment was installed and first read healthy (G-558), and how many go-live lines are proven
-(G-584). A screen prints the absence; nobody can mistake it for a zero.
+the guide's "real work" (G-556), the moment a cell first routed ``deliver`` (G-557), the moment
+the deployment was installed and first read healthy (G-558), and how many go-live lines are
+proven (G-584). A screen prints the absence; nobody can mistake it for a zero.
 
 Navigation
 ----------
@@ -77,6 +78,7 @@ from crb.core.flow import (
     parse_ts,
     per_unit,
     spend_of_rows,
+    stated_durations,
 )
 from crb.core.ledger import PROCESS_FACTORY, GradeRow
 from crb.core.routing import DEFAULT_POLICY, ControlsVerdict
@@ -342,11 +344,13 @@ def decide_and_license(
             unattested += 1
             continue
         pairs.append((graded_at[att.reviewed_row_hash], rec.verified_at))
-    reviews = int(
-        session.execute(
-            select(func.count()).select_from(Review).where(Review.repo == repo)
-        ).scalar_one()
-    )
+    minutes = [
+        m
+        for (m,) in session.execute(
+            select(Review.minutes).where(Review.repo == repo).order_by(Review.seq.asc())
+        )
+    ]
+    stated = [int(m) for m in minutes if m is not None]
     return StreamFlow(
         stream="decide-and-license",
         name=STREAM_NAMES["decide-and-license"],
@@ -357,16 +361,26 @@ def decide_and_license(
                 pairs,
                 reason="no sign-off of this repository names a row this ledger holds",
             ),
+            stated_durations(
+                "review_minutes",
+                "Reviewer time per review, as the reviewer stated it",
+                [m * 60.0 for m in stated],
+                reason="no review of this repository has stated its minutes yet",
+            ),
         ),
         spend=Spend(),
-        spend_label="no model spend: deciding is human time, and it is not captured",
+        spend_label=(
+            "no model spend: deciding is human time, shown above as the minutes reviewers stated"
+        ),
         counts={
             "signoffs": sum(1 for r in records if not r.revoked),
             "revocations": sum(1 for r in records if r.revoked),
             "signoffs_without_an_attested_row": unattested,
-            "human_reviews": reviews,
+            "human_reviews": len(minutes),
+            "reviews_with_minutes": len(stated),
+            "review_minutes_total": sum(stated),
         },
-        not_captured=(NOT_CAPTURED["deliver_route_moment"], NOT_CAPTURED["reviewer_minutes"]),
+        not_captured=(NOT_CAPTURED["deliver_route_moment"],),
     )
 
 
@@ -531,11 +545,6 @@ NOT_CAPTURED: dict[str, NotCaptured] = {
             "the route is recomputed on every read and the transition is never stamped, so the "
             "decision's clock is started from the row the approver attested instead"
         ),
-        gap="G-557",
-    ),
-    "reviewer_minutes": NotCaptured(
-        figure="the reviewer minutes each decision cost",
-        why="POST /reviews records a verdict and its findings, and asks for no minutes",
         gap="G-557",
     ),
     "install_to_health": NotCaptured(

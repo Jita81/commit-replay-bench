@@ -104,6 +104,8 @@ export interface Review {
   verdict: Verdict
   findings: Finding[]
   mergeable: boolean | null
+  /** The reviewer's own minutes on this review; null when not stated (DL-068). */
+  minutes?: number | null
   statement: string
   patch_sha256_reviewed: string
   evidence_pack_hash: string
@@ -122,6 +124,8 @@ export interface ReviewCreateRequest {
   /** sha256 of the patch bytes the reviewer LOADED (must equal the pack's diff_sha256). */
   patch_sha256: string
   not_reviewed?: boolean
+  /** Whole minutes the review took, as the reviewer states it (1 to 480); omitted when not stated. */
+  minutes?: number
 }
 
 /** `GET /reviews/verify` — chain intact and every verdict anchored. */

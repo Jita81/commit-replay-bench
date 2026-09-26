@@ -44,6 +44,7 @@ const FLOW_HINTS: Record<string, HintId> = {
   queued_to_graded: 'flow.queued_to_graded',
   first_row_to_bar: 'flow.first_row_to_bar',
   accepted_to_signed: 'flow.accepted_to_signed',
+  review_minutes: 'flow.review_minutes',
   registered_to_pr: 'flow.registered_to_pr',
   pr_to_merged: 'flow.pr_to_merged',
   registered_to_merged: 'flow.registered_to_merged',

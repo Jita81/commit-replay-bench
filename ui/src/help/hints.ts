@@ -121,6 +121,8 @@ export const HINTS = {
     'From queueing a replay or blind run to its last row being graded: how long buying attempts takes in practice. Runs whose rows arrived by import are not timed, because no queue moment was recorded for them.',
   'flow.first_row_to_bar':
     'From a class and size’s first graded row to its tenth — the number of rows the routing rule needs before it will route on a cell at all. It says how long earning a routable cell takes, not how good the cell is.',
+  'flow.review_minutes':
+    'How long a review took, in the minutes the reviewer stated when recording it: the median with the number of reviews that stated them. A review that left the minutes empty is not in it and is not counted as zero.',
   'flow.accepted_to_signed':
     'From the moment the row an approver said they read was graded clean to the moment they signed the cell. It is the decision’s own wait, measured on the row named in the attestation rather than averaged over rows nobody chose.',
   'flow.registered_to_pr':
@@ -1149,6 +1151,8 @@ export const HINTS = {
     'Would a maintainer merge this as it stands? Recorded with the review; it never changes a route.',
   'field.review.statement':
     'What you concluded and why. This is the governance record, append-only.',
+  'field.review.minutes':
+    'How long this review took you, in whole minutes, as you judge it. Optional; leave it empty rather than guess. The Sign-off page adds the stated minutes up as the time decisions cost, and a review without them is left out, never counted as zero.',
   'field.review.not_reviewed':
     'Record that you looked but could not review this row: no findings, no anchor hash.',
   'tile.review.anchor':
@@ -1656,6 +1660,7 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.queued_to_graded',
   'flow.first_row_to_bar',
   'flow.accepted_to_signed',
+  'flow.review_minutes',
   'flow.registered_to_pr',
   'flow.pr_to_merged',
   'flow.registered_to_merged',

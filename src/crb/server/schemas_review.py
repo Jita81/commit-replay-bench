@@ -35,7 +35,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from crb.core.review import FINDING_KINDS, VERDICTS, is_sha256
+from crb.core.review import FINDING_KINDS, MAX_REVIEW_MINUTES, VERDICTS, is_sha256
 
 _SHA256_LEN = 64
 
@@ -78,7 +78,8 @@ class ReviewCreateRequest(BaseModel):
     agree (422 otherwise). ``patch_sha256`` is the hash of the patch the reviewer
     loaded — it must equal the row's pack ``diff_sha256`` (422 ``review_refused`` /
     ``patch_hash_mismatch``). ``not_reviewed: true`` records that the reviewer looked
-    and could not review: no findings, no ``mergeable``, no hash."""
+    and could not review: no findings, no ``mergeable``, no hash. ``minutes`` is the
+    reviewer's own time on the review, optional, 1 to 480 (DL-068)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -86,6 +87,9 @@ class ReviewCreateRequest(BaseModel):
     statement: str = Field(min_length=1, max_length=8000)
     findings: list[FindingIn] = Field(default_factory=list, max_length=200)
     mergeable: bool | None = None
+    #: How long the review took, in whole minutes, as the reviewer states it (DL-068):
+    #: optional, never guessed from timestamps, and at most a working day.
+    minutes: int | None = Field(default=None, ge=1, le=MAX_REVIEW_MINUTES, strict=True)
     patch_sha256: str = Field(default="", max_length=_SHA256_LEN)
     not_reviewed: bool = False
     verdict: str | None = None
@@ -139,6 +143,8 @@ class ReviewOut(BaseModel):
     verdict: str
     findings: list[FindingOut]
     mergeable: bool | None
+    #: The reviewer's own minutes on this review; ``null`` when not stated (DL-068).
+    minutes: int | None = None
     statement: str
     patch_sha256_reviewed: str
     evidence_pack_hash: str

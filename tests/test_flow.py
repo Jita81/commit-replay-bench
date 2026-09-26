@@ -40,6 +40,7 @@ from crb.core.flow import (
     per_unit,
     spend_of,
     spend_of_rows,
+    stated_durations,
 )
 
 
@@ -119,6 +120,19 @@ class TestLeadTime:
     def test_to_dict_carries_the_key_the_label_and_the_n(self) -> None:
         d = LeadTime(key="k", label="a → b", n=0).to_dict()
         assert d["key"] == "k" and d["label"] == "a → b" and d["n"] == 0
+
+
+class TestStatedDurations:
+    def test_a_stated_figure_reduces_like_a_lead_time(self) -> None:
+        lt = stated_durations("review_minutes", "Reviewer time", [600.0, 1200.0, 300.0])
+        assert (lt.n, lt.median_s, lt.min_s, lt.max_s) == (3, 600.0, 300.0, 1200.0)
+
+    def test_nothing_stated_is_unmeasured_with_its_reason_and_a_bad_value_is_dropped(
+        self,
+    ) -> None:
+        lt = stated_durations("k", "l", [0.0, -60.0], reason="nobody said")
+        assert lt.n == 0 and lt.median_s is None and lt.dropped == 2
+        assert lt.reason == "nobody said"
 
 
 class TestSpend:
