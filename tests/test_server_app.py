@@ -280,8 +280,9 @@ class TestFactory:
 class TestVersion:
     def test_version_says_whether_an_organisation_sign_in_exists(self, client: TestClient) -> None:
         d = client.get(f"{API_PREFIX}/version").json()
-        assert set(d) == {"crb", "apparatus", "policy", "uptime_s", "oidc_enabled"}
+        assert set(d) == {"crb", "apparatus", "policy", "uptime_s", "oidc_enabled", "dev_autologin"}
         assert d["oidc_enabled"] is False  # the test settings configure no provider
+        assert d["dev_autologin"] is False  # off unless CRB_AUTH__DEV_AUTOLOGIN names an account
 
 
 class TestMiddleware:
