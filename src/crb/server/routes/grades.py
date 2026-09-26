@@ -186,7 +186,9 @@ def list_grades(
     q = _apply_filters(select(Grade), filters)
     c = _apply_filters(select(func.count(Grade.seq)), filters)
     total = int(db.execute(c).scalar_one())
-    rows = list(db.execute(q.order_by(Grade.seq).limit(page.limit).offset(page.offset)).scalars())
+    rows: list[Grade] = list(
+        db.execute(q.order_by(Grade.seq).limit(page.limit).offset(page.offset)).scalars()
+    )
     return Page[GradeRowOut](
         items=[grade_out(g) for g in rows], total=total, limit=page.limit, offset=page.offset
     )
