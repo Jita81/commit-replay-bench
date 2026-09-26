@@ -332,26 +332,46 @@ Registry credentials likewise live in those files; every step tail is passed thr
 **Sandbox images**: start from the shipped reference set —
 [`deploy/sandbox/`](../deploy/sandbox/README.md): `crb-sandbox-python` (pytest),
 `crb-sandbox-node` (`node --test`), `crb-sandbox-go`, each digest-pinned, running as user
-`65534` with a read-only root and proven from inside by CI **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]** — and extend one per repository
-(or per toolchain) with the repository's dependencies when its tests need more than the
-runner. Under docker, setup does not run (`BaseRunner.sandbox_refusal`: setup is a host
-phase and fails closed with `SETUP_SANDBOX_REFUSED` when the executor is `docker`), so the
-image must already contain what setup would have installed — and nothing a host setup
-installed is visible inside: the sandbox mounts only the trial worktree, read-only, at
-`/work`, and a trial worktree's `node_modules` is a **symlink to the host clone's**
-(`Workspace._post_create`), which dangles inside the container; a host venv, module cache
-or `~/.m2` is likewise absent by construction — `DockerExecutor.build_argv` binds only the
-worktree (read-only, at `/work`) and tmpfs where the runner declared it, nothing else from
-the host **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag`
-and `::test_docker_build_argv_network_writable_paths_extra_mounts_and_cwd` pin the argv
-token by token; apparatus 2.2]**. Bake the dependencies into a derived image
-([`deploy/sandbox/README.md` §4](../deploy/sandbox/README.md) — `npm ci` of the lockfile
-under `/opt/app` and `runner_opts.env: {NODE_PATH: /opt/app/node_modules}`; hash-pinned
-test requirements for Python; `GOMODCACHE` for Go) **[measured — the symlink claim only: a `node_modules` symlink
-to a host directory reads `No such file or directory` from inside `crb-sandbox-node`
-under `DockerExecutor`, n = 1 probe, colima / Docker 29.5.2, 2026-09-22; apparatus
-2.2]**; the derived-image recipe itself is the README's and is **[hypothesis]** until a
-repository is measured on one. Name the image in the repository's `sandbox_image` (it wins) or the deployment's
+`65534` with a read-only root and proven from inside by CI **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]** — and never bake a repository's dependencies into one: they belong to the task, because a
+gold commit routinely changes its parent's lockfile. Under docker, setup does not run
+(`BaseRunner.sandbox_refusal`: setup is a host phase and fails closed with
+`SETUP_SANDBOX_REFUSED` when the executor is `docker`), and nothing a host setup installed is
+visible inside: a trial worktree's `node_modules` is a **symlink to the host clone's**
+(`Workspace._post_create`), which dangles inside the container **[measured — a
+`node_modules` symlink to a host directory reads `No such file or directory` from inside
+`crb-sandbox-node` under `DockerExecutor`, n = 1 probe, colima / Docker 29.5.2, 2026-09-22;
+apparatus 2.2]**. `DockerExecutor.build_argv` binds the worktree read-only at `/src` and
+runs the tests in a throwaway, size-capped tmpfs copy of it at `/work` (the default
+`CRB_SANDBOX__TREE=copy`; `readonly` binds the worktree itself at `/work`), plus the sealed
+dependency sets read-only, and nothing else from the host **[measured —
+`tests/test_execution.py::test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tmpfs_at_work`,
+`::test_docker_build_argv_has_every_hardening_flag` and
+`::test_docker_build_argv_writable_paths_extra_mounts_and_cwd` pin the argv token by token;
+apparatus 2.2]**.
+
+**Dependencies under docker come from the sealed sets (ADR-0019).** The workflow, per
+repository: commit the lockfile the recipe reads (`go.sum`; `name==version` pins in
+`requirements*.txt` or the files named in `runner_opts.deps_lock`; a `package-lock.json`,
+lockfileVersion 2+, with any install script named in `runner_opts.deps_build_scripts`);
+switch provisioning on (`CRB_PROVISION__ENABLED=true`, pointed at your mirror —
+[DEPLOYMENT §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)); run
+`crb repo qualify <name>` (or the Posture panel's **Qualify** button), which fetches each
+task's parent and gold sets through the allowlisting proxy, seals them under `$CRB_HOME/deps`
+and proves each task in the posture before any model spend; then replay as usual. Each test
+run mounts its task's set read-only (`/deps/gomod`, `/deps/site`, `/work/node_modules`) with
+the test container still `--network=none`. `crb deps ls | verify | gc` lists, re-proves and
+trims the sets. The recipe, the mount table and the refusals are
+[`deploy/sandbox/README.md` §4](../deploy/sandbox/README.md#4-dependencies-are-provisioned-per-task-adr-0019).
+
+**The exception — a derived image for the toolchain, never for dependencies.** Extend a
+reference image only for something the toolchain lacks: cgo's compiler, the linter belt 5
+runs at the repository's pinned version, another language's runtime
+([`deploy/sandbox/README.md` §4.1](../deploy/sandbox/README.md#41-extending-an-image-for-a-toolchain-never-for-dependencies)).
+It is a different posture — the image's ID is part of what a qualification records — so a
+repository moved onto it is qualified again. The derived-image recipe is the README's and is
+**[hypothesis]** until a repository is measured on one.
+
+**Which image a run uses.** Name the sandbox image in the repository's `sandbox_image` (it wins) or the deployment's
 `CRB_SANDBOX__IMAGE` (the default for repositories that name none); the worker never pulls,
 so it must be in the daemon's store. A JVM reference image is not shipped — the Maven
 runner cannot resolve plugins offline under docker yet (README §6), so under the compose /

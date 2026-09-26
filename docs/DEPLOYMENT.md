@@ -29,7 +29,12 @@ The two container shapes run the same image and the same four things: PostgreSQL
 the **api** (HTTP + UI) and the **worker** (queue consumer that mines, builds, grades and
 appends to the ledger). Both enforce the same invariants: the append-only tables carry DB
 triggers, every verdict is hash-chained, the sandbox fails closed, and the only permitted
-egress is the model endpoint (worker) and the OIDC issuer (api).
+egress is the model endpoint (worker), the OIDC issuer (api), the repository's git remote
+(clone, fetch and factory delivery), and two flows that are off by default: the tracker the
+intake watches (`CRB_INTAKE__TRACKER`) and, with dependency provisioning on
+(`CRB_PROVISION__ENABLED=true`, §3.4), the fetch sidecar to your package mirror or registry —
+which receives only the package names and versions the task's lockfiles pin
+([SECURITY.md](SECURITY.md) has the complete table, with what each flow sends).
 
 ### 1.1 Single host without containers (evaluation)
 
@@ -564,8 +569,10 @@ Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up 
 
 crb never bundles a model and never phones home: no telemetry, no update checks, no
 run-time pulls by the worker itself. The complete outbound list is: worker → model endpoint;
-api → OIDC issuer; (`dind` only) sidecar → your registry; (provisioning on, §3.4) worker
-fetch sidecar → your package mirror. Sandboxes run with `--network=none`; a `file://`
+api → OIDC issuer; api and worker → the repository's git remote (clone, fetch, factory
+delivery); (intake on) → the tracker it watches; (`dind` only) sidecar → your registry;
+(provisioning on, §3.4) worker fetch sidecar → your package mirror, sent only the package
+names and versions the lockfiles pin. Sandboxes run with `--network=none`; a `file://`
 mirror makes the fetch network-less too. To operate fully inside the tenant:
 
 1. point the builder at an in-tenant endpoint — Azure OpenAI with a private endpoint (§4.3)
