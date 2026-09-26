@@ -16,7 +16,8 @@ What it does: Renders the chart and, for the API and the worker Deployments, res
               ``$CRB_HOME/secrets``), finds the volume that backs it, and asserts both pods
               name the same directory on the same persistent claim; that a ReadWriteOnce claim
               pins both pods to one node (merged with any affinity the operator sets) and is
-              refused when the API could not follow the worker's placement (P-046); that an
+              refused when the API could not follow the worker's placement — a difference in
+              ``nodeSelector``, ``tolerations`` or any kind of ``affinity`` (P-046); that an
               operator's own claim replaces the chart's; that no pod label or annotation the
               chart sets can be set again in ``podLabels`` / ``podAnnotations`` (P-047); and
               that every claim the chart makes is named in DEPLOYMENT §5, the recovery
@@ -160,8 +161,21 @@ def test_the_api_and_the_worker_resolve_one_secrets_store() -> None:
     assert any(c["metadata"]["name"] == api[1][1] for c in claims), "the chart makes the claim"
 
 
+#: An operator's own affinity, the same on both pods (a difference is refused, P-046).
+_ZONE = (
+    "affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0]"
+    ".matchExpressions[0]"
+)
+OWN_AFFINITY = tuple(
+    arg
+    for pod in ("api", "worker")
+    for kv in ("key=topology.kubernetes.io/zone", "operator=In", "values={uksouth-1}")
+    for arg in ("--set", f"{pod}.{_ZONE}.{kv}")
+)
+
+
 def test_a_read_write_once_store_pins_the_api_and_the_worker_to_one_node() -> None:
-    docs = _render("--set", "api.affinity.nodeAffinity.x=1")
+    docs = _render(*OWN_AFFINITY)
     api, worker = _deployment(docs, "api"), _deployment(docs, "worker")
     for d in (api, worker):
         pins = _node_pins(d)
@@ -173,7 +187,8 @@ def test_a_read_write_once_store_pins_the_api_and_the_worker_to_one_node() -> No
                 for t in pins
             )
     # the operator's own affinity is kept, not replaced
-    assert _deployment(docs, "api")["spec"]["template"]["spec"]["affinity"]["nodeAffinity"]
+    for d in (api, worker):
+        assert d["spec"]["template"]["spec"]["affinity"]["nodeAffinity"], d["metadata"]["name"]
 
 
 def test_an_operators_claim_replaces_the_charts_and_many_nodes_need_no_pin() -> None:
@@ -231,6 +246,101 @@ def test_a_read_write_once_store_refuses_a_worker_placement_the_api_cannot_follo
         "secretsStore.accessMode=ReadWriteMany",
     )
     assert not _node_pins(_deployment(_render(*WORKER_POOL, *rwx), "worker"))
+
+
+#: Every PodSpec field that decides which node a pod may run on (the Kubernetes scheduler's
+#: own inputs), and the three kinds of ``affinity``. A field the chart can emit on the API or
+#: the worker must be compared by ``crb.secretsStore.samePlacement``.
+PLACEMENT_FIELDS = (
+    "nodeSelector",
+    "tolerations",
+    "affinity",
+    "topologySpreadConstraints",
+    "nodeName",
+    "schedulerName",
+)
+AFFINITY_KINDS = ("nodeAffinity", "podAffinity", "podAntiAffinity")
+_TERM = "requiredDuringSchedulingIgnoredDuringExecution"
+
+#: For each placement value (a field, or ``affinity.<kind>``), the ``--set`` arguments that
+#: place the worker only. Each is a placement the API cannot be assumed to follow.
+WORKER_ONLY_PLACEMENT = {
+    "nodeSelector": ("--set", "worker.nodeSelector.crb\\.dev/pool=worker"),
+    "tolerations": (
+        "--set",
+        "worker.tolerations[0].key=crb.dev/worker",
+        "--set",
+        "worker.tolerations[0].operator=Exists",
+        "--set",
+        "worker.tolerations[0].effect=NoSchedule",
+    ),
+    # the §3.1 pool expressed as required node affinity instead of a nodeSelector
+    "affinity.nodeAffinity": (
+        "--set",
+        f"worker.affinity.nodeAffinity.{_TERM}.nodeSelectorTerms[0]"
+        ".matchExpressions[0].key=crb.dev/pool",
+        "--set",
+        f"worker.affinity.nodeAffinity.{_TERM}.nodeSelectorTerms[0]"
+        ".matchExpressions[0].operator=In",
+        "--set",
+        f"worker.affinity.nodeAffinity.{_TERM}.nodeSelectorTerms[0]"
+        ".matchExpressions[0].values={worker}",
+    ),
+    "affinity.podAffinity": (
+        "--set",
+        f"worker.affinity.podAffinity.{_TERM}[0].labelSelector.matchLabels.app=gpu-cache",
+        "--set",
+        f"worker.affinity.podAffinity.{_TERM}[0].topologyKey={HOSTNAME}",
+    ),
+    "affinity.podAntiAffinity": (
+        "--set",
+        f"worker.affinity.podAntiAffinity.{_TERM}[0].labelSelector.matchLabels.app=noisy",
+        "--set",
+        f"worker.affinity.podAntiAffinity.{_TERM}[0].topologyKey={HOSTNAME}",
+    ),
+}
+
+
+def _as_api(args: tuple[str, ...]) -> list[str]:
+    return [a.replace("worker.", "api.", 1) if a.startswith("worker.") else a for a in args]
+
+
+def test_every_placement_field_the_chart_emits_is_compared() -> None:
+    """The class behind P-046: a placement field the chart lets the operator set on the API or
+    the worker, but that the same-placement guard does not compare, leaves one pod pending. The
+    first fix compared ``nodeSelector`` and ``tolerations`` and missed ``affinity`` (the
+    adversarial check on PR #57). Any field a pod template (or a helper it includes) can emit
+    must have a worker-only case below, so a field added later fails here until it is
+    compared."""
+    templates = "\n".join(
+        (CHART / "templates" / name).read_text()
+        for name in ("api-deployment.yaml", "worker-deployment.yaml", "_helpers.tpl")
+    )
+    emitted = [
+        f for f in PLACEMENT_FIELDS if any(ln.strip() == f"{f}:" for ln in templates.splitlines())
+    ]
+    assert "affinity" in emitted and "nodeSelector" in emitted, emitted
+    covered = {k.split(".", 1)[0] for k in WORKER_ONLY_PLACEMENT}
+    assert set(emitted) <= covered, f"placement fields with no case: {set(emitted) - covered}"
+    assert {f"affinity.{k}" for k in AFFINITY_KINDS} <= set(WORKER_ONLY_PLACEMENT)
+
+
+@pytest.mark.parametrize("placement", sorted(WORKER_ONLY_PLACEMENT))
+def test_a_read_write_once_store_refuses_any_worker_only_placement(placement: str) -> None:
+    """A worker placed through required node affinity (or pod affinity, or anti-affinity) the
+    API does not share is the P-046 failure by another route: the API is scheduled on a general
+    node, the pin sends the worker after it, and the worker's own rule forbids that node. The
+    render refuses it and names ``api.<field>``; the same placement on both pods renders."""
+    worker_only = WORKER_ONLY_PLACEMENT[placement]
+    err = _refused(*worker_only)
+    assert f"api.{placement.split('.', 1)[0]}" in err and "ReadWriteMany" in err, err
+    docs = _render(*worker_only, *_as_api(worker_only))
+    api, worker = _deployment(docs, "api"), _deployment(docs, "worker")
+    assert _node_pins(api) and _node_pins(worker)
+    if placement.startswith("affinity."):
+        kind = placement.split(".", 1)[1]
+        for d in (api, worker):
+            assert kind in d["spec"]["template"]["spec"]["affinity"], d["metadata"]["name"]
 
 
 def _set_key(key: str) -> str:

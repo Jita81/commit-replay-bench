@@ -139,13 +139,16 @@ and the store refuses a group-accessible directory; the first write creates it 0
 The pin puts the api on the worker's node (and the worker on the api's). A worker on a
 dedicated, tainted pool (docs/DEPLOYMENT.md §4.4) that the api does not tolerate would leave
 whichever pod is scheduled second pending for ever, so a ReadWriteOnce store refuses any
-difference in nodeSelector or tolerations (docs/PREVENTION.md P-046).
+difference in nodeSelector, tolerations or affinity (node affinity, pod affinity and pod
+anti-affinity: each can forbid the node the other pod took). The operator's own values are
+compared, before the chart adds the pin (docs/PREVENTION.md P-046). A placement field added
+to a pod template must be added here: tests/test_deploy_secrets_store.py fails until it is.
 */}}
 {{- define "crb.secretsStore.samePlacement" -}}
-{{- $api := dict "nodeSelector" (.api.nodeSelector | default dict) "tolerations" (.api.tolerations | default list) -}}
-{{- $worker := dict "nodeSelector" (.worker.nodeSelector | default dict) "tolerations" (.worker.tolerations | default list) -}}
+{{- $api := dict "nodeSelector" (.api.nodeSelector | default dict) "tolerations" (.api.tolerations | default list) "affinity" (.api.affinity | default dict) -}}
+{{- $worker := dict "nodeSelector" (.worker.nodeSelector | default dict) "tolerations" (.worker.tolerations | default list) "affinity" (.worker.affinity | default dict) -}}
 {{- if and .worker.enabled (ne (toJson $api) (toJson $worker)) }}
-{{- fail "secretsStore.accessMode=ReadWriteOnce puts the api and the worker on one node, so api.nodeSelector and api.tolerations must be the same as worker.nodeSelector and worker.tolerations (a worker on a dedicated, tainted pool needs the api there too). Either give the api the worker's placement, or name a ReadWriteMany claim (secretsStore.existingClaim, secretsStore.accessMode=ReadWriteMany), which needs no pin — docs/DEPLOYMENT.md §3.1" }}
+{{- fail "secretsStore.accessMode=ReadWriteOnce puts the api and the worker on one node, so api.nodeSelector, api.tolerations and api.affinity must be the same as worker.nodeSelector, worker.tolerations and worker.affinity (a worker on a dedicated, tainted pool, by a selector or by node affinity, needs the api there too). Either give the api the worker's placement, or name a ReadWriteMany claim (secretsStore.existingClaim, secretsStore.accessMode=ReadWriteMany), which needs no pin — docs/DEPLOYMENT.md §3.1" }}
 {{- end -}}
 {{- end -}}
 

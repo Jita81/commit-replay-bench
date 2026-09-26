@@ -240,10 +240,14 @@ them at build time, both mount at `CRB_SECRETS_DIR` (`/srv/crb-secrets/store`). 
 ReadWriteOnce claim pins both pods to one node; name a ReadWriteMany claim of your own
 (`secretsStore.existingClaim`, `secretsStore.accessMode: ReadWriteMany`) to lift the pin.
 Because of the pin, the api must be able to run wherever the worker runs: with a
-ReadWriteOnce claim the chart refuses to render unless `api.nodeSelector` and
-`api.tolerations` are the same as `worker.nodeSelector` and `worker.tolerations`. A worker
-on the dedicated, tainted pool of §4.4 therefore takes the api with it (the example in
-§3.1), or the store moves to a ReadWriteMany claim on a file system that keeps POSIX
+ReadWriteOnce claim the chart refuses to render unless `api.nodeSelector`,
+`api.tolerations` and `api.affinity` are the same as `worker.nodeSelector`,
+`worker.tolerations` and `worker.affinity`. Affinity counts as placement: a worker kept on
+its pool by required node affinity (rather than a node selector) would otherwise follow an
+api scheduled on a general node that its own rule forbids, and stay pending; pod affinity
+and pod anti-affinity can forbid a node in the same way. The chart compares your values
+before it adds its own pin. A worker on the dedicated, tainted pool of §4.4 therefore takes
+the api with it (the example in §3.1), or the store moves to a ReadWriteMany claim on a file system that keeps POSIX
 permissions (the store refuses a directory that its group can read).
 The claim has no `keep` policy, so a stored credential does not outlive the release.
 The chart also refuses an `api.podLabels`, `worker.podLabels`, `api.podAnnotations` or

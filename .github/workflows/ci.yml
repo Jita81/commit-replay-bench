@@ -503,6 +503,7 @@ jobs:
           if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set secretsStore.accessMode=ReadWriteOncePod > /dev/null 2>&1; then echo "expected render failure: a ReadWriteOncePod secrets store"; exit 1; fi
           # the pin puts the api on the worker's node: a worker-only tainted pool is refused (P-046)
           if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set 'worker.tolerations[0].key=crb.dev/worker' --set 'worker.tolerations[0].operator=Exists' > /dev/null 2>&1; then echo "expected render failure: api cannot follow the worker's placement"; exit 1; fi
+          if helm template crb deploy/helm/crb --set postgresql.mode=embedded --set 'worker.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key=crb.dev/pool' --set 'worker.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].operator=Exists' > /dev/null 2>&1; then echo "expected render failure: api cannot follow the worker's node affinity"; exit 1; fi
       - name: docker compose config
         run: |
           printf 'POSTGRES_PASSWORD=ci\nCRB_SECRET_KEY=ci\n' > deploy/.env
