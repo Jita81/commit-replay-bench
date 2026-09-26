@@ -1816,7 +1816,10 @@ def test_every_shared_setting_is_read_from_an_explicit_environment(
         value = "false" if sub_kind is bool else "7" if sub_kind is int else "x"
         env = {f"CRB_{name.upper()}__{sub.upper()}": value}
     else:
-        value = "false" if kind is bool else "7" if kind is int else "https://crb.example"
+        # a bool is set to the opposite of its default (#53's allow_unsealed_prod defaults
+        # False, #57's metrics_enabled True): a value equal to the default proves nothing
+        flipped = "false" if getattr(worker_main._shared_settings({}), name) else "true"
+        value = flipped if kind is bool else "7" if kind is int else "https://crb.example"
         env = {f"CRB_{name.upper()}": value}
     default = getattr(worker_main._shared_settings({}), name)
     try:

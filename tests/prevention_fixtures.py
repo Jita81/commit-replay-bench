@@ -46,6 +46,7 @@ from crb.core.prevention import (
     MemoryPreventionStore,
     PreventionRecord,
 )
+from fixtures.posture import posture_row
 
 REPO = "fx"
 T0 = dt.datetime(2026, 10, 1, tzinfo=dt.UTC)
@@ -151,7 +152,7 @@ def attempt(
         lint_ok = None
     else:  # pragma: no cover - a fixture typo
         raise ValueError(f"unknown fixture kind {kind!r}")
-    return GradeRow(
+    return posture_row(
         repo=repo,
         task_id=task_id,
         clean=clean,
