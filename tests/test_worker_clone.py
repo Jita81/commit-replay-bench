@@ -20,7 +20,9 @@ What it does: Pins that a URL-registered repo is cloned into ``<home>/repos/<nam
               on the stored path, in ``config_json["path"]``, swapped in after registration, or
               at the clone destination — is refused before any git process starts; the clone
               destination is held to identity (exactly ``<root>/<name>``, never a link, in five
-              link shapes); and an AST ratchet holds every use site to ``confined_clone_path``.
+              link shapes); an AST ratchet holds every use site to ``confined_clone_path``; and
+              a discovery test keeps that list equal to every function in ``crb.server`` that
+              opens git.
 How:          ``fixtures.remote.bare_remote`` over ``pyrepo`` with the developer switch;
               ``RecordingBuilder`` captures its constructor kwargs; ``test_worker``'s harness;
               ``_spy_git`` records every git process ``crb.core.git`` starts.
@@ -32,7 +34,8 @@ Works with:   src/crb/server/worker.py (under test), src/crb/core/git.py (``clon
 Tested by:    tests/test_worker_clone.py
 Touch when:   the clone destination or the URL policy changes (mirror the route and CLI suites);
               a builder gains a config key the worker must pass through; a new place opens a
-              stored clone path (add it to ``_USE_SITES``).
+              stored clone path (add it to ``_USE_SITES``; any other git opener in
+              ``crb.server`` goes on ``_NOT_A_STORED_CLONE`` with its reason).
 """
 
 from __future__ import annotations
@@ -538,6 +541,36 @@ def test_git_opens_only_the_confined_path_at_every_use_site(module: str, functio
         if not (isinstance(arg, ast.Name) and arg.id in confined)
     ]
     assert not bad, f"{module}:{function} opens git on an unconfined path: {bad}"
+
+
+#: server functions that open git on something that is NOT a stored clone path, and why
+_NOT_A_STORED_CLONE = {
+    ("server/routes/grades.py", "retained_patch_text"): "a retained worktree under scratch",
+}
+
+
+def _git_openers_in_server() -> set[tuple[str, str]]:
+    """Every function under ``crb.server`` that calls ``GitRepo(…)`` or ``clone_repo(…)``."""
+    found = set()
+    for path in (_SRC / "server").rglob("*.py"):
+        for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+                isinstance(n, ast.Call) and _call_name(n) in {"GitRepo", "clone_repo"}
+                for n in ast.walk(fn)
+            ):
+                found.add((path.relative_to(_SRC).as_posix(), fn.name))
+    return found
+
+
+def test_the_use_site_list_is_every_place_the_server_opens_git() -> None:
+    """PR #52 review (DL-053's "every use site"): ``_USE_SITES`` is a hand-kept list, so the
+    ratchet above is only as complete as the list. Every function in ``crb.server`` that
+    opens git is on it or named here as not a stored clone — a new one fails until someone
+    decides which it is."""
+    unlisted = _git_openers_in_server() - set(_USE_SITES) - set(_NOT_A_STORED_CLONE)
+    assert not unlisted, f"a server function opens git and is on neither list: {unlisted}"
+    stale = (set(_USE_SITES) | set(_NOT_A_STORED_CLONE)) - _git_openers_in_server()
+    assert not stale, f"listed but no longer opens git: {stale}"
 
 
 def test_the_link_rule_is_called_only_inside_the_confiners() -> None:

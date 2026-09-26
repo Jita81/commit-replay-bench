@@ -340,11 +340,12 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   clone inside it. git is then pointed at the resolved path that was checked;
   `clone_repo` refuses a destination that is a symbolic link; and a structural test holds
   every place that opens a stored clone to the one use-time function
-  (`confined_clone_path`).
-  **[measured — n = 26 tests, all passing on this change (PR #52); method: pytest on the
+  (`confined_clone_path`), with a second test that fails when a function in `crb.server`
+  opens git and is not on that test's list.
+  **[measured — n = 27 tests, all passing on this change (PR #52); method: pytest on the
   node ids below, which include a link at the destination in five shapes (outside the
   directory, to another clone inside it, to an empty directory, dangling, and chained). The
-  tests were written before the code they check: 8 of the 9 clone-path tests added first
+  tests that pin a fix were written before it: 8 of the 9 clone-path tests added first
   failed on `main` at 8ab88ad (the ninth is the control that must pass), and 8 of the 10 destination-shape tests failed on 7d5a619 (the
   other 2, the outside shape, already passed there); apparatus 2.2. A count of tests, not a
   rate, so no interval]** `tests/test_server_routes_repos.py::TestClonePathConfinement`,
@@ -353,6 +354,7 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   `tests/test_worker_clone.py::test_every_link_at_the_clone_destination_is_refused_before_any_git_command`,
   `tests/test_worker_clone.py::test_the_destination_rule_is_identity_not_containment`,
   `tests/test_worker_clone.py::test_git_opens_only_the_confined_path_at_every_use_site`,
+  `tests/test_worker_clone.py::test_the_use_site_list_is_every_place_the_server_opens_git`,
   `tests/test_git_clone.py::test_clone_refuses_a_destination_that_is_a_symbolic_link`,
   `tests/test_mcp_server.py::test_register_repo_tool_is_confined_to_the_repos_root`
 - Account lifecycle: an admin sets a password or the active flag (`PUT /users/{id}/password`,
