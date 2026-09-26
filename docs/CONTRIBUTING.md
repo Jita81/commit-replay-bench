@@ -38,19 +38,24 @@ Every PR must pass all of these locally **and** in CI (`.github/workflows/ci.yml
 .venv/bin/ruff format --check src tests
 .venv/bin/mypy                       # strict, over src/crb
 .venv/bin/lint-imports               # crb.core stdlib-only + downward layers
-.venv/bin/pytest -q -m "not sandbox_images" --cov=crb --cov-fail-under=70
+.venv/bin/pytest -q -m "not sandbox_images" --cov=crb --cov-branch --cov-fail-under=70
 ```
 
-The pytest line is the one CI's `test` job runs. `sandbox_images` is left out because it
-builds the reference sandbox images, and CI's `sandbox-images` job runs it on its own.
+Each line is a command CI runs, word for word apart from CI's report-only `--cov-report`
+options; `tests/test_version_consistency.py` fails when one drifts from `ci.yml`. The pytest
+line is the one CI's `test` job runs: it measures branch coverage, as CI does, so the
+coverage floor means the same thing on both. `sandbox_images` is left out because it builds the
+reference sandbox images, and CI's `sandbox-images` job runs it on its own.
 
 CI additionally runs `gitleaks` (secrets), `pip-audit` (known vulnerabilities in the
 resolved environment) and produces a CycloneDX SBOM.
 
-No test may fail because of the machine it runs on. Running as root, with no docker daemon or
-with no network is meant to change which tests run, not their results: builder settings in
-tests name a non-root user or pin `os.getuid`, the doctor tests never ask the host's daemon, and a test that needs
-a daemon or a network host is skipped with the reason when it is absent (under
+No test may fail because of the machine it runs on **[aspiration — the rule DL-053 sets; the
+run below shows it is not yet demonstrated]**. Running as root, with no docker daemon or with
+no network is meant to change which tests run, not their results **[aspiration — DL-053]**.
+What holds the suite to it: builder settings in tests name a non-root user or pin
+`os.getuid`, the doctor tests never ask the host's daemon, and a test that needs a daemon or a
+network host is skipped with the reason when it is absent (under
 `CRB_TEST_STRICT_WARMUP=1` an unreachable host is a failure instead, below). One whole-suite
 run under all three conditions still had one failure, from timing rather than the host
 **[measured — n = 1 whole-suite run at `b5e2b7f`, `-m "not sandbox_images"`, with uid 0
@@ -173,13 +178,12 @@ PRs delete theirs. Feature branches
 `feat/<area>-<topic>` / `fix/<area>-<topic>` / `docs/<topic>`; one PR per file-disjoint
 workstream where possible. **Branch protection on `main` requires the CI jobs green and
 the branch up to date before a merge** (lint, types, layers, code-map, dod, both
-pytest matrices, PostgreSQL, security, container, walkthrough — the same commands you run
-locally:
-`pytest -m "not sandbox_images"`, `ruff check`, `ruff format --check`, `mypy --strict src scripts`,
-`scripts/code_map.py --check`, `scripts/dod_check.py --check`,
-`scripts/claims_check.py --check`, `lint-imports`,
-`cd ui && npx tsc -b && npx vitest run`,
-`helm lint --strict`); the adversarial verify pass (re-run the full suite on the merged
+pytest matrices, PostgreSQL, security, container, walkthrough — commands you can run
+locally: the five in [The gates](#the-gates), exactly as written there, and
+`python scripts/code_map.py --check`, `python scripts/dod_check.py --check`,
+`python scripts/claims_check.py --check`,
+`cd ui && npm run typecheck && npx vitest run`,
+`helm lint deploy/helm/crb --strict`); the adversarial verify pass (re-run the full suite on the merged
 tree) before each release tag. The repository is public and Actions minutes are free, so
 "CI is unavailable" is no longer a reason to merge on local gates (it was, for one day —
 DL-035).
