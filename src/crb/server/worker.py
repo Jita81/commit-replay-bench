@@ -190,7 +190,7 @@ from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
-from crb.core.deps import DepsProvider
+from crb.core.deps import DepsProvider, ProvisionRefused
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import (
     TREE_COPY,
@@ -1111,6 +1111,11 @@ class Worker:
             counts = dict(ctx.counts) if ctx else {}
             _LOG.exception("run %s failed", run.id[:8])
             emitter.error("system", "run.error", exc)
+            if run.kind == KIND_PROBE:
+                # ONE place records a probe that raised, whatever raised it — a provisioning
+                # stop included — so a probe that passed earlier never keeps reading "ok"
+                # (CodeRabbit on PR #56)
+                self._set_probe(run.repo, PROBE_FAILED, probe_failure_detail(exc))
         finally:
             hb_stop.set()
             hb.join(timeout=5)
@@ -1687,21 +1692,15 @@ class Worker:
         ctx.emit("system", "probe.start", scope=list(scope), path=str(ctx.git.path))
         # ADR-0019: the probe reads the clone's own dependencies the way a trial would
         head = ctx.git.rev_parse("HEAD")
+        # anything this raises is recorded on the repository by execute(), whatever it is
         binding = (
             self._deps_provider(executor)
             .resolve(ctx.git, ctx.config, parent=head, gold=head, executor_name=executor.name)
             .parent
         )
-        try:
-            result = runner.run_for(
-                executor, ctx.git.path, scope, timeout=ctx.timeout, authored=None, deps=binding
-            )
-        except SandboxUnavailable:
-            raise
-        except Exception as exc:
-            detail = f"probe error: {type(exc).__name__}: {exc}"
-            self._set_probe(ctx.run.repo, PROBE_FAILED, detail)
-            raise
+        result = runner.run_for(
+            executor, ctx.git.path, scope, timeout=ctx.timeout, authored=None, deps=binding
+        )
         ok = result.green
         why = (
             "timed out"
@@ -2772,6 +2771,14 @@ def trial_labels_for(ladder: EscalationLadder, base: Budget) -> dict[str, dict[s
         }
         for i, rung in enumerate(ladder)
     }
+
+
+def probe_failure_detail(exc: BaseException) -> str:
+    """What a repository's probe status says when the probe raised: a provisioning stop
+    with its code and its fix, anything else by its type."""
+    if isinstance(exc, ProvisionRefused):
+        return redact_and_cap(f"{exc.code}: {exc.message} — {exc.fix}", max_chars=1000)
+    return redact_and_cap(f"probe error: {type(exc).__name__}: {exc}", max_chars=1000)
 
 
 def docker_settings_for(

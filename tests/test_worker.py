@@ -857,6 +857,37 @@ def test_probe_run_sets_status(h: Harness) -> None:
     assert "probe.start" in actions and "probe.done" in actions and "run.executor" in actions
 
 
+def test_a_provisioning_stop_during_a_probe_is_recorded_on_the_repository(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A probe whose dependencies are refused (``PROVISION_DISABLED`` for a docker
+    repository with dependencies while provisioning is off) fails the run AND the
+    repository's probe status — a probe that passed earlier must not keep reading ``ok``
+    (CodeRabbit on PR #56)."""
+    from crb.core.deps import ProvisionRefused
+
+    h.enqueue("probe")
+    assert h.run_one().status == STATUS_SUCCEEDED and h.repo_row().probe_status == "ok"
+
+    class _Refusing:
+        def resolve(self, *a: Any, **k: Any) -> Any:
+            raise ProvisionRefused("PROVISION_DISABLED", "fx declares python dependencies")
+
+    monkeypatch.setattr(h.worker, "_deps_provider", lambda executor: _Refusing())
+    h.enqueue("probe")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    repo = h.repo_row()
+    assert repo.probe_status == "failed"
+    assert repo.probe_detail.startswith("PROVISION_DISABLED: fx declares python dependencies")
+    assert "CRB_PROVISION__ENABLED" in repo.probe_detail  # the fix travels with it
+    # the class, not the one exception: anything a probe raises is recorded the same way
+    h.enqueue("probe")
+    monkeypatch.setattr(h.worker, "_deps_provider", lambda executor: None)  # AttributeError
+    assert h.run_one().status == STATUS_FAILED
+    assert h.repo_row().probe_detail.startswith("probe error: AttributeError")
+
+
 def test_probe_failure_is_recorded(tmp_path: Path, pyrepo: pr.PyRepo) -> None:
     h = Harness(tmp_path, pyrepo)
     h.add_repo(probe="tests/does_not_exist.py")

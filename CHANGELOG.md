@@ -59,6 +59,11 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **A probe that raised always updates the repository's probe status** (product.posture.42;
+  CodeRabbit on PR #56). A provisioning stop during a probe (`PROVISION_DISABLED`, raised
+  before the probe's own error handling) failed the run but left `probe_status` at its last
+  value, so a repository that had passed read `ok`. The worker now records a probe that
+  raised in one place, whatever raised it; a provisioning stop keeps its code and its fix.
 - **The sandbox's tree holds without a default image** (product.posture.41; CodeRabbit on
   PR #56). A worker with no `CRB_SANDBOX__IMAGE` (each repository names its own) discarded
   `CRB_SANDBOX__TREE` and `__WORK_SIZE`, so `readonly` silently ran as `copy` with the default
