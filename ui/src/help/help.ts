@@ -300,13 +300,14 @@ export const HELP: ScreenHelp[] = [
     purpose: 'The repository as an instrument: its toolchain probe, mined tasks, change profile and the configuration that governs how its commits are replayed.',
     next: {
       viewer: 'Read the probe result and the task list; a task opens its spec and every graded trial against it.',
-      operator: 'Edit the configuration when the walk’s probe or mine stage fails; the runner, test prefixes and services are what the belts depend on.',
+      operator: 'Edit the configuration when the walk’s probe or mine stage fails; the runner, test prefixes and services are what the belts depend on. Press Qualify when the Posture panel says a task is not proven where it will be graded.',
     },
-    numbers: 'The change profile counts commits by class and size; it weights the coverage figure on the map. Gold-clean is tasks whose own test passes at the recorded commit.',
+    numbers: 'The change profile counts commits by class and size; it weights the coverage figure on the map. Gold-clean is tasks whose own test passes at the recorded commit. The Posture panel counts the tasks proven in the posture that will grade them — qualified N of M — and names every reason the others are not, each with what to do; qualifying spends no model money.',
     terms: ['gold_clean', 'belt', 'cell', 'oracle_strength', 'wilson', 'apparatus'],
     readMore: [
       { to: 'OPERATOR#2-configure-a-repository', label: 'Configure a repository' },
       { to: 'OPERATOR#22-services-the-oracle-needs', label: 'Services the oracle needs' },
+      { to: 'OPERATOR#7a-when-a-posture-is-unqualified', label: 'When a posture is unqualified' },
     ],
   },
   {

@@ -53,6 +53,7 @@ from crb.core import signoff as so
 from crb.core.ledger import GradeRow, LedgerIntegrityError
 from crb.core.routing import ROUTE_DELIVER, ROUTE_HUMAN, ControlsVerdict
 from crb.core.version import APPARATUS_VERSION
+from fixtures.posture import posture_row
 
 PACK = "b" * 64
 ROW_HASH = "c" * 64
@@ -74,7 +75,7 @@ def _row(
     task_id: str = "0123456789abcdef",
     oracle_strength: float | None = ORACLE,
 ) -> GradeRow:
-    return GradeRow(
+    return posture_row(
         repo=repo,
         task_id=task_id,
         clean=clean,

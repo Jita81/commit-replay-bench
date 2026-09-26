@@ -52,6 +52,7 @@ from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.leakage import RecordingSpawn, leaks
+from fixtures.posture import witnessed_context_for
 
 _POISON = 'import calc as _m\nexec("def subtract(a, b):\\n    return a - b\\n", _m.__dict__)\n'
 
@@ -66,6 +67,9 @@ def _spec(pyrepo: pr.PyRepo, runner: PytestRunner, executor: LocalExecutor, tmp:
         ledger=JsonlLedger(tmp / "ledger.jsonl"),
         evidence_dir=tmp / "evidence",
         ladder=("r1", "r2"),
+        context_for=witnessed_context_for(
+            pyrepo.repo, pyrepo.config, runner=runner, executor=executor, scratch=tmp / "scratch"
+        ),
     )
 
 
@@ -197,6 +201,13 @@ def test_the_builder_is_handed_no_fragment_of_the_task_sha(
         evidence_dir=tmp_path / "evidence",
         mode=mode,
         ladder=("claude_code:claude-opus-5",),
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=runner,
+            executor=executor,
+            scratch=tmp_path / "scratch",
+        ),
     )
     spawn = RecordingSpawn()
     events: list[tuple[str, dict[str, Any]]] = []
@@ -922,3 +933,125 @@ def test_the_structural_ratchet_admits_workspace_as_a_type() -> None:
 def test_the_structural_ratchet_admits_an_opaque_name(body: str) -> None:
     src = f"def f(repo, sha, scratch, c, ws):\n    {body}\n"
     assert worktree_dest_offenders(src, "x.py") == []
+
+
+# ---------------------------------------------------------------------------
+# ADR-0019: the context before the builder; the environment stops the ladder
+# ---------------------------------------------------------------------------
+
+
+def test_unqualified_task_never_reaches_build_fn(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from crb.core.posture import PostureMismatch
+    from crb.core.run import run
+
+    calls: list[str] = []
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        calls.append(task.task_id)
+        return _attempt()
+
+    def unqualified(task: TaskSpec) -> Any:
+        raise PostureMismatch(f"{task.task_id[:10]} is unqualified in pst_x (QUAL_NOT_RED)")
+
+    spec = replace(_spec(pyrepo, runner, executor, tmp_path), context_for=unqualified)
+    summary = run(spec, pyrepo.repo, [feat_task], build_fn)
+    assert calls == []  # the builder was never called: nothing was spent
+    assert summary.rows == 0 and "QUAL_NOT_RED" in summary.stopped_reason
+    assert list(spec.ledger.rows()) == []
+    with pytest.raises(ValueError, match="context_for"):
+        replace(spec, context_for=None)
+
+
+@pytest.mark.parametrize("bad", ["other_posture", "unqualified", "revoked"])
+def test_the_real_context_for_refuses_before_any_builder_is_paid(
+    bad: str,
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """The same stop through ``crb.core.qualify.context_for`` itself, not a stub: a record
+    from another posture, or one that is not ``qualified``, stops the run before the
+    builder is called (``grade.check_posture`` would only refuse AFTER it was paid)."""
+    from dataclasses import replace
+
+    from crb.core.deps import HOST_ENV_DEPS, TaskDeps
+    from crb.core.posture import Posture
+    from crb.core.qualify import Qualification, context_for
+    from crb.core.run import run
+    from fixtures.posture import discovery_qualification
+
+    good = discovery_qualification(feat_task, executor)
+    posture = Posture.from_dict(good.posture)
+    if bad == "other_posture":
+        record = Qualification.from_dict({**good.to_dict(), "posture_id": "pst_" + "0" * 24})
+    else:
+        record = Qualification.from_dict({**good.to_dict(), "state": bad, "code": "QUAL_NOT_RED"})
+    calls: list[str] = []
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        calls.append(task.task_id)
+        return _attempt()
+
+    spec = replace(
+        _spec(pyrepo, runner, executor, tmp_path),
+        context_for=lambda t: context_for(
+            t,
+            posture=posture,
+            qualification=record,
+            deps=TaskDeps.uniform(HOST_ENV_DEPS),
+            witness=None,
+        ),
+    )
+    summary = run(spec, pyrepo.repo, [feat_task], build_fn)
+    assert calls == [] and summary.rows == 0 and list(spec.ledger.rows()) == []
+    assert ("was qualified in" if bad == "other_posture" else f"is {bad}") in (
+        summary.stopped_reason
+    )
+
+
+def test_an_environment_row_stops_the_ladder_and_reports_it(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from crb.core.grade import BLAME_GOLD_GREEN, ControlRun
+    from crb.core.ledger import GradeRow
+    from fixtures.posture import context
+
+    class _RedGold:
+        def control(self, scope: Any, *, why: str, allow_failing: Any = None) -> ControlRun:
+            return ControlRun(
+                BLAME_GOLD_GREEN, tuple(scope), False, rc=1, tail="network is unreachable"
+            )
+
+    reported: list[tuple[str, GradeRow]] = []
+    builds: list[str] = []
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        builds.append(rung)
+        return _attempt()  # does nothing: the target stays red
+
+    spec = replace(
+        _spec(pyrepo, runner, executor, tmp_path),
+        context_for=lambda t: context(t, executor, witness=_RedGold())[1],
+        on_environment=lambda t, row: reported.append((t.task_id, row)),
+    )
+    outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+    assert builds == ["r1"]  # the ladder has r1 and r2: the second rung was never paid for
+    (row,) = outcome.rows
+    assert row.error.startswith("environment: gold control red") and row.failure_kind == "harness"
+    assert reported == [(feat_task.task_id, row)]

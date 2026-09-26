@@ -54,6 +54,7 @@ from crb.server.worker import (
 from crb.store.jobs import STATUS_FAILED, STATUS_SUCCEEDED
 from crb.store.models import Run
 from fixtures import pyrepo as pr
+from fixtures.posture import posture_row
 from test_worker import FakeBuilder, Harness
 
 SONNET = {"builder": "fake", "model": "sonnet"}
@@ -324,7 +325,7 @@ def test_stamp_cannot_change_a_verdict() -> None:
     """The stamp copies every verdict field verbatim and ``GradeRow`` re-runs its
     invariants: a red row stays red, a clean row keeps its pack. (``_RunLedger._stamp``
     is exercised end to end above; this pins the construction it relies on.)"""
-    red = GradeRow(
+    red = posture_row(
         repo="r",
         task_id="t" * 40,
         clean=False,
@@ -337,5 +338,5 @@ def test_stamp_cannot_change_a_verdict() -> None:
     )
     stamped = GradeRow(**{**red.fields(), "labels": {**red.labels, LABEL_BUDGET_TIER: "25/25/900"}})
     assert stamped.clean is False and stamped.target_green is False
-    assert stamped.labels == {"rung": "r1", LABEL_BUDGET_TIER: "25/25/900"}
+    assert stamped.labels == {**red.labels, LABEL_BUDGET_TIER: "25/25/900"}
     assert stamped.row_id == red.row_id and stamped.created == red.created

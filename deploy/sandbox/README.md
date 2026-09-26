@@ -10,7 +10,7 @@ CI's `sandbox-images` job, which runs each language's fixture repository through
 executor on the image it just built (`tests/test_sandbox_images_docker.py`).
 
 Contents: [1 What ships](#1-what-ships) · [2 Build, tag, push](#2-build-tag-and-push-to-a-private-registry) ·
-[3 Select an image](#3-select-an-image) · [4 Extend an image](#4-extend-an-image-a-repositorys-dependencies-another-toolchain) ·
+[3 Select an image](#3-select-an-image) · [4 Dependencies](#4-dependencies-are-provisioned-per-task-adr-0019) ·
 [5 Rebuild cadence and the digest rule](#5-rebuild-cadence-and-the-digest-pinning-rule) · [6 Not shipped](#6-what-is-not-shipped-and-why)
 
 ## 1. What ships
@@ -39,23 +39,41 @@ inside as uid 65534, 3/3 images, 2026-09-22]**; hadolint
 clean (CI runs `hadolint/hadolint-action` on each file, as it does on `deploy/Dockerfile`).
 
 What CI proves on each image, from inside, on every pull request
-(`tests/test_sandbox_images_docker.py`, ten tests per language): the image's own default
-user and the executor's user are uid 65534; `/usr` and the worktree at `/work` refuse a write
-(`Read-only file system`) and nothing reaches the host, while `/tmp` accepts one; no
-setuid/setgid file is in the image; `/tmp` is `noexec` for every command but the Go runner's
-(`/proc/mounts` says so and a script written there is refused / runs accordingly); a test that
-asserts `example.com:443` is reachable **fails** through that language's runner, attributed
-to exactly that test id; an image absent from the daemon's store is `SandboxUnavailable`
-rather than a pull (the daemon's `No such image`, not its `pull access denied`); the language's fixture repository qualifies (RED at the parent, gold
-clean) and grades clean with the same baseline reading the host runner suite pins, leaving
-the host worktree untouched; the OCI labels and `USER` are set **[measured — 10 tests × 3
-images in `tests/test_sandbox_images_docker.py`, run as the CI `sandbox-images` job's smoke
-step on images built from the tree: 47 passed / 0 skipped locally (colima, Docker 29.5.2,
-2026-09-22) and 44 passed / 0 skipped in CI on PR #44 run 35678358686, head 4a64fe3;
-apparatus 2.2]**. The sandbox suite and the
+(`tests/test_sandbox_images_docker.py`): the image's own default user and the executor's
+user are uid 65534; `/usr` and the worktree — read-only at `/src` — refuse a write
+(`Read-only file system`), while `/work`, the throwaway copy of the tree every command runs
+in (ADR-0019 §7), and `/tmp` accept one, and the host tree is byte-identical afterwards; the
+image carries `/bin/sh` and GNU `tar`, which make that copy; no setuid/setgid file is in the
+image; `/tmp` is `noexec` for every command but the Go runner's (`/proc/mounts` says so and a
+script written there is refused / runs accordingly); a test that asserts `example.com:443` is
+reachable **fails** through that language's runner, attributed to exactly that test id; an
+image absent from the daemon's store is `SandboxUnavailable` rather than a pull (the daemon's
+`No such image`, not its `pull access denied`); the language's fixture repository qualifies
+(RED at the parent, gold clean) and grades clean with the same baseline reading the host
+runner suite pins, leaving the host worktree untouched; the OCI labels and `USER` are set; and
+a Go test that writes into its own package directory reads the same on the host and in the
+copy (the D5 regression) **[measured — n = 42 tests passed, 0 skipped, across
+`tests/test_sandbox_images_docker.py` (3 images) and `tests/test_sandbox_docker.py`; method: a
+local run on colima, Docker 29.5.2, 2026-09-25; apparatus 2.2]**. Before ADR-0019 the same
+module had ten tests per language and pinned the read-only `/work` instead **[measured — 47
+passed / 0 skipped locally (colima, Docker 29.5.2, 2026-09-22) and 44 passed / 0 skipped in CI
+on PR #44 run 35678358686, head 4a64fe3; apparatus 2.2]**. The sandbox suite and the
 sealed-builder suite (`tests/test_sandbox_docker.py`, `tests/test_builders_container_docker.py`)
 also run on the python image in that job, so the kill path, the sidecar and the copy-back
-are proven on the shipped bytes too.
+are proven on the shipped bytes too, and the dependency-provisioning suites
+(`tests/test_provision_{fetch,go,python,node}.py`) fetch from an offline mirror into a sealed
+set and run each language's fixture offline on its image.
+
+**The fetch images.** Dependency provisioning (§4) runs its fetch in the full toolchain
+image each sandbox image is built from — pinned by the same digests — because the slim
+runtimes have no CA certificates. Pre-pull them next to the sandbox images when provisioning
+is on:
+
+| Fetch image (`CRB_PROVISION__*_IMAGE`) | For |
+|---|---|
+| `golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d` | Go modules (`go mod download`) |
+| `python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7` | Python wheels (`pip download`, then the offline `pip install`) |
+| `node:22.19.0-bookworm-slim@sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90` | Node modules (`npm ci --ignore-scripts`) |
 
 ## 2. Build, tag and push to a private registry
 
@@ -89,8 +107,9 @@ index digests resolve it). Sign them with cosign if your registry policy asks fo
 worker does not verify signatures itself; the registry admission policy or the node's
 runtime does. Multi-arch (`--platform linux/amd64,linux/arm64`) works unchanged.
 
-**The worker never pulls.** Each image must already be in the store of the daemon the
-worker talks to:
+**The worker never pulls.** Each image — the sandbox images, and with provisioning on the
+three fetch images in §1 and the proxy image — must already be in the store of the daemon
+the worker talks to:
 
 * compose / a single host: `docker pull <ref>` on the host (or `docker save | docker load`
   on an air-gapped one — compare `docker image inspect --format '{{.Id}}'` before and after,
@@ -135,58 +154,82 @@ crb repo add cobra --url https://github.com/<org>/cobra.git --language go --runn
 crb repo probe cobra
 ```
 
-## 4. Extend an image: a repository's dependencies, another toolchain
+## 4. Dependencies are provisioned per task (ADR-0019)
 
-The reference images carry the toolchain and the test runner and **nothing else**. Under
-the docker executor `crb repo setup` does not run — setup is a host phase; the sandbox has
-no network — so a repository whose tests need more than the runner needs an image that
-already contains it ([OPERATOR.md §2.1](../../docs/OPERATOR.md#21-environment-setup--the-only-network-phase)).
-Extend the reference image; never loosen it:
+The reference images carry the toolchain and the test runner and **nothing else**, and a
+repository's dependencies are never baked into an image. They belong to the task: one
+commit's `go.sum` is not its parent's (the gold commit of a replay routinely bumps a module),
+so an image that holds one commit's dependencies serves one commit
+([ADR-0019](../../docs/adr/0005-fail-closed-docker-sandbox.md#amendment-2026-09-25--adr-0019-a-throwaway-tree-read-only-dependency-sets-and-no-network-for-any-command)
+records the finding, defects D1–D5). Instead, with provisioning switched on
+(`CRB_PROVISION__ENABLED=true`, [DEPLOYMENT.md §3.4](../../docs/DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)):
 
-**Python** — the repository's test dependencies, hash-pinned like the base's pytest
-(the worktree is on `PYTHONPATH` at `/work`, so the repository itself is never installed):
+1. the lockfiles at the parent and at the gold are read from the repository's **git
+   objects** — never a worktree, so nothing a builder writes can change what is fetched;
+   `.npmrc`, `pip.conf` and `go.env` are never read;
+2. a **fetch container** — the fetch image above, as the worker's non-root uid, read-only,
+   no capabilities — fetches them. Its only network is an `--internal` bridge whose only
+   way out is the allowlisting proxy to the configured registry hosts; a `file://` mirror
+   runs it with no network at all. It sees the lockfiles and its output directory, never the
+   source, a secret or `CRB_HOME`, and runs no repository code;
+3. the result is **sealed** under `$CRB_HOME/deps` (`CRB_PROVISION__STORE`): content-addressed
+   by the recipe, the fetch image's ID and the lockfile hashes, digested, made read-only and
+   shared by every task with the same inputs (`crb deps ls | verify | gc`);
+4. the test container **keeps `--network=none`** and mounts the set read-only:
+
+| Language | Lockfile (at the commit) | Set | Mounted at | Test-time environment |
+|---|---|---|---|---|
+| Go | `go.mod` + `go.sum` (a `vendor/` tree needs no fetch) | ONE module cache for the parent's and the gold's modules | `/deps/gomod` | `GOMODCACHE=/deps/gomod GOPROXY=off GOSUMDB=off GOVCS=*:off GOTOOLCHAIN=local` |
+| Python | `requirements*.txt` with `name==version` lines (hashes optional), or `runner_opts.deps_lock` | wheels only, installed with no network; one set per lock | `/deps/site` | `PYTHONPATH=/work:/deps/site`, `PYTHONNOUSERSITE=1` |
+| Node | `package-lock.json` / `npm-shrinkwrap.json`, lockfileVersion 2+ | `npm ci --ignore-scripts`; the packages named in `runner_opts.deps_build_scripts` rebuilt with no network; one set per lock | `/work/node_modules` | `NODE_PATH=/work/node_modules`, `.bin` on `PATH` |
+
+A trial is graded with the set its own manifests select — the parent's or the gold's; one
+that selects anything outside that closure is disqualified, never graded. Refused, each with
+its code and fix: a URL, VCS, path or foreign-registry source; an unpinned version; `go.work`;
+`yarn`, `pnpm`, `poetry`, `uv` and `pylock` locks; a Python package published only as a
+source distribution; an install script the repository did not name; JVM and Rust. Those stay
+measurable in the local posture, on a stamp that says so. With provisioning **off**, a
+repository that declares dependencies is refused `PROVISION_DISABLED` under docker before any
+spend.
+
+### 4.1 Extending an image for a toolchain (never for dependencies)
+
+A derived image is for something the **toolchain** lacks: cgo's compiler, the linter belt 5
+runs (`ruff` at the version the repository pins), another language's runtime. It is a
+different posture — the image's ID is part of what a qualification records — so a repository
+moved onto it is qualified again. Build it multi-stage: fetch in the full toolchain image by
+digest (it has CA certificates; the slim sandbox images have none, so a `RUN` that downloads
+inside them fails with `x509: certificate signed by unknown authority` — the D3 finding), then
+copy the result onto the sandbox image:
 
 ```dockerfile
 # syntax=docker/dockerfile:1.7
+FROM python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7 AS fetch
+COPY ruff-requirements.txt /r.txt          # ruff==<the repository's pin> --hash=sha256:…
+RUN pip download --only-binary=:all: --no-deps --require-hashes -r /r.txt -d /wheels
+
 FROM <acr>.azurecr.io/crb-sandbox/python@sha256:<digest>
+COPY --from=fetch /wheels /opt/wheels
+COPY ruff-requirements.txt /opt/wheels/r.txt
 USER 0
-COPY requirements-test.txt /opt/crb/requirements-test.txt      # uv pip compile --generate-hashes …
-RUN pip install --no-cache-dir --require-hashes --root-user-action=ignore -r /opt/crb/requirements-test.txt
+RUN pip install --no-index --find-links /opt/wheels --require-hashes --root-user-action=ignore \
+      -r /opt/wheels/r.txt
 USER 65534:65534
 ```
 
-Add `ruff==<the version the repository pins>` there when the repository configures ruff:
-belt 5 runs the image's `ruff` under docker and fails closed (a visible harness error, never
-a silent skip) when it is absent.
-
-**Node** — `vitest` / `jest` / `mocha` and the repository's devDependencies resolve from
-`node_modules` (`NODE_PATH=/work/node_modules`; the tool binary from `PATH` under docker).
-A trial worktree's `node_modules` is a symlink to the host clone's (`crb repo setup` runs
-`npm ci` there), which the container cannot follow — the probe runs in the clone itself and
-sees a real directory, a grade does not — so bake it: `COPY package.json
-package-lock.json /opt/app/` + `npm ci --ignore-scripts --prefix /opt/app` in a derived
-image, `ENV PATH=/opt/app/node_modules/.bin:$PATH`, and `runner_opts.env:
-{NODE_PATH: /opt/app/node_modules}` on the repository (it overrides the runner's default).
-Native modules need their build dependencies in the image at `npm ci` time only.
-`DockerSettings.extra_ro_mounts` can expose a host directory read-only instead, but no
-deployment key sets it for the test sandbox yet — programmatic use only.
-
-**Go** — modules: `go mod download` into a directory the image keeps (`/opt/gomod`, or a
-host directory exposed through `extra_ro_mounts`) and set `runner_opts.gomodcache:
-/opt/gomod`; the runner passes it as `GOMODCACHE`. Commit a complete `go.sum` — the
-worktree is read-only, so a module the sum file does not cover fails the build, attributed
-to the trial. cgo: `apt-get install gcc libc6-dev` in the derived image and
-`runner_opts.cgo: "1"`. Note the runner sets
-`Command.exec_tmp` — the sandbox's tmpfs is mounted `exec` for Go alone (every other
-command's is `noexec`), because `go test` compiles each test binary under `/tmp` and runs
-it; `nosuid,nodev` still hold.
+Belt 5 runs the image's `ruff` under docker and fails closed (a visible harness error, never a
+silent skip) when it is absent. For cgo: a stage that installs `gcc libc6-dev` from the Debian
+release the image is built on, copied or installed onto the Go sandbox image, and
+`runner_opts.cgo: "1"`. The Go runner sets `Command.exec_tmp` — the `/tmp` tmpfs is `exec` for
+Go alone, because `go test` compiles each test binary there and runs it; `nosuid,nodev` hold.
 
 **Another toolchain** (JVM, Rust) — copy the shape: a digest-pinned base, the toolchain and
-the runner only, caches under `/tmp`, `USER 65534:65534`, the labels; then add the
-language to `tests/conftest_langs.py::SHIPPED_SANDBOX_LANGS`, its fixture, net probe and
-expected baseline to `tests/test_sandbox_images_docker.py`, and a hadolint + build step to
-the `sandbox-images` job in `.github/workflows/ci.yml`. The suite refuses a language with no
-image and an image with no suite (`assert tuple(_LANGS) == SHIPPED_SANDBOX_LANGS`).
+the runner only, caches under `/tmp`, `/bin/sh` and GNU `tar` (the throwaway tree needs
+them), `USER 65534:65534`, the labels; then add the language to
+`tests/conftest_langs.py::SHIPPED_SANDBOX_LANGS`, its fixture, net probe and expected baseline
+to `tests/test_sandbox_images_docker.py`, and a hadolint + build step to the `sandbox-images`
+job in `.github/workflows/ci.yml`. The suite refuses a language with no image and an image
+with no suite (`assert tuple(_LANGS) == SHIPPED_SANDBOX_LANGS`).
 
 ## 5. Rebuild cadence and the digest-pinning rule
 

@@ -352,6 +352,49 @@ def test_javascript_node_modules_link_is_harness_written(pyrepo: pr.PyRepo, tmp_
         assert "node_modules" not in ws.touched_files()
 
 
+def test_a_node_modules_link_at_a_sealed_set_is_the_harness_not_the_builder(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A local sealed run links ``./node_modules`` at the bound set when the worktree has
+    no entry (the clone was never set up, so the workspace planted none — CodeRabbit on
+    PR #56, node_runners.py:201). That link is the harness's: it must never read as a
+    builder change (a delivered diff, belt 4, ``discard_source_edits``). Only a link at a
+    SEALED Node set in a registered store qualifies — a directory nobody can write, which
+    a builder cannot make. A link anywhere else, a writable set, or a real directory is
+    still the builder's change: the gate holds for everything the harness did not do."""
+    from crb.core.deps import register_store_root
+
+    store = register_store_root(tmp_path / "store")
+    key = "dep_" + "9" * 64
+    sealed = store / "node" / key / "node_modules"
+    (sealed / ".bin").mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere" / "node_modules"
+    elsewhere.mkdir(parents=True)
+    js_cfg = RepoConfig(
+        name="jsfixture", language=Language.JAVASCRIPT, runner="mocha", test_prefix="tests/"
+    )
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=js_cfg) as ws:
+        link = ws.root / "node_modules"
+        assert not link.exists() and ws.harness_files == {}  # the clone has no tree
+        before = ws.diff_stats()
+        link.symlink_to(sealed)
+        assert "node_modules" in ws.touched_files()  # writable: not a sealed set
+        sealed.chmod(0o555)
+        try:
+            assert "node_modules" not in ws.touched_files()
+            assert ws.harness_unchanged("node_modules")
+            assert ws.diff_stats() == before
+            link.unlink()
+            link.symlink_to(elsewhere)
+            assert "node_modules" in ws.touched_files()
+            link.unlink()
+            (link / "pkg").mkdir(parents=True)
+            (link / "pkg" / "index.js").write_text("x\n", encoding="utf-8")
+            assert any(f.startswith("node_modules") for f in ws.touched_files())
+        finally:
+            sealed.chmod(0o755)
+
+
 def test_parent_text(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
         assert ws.parent_text(pr.SRC) == pr.SRC_INITIAL

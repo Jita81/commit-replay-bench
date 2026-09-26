@@ -8,7 +8,8 @@ already present (CI: the reference image it just built from
 
 * ``qualify`` + ``grade`` run and parse under ``--network=none`` (gold → clean);
 * a test that opens ``https://example.com`` FAILS (the network is truly off);
-* a test that writes ``/work/hacked.txt`` FAILS (the worktree is read-only);
+* the worktree is read-only at ``/src``, and a test that writes ``/work/hacked.txt``
+  writes a throwaway copy — it passes and nothing reaches the host (ADR-0019 §7);
 * the worktree on the host is byte-identical after a sandboxed run;
 * a cancel and the wall clock on ``DockerExecutor.run`` (the non-stream path the grade
   stage uses) kill the CONTAINER, confirmed by the daemon, and ``docker ps`` no longer
@@ -28,7 +29,8 @@ What it is:   The sandbox suite — the instrument inside ``DockerExecutor`` aga
               and proof that the walls hold.
 What it does: Pins that the executor is hardened, that ``qualify`` and ``grade`` run and parse
               under ``--network=none`` (gold → clean), that a test opening ``https://example.com``
-              FAILS, that a test writing ``/work/hacked.txt`` FAILS (read-only worktree), that
+              FAILS, that the worktree is read-only at ``/src`` and a test writing
+              ``/work/hacked.txt`` writes only a throwaway copy, that
               the host worktree is byte-identical after a sandboxed run, and that a cancel /
               the wall clock on ``run()`` ends in a daemon-confirmed ``docker kill`` of the
               container (``kill_confirmed`` True, nothing reported, ``docker ps`` empty).
@@ -66,14 +68,21 @@ from pathlib import Path
 
 import pytest
 
-from crb.core.execution import Command, DockerExecutor, DockerSettings, UnconfirmedKill
+from crb.core.execution import (
+    TREE_COPY_MARKER,
+    TREE_COPY_RC,
+    Command,
+    DockerExecutor,
+    DockerSettings,
+    UnconfirmedKill,
+)
 from crb.core.git import GitRepo
-from crb.core.grade import grade
 from crb.core.mine import Candidate, qualify
 from crb.core.runners import get_runner
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from fixtures.posture import grade_adhoc as grade
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -235,14 +244,23 @@ def test_network_is_off(trial, task, runner, executor):
     assert "URLError" in run.tail, run.tail
 
 
-def test_worktree_is_read_only(trial, task, runner, executor):
+def test_worktree_is_read_only_and_a_test_writes_only_a_throwaway_copy(
+    trial, task, runner, executor
+):
+    """ADR-0019 §7: the worktree is read-only at ``/src``; a test that writes into ``/work``
+    writes a throwaway copy (so it PASSES, as it does on the host), and nothing it writes
+    reaches the host tree."""
     trial.overlay_sources(task.src_files)
     (trial.root / pyrepo_min.WRITE_TEST).write_text(pyrepo_min.WRITE_TEST_SRC, encoding="utf-8")
+    before = _snapshot(trial.root)
     run = runner.run(executor, trial.root, (pyrepo_min.WRITE_TEST,))
-    assert run.red and not run.timed_out
-    assert run.failing == frozenset({pyrepo_min.WRITE_TEST_ID})
-    assert "Read-only file system" in run.tail, run.tail
+    assert run.green, run.tail
     assert not (trial.root / "hacked.txt").exists()
+    assert _snapshot(trial.root) == before
+    src = executor.run(
+        Command(("sh", "-c", "echo owned > /src/hacked.txt"), trial.root, timeout=60)
+    )
+    assert not src.ok and "Read-only file system" in src.combined, src.combined
 
 
 def test_host_worktree_unchanged_after_sandboxed_run(trial, task, config, runner, executor):
@@ -255,6 +273,79 @@ def test_host_worktree_unchanged_after_sandboxed_run(trial, task, config, runner
     assert trial.touched_files() == sorted({*task.src_files, *task.test_files})
     stray = {p.name for p in trial.root.iterdir()} - top_before - _ALLOWED_HOST_WRITES
     assert not stray, f"sandboxed run left {sorted(stray)} on the host"
+
+
+# ---------------------------------------------------------------------------
+# Host modes never hide the tree from the sandbox uid (PR #56, the sandbox-images job)
+# ---------------------------------------------------------------------------
+
+#: What a real worktree can hold that the sandbox uid cannot read as it stands: a
+#: directory with no mode bits, a file only its owner may read (a restrictive umask, a
+#: tool's private cache) and a file with no mode bits at all.
+_HIDDEN = {"locked/inner.txt": "inner", "owner_only.txt": "owner", "no_bits.txt": "none"}
+
+
+def _plant_hidden(root: Path) -> None:
+    for rel, text in _HIDDEN.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text + "\n", encoding="utf-8")
+    (root / "owner_only.txt").chmod(0o600)
+    (root / "no_bits.txt").chmod(0o000)
+    (root / "locked").chmod(0o000)
+
+
+def _unplant_hidden(root: Path) -> None:
+    """Give the owner its modes back so the worktree can be removed whatever the run did."""
+    (root / "locked").chmod(0o755)
+    for rel in _HIDDEN:
+        (root / rel).chmod(0o644)
+
+
+@pytest.mark.parametrize("tree", ["copy", "readonly"])
+def test_a_path_host_modes_hide_from_the_sandbox_uid_still_reaches_the_tests(trial, tree):
+    """The tree the tests see is the WHOLE worktree, whatever its host modes: a mode-000
+    directory, a mode-600 file and a mode-000 file are read inside the container, in the
+    throwaway copy and in the read-only tree alike — never a ``tree_copy_failed`` the model
+    would be disqualified for, never a path silently left out of the copy."""
+    _plant_hidden(trial.root)
+    try:
+        ex = DockerExecutor(DockerSettings(image=IMAGE, tree=tree))
+        r = ex.run(Command(("cat", *_HIDDEN), trial.root, timeout=60))
+    finally:
+        _unplant_hidden(trial.root)
+    assert r.ok and r.env_error == "", r.combined
+    assert r.stdout.split() == list(_HIDDEN.values())
+
+
+def test_a_command_after_a_runner_wrote_its_scratch_still_copies_the_tree(
+    trial, task, runner, executor
+):
+    """The CI failure, reproduced from the product's own steps: the pytest runner declares
+    ``.pytest_scratch`` writable (created 0733 on the host); the NEXT command, which does
+    not declare it, copies the tree including that directory — and must not fail on it."""
+    trial.overlay_sources(task.src_files)
+    assert runner.run(executor, trial.root, (pyrepo_min.TEST_SUB,)).green
+    r = executor.run(Command(("ls", "-A"), trial.root, timeout=60))
+    assert r.ok and r.env_error == "", r.combined
+    assert ".pytest_scratch" in r.stdout.split()
+
+
+def test_the_copy_fails_closed_on_a_path_it_cannot_read_never_drops_it(trial, executor):
+    """Belt and braces under the host-side grant: the copy script itself, run WITHOUT the
+    grant, stops with the tree-copy marker on a directory it cannot read. Under colima GNU
+    tar calls such a directory "removed before we read it" and exits 1 — the exit the script
+    must tolerate for "file changed" — so the rc alone would have dropped it silently."""
+    locked = trial.root / "locked"
+    locked.mkdir()
+    (locked / "inner.txt").write_text("inner\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        argv = executor.build_argv(Command(("true",), trial.root, timeout=60))
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=120, check=False)
+    finally:
+        locked.chmod(0o755)
+    assert r.returncode == TREE_COPY_RC and TREE_COPY_MARKER in r.stderr, r.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -309,3 +400,13 @@ def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
     assert _ps(r.container) == ""
+
+
+def test_a_command_that_reads_no_tree_runs_in_an_empty_scratch(trial, executor):
+    """The toolchain probe's shape (``Command(tree=False)``): nothing of the worktree is in
+    the container — no ``/src``, an empty ``/work`` — and the command still runs, so a
+    posture is resolved without copying the clone it is resolved in (CodeRabbit on PR #56)."""
+    r = executor.run(
+        Command(("sh", "-c", "ls -A /work; test ! -e /src && echo no-src"), trial.root, tree=False)
+    )
+    assert r.ok and r.stdout.split() == ["no-src"], r.combined

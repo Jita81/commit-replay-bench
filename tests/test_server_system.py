@@ -74,6 +74,7 @@ PROBE_NAMES = {
     "append_only",
     "ledger",
     "sandbox",
+    "provision",
     "toolchains",
     "builders",
     "worker",
@@ -161,7 +162,7 @@ class TestHealth:
         assert body["role"] == "all"  # no CRB_ROLE: every probe evaluated
         ao = _probe(body, "append_only")
         assert ao["status"] == "ok"
-        assert ao["data"] == {"triggers": 10, "expected": 10}
+        assert ao["data"] == {"triggers": 12, "expected": 12}
         assert _probe(body, "db")["status"] == "ok"
         assert _probe(body, "db")["data"]["users"] == 1
         assert _probe(body, "ledger") == {
@@ -491,7 +492,7 @@ class TestHealth:
     ) -> None:
         """The whole ``/health`` body, not one probe: a store that raises reaches ``db``,
         ``migrations``, ``append_only``, ``ledger`` and ``worker``; a probe module that
-        raises reaches ``sandbox``, ``toolchains`` and ``builders``. Each serves ONE fixed
+        raises reaches ``sandbox``, ``provision``, ``toolchains`` and ``builders``. Each serves ONE fixed
         sentence (``<probe> could not be read — see the API log, request id …``) with
         empty ``data``; the driver message — which for PostgreSQL carries host, user and
         DSN — appears nowhere in the body and once per probe in the log, with the id."""
@@ -508,6 +509,7 @@ class TestHealth:
 
         for fn in ("probe_docker", "probe_toolchains", "probe_builders"):
             monkeypatch.setattr(f"crb.server.routes.system.probes.{fn}", _boom)
+        monkeypatch.setattr("crb.server.routes.system.probe_provision", _boom)
         settings = make_settings(tmp_path, sandbox={"executor": "docker"})
         with caplog.at_level(logging.ERROR, logger="crb.observability.probes"):
             body = collect_health(_factory, settings, role="all", request_id="req-42")  # type: ignore[arg-type]
@@ -593,6 +595,61 @@ class TestRoleAwareSandboxProbe:
             others = [p["status"] for p in body["probes"] if p["name"] != "sandbox"]
             assert body["status"] == ("degraded" if "degraded" in others else "ok")
             assert "down" not in others
+
+    def test_the_provision_probe_is_skipped_when_off_and_on_the_api(
+        self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR-0019: the worker fetches, so an ``api`` process skips the provision probe; a
+        worker skips it while provisioning is off — and says what that means under docker."""
+        settings = make_settings(tmp_path)
+        for role, needle in (("api", "worker's"), ("worker", "CRB_PROVISION__ENABLED")):
+            monkeypatch.setenv("CRB_ROLE", role)
+            with TestClient(create_app(settings, factory)) as c:
+                body = c.get(f"{API_PREFIX}/health").json()
+            provision = _probe(body, "provision")
+            assert provision["status"] == "skipped", provision
+            assert needle in provision["detail"] and provision["data"]["enabled"] is False
+        from crb.server.routes.system import probe_provision_role
+
+        on = make_settings(tmp_path, provision={"enabled": True, "go_proxy": "file:///nowhere"})
+        monkeypatch.setenv("PATH", str(tmp_path / "no-bin"))
+        worker = probe_provision_role(on, "worker")
+        assert worker.status == "down" and "docker" in worker.detail
+        assert probe_provision_role(on, "api").status == "skipped"
+
+    def test_a_readiness_poll_reuses_the_provision_probe_for_a_bounded_time(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The provisioning probe inspects three images and a network and starts a
+        container; a readiness poll every few seconds must not do that each time
+        (CodeRabbit on PR #56). A result is reused for ``PROVISION_PROBE_TTL_S`` when it is
+        ``ok`` and ``PROVISION_PROBE_DOWN_TTL_S`` when it is not, so a fixed store is seen
+        soon; off, nothing is probed or cached."""
+        from crb.server.routes import system
+
+        calls: list[str] = []
+        answer = {"status": "ok"}
+
+        def _probe(config: Any, **_: Any) -> ProbeResult:
+            calls.append(str(config.store))
+            return ProbeResult("provision", answer["status"], "x", {"enabled": config.enabled})
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(system, "probe_provision", _probe)
+        monkeypatch.setattr(system, "_monotonic", lambda: clock["t"])
+        on = make_settings(tmp_path, provision={"enabled": True, "go_proxy": "file:///nowhere"})
+        for _ in range(3):
+            assert system.probe_provision_role(on, "worker").status == "ok"
+        assert len(calls) == 1
+        clock["t"] += system.PROVISION_PROBE_TTL_S + 1
+        answer["status"] = "down"
+        assert system.probe_provision_role(on, "all").status == "down" and len(calls) == 2
+        clock["t"] += system.PROVISION_PROBE_DOWN_TTL_S - 1
+        assert system.probe_provision_role(on, "all").status == "down" and len(calls) == 2
+        clock["t"] += 2
+        answer["status"] = "ok"
+        assert system.probe_provision_role(on, "all").status == "ok" and len(calls) == 3
+        assert system.PROVISION_PROBE_DOWN_TTL_S < system.PROVISION_PROBE_TTL_S <= 300
 
     def test_worker_and_all_roles_probe_the_sandbox(
         self, tmp_path: Path, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch

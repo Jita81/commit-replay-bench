@@ -8,13 +8,11 @@
 #
 # What it contains — the toolchain and the test runner the `node` runner invokes, nothing
 # else: Node.js 22 (its built-in test runner and JUnit reporter) and the npm the base image
-# ships, which a derived image uses to install a repository's devDependencies. No git, no
-# compiler, nothing that listens. The vitest / jest / mocha runners resolve their binary
-# from PATH and the repository's devDependencies from NODE_PATH — neither is in this image,
-# and a host setup's `node_modules` is NOT visible inside (the sandbox mounts only the
-# worktree, whose `node_modules` is a symlink to the host clone that dangles in the
-# container) — a repository that needs them extends this image with an `npm ci` of its
-# lockfile: deploy/sandbox/README.md §4.
+# ships (`npm ls` is the environment probe). No git, no compiler, nothing that listens. The
+# vitest / jest / mocha runners resolve their binary from PATH and the repository's
+# devDependencies from NODE_PATH — neither is in this image: a repository's `node_modules`
+# is provisioned per task from its committed package-lock.json and mounted read-only at
+# /work/node_modules, with its .bin on PATH (ADR-0019, deploy/sandbox/README.md §4).
 #
 # Build from deploy/sandbox:
 #

@@ -44,8 +44,8 @@ from crb.builders import budget as bud
 from crb.builders import openai_client as oc
 from crb.builders.openai_agent import RUN_COMMAND_ALLOWLIST, OpenAIAgentBuilder, tool_schema
 from crb.core.execution import LocalExecutor
-from crb.core.grade import grade
 from crb.core.runners import get_runner
+from fixtures.posture import grade_adhoc as grade
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 if str(_FIXTURES) not in sys.path:

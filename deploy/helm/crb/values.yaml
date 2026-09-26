@@ -70,6 +70,33 @@ config:
   # shipped reference images (deploy/sandbox/README.md) pushed to your registry, pinned by
   # digest, and pre-pulled into the daemon the worker talks to (the worker never pulls).
   CRB_SANDBOX__IMAGE: ""
+  # ADR-0019 §7: tests run in a throwaway copy of the read-only worktree (a tmpfs capped at
+  # WORK_SIZE — it counts against the sandbox's memory). `readonly` keeps the worktree
+  # itself read-only: a different posture, qualified separately.
+  CRB_SANDBOX__TREE: "copy"
+  CRB_SANDBOX__WORK_SIZE: "1g"
+  # Dependency provisioning (ADR-0019, docs/DEPLOYMENT.md §3.4). OFF by default: under docker a
+  # repository that declares dependencies is refused PROVISION_DISABLED before any spend.
+  # Switched on, each task's dependencies are fetched OUTSIDE the test container by a fetch
+  # container behind the allowlisting proxy, sealed under $CRB_HOME/deps on the work volume
+  # (the dind sidecar sees it at the same path) and mounted read-only. In prod point the
+  # registries at your mirror (a public registry is refused unless ALLOW_PUBLIC) and keep the
+  # fetch images pinned by digest and pre-pulled into the daemon.
+  CRB_PROVISION__ENABLED: "false"
+  CRB_PROVISION__GO_PROXY: "https://proxy.golang.org"
+  CRB_PROVISION__GO_SUMDB: "sum.golang.org"
+  CRB_PROVISION__PYPI_INDEX: "https://pypi.org/simple"
+  CRB_PROVISION__PYPI_FILES_HOST: "files.pythonhosted.org"
+  CRB_PROVISION__NPM_REGISTRY: "https://registry.npmjs.org"
+  CRB_PROVISION__EXTRA_ALLOW_HOSTS: ""
+  CRB_PROVISION__ALLOW_PUBLIC: "false"
+  CRB_PROVISION__EGRESS_NETWORK: "bridge"
+  # an image with python3 for the proxy sidecar (the builder image, or the python fetch image)
+  CRB_PROVISION__PROXY_IMAGE: ""
+  # the sealed sets on the work volume: keep worker.workDir.size comfortably above this
+  CRB_PROVISION__MAX_TOTAL_GB: "20"
+  CRB_PROVISION__MAX_BUNDLE_MB: "2048"
+  CRB_PROVISION__FETCH_TIMEOUT_S: "900"
 
 # Extra env entries (list of core/v1 EnvVar) appended to every crb container.
 extraEnv: []
@@ -228,6 +255,12 @@ networkPolicy:
   # The OIDC issuer (api only). login.microsoftonline.com resolves to Microsoft ranges —
   # use the Azure service tag equivalent CIDRs, or an egress proxy CIDR.
   oidc:
+    cidrs: []
+    port: 443
+  # The package mirror the dependency fetch reaches (ADR-0019; worker only, and only when
+  # CRB_PROVISION__ENABLED). Its private endpoint IP(s) as /32. Under worker.sandbox.mode=
+  # hostSocket the fetch runs on the node's network and this policy does not cover it.
+  packageMirror:
     cidrs: []
     port: 443
   # Arbitrary extra egress rules (networking.k8s.io/v1 NetworkPolicyEgressRule) applied to

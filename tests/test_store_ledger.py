@@ -149,7 +149,8 @@ def test_verify_detects_a_row_tampered_underneath_the_triggers(
 def test_labels_round_trip_through_json_column(ledger: DbLedger) -> None:
     r = ledger.append(grade_row(labels={"campaign": "t9", "seed": "1"}))
     stored = next(iter(ledger.rows()))
-    assert stored.labels == {"campaign": "t9", "seed": "1"}
+    assert stored.labels == r.labels  # the posture labels (ADR-0019) round-trip too
+    assert stored.labels["campaign"] == "t9" and stored.labels["seed"] == "1"
     assert stored.row_hash == r.row_hash and stored.verify_hash()
 
 

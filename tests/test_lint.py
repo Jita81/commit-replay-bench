@@ -67,6 +67,7 @@ from crb.core.runners import get_runner
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import Language, RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from fixtures.posture import grade_adhoc, grade_witnessed
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -134,9 +135,21 @@ def _trial(repo: GitRepo, config: RepoConfig, task: TaskSpec, dest: Path) -> Wor
     return langs.trial_worktree(repo, cand, dest, config)
 
 
-def _grade(ws: Workspace, task: TaskSpec, config: RepoConfig, **kw: Any) -> g.GradeResult:
-    return g.grade(
-        ws, task, config=config, runner=get_runner(config), executor=LocalExecutor(), **kw
+def _grade(
+    ws: Workspace, task: TaskSpec, config: RepoConfig, *, gold_lint: bool | None = True, **kw: Any
+) -> g.GradeResult:
+    """A witnessed grade whose qualification says the gold PASSED belt 5 (``gold_lint``
+    True) — what ``qualify_task`` records for a lint-clean gold, and the only fact that
+    makes a lint rejection the model's (ADR-0019 §5). A case about the other two readings
+    passes ``gold_lint`` itself."""
+    return grade_witnessed(
+        ws,
+        task,
+        config=config,
+        runner=get_runner(config),
+        executor=LocalExecutor(),
+        gold_lint=gold_lint,
+        **kw,
     )
 
 
@@ -531,6 +544,45 @@ def test_accepting_linter_is_clean_and_true(
     assert row.clean and row.repo_lint_clean is True and row.failure_kind == ""
 
 
+@pytest.mark.parametrize("gold_lint", [True, False, None])
+def test_a_lint_rejection_names_the_gold_witness_only_when_the_gold_passed_belt_5(
+    pyfix: tuple[GitRepo, str, RepoConfig], tmp_path: Path, gold_lint: bool | None
+) -> None:
+    """ADR-0019 §5, belt 5: ``lint_gold_ok`` says the gold passed belt 5 at qualification,
+    so it is named ONLY when the qualification measured that (``gold.lint is True``). A gold
+    that failed it makes the rejection the posture's (``GOLD_LINT_RED``); a gold whose belt 5
+    was never measured — a factory item, a gold tree with no lint plan — leaves the
+    rejection with no witness: an environment row (``LINT_UNWITNESSED``, harness, revokes
+    nothing), never a ``lint`` row that asserts a gold fact nobody measured (CodeRabbit on
+    PR #56). Unwitnessed ad hoc it reads ``unwitnessed``, as every other belt does."""
+    repo, feat_sha, config = pyfix
+    task = _mine(repo, config, feat_sha, tmp_path)
+    script = _script(tmp_path / "bin" / "lint", 'echo "$@: E501 line too long"\nexit 1\n')
+    config = _config_with(config, lint=_fake_lint_config(script, exts=[".py"]))
+    ws = _trial(repo, config, task, tmp_path / "t")
+    ws.overlay_sources(task.src_files)
+    res = _grade(ws, task, config, gold_lint=gold_lint)
+    assert res.belts == g.Belts(True, True, True, True, False) and not res.clean
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    if gold_lint is True:
+        assert res.blame_control == g.BLAME_LINT_GOLD_OK and res.error == ""
+        assert row.failure_kind == lg.FAILURE_LINT
+        assert row.labels[lg.LABEL_BLAME_CONTROL] == g.BLAME_LINT_GOLD_OK
+        return
+    assert not res.blamed and res.blame_control == ""
+    assert res.error.startswith(g.ENVIRONMENT_PREFIX)
+    code = g.ENV_CODE_GOLD_LINT if gold_lint is False else g.ENV_CODE_LINT_UNWITNESSED
+    assert res.env_code == code
+    assert row.failure_kind == lg.FAILURE_HARNESS and lg.LABEL_BLAME_CONTROL not in row.labels
+    if gold_lint is None:  # unwitnessed ad hoc: the label every other belt gets there
+        ws2 = _trial(repo, config, task, tmp_path / "t2")
+        ws2.overlay_sources(task.src_files)
+        adhoc = grade_adhoc(
+            ws2, task, config=config, runner=get_runner(config), executor=LocalExecutor()
+        )
+        assert adhoc.blame_control == g.BLAME_UNWITNESSED
+
+
 def test_lint_timeout_fails_the_belt_closed(
     pyfix: tuple[GitRepo, str, RepoConfig], tmp_path: Path
 ) -> None:
@@ -921,7 +973,7 @@ def test_lint_run_is_in_the_evidence_pack_and_survives_the_round_trip(
     d = pack.to_dict()
     assert d["grade"]["lint_run"]["ok"] is False and d["grade"]["repo_lint_clean"] is False
     assert "ghp_" + "b" * 40 not in json.dumps(d)  # redacted at construction
-    assert d["apparatus"]["apparatus_version"] == "2.2"
+    assert d["apparatus"]["apparatus_version"] == "2.3"
     assert os.environ.get("CRB_HOME") is None  # never the live stack
 
 

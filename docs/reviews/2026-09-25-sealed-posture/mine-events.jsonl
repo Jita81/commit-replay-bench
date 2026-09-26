@@ -1,0 +1,7 @@
+{"event": "mine.candidate", "pool": "standard", "repo": "cobra", "sha": "746ef07158728502482cea9f880a6f4b21ef29a9"}
+{"event": "provision.fetch", "hosts": ["proxy.golang.org", "sum.golang.org"], "image": "golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d", "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6", "lang": "go", "mode": "proxy", "recipe": "go.modcache.v1", "step": "fetch"}
+{"bytes": 1859788, "digest": "sha256:0338fa2960a873a2ae7270d97092700f6c6b07158cc8074303d2a580a2fef102", "event": "provision.seal", "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6", "lang": "go"}
+{"code": "", "duration_s": 61.982, "event": "qualify.task", "fingerprint": "7c3546c6809652d19b68f15dc59f25063b19922cd050ef442a8d657ef6f0458a", "message": "", "posture_class": "docker/copy/sealed", "posture_id": "pst_9108b668d829d89d832eaaad", "state": "qualified", "task": "746ef07158728502482cea9f880a6f4b21ef29a9"}
+{"baseline_failing": 1, "cls": "bug.fix", "event": "mine.red", "sha": "746ef07158728502482cea9f880a6f4b21ef29a9", "size": "XS"}
+{"clean": true, "event": "mine.gold", "lint": true, "note": "", "sha": "746ef07158728502482cea9f880a6f4b21ef29a9"}
+{"event": "mine.done", "examined": 1, "found": 1, "pool": "standard", "repo": "cobra"}

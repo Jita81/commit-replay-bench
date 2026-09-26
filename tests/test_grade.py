@@ -54,6 +54,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.posture import grade_adhoc
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -80,7 +81,7 @@ def _grade(
     executor: LocalExecutor,
     **kw: Any,
 ) -> g.GradeResult:
-    return g.grade(ws, task, config=pyrepo.config, runner=runner, executor=executor, **kw)
+    return grade_adhoc(ws, task, config=pyrepo.config, runner=runner, executor=executor, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -936,12 +937,12 @@ def test_poison_flagged_skip_worktree_is_disqualified(
             assert (
                 "conftest.py" not in ws.repo.run("diff", "--name-only", "HEAD", cwd=ws.root).lines
             )
-            res = g.grade(ws, task, config=pyrepo.config, runner=runner, executor=executor)
+            res = grade_adhoc(ws, task, config=pyrepo.config, runner=runner, executor=executor)
             _assert_worktree_dq(res, "conftest.py")
             assert "skip-worktree / assume-unchanged" in res.dq_reason
             # the flag alone, on an honest file, is still a DQ: the ground moved
             ws.repo.run("update-index", undo, "conftest.py", cwd=ws.root, check=True)
-            res = g.grade(ws, task, config=pyrepo.config, runner=runner, executor=executor)
+            res = grade_adhoc(ws, task, config=pyrepo.config, runner=runner, executor=executor)
             _assert_infra_dq(res, "conftest.py")  # the poison, seen by belt 1b
         finally:
             ws.remove()
@@ -965,7 +966,7 @@ def test_gold_still_grades_clean_with_a_tracked_conftest_at_the_parent(
     try:
         ws.overlay_tests([pr.TEST_MULTIPLY])
         ws.overlay_sources([pr.SRC])
-        res = g.grade(
+        res = grade_adhoc(
             ws, task, config=pyrepo.config, runner=PytestRunner(pyrepo.config), executor=executor
         )
         assert res.clean is True and res.changed_files == (pr.SRC,)
@@ -1000,10 +1001,10 @@ def test_harness_written_conftest_is_not_a_builder_change_until_edited(
     try:
         ws.overlay_tests([pr.TEST_SUBTRACT])
         pr.apply_gold(ws)
-        res = g.grade(ws, feat_task, config=cfg, runner=runner, executor=executor)
+        res = grade_adhoc(ws, feat_task, config=cfg, runner=runner, executor=executor)
         assert res.clean is True and res.changed_files == (pr.SRC,)
         (ws.root / "conftest.py").write_text("# op\nimport calc\n", encoding="utf-8")
-        res = g.grade(ws, feat_task, config=cfg, runner=runner, executor=executor)
+        res = grade_adhoc(ws, feat_task, config=cfg, runner=runner, executor=executor)
         _assert_infra_dq(res, "conftest.py")
     finally:
         ws.remove()
@@ -1144,7 +1145,7 @@ def _lang_trial(
 def _grade_lang(
     ws: Workspace, task: TaskSpec, config: RepoConfig, executor: LocalExecutor
 ) -> g.GradeResult:
-    return g.grade(ws, task, config=config, runner=get_runner(config), executor=executor)
+    return grade_adhoc(ws, task, config=config, runner=get_runner(config), executor=executor)
 
 
 @pytest.mark.parametrize(
@@ -1342,3 +1343,355 @@ def test_rust_infra_edit_is_disqualified_honest_version_bump_is_clean(
             assert "Cargo.toml" in res.changed_files
     finally:
         ws.remove()
+
+
+# ---------------------------------------------------------------------------
+# ADR-0019: the posture context and the witness
+# ---------------------------------------------------------------------------
+
+from collections.abc import Collection, Sequence  # noqa: E402
+
+from crb.core import ledger as lg  # noqa: E402
+from crb.core.deps import HOST_ENV_DEPS, ClosureViolation, TaskDeps  # noqa: E402
+from crb.core.execution import ExecResult  # noqa: E402
+from crb.core.posture import PostureMismatch  # noqa: E402
+from crb.core.qualify import GoldWitness, Qualification  # noqa: E402
+from fixtures import posture as pfx  # noqa: E402
+
+
+class _Counting(PytestRunner):
+    """The real pytest runner, counting its runs; ``script`` replaces them when set."""
+
+    def __init__(self, *a: Any, script: list[rb.TestRun] | None = None, **kw: Any) -> None:
+        super().__init__(*a, **kw)
+        self.calls = 0
+        self.script = list(script or [])
+        self.on_run: Callable[[Path], None] | None = None
+
+    def run(self, executor: Any, root: Path, scope: Any, *, timeout: int = 0) -> rb.TestRun:
+        self.calls += 1
+        if self.on_run is not None:
+            self.on_run(Path(root))
+        if self.script:
+            return self.script.pop(0)
+        return super().run(executor, root, scope, timeout=timeout)
+
+
+class _Scripted:
+    """A witness whose control answer is fixed (green or red)."""
+
+    def __init__(self, green: bool, kind: str = g.BLAME_GOLD_GREEN) -> None:
+        self.green, self.kind = green, kind
+        self.asked: list[tuple[tuple[str, ...], str, Collection[str] | None]] = []
+
+    def control(
+        self, scope: Sequence[str], *, why: str, allow_failing: Collection[str] | None = None
+    ) -> g.ControlRun:
+        self.asked.append((tuple(scope), why, allow_failing))
+        return g.ControlRun(
+            self.kind,
+            tuple(scope),
+            self.green,
+            rc=0 if self.green else 1,
+            tail="" if self.green else "go: module lookup disabled by GOPROXY=off",
+        )
+
+
+def test_a_blamed_grade_needs_a_witness_from_the_same_posture() -> None:
+    red = g.Belts(True, False)
+    with pytest.raises(g.MisattributionViolation):
+        g.GradeResult("a" * 40, "r", g.MODE_SIGHTED, clean=False, belts=red)
+    with pytest.raises(g.MisattributionViolation):  # belt 3, 4 or 5 alike
+        g.GradeResult(
+            "a" * 40, "r", g.MODE_SIGHTED, clean=False, belts=g.Belts(True, True, True, False)
+        )
+    ok = g.GradeResult(
+        "a" * 40, "r", g.MODE_SIGHTED, clean=False, belts=red, blame_control=g.BLAME_GOLD_GREEN
+    )
+    assert ok.blamed and ok.to_dict()["blame_control"] == "gold_green"
+    # not blamed: an error, a disqualification or a clean verdict names no witness
+    assert not g.GradeResult(
+        "a" * 40, "r", g.MODE_SIGHTED, clean=False, belts=red, error="x"
+    ).blamed
+    with pytest.raises(ValueError, match="blame_control"):
+        g.GradeResult("a" * 40, "r", g.MODE_SIGHTED, clean=False, belts=red, blame_control="vibes")
+    # at the ledger, "unwitnessed" is not a witness: a model-failure row is refused
+    unwitnessed = g.GradeResult(
+        "a" * 40,
+        "r",
+        g.MODE_SIGHTED,
+        clean=False,
+        belts=red,
+        blame_control=g.BLAME_UNWITNESSED,
+        posture_id="pst_x",
+        posture_class="local/inplace/host-env",
+        qualification_id="q1",
+    )
+    task = TaskSpec(
+        task_id="a" * 40,
+        repo="r",
+        subject="s",
+        authored="2026-01-01T00:00:00Z",
+        test_files=("t.py",),
+        src_files=("s.py",),
+        target_tests=("t.py",),
+        belt_scope=(),
+    )
+    with pytest.raises(g.MisattributionViolation, match="without a witness"):
+        lg.grade_row_from_result(unwitnessed, task, pack_hash="c" * 64)
+
+
+def test_a_red_gold_control_is_environment_not_builder_red(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+) -> None:
+    witness = _Scripted(green=False)
+    res = pfx.grade_adhoc(
+        trial, feat_task, config=pyrepo.config, runner=runner, executor=executor, witness=witness
+    )  # the builder did nothing: the target is red
+    assert res.belts.target_green is False
+    assert res.error.startswith("environment: gold control red in pst_")
+    assert res.env_code == g.ENV_CODE_GOLD_CONTROL_RED and not res.blamed
+    assert res.control is not None and res.extra["control"]["green"] is False
+    assert witness.asked and witness.asked[0][0] == feat_task.target_tests
+    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    assert row.failure_kind == lg.FAILURE_HARNESS  # the unchanged rule: never the model
+    assert row.labels[lg.LABEL_ENV_CODE] == "GOLD_CONTROL_RED"
+    assert lg.LABEL_BLAME_CONTROL not in row.labels
+    split = lg.failure_split([row])
+    assert split.model_n == 0 and split.n == 1
+
+
+def test_a_green_gold_control_keeps_builder_red_and_names_the_witness(
+    trial: Workspace,
+    feat_task: TaskSpec,
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    witness = GoldWitness(
+        pyrepo.repo,
+        pyrepo.config,
+        feat_task,
+        runner=runner,
+        executor=executor,
+        scratch=tmp_path / "witness",
+        binding=HOST_ENV_DEPS,
+    )
+    res = pfx.grade_adhoc(
+        trial, feat_task, config=pyrepo.config, runner=runner, executor=executor, witness=witness
+    )
+    assert res.belts.target_green is False and not res.error
+    assert res.blame_control == g.BLAME_GOLD_GREEN and res.control is not None and res.control.green
+    assert witness.runs and witness.runs[0].scope == feat_task.target_tests
+    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    assert row.failure_kind == lg.FAILURE_BUILDER_RED
+    assert row.labels[lg.LABEL_BLAME_CONTROL] == "gold_green"
+    assert row.labels[lg.LABEL_POSTURE_ID].startswith("pst_") and row.labels[lg.LABEL_QUALIFICATION]
+
+
+def test_a_spec_projected_for_another_posture_raises_before_any_run(
+    trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
+) -> None:
+    counting = _Counting(pyrepo.config)
+    spec, ctx = pfx.context(feat_task, executor)
+    other = Qualification.from_dict(
+        {
+            **ctx.qualification.to_dict(),
+            "posture_id": "pst_" + "0" * 24,
+            "qualification_id": "other",
+        }
+    )
+    with pytest.raises(PostureMismatch, match="posture"):
+        g.grade(
+            trial,
+            other.project(feat_task),
+            ctx=ctx,
+            config=pyrepo.config,
+            runner=counting,
+            executor=executor,
+        )
+    with pytest.raises(PostureMismatch, match="projected"):
+        g.grade(trial, feat_task, ctx=ctx, config=pyrepo.config, runner=counting, executor=executor)
+
+    class _Docker:
+        name = "docker"
+
+    with pytest.raises(PostureMismatch, match="executor"):
+        g.grade(trial, spec, ctx=ctx, config=pyrepo.config, runner=counting, executor=_Docker())  # type: ignore[arg-type]
+    assert counting.calls == 0  # nothing ran, nothing was written
+
+
+def test_a_trial_outside_the_dependency_closure_is_disqualified_before_any_run(
+    trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
+) -> None:
+    class _Outside:
+        def select(self, root: Path) -> str:
+            raise ClosureViolation(
+                "requirements.txt selects requests==9.9 outside the task's closure"
+            )
+
+    counting = _Counting(pyrepo.config)
+    spec, ctx = pfx.context(feat_task, executor)
+    ctx = g.GradeContext(
+        ctx.posture,
+        ctx.qualification,
+        TaskDeps("host-env", "python", HOST_ENV_DEPS, HOST_ENV_DEPS, HOST_ENV_DEPS, _Outside()),
+    )
+    pr.apply_gold(trial)
+    res = g.grade(trial, spec, ctx=ctx, config=pyrepo.config, runner=counting, executor=executor)
+    assert res.disqualified and res.dq_reason.startswith("dependency closure: requirements.txt")
+    assert counting.calls == 0 and not res.clean and not res.blamed
+    assert lg.grade_row_from_result(res, spec, pack_hash="c" * 64).failure_kind == "disqualified"
+
+
+def test_a_file_a_test_writes_is_never_the_builders(
+    trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
+) -> None:
+    """The 2026-09-25 finding D5's other half: a test that writes into the tree. The
+    builder changed nothing; a file the TEST wrote must not satisfy belt 4."""
+    green = rb.TestRun(0, frozenset(), "ok")
+    counting = _Counting(pyrepo.config, script=[green, green])
+    counting.on_run = lambda root: (root / "src" / "calc" / "generated.py").write_text("X = 1\n")
+    res = pfx.grade_adhoc(
+        trial,
+        feat_task,
+        config=pyrepo.config,
+        runner=counting,
+        executor=executor,
+        witness=_Scripted(green=True),
+    )
+    assert counting.calls == 2
+    assert res.belts.target_green is True and res.belts.no_new_failures is True
+    assert res.belts.source_changed is False  # the tree after the runs has a new .py file
+    assert "src/calc/generated.py" not in res.changed_files
+    assert res.blame_control == g.BLAME_NO_SOURCE
+
+
+def test_belt_3_subtracts_the_in_posture_baseline_not_the_discovery_one(
+    trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
+) -> None:
+    only_here = "tests/test_calc.py::test_writes_into_its_package"
+    green = rb.TestRun(0, frozenset(), "ok")
+    belt = rb.TestRun(1, frozenset({only_here}), "1 failed")
+    pr.apply_gold(trial)
+    # the qualification in THIS posture: nothing failing at the parent …
+    spec, ctx = pfx.context(feat_task.with_(baseline_failing=[]), executor, witness=_Scripted(True))
+    # … while the discovery (host) value says it fails, smuggled back onto the spec
+    spec = spec.with_(baseline_failing=[only_here])
+    res = g.grade(
+        trial,
+        spec,
+        ctx=ctx,
+        config=pyrepo.config,
+        runner=_Counting(pyrepo.config, script=[green, belt]),
+        executor=executor,
+    )
+    assert res.belts.no_new_failures is False and res.new_failures == (only_here,)
+    assert res.blame_control == g.BLAME_GOLD_GREEN
+    spec2, ctx2 = pfx.context(
+        feat_task.with_(baseline_failing=[only_here]), executor, witness=_Scripted(True)
+    )
+    res2 = g.grade(
+        trial,
+        spec2.with_(baseline_failing=[]),
+        ctx=ctx2,
+        config=pyrepo.config,
+        runner=_Counting(pyrepo.config, script=[green, belt]),
+        executor=executor,
+    )
+    assert res2.belts.no_new_failures is True and res2.clean
+
+
+def test_an_env_error_run_is_never_a_verdict_and_the_witness_says_whose(
+    trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
+) -> None:
+    """A trial tree that did not copy into the sandbox is never a verdict. Whose fault it
+    was is a blame decision: the gold's tree runs the same scope first. Green → the
+    trial's own tree did not fit (a .venv, a 0600 file): disqualified, never an
+    environment row, so nothing is revoked. Red → an environment row that names its
+    control. No witness → an environment row that names none (never revokes)."""
+    broken = rb.TestRun(125, frozenset(), "", env_error="tree_copy_failed: no space left on /work")
+
+    def graded(witness: Any) -> g.GradeResult:
+        return pfx.grade_adhoc(
+            trial,
+            feat_task,
+            config=pyrepo.config,
+            runner=_Counting(pyrepo.config, script=[broken]),
+            executor=executor,
+            witness=witness,
+        )
+
+    green = _Scripted(green=True)
+    res = graded(green)
+    assert res.disqualified and res.dq_reason.startswith("trial tree: tree_copy_failed")
+    assert not res.error and not res.blamed and not res.env_code
+    assert green.asked == [(feat_task.target_tests, "trial tree: " + broken.env_error, None)]
+    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    assert row.failure_kind == "disqualified" and not lg.is_environment_error(row.error)
+
+    red = _Scripted(green=False)
+    res = graded(red)
+    assert res.error.startswith("environment: gold control red in pst_")
+    assert "trial tree: tree_copy_failed" in res.error and not res.disqualified
+    assert res.env_code == g.ENV_CODE_GOLD_CONTROL_RED and res.control is not None
+    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    assert row.failure_kind == "harness" and row.labels[lg.LABEL_ENV_CODE] == "GOLD_CONTROL_RED"
+
+    res = graded(None)
+    assert res.error.startswith("environment: tree_copy_failed")
+    assert res.env_code == g.ENV_CODE_TEST_RUN and res.control is None and not res.blamed
+    assert lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64).failure_kind == "harness"
+    assert ExecResult(0, "", "").env_error == ""
+
+
+def test_a_belt_scope_env_error_asks_the_witness_with_the_in_posture_baseline(
+    trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
+) -> None:
+    """The same rule at belt 3: the control is the belt scope, allowed the baseline."""
+    green = rb.TestRun(0, frozenset(), "ok")
+    broken = rb.TestRun(97, frozenset(), "", env_error="tree_copy_failed")
+    pr.apply_gold(trial)
+    base = "tests/test_calc.py::test_old"
+    spec, ctx = pfx.context(
+        feat_task.with_(baseline_failing=[base]), executor, witness=_Scripted(True)
+    )
+    res = g.grade(
+        trial,
+        spec,
+        ctx=ctx,
+        config=pyrepo.config,
+        runner=_Counting(pyrepo.config, script=[green, broken]),
+        executor=executor,
+    )
+    assert res.disqualified and res.dq_reason.startswith("trial tree: tree_copy_failed")
+    asked = ctx.witness.asked  # type: ignore[union-attr]
+    assert asked and asked[0][0] == feat_task.belt_scope and set(asked[0][2] or ()) == {base}
+
+
+def test_control_from_run_holds_belt_3_to_the_in_posture_baseline() -> None:
+    """Belt 3's control is green only when nothing OUTSIDE the baseline fails — the rule
+    that keeps an environment failure outside the target from being charged."""
+    from crb.core.qualify import control_from_run
+
+    base = {"t::old"}
+    new = rb.TestRun(1, frozenset({"t::writer"}), "1 failed")
+    old = rb.TestRun(1, frozenset({"t::old"}), "1 failed")
+    assert control_from_run("gold_green", ("t",), new, base).green is False
+    assert control_from_run("gold_green", ("t",), old, base).green is True
+    assert control_from_run("gold_green", ("t",), old, set()).green is False
+    assert control_from_run("gold_green", ("t",), rb.TestRun(0, frozenset(), ""), set()).green
+    # unattributable, timed out or unprepared is never green, whatever the baseline allows
+    for bad in (
+        rb.TestRun(2, frozenset(), "", parse_error="build failed"),
+        rb.TestRun(124, frozenset(), "", timed_out=True),
+        rb.TestRun(97, frozenset(), "", env_error="tree_copy_failed"),
+    ):
+        assert control_from_run("gold_green", ("t",), bad, base).green is False
+    # a target control (allow_failing=None) is the run's own green
+    assert control_from_run("gold_green", ("t",), old, None).green is False

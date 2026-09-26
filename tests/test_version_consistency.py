@@ -146,7 +146,7 @@ def test_release_tag_rule_accepts_only_the_version_tag() -> None:
 
 def test_apparatus_version_is_independent_of_the_package_version() -> None:
     assert re.match(r"^\d+\.\d+$", APPARATUS_VERSION)
-    assert APPARATUS_VERSION == "2.2"  # bumps only with an ADR (see crb.core.version)
+    assert APPARATUS_VERSION == "2.3"  # bumps only with an ADR (see crb.core.version; ADR-0019)
 
 
 def test_changelog_has_a_dated_header_for_the_current_version() -> None:
