@@ -703,6 +703,40 @@ def test_the_structural_ratchet_sees_workspace_handed_on_as_a_value(src: str) ->
     assert len(worktree_dest_offenders(src, "x.py")) == 1
 
 
+@pytest.mark.parametrize(
+    "src",
+    [
+        "def g(ws: Workspace, repo, sha, scratch):\n    return ws.create(repo, sha, scratch / sha)\n",
+        "def g(ws, repo, sha, scratch):\n    return type(ws).create(repo, sha, scratch / sha)\n",
+        "def g(ws, repo, ref, scratch):\n    return ws.__class__.at_ref(repo, ref, scratch / ref)\n",
+        # a name on the allowlist that the file rebinds is no longer the listed class
+        "from crb.builders.container import SealedCheckout\n"
+        "SealedCheckout = pick()\n"
+        "SealedCheckout.create(repo, sha, scratch / sha)\n",
+        "def g(SealedCheckout, repo, sha, scratch):\n"
+        "    SealedCheckout.create(repo, sha, scratch / sha)\n",
+    ],
+    ids=["instance", "type-of", "dunder-class", "allowlisted-rebound", "allowlisted-param"],
+)
+def test_the_structural_ratchet_reads_create_and_at_ref_on_any_receiver(src: str) -> None:
+    """PR #53 review, fourth round: ``Workspace.create`` and ``Workspace.at_ref`` are
+    classmethods, so an instance reaches them (``ws.create(…)``, ``type(ws).create(…)``)
+    and gave 0 offenders. Following the receiver back to ``Workspace`` was the gap, as
+    following the alias was; the attribute name is the class, as ``worktree_add`` already
+    is, and only a receiver on ``_NOT_A_WORKSPACE`` that the file never rebinds is let off."""
+    assert len(worktree_dest_offenders(src, "x.py")) == 1
+
+
+def test_the_structural_ratchet_reads_a_subscript_index_as_a_type_only_for_a_generic() -> None:
+    """PR #53 review, fourth round: every subscript index counted as a type, so
+    ``Box[Workspace]`` handed ``Workspace`` on unseen. Only a known generic's index is a
+    type now; here both the value and the call it reaches are named."""
+    src = "Box[Workspace].create(repo, sha, scratch / sha)\n"
+    found = worktree_dest_offenders(src, "x.py")
+    assert len(found) == 2
+    assert sum("(Workspace as a value)" in f for f in found) == 1
+
+
 def test_the_structural_ratchet_admits_workspace_as_a_type() -> None:
     """An annotation or a type expression names the class without handing it on, and a
     plain ``Workspace(…)`` wraps a directory that already exists: the replay-side modules
@@ -710,6 +744,8 @@ def test_the_structural_ratchet_admits_workspace_as_a_type() -> None:
     src = (
         "from collections.abc import Callable\n"
         "BuildFn = Callable[[Workspace, str], None]\n"
+        "Kinds = tuple[type[Workspace], ...]\n"
+        "Opt = typing.Optional[Workspace]\n"
         "held: Workspace | None = None\n"
         "def f(ws: Workspace, repo, sha, scratch) -> Workspace:\n"
         '    return Workspace.create(repo, sha, opaque_dest(scratch, "run"))\n'
@@ -730,8 +766,17 @@ def test_the_structural_ratchet_admits_workspace_as_a_type() -> None:
         '        dest = opaque_dest(scratch, "b")\n    g()\n    Workspace.create(repo, sha, dest)',
         # an explicit ``dest=`` beside ``**`` is resolvable
         'Workspace.create(repo, sha, dest=opaque_dest(scratch, "run"), **extra)',
+        # the OpenAI SDK's ``create`` makes a chat completion, not a worktree
+        "call = lambda: self.client.chat.completions.create(**kwargs)",
     ],
-    ids=["inline", "named", "not-a-worktree-constructor", "nonlocal-opaque", "kw-beside-star"],
+    ids=[
+        "inline",
+        "named",
+        "not-a-worktree-constructor",
+        "nonlocal-opaque",
+        "kw-beside-star",
+        "sdk-completion",
+    ],
 )
 def test_the_structural_ratchet_admits_an_opaque_name(body: str) -> None:
     src = f"def f(repo, sha, scratch, c, ws):\n    {body}\n"
