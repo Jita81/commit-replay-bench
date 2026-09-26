@@ -23,10 +23,12 @@ What it does: Pins that ``pyproject.toml``, ``crb.core.version.__version__`` and
               ``v<version>``, that ``APPARATUS_VERSION`` is deliberately independent of it,
               that the CHANGELOG has a dated header for the current version, and that the gate
               tools (mypy, ruff) are pinned exactly with Dependabot moving them, that local
-              coverage output is ignored, and that CONTRIBUTING's gate commands are the ones
-              CI runs — a gate's verdict must not drift with the day the environment was
-              resolved, nor with where it is run.
-How:          Reads the files as text / TOML (ci.yml's ``run:`` steps split into shell words);
+              coverage output is ignored, and that CONTRIBUTING's gate commands, and the
+              other commands its branch-protection paragraph lists, are ones CI runs (in the
+              same working directory) — a gate's verdict must not drift with the day the
+              environment was resolved, nor with where it is run.
+How:          Reads the files as text / TOML (ci.yml's ``run:`` steps split into shell words,
+              each with its step's ``working-directory``);
               no subprocess. ``semver_of`` is the one rule.
 Layer:        tests — docs/ARCHITECTURE.md#74-versioning
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
@@ -187,18 +189,21 @@ def test_local_coverage_output_is_ignored() -> None:
     assert ".coverage" in ignored and "coverage.xml" in ignored
 
 
-def _ci_commands() -> list[list[str]]:
-    """Every command a ``run:`` step of ci.yml runs, as shell words: a folded block (``>-``)
-    is one command, a literal block (``|``) is one command per line."""
+def _ci_steps() -> list[tuple[str, list[str]]]:
+    """Every command a ``run:`` step of ci.yml runs, as (working directory, shell words): a
+    folded block (``>-``) is one command, a literal block (``|``) is one command per line, and
+    the directory is the step's ``working-directory`` (``.`` when it has none)."""
     lines = CI.read_text(encoding="utf-8").splitlines()
-    commands: list[str] = []
+    commands: list[tuple[str, str]] = []
     for i, line in enumerate(lines):
-        m = re.match(r"^(\s*)(?:- )?run:\s*(.*)$", line)
+        m = re.match(r"^(\s*)(- )?run:\s*(.*)$", line)
         if not m:
             continue
-        indent, rest = len(m.group(1)), m.group(2).strip()
+        indent = len(m.group(1)) + len(m.group(2) or "")
+        rest = m.group(3).strip()
+        workdir = _working_directory(lines, i, indent)
         if rest and rest[0] not in "|>":
-            commands.append(rest)
+            commands.append((workdir, rest))
             continue
         body: list[str] = []
         for following in lines[i + 1 :]:
@@ -206,16 +211,39 @@ def _ci_commands() -> list[list[str]]:
                 break
             body.append(following.strip())
         if rest.startswith(">"):
-            commands.append(" ".join(b for b in body if b))
+            commands.append((workdir, " ".join(b for b in body if b)))
         else:
-            commands.extend(b for b in body if b)
-    words: list[list[str]] = []
-    for command in commands:
+            commands.extend((workdir, b) for b in body if b)
+    steps: list[tuple[str, list[str]]] = []
+    for workdir, command in commands:
         try:
-            words.append(shlex.split(command, comments=True))
+            steps.append((workdir, shlex.split(command, comments=True)))
         except ValueError:  # a shell fragment shlex cannot read is no gate command
             continue
-    return words
+    return steps
+
+
+def _working_directory(lines: list[str], at: int, indent: int) -> str:
+    """The ``working-directory`` of the step whose ``run:`` key is on line ``at``, indented
+    ``indent`` columns: a key at that indent between the step's ``- `` and the next step."""
+    start = at
+    while start > 0 and not lines[start].startswith(" " * (indent - 2) + "- "):
+        start -= 1
+    end = at + 1
+    while end < len(lines) and (
+        not lines[end].strip() or len(lines[end]) - len(lines[end].lstrip()) >= indent
+    ):
+        end += 1
+    for line in lines[start:end]:
+        m = re.match(rf"^ {{{indent - 2}}}(?:- |  )working-directory:\s*(\S+)\s*$", line)
+        if m:
+            return m.group(1)
+    return "."
+
+
+def _ci_commands() -> list[list[str]]:
+    """Every command a ``run:`` step of ci.yml runs, as shell words (see ``_ci_steps``)."""
+    return [words for _, words in _ci_steps()]
 
 
 def _documented_gates() -> list[list[str]]:
@@ -244,4 +272,39 @@ def test_the_documented_gate_commands_are_the_ones_ci_runs() -> None:
     for command in documented:
         assert _verdict_words(command) in ci, (
             f"CONTRIBUTING documents {shlex.join(command)!r}, which no CI step runs"
+        )
+
+
+def _branch_protection_commands() -> list[tuple[str, list[str]]]:
+    """The commands CONTRIBUTING's branch-protection paragraph lists as the ones "you can run
+    locally", as (working directory, shell words): each inline code span between "run
+    locally:" and the adversarial verify pass. ``cd ui && A && B`` is A and B, each run in
+    ``ui``."""
+    text = " ".join(CONTRIBUTING.read_text(encoding="utf-8").split())
+    listing = re.search(r"commands you can run locally:(.*?)\); the adversarial verify", text)
+    assert listing, "CONTRIBUTING's branch-protection paragraph no longer lists its commands"
+    commands: list[tuple[str, list[str]]] = []
+    for span in re.findall(r"`([^`]+)`", listing.group(1)):
+        workdir = "."
+        for part in span.split("&&"):
+            words = shlex.split(part)
+            if words[:1] == ["cd"]:
+                workdir = words[1]
+            else:
+                commands.append((workdir, words))
+    return commands
+
+
+def test_the_commands_the_branch_protection_paragraph_lists_are_ones_ci_runs() -> None:
+    """CONTRIBUTING's branch-protection paragraph names, beside the gate block, the other CI
+    commands a contributor can run locally. Each must be a command CI runs, in the same
+    directory: a loose form (``mypy --strict src scripts``, ``helm lint --strict`` with no
+    chart) passed every test until PR #51's review found it."""
+    listed = _branch_protection_commands()
+    assert listed, "CONTRIBUTING's branch-protection paragraph lists no commands"
+    ci = [(workdir, _verdict_words(words)) for workdir, words in _ci_steps()]
+    for workdir, words in listed:
+        assert (workdir, _verdict_words(words)) in ci, (
+            f"CONTRIBUTING lists {shlex.join(words)!r} (run in {workdir!r}), which no CI "
+            "step runs there"
         )
