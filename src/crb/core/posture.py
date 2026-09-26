@@ -192,10 +192,24 @@ def resolve_posture(
     )
 
 
+def expected_posture_class(executor: str, *, tree: str, provisioning: bool) -> str:
+    """The class a deployment grades a repository in, from its settings alone — the same
+    choices the worker makes (``crb.provision.make_deps_provider``): the sandbox is always
+    the ``sealed`` mode (provisioning off refuses a repository with dependencies there) with
+    the repository's tree, else the deployment's; the host executor is ``sealed`` when
+    provisioning is on (a set is bound per task) and the host's own environment when it is
+    off. The worker still measures the full posture live before every run."""
+    kind = (executor or "local").strip().lower()
+    if kind == "docker":
+        return f"docker/{(tree or 'copy').strip().lower()}/sealed"
+    return f"local/inplace/{'sealed' if provisioning else 'host-env'}"
+
+
 __all__ = [
     "LEGACY_POSTURE_ID",
     "Posture",
     "PostureMismatch",
+    "expected_posture_class",
     "normalised_env_hash",
     "probe_toolchain",
     "resolve_posture",

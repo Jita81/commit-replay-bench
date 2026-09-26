@@ -98,7 +98,7 @@ from crb.server.schemas_capability import (
 )
 from crb.store import qualifications as store_qualifications
 from crb.store.ledger import DbLedger
-from crb.store.models import Run
+from crb.store.models import Repo, Run
 
 router = APIRouter(tags=["capability"])
 _ERR = {"model": ErrorEnvelope}
@@ -234,7 +234,11 @@ def filter_posture(
     """:func:`rows_for_posture` against the store: ``deployment`` (the default) is the
     deployment's own posture class; fingerprints and legacy executors come from the
     records."""
-    wanted = deployment_posture_class(settings) if posture in ("", POSTURE_DEPLOYMENT) else posture
+    wanted = (
+        deployment_posture_class(settings, session.get(Repo, repo))
+        if posture in ("", POSTURE_DEPLOYMENT)
+        else posture
+    )
     return rows_for_posture(
         rows,
         wanted,

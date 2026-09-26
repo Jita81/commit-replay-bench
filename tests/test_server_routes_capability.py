@@ -760,6 +760,31 @@ def test_the_map_defaults_to_the_deployment_posture_class(env: Env) -> None:
     assert docker["cells"][0]["n"] == 5 and docker["cells"][0]["posture_ids"] == ["pst_docker"]
 
 
+def test_the_deployment_class_follows_the_workers_provider_and_the_repos_tree(env: Env) -> None:
+    """The default filter names the class the WORKER grades in (CodeRabbit on PR #56): the
+    host executor with provisioning on is ``local/inplace/sealed`` (the worker binds sealed
+    sets), and under docker a repository's own ``sandbox_tree`` overrides the deployment's
+    tree — otherwise the default map drops every row the worker measured."""
+    from crb.store.models import Repo
+
+    _posture_rows(env, 2, cls="local/inplace/sealed", pid="pst_local_sealed")
+    _posture_rows(env, 3, cls="docker/readonly/sealed", pid="pst_docker_ro", first=100)
+    env.settings.provision.enabled = True
+    body = _beta(env)
+    assert body["summary"]["posture_class"] == "local/inplace/sealed"
+    assert [c["n"] for c in body["cells"]] == [2]
+    env.settings.provision.enabled = False
+    env.settings.sandbox.executor = "docker"
+    with env.factory() as s:
+        repo = s.get(Repo, BETA)
+        assert repo is not None
+        repo.config_json = {**dict(repo.config_json or {}), "sandbox_tree": "readonly"}
+        s.commit()
+    body = _beta(env)
+    assert body["summary"]["posture_class"] == "docker/readonly/sealed"
+    assert [c["n"] for c in body["cells"]] == [3]
+
+
 def test_posture_all_pools_only_posture_invariant_tasks(env: Env) -> None:
     from crb.core.qualify import Qualification
     from crb.store import qualifications as sq

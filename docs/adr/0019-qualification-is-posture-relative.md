@@ -181,7 +181,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
    - In every posture, belts 4 and 5 read the builder's changes as they stood before the first test ran. A file a test writes is therefore never counted as the builder's.
 
 8. **Posture is a filter, never a blend.**
-   - By default, the capability map, the factory's route gate and the sign-off overlay read the deployment's posture class (`crb.server.routes.capability.rows_for_posture`).
+   - By default, the capability map, the factory's route gate and the sign-off overlay read the deployment's posture class (`crb.server.routes.capability.rows_for_posture`). The API and the worker derive it by one rule (`crb.core.posture.expected_posture_class`): the sandbox is `sealed` with the repository's `sandbox_tree`, else the deployment's; the host executor is `sealed` when provisioning is on and `host-env` when it is off (PR #56).
    - `posture=all` pools two classes only over tasks whose qualification fingerprints match in both. It counts the rest as `excluded_posture_divergent`.
    - A cell lists its `posture_ids`, as it lists its apparatus versions.
 

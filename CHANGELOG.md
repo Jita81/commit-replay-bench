@@ -59,6 +59,12 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **The default map reads the class the worker grades in** (product.posture.38; CodeRabbit
+  on PR #56). The API's default posture filter said `local/inplace/host-env` for the host
+  executor with provisioning on (the worker grades `local/inplace/sealed`) and ignored a
+  repository's own `sandbox_tree` under docker, so the default map, `/routes` and the
+  delivery gate dropped every row the worker had measured. One rule,
+  `expected_posture_class`, now serves the API and the worker.
 - **`crb deps gc` never removes a live stage** (product.posture.37; CodeRabbit on PR #56).
   It removed every `.staging/<uuid>` while a worker in another process could be filling one,
   so that fetch failed closed with a false refusal. Each stage now holds an exclusive lease

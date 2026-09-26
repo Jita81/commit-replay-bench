@@ -170,3 +170,19 @@ def test_the_toolchain_probe_reads_no_tree(tmp_path: Path) -> None:
     )
     assert [c.argv for c in ex.cmds] == [("go", "version")]
     assert ex.cmds[0].tree is False
+
+
+def test_the_expected_class_is_the_workers_choice_of_executor_tree_and_provider() -> None:
+    """One rule for the API's default filter and the worker's route gate (CodeRabbit on PR
+    #56): the sandbox is always sealed with the repository's tree; the host executor is
+    sealed exactly when provisioning is on (``make_deps_provider`` binds a set per task)."""
+    from crb.core.posture import expected_posture_class
+
+    assert expected_posture_class("docker", tree="", provisioning=False) == "docker/copy/sealed"
+    assert expected_posture_class("docker", tree="readonly", provisioning=True) == (
+        "docker/readonly/sealed"
+    )
+    assert expected_posture_class("local", tree="copy", provisioning=False) == (
+        "local/inplace/host-env"
+    )
+    assert expected_posture_class("", tree="", provisioning=True) == "local/inplace/sealed"

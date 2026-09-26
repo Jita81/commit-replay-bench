@@ -225,6 +225,7 @@ from crb.core.oracle.mutation import (
     aggregate_by_cell,
     score_task,
 )
+from crb.core.posture import expected_posture_class
 from crb.core.qualify import Qualification
 from crb.core.redact import redact_and_cap
 from crb.core.run import BuildAttempt, RunSpec, RunSummary
@@ -1493,13 +1494,20 @@ class Worker:
             actor=ctx.run.actor,
         )
 
-    def _deployment_posture_class(self) -> str:
-        """This worker's posture class from its settings (the map's reading when no run
-        has measured one): ``docker/<tree>/sealed`` or ``local/inplace/host-env``."""
-        if self.settings.executor == "docker":
+    def _deployment_posture_class(self, repo: str = "") -> str:
+        """This worker's posture class for ``repo`` from its settings and the repository's
+        own ``sandbox_tree`` (the map's reading when no run has measured one) —
+        :func:`crb.core.posture.expected_posture_class`, the rule the API uses too."""
+        tree = ""
+        if repo:
+            with self.factory() as s:
+                row = s.get(Repo, repo)
+                tree = str(dict(row.config_json or {}).get("sandbox_tree") or "") if row else ""
+        if not tree:
             tree = self.settings.docker.tree if self.settings.docker is not None else TREE_COPY
-            return f"docker/{tree}/sealed"
-        return "local/inplace/host-env"
+        return expected_posture_class(
+            self.settings.executor, tree=tree, provisioning=self.settings.provision.enabled
+        )
 
     def _stamp(self, ctx: RunContext, **extra: Any) -> None:
         apparatus = {
@@ -2214,7 +2222,7 @@ class Worker:
 
         ADR-0019 §8: only rows of ``posture_class`` (the run's own, else this deployment's)
         license a delivery — a cell measured in another posture never does."""
-        cls = posture_class or self._deployment_posture_class()
+        cls = posture_class or self._deployment_posture_class(repo)
         cache: dict[str, dict[str, Any] | None] = {}
         computed: dict[str, bool] = {}
 

@@ -34,6 +34,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from crb.core.posture import expected_posture_class
 from crb.core.qualify import (
     POSTURE_UNQUALIFIED,
     Qualification,
@@ -65,17 +66,20 @@ def deployment_image(settings: Any, repo: Repo | None) -> str:
     return image or str(getattr(settings.sandbox, "image", "") or "")
 
 
-def deployment_posture_class(settings: Any) -> str:
-    """The posture class this deployment grades in — ``executor/tree/dependency mode`` —
-    from its settings alone (the map's default filter; the worker measures the full
-    posture live before every run). Docker is the sealed mode with the sandbox's tree — the
-    throwaway copy unless ``CRB_SANDBOX__TREE`` says ``readonly`` (ADR-0019 §7); local is
-    the host's own environment."""
-    executor = deployment_executor(settings)
-    if executor == "docker":
-        tree = str(getattr(settings.sandbox, "tree", "") or "copy")
-        return f"docker/{tree}/sealed"
-    return "local/inplace/host-env"
+def deployment_posture_class(settings: Any, repo: Repo | None = None) -> str:
+    """The posture class this deployment grades ``repo`` in — ``executor/tree/dependency
+    mode`` — from its settings and the repository's own ``sandbox_tree`` (the map's default
+    filter; the worker measures the full posture live before every run):
+    :func:`crb.core.posture.expected_posture_class`, the rule the worker uses too."""
+    tree = ""
+    if repo is not None:
+        tree = str(dict(repo.config_json or {}).get("sandbox_tree") or "")
+    provision = getattr(settings, "provision", None)
+    return expected_posture_class(
+        deployment_executor(settings),
+        tree=tree or str(getattr(settings.sandbox, "tree", "") or ""),
+        provisioning=bool(getattr(provision, "enabled", False)),
+    )
 
 
 def posture_summary(
