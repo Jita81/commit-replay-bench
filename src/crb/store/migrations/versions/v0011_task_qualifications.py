@@ -223,7 +223,7 @@ def downgrade() -> None:
     (``--sql``) there is nothing to count: the script drops the table and whoever runs it
     owns that check."""
     if not context.is_offline_mode() and _table_exists():
-        n = (
+        n: int = (
             op.get_bind()
             .execute(
                 sa.text("SELECT COUNT(*) FROM task_qualifications WHERE state <> :legacy"),
