@@ -127,6 +127,50 @@ def test_a_legacy_qualification_is_never_qualified() -> None:
         assert not _q(state=state, code="QUAL_NOT_RED").is_qualified
 
 
+def test_context_for_refuses_another_postures_record_and_every_unqualified_state() -> None:
+    """ADR-0019 §3: only a ``qualified`` record for THIS task in THIS posture makes a grade
+    context. The posture check is what stops a builder being paid before
+    ``grade.check_posture`` could refuse; the state check has no backstop inside
+    ``context_for`` (the worker's admission filters, but a caller may not)."""
+    from crb.core.deps import HOST_ENV_DEPS, TaskDeps
+    from crb.core.posture import PostureMismatch
+    from crb.core.qualify import context_for
+
+    deps = TaskDeps.uniform(HOST_ENV_DEPS)
+    task = _task()
+    other = Posture.from_dict({**POSTURE.to_dict(), "tree": "copy"})
+    assert other.posture_id != POSTURE.posture_id
+    ok = context_for(task, posture=POSTURE, qualification=_q(), deps=deps, witness=None)
+    assert ok.qualification.is_qualified and ok.posture == POSTURE
+    with pytest.raises(PostureMismatch, match="was qualified in"):
+        context_for(task, posture=other, qualification=_q(), deps=deps, witness=None)
+    for state in ("unqualified", "revoked"):
+        with pytest.raises(PostureMismatch, match=f"is {state} in .*QUAL_NOT_RED"):
+            context_for(
+                task,
+                posture=POSTURE,
+                qualification=_q(state=state, code="QUAL_NOT_RED"),
+                deps=deps,
+                witness=None,
+            )
+    with pytest.raises(PostureMismatch, match="is legacy in"):
+        context_for(
+            task, posture=POSTURE, qualification=_q(state=STATE_LEGACY), deps=deps, witness=None
+        )
+    with pytest.raises(PostureMismatch, match="is for"):
+        context_for(
+            _task(task_id="c" * 40), posture=POSTURE, qualification=_q(), deps=deps, witness=None
+        )
+
+
+def test_the_env_unloadable_fix_holds_whether_provisioning_is_on_or_off() -> None:
+    """The 2026-09-25 proof's damaged sealed set gave QUAL_ENV_UNLOADABLE with provisioning
+    ON, and the fix said to switch it on. The sentence now names both cases."""
+    fix = qmod.QUAL_TEXT[qmod.QUAL_ENV_UNLOADABLE]
+    assert "switch provisioning on if it is off" in fix
+    assert "crb deps verify" in fix and "delete any set it names" in fix
+
+
 # ---------------------------------------------------------------------------
 # the measurement half: qualify_task (ADR-0019 §2)
 # ---------------------------------------------------------------------------

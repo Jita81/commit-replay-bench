@@ -174,6 +174,55 @@ def test_unqualified_task_never_reaches_build_fn(
         replace(spec, context_for=None)
 
 
+@pytest.mark.parametrize("bad", ["other_posture", "unqualified", "revoked"])
+def test_the_real_context_for_refuses_before_any_builder_is_paid(
+    bad: str,
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """The same stop through ``crb.core.qualify.context_for`` itself, not a stub: a record
+    from another posture, or one that is not ``qualified``, stops the run before the
+    builder is called (``grade.check_posture`` would only refuse AFTER it was paid)."""
+    from dataclasses import replace
+
+    from crb.core.deps import HOST_ENV_DEPS, TaskDeps
+    from crb.core.posture import Posture
+    from crb.core.qualify import Qualification, context_for
+    from crb.core.run import run
+    from fixtures.posture import discovery_qualification
+
+    good = discovery_qualification(feat_task, executor)
+    posture = Posture.from_dict(good.posture)
+    if bad == "other_posture":
+        record = Qualification.from_dict({**good.to_dict(), "posture_id": "pst_" + "0" * 24})
+    else:
+        record = Qualification.from_dict({**good.to_dict(), "state": bad, "code": "QUAL_NOT_RED"})
+    calls: list[str] = []
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        calls.append(task.task_id)
+        return _attempt()
+
+    spec = replace(
+        _spec(pyrepo, runner, executor, tmp_path),
+        context_for=lambda t: context_for(
+            t,
+            posture=posture,
+            qualification=record,
+            deps=TaskDeps.uniform(HOST_ENV_DEPS),
+            witness=None,
+        ),
+    )
+    summary = run(spec, pyrepo.repo, [feat_task], build_fn)
+    assert calls == [] and summary.rows == 0 and list(spec.ledger.rows()) == []
+    assert ("was qualified in" if bad == "other_posture" else f"is {bad}") in (
+        summary.stopped_reason
+    )
+
+
 def test_an_environment_row_stops_the_ladder_and_reports_it(
     pyrepo: pr.PyRepo,
     feat_task: TaskSpec,

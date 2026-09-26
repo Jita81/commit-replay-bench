@@ -523,6 +523,24 @@ def test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tm
     assert any(a.endswith("dst=/work/.") for a in fixer)  # the fixer's rw bind, as before
 
 
+def test_once_the_posture_names_the_image_by_id_every_container_runs_that_id(
+    tmp_path: Path,
+) -> None:
+    """The posture names the image by content id; a container started by tag would run
+    whatever the tag points at NOW — a rebuild mid-run would grade a trial on bytes no
+    posture or qualification names. After ``image_id()`` every argv carries the id."""
+    ident = "sha256:" + "9" * 64
+    d = DockerExecutor(_settings(), runner=FakeRunner(_ok(ident)), verify_daemon=False)
+    before = d.build_argv(Command(("go", "test"), tmp_path))
+    assert "crb/py:test" in before  # nothing has named the id yet (an ad hoc grade)
+    assert d.posture_facts()["image_id"] == ident
+    for tree in ("copy", "readonly"):
+        d.settings = _settings(tree=tree)
+        argv = d.build_argv(Command(("go", "test"), tmp_path))
+        assert ident in argv and "crb/py:test" not in argv, argv
+    assert d.posture_facts()["image_ref"] == "crb/py:test"  # the stamp still names the tag
+
+
 def test_network_true_is_refused_under_docker(tmp_path: Path) -> None:
     d = DockerExecutor(_settings(), runner=FakeRunner(_ok()), verify_daemon=False)
     for tree in ("copy", "readonly"):

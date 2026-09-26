@@ -711,8 +711,8 @@ def tree_lock_key(lang: str, root: Path, paths: Sequence[str]) -> str:
         return node_lock_key(root) or ""
     files: dict[str, bytes] = {}
     for p in paths:
-        f = Path(root) / p
-        if f.is_file():
+        f = _inside(Path(root), p)  # a link out of the tree reads as absent
+        if f is not None:
             files[p] = f.read_bytes()
     return files_lock_key(lang, files)
 
@@ -738,18 +738,48 @@ def closure_selector(
     return ClosureSelector(lang, lock_keys=keys, lock_paths=paths)
 
 
+def _inside(root: Path, rel: str) -> Path | None:
+    """``root / rel`` when it is a regular file that is not a link and resolves inside
+    ``root``; else ``None``. The trial tree is the builder's: nothing it names is read
+    from outside it."""
+    p = root / rel
+    if p.is_symlink() or not p.is_file():
+        return None
+    base = root.resolve()
+    real = p.resolve()
+    return p if base in real.parents else None
+
+
+def _trial_manifest(root: Path, rel: str) -> Path | None:
+    """The trial's ``rel`` to read, ``None`` when it is absent, or
+    :class:`ClosureViolation` when it is a link or leaves the tree."""
+    p = root / rel
+    if not p.is_symlink() and not p.exists():
+        return None
+    ok = _inside(root, rel)
+    if ok is None:
+        raise ClosureViolation(f"{rel} is a link or is not a file inside the trial's tree")
+    return ok
+
+
 def select_role(selector: ClosureSelector, root: Path) -> str:
-    """``"parent"`` or ``"gold"`` for the trial at ``root``, or :class:`ClosureViolation`."""
+    """``"parent"`` or ``"gold"`` for the trial at ``root``, or :class:`ClosureViolation`.
+    A manifest that is a link, or a local ``replace`` that leaves the tree, is a
+    violation: the fetch side refuses the same (:func:`_read_go`), and a builder's tree
+    must never make the grader read — and quote — a file outside it."""
     root = Path(root)
     if selector.lang == LANG_GO:
-        gomod_path = root / "go.mod"
-        if not gomod_path.is_file():
+        gomod_path = _trial_manifest(root, "go.mod")
+        if gomod_path is None:
             return ROLE_GOLD
         gomod = parse_go_mod(gomod_path.read_text(encoding="utf-8", errors="replace"))
         wanted = set(gomod.resolved_requires())
-        for rel in gomod.local_replaces():
-            sub = root / posixpath.normpath(rel) / "go.mod"
-            if sub.is_file():
+        for target in gomod.local_replaces():
+            rel = posixpath.normpath(target)
+            if target.startswith("/") or rel == ".." or rel.startswith("../"):
+                raise ClosureViolation(f"go.mod: replace => {target} points outside the tree")
+            sub = _trial_manifest(root, posixpath.join(rel, "go.mod"))
+            if sub is not None:
                 wanted |= set(parse_go_mod(sub.read_text("utf-8", "replace")).resolved_requires())
         outside = sorted(wanted - set(selector.modules))
         if outside:

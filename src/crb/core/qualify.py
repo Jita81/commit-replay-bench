@@ -117,8 +117,9 @@ QUAL_TEXT: dict[str, str] = {
         "provisioning or the image)"
     ),
     QUAL_ENV_UNLOADABLE: (
-        "the parent cannot load its dependencies offline: switch provisioning on, or fix "
-        "the module named"
+        "the parent cannot load its dependencies offline: switch provisioning on if it is "
+        "off; if it is on, run crb deps verify and delete any set it names (the next run "
+        "fetches it again); otherwise fix the module named"
     ),
     QUAL_NOT_RED: (
         "the target already passes at the parent in this posture, so it cannot judge a patch "

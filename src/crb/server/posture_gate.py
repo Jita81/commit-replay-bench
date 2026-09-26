@@ -45,8 +45,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.core.deps import DepsProvider, TaskDeps
 from crb.core.execution import Executor
 from crb.core.git import GitRepo
-from crb.core.grade import MODE_SIGHTED, GradeContext, grade
-from crb.core.ledger import GradeRow, is_environment_error
+from crb.core.grade import ENV_CODE_GOLD_CONTROL_RED, MODE_SIGHTED, GradeContext, grade
+from crb.core.ledger import LABEL_ENV_CODE, GradeRow, is_environment_error
 from crb.core.posture import Posture, PostureMismatch, resolve_posture
 from crb.core.qualify import (
     POSTURE_CANARY_FAILED,
@@ -299,9 +299,14 @@ class PostureGate:
     def on_environment(self, task: TaskSpec, row: GradeRow) -> None:
         """``RunSpec.on_environment``: the trial's gold control was red in this posture —
         the posture moved under the qualification, so it is revoked (a new record, never an
-        edit) and the task is not built again in this run."""
+        edit) and the task is not built again in this run. Only a row whose control RAN red
+        (``env_code`` ``GOLD_CONTROL_RED``) revokes: an environment row no control witnessed
+        stops the ladder but says nothing about the qualification (the code's text says
+        the gold failed here, which must be true)."""
         q = self.qualifications.get(task.task_id)
         if q is None or not q.is_qualified:
+            return
+        if row.labels.get(LABEL_ENV_CODE) != ENV_CODE_GOLD_CONTROL_RED:
             return
         reason = redact_and_cap(row.error, max_chars=300)
         if self.session_factory is not None:

@@ -98,6 +98,7 @@ PROVISION_PRIVATE_MODULE = "PROVISION_PRIVATE_MODULE"
 PROVISION_TOOLCHAIN_TOO_OLD = "PROVISION_TOOLCHAIN_TOO_OLD"
 PROVISION_FETCH_FAILED = "PROVISION_FETCH_FAILED"
 PROVISION_TOO_LARGE = "PROVISION_TOO_LARGE"
+PROVISION_UNSAFE_OUTPUT = "PROVISION_UNSAFE_OUTPUT"
 #: A sealed set no longer matches its digest (run scope).
 BUNDLE_INTEGRITY = "BUNDLE_INTEGRITY"
 
@@ -175,6 +176,12 @@ REFUSALS: Mapping[str, tuple[str, str]] = {
         SCOPE_TASK,
         "the dependency set exceeded CRB_PROVISION__MAX_BUNDLE_MB; raise it if the set is "
         "genuinely that large",
+    ),
+    PROVISION_UNSAFE_OUTPUT: (
+        SCOPE_TASK,
+        "a package's install or rebuild step wrote a link that leaves its dependency set; "
+        "the set was discarded, not sealed: find the package named and leave it out of "
+        "runner_opts.deps_build_scripts, or pin a version that does not do this",
     ),
     BUNDLE_INTEGRITY: (
         SCOPE_RUN,
@@ -645,6 +652,7 @@ __all__ = [
     "PROVISION_TOOLCHAIN_TOO_OLD",
     "PROVISION_TOO_LARGE",
     "PROVISION_UNPINNED",
+    "PROVISION_UNSAFE_OUTPUT",
     "PROVISION_UNSUPPORTED_LANGUAGE",
     "REFUSALS",
     "REFUSAL_DOC",

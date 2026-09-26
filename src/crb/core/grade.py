@@ -72,7 +72,8 @@ What it does: Evaluates belts 1–5 mechanically against the parent tree and the
               silent pass. Grades in ONE posture (ADR-0019): belt 3 subtracts the baseline
               measured there, and a verdict that would blame the builder names a witness run
               there first (``MisattributionViolation`` otherwise) — a red one is an
-              ``environment:`` error, never a model failure.
+              ``environment:`` error, never a model failure; a trial tree the sandbox could not
+              take is witnessed the same way (green: the trial is disqualified).
 How:          Posture check (spec, context, executor) → integrity check of the git view →
               tamper scan (target tests, test infrastructure, other tests) → the dependency
               closure (belt 1b) → the builder's changes and diff, read before any run →
@@ -505,10 +506,41 @@ def grade(
     }
     baseline = ctx.qualification.baseline  # the in-posture union, never the discovery set
 
-    def environment(run: TestRun, **changes: Any) -> GradeResult:
-        """The test run could not be given its ground: an environment failure, never a
-        verdict about the patch."""
+    def environment(
+        run: TestRun,
+        scope: Sequence[str],
+        *,
+        allow_failing: Collection[str] | None,
+        **changes: Any,
+    ) -> GradeResult:
+        """The trial's test run could not be given its ground (its tree did not copy into
+        the sandbox) — never a verdict about the patch. Whose fault it was is a blame
+        decision like any other, so the witness runs the same scope on the gold tree
+        first: a GREEN control means the posture can hold the gold's tree and it was the
+        trial's own tree that did not fit (its size or its file modes) — disqualified,
+        never charged, never an environment row, nothing revoked. A RED control makes it
+        an environment row (``GOLD_CONTROL_RED``: the caller revokes the qualification).
+        With no witness (an unwitnessed grade) it is an environment row that names no
+        control (``TEST_RUN_ENVIRONMENT``), which never revokes anything."""
         _emit(on_event, "grade.environment", task=task.task_id, env_error=run.env_error)
+        if ctx.witness is not None:
+            why = f"trial tree: {run.env_error}"
+            blame = witness(scope, why=why, allow_failing=allow_failing)
+            control = blame.get("control")
+            if "error" not in blame and control is not None:
+                return done(
+                    disqualified=True,
+                    dq_reason=redact_and_cap(
+                        f"trial tree: {run.env_error} — the gold's tree ran here, so the "
+                        "trial's own tree did not fit the sandbox (its size or its file modes)",
+                        max_chars=500,
+                    ),
+                    control=control,
+                    extra={"control": control.to_dict()},
+                    **changes,
+                )
+            if "error" in blame:
+                return done(**{**blame, **changes})
         return done(
             error=redact_and_cap(f"{ENVIRONMENT_PREFIX} {run.env_error}", max_chars=2000),
             env_code=ENV_CODE_TEST_RUN,
@@ -701,7 +733,9 @@ def grade(
         )
         if target_run.env_error:
             belts = Belts(tests_unmodified=True)
-            return environment(target_run, target_run=target_run)
+            return environment(
+                target_run, task.target_tests, allow_failing=None, target_run=target_run
+            )
         belts = Belts(tests_unmodified=True, target_green=target_run.green)
         _emit(
             on_event,
@@ -737,7 +771,13 @@ def grade(
         )
         if belt_run.env_error:
             belts = Belts(tests_unmodified=True, target_green=True)
-            return environment(belt_run, target_run=target_run, belt_run=belt_run)
+            return environment(
+                belt_run,
+                task.belt_scope,
+                allow_failing=baseline,
+                target_run=target_run,
+                belt_run=belt_run,
+            )
         if belt_run.timed_out or belt_run.parse_error:
             no_new = False
             new: set[str] = set()

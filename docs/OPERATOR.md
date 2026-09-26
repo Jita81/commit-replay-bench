@@ -757,7 +757,7 @@ Posture panel lists each with how many tasks it keeps out.
 | `POSTURE_UNQUALIFIED` | run | qualify the repository in this posture (`crb repo qualify`, or leave `qualify_first` on); this costs no model money |
 | `POSTURE_DRIFT` | run | the image, toolchain, limits or runner environment changed after qualification: qualify again |
 | `POSTURE_CANARY_FAILED` | run | the gold did not grade clean here: read the canary's tail (the cause is usually provisioning or the image) |
-| `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on, or fix the module named |
+| `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify` and delete any set it names (the next run fetches it again); otherwise fix the module named |
 | `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Posture panel shows how the record differs from other postures |
 | `QUAL_GOLD_NOT_GREEN`, `QUAL_GOLD_NEW_FAILURES`, `QUAL_GOLD_LINT` | task | the humans' own patch does not pass here; the task is excluded, as a task with a dirty gold always was |
 | `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed: the test is not deterministic in this posture |
@@ -771,7 +771,11 @@ the grader first runs the same failing scope on the humans' own change, now, in 
 posture. If that control passes, the row is `builder_red` (or `lint`) and names the witness
 (`labels.blame_control`). If it fails, the row is `harness` with `error: environment: …`
 — counted against autonomy, never against the model — and the task's qualification is
-revoked. Two such rows in a row stop the run (`env_stop`, default 2).
+revoked. Two such rows in a row stop the run (`env_stop`, default 2). When the trial's own
+tree could not be copied into the sandbox (`tree_copy_failed`), the same control decides:
+if the gold's tree runs there, the trial's tree was the problem (too big for `work_size`, a
+file the sandbox user cannot read) and the attempt is **disqualified**, never charged and
+never revoking anything; if the gold fails too, it is an environment row as above.
 
 **With provisioning off** (the default), the sealed sandbox provides no third-party
 dependencies, so a repository that declares one is refused `PROVISION_DISABLED` before

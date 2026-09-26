@@ -8,6 +8,11 @@ Layout under the root (``CRB_PROVISION__STORE``, default ``<CRB_HOME>/deps``)::
 
 Invariants:
 
+* **Nothing a container wrote is followed.** A fetch or rebuild step may run package code
+  with ``/out`` writable; before sealing, a symlink that leaves the set or anything but a
+  regular file at the manifest's name is ``PROVISION_UNSAFE_OUTPUT`` and the stage is
+  discarded. The manifest is written ``O_EXCL | O_NOFOLLOW``; removal never chmods through a
+  link; a link to a directory is part of the digest.
 * **Sealed is final.** :meth:`BundleStore.seal` hashes every file into an output digest,
   writes ``bundle.json`` (schema ``crb.bundle/1``), removes every write bit and renames
   the directory into place with ``os.replace``. A set is never edited after that; a
@@ -25,13 +30,14 @@ Navigation
 ----------
 What it is:   The content-addressed store of sealed dependency sets and the only maker of a
               real ``BundleMount``.
-What it does: Stages a fetch (0700), seals it (digest over every file, ``bundle.json``,
-              ``a-w``, atomic rename; a lost race keeps the winner), hands out read-only
-              mounts, re-verifies a set, collects garbage without ever removing a cited key,
-              and proves the docker daemon can see the root.
-How:          ``stage`` → the fetch writes ``out`` → ``seal`` (walk → sha256 lines → digest →
-              manifest → chmod → ``os.replace``) → ``mount`` / ``binding_env`` → ``verify`` /
-              ``gc`` / ``visible_to_daemon``.
+What it does: Stages a fetch (0700), refuses an output whose links leave it, seals it
+              (digest over every file and link, ``bundle.json``, ``a-w``, atomic rename; a
+              lost race keeps the winner), hands out read-only mounts, re-verifies a set,
+              collects garbage without ever removing a cited key, and proves the docker
+              daemon can see the root.
+How:          ``stage`` → the fetch writes ``out`` → ``seal`` (unsafe links → walk → sha256
+              lines → digest → manifest → chmod → ``os.replace``) → ``mount`` /
+              ``binding_env`` → ``verify`` / ``gc`` / ``visible_to_daemon``.
 Layer:        provision — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/core/deps.py (``BundleMount``, ``register_store_root``, the refusals),
@@ -59,7 +65,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from crb.core.deps import KEY_RE, BundleMount, ProvisionRefused, register_store_root
+from crb.core.deps import (
+    KEY_RE,
+    PROVISION_UNSAFE_OUTPUT,
+    BundleMount,
+    ProvisionRefused,
+    register_store_root,
+)
 
 SCHEMA = "crb.bundle/1"
 MANIFEST = "bundle.json"
@@ -71,14 +83,44 @@ def _now() -> str:
 
 
 def _walk(root: Path) -> Iterator[Path]:
-    """Every regular file and symlink under ``root``, sorted, excluding the manifest."""
+    """Every regular file and every symlink under ``root`` — a link to a directory
+    included (``os.walk`` lists it among the directories and never descends it), so the
+    digest covers it — sorted, excluding the manifest."""
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames.sort()
-        for name in sorted(filenames):
+        links = [n for n in dirnames if (Path(dirpath) / n).is_symlink()]
+        for name in sorted([*filenames, *links]):
             p = Path(dirpath) / name
             if p.parent == root and name == MANIFEST:
                 continue
             yield p
+
+
+def unsafe_links(root: Path) -> list[str]:
+    """Every symlink under ``root`` that points outside it — an absolute target, or a
+    relative one that leaves ``root`` read as written or once resolved — as
+    ``"rel -> target"``, sorted. A fetch or rebuild step runs package code with ``/out``
+    writable; a link it plants there must never lead the host's seal or removal out of
+    the stage (ADR-0019 §6)."""
+    base = Path(os.path.realpath(root))
+    out: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in [*dirnames, *filenames]:
+            p = Path(dirpath) / name
+            if not p.is_symlink():
+                continue
+            target = os.readlink(p)
+            rel = p.relative_to(root).as_posix()
+            lexical = os.path.normpath(os.path.join(os.path.dirname(rel), target))
+            resolved = Path(os.path.realpath(p))
+            if (
+                os.path.isabs(target)
+                or lexical == ".."
+                or lexical.startswith("../")
+                or not (resolved == base or base in resolved.parents)
+            ):
+                out.append(f"{rel} -> {target}")
+    return sorted(out)
 
 
 def output_digest(root: Path) -> tuple[str, int]:
@@ -121,20 +163,41 @@ def _make_read_only(root: Path) -> None:
 
 
 def _make_writable(root: Path) -> None:
-    """Give the worker back write permission so it can remove a set it owns."""
-    if not root.exists():
+    """Give the worker back write permission so it can remove a set it owns. A symlink
+    is never followed: what a link points at is not the worker's to chmod."""
+    if root.is_symlink() or not root.exists():
         return
     with contextlib.suppress(OSError):
         root.chmod(0o755)
     for dirpath, dirnames, filenames in os.walk(root):
         for name in dirnames:
+            p = Path(dirpath) / name
+            if p.is_symlink():  # chmod follows a link: never touch what it points at
+                continue
             with contextlib.suppress(OSError):
-                (Path(dirpath) / name).chmod(0o755)
+                p.chmod(0o755)
         for name in filenames:
             p = Path(dirpath) / name
             if not p.is_symlink():
                 with contextlib.suppress(OSError):
                     p.chmod(0o644)
+
+
+def _write_new(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` as a NEW read-only regular file: whatever stood at the
+    name is removed first (never followed), and ``O_EXCL | O_NOFOLLOW`` refuses a name a
+    container re-planted in between."""
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        data = text.encode("utf-8")
+        while data:
+            data = data[os.write(fd, data) :]
+        os.fchmod(fd, 0o444)
+    finally:
+        os.close(fd)
 
 
 def remove_tree(root: Path) -> None:
@@ -200,6 +263,7 @@ class BundleStore:
         lang, key = str(manifest["lang"]), str(manifest["key"])
         final = self.path_of(lang, key)
         out = Path(stage) / "out"
+        self._refuse_unsafe(Path(stage), out)
         digest, size = output_digest(out)
         record = {
             "schema": SCHEMA,
@@ -208,9 +272,8 @@ class BundleStore:
             "bytes": size,
             "created": _now(),
         }
-        (out / MANIFEST).write_text(json.dumps(record, indent=1, sort_keys=True), encoding="utf-8")
+        _write_new(out / MANIFEST, json.dumps(record, indent=1, sort_keys=True))
         _make_read_only(out)
-        (out / MANIFEST).chmod(0o444)
         final.parent.mkdir(parents=True, exist_ok=True)
         try:
             if final.exists():
@@ -227,6 +290,30 @@ class BundleStore:
         final.chmod(0o555)
         remove_tree(Path(stage))
         return Sealed(lang, key, final, record)
+
+    @staticmethod
+    def _refuse_unsafe(stage: Path, out: Path) -> None:
+        """``PROVISION_UNSAFE_OUTPUT`` (the stage discarded) when what the container wrote
+        could lead the host out of the stage: ``out`` itself or its manifest name is
+        anything but what the store made (a link, a directory, a device), or a symlink
+        points outside ``out``. Nothing the container wrote is followed before this
+        holds."""
+        problems: list[str] = []
+        if out.is_symlink() or not out.is_dir():
+            problems.append("out is not the stage's own directory")
+        else:
+            m = out / MANIFEST
+            if m.is_symlink() or (m.exists() and not m.is_file()):
+                problems.append(f"{MANIFEST} is not a regular file")
+            problems += [f"link {x} leaves the set" for x in unsafe_links(out)]
+        if problems:
+            remove_tree(stage)
+            raise ProvisionRefused(
+                PROVISION_UNSAFE_OUTPUT,
+                "the fetch wrote something the store will not follow: "
+                + "; ".join(problems[:5])
+                + (f" (and {len(problems) - 5} more)" if len(problems) > 5 else ""),
+            )
 
     def discard(self, stage: Path) -> None:
         """Remove an unsealed stage (a failed or refused fetch)."""
@@ -357,4 +444,12 @@ class BundleStore:
             )
 
 
-__all__ = ["MANIFEST", "SCHEMA", "BundleStore", "Sealed", "output_digest", "remove_tree"]
+__all__ = [
+    "MANIFEST",
+    "SCHEMA",
+    "BundleStore",
+    "Sealed",
+    "output_digest",
+    "remove_tree",
+    "unsafe_links",
+]

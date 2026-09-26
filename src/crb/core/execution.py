@@ -537,7 +537,9 @@ class DockerExecutor:
 
     def image_id(self) -> str:
         """The image's content id (``docker image inspect --format {{.Id}}``) — never the
-        tag, which a re-push moves. Cached per executor; an absent image is
+        tag, which a re-push moves. Cached per executor, and from then on every container
+        this executor starts names the id, not the tag (:meth:`build_argv`), so the bytes
+        that grade a trial are the bytes the posture names. An absent image is
         :class:`SandboxUnavailable` (the worker never pulls)."""
         if self._image_id:
             return self._image_id
@@ -648,15 +650,19 @@ class DockerExecutor:
             argv += ["--env", f"{k}={v}"]
         argv += ["--env", "HOME=/tmp", "--env", "CI=1", "--env", "NO_COLOR=1"]
         cwd_inside = s.workdir if cmd.cwd_rel in {".", ""} else f"{s.workdir}/{cmd.cwd_rel}"
+        # once the posture named the image by content id (image_id()), every container runs
+        # THAT id, never the tag: a tag rebuilt mid-run cannot grade a trial under a posture
+        # (and a qualification) measured on other bytes
+        image = self._image_id or s.image
         if copy:
             excludes = "".join(
                 f"--exclude=./{rel.strip('/')} " for rel in ("node_modules", *cmd.writable_paths)
             )
             script = _COPY_SCRIPT.format(excludes=excludes, work=s.workdir)
-            argv += ["--workdir", s.workdir, f"--stop-timeout={max(1, int(cmd.timeout))}", s.image]
+            argv += ["--workdir", s.workdir, f"--stop-timeout={max(1, int(cmd.timeout))}", image]
             argv += ["/bin/sh", "-c", script, cmd.cwd_rel or ".", *cmd.argv]
             return argv
-        argv += ["--workdir", cwd_inside, f"--stop-timeout={max(1, int(cmd.timeout))}", s.image]
+        argv += ["--workdir", cwd_inside, f"--stop-timeout={max(1, int(cmd.timeout))}", image]
         argv += list(cmd.argv)
         return argv
 

@@ -130,6 +130,7 @@ refused `PROVISION_DISABLED` under docker before any spend.
 | No repository code runs with a network | `go mod download`; `npm ci --ignore-scripts`; `pip download --only-binary=:all:`. A Python install and a named Node install script run in a **second** container with `--network=none` | [measured] `tests/test_provision_python.py`, `tests/test_provision_node.py` (the plans, and a daemon run of each) |
 | Integrity | Go checks every module against the committed `go.sum` (and the checksum database unless the mirror is air-gapped); npm checks every tarball against the lock's `integrity`; pip enforces `--require-hashes` when the lock carries hashes and the manifest records the fetched hash when it does not | [measured] the daemon tests of each recipe fetch against committed hashes (`tests/test_provision_go.py::test_go_fetch_puts_parent_and_gold_in_one_cache`) |
 | The store | Content-addressed (recipe, fetch image ID, lockfile blob hashes); built in a 0700 stage; sealed with a sha256 output digest in `bundle.json`, every write bit removed, renamed atomically; the only constructor of a mount; `crb deps verify` re-proves the digest (`BUNDLE_INTEGRITY`, run scope) | [measured] `tests/test_provision_store.py` |
+| The host never follows what a container wrote | A named install or rebuild step runs package code with `/out` writable. Before the seal, a symlink that leaves the set (absolute, or escaping read as written or once resolved) or anything but a regular file at `bundle.json` is `PROVISION_UNSAFE_OUTPUT` (task scope) and the stage is discarded; the manifest is written as a new file with `O_EXCL \| O_NOFOLLOW`; removal never changes permissions through a link; a link to a directory inside a set is part of its digest, so `crb deps verify` sees it swapped | [measured] `tests/test_provision_fetch.py::test_links_a_fetch_plants_in_out_never_lead_the_host_out_of_the_stage` (a real daemon: the links planted from inside the container, the host file and directory unchanged), `tests/test_provision_store.py::test_a_link_planted_in_the_output_is_refused_and_never_followed`, `::test_removal_never_chmods_through_a_link`, `::test_a_directory_link_inside_the_set_is_in_the_digest` |
 | Limits | A watchdog kills a fetch past `CRB_PROVISION__MAX_BUNDLE_MB` (`PROVISION_TOO_LARGE`); the wall clock is `CRB_PROVISION__FETCH_TIMEOUT_S`; `crb deps gc` never removes a cited key | [measured] `tests/test_provision_fetch.py::test_an_oversized_fetch_is_killed_and_refused` |
 | Production | A public registry is refused unless `CRB_PROVISION__ALLOW_PUBLIC`; a fetch image without `@sha256:` is refused — both at start-up | [measured] `tests/test_settings_provision.py` |
 
@@ -427,7 +428,7 @@ subject to a retention window.
 | T13 | A weak oracle lets a semantically wrong patch pass | grade | not a mechanical false-Q1; measured and gated by oracle strength (`crb.core.oracle`), routed to `human` below 0.8 |
 | T14 | A dependency fetch runs untrusted code with a network (an install script, a source build) | provision | 3.1.1: wheels only, `npm ci --ignore-scripts`, `go mod download`; anything that must build runs in a second container with `--network=none`; a Python source distribution is refused |
 | T15 | A builder steers a fetch, or a repository injects fetch configuration (`.npmrc`, `pip.conf`, `go.env`, an index line) | provision | 3.1.1: inputs from git objects at the parent and the gold only, never a worktree; configuration files never read; Python's lock rewritten from the parsed pins; the argv, environment and allowlist are the recipe's, never a `RepoConfig`'s or a run request's |
-| T16 | Exfiltration or metadata disclosure through module paths or a fetch's requests | provision | 3.1.1: the fetch sees the lockfiles only (no source, no secret, no `CRB_HOME`); the proxy admits the configured registry hosts only; production points at the tenant's mirror; a private module behind a public proxy is refused before any request (`PROVISION_PRIVATE_MODULE`) |
+| T16 | Exfiltration or metadata disclosure through module paths or a fetch's requests | provision | 3.1.1: the fetch sees the lockfiles only (no source, no secret, no `CRB_HOME`); the proxy admits the configured registry hosts only; production points at the tenant's mirror; a private module behind a public proxy is refused before any request (`PROVISION_PRIVATE_MODULE`); at grade time the closure selector reads nothing outside the builder's tree — a linked manifest or a local `replace` that leaves the tree is a closure violation, so no file outside it is read or quoted (`tests/test_provision.py::test_a_trial_never_makes_the_selector_read_outside_its_tree`) |
 | T17 | A substituted artifact (a registry or mirror serves different bytes) | provision | 3.1.1 integrity: `go.sum` + the checksum database, npm `integrity`, pip hashes where committed (recorded where not — the residual) |
 | T18 | Tampering with or poisoning the store | provision / test run | 3.1.1: sealed read-only with a digest; `validate_mount` at every use; `crb deps verify` → `BUNDLE_INTEGRITY` stops the run; the key includes the fetch image's ID |
 | T19 | The fetch's proxy is used as a relay to another host | provision | the proxy is CONNECT-only to an exact host:port allowlist (`crb.builders.egress_proxy`); denials are logged and named in the refusal |
@@ -449,16 +450,21 @@ subject to a retention window.
   apparatus 2.2]**. Every *verdict* to date is on the host executor posture. The first replay
   in the docker posture (run `0c44ff24…`, cobra) graded its rows `builder_red` because the
   sealed container could not load cobra's modules — an instrument failure charged to the
-  model **[measured — n = 4 rows, each `builder_red` with the target red; method: the run's
-  grade rows in the deployment's ledger export of 2026-09-25; apparatus 2.2]**. Dependency
+  model **[measured — n = 3 or 4 rows, each `builder_red` with the target red; method: the
+  run's grade rows as read on 2026-09-25; apparatus 2.2. The count is disputed: 3 rows were
+  observed when the run was cancelled (the session's findings note), and stream D read 4 from
+  the deployment's ledger export, which is not committed — [gap] F42, settled only by the
+  stack's ledger]**. Dependency
   provisioning and the throwaway tree (3.1, 3.1.1) now let the sealed posture run a Go, a
   Python and a Node fixture with dependencies offline **[measured — n = 3 fixture
   repositories, one per language, each parent and gold tree passing offline in the shipped
   image against its sealed set; method: `tests/test_provision_{go,python,node}.py` against a
-  real daemon on colima, 2026-09-25; apparatus 2.2]**. Excluding the 4 rows of run `0c44ff24…`
-  from every rate is the apparatus 2.3 read rule of ADR-0019 **[gap — posture-relative
-  qualification and the blame witness are a separate change, not yet merged]**, and no real
-  repository has yet been qualified in the sealed posture on a live stack **[gap]**.
+  real daemon on colima, 2026-09-25; apparatus 2.2]**. The apparatus 2.3 read rule of ADR-0019
+  is in force: a docker row stamped before 2.3, such as each row of run `0c44ff24…`, is left
+  out of every rate and counted `unqualified_posture` **[measured — the DoD criterion
+  results.truth.16, `tests/test_server_routes_capability.py::test_pre_2_3_docker_rows_are_excluded_and_counted`;
+  apparatus 2.3]**. No real repository has yet been qualified in the sealed posture on a live
+  stack **[gap — F42]**.
 - Container escape is out of scope for the application layer.
 
 Report a vulnerability to the repository owner privately; do not open a public issue.

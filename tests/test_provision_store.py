@@ -6,8 +6,10 @@ What it is:   The suite for ``crb.provision.store.BundleStore``.
 What it does: Pins that a seal is atomic and leaves nothing writable; that one changed byte is
               ``BUNDLE_INTEGRITY``; that garbage collection never removes a cited key; that a
               mount outside a registered store or without a ``dep_`` key is refused at
-              construction and again by ``validate_mount``; and that two concurrent seals of
-              one key keep exactly one set.
+              construction and again by ``validate_mount``; that two concurrent seals of
+              one key keep exactly one set; and that a link planted in a stage is refused
+              ``PROVISION_UNSAFE_OUTPUT``, never followed by the seal or by removal, while a
+              directory link inside a set is sealed into its digest.
 How:          A store under ``tmp_path``; stages filled by hand; threads for the race.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
@@ -149,3 +151,77 @@ def test_a_concurrent_seal_keeps_one(tmp_path: Path) -> None:
     assert [s.key for s in store.sets()] == [KEY]
     assert not any((store.root / ".staging").iterdir()), "losers discard their stage"
     store.verify(KEY)
+
+
+def _victims(tmp_path: Path) -> tuple[Path, Path]:
+    """A host file (0600) and a host directory (0700) OUTSIDE the store."""
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    hostfile = victim / "hostfile"
+    hostfile.write_text("the host's own bytes\n", encoding="utf-8")
+    hostfile.chmod(0o600)
+    secretdir = victim / "secretdir"
+    secretdir.mkdir(mode=0o700)
+    secretdir.chmod(0o700)
+    return hostfile, secretdir
+
+
+def test_a_link_planted_in_the_output_is_refused_and_never_followed(tmp_path: Path) -> None:
+    """A rebuild step runs package code with /out writable (ADR-0019 §6). The host side
+    must not follow what it planted: a manifest-name link, a directory link out of the set
+    or an absolute link is PROVISION_UNSAFE_OUTPUT, the stage is gone and the host's own
+    file and directory keep their bytes and modes."""
+    hostfile, secretdir = _victims(tmp_path)
+    store = BundleStore(tmp_path / "deps")
+    for plant in (
+        lambda out: (out / MANIFEST).symlink_to(hostfile),
+        lambda out: (out / "node_modules" / "evil").symlink_to(secretdir),
+        lambda out: (out / "node_modules" / "rel").symlink_to("../../../../victim/hostfile"),
+    ):
+        st = _fill(store, {"node_modules/ok/index.js": b"x"})
+        plant(st / "out")
+        with pytest.raises(ProvisionRefused) as ei:
+            store.seal(st, {"lang": "node", "key": KEY, "recipe": "t"})
+        assert ei.value.code == "PROVISION_UNSAFE_OUTPUT", ei.value.message
+        assert not st.exists() and store.get("node", KEY) is None
+        assert hostfile.read_text(encoding="utf-8") == "the host's own bytes\n"
+        assert stat.S_IMODE(hostfile.stat().st_mode) == 0o600
+        assert stat.S_IMODE(secretdir.stat().st_mode) == 0o700
+
+
+def test_removal_never_chmods_through_a_link(tmp_path: Path) -> None:
+    """``remove_tree`` (discard, gc, the wheel clean-up) gives write back to what the
+    worker owns — never to a directory a link points at."""
+    from crb.provision.store import remove_tree
+
+    _hostfile, secretdir = _victims(tmp_path)
+    store = BundleStore(tmp_path / "deps")
+    st = _fill(store, {"a/b.txt": b"b"})
+    (st / "out" / "a" / "evil").symlink_to(secretdir)
+    remove_tree(st)
+    assert not st.exists() and secretdir.is_dir()
+    assert stat.S_IMODE(secretdir.stat().st_mode) == 0o700
+
+
+def test_a_directory_link_inside_the_set_is_in_the_digest(tmp_path: Path) -> None:
+    """A link to a directory is sealed (it stays inside the set) and hashed: swapping its
+    target after the seal is BUNDLE_INTEGRITY, as a changed byte is."""
+    from crb.provision.store import remove_tree, unsafe_links
+
+    store = BundleStore(tmp_path / "deps")
+    st = _fill(store, {"node_modules/real/a.js": b"a", "node_modules/other/b.js": b"b"})
+    (st / "out" / "node_modules" / "alias").symlink_to("real")
+    assert unsafe_links(st / "out") == []
+    before = output_digest(st / "out")[0]
+    sealed = store.seal(st, {"lang": "node", "key": KEY, "recipe": "t"})
+    assert sealed.digest == before
+    link = sealed.path / "node_modules" / "alias"
+    parent = link.parent
+    parent.chmod(0o755)
+    link.unlink()
+    link.symlink_to("other")
+    parent.chmod(0o555)
+    with pytest.raises(ProvisionRefused) as ei:
+        store.verify(KEY)
+    assert ei.value.code == "BUNDLE_INTEGRITY"
+    remove_tree(store.root)  # a sealed set is read-only: give tmp_path its tree back

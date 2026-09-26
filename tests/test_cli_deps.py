@@ -9,7 +9,8 @@ What it does: Pins that ``ls`` lists the sealed sets (text and ``--json``), that
 How:          A store under ``tmp_path`` sealed by hand → ``crb.cli.main.main([...])``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   src/crb/cli/commands/deps.py (under test), src/crb/provision/store.py (the store)
+Works with:   src/crb/cli/commands/deps.py (under test), src/crb/provision/store.py (the store),
+              src/crb/core/deps.py (the refusal codes and fixes the commands print)
 Tested by:    tests/test_cli_deps.py
 Touch when:   a ``crb deps`` subcommand is added or its output changes.
 """

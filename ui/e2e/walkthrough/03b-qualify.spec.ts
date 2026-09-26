@@ -14,8 +14,9 @@
  *               the repository's Overview and the `stat.repo.qualified` tile.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0019-qualification-is-posture-relative.md
- * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Repos/PosturePanel.tsx (the panel
- *               under test), src/crb/server/worker.py (`_run_qualify`), src/crb/core/qualify.py
+ * Works with:   ui/e2e/walkthrough/support.ts (the fixtures, targets and run helpers),
+ *               ui/src/screens/Repos/PosturePanel.tsx (the panel under test),
+ *               src/crb/server/worker.py (`_run_qualify`), src/crb/core/qualify.py
  *               (`qualify_task`, whose events are asserted)
  * Tested by:    ui/e2e/walkthrough/03b-qualify.spec.ts
  * Touch when:   the Posture panel's button or tile changes, or a qualify event is renamed.

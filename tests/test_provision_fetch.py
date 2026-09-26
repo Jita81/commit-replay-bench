@@ -14,7 +14,9 @@ What it does: Pins that the fetch argv has only the internal network or none, is
               ``/out`` and nothing else (no worktree, no ``/src``, no ``CRB_HOME``, no
               secret-named variable); that an air-gapped mirror needs no network and no
               sidecar; that an oversized fetch is killed and refused ``PROVISION_TOO_LARGE``;
-              and that a denied host is named in ``PROVISION_FETCH_FAILED``.
+              that a denied host is named in ``PROVISION_FETCH_FAILED``; and that links a
+              fetch plants in ``/out`` are refused ``PROVISION_UNSAFE_OUTPUT`` at the seal,
+              never followed on the host.
 How:          ``fetch_argv`` on a fixed plan; ``run_fetch`` against the pinned python image with a
               stage under ``tests/.cache`` (bind-mountable under colima).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -257,3 +259,40 @@ def test_a_denied_host_is_named_in_the_refusal(scratch: Path) -> None:
         check=False,
     ).stdout.strip()
     assert left == ""
+
+
+@pytest.mark.docker
+@pytest.mark.sandbox_images
+def test_links_a_fetch_plants_in_out_never_lead_the_host_out_of_the_stage(scratch: Path) -> None:
+    """The rebuild step (``npm rebuild <named>``) runs package code with ``/out`` writable.
+    Code there plants a manifest-name link to a host file and a directory link to a host
+    directory; the host's seal refuses PROVISION_UNSAFE_OUTPUT, and the host file and
+    directory keep their bytes and modes (the 2026-09-25 fetch-security PoC)."""
+    victim = scratch / "victim"
+    victim.mkdir()
+    hostfile = victim / "hostfile"
+    hostfile.write_text("the host's own bytes\n", encoding="utf-8")
+    hostfile.chmod(0o600)
+    secretdir = victim / "secretdir"
+    secretdir.mkdir()
+    secretdir.chmod(0o700)
+    store = BundleStore(scratch / "deps")
+    stage = store.stage()
+    script = (
+        "import os\n"
+        "os.makedirs('/out/app/node_modules', exist_ok=True)\n"
+        f"os.symlink({str(hostfile)!r}, '/out/bundle.json')\n"
+        f"os.symlink({str(secretdir)!r}, '/out/app/node_modules/evil')\n"
+    )
+    run_fetch(
+        _py_plan(script, offline=True), stage, config=ProvisionConfig(enabled=True, env="dev")
+    )
+    assert (stage / "out" / "bundle.json").is_symlink()  # the container did plant them
+    with pytest.raises(ProvisionRefused) as ei:
+        store.seal(stage, {"lang": "node", "key": KEY, "recipe": "npm.rebuild.v1"})
+    assert ei.value.code == "PROVISION_UNSAFE_OUTPUT"
+    assert "bundle.json" in ei.value.message and "evil" in ei.value.message
+    assert not stage.exists() and store.get("node", KEY) is None
+    assert hostfile.read_text(encoding="utf-8") == "the host's own bytes\n"
+    assert oct(hostfile.stat().st_mode & 0o777) == "0o600"
+    assert oct(secretdir.stat().st_mode & 0o777) == "0o700"

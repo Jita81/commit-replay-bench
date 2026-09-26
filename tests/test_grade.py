@@ -1607,20 +1607,91 @@ def test_belt_3_subtracts_the_in_posture_baseline_not_the_discovery_one(
     assert res2.belts.no_new_failures is True and res2.clean
 
 
-def test_an_env_error_run_is_environment_never_a_verdict(
+def test_an_env_error_run_is_never_a_verdict_and_the_witness_says_whose(
     trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
 ) -> None:
+    """A trial tree that did not copy into the sandbox is never a verdict. Whose fault it
+    was is a blame decision: the gold's tree runs the same scope first. Green → the
+    trial's own tree did not fit (a .venv, a 0600 file): disqualified, never an
+    environment row, so nothing is revoked. Red → an environment row that names its
+    control. No witness → an environment row that names none (never revokes)."""
     broken = rb.TestRun(125, frozenset(), "", env_error="tree_copy_failed: no space left on /work")
-    witness = _Scripted(green=True)
-    res = pfx.grade_adhoc(
-        trial,
-        feat_task,
-        config=pyrepo.config,
-        runner=_Counting(pyrepo.config, script=[broken]),
-        executor=executor,
-        witness=witness,
-    )
+
+    def graded(witness: Any) -> g.GradeResult:
+        return pfx.grade_adhoc(
+            trial,
+            feat_task,
+            config=pyrepo.config,
+            runner=_Counting(pyrepo.config, script=[broken]),
+            executor=executor,
+            witness=witness,
+        )
+
+    green = _Scripted(green=True)
+    res = graded(green)
+    assert res.disqualified and res.dq_reason.startswith("trial tree: tree_copy_failed")
+    assert not res.error and not res.blamed and not res.env_code
+    assert green.asked == [(feat_task.target_tests, "trial tree: " + broken.env_error, None)]
+    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    assert row.failure_kind == "disqualified" and not lg.is_environment_error(row.error)
+
+    red = _Scripted(green=False)
+    res = graded(red)
+    assert res.error.startswith("environment: gold control red in pst_")
+    assert "trial tree: tree_copy_failed" in res.error and not res.disqualified
+    assert res.env_code == g.ENV_CODE_GOLD_CONTROL_RED and res.control is not None
+    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    assert row.failure_kind == "harness" and row.labels[lg.LABEL_ENV_CODE] == "GOLD_CONTROL_RED"
+
+    res = graded(None)
     assert res.error.startswith("environment: tree_copy_failed")
-    assert not res.blamed and not witness.asked  # never a verdict, so nothing to witness
+    assert res.env_code == g.ENV_CODE_TEST_RUN and res.control is None and not res.blamed
     assert lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64).failure_kind == "harness"
     assert ExecResult(0, "", "").env_error == ""
+
+
+def test_a_belt_scope_env_error_asks_the_witness_with_the_in_posture_baseline(
+    trial: Workspace, feat_task: TaskSpec, pyrepo: pr.PyRepo, executor: LocalExecutor
+) -> None:
+    """The same rule at belt 3: the control is the belt scope, allowed the baseline."""
+    green = rb.TestRun(0, frozenset(), "ok")
+    broken = rb.TestRun(97, frozenset(), "", env_error="tree_copy_failed")
+    pr.apply_gold(trial)
+    base = "tests/test_calc.py::test_old"
+    spec, ctx = pfx.context(
+        feat_task.with_(baseline_failing=[base]), executor, witness=_Scripted(True)
+    )
+    res = g.grade(
+        trial,
+        spec,
+        ctx=ctx,
+        config=pyrepo.config,
+        runner=_Counting(pyrepo.config, script=[green, broken]),
+        executor=executor,
+    )
+    assert res.disqualified and res.dq_reason.startswith("trial tree: tree_copy_failed")
+    asked = ctx.witness.asked  # type: ignore[union-attr]
+    assert asked and asked[0][0] == feat_task.belt_scope and set(asked[0][2] or ()) == {base}
+
+
+def test_control_from_run_holds_belt_3_to_the_in_posture_baseline() -> None:
+    """Belt 3's control is green only when nothing OUTSIDE the baseline fails — the rule
+    that keeps an environment failure outside the target from being charged."""
+    from crb.core.qualify import control_from_run
+
+    base = {"t::old"}
+    new = rb.TestRun(1, frozenset({"t::writer"}), "1 failed")
+    old = rb.TestRun(1, frozenset({"t::old"}), "1 failed")
+    assert control_from_run("gold_green", ("t",), new, base).green is False
+    assert control_from_run("gold_green", ("t",), old, base).green is True
+    assert control_from_run("gold_green", ("t",), old, set()).green is False
+    assert control_from_run("gold_green", ("t",), rb.TestRun(0, frozenset(), ""), set()).green
+    # unattributable, timed out or unprepared is never green, whatever the baseline allows
+    for bad in (
+        rb.TestRun(2, frozenset(), "", parse_error="build failed"),
+        rb.TestRun(124, frozenset(), "", timed_out=True),
+        rb.TestRun(97, frozenset(), "", env_error="tree_copy_failed"),
+    ):
+        assert control_from_run("gold_green", ("t",), bad, base).green is False
+    # a target control (allow_failing=None) is the run's own green
+    assert control_from_run("gold_green", ("t",), old, None).green is False

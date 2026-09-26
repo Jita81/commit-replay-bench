@@ -34,6 +34,22 @@ seam, `crb.core.deps`, and wired end to end.
 - **The integrity fix now says what is true.** `BUNDLE_INTEGRITY` stops the run, and
   `crb deps verify` names the set; the operator deletes it and the next run fetches it again.
   Nothing revokes the qualifications that cite it automatically yet **[gap]** (G-966).
+- **After the adversarial review of the merge** (three lenses; the surviving findings fixed, each
+  with a test that fails if the behaviour regresses — product.posture.29–31):
+  - a trial whose own tree does not fit the sandbox's copy is no longer an unwitnessed
+    environment row that revoked the task with a false reason: the gold control runs first,
+    and a green one disqualifies the trial (never charged, nothing revoked); only a row whose
+    control ran red revokes a qualification;
+  - belt 3's control rule and both of `context_for`'s refusals now have tests of their own;
+  - once the posture has resolved the image's content id, every container runs that id, not
+    the tag;
+  - the host never follows a link a fetch or rebuild container planted in its output
+    (`PROVISION_UNSAFE_OUTPUT`), removal never changes permissions through a link, and a link
+    to a directory inside a set is part of its digest;
+  - the grade-time closure selector reads nothing outside the builder's tree;
+  - `QUAL_ENV_UNLOADABLE`'s fix covers provisioning on as well as off;
+  - the count of run `0c44ff24…`'s rows (3 observed, 4 in stream D's reading of an export that
+    is not committed) is marked disputed wherever it is cited **[gap]** (F42).
 
 ### 2026-09-25 — qualification is posture-relative (ADR-0019, apparatus 2.3)
 
@@ -78,8 +94,10 @@ grades it and blames the model only with a witness from there.
 
 The first replay in the docker posture (run `0c44ff24…`, cobra) graded every attempt
 `builder_red`: the sealed test container held none of cobra's modules and could not build a
-single target **[measured — n = 4 rows, each `builder_red` with the target red; method: the
-run's grade rows in the deployment's ledger export of 2026-09-25; apparatus 2.2]**. This
+single target **[measured — n = 3 or 4 rows, each `builder_red` with the target red; method:
+the run's grade rows as read on 2026-09-25; apparatus 2.2. The count is disputed: 3 were
+observed when the run was cancelled, 4 in stream D's reading of the deployment's ledger export,
+which is not committed — [gap] F42]**. This
 change is the dependency half of the fix (posture-relative qualification and the blame
 witness are the other half, the entry above).
 

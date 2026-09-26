@@ -1900,6 +1900,42 @@ def test_two_environment_rows_stop_the_run_and_revoke_the_qualifications(
     assert any(e.action == "run.environment_stop" for e in h.events(run.id))
 
 
+def test_only_a_control_that_ran_red_revokes_a_qualification(tmp_path: Path) -> None:
+    """QUAL_ENV_WITNESS_RED says the gold failed here during a replay, so only a row whose
+    control RAN red (``env_code`` ``GOLD_CONTROL_RED``) may revoke. An environment row no
+    control witnessed (``TEST_RUN_ENVIRONMENT``) leaves the record in force."""
+    from types import SimpleNamespace
+
+    from crb.core.execution import LocalExecutor
+    from crb.server.posture_gate import PostureGate
+    from fixtures.posture import discovery_qualification
+
+    task = pr.build(tmp_path / "repo").feat_task()
+    q = discovery_qualification(task, LocalExecutor())
+    gate = PostureGate(
+        repo=None,  # type: ignore[arg-type]  # on_environment reads none of these
+        config=None,  # type: ignore[arg-type]
+        runner=None,  # type: ignore[arg-type]
+        executor=None,  # type: ignore[arg-type]
+        scratch=tmp_path,
+        provider=None,  # type: ignore[arg-type]
+        posture=None,  # type: ignore[arg-type]
+    )
+    gate.qualifications[task.task_id] = q
+    unwitnessed = SimpleNamespace(
+        error="environment: tree_copy_failed", labels={"env_code": "TEST_RUN_ENVIRONMENT"}
+    )
+    gate.on_environment(task, unwitnessed)  # type: ignore[arg-type]
+    assert gate.qualifications[task.task_id] is q and q.is_qualified
+    red = SimpleNamespace(
+        error="environment: gold control red in pst_x: belt 2",
+        labels={"env_code": "GOLD_CONTROL_RED"},
+    )
+    gate.on_environment(task, red)  # type: ignore[arg-type]
+    revoked = gate.qualifications[task.task_id]
+    assert revoked.state == "revoked" and revoked.code == "QUAL_ENV_WITNESS_RED"
+
+
 def test_qualify_run_spends_nothing(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*a: Any, **k: Any) -> Any:
         raise AssertionError("a qualify run constructed a builder")

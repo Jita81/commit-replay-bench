@@ -44,7 +44,7 @@ const POSTURE: RepoPosture = {
   qualified: 3,
   total: 9,
   refusals_by_code: [
-    { code: 'QUAL_ENV_UNLOADABLE', n: 5, message: '', fix: 'the parent cannot load its dependencies offline: switch provisioning on, or fix the module named', doc: 'docs/OPERATOR.md#7a-when-a-posture-is-unqualified' },
+    { code: 'QUAL_ENV_UNLOADABLE', n: 5, message: '', fix: 'the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run crb deps verify and delete any set it names (the next run fetches it again); otherwise fix the module named', doc: 'docs/OPERATOR.md#7a-when-a-posture-is-unqualified' },
     { code: 'POSTURE_UNQUALIFIED', n: 1, message: '', fix: 'qualify the repository in this posture (crb repo qualify, or leave qualify_first on); this costs no model money', doc: 'docs/OPERATOR.md#7a-when-a-posture-is-unqualified' },
   ],
   delta: [],

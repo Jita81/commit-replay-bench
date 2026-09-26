@@ -16,9 +16,12 @@ What it is:   The docker-marked end-to-end proof of the sealed posture: per-task
               (stream Q).
 What it does: Builds the fixture repository and its module mirror, resolves the live posture,
               admits the task through ``PostureGate`` (qualify-first), replays the gold
-              through ``crb.core.run.run`` and asserts a clean row; empties the sealed cache and
-              asserts the refusal before any builder call, the witnessed environment row and
-              the unloadable re-qualification.
+              through ``crb.core.run.run`` and asserts a clean row; moves the environment under
+              a non-target test (a read-only tree: belt 3's control is red, an environment
+              row) and bloats the trial's own tree past a small copy (the gold's fits: a
+              disqualification, nothing revoked); empties the sealed cache and asserts the
+              refusal before any builder call, the witnessed environment row and the
+              unloadable re-qualification.
 How:          Real ``docker`` (colima locally, CI's sandbox-images job), the shipped Go
               sandbox image and the pinned Go fetch image; a counting build function stands in
               for a builder, so nothing reaches a model.
@@ -26,7 +29,8 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/server/posture_gate.py (``PostureGate``: admission and ``context_for``),
-              src/crb/provision/__init__.py (``SealedProvider``), src/crb/core/qualify.py,
+              src/crb/provision/__init__.py (``SealedProvider``), src/crb/core/qualify.py
+              (``qualify_task``: the re-qualification refused ``QUAL_ENV_UNLOADABLE``),
               src/crb/core/grade.py (the witness), src/crb/core/run.py (the run loop),
               tests/fixtures/goproxy.py and tests/fixtures/langs/gorepo_deps.py (the
               repository and its mirror), tests/conftest_langs.py (the images)
@@ -42,8 +46,9 @@ import importlib
 import os
 import stat
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -52,8 +57,8 @@ from crb.core.deps import ProvisionRefused
 from crb.core.evidence import BuilderRef
 from crb.core.execution import DockerExecutor, DockerSettings
 from crb.core.git import GitRepo
-from crb.core.grade import grade
-from crb.core.qualify import QUAL_ENV_UNLOADABLE, qualify_task
+from crb.core.grade import GradeContext, grade
+from crb.core.qualify import QUAL_ENV_UNLOADABLE, GoldWitness, qualify_task
 from crb.core.run import BuildAttempt, RunSpec, run
 from crb.core.runners import get_runner
 from crb.core.spec import TaskSpec
@@ -194,6 +199,63 @@ def test_the_sealed_posture_provisions_qualifies_replays_and_never_blames_the_mo
     assert rows[0].clean and rows[0].labels["posture_id"] == posture.posture_id
     ctx = g1.context_for(task)
     deps = g1.deps_for(task)
+    # the posture named the image by content id, and every container now runs that id
+    assert executor.image_id().startswith("sha256:")
+
+    def graded(ex: DockerExecutor, edit: Callable[[Workspace], None], name: str) -> Any:
+        """Grade a trial (``edit`` applied) with ``ex`` for the trial AND its witness."""
+        witness = GoldWitness(
+            repo,
+            config,
+            task,
+            runner=runner,
+            executor=ex,
+            scratch=scratch / "work",
+            binding=deps.gold,
+            timeout=600,
+        )
+        c = GradeContext(ctx.posture, ctx.qualification, ctx.deps, witness)
+        ws = Workspace.create(repo, feat, scratch / "work" / name, config=config)
+        try:
+            ws.overlay_tests(task.test_files)
+            edit(ws)
+            res = grade(ws, c.spec(task), ctx=c, config=config, runner=runner, executor=ex)
+        finally:
+            ws.remove()
+        return res, witness
+
+    # (b2) the environment moves under a test OUTSIDE the target: the tree turns read-only,
+    # so the writer test fails for the trial (the gold's own patch) and for the gold alike.
+    # Belt 3's control is held to the in-posture baseline — an environment row, never
+    # builder_red (the belt-3 half of the witness; the target half is (c) below)
+    readonly = DockerExecutor(DockerSettings(image=image, tree="readonly"))
+    res, witness = graded(readonly, lambda ws: ws.overlay_sources(task.src_files), "ro")
+    assert res.belts.target_green is True and res.belts.no_new_failures is False
+    assert gorepo_deps.WRITER_TEST_ID in res.new_failures
+    assert res.error.startswith(f"environment: gold control red in {posture.posture_id}")
+    assert "belt 3" in res.error and res.env_code == "GOLD_CONTROL_RED"
+    assert witness.runs and gorepo_deps.WRITER_TEST_ID in witness.runs[-1].failing
+    row = lg.grade_row_from_result(res, ctx.spec(task), pack_hash="c" * 64)
+    assert row.failure_kind == lg.FAILURE_HARNESS and not res.blamed
+
+    # (b3) the TRIAL's own tree does not fit the copy (a builder left 12 MB in it) while
+    # the gold's does: disqualified, never an environment row, and the gate revokes
+    # nothing (no control ran red)
+    small = DockerExecutor(DockerSettings(image=image, work_size="8m"))
+
+    def bloat(ws: Workspace) -> None:
+        ws.overlay_sources(task.src_files)
+        (ws.root / "app" / "blob.bin").write_bytes(os.urandom(12 << 20))
+
+    res, witness = graded(small, bloat, "big")
+    assert res.disqualified and res.dq_reason.startswith("trial tree: tree_copy_failed"), (
+        res.to_dict()
+    )
+    assert not res.error and witness.runs and witness.runs[0].green
+    row = lg.grade_row_from_result(res, ctx.spec(task), pack_hash="c" * 64)
+    assert row.failure_kind == "disqualified" and not lg.is_environment_error(row.error)
+    g1.on_environment(task, row)  # what run() would never call for this row — still inert
+    assert g1.qualifications[feat].is_qualified
 
     # (c) the environment breaks: the sealed module cache is emptied
     assert _empty(store / "go" / deps.gold.key / "gomod") > 0

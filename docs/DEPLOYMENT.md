@@ -287,9 +287,10 @@ resolve plugins offline yet (README §6).
 container never has a network, so a repository's dependencies cannot be installed in it —
 and an image that bakes them in serves one commit's lockfile only. Before this, the docker
 posture could not build a Go repository with a third-party module and graded every attempt
-against the model **[measured — n = 4 rows of run `0c44ff24…` (cobra), each `builder_red`
-with the target red; method: the run's grade rows in the deployment's ledger export of
-2026-09-25; apparatus 2.2]**. With `CRB_PROVISION__ENABLED=true`:
+against the model **[measured — n = 3 or 4 rows of run `0c44ff24…` (cobra), each
+`builder_red` with the target red; method: the run's grade rows as read on 2026-09-25;
+apparatus 2.2. The count is disputed: 3 rows were observed when the run was cancelled, and
+stream D read 4 from the deployment's ledger export, which is not committed — [gap] F42]**. With `CRB_PROVISION__ENABLED=true`:
 
 - the lockfiles at the parent and at the gold are read from git objects; a fetch container
   (the pinned toolchain image, the worker's non-root uid, read-only, no capabilities) fetches
@@ -309,7 +310,7 @@ with the target red; method: the run's grade rows in the deployment's ledger exp
 | `PROVISION_FETCH_IMAGE_UNPINNED` | run | pin `CRB_PROVISION__{GO,PYTHON,NODE}_IMAGE` by digest |
 | `PROVISION_STORE_NOT_VISIBLE` | run | put `CRB_PROVISION__STORE` where the daemon can bind-mount it (under colima: your home; under `dind`: the work volume) |
 | `PROVISION_UNSUPPORTED_LANGUAGE` | run | JVM and Rust: the local posture only in this version |
-| `PROVISION_NO_LOCK`, `PROVISION_UNPINNED`, `PROVISION_SOURCE_REFUSED`, `PROVISION_BUILD_REQUIRED`, `PROVISION_LOCK_UNSUPPORTED`, `PROVISION_PRIVATE_MODULE`, `PROVISION_TOOLCHAIN_TOO_OLD`, `PROVISION_FETCH_FAILED`, `PROVISION_TOO_LARGE` | task | a fact about that commit's lockfiles or the registry; the message names the file, the line, the host or the setting |
+| `PROVISION_NO_LOCK`, `PROVISION_UNPINNED`, `PROVISION_SOURCE_REFUSED`, `PROVISION_BUILD_REQUIRED`, `PROVISION_LOCK_UNSUPPORTED`, `PROVISION_PRIVATE_MODULE`, `PROVISION_TOOLCHAIN_TOO_OLD`, `PROVISION_FETCH_FAILED`, `PROVISION_TOO_LARGE`, `PROVISION_UNSAFE_OUTPUT` | task | a fact about that commit's lockfiles or the registry; the message names the file, the line, the host or the setting |
 | `BUNDLE_INTEGRITY` | run | a sealed set no longer matches its digest: `crb deps verify` names it; delete that set's directory from the store and the next run fetches and seals it again. Nothing removes the damaged set or revokes the qualifications that cite it for you yet **[gap]** (G-966) |
 
 Switch it on in this order: mirror the registries inside the tenant (or allow the public

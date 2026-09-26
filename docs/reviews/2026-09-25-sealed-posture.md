@@ -14,8 +14,8 @@ operator's stack: cobra, bug.fix × XS, image `crb-sandbox-go:main-8ab88ad`, bui
 three were graded `failure_kind: builder_red` with `target_green: false`, at $0.147, $0.180 and
 $0.137 **[measured — n = 3 attempts, method: the run's grade rows read on the live stack on
 2026-09-25, recorded in the session's findings note; apparatus 2.2]**. The same cell on the host
-posture reads Sonnet 5 22 of 22 clean **[measured — n = 22 tasks, method: the README's host-posture
-cell; apparatus 2.2]**. Stream D's CHANGELOG entry counts 4 `builder_red` rows for the same run;
+posture reads Sonnet 5 22 of 22 clean **[measured — n = 22 attempts on 9 tasks, method: the
+README's host-posture cell; apparatus 2.2]**. Stream D's CHANGELOG entry counts 4 `builder_red` rows for the same run;
 this review could not reconcile the two counts without the stack's ledger, which the hard rules
 keep out of reach **[gap]**.
 
@@ -86,6 +86,32 @@ read-only. Task `746ef07158728502482cea9f880a6f4b21ef29a9`, parent `f2878ba` (it
 `ALLOW_PUBLIC=true`, the pinned Go fetch image and a pinned proxy image), through the wrapper
 [`crbp.sh`](2026-09-25-sealed-posture/crbp.sh).
 
+**Set-up commands.** Run from a checkout of this repository. `CRB_HOME` must be a throwaway
+directory the docker daemon can bind-mount (under colima, somewhere under `$HOME`); never point it
+at a live stack. `<clone>` is the cobra clone and `<set>` is the directory `crb deps verify` names.
+
+```sh
+export CRB_HOME="$HOME/crb-proof-home" REPO_ROOT="$PWD"
+S=docs/reviews/2026-09-25-sealed-posture
+git clone https://github.com/Jita81/cobra.git <clone>
+$S/crbp.sh repo add cobra --path <clone> --language go \
+  --sandbox-image crb-sandbox-go:main-8ab88ad --probe ./...
+# (a) and (b): the miner qualifies the task in the sealed posture
+$S/crbp.sh mine cobra --executor docker --ref 746ef07158728502482cea9f880a6f4b21ef29a9 \
+  --max-candidates 1 --target 1 --events 2> "$CRB_HOME/mine-events.jsonl"
+$S/crbp.sh repo probe cobra --executor docker
+CRB_SANDBOX__TREE=readonly $S/crbp.sh repo qualify cobra --executor docker --task 746ef07
+# (c) 1–5: proof.py under crbp.sh's environment (the same exports, python instead of crb)
+( eval "$(grep '^export ' $S/crbp.sh)"; "$REPO_ROOT/.venv/bin/python" $S/proof.py "$CRB_HOME/proof.json" )
+# (c) 6: provisioning off, the shipped default (exit 2)
+env -u CRB_PROVISION__ENABLED PYTHONPATH="$REPO_ROOT/src" \
+  "$REPO_ROOT/.venv/bin/python" -m crb.cli.main repo qualify cobra --executor docker
+# recovery: name the damaged set, give back its write bits, delete it, qualify again
+$S/crbp.sh deps verify
+chmod -R u+w <set> && rm -rf <set>
+$S/crbp.sh repo qualify cobra --executor docker
+```
+
 Every result below is **[measured — n = 1 real repository and 1 task; method: the product's own
 code on colima as listed in each item, 2026-09-25; apparatus 2.3]**.
 
@@ -150,7 +176,9 @@ gold's target is red there, so the record is `unqualified`, `QUAL_GOLD_NOT_GREEN
    GOPROXY=off` — the D1 message, now attributed to the environment.
 5. **Qualifying again refuses the task.** A second qualification in the broken environment is
    `unqualified`, `QUAL_ENV_UNLOADABLE`: "the parent cannot load its dependencies offline in this
-   posture".
+   posture". Its fix sentence then said to switch provisioning on, which it already was; the
+   sentence now covers both cases (switch it on if it is off; if it is on, run `crb deps verify`
+   and delete the set it names). `proof.json` keeps the text as it was returned.
 6. **Provisioning off, the shipped default.** `crb repo qualify` without
    `CRB_PROVISION__ENABLED` stops with exit 2 before anything runs: `PROVISION_DISABLED: cobra
    declares go dependencies (github.com/cpuguy83/go-md2man/v2@v2.0.6, …) and dependency
@@ -172,7 +200,10 @@ the operator does. Automatic quarantine and revocation are **[gap]** G-966.
 and (c) 1–5 on a fixture Go repository with one module, provisioned from a `file://` mirror with
 no network at all, and runs in CI's sandbox-images job. It fails if the gate stops verifying the
 set, if the witness is removed (the row would read `builder_red`), or if the throwaway tree
-stops being the default (the test that writes into its package would join the baseline).
+stops being the default (the test that writes into its package would join the baseline). After
+the adversarial review of this merge it also moves the environment under a test outside the
+target (belt 3's control must be red, not green) and bloats the trial's own tree past a small
+copy while the gold's fits (a disqualification, and nothing revoked).
 
 ## 4. What is still open
 

@@ -11,7 +11,9 @@ What it does: Pins that editing a worktree changes neither the inputs nor the ke
               key covers the parent's and the gold's blobs together; that URL, VCS, path, index,
               foreign-host, unpinned, ``go.work``, yarn/pnpm/uv, install-script and JVM inputs
               are each refused with their code and scope; that ``.npmrc``, ``pip.conf`` and
-              ``go.env`` are never read; and that a trial selects the parent's or the gold's set
+              ``go.env`` are never read; that a trial never makes the selector read outside its
+              tree (an escaping replace or a linked manifest); and that a trial selects the
+              parent's or the gold's set
               or raises ``ClosureViolation`` naming what was outside.
 How:          ``two_commit_repo`` / ``init_repo`` + ``commit_all`` → ``LockInputs.from_git`` → assert;
               a spy ``GitRepo`` records every path asked for.
@@ -351,6 +353,62 @@ def test_a_trial_outside_the_closure_raises_closure_violation(tmp_path: Path) ->
     pg = pv.LockInputs.from_git(prepo, p1, _cfg("pytest"))
     psel = pv.closure_selector("python", parent=pp, gold=pg)
     (tmp_path / "py" / "requirements.txt").write_text("left==6.6.6\n", encoding="utf-8")
+    with pytest.raises(ClosureViolation):
+        psel.select(tmp_path / "py")
+
+
+def test_a_trial_never_makes_the_selector_read_outside_its_tree(tmp_path: Path) -> None:
+    """The selector reads the BUILDER's tree at grade time. A local replace that leaves
+    the tree, or a manifest that is a link, is a violation (the fetch side refuses the
+    same); the file outside is never read, so its contents never reach an error."""
+    root, feat = gorepo_deps.build(tmp_path / "repo")
+    repo = GitRepo(root)
+    cfg = gorepo_deps.config()
+    parent = pv.LockInputs.from_git(repo, repo.parent(feat), cfg)
+    gold = pv.LockInputs.from_git(repo, feat, cfg)
+    sel = pv.closure_selector("go", modules={*parent.pins, *gold.pins})
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "go.mod").write_text(
+        "module x.io/y\n\ngo 1.22\n\nrequire private.corp/secret-thing v1.2.3\n",
+        encoding="utf-8",
+    )
+    original = (root / "go.mod").read_text(encoding="utf-8")
+    for target in ("../other", str(other), "./sub/../../other"):
+        (root / "go.mod").write_text(original + f"\nreplace x.io/y => {target}\n", encoding="utf-8")
+        with pytest.raises(ClosureViolation) as ei:
+            sel.select(root)
+        assert "points outside the tree" in str(ei.value)
+        assert "secret-thing" not in str(ei.value)
+    # a go.mod that is a link — out of the tree, or to a file inside it — is refused
+    (root / "go.mod").unlink()
+    (root / "go.mod").symlink_to(other / "go.mod")
+    with pytest.raises(ClosureViolation) as ei:
+        sel.select(root)
+    assert "is a link" in str(ei.value) and "secret-thing" not in str(ei.value)
+    # a local replace whose go.mod is a link out of the tree is refused too
+    (root / "go.mod").unlink()
+    (root / "go.mod").write_text(original + "\nreplace x.io/y => ./sub\n", encoding="utf-8")
+    (root / "sub").mkdir()
+    (root / "sub" / "go.mod").symlink_to(other / "go.mod")
+    with pytest.raises(ClosureViolation) as ei:
+        sel.select(root)
+    assert "sub/go.mod is a link" in str(ei.value) and "secret-thing" not in str(ei.value)
+    # python: a lockfile that is a link out of the tree reads as absent, never as the file
+    prepo, (p0, p1) = _repo(
+        tmp_path / "py",
+        {"requirements.txt": "left==1.0.0\n"},
+        {"requirements.txt": "left==1.1.0\n"},
+    )
+    psel = pv.closure_selector(
+        "python",
+        parent=pv.LockInputs.from_git(prepo, p0, _cfg("pytest")),
+        gold=pv.LockInputs.from_git(prepo, p1, _cfg("pytest")),
+    )
+    outside = tmp_path / "gold-requirements.txt"
+    outside.write_text("left==1.1.0\n", encoding="utf-8")  # the gold's bytes, outside
+    (tmp_path / "py" / "requirements.txt").unlink()
+    (tmp_path / "py" / "requirements.txt").symlink_to(outside)
     with pytest.raises(ClosureViolation):
         psel.select(tmp_path / "py")
 

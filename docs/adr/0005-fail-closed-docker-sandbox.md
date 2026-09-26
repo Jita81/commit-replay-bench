@@ -137,10 +137,11 @@ commit's three added tests; apparatus 2.2]**.
 The first replay in the docker posture (F42 part 2, run `0c44ff24…`, cobra) graded every
 attempt `builder_red` because the sealed container held none of the repository's modules,
 and a test that writes into its own package directory (`TestDeadcodeElimination`) failed on
-the read-only worktree while it passes on the host **[measured — n = 4 rows, each
-`builder_red` with the target red; method: the run's grade rows in the deployment's ledger
-export of 2026-09-25, and each defect reproduced by hand against a fresh clone inside the
-shipped Go image with `--network none`; apparatus 2.2]**. ADR-0019 decides the fix; this
+the read-only worktree while it passes on the host **[measured — n = 3 or 4 rows, each
+`builder_red` with the target red (disputed: 3 observed when the run was cancelled, 4 in
+stream D's reading of the deployment's ledger export, which is not committed — [gap] F42);
+method: the run's grade rows as read on 2026-09-25, and each defect reproduced by hand
+against a fresh clone inside the shipped Go image with `--network none`; apparatus 2.2]**. ADR-0019 decides the fix; this
 ADR's argv changes three ways:
 
 1. **Tests run in a throwaway copy of the tree.** The worktree is bind-mounted read-only at
