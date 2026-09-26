@@ -216,8 +216,10 @@ def test_a_recurring_budget_class_gets_the_calibrated_budget_on_ks_surface() -> 
     snap = snapshot(store.records(), repo=REPO, params={}, base_config={})
     policy = resolve_policy({}, snap.config_section(K_SECTION, {}))
     assert policy.budget_profile == PROFILE_CALIBRATED
-    # a run's own parameter still wins over the loop's overlay
-    assert resolve_policy({"budget_profile": "default"}, snap.config_section(K_SECTION, {}))
+    # a run's own parameter still wins over the loop's overlay — the value AND where it came
+    # from (a bare object is always truthy: the old line held whatever won)
+    ran = resolve_policy({"budget_profile": "default"}, snap.config_section(K_SECTION, {}))
+    assert (ran.budget_profile, ran.sources["budget_profile"]) == ("default", "run")
 
 
 def test_the_loop_never_applies_a_calibrated_budget_k_cannot_calibrate() -> None:
