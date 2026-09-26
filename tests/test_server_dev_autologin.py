@@ -2,15 +2,15 @@
 
 The setting names one local account. When it is set, a browser on the same machine is signed
 in as that account without a password — and nothing else is. These tests pin every half of
-that sentence: the settings refuse it outside ``CRB_ENV=dev`` and on a non-loopback bind
-(``crb serve --host`` included); the route signs in a loopback peer that names a loopback
+that sentence: the settings refuse it outside ``CRB_ENV=dev``, on a non-loopback bind
+(``crb serve --host`` included) and with local sign-in switched off; the route signs in a loopback peer that names a loopback
 host and refuses a remote peer, a request that came through a proxy (any forwarding header),
 a page served under another host name (DNS rebinding) and a cross-site request, answering
 all of them exactly as if the setting were off; the session it issues is exactly the one a
 password sign-in issues (the same cookie names, the credential version with the account's
 session nonce, the session-bound CSRF token), so the role ladder, sign-out and "sign out
 everywhere" end it like any other, and it neither consumes nor resets the login limiter's
-buckets; every sign-in is an audit event and a log line;
+buckets (the address's or the account's own); every sign-in is an audit event and a log line;
 a missing or disabled account signs nobody in and the log says why; ``/health``,
 ``/version`` and ``crb doctor`` report it; and it is off by default.
 
@@ -19,8 +19,8 @@ Navigation
 What it is:   The test suite for the development-only automatic sign-in — the settings
               refusals, the loopback-only route, the session it issues and how it is reported.
 What it does: Pins that the setting is empty by default and the route then answers 404
-              ``dev_autologin_off``; that ``prod`` and a non-loopback ``bind_host`` refuse to
-              construct and ``serve`` refuses a non-loopback ``--host``; that a loopback peer
+              ``dev_autologin_off``; that ``prod``, a non-loopback ``bind_host`` and
+              ``local_auth_enabled=False`` refuse to construct and ``serve`` refuses a non-loopback ``--host``; that a loopback peer
               (IPv4 and IPv6) on a loopback host name is signed in with the session and CSRF
               cookies; that a remote peer, each forwarding header, a foreign ``Host``, a
               foreign ``Origin`` and ``Sec-Fetch-Site: cross-site`` are refused like "off"
@@ -30,7 +30,7 @@ What it does: Pins that the setting is empty by default and the route then answe
               (session nonce included) and CSRF token are a password sign-in's, the token
               valid for that session only, and that sign out everywhere or a sign-out on
               another device ends it; that it neither fills nor empties the per-address
-              login bucket; that each sign-in writes one
+              login bucket or the account's own; that each sign-in writes one
               ``auth.dev_autologin`` event and one warning line; that start-up warns; that a
               missing or disabled account is 403 with the reason in the log; and that
               ``/health``, ``/version`` and the ``dev_autologin`` doctor line report it.
@@ -171,6 +171,14 @@ class TestSettings:
     @pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.2", "::1", "localhost"])
     def test_a_loopback_bind_admits_it(self, tmp_path: Path, host: str) -> None:
         assert make_settings(tmp_path, bind_host=host).auth.dev_autologin == "root"
+
+    def test_local_sign_in_switched_off_refuses_it(self, tmp_path: Path) -> None:
+        # CRB_LOCAL_AUTH_ENABLED=false turns local accounts away at /auth/login; the automatic
+        # path signs in a local account, so the two settings contradict each other
+        with pytest.raises(ValidationError, match="CRB_LOCAL_AUTH_ENABLED"):
+            make_settings(tmp_path, local_auth_enabled=False)
+        s = make_settings(tmp_path, local_auth_enabled=False, auth={})
+        assert s.auth.dev_autologin == "" and s.local_auth_enabled is False
 
     def test_a_malformed_username_is_refused_at_start_up(self, tmp_path: Path) -> None:
         with pytest.raises(ValidationError, match="CRB_AUTH__DEV_AUTOLOGIN"):
@@ -574,6 +582,26 @@ class TestTheLoginLimit:
             assert r.status_code == 401, r.text
         assert local.post(AUTOLOGIN).status_code == 200
         assert limiter.retry_after("root", "127.0.0.1") is not None
+        r = local.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
+        assert r.status_code == 429 and err(r)["code"] == "rate_limited"
+
+    def test_an_automatic_sign_in_does_not_clear_the_accounts_own_bucket(
+        self, local: TestClient
+    ) -> None:
+        # a password success clears its (username, address) bucket; the automatic path is
+        # not a password success, so the account's guesses so far still count
+        limiter = local.app.state.login_limiter  # type: ignore[attr-defined]
+        for _ in range(limiter.limit - 1):
+            r = local.post(
+                f"{API_PREFIX}/auth/login", json={"username": "root", "password": "wrong-pw"}
+            )
+            assert r.status_code == 401, r.text
+        assert local.post(AUTOLOGIN).status_code == 200
+        local.cookies.clear()
+        r = local.post(
+            f"{API_PREFIX}/auth/login", json={"username": "root", "password": "wrong-pw"}
+        )
+        assert r.status_code == 401, r.text
         r = local.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
         assert r.status_code == 429 and err(r)["code"] == "rate_limited"
 
