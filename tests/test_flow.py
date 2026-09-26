@@ -196,12 +196,12 @@ class TestPerUnit:
 class TestNotCaptured:
     def test_a_figure_nobody_measured_names_its_gap(self) -> None:
         nc = NotCaptured(
-            figure="reviewer minutes", why="POST /reviews takes no minutes", gap="G-557"
+            figure="developer hours", why="the work happens outside the product", gap="G-556"
         )
         assert nc.to_dict() == {
-            "figure": "reviewer minutes",
-            "why": "POST /reviews takes no minutes",
-            "gap": "G-557",
+            "figure": "developer hours",
+            "why": "the work happens outside the product",
+            "gap": "G-556",
         }
 
 

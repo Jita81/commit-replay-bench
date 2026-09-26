@@ -192,7 +192,7 @@ from crb.builders.budget import budget_for_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
-from crb.core.capability import PROJECTION_CLASS_SIZE
+from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
@@ -236,6 +236,7 @@ from crb.core.posture import expected_posture_class
 from crb.core.prevention import K_SECTION, W_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.qualify import Qualification
 from crb.core.redact import redact_and_cap
+from crb.core.routing import ROUTE_DELIVER
 from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
 from crb.core.runners import get_runner
@@ -262,6 +263,7 @@ from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
+from crb.server.flow_record import record_deliver_transitions
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
     ApprovalPolicy,
@@ -275,7 +277,7 @@ from crb.server.intake import (
     post_outcomes_to_tickets,
 )
 from crb.server.posture_gate import DEFAULT_ENV_STOP, PostureGate, resolve_run_posture
-from crb.server.prevention_state import learning_snapshot, learning_tick
+from crb.server.prevention_state import current_checks_arm, learning_snapshot, learning_tick
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
@@ -1187,6 +1189,7 @@ class Worker:
             emitter.emit("system", "run.finish_refused", status=StepStatus.ERROR, error=str(exc))
             return
         metrics.runs_total.labels(run.kind, status).inc()
+        self._record_flow(run)
         emitter.emit(
             "system",
             "run.finished",
@@ -2428,6 +2431,60 @@ class Worker:
         self._progress(ctx, len(scores), total)
         return (STATUS_CANCELLED if cancelled else STATUS_SUCCEEDED), counts, ""
 
+    def _served_map(
+        self, repo: str, *, run_id: str = "", posture_class: str = ""
+    ) -> tuple[CapabilityMap, dict[str, str]]:
+        """The (class × size) map ``GET /capability-map`` serves by default — sighted rows,
+        the current apparatus, the repository's own checks arm, this deployment's posture
+        class (or ``posture_class``), the latest controls verdict, sign-offs overlaid —
+        without the rows of ``run_id``; and the scope it was read in (apparatus × posture
+        class × checks arm). The route gate and the flow recorder read this one map."""
+        cls = posture_class or self._deployment_posture_class(repo)
+        before = (r for r in self.ledger.rows(repo=repo) if not run_id or r.run_id != run_id)
+        current = rows_for_arm(
+            self.factory,
+            repo,
+            rows_for_apparatus(rows_for_mode(before, "sighted"), "current"),
+            CHECKS_CURRENT,
+        )
+        with self.factory() as s:
+            rows = rows_for_posture(
+                current,
+                cls,
+                fingerprints=lambda classes: store_qualifications.latest_fingerprints(
+                    s, repo, classes
+                ),
+                legacy_executor_of=legacy_executor_lookup(s),
+            ).rows
+            cmap, _ = signed_map(
+                rows, PROJECTION_CLASS_SIZE, s, repo, controls=latest_controls_verdict(s, repo)
+            )
+        scope = {
+            "apparatus": APPARATUS_VERSION,
+            "posture_class": cls,
+            "checks_arm": current_checks_arm(self.factory, repo),
+        }
+        return cmap, scope
+
+    def _record_flow(self, run: Run) -> None:
+        """ADR-0029: after a run finishes, stamp every cell the served map now routes
+        ``deliver`` for the first time — the moment the decide stream's clock starts. It is
+        observability, never a verdict: a failure is logged and the run stands."""
+        try:
+            cmap, scope = self._served_map(run.repo)
+            cells = [
+                (c.key.capability_class, c.key.size)
+                for c in cmap.cells
+                if c.decision is not None and c.decision.route == ROUTE_DELIVER
+            ]
+            with self.factory() as s:
+                record_deliver_transitions(
+                    s, repo=run.repo, deliver_cells=cells, scope=scope, run_id=run.id
+                )
+                s.commit()
+        except Exception:
+            _LOG.exception("flow: recording deliver transitions for %s failed", run.repo)
+
     def _route_lookup(
         self, repo: str, run_id: str = "", posture_class: str = ""
     ) -> Callable[[BacklogItem], dict[str, Any] | None]:
@@ -2445,30 +2502,11 @@ class Worker:
         license a delivery — a cell measured in another posture never does. ADR-0024: and
         only rows of the repository's own ``checks`` arm — a cell measured with the format
         step or belt 6 set otherwise never does."""
-        cls = posture_class or self._deployment_posture_class(repo)
         cache: dict[str, dict[str, Any] | None] = {}
         computed: dict[str, bool] = {}
 
         def compute() -> None:
-            before = (r for r in self.ledger.rows(repo=repo) if not run_id or r.run_id != run_id)
-            current = rows_for_arm(
-                self.factory,
-                repo,
-                rows_for_apparatus(rows_for_mode(before, "sighted"), "current"),
-                CHECKS_CURRENT,
-            )
-            with self.factory() as s:
-                rows = rows_for_posture(
-                    current,
-                    cls,
-                    fingerprints=lambda classes: store_qualifications.latest_fingerprints(
-                        s, repo, classes
-                    ),
-                    legacy_executor_of=legacy_executor_lookup(s),
-                ).rows
-                cmap, _ = signed_map(
-                    rows, PROJECTION_CLASS_SIZE, s, repo, controls=latest_controls_verdict(s, repo)
-                )
+            cmap, _ = self._served_map(repo, run_id=run_id, posture_class=posture_class)
             for c in cmap.cells:
                 if c.decision is not None:
                     st = c.stats

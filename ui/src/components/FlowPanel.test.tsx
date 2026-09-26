@@ -62,9 +62,9 @@ const MANUFACTURE: Flow['streams'][number] = {
   counts: { items_registered: 4, pull_requests_opened: 3, merged: 0 },
   not_captured: [
     {
-      figure: 'the reviewer minutes each decision cost',
-      why: 'POST /reviews records a verdict and its findings, and asks for no minutes',
-      gap: 'G-557',
+      figure: 'how many go-live lines are proven',
+      why: 'nothing reads the go-live checklist against this deployment’s own probes',
+      gap: 'G-584',
     },
   ],
 }
@@ -167,8 +167,37 @@ describe('FlowPanel', () => {
   it('a figure nothing records is printed with its gap, so its absence is not a zero', async () => {
     mount()
     await screen.findByTestId('flow-registered_to_pr')
-    expect(screen.getByText(/the reviewer minutes each decision cost/)).toBeInTheDocument()
-    expect(screen.getByText(/Gap G-557\./)).toBeInTheDocument()
+    expect(screen.getByText(/how many go-live lines are proven/)).toBeInTheDocument()
+    expect(screen.getByText(/Gap G-584\./)).toBeInTheDocument()
+  })
+
+  it('an install that passed before recording is a dash with the reason, never a guessed date', async () => {
+    const platform: Flow['streams'][number] = {
+      ...MANUFACTURE,
+      stream: 'run-the-platform',
+      name: 'Run the platform',
+      lead_times: [
+        {
+          key: 'installed_to_healthy',
+          label: 'Installed → first green /health',
+          n: 0,
+          median_s: null,
+          min_s: null,
+          max_s: null,
+          dropped: 0,
+          reason: 'the install passed before this product recorded it (an existing deployment upgraded), so it is not dated',
+        },
+      ],
+      spend: { usd: null, rows_priced: 0, rows_unpriced: 0, apparatus_versions: [] },
+      per_unit_label: '',
+      counts: { install_recorded: 0 },
+    }
+    const { container } = mount('run-the-platform', { ...FLOW, streams: [platform] })
+    const tile = await screen.findByTestId('flow-installed_to_healthy')
+    expect(tile.textContent).toContain('—')
+    expect(tile.textContent).toContain('the install passed before this product recorded it')
+    expect(screen.getByText('install recorded')).toBeInTheDocument()
+    expect(unhinted(container)).toEqual([])
   })
 
   it('every element a reader meets carries a registry hint', async () => {

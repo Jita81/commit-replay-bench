@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from crb.core.review import ReviewRecord
 from crb.core.version import APPARATUS_VERSION
@@ -51,6 +52,7 @@ from crb.factory.evidence import (
     FactoryEvent,
     JsonlFactoryStore,
 )
+from crb.server.app import API_PREFIX, create_app
 from crb.server.factory_state import FactoryHome
 from crb.server.flow import measure
 from crb.store.ledger import DbLedger, DbReviewLedger
@@ -61,10 +63,14 @@ from fixtures.server_seed import (
     DELIVER_CELL,
     RUN_IDS,
     Env,
+    add_users,
     envelope,
     login,
     logout,
     make_env,
+    make_factory,
+    make_settings,
+    seed,
     user_id,
 )
 from fixtures.signoff_seed import attested_body, clear_policy
@@ -327,10 +333,51 @@ class TestConnectAndProve:
 class TestDecideAndLicense:
     def test_the_decisions_start_and_its_cost_are_not_invented(self, env: Env) -> None:
         s = stream(reading(env), "decide-and-license")
-        figures = [nc["figure"] for nc in s["not_captured"]]
-        assert figures == ["the moment a cell first routed deliver"]
-        assert {nc["gap"] for nc in s["not_captured"]} == {"G-557"}
+        # both halves are recorded now (ADR-0029, DL-068): nothing is served as missing,
+        # and with nothing recorded yet each reads unmeasured with its reason, never zero
+        assert s["not_captured"] == []
+        lt = lead(s, "routed_deliver_to_signed")
+        assert lt["n"] == 0 and lt["median_s"] is None and lt["reason"]
         assert s["spend"]["usd"] is None
+
+    def test_a_cell_first_routing_deliver_to_its_signature_is_measured(self, env: Env) -> None:
+        clear_policy(env)
+        login(env.client, "approver")
+        r = env.post("/signoffs", json=attested_body(env, DELIVER_CELL))
+        assert r.status_code == 201, r.text
+        signed_at = r.json()["created"]
+        cell = {"capability_class": DELIVER_CELL["capability_class"], "size": DELIVER_CELL["size"]}
+        add_event(
+            env,
+            event_id="d" * 32,
+            trace_id="v" * 32,
+            seq=1,
+            timestamp="2026-01-01T09:00:00+00:00",
+            stage="system",
+            action="cell.routed_deliver",
+            status="ok",
+            repo=ALPHA,
+            payload_json={**cell, "moment": "observed", "scope": "x"},
+        )
+        add_event(
+            env,
+            event_id="c" * 32,
+            trace_id="v" * 32,
+            seq=2,
+            timestamp="2026-01-01T09:00:00+00:00",
+            stage="system",
+            action="flow.recorder_started",
+            status="ok",
+            repo=ALPHA,
+            payload_json={"scope": "y", "inherited": [{"capability_class": "a", "size": "S"}]},
+        )
+        s = stream(reading(env), "decide-and-license")
+        lt = lead(s, "routed_deliver_to_signed")
+        assert lt["n"] == 1 and lt["median_s"] is not None and lt["median_s"] > 0
+        assert lt["max_s"] == lt["min_s"]
+        assert s["counts"]["cells_routed_deliver"] == 1
+        assert s["counts"]["cells_at_deliver_before_recording"] == 1
+        assert signed_at > "2026-01-01T09:00:00+00:00"
 
     def test_the_reviewers_stated_minutes_are_shown_with_their_n(self, env: Env) -> None:
         s = stream(reading(env), "decide-and-license")
@@ -481,10 +528,53 @@ class TestManufactureAndDeliver:
 
 
 class TestRunThePlatform:
-    def test_the_accounts_are_counted_and_two_figures_are_not_captured(self, env: Env) -> None:
+    def test_the_accounts_are_counted_and_only_the_go_live_lines_are_not_captured(
+        self, env: Env
+    ) -> None:
         s = stream(reading(env), "run-the-platform")
         assert s["counts"]["accounts"] == 4 and s["counts"]["admins_active"] == 1
-        assert [nc["gap"] for nc in s["not_captured"]] == ["G-558", "G-584"]
+        assert [nc["gap"] for nc in s["not_captured"]] == ["G-584"]
+
+    def test_an_install_that_passed_before_recording_is_never_dated(self, env: Env) -> None:
+        # the seeded database held rows before the server first started: the install moment
+        # is unknown, so install → first green is unmeasured with the reason, never guessed
+        s = stream(reading(env), "run-the-platform")
+        lt = lead(s, "installed_to_healthy")
+        assert lt["n"] == 0 and lt["median_s"] is None
+        assert "before this product recorded it" in lt["reason"]
+        assert s["counts"]["install_recorded"] == 0
+
+    def test_install_to_the_first_green_health_is_measured(self, tmp_path: Path) -> None:
+        factory = make_factory(tmp_path)
+        with factory() as s:
+            for i, (action, ts, payload) in enumerate(
+                [
+                    ("deployment.installed", "2026-09-01T10:00:00+00:00", {"moment": "observed"}),
+                    ("deployment.first_healthy", "2026-09-01T10:45:00+00:00", {"status": "ok"}),
+                ]
+            ):
+                s.add(
+                    Event(
+                        event_id=f"{i:032x}",
+                        trace_id="w" * 32,
+                        seq=i + 1,
+                        timestamp=ts,
+                        stage="system",
+                        action=action,
+                        status="ok",
+                        payload_json=payload,
+                    )
+                )
+            s.commit()
+        seed(factory)
+        add_users(factory)
+        with TestClient(create_app(make_settings(tmp_path), factory)) as client:
+            login(client, "viewer")
+            body = client.get(f"{API_PREFIX}/flow?repo={ALPHA}").json()
+        s = stream(body, "run-the-platform")
+        lt = lead(s, "installed_to_healthy")
+        assert lt["n"] == 1 and lt["median_s"] == 2700.0 and lt["reason"] == ""
+        assert s["counts"]["install_recorded"] == 1
 
     def test_a_recovery_is_timed_from_the_reset_to_the_next_sign_in(self, env: Env) -> None:
         target = user_id("viewer1")

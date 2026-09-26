@@ -14,11 +14,13 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 |---|---|
 | connect-and-prove | repository registered → its first controls report that passed |
 | measure | run queued → its last row graded; a cell's first row → its tenth |
-| decide-and-license | the attested row graded clean (accepted) → the cell signed; and the |
+| decide-and-license | a cell first routed ``deliver`` (recorded, ADR-0029) → the cell signed; |
+| | the attested row graded clean (accepted) → the cell signed; and the |
 | | minutes each review took, as the reviewer stated them on ``POST /reviews`` |
 | manufacture-and-deliver | item registered → pull request opened → merged |
 | learn | a refusal raised → the strengthening item that supersedes it registered |
-| run-the-platform | an admin set an account's password → that account signed in again |
+| run-the-platform | an admin set an account's password → that account signed in again; |
+| | the install → the first green ``/health`` (both recorded, ADR-0029) |
 
 **Money is counted once.** Every graded row belongs to exactly one stream's spend
 (:func:`partition_rows`: a factory-built row is manufacture's, a row of a £0 proving run is
@@ -26,12 +28,15 @@ connect's, every other row is measure's); the reading also serves the repository
 spend, which the parts add up to. The sums use the product's one spend rule
 (``crb.core.flow.spend_of_rows``), which the value scorecard also uses.
 
-**What it refuses to invent.** Four figures those criteria ask for are not recorded anywhere,
+**What it refuses to invent.** Three figures those criteria ask for are not recorded anywhere,
 so they are served as :class:`~crb.core.flow.NotCaptured` — named, with why and with the gap
 that would close them — and never derived from a neighbouring number: the developer hours of
-the guide's "real work" (G-556), the moment a cell first routed ``deliver`` (G-557), the moment
-the deployment was installed and first read healthy (G-558), and how many go-live lines are
-proven (G-584). A screen prints the absence; nobody can mistake it for a zero.
+the guide's "real work" (G-556), how many go-live lines are proven (G-584) and the guard's
+false-positive rate (G-536). A screen prints the absence; nobody can mistake it for a zero.
+Three moments that were missing are now recorded when they happen (ADR-0029,
+:mod:`crb.server.flow_record`) and read back here: a cell first routing ``deliver``, the
+install and the first green ``/health``. A moment that passed before recording began is
+counted and never dated.
 
 Navigation
 ----------
@@ -67,6 +72,7 @@ from collections.abc import Iterable, Sequence
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from crb.core.capability import WILDCARD
 from crb.core.evidence import utc_now_iso
 from crb.core.flow import (
     STREAM_NAMES,
@@ -95,6 +101,12 @@ from crb.factory.evidence import (
     EV_INTAKE_REGISTERED,
     EV_RED_REFUSED,
     FactoryEvent,
+)
+from crb.server.flow_record import (
+    MOMENT_OBSERVED,
+    deliver_moments,
+    inherited_cells,
+    install_moments,
 )
 from crb.store.models import Event, Repo, Review, Run, Task, User
 
@@ -351,6 +363,22 @@ def decide_and_license(
         )
     ]
     stated = [int(m) for m in minutes if m is not None]
+    moments = deliver_moments(session, repo)
+    routed_pairs: list[tuple[str, str]] = []
+    for rec in records:
+        if rec.revoked:
+            continue
+        # the latest first-deliver stamp of a matching cell at or before the signature: the
+        # transition this signature answered (a wildcard size matches every size)
+        starts = [
+            ts
+            for (cls, size), stamps in moments.items()
+            if cls == rec.capability_class and rec.size in (size, WILDCARD)
+            for ts in stamps
+            if ts <= rec.verified_at
+        ]
+        if starts:
+            routed_pairs.append((max(starts), rec.verified_at))
     return StreamFlow(
         stream="decide-and-license",
         name=STREAM_NAMES["decide-and-license"],
@@ -360,6 +388,15 @@ def decide_and_license(
                 "Attested row accepted → cell signed",
                 pairs,
                 reason="no sign-off of this repository names a row this ledger holds",
+            ),
+            lead_time(
+                "routed_deliver_to_signed",
+                "Cell first routed deliver → cell signed",
+                routed_pairs,
+                reason=(
+                    "no signed cell of this repository first routed deliver while the product "
+                    "was recording it"
+                ),
             ),
             stated_durations(
                 "review_minutes",
@@ -379,8 +416,9 @@ def decide_and_license(
             "human_reviews": len(minutes),
             "reviews_with_minutes": len(stated),
             "review_minutes_total": sum(stated),
+            "cells_routed_deliver": len(moments),
+            "cells_at_deliver_before_recording": inherited_cells(session, repo),
         },
-        not_captured=(NOT_CAPTURED["deliver_route_moment"],),
     )
 
 
@@ -491,6 +529,16 @@ def run_the_platform(session: Session) -> StreamFlow:
     """
     users = list(session.execute(select(User)).scalars())
     last_login = {u.id: u.last_login for u in users}
+    installed_at, moment, healthy_at = install_moments(session)
+    observed = bool(installed_at) and moment == MOMENT_OBSERVED
+    install_reason = (
+        "the install passed before this product recorded it (an existing deployment "
+        "upgraded), so it is not dated"
+        if installed_at and not observed
+        else "no install moment is on record for this deployment"
+        if not installed_at
+        else "this deployment has not yet read green on /health"
+    )
     resets = session.execute(
         select(Event).where(Event.action == RESET_ACTION).order_by(Event.id.asc())
     ).scalars()
@@ -515,6 +563,12 @@ def run_the_platform(session: Session) -> StreamFlow:
                 pairs,
                 reason="no account on this deployment has been recovered by an admin yet",
             ),
+            lead_time(
+                "installed_to_healthy",
+                "Installed → first green /health",
+                [(installed_at, healthy_at)] if observed and healthy_at else [],
+                reason=install_reason,
+            ),
         ),
         spend=Spend(),
         spend_label="no model spend: running the platform buys no attempts",
@@ -523,8 +577,9 @@ def run_the_platform(session: Session) -> StreamFlow:
             "accounts_active": sum(1 for u in users if u.active),
             "admins_active": sum(1 for u in users if u.active and u.role == "admin"),
             "recoveries_started": recovered,
+            "install_recorded": 1 if observed else 0,
         },
-        not_captured=(NOT_CAPTURED["install_to_health"], NOT_CAPTURED["go_live_lines"]),
+        not_captured=(NOT_CAPTURED["go_live_lines"],),
     )
 
 
@@ -538,19 +593,6 @@ NOT_CAPTURED: dict[str, NotCaptured] = {
             "product, and nothing here times it"
         ),
         gap="G-556",
-    ),
-    "deliver_route_moment": NotCaptured(
-        figure="the moment a cell first routed deliver",
-        why=(
-            "the route is recomputed on every read and the transition is never stamped, so the "
-            "decision's clock is started from the row the approver attested instead"
-        ),
-        gap="G-557",
-    ),
-    "install_to_health": NotCaptured(
-        figure="the time from installing the deployment to its first green /health",
-        why="neither the install nor the first healthy probe is stamped anywhere",
-        gap="G-558",
     ),
     "go_live_lines": NotCaptured(
         figure="how many go-live lines are proven",

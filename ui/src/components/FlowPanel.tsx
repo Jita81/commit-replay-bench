@@ -45,11 +45,13 @@ const FLOW_HINTS: Record<string, HintId> = {
   first_row_to_bar: 'flow.first_row_to_bar',
   accepted_to_signed: 'flow.accepted_to_signed',
   review_minutes: 'flow.review_minutes',
+  routed_deliver_to_signed: 'flow.routed_deliver_to_signed',
   registered_to_pr: 'flow.registered_to_pr',
   pr_to_merged: 'flow.pr_to_merged',
   registered_to_merged: 'flow.registered_to_merged',
   refusal_to_strengthening: 'flow.refusal_to_strengthening',
   password_set_to_signed_in: 'flow.password_set_to_signed_in',
+  installed_to_healthy: 'flow.installed_to_healthy',
 }
 
 /** Which apparatus versions a spend's rows came from, in words ('' when it covers no row). */

@@ -168,7 +168,7 @@ const flowStream = (stream: string, name: string, key: string) => ({
   per_unit: null,
   per_unit_label: stream === 'manufacture-and-deliver' ? 'per merged pull request' : '',
   counts: { graded_rows: 44 },
-  not_captured: stream === 'decide-and-license' ? [{ figure: 'the reviewer minutes each decision cost', why: 'POST /reviews asks for no minutes', gap: 'G-557' }] : [],
+  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of the guide’s “real work”', why: 'nothing here times the work a person does outside this product', gap: 'G-556' }] : [],
 })
 const FLOW = {
   repo: 'alpha',

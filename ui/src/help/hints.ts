@@ -121,6 +121,8 @@ export const HINTS = {
     'From queueing a replay or blind run to its last row being graded: how long buying attempts takes in practice. Runs whose rows arrived by import are not timed, because no queue moment was recorded for them.',
   'flow.first_row_to_bar':
     'From a class and size’s first graded row to its tenth — the number of rows the routing rule needs before it will route on a cell at all. It says how long earning a routable cell takes, not how good the cell is.',
+  'flow.routed_deliver_to_signed':
+    'From the moment a cell first routed deliver to an approver signing it: how long a trusted cell waits on a person. The moment is recorded when a run ends and the map first routes the cell; cells already at deliver before recording began are counted below and never timed.',
   'flow.review_minutes':
     'How long a review took, in the minutes the reviewer stated when recording it: the median with the number of reviews that stated them. A review that left the minutes empty is not in it and is not counted as zero.',
   'flow.accepted_to_signed':
@@ -133,6 +135,8 @@ export const HINTS = {
     'The whole of manufacture: from the item being registered to its pull request being merged. This is the number a delivery team feels, and it includes every wait on a person inside it.',
   'flow.refusal_to_strengthening':
     'From a refusal being raised to a strengthening item being registered that supersedes what was refused. It says how quickly a stop becomes work, and a refusal nobody has answered is not counted.',
+  'flow.installed_to_healthy':
+    'From this deployment’s install to the first time /health read green. The install is dated only when the server was first started on an empty database; a deployment upgraded to this release shows a dash with the reason rather than a guessed date.',
   'flow.password_set_to_signed_in':
     'From an admin setting someone else’s password to that person signing in again: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted.',
   'flow.spend':
@@ -1661,11 +1665,13 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.first_row_to_bar',
   'flow.accepted_to_signed',
   'flow.review_minutes',
+  'flow.routed_deliver_to_signed',
   'flow.registered_to_pr',
   'flow.pr_to_merged',
   'flow.registered_to_merged',
   'flow.refusal_to_strengthening',
   'flow.password_set_to_signed_in',
+  'flow.installed_to_healthy',
   'flow.spend',
   'flow.spend_total',
   'flow.per_unit',
