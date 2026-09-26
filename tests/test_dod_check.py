@@ -19,11 +19,14 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               ``--check`` fails on a stale GAP-ANALYSIS.md; and that the prevention register
               (docs/PREVENTION.md) must exist and refuses an entry closed without an
               executable artefact that resolves, an advisory closure, a pending entry with no
-              gap, an unknown level or status, a duplicate id and a missing first-seen.
+              gap, an unknown level or status, a duplicate id and a missing first-seen; that a
+              gap line no criterion (or pending row) cites is refused; and that a PLAN.md wave
+              item must be a gap id, while a gap the wave closes stays a valid item through the
+              generated "Gap ids retired" list.
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
-              ``main([...])`` in-process.
+              ``main([...])`` in-process; the fixture carries a minimal PLAN.md.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   scripts/dod_check.py (under test), docs/dod/STANDARD.md (the format),
@@ -156,6 +159,21 @@ REGISTER = """# Prevention register
 """
 
 
+#: A minimal plan: one wave whose items are a register gap and a backlog row.
+PLAN = """# The plan
+
+## Wave 1 — the first wave
+
+| stream | gaps | what ships |
+|---|---|---|
+| A · one | G-701, F23 | the thing |
+"""
+
+#: The fixture page's one gap line; ``_write_all`` keeps it only while a criterion cites it,
+#: because a gap line no criterion cites is itself a defect.
+G001 = "- **G-001** \u2014 non-goals not on the About block \u00b7 add one sentence \u00b7 ui\n"
+
+
 def _rows(prefix: str, cats: list[str]) -> str:
     return "\n".join(
         f"| {prefix}.{c.lower()}.{i} | {c} | ok | `code:ui/src/App.tsx::App` | met | |"
@@ -223,6 +241,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
         "jobs:\n  code-map:\n    name: code-map\n", encoding="utf-8"
     )
     (tmp_path / "docs/PREVENTION.md").write_text(REGISTER, encoding="utf-8")
+    (tmp_path / "docs/dod/PLAN.md").write_text(PLAN, encoding="utf-8")
     monkeypatch.setattr(mod, "ROOT", tmp_path)
     monkeypatch.setattr(mod, "DOD", tmp_path / "docs/dod")
     monkeypatch.setattr(mod, "OUT", tmp_path / "docs/dod/GAP-ANALYSIS.md")
@@ -236,13 +255,15 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, P
     monkeypatch.setattr(mod, "ADR_DIR", tmp_path / "docs/adr")
     monkeypatch.setattr(mod, "BACKLOG", tmp_path / "docs/reviews/backlog.md")
     monkeypatch.setattr(mod, "PREVENTION", tmp_path / "docs/PREVENTION.md")
+    monkeypatch.setattr(mod, "PLAN", tmp_path / "docs/dod/PLAN.md")
     return mod, tmp_path
 
 
 def _write_all(root: Path, *, ng_state: str = "n/a", ng_gap: str = "not applicable here") -> None:
-    (root / "docs/dod/pages/results.md").write_text(
-        PAGE.replace("{NG_STATE}", ng_state).replace("{NG_GAP}", ng_gap), encoding="utf-8"
-    )
+    page = PAGE.replace("{NG_STATE}", ng_state).replace("{NG_GAP}", ng_gap)
+    if ng_gap != "G-001":
+        page = page.replace(G001, "")
+    (root / "docs/dod/pages/results.md").write_text(page, encoding="utf-8")
     jcats = [
         "PURPOSE",
         "ENTRY-EXIT",
@@ -512,7 +533,7 @@ def test_a_gap_record_needs_the_em_dash_and_measured_needs_an_apparatus_version(
     ``- **G-nnn** \u2014 what \u00b7 change \u00b7 owner`` with an em dash, and a ``measured:``
     annotation names an apparatus VERSION, not the bare word."""
     mod, root = tree
-    _write_all(root)
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
     page = root / "docs/dod/pages/results.md"
     good = page.read_text(encoding="utf-8")
     page.write_text(good.replace("- **G-001** \u2014 ", "- **G-001** - "), encoding="utf-8")
@@ -743,3 +764,82 @@ def test_two_streams_numbering_the_same_criterion_id_are_refused(
     stream.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert mod.main(["--check"]) == 1
     assert "duplicate criterion id measure." in capsys.readouterr().out
+
+
+def test_a_gap_line_that_no_criterion_cites_is_refused(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-051: a gap line no criterion cites never reaches the gap
+    analysis, so it names work nobody is asked to do and hides work that was done (G-931,
+    G-940 to G-944 and six stray copies of G-905 sat in the tree for a wave). An artefact's
+    gap is cited by a criterion of the same file; a register gap by a pending row."""
+    mod, root = tree
+    _write_all(root)
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    capsys.readouterr()
+    page = root / "docs/dod/pages/results.md"
+    good = page.read_text(encoding="utf-8")
+    page.write_text(good + G001, encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "gap G-001 is defined but no criterion in this file cites it" in (
+        capsys.readouterr().out
+    )
+    page.write_text(good, encoding="utf-8")
+    (root / "docs/PREVENTION.md").write_text(
+        REGISTER
+        + "- **G-702** \u2014 nothing cites this \u00b7 cite it or delete it \u00b7 server\n",
+        encoding="utf-8",
+    )
+    assert mod.main(["--check"]) == 1
+    assert "PREVENTION.md: gap G-702 is defined but no pending row cites it" in (
+        capsys.readouterr().out
+    )
+
+
+def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-051: nothing checked that PLAN.md's wave items were gaps at all, so
+    the plan and the order of work drifted apart unseen. Every item in a
+    wave table's ``gaps`` column must be a gap id the record defines: an artefact's gap, a
+    register gap or a backlog row. A gap the wave CLOSES stays a valid item — the generator
+    carries each id that leaves the order of work into GAP-ANALYSIS.md's retired list — while
+    an id that was never a gap fails."""
+    mod, root = tree
+    plan = root / "docs/dod/PLAN.md"
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    plan.write_text(PLAN.replace("G-701, F23", "G-001, G-701, F23"), encoding="utf-8")
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    capsys.readouterr()
+    # an id that was never a gap: a typo
+    plan.write_text(PLAN.replace("G-701, F23", "G-001, G-010"), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "PLAN.md:7: wave item G-010 is not a gap id defined under docs/dod" in (
+        capsys.readouterr().out
+    )
+    # a wave item is gap ids and nothing else
+    plan.write_text(PLAN.replace("G-701, F23", "G-001 (and the rest)"), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "PLAN.md:7: a wave item is a gap id, not 'G-001 (and the rest)'" in (
+        capsys.readouterr().out
+    )
+    # the wave closes G-001: the criterion is met, its line goes, the plan still names it
+    plan.write_text(PLAN.replace("G-701, F23", "G-001, G-701, F23"), encoding="utf-8")
+    _write_all(root)
+    assert mod.main([]) == 0
+    out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
+    assert "## Gap ids retired" in out and "G-001" in out.split("## Gap ids retired", 1)[1]
+    assert mod.main(["--check"]) == 0
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0  # the retired list is stable
+    capsys.readouterr()
+    # ... and a typo beside it still fails
+    plan.write_text(PLAN.replace("G-701, F23", "G-001, G-011"), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "wave item G-011 is not a gap id" in capsys.readouterr().out
+    # a plan with no wave table names nothing, and a missing plan is a defect
+    plan.write_text("# The plan\n", encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    assert "PLAN.md names no wave item" in capsys.readouterr().out
+    plan.unlink()
+    assert mod.main(["--check"]) == 1
+    assert "docs/dod/PLAN.md is missing" in capsys.readouterr().out
