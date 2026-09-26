@@ -27,9 +27,11 @@ What it does: Pins that a keychain login is ok, that no login and no key is degr
               stamped behind head and on one whose append-only triggers are missing, and
               renders ``ui`` ok (text and JSON) on a complete build.
 How:          A fake ``claude`` on PATH and a throwaway ``CRB_HOME`` (the persistent case is a
-              unique, never-created path under ``/srv`` — host state cannot reach it); an RSA key pair from
-              ``cryptography`` and an ``httpx.MockTransport`` standing in for GitHub; a
-              ``ui/dist`` made of one-line chunk files. The ``home`` fixture pins ``CRB_UI_DIST``
+              unique, never-created path under ``/srv`` — host state cannot reach it); a
+              ``sandbox`` probe that never asks the host's docker daemon, so a report reads the
+              same with or without one; an RSA key pair from ``cryptography`` and an
+              ``httpx.MockTransport`` standing in for GitHub; a ``ui/dist`` made of one-line
+              chunk files. The ``home`` fixture pins ``CRB_UI_DIST``
               to a path the test owns with no build, so a ``ui/dist`` built in the checkout
               (``scripts/walkthrough.sh``) never reaches a test; a test wanting a build makes
               its own.
@@ -72,6 +74,7 @@ from crb.cli.commands.service import (
 )
 from crb.cli.main import main
 from crb.core.secrets_file import SecretsStore
+from crb.observability import probes
 from crb.server.settings import GitHubAppSettings, Settings
 from crb.store import migrate
 
@@ -94,15 +97,23 @@ esac
 """
 
 
+def _daemon_not_asked(timeout: int = 10, *, request_id: str = "") -> probes.ProbeResult:
+    """The ``sandbox`` line as a fixed answer: the host's docker daemon is never asked."""
+    return probes.ProbeResult("sandbox", probes.OK, "docker (test double: no daemon asked)")
+
+
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A throwaway ``CRB_HOME`` with every ``CRB_*`` and credential variable cleared, so the probe
-    never sees the operator's login — and ``CRB_UI_DIST`` pinned to a path this test owns with
-    no build in it. Cleared instead, the ``ui`` line falls back to the working directory's
-    ``ui/dist``, which ``scripts/walkthrough.sh`` builds in the checkout: the line then flipped
-    from ``warn`` to ``ok`` on the developer's machine and stayed ``warn`` in CI. A test that
-    wants a built UI builds its own and points ``CRB_UI_DIST`` (or ``ui_dist``) at it.
+    never sees the operator's login — a ``sandbox`` probe that never asks the host's docker
+    daemon, so a report reads the same on a laptop and in a container with no daemon — and
+    ``CRB_UI_DIST`` pinned to a path this test owns with no build in it. Cleared instead, the
+    ``ui`` line falls back to the working directory's ``ui/dist``, which
+    ``scripts/walkthrough.sh`` builds in the checkout: the line then flipped from ``warn`` to
+    ``ok`` on the developer's machine and stayed ``warn`` in CI. A test that wants a built UI
+    builds its own and points ``CRB_UI_DIST`` (or ``ui_dist``) at it.
     """
+    monkeypatch.setattr(probes, "probe_docker", _daemon_not_asked)
     for key in list(os.environ):
         if key.startswith("CRB_") or key in {"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}:
             monkeypatch.delenv(key, raising=False)
@@ -581,6 +592,39 @@ class TestDoctorReport:
             f"database at 0001, code head {migrate.head_revision()} — run `crb migrate`"
         )
         assert next(p for p in body["probes"] if p["name"] == "worker")["status"] == "degraded"
+
+    def test_the_report_is_the_same_whether_or_not_the_host_has_a_docker_daemon(
+        self,
+        home: Path,
+        fake_cli: Callable[[bool], None],
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """A report over test fixtures must not read the machine it runs on: the store-only
+        fixture above gave ``overall: warn`` on a developer's laptop and ``overall: fail`` in
+        a container with no docker daemon (assessment 2026-09-25 §E2). A fake ``docker`` first
+        on PATH answers, then refuses; the report is identical both times."""
+        fake_cli(True)
+        monkeypatch.setenv("CRB_ENV", "dev")
+        monkeypatch.setenv("CRB_UI_DIST", str(home / "no-built-ui"))
+        home.mkdir()
+        migrate.upgrade(f"sqlite:///{home / 'crb.db'}")
+        bindir = tmp_path / "fake-docker"
+        bindir.mkdir()
+        docker = bindir / "docker"
+        monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+        reports: list[tuple[int, str]] = []
+        for script in (
+            "#!/bin/sh\necho 99.0\n",
+            "#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2\nexit 1\n",
+        ):
+            docker.write_text(script)
+            docker.chmod(0o755)
+            code = main(["doctor"])
+            reports.append((code, capsys.readouterr().out))
+        assert reports[0] == reports[1]
+        assert reports[0][1].rstrip().endswith("overall: warn") and reports[0][0] == 0
 
     def test_a_complete_build_renders_the_ui_line_ok_in_text_and_json(
         self,

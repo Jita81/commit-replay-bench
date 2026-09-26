@@ -12,14 +12,16 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               year, a leading-zero identifier — are not claims; that a count written without
               digit grouping (``1200``) and a result standing beside a confidence interval
               *are*; that a tag written inside inline code does not cover the claim around it;
-              and that ``--check`` exits non-zero while the default report exits zero.
+              that ``--check`` exits non-zero while the default report exits zero; and that
+              the two DL-053 rules CONTRIBUTING states, which the gate cannot see because
+              they are unquantified, keep their ``[aspiration]`` tags.
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/claims_check.py (the code under test), docs/EVIDENCE-AND-CLAIMS.md
               (the claim-tag rule these tests enforce a shape for), .github/workflows/ci.yml
-              (the claims job that runs --check)
+              (the claims job that runs --check), docs/CONTRIBUTING.md (the DL-053 rules)
 Tested by:    (this is a test file)
 Touch when:   a tag is added to the policy, the heuristic changes, or a file joins the
               allowlist (add the case here in the same change).
@@ -205,3 +207,31 @@ def test_the_repository_itself_passes_the_gate() -> None:
     """The allowlist is not aspirational: every file on it is clean on this tree."""
     assert cc.check_tree(ROOT, cc.ALLOWLIST) == []
     assert all((ROOT / rel).exists() for rel in cc.ALLOWLIST)
+
+
+def test_the_allowlist_only_grows() -> None:
+    """A page that has been cleaned never leaves the gate. CONTRIBUTING joined when PR #51's
+    review found a verdict claim there that the evidence did not support."""
+    assert {"README.md", "docs/RELEASING.md", "docs/CONTRIBUTING.md"} <= set(cc.ALLOWLIST)
+
+
+DL053_RULES = (
+    "No test may fail because of the machine it runs on",
+    "Running as root, with no docker daemon or with no network is meant to change which tests"
+    " run, not their results",
+)
+
+
+@pytest.mark.parametrize("rule", DL053_RULES)
+def test_the_dl053_rules_in_contributing_stay_tagged_as_aspirations(rule: str) -> None:
+    """The gate reads only quantified sentences, so it cannot see an unquantified rule stated
+    as a fact. CONTRIBUTING states DL-053's two rules, which one whole-suite run did not yet
+    demonstrate: each sentence must carry its ``[aspiration`` tag until evidence replaces it
+    (PR #51 review). A targeted guard — an unquantified claim elsewhere is still unchecked."""
+    text = " ".join((ROOT / "docs" / "CONTRIBUTING.md").read_text(encoding="utf-8").split())
+    assert rule in text, f"CONTRIBUTING no longer states {rule!r}: update DL053_RULES"
+    sentence = text[text.index(rule) :]
+    end = sentence.find(". ")
+    assert "**[aspiration" in sentence[: end if end >= 0 else None], (
+        f"CONTRIBUTING states {rule!r} as a fact: tag it [aspiration] or cite the evidence"
+    )
