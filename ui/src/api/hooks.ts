@@ -861,6 +861,22 @@ export function useSetUserPassword(): UseMutationResult<User, ApiError, { id: st
 }
 
 /**
+ * `POST /users/{id}/sessions/revoke` (admin) — "sign out everywhere": the account's session
+ * nonce rotates, so every session it holds (a local or an identity-provider account) ends on its
+ * next request. The account can sign in again at once.
+ */
+export function useRevokeUserSessions(): UseMutationResult<User, ApiError, { id: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }) => api<User>(`/users/${enc(id)}/sessions/revoke`, { method: 'POST' }),
+    onSuccess: (_u, { id }) => {
+      void qc.invalidateQueries({ queryKey: keys.users })
+      void qc.invalidateQueries({ queryKey: ['users', id, 'events'] })
+    },
+  })
+}
+
+/**
  * `PUT /users/me/password` — the signed-in account changes its own password with the current
  * one. The response re-issues this browser's cookie, so the person stays signed in here while
  * every other session of the account ends.

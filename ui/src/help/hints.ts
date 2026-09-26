@@ -1520,7 +1520,11 @@ export const HINTS = {
   'button.settings.verify_login':
     'Try the stored token once, through the builder’s own environment, and report whether it was accepted; allowed once every 10 seconds.',
   'button.settings.remove_token':
-    'Delete the stored token from the server; builders in cli mode stop working until a new one is stored.',
+    'Delete the stored token from the server; builders in cli mode stop working until a new one is stored. You are asked to confirm first.',
+  'button.settings.remove_token_confirm':
+    'Delete the stored token now. Runs in cli mode fail until a new one is stored.',
+  'button.settings.remove_token_keep':
+    'Keep the stored token and close the question. Nothing is deleted.',
   'pill.settings.signin_state':
     'Where the sign-in flow is: waiting for the code, exchanging it, done or failed.',
   'pill.settings.github_configured':
@@ -1572,11 +1576,13 @@ export const HINTS = {
   'stat.settings.last_login':
     'The last successful sign-in for this account, as an age. An account that has never signed in reads "Never".',
   'col.settings.account_actions':
-    'Set this account’s password, or read the audit trail of every change made to it.',
+    'Set this account’s password, sign it out on every device, or read its audit trail: every change made to it and every sign-in.',
+  'button.settings.sign_out_everywhere':
+    'End every session this account holds, on every device, on its next request — for a lost laptop or a leaver. It works for an identity-provider account too. The person can sign in again at once; turn the account off as well to keep them out.',
   'button.settings.set_password':
     'Set a new password for this account. Only an admin may set another account’s password — you change your own in the “Change my password” card above. It ends every session the account holds, so the person signs in again with the new one, and only a local account has a password to set at all.',
   'button.settings.account_history':
-    'Show every recorded change to this account — created, role set, password set, deactivated, reactivated — with who did it and when.',
+    'Show the account’s audit trail — created, role set, password set, deactivated, reactivated, signed out everywhere, and each sign-in and failed sign-in — with who did it and when.',
   'field.settings.set_password':
     'The new password for this account: at least 12 characters. It is never shown back and never recorded in the audit trail.',
   'field.settings.set_password_confirm':
@@ -1586,7 +1592,11 @@ export const HINTS = {
   'tile.settings.account_history':
     'The account’s own audit trail: one row per recorded change, newest first, each with the actor who made it. A change made on the API host reads cli followed by the operating-system user.',
   'pill.settings.account_event':
-    'What was done to the account: created, role set, password set, deactivated or reactivated.',
+    'What happened to the account: created, role set, password set, deactivated, reactivated, signed out everywhere, signed in (user.login) or a refused sign-in (user.login_failed, by anonymous).',
+  'link.settings.created_home':
+    'Go back to Home: the task list shows the account you just created, and the next task.',
+  'link.settings.created_connect':
+    'Go on to Connection to connect a repository, the next step once the people who approve are set up.',
   'tile.settings.my_password':
     'Change the password of the account you are signed in as. This browser stays signed in; every other session of the account ends.',
   'field.settings.my_current_password':

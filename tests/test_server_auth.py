@@ -12,9 +12,13 @@ What it does: Pins password hashing (short passwords refused), session round tri
               failures rate-limit, local auth can be disabled, a deactivated user's session
               stops working, logout clears; that a POST without the CSRF header is refused while
               GET is never checked and an anonymous POST is 401 not CSRF; that a viewer cannot
-              manage users, the last-admin guard, and user lists never include hashes; and the
-              OIDC flow — state + PKCE cookie on start, a mapped user on callback, state mismatch
-              and provider errors rejected, exchange failure as 502.
+              manage users, the last-admin guard, and user lists never include hashes; the
+              OIDC flow — state + PKCE cookie on start, a mapped user on callback, and every
+              callback failure (state missing or forged, a provider refusal, a failed exchange,
+              a disabled account) a redirect to ``/login?error=<code>`` with no provider words;
+              that every sign-in and refused sign-in is a ``user.*`` event (a refused name that
+              is no account recorded without the name; a lost ``seq`` race retried); and that
+              /login's session sentence matches ``session_ttl`` (P-051).
 How:          ``create_app(oidc_client=FakeOidc(...))`` — no network; a ``TestClient`` per
               settings variant.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
@@ -534,7 +538,8 @@ class TestOidc:
                 params={"code": "good-code", "state": pending.state},
                 follow_redirects=False,
             )
-            assert r.status_code == 400 and err(r)["code"] == "oidc_state_missing"
+            assert r.status_code == 302
+            assert r.headers["location"] == "/login?error=oidc_state_missing"
         # Upsert by (issuer, subject): a second login with new groups refreshes the profile
         # but not the role — the claims set it on the FIRST sign-in only (D4; the
         # ``always`` mode is TestOidcRoleSource's)
@@ -558,48 +563,8 @@ class TestOidc:
             oidc_users = [u for u in users["items"] if u["issuer"] == ISSUER]
             assert len(oidc_users) == 1 and oidc_users[0]["subject"] == "entra-oid-123"
 
-    def test_callback_rejects_state_mismatch_and_provider_errors(
-        self, oidc_app: tuple[Any, FakeOidc]
-    ) -> None:
-        app, _ = oidc_app
-        with TestClient(app) as c:
-            r = c.get(
-                f"{API_PREFIX}/auth/oidc/callback",
-                params={"code": "good-code", "state": "x"},
-                follow_redirects=False,
-            )
-            assert r.status_code == 400 and err(r)["code"] == "oidc_state_missing"
-            c.get(f"{API_PREFIX}/auth/oidc/start", follow_redirects=False)
-            r = c.get(
-                f"{API_PREFIX}/auth/oidc/callback",
-                params={"code": "good-code", "state": "forged"},
-                follow_redirects=False,
-            )
-            assert r.status_code == 400 and err(r)["code"] == "oidc_state_mismatch"
-            r = c.get(
-                f"{API_PREFIX}/auth/oidc/callback",
-                params={"error": "access_denied", "error_description": "user cancelled"},
-                follow_redirects=False,
-            )
-            assert r.status_code == 400 and err(r)["code"] == "oidc_provider_error"
-            assert SESSION_COOKIE not in c.cookies
-
-    def test_callback_exchange_failure_is_502(
-        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path
-    ) -> None:
-        app, _ = oidc_app
-        settings = make_settings(tmp_path, oidc=OIDC_SETTINGS)
-        with TestClient(app) as c:
-            c.get(f"{API_PREFIX}/auth/oidc/start", follow_redirects=False)
-            pending = read_oidc_cookie(settings, c.cookies[OIDC_COOKIE])
-            r = c.get(
-                f"{API_PREFIX}/auth/oidc/callback",
-                params={"code": "bad-code", "state": pending.state},
-                follow_redirects=False,
-            )
-            assert r.status_code == 502 and err(r)["code"] == "oidc_exchange_failed"
-            assert "invalid_grant" not in r.text
-            assert SESSION_COOKIE not in c.cookies
+    # A failed callback (state missing or forged, a provider refusal, a failed exchange, a
+    # disabled account) returns to /login with its code: TestOidcFailureReturnsToLogin.
 
     def test_open_redirect_is_neutralised(
         self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path
@@ -957,3 +922,250 @@ class TestOidcRoleSource:
         assert OidcSettings(role_from_claims="always").role_from_claims == "always"
         with pytest.raises(ValueError):
             OidcSettings(role_from_claims="sometimes")
+
+
+# --- a sign-in is an audit event; an OIDC failure goes back to /login (G-190, G-188) -------
+
+
+def _trail(app: Any, username: str) -> list[Any]:
+    """The ``user.*`` events on ``username``'s own trace, oldest first."""
+    from sqlalchemy import select
+
+    from crb.server.routes.admin import user_trace_id
+    from crb.store.models import Event, User
+
+    with app.state.session_factory() as s:
+        user = s.execute(select(User).where(User.subject == f"local:{username}")).scalar_one()
+        rows = list(
+            s.execute(
+                select(Event).where(Event.trace_id == user_trace_id(user.id)).order_by(Event.seq)
+            ).scalars()
+        )
+        s.expunge_all()
+        return rows
+
+
+class TestSignInIsAudited:
+    """G-190: who signed in, and who tried, is on the account's own trail — the History the
+    Users card renders — not only in the server log."""
+
+    def test_a_local_sign_in_writes_user_login_with_the_account_as_actor(
+        self, client: TestClient
+    ) -> None:
+        login(client)
+        app = client.app
+        (ev,) = [e for e in _trail(app, "root") if e.action.startswith("user.login")]
+        assert ev.action == "user.login"
+        assert ev.actor == ev.payload_json["target"]
+        assert ev.payload_json["method"] == "local"
+        assert ev.payload_json["username"] == "root"
+
+    def test_a_failed_sign_in_to_an_account_is_recorded_without_the_password(
+        self, client: TestClient
+    ) -> None:
+        r = client.post(
+            f"{API_PREFIX}/auth/login", json={"username": "root", "password": "wrong-password-1"}
+        )
+        assert r.status_code == 401
+        evs = [e for e in _trail(client.app, "root") if e.action.startswith("user.login")]
+        assert [e.action for e in evs] == ["user.login_failed"]
+        assert evs[0].actor == "anonymous"
+        assert evs[0].payload_json["method"] == "local"
+        blob = repr(evs[0].payload_json) + evs[0].error_message
+        assert "wrong-password-1" not in blob and "argon2" not in blob
+
+    def test_an_unknown_username_is_counted_but_never_stored(self, client: TestClient) -> None:
+        """A person who types their password into the username box must not have it written
+        to the audit table: the event carries no name. It is still written, so a refusal
+        costs the same whether or not the account exists."""
+        from sqlalchemy import select
+
+        from crb.store.models import Event
+
+        typed = "my-secret-typed-here"
+        r = client.post(f"{API_PREFIX}/auth/login", json={"username": typed, "password": "x" * 12})
+        assert r.status_code == 401
+        with client.app.state.session_factory() as s:
+            evs = list(
+                s.execute(select(Event).where(Event.action == "user.login_failed")).scalars()
+            )
+            assert len(evs) == 1
+            assert evs[0].payload_json == {"method": "local", "reason": "unknown_account"}
+            assert typed not in repr(evs[0].payload_json) + evs[0].error_message
+
+    def test_a_lost_race_for_the_trace_seq_is_retried_not_refused(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two sign-ins to one account can read the same last ``seq`` on its trail; the
+        loser's commit breaks the unique ``(trace_id, seq)``. The sign-in rolls back and
+        writes again rather than answering a 500 (DL-071). The race is staged by adding a
+        second row with the same ``(trace_id, seq)`` to the first attempt's transaction."""
+        import crb.server.routes.auth as routes_auth
+        from crb.server.routes.admin import record_user_event as real_record
+        from crb.store.models import Event
+
+        calls = {"n": 0}
+
+        def racing(db: Any, **kw: Any) -> None:
+            real_record(db, **kw)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                (mine,) = [o for o in db.new if isinstance(o, Event)]
+                twin = Event(
+                    **{
+                        c.name: getattr(mine, c.name)
+                        for c in Event.__table__.columns
+                        if c.name != "id"
+                    }
+                )
+                twin.event_id = "f" * 32
+                db.add(twin)
+
+        monkeypatch.setattr(routes_auth, "record_user_event", racing)
+        login(client)
+        assert calls["n"] == 2
+        actions = [e.action for e in _trail(client.app, "root")]
+        assert actions.count("user.login") == 1
+
+    def test_a_rate_limited_attempt_writes_no_event(self, client: TestClient) -> None:
+        for _ in range(5):
+            client.post(
+                f"{API_PREFIX}/auth/login", json={"username": "root", "password": "bad-password"}
+            )
+        r = client.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
+        assert r.status_code == 429
+        evs = [e for e in _trail(client.app, "root") if e.action.startswith("user.login")]
+        assert [e.action for e in evs] == ["user.login_failed"] * 5
+
+    def test_an_oidc_sign_in_writes_user_login(
+        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path
+    ) -> None:
+        app, _ = oidc_app
+        c = _oidc_login(app, make_settings(tmp_path, oidc=OIDC_SETTINGS))
+        try:
+            me = c.get(f"{API_PREFIX}/auth/me").json()
+        finally:
+            c.__exit__(None, None, None)
+        evs = _user_events(app, "user.login")
+        assert len(evs) == 1 and evs[0].actor == me["id"]
+        assert evs[0].payload_json["method"] == "oidc"
+
+    def test_api_md_lists_both_events(self) -> None:
+        text = Path("docs/API.md").read_text(encoding="utf-8")
+        assert "`user.login`" in text and "`user.login_failed`" in text
+
+
+class TestOidcFailureReturnsToLogin:
+    """G-188 / G-412: a failed provider round-trip lands on ``/login?error=<code>`` with the
+    form, never on a raw JSON envelope. Only a known code travels in the URL — never the
+    provider's own words."""
+
+    def _location(self, r: Any) -> tuple[str, dict[str, list[str]]]:
+        assert r.status_code == 302, r.text
+        loc = urlparse(r.headers["location"])
+        return loc.path, parse_qs(loc.query)
+
+    def test_a_provider_refusal_returns_with_its_code_and_next(
+        self, oidc_app: tuple[Any, FakeOidc]
+    ) -> None:
+        app, _ = oidc_app
+        with TestClient(app) as c:
+            c.get(f"{API_PREFIX}/auth/oidc/start?next=/runs", follow_redirects=False)
+            r = c.get(
+                f"{API_PREFIX}/auth/oidc/callback",
+                params={"error": "access_denied", "error_description": "user <b>cancelled</b>"},
+                follow_redirects=False,
+            )
+            path, q = self._location(r)
+            assert path == "/login"
+            assert q == {"error": ["oidc_provider_error"], "next": ["/runs"]}
+            assert "cancelled" not in r.headers["location"]
+            assert SESSION_COOKIE not in c.cookies and OIDC_COOKIE not in c.cookies
+
+    def test_a_missing_or_forged_state_returns_with_its_code(
+        self, oidc_app: tuple[Any, FakeOidc]
+    ) -> None:
+        app, _ = oidc_app
+        with TestClient(app) as c:
+            r = c.get(
+                f"{API_PREFIX}/auth/oidc/callback",
+                params={"code": "good-code", "state": "x"},
+                follow_redirects=False,
+            )
+            path, q = self._location(r)
+            assert (path, q) == ("/login", {"error": ["oidc_state_missing"]})
+            c.get(f"{API_PREFIX}/auth/oidc/start", follow_redirects=False)
+            r = c.get(
+                f"{API_PREFIX}/auth/oidc/callback",
+                params={"code": "good-code", "state": "forged"},
+                follow_redirects=False,
+            )
+            path, q = self._location(r)
+            assert path == "/login" and q["error"] == ["oidc_state_mismatch"]
+            assert SESSION_COOKIE not in c.cookies
+
+    def test_an_exchange_failure_returns_with_its_code_and_hides_the_reason(
+        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path
+    ) -> None:
+        app, _ = oidc_app
+        settings = make_settings(tmp_path, oidc=OIDC_SETTINGS)
+        with TestClient(app) as c:
+            c.get(f"{API_PREFIX}/auth/oidc/start", follow_redirects=False)
+            pending = read_oidc_cookie(settings, c.cookies[OIDC_COOKIE])
+            r = c.get(
+                f"{API_PREFIX}/auth/oidc/callback",
+                params={"code": "bad-code", "state": pending.state},
+                follow_redirects=False,
+            )
+            path, q = self._location(r)
+            assert path == "/login" and q["error"] == ["oidc_exchange_failed"]
+            assert "invalid_grant" not in r.text + r.headers["location"]
+            assert SESSION_COOKIE not in c.cookies
+
+    def test_a_disabled_account_returns_with_its_code_and_is_recorded(
+        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path
+    ) -> None:
+        app, _ = oidc_app
+        settings = make_settings(tmp_path, oidc=OIDC_SETTINGS)
+        c = _oidc_login(app, settings)
+        me = c.get(f"{API_PREFIX}/auth/me").json()
+        c.__exit__(None, None, None)
+        with TestClient(app) as admin:
+            login(admin)
+            r = admin.put(f"{API_PREFIX}/users/{me['id']}/active", json={"active": False})
+            assert r.status_code == 200, r.text
+        with TestClient(app) as c:
+            c.get(f"{API_PREFIX}/auth/oidc/start", follow_redirects=False)
+            pending = read_oidc_cookie(settings, c.cookies[OIDC_COOKIE])
+            r = c.get(
+                f"{API_PREFIX}/auth/oidc/callback",
+                params={"code": "good-code", "state": pending.state},
+                follow_redirects=False,
+            )
+            path, q = self._location(r)
+            assert path == "/login" and q["error"] == ["account_disabled"]
+            assert SESSION_COOKIE not in c.cookies
+        failed = _user_events(app, "user.login_failed")
+        assert len(failed) == 1 and failed[0].payload_json["reason"] == "account_disabled"
+
+    def test_an_unconfigured_deployment_still_answers_404(self, client: TestClient) -> None:
+        r = client.get(f"{API_PREFIX}/auth/oidc/callback", follow_redirects=False)
+        assert r.status_code == 404 and err(r)["code"] == "oidc_not_configured"
+
+
+def test_the_sign_in_page_states_the_session_length_the_server_sets(tmp_path: Path) -> None:
+    """P-051: /login told people a session "expires with the browser" while the cookie
+    carried ``Max-Age`` = ``session_ttl`` (8 hours). The page's sentence and the server's
+    default are now held to each other: change one without the other and this fails."""
+    import re
+
+    page = Path("ui/src/screens/Login/LoginPage.tsx").read_text(encoding="utf-8")
+    assert "expire with the browser" not in page
+    m = re.search(r"A session lasts (\d+) hours unless this deployment sets another length", page)
+    assert m, "the sign-in page no longer states the session length"
+    default_ttl = Settings.model_fields["session_ttl"].default
+    assert int(m.group(1)) * 3600 == default_ttl
+    with TestClient(create_app(make_settings(tmp_path))) as c:
+        r = c.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
+        cookie = next(v for v in r.headers.get_list("set-cookie") if v.startswith(SESSION_COOKIE))
+        assert f"Max-Age={default_ttl}" in cookie

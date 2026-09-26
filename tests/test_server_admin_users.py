@@ -15,8 +15,10 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               again after reactivation) and the last active admin cannot be deactivated
               (409 ``last_admin``), that ``GET /users`` rows carry ``active`` and
               ``last_login``, that every change lands as one event with actor and target
-              and never a password, and that those events are ordinary ``events`` rows —
-              trigger-protected, not hash-chained (the chain is the ledger's).
+              and never a password, that those events are ordinary ``events`` rows —
+              trigger-protected, not hash-chained (the chain is the ledger's) — and that a
+              password set by any door rotates the session nonce, so the old sessions end
+              even when the stored hash does not move (#52's revocation, P-052).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; a second
               ``TestClient`` on the started app (no second lifespan) where two sessions
               must be told apart; events read straight from the ``events`` table on the
@@ -467,7 +469,12 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
     )
     assert r.status_code == 200
 
-    evs = events_for(app, uid)
+    # the account's CHANGES; its sign-ins (user.login*) are on the same trail, pinned in
+    # tests/test_server_auth.py::TestSignInIsAudited
+    trail = events_for(app, uid)
+    # one trace, no gaps: the sign-ins take their seq on the same trail as the changes
+    assert [e.seq for e in trail] == list(range(1, len(trail) + 1))
+    evs = [e for e in trail if not e.action.startswith("user.login")]
     assert [e.action for e in evs] == [
         "user.created",
         "user.password_set",
@@ -476,7 +483,6 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
         "user.role_set",
         "user.password_set",
     ]
-    assert [e.seq for e in evs] == [1, 2, 3, 4, 5, 6]
     assert all(e.stage == "system" for e in evs)
     assert [e.actor for e in evs] == [root, root, root, root, root, uid]
     assert all(e.payload_json["target"] == uid for e in evs)
@@ -490,7 +496,7 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
     login(client, "root", ROOT_PW)
     r = client.put(f"{API_PREFIX}/users/{root}/active", json={"active": False})
     assert r.status_code == 409
-    assert events_for(app, root) == []
+    assert [e.action for e in events_for(app, root)] == ["user.login", "user.login"]
 
 
 def test_account_events_use_the_unchained_events_table(client: TestClient, app: Any) -> None:
@@ -565,3 +571,82 @@ class TestAccountEventsRoute:
     def test_api_md_lists_the_route(self) -> None:
         text = Path("docs/API.md").read_text(encoding="utf-8")
         assert "`/users/{id}/events`" in text
+
+
+# --- a password set ends sessions through the session nonce (#52), not only the re-salt -----
+
+
+def _freeze_hash(monkeypatch: pytest.MonkeyPatch, app: Any, username: str) -> str:
+    """From now on every new hash is the one ``username`` already has, so a password set can
+    only end sessions by rotating the nonce. Returns the account id."""
+    import crb.server.auth as auth_mod
+
+    with app.state.session_factory() as s:
+        user = s.execute(select(User).where(User.subject == f"local:{username}")).scalar_one()
+        frozen, uid = user.password_hash, user.id
+    monkeypatch.setattr(auth_mod, "hash_password", lambda _password: frozen)
+    return str(uid)
+
+
+def _nonce_and_hash(app: Any, uid: str) -> tuple[str, str]:
+    with app.state.session_factory() as s:
+        user = s.get(User, uid)
+        assert user is not None
+        return str(user.session_nonce or ""), str(user.password_hash)
+
+
+class TestPasswordSetRotatesTheSessionNonce:
+    """#52 made a session revocable by binding it to ``credential_version`` = the password
+    hash AND ``users.session_nonce``. A password set used to end sessions only because argon2
+    re-salts the hash; these pin that it goes through #52's own mechanism — the nonce
+    rotates — so the old sessions end even when the stored hash does not move."""
+
+    def test_an_admin_set_password_ends_the_targets_sessions(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin, target = client, other_client(client)
+        login(admin)
+        create(admin, "nora", "operator")
+        login(target, "nora", USER_PW)
+        uid = _freeze_hash(monkeypatch, app, "nora")
+        nonce_before, hash_before = _nonce_and_hash(app, uid)
+        r = admin.put(f"{API_PREFIX}/users/{uid}/password", json={"password": NEW_PW})
+        assert r.status_code == 200, r.text
+        nonce_after, hash_after = _nonce_and_hash(app, uid)
+        assert hash_after == hash_before  # the re-salt moved nothing here
+        assert nonce_after and nonce_after != nonce_before
+        r = target.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+
+    def test_a_self_change_keeps_this_browser_and_ends_the_other(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        here, elsewhere = client, other_client(client)
+        login(here)
+        login(elsewhere)
+        uid = _freeze_hash(monkeypatch, app, "root")
+        nonce_before, _ = _nonce_and_hash(app, uid)
+        r = here.put(
+            f"{API_PREFIX}/users/me/password",
+            json={"current_password": ROOT_PW, "new_password": NEW_PW},
+        )
+        assert r.status_code == 200, r.text
+        assert _nonce_and_hash(app, uid)[0] != nonce_before
+        here.headers["X-CSRF-Token"] = here.cookies[CSRF_COOKIE]
+        assert here.get(f"{API_PREFIX}/auth/me").status_code == 200
+        r = elsewhere.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+
+    def test_the_host_verb_uses_the_same_primitive(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``crb users set-password`` calls :func:`set_password`, so it rotates the nonce too."""
+        from crb.server.auth import set_password
+
+        uid = _freeze_hash(monkeypatch, app, "root")
+        with app.state.session_factory() as s:
+            user = s.get(User, uid)
+            assert user is not None
+            nonce = user.session_nonce
+            set_password(user, NEW_PW)
+            assert user.session_nonce and user.session_nonce != nonce

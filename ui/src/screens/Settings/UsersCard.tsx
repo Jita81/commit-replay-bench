@@ -6,20 +6,24 @@
  * What it is:   The Users card on /settings: every account as a row (sign-in name, display
  *               name, email, where it is issued, role, active, last sign-in), the acts an
  *               admin takes on one — change the role, turn the account off and on, set a new
- *               password — the account's own audit trail, and the form that creates a local
- *               account.
+ *               password, sign it out everywhere — the account's own audit trail (changes and
+ *               sign-ins), and the form that creates a local account, with the next step after
+ *               it (Home, or Connection).
  * What it does: Closes the half of recover-an-account that had no screen: `PUT
  *               /users/{id}/active` behind a toggle that is DISABLED for the last active
  *               admin (with the reason as its hint, so the person meets the rule before the
  *               409, not after it), `PUT /users/{id}/password` behind a dialog, and `GET
  *               /users/{id}/events` under each row, so an auditor reads in the product who
- *               reset or disabled which account. Every mutation has a success sentence that
- *               names the account. An account issued by the organisation's identity provider
- *               has no password to set here and says so.
+ *               reset or disabled which account and who signed in when; `POST
+ *               /users/{id}/sessions/revoke` behind "Sign out everywhere" (#52's revocation,
+ *               the one way to end an identity-provider account's sessions). Every mutation
+ *               has a success sentence that names the account. An account issued by the
+ *               organisation's identity provider has no password to set here and says so.
  * How:          `useUsers` / `useSetUserRole` / `useSetUserActive` / `useCreateUser` /
- *               `useUserEvents`; `lastActiveAdmin` derives the guarded row from the list the
- *               screen already holds (the same rule the server takes under its lock — the
- *               screen never decides, it only stops an act it knows will be refused).
+ *               `useRevokeUserSessions` / `useUserEvents`; `lastActiveAdmin` derives the
+ *               guarded row from the list the screen already holds (the same rule the server
+ *               takes under its lock — the screen never decides, it only stops an act it
+ *               knows will be refused).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Settings/SettingsPage.tsx (mounts it for admins),
@@ -38,7 +42,8 @@
  *               line in the audit trail's empty state; never for a new repository.
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useCreateUser, useSetUserActive, useSetUserRole, useUserEvents, useUsers } from '../../api/hooks'
+import { Link } from 'react-router'
+import { useCreateUser, useRevokeUserSessions, useSetUserActive, useSetUserRole, useUserEvents, useUsers } from '../../api/hooks'
 import { ROLE_ORDER, type Role, type User } from '../../api/types'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -90,7 +95,7 @@ function AccountHistory({ user }: { user: User }) {
       <QueryBoundary query={events} loading="Loading the account history…">
         {(page) =>
           page.items.length === 0 ? (
-            <EmptyState compact title="No recorded changes" reason="Every change to an account — created, role set, password set, deactivated, reactivated — is one event with the actor who made it. This account has none on record." />
+            <EmptyState compact title="No recorded changes" reason="Every change to an account — created, role set, password set, deactivated, reactivated, signed out everywhere — and every sign-in is one event with the actor who made it. This account has none on record." />
           ) : (
             <ol className="m-0 list-none space-y-2 p-0" data-testid="account-history-list">
               {page.items.map((ev) => (
@@ -134,6 +139,7 @@ export function UsersCard() {
   const create = useCreateUser()
   const setRole = useSetUserRole()
   const setActive = useSetUserActive()
+  const revoke = useRevokeUserSessions()
   const [username, setUsername] = useState('')
   const [display, setDisplay] = useState('')
   const [email, setEmail] = useState('')
@@ -270,7 +276,7 @@ export function UsersCard() {
                   onSuccess: (x) =>
                     setSaid(
                       next
-                        ? `${x.username || x.display_name} is active again and can sign in. Sessions it held less than the session lifetime ago work again — set a password to end them.`
+                        ? `${x.username || x.display_name} is active again and can sign in. Sessions it held less than the session lifetime ago work again — sign it out everywhere, or set a password, to end them.`
                         : `${x.username || x.display_name} is deactivated and is refused on its very next request.`,
                     ),
                   // the server is the one that decides: a refusal puts the control back
@@ -303,6 +309,20 @@ export function UsersCard() {
             <Button size="sm" hint="button.settings.set_password" disabled={!isLocalAccount(u)} data-testid={`user-set-password-${u.username}`} onClick={() => setPwFor(u)}>
               Set password
             </Button>
+            <Button
+              size="sm"
+              hint="button.settings.sign_out_everywhere"
+              data-testid={`user-sign-out-${u.username}`}
+              disabled={revoke.isPending}
+              onClick={() =>
+                revoke.mutate(
+                  { id: u.id },
+                  { onSuccess: (x) => setSaid(`${x.username || x.display_name} is signed out everywhere: every session it held ends on its next request. It can sign in again at once — turn it off as well to keep it out.`) },
+                )
+              }
+            >
+              Sign out everywhere
+            </Button>
             <Button size="sm" variant="ghost" hint="button.settings.account_history" data-testid={`user-history-${u.username}`} aria-expanded={historyFor === u.id} onClick={() => setHistoryFor(historyFor === u.id ? '' : u.id)}>
               History
             </Button>
@@ -311,7 +331,7 @@ export function UsersCard() {
       },
       { key: 'created', header: 'Created', hint: 'col.settings.users', sortValue: (u) => u.created, cell: (u) => <span className="text-xs text-on-surface-muted">{fmtDate(u.created)}</span>, hideBelowMd: true },
     ],
-    [setRole, setActive, guarded, historyFor, asked],
+    [setRole, setActive, revoke, guarded, historyFor, asked],
   )
 
   return (
@@ -333,6 +353,7 @@ export function UsersCard() {
         )}
         {setRole.isError && <ErrorState compact error={setRole.error} />}
         {setActive.isError && <ErrorState compact error={setActive.error} />}
+        {revoke.isError && <ErrorState compact error={revoke.error} />}
         {shown && <AccountHistory user={shown} />}
         <form onSubmit={submit} className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
           <TextField label="Username" hint="field.settings.new_username" required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
@@ -352,9 +373,20 @@ export function UsersCard() {
             </Button>
           </div>
           {created && (
-            <p role="status" className="m-0 text-sm sm:col-span-3" data-testid="users-created">
-              {created}
-            </p>
+            <div className="space-y-1 sm:col-span-3">
+              <p role="status" className="m-0 text-sm" data-testid="users-created">
+                {created}
+              </p>
+              {/* the next step, so the admin is not left on a cleared form (G-276) */}
+              <p className="m-0 flex flex-wrap gap-3 text-sm" data-testid="users-created-next">
+                <Hint as={Link} id="link.settings.created_home" to="/home">
+                  Back to Home
+                </Hint>
+                <Hint as={Link} id="link.settings.created_connect" to="/connect">
+                  Connect a repository
+                </Hint>
+              </p>
+            </div>
           )}
           {create.isError && (
             <div className="sm:col-span-3">

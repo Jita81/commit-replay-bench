@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Accounts and sign-in: every stop names its way forward, and every sign-in is on the record**
+  (stream U; [pull request pending, from `feat/ns1-u`](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1-u)).
+  Settings › Users shows each account's kind, active state and last sign-in; an admin sets a
+  password, turns an account off and on, signs it out everywhere and reads its History; everyone
+  changes their own password. `/login` names who sets a new password, a 429 names the wait, and a
+  failed organisation sign-in returns to the form with its reason. `user.login` and
+  `user.login_failed` join the account's trail, never storing what was typed (DL-071); a
+  password set rotates the session nonce (DL-072). Walkthrough 13 recovers an account, timed.
+
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile
   score working changes per pound, blind, and VALUE heads the definition of done. A bug class is

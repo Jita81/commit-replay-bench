@@ -28,7 +28,7 @@
  *               their hint, and an identity-provider account, whose Set-password button is
  *               disabled — so both states are walked, not only unit-tested.
  */
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import type { EventSourceLike } from '../api/sse'
@@ -625,7 +625,25 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
     open: async () => {
       await screen.findByTestId('settings-sandbox-mode')
     },
-    minHints: 56,
+    minHints: 58,
+  },
+  {
+    // G-922: Remove token asks before it deletes — the question's two buttons are a state of their own
+    name: '/settings as admin + Remove token confirm',
+    route: '/settings',
+    path: '/settings',
+    element: <SettingsPage />,
+    api: INSTRUMENT_SCREENS['/settings']!.api,
+    roles: ['admin'],
+    open: async () => {
+      const remove = await screen.findByTestId('claude-login-remove')
+      await waitFor(() => {
+        if ((remove as HTMLButtonElement).disabled) throw new Error('the token is not loaded yet')
+      })
+      await userEvent.click(remove)
+      await screen.findByTestId('claude-login-remove-confirm')
+    },
+    minHints: 60,
   },
   {
     // F23's password act: the dialog's two fields and its submit are a state the one-entry table cannot reach
@@ -639,7 +657,7 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
       await userEvent.click(await screen.findByTestId('user-set-password-ada'))
       await screen.findByTestId('set-password-form')
     },
-    minHints: 59,
+    minHints: 61,
   },
   {
     // F23's audit half: the account's own `user.*` events under its row
@@ -653,7 +671,7 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
       await userEvent.click(await screen.findByTestId('user-history-ada'))
       await screen.findByTestId('account-history-list')
     },
-    minHints: 59,
+    minHints: 61,
   },
   {
     name: '/repos + Add a repository dialog',

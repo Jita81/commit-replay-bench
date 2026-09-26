@@ -138,8 +138,10 @@ test.describe('07 settings + accessibility', () => {
     }
     await axeClean(page, '/settings (token stored)')
 
-    // remove: back to absent, still nothing that looks like a key on the page
+    // remove: one click asks (G-922), the second deletes; back to absent, still nothing that
+    // looks like a key on the page
     await page.getByTestId('claude-login-remove').click()
+    await page.getByTestId('claude-login-remove-confirm').getByRole('button', { name: 'Yes, remove it' }).click()
     await expect(status).toHaveAttribute('data-present', 'false')
     await expect(page.getByTestId('claude-login-verify')).toBeDisabled()
     text = (await page.locator('main').textContent()) ?? ''

@@ -5,8 +5,8 @@
  * Navigation
  * ----------
  * What it is:   Screen test for the Users card and its Set-password dialog against mocked
- *               `/users`, `/users/{id}/active`, `/users/{id}/password` and
- *               `/users/{id}/events`.
+ *               `/users`, `/users/{id}/active`, `/users/{id}/password`,
+ *               `/users/{id}/sessions/revoke` and `/users/{id}/events`.
  * What it does: Pins the six things the gap asked for: the row shows `active` and the last
  *               sign-in as an age; the active toggle sends `PUT /users/{id}/active` and says
  *               what it did; the toggle AND the role select of the last active admin are
@@ -14,8 +14,10 @@
  *               identity-provider account cannot have its password set here; the Set-password
  *               dialog refuses a mismatch and a short password locally, never echoes either
  *               value, and on success names the account and says its sessions ended; a 409
- *               from the server is shown in the server's own words; and the account's `user.*`
- *               events are fetched and rendered under the row.
+ *               from the server is shown in the server's own words; the account's `user.*`
+ *               events are fetched and rendered under the row; Sign out everywhere posts to
+ *               `/users/{id}/sessions/revoke` (an identity-provider account included) and says
+ *               what it did; and a created account is followed by the next step (G-276).
  * How:          `mockApi` + `renderApp` with an admin principal; `userEvent` for every act;
  *               the mutation bodies read back off `calls` so the test pins the request, not
  *               only the rendering.
@@ -127,7 +129,7 @@ describe('UsersCard', () => {
     })
     renderApp(<UsersCard />)
     await userEvent.click(await screen.findByTestId('user-active-cliff'))
-    await waitFor(() => expect(screen.getByTestId('users-said')).toHaveTextContent(/is active again and can sign in.*set a password to end them/))
+    await waitFor(() => expect(screen.getByTestId('users-said')).toHaveTextContent(/is active again and can sign in.*sign it out everywhere, or set a password, to end them/))
   })
 
   it('the last active admin cannot be deactivated or demoted: both controls are disabled before they are used, and say why', async () => {
@@ -267,5 +269,44 @@ describe('UsersCard', () => {
     await userEvent.type(screen.getByLabelText(/^Initial password/), 'a-long-enough-password')
     await userEvent.click(screen.getByRole('button', { name: 'Create local user' }))
     await waitFor(() => expect(screen.getByTestId('users-created')).toHaveTextContent('Account cliff created as approver. It can sign in now with the password you typed.'))
+  })
+
+  it('after an account is created the card offers the next step: back to Home, or on to a repository (G-276)', async () => {
+    admin({ 'GET /users': list(ADA), 'POST /users': { ...LEAVER, role: 'approver' } })
+    const { container } = renderApp(<UsersCard />)
+    await userEvent.type(await screen.findByLabelText(/^Username/), 'cliff')
+    await userEvent.type(screen.getByLabelText(/^Display name/), 'Cliff')
+    await userEvent.type(screen.getByLabelText(/^Email/), 'cliff@example.org')
+    await userEvent.type(screen.getByLabelText(/^Initial password/), 'a-long-enough-password')
+    await userEvent.click(screen.getByRole('button', { name: 'Create local user' }))
+    const next = await screen.findByTestId('users-created-next')
+    expect(within(next).getByRole('link', { name: 'Back to Home' })).toHaveAttribute('href', '/home')
+    expect(within(next).getByRole('link', { name: 'Connect a repository' })).toHaveAttribute('href', '/connect')
+    expect(unhinted(container)).toEqual([])
+  })
+
+  it('Sign out everywhere ends every session of the account through POST /users/{id}/sessions/revoke and says so (G-986)', async () => {
+    const { calls } = admin({
+      'GET /users': list(ADA, LEAVER, PROVIDED),
+      'POST /users/u3/sessions/revoke': PROVIDED,
+    })
+    renderApp(<UsersCard />)
+    // an identity-provider account has no password here, but its sessions can still be ended
+    const button = await screen.findByTestId('user-sign-out-sub-123')
+    expect(button).toBeEnabled()
+    await userEvent.click(button)
+    await waitFor(() =>
+      expect(screen.getByTestId('users-said')).toHaveTextContent(
+        'sub-123 is signed out everywhere: every session it held ends on its next request. It can sign in again at once — turn it off as well to keep it out.',
+      ),
+    )
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/users/u3/sessions/revoke')).toBe(true)
+  })
+
+  it('a refused sign-out shows the server’s words', async () => {
+    admin({ 'GET /users': list(ADA, LEAVER), 'POST /users/u2/sessions/revoke': () => envelope(404, 'not_found', "no user 'u2'") })
+    renderApp(<UsersCard />)
+    await userEvent.click(await screen.findByTestId('user-sign-out-cliff'))
+    expect(await screen.findByText("no user 'u2'")).toBeInTheDocument()
   })
 })
