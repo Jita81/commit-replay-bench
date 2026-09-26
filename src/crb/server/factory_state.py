@@ -77,6 +77,7 @@ from typing import Any
 
 from crb.core.redact import redact_and_cap
 from crb.factory.backlog import Backlog, BacklogError, BacklogItem
+from crb.factory.delivery import repository_mismatch
 from crb.factory.evidence import (
     EV_BUILD,
     EV_DELIVERY,
@@ -280,6 +281,9 @@ class DeliveredPr:
     pr_number: int
     pr_url: str
     outcome: FactoryEvent | None = None
+    #: ``owner/name`` the delivery recorded (``""`` before it did — the sync then reads the
+    #: repository from ``pr_url``; PR #55 review).
+    repository: str = ""
 
 
 @dataclass
@@ -341,18 +345,35 @@ def outcomes_pending(home: FactoryHome) -> list[DeliveredPr]:
     ]
 
 
-def sync_outcomes(home: FactoryHome, read_pr: ReadPrFn, *, actor: str) -> OutcomeSyncReport:
+def sync_outcomes(
+    home: FactoryHome, read_pr: ReadPrFn, *, actor: str, repository: str
+) -> OutcomeSyncReport:
     """Read every delivered pull request whose fate can still change
     (:func:`outcomes_pending`: no outcome on the chain yet, or ``delivery.closed`` — a
     person can reopen and merge it) and record ``delivery.merged`` / ``delivery.closed``
     for the ones that ended: at most closed then merged per PR (the evidence ledger refuses
     a repeat of the same state and anything after a merge). A merged PR is never read
     again; a PR still open records nothing; a read that fails is an entry in ``errors``
-    and the PR is retried by the next sync."""
+    and the PR is retried by the next sync.
+
+    ``read_pr`` reads a number in ``repository`` (``owner/name``, the repository the row
+    is linked to now). A pull request delivered to another repository — the row was
+    re-linked since — is an entry in ``errors`` and is never read: the same number there
+    is somebody else's pull request, and its fate is not this item's (PR #55 review;
+    :func:`crb.factory.delivery.repository_mismatch`)."""
     report = OutcomeSyncReport()
     ev = home.evidence(actor=actor)
     for d in outcomes_pending(home):
         report.checked += 1
+        why = repository_mismatch(
+            repository=d.repository,
+            pr_url=d.pr_url,
+            remote=repository,
+            where=f"PR #{d.pr_number} ({d.item_id})",
+        )
+        if why:
+            report.errors.append(why)
+            continue
         try:
             pr = read_pr(d.pr_number)
         except GitHubAppError as exc:
@@ -607,12 +628,23 @@ class FactoryHome:
             if ev.kind in (EV_DELIVERY, EV_DELIVERY_UPDATED) and number > 0:
                 seen.setdefault(
                     (ev.item_id, number),
-                    DeliveredPr(ev.item_id, number, str(ev.payload.get("pr_url", ""))),
+                    DeliveredPr(
+                        ev.item_id,
+                        number,
+                        str(ev.payload.get("pr_url", "")),
+                        repository=str(ev.payload.get("repository", "")),
+                    ),
                 )
             elif ev.kind in (EV_DELIVERY_MERGED, EV_DELIVERY_CLOSED):
                 outcomes[(ev.item_id, number)] = ev
         return [
-            DeliveredPr(d.item_id, d.pr_number, d.pr_url, outcome=outcomes.get(key))
+            DeliveredPr(
+                d.item_id,
+                d.pr_number,
+                d.pr_url,
+                outcome=outcomes.get(key),
+                repository=d.repository,
+            )
             for key, d in seen.items()
         ]
 

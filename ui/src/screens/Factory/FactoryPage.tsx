@@ -5,8 +5,9 @@
  * ----------
  * What it is:   The screen at /factory: one repository's frozen backlog and, for every item,
  *               the six steps of the process as a step list — readiness (structural gaps
- *               signed by an approver) → RED proof → build under the belts → delivery (route-
- *               gated branch + PR) → independent review → outcome — with the act a person can
+ *               signed by an approver) → RED proof → build under the belts → independent
+ *               review → delivery (route-gated branch + PR, only after the review accepts —
+ *               ADR-0021) → outcome — with the act a person can
  *               take at the step that is waiting on them: sign a structural gap (approver),
  *               freeze a backlog and run the loop (operator).
  * What it does: Makes the factory legible as a process rather than a table: which step each
@@ -88,7 +89,7 @@ import { EvidenceDrawer } from '../Runs/EvidenceDrawer'
 type StepStatus = 'done' | 'current' | 'todo' | 'failed' | 'skipped'
 
 interface Step {
-  id: 'readiness' | 'red' | 'build' | 'delivery' | 'review' | 'outcome'
+  id: 'readiness' | 'red' | 'build' | 'review' | 'delivery' | 'outcome'
   title: string
   status: StepStatus
   detail: string
@@ -99,8 +100,8 @@ const STEP_HINT: Record<Step['id'], HintId> = {
   readiness: 'step.factory.readiness',
   red: 'step.factory.red',
   build: 'step.factory.build',
-  delivery: 'step.factory.delivery',
   review: 'step.factory.review',
+  delivery: 'step.factory.delivery',
   outcome: 'step.factory.outcome',
 }
 
@@ -244,13 +245,29 @@ export function stepsFor(t: FactoryTask): Step[] {
           status: 'failed',
           detail: t.build_status.replace(/_/g, ' '),
         }
+  // ADR-0021: the review comes BEFORE the delivery — a pull request opens only on a build
+  // the review accepted, so the review step is read first and the delivery step after it
+  const review: Step = t.review_verdict
+    ? {
+        id: 'review',
+        title: 'Independent review',
+        status: t.review_verdict === 'accept' ? 'done' : t.review_verdict === 'reject' ? 'failed' : 'current',
+        detail: `${t.review_verdict.replace(/_/g, ' ')}${r?.step === 'review' ? ' — the reviewer asked for a stronger test' : ''}`,
+      }
+    : {
+        id: 'review',
+        title: 'Independent review',
+        status: buildDone ? 'current' : 'todo',
+        detail: 'not yet',
+      }
+  const accepted = t.review_verdict === 'accept'
   const delivery: Step = t.pr_url
-    ? // `delivery.updated` = a rework re-pointed the branch on the SAME pull request (DL-045)
+    ? // `delivery.updated` = a later run's accepted build re-pointed the SAME pull request
       {
         id: 'delivery',
         title: 'Delivery',
         status: 'done',
-        detail: t.last_event === 'delivery.updated' ? 'pull request updated by a rework' : 'branch + pull request opened',
+        detail: t.last_event === 'delivery.updated' ? 'pull request updated by a later accepted build' : 'branch + pull request opened',
       }
     : r?.step === 'delivery'
       ? OPT_IN_OFF.test(r.reason)
@@ -273,25 +290,19 @@ export function stepsFor(t: FactoryTask): Step[] {
               status: 'failed',
               detail: `Delivery failed — the push was refused: ${r.reason}.`,
             }
-      : {
-          id: 'delivery',
-          title: 'Delivery',
-          status: buildDone ? 'current' : 'todo',
-          detail: buildDone ? 'pending' : 'not yet',
-        }
-  const review: Step = t.review_verdict
-    ? {
-        id: 'review',
-        title: 'Independent review',
-        status: t.review_verdict === 'accept' ? 'done' : t.review_verdict === 'reject' ? 'failed' : 'current',
-        detail: `${t.review_verdict.replace(/_/g, ' ')}${r?.step === 'review' ? ' — the reviewer asked for a stronger test' : ''}`,
-      }
-    : {
-        id: 'review',
-        title: 'Independent review',
-        status: buildDone ? 'current' : 'todo',
-        detail: 'not yet',
-      }
+      : t.review_verdict && !accepted
+        ? {
+            id: 'delivery',
+            title: 'Delivery',
+            status: 'skipped',
+            detail: `No pull request — the review did not accept this build (${t.review_verdict.replace(/_/g, ' ')}), so nothing was pushed.`,
+          }
+        : {
+            id: 'delivery',
+            title: 'Delivery',
+            status: accepted ? 'current' : 'todo',
+            detail: accepted ? 'pending' : buildDone ? 'after the review accepts the build' : 'not yet',
+          }
   const outcome: Step =
     t.status === 'accepted'
       ? { id: 'outcome', title: 'Outcome', status: 'done', detail: 'accepted' }
@@ -318,7 +329,7 @@ export function stepsFor(t: FactoryTask): Step[] {
               status: 'todo',
               detail: t.status.replace(/_/g, ' '),
             }
-  return [readiness, red, build, delivery, review, outcome]
+  return [readiness, red, build, review, delivery, outcome]
 }
 
 /**
@@ -385,7 +396,8 @@ const EVENT_PHRASE: Record<string, string> = {
   'red.refused': 'RED proof refused',
   'build.graded': 'build graded under the belts',
   'delivery.opened': 'branch and pull request opened',
-  'delivery.updated': 'pull request updated by a rework',
+  'delivery.updated': 'pull request updated by a later accepted build',
+  'delivery.closed': 'pull request closed',
   'delivery.refused': 'delivery withheld',
   'review.verdict': 'review recorded',
   'edit.permitted': 'rework permitted',
@@ -548,7 +560,7 @@ export function FactoryPage() {
             )}
           </Card>
 
-          <Card title="Items" eyebrow="readiness → RED proof → build → delivery → review → outcome">
+          <Card title="Items" eyebrow="readiness → RED proof → build → review → delivery → outcome">
             {tasks.isPending && <p className="text-sm text-on-surface-muted">Loading…</p>}
             {tasks.isError && (noBacklog(tasks.error) ? <EmptyState compact glyph="⚙" title="No factory items — no backlog registered" /> : <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} />)}
             {tasks.data && tasks.data.length === 0 && <EmptyState compact title="No factory items yet" reason="Items appear once a factory run has worked the backlog." />}

@@ -19,13 +19,15 @@ What it is:   The git wrapper — ``GitRepo`` (every query and worktree mutation
               makes, as argv) and ``clone_repo`` (the one network operation, policy-checked
               and atomic).
 What it does: Runs ``git -C <path> …`` with captured output and a wall clock; raises
-              ``GitError`` (argv and stderr preserved) on ``check=True`` failures; reads
+              ``GitError`` (argv and stderr preserved, REDACTED — an ``extraheader`` value
+              and every credential shape removed) on ``check=True`` failures; reads
               history, changed files, churn, author dates and file contents from the
               object store; adds and removes worktrees. Refuses clone sources that are not
               ``https://`` / ssh (``file://`` only under the test-only switch) and never
               lets a credential reach a log or an exception.
 How:          ``run`` → ``subprocess.run(["git", "-C", path, …])`` (no shell, timeout →
-              ``GitError`` rc 124); ``clone_repo`` → ``validate_clone_url`` → clone into a
+              ``GitError`` rc 124; a one-shot credential goes in ``env`` through
+              ``git_config_env``, never on the argv); ``clone_repo`` → ``validate_clone_url`` → clone into a
               sibling temp dir with ``GIT_TERMINAL_PROMPT=0`` → rename into place on exit 0;
               ``redact_url`` / ``redact_urls_in`` strip userinfo from every message.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -34,9 +36,10 @@ Works with:   src/crb/core/workspace.py (creates worktrees and reads the parent 
               it), src/crb/core/mine.py (log, changed files, churn, subject, author date),
               src/crb/core/capability.py (the change-profile walk), src/crb/server/worker.py
               (clones a URL-registered repository on its first run),
-              src/crb/cli/commands/repo.py (``crb repo add --url``)
+              src/crb/cli/commands/repo.py (``crb repo add --url``),
+              src/crb/factory/delivery.py (the push, whose auth header rides ``env``)
 Tested by:    tests/test_git.py, tests/test_git_clone.py, tests/test_cli_repo_url.py,
-              tests/test_worker_clone.py
+              tests/test_worker_clone.py, tests/test_factory_delivery.py
 Touch when:   never for a new repository (register a local clone with ``--path`` or a URL
               with ``--url`` — docs/OPERATOR.md#2-configure-a-repository); a new git query
               belongs here as argv, never as a shell string, and a clone-policy change
@@ -50,9 +53,12 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+
+from crb.core.redact import redact
 
 #: Set to ``1`` to let :func:`validate_clone_url` accept ``file://`` URLs. Test and
 #: developer machines only: a local path is never a legitimate source for a
@@ -73,15 +79,28 @@ class CloneUrlError(ValueError):
     """A clone URL the policy refuses (scheme, shape, or a local source in production)."""
 
 
+#: A ``-c http[.<url>].extraheader=<value>`` element: the value is an auth header.
+_EXTRAHEADER_RE = re.compile(r"(?is)(extraheader\s*=).*")
+
+
+def redact_argv(argv: list[str]) -> list[str]:
+    """``argv`` with every credential removed: an ``extraheader`` value is replaced whole
+    (it is an ``Authorization`` header by construction) and every other element passes
+    through :func:`crb.core.redact.redact`. What a :class:`GitError` keeps."""
+    return [redact(_EXTRAHEADER_RE.sub(r"\1[REDACTED]", str(a))) for a in argv]
+
+
 class GitError(RuntimeError):
-    """A git command failed. ``argv`` and ``stderr`` are preserved for the ledger."""
+    """A git command failed. ``argv`` and ``stderr`` are preserved for the ledger —
+    REDACTED at construction (:func:`redact_argv`), so no caller that put a credential on
+    a command line can carry it into an event, a log or an exception message."""
 
     def __init__(self, argv: list[str], returncode: int, stderr: str) -> None:
-        self.argv = argv
+        self.argv = redact_argv(list(argv))
         self.returncode = returncode
-        self.stderr = stderr
+        self.stderr = redact(stderr)
         super().__init__(
-            f"git {' '.join(argv[:3])}… failed rc={returncode}: {stderr.strip()[:400]}"
+            f"git {' '.join(self.argv[:3])}… failed rc={returncode}: {self.stderr.strip()[:400]}"
         )
 
 
@@ -103,6 +122,27 @@ class GitResult:
         return [ln for ln in self.stdout.split("\n") if ln.strip()]
 
 
+def git_config_env(
+    pairs: Mapping[str, str], *, base: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_n`` / ``GIT_CONFIG_VALUE_n`` for ``pairs``,
+    appended after any count ``base`` (default: the process environment) already carries —
+    git's documented way to pass configuration to ONE command without the argv (``-c``,
+    visible in ``/proc`` and ``ps``) or a config file. A malformed inherited count is
+    read as 0."""
+    src = os.environ if base is None else base
+    try:
+        n = max(0, int(src.get("GIT_CONFIG_COUNT", "0") or 0))
+    except ValueError:
+        n = 0
+    out: dict[str, str] = {}
+    for i, (key, value) in enumerate(pairs.items(), start=n):
+        out[f"GIT_CONFIG_KEY_{i}"] = key
+        out[f"GIT_CONFIG_VALUE_{i}"] = value
+    out["GIT_CONFIG_COUNT"] = str(n + len(pairs))
+    return out
+
+
 class GitRepo:
     """Handle on a local clone (or a worktree of one). ``cwd`` on a method points a
     call at a worktree of this clone; the object store queried is the same."""
@@ -113,13 +153,28 @@ class GitRepo:
         self.timeout = timeout
 
     # --- plumbing ----------------------------------------------------------------
-    def run(self, *args: str, check: bool = False, cwd: str | Path | None = None) -> GitResult:
+    def run(
+        self,
+        *args: str,
+        check: bool = False,
+        cwd: str | Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> GitResult:
         """``git -C <cwd or path> <args>``. A timeout is a ``GitError`` (rc 124) always;
-        a non-zero exit is one only with ``check=True``."""
+        a non-zero exit is one only with ``check=True``. ``env`` is layered over the
+        process environment — the channel for a one-shot credential
+        (:func:`git_config_env`), which must never be an argument: an argv is readable by
+        every user on the host."""
         argv = [self.git_binary, "-C", str(cwd or self.path), *args]
+        full_env = None if env is None else {**os.environ, **dict(env)}
         try:
             p = subprocess.run(
-                argv, capture_output=True, text=True, timeout=self.timeout, check=False
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                check=False,
+                env=full_env,
             )
         except subprocess.TimeoutExpired as e:
             raise GitError(argv, 124, f"timed out after {self.timeout}s") from e

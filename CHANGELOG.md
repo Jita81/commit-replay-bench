@@ -8,6 +8,52 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 ## [Unreleased]
 
+### 2026-09-25 — the factory reviews before it delivers; an operator approves what a ticket asks
+
+Four findings of the external assessment of 2026-09-25 (C1, C3, C6, D1), each reproduced on
+`main` by a failing test before the change (DL-053; ADR-0021, ADR-0022). The review now runs
+before anything is pushed and only an `accept` opens a pull request; an earlier run's open
+pull request is closed, naming the verdict, when a later review does not accept the item. The
+test author and a build rung must differ by model, not only by label. A ready ticket waits
+for an operator's evented Register act unless its author is on an explicit allowlist; one
+intake pass per repository runs under a lease; a 429 is waited out within a cap; the tracker
+credential never leaves the tracker's origin; ticket text is inert in the pull request and
+the branch is `[a-z0-9-]`. The push token travels in git's environment, never on its argv,
+and a `GitError` redacts any credential it would have kept. No apparatus impact.
+
+The review of PR #55 found four more, each now pinned by a test that failed first. The
+Register act wrote on the ticket while the repository's listener was off; it is now refused
+with `intake_listener_off`, the Intake screen does not offer it, and no route can reach the
+board except through the one listener check. `approved_by` recorded the operator's display
+name; it is now the stable account id, with the name beside it as `approved_by_name`. A
+factory close asked for the item's credentials instead of the repository's; both delivery
+and close now resolve the one repository key the loop holds. A model priced as a
+placeholder lost its dated aliases, so the same-model refusal failed open for it; every key
+in the pricing table now names a model, priced or not.
+
+Its re-review found four more, each pinned the same way. A switch-off committed while a pass
+still held the repository's lease, and a pass that read the switch before the lease kept
+reading and writing; the switch-off now takes the lease (409 `intake_busy` while a pass holds
+it), every pass asks the committed switch again under the lease, and the worker tells the
+tickets their outcomes before it lets the lease go. The Register act trusted the last poll's
+read; it now reads the ticket under the lease and refuses one edited since. The Intake screen
+showed the message "the ticket has been told" when the tracker had refused the queued note; it
+now says the ticket could not be updated. A re-linked repository row let the factory push to, comment on
+or close the SAME-numbered pull request in the new repository, and the outcome sync read its
+fate; each delivery now records the repository beside the number and every reuse checks it.
+
+A later re-review found one more, pinned the same way. The intake lease was stamped only when
+a pass took it, so a pass still calling the tracker after the lease's time to live looked
+crashed, and a second pass could take the repository over while the first kept reading and
+writing. Every tracker call a pass or a Register act makes now renews the lease before and
+after the call. A pass whose lease is taken over while one slow call is in flight stops before
+its next call, acts on nothing that call returned and records the new stop reason
+`lease_lost`; the poll and the Register act answer 409 `intake_busy`. A write the tracker
+has already applied is not reported as failed when the lease is lost just after it: a moved
+ticket is recorded as `intake.transitioned` and a posted link as `intake.delivered`, so the
+new holder does not repeat them, and the next call stops the pass. Every tracker verb is
+sorted as a read or a write, and a test fails if a new verb is not.
+
 ### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
 
 SQLAlchemy 2.1.1 reached PyPI on 2026-09-25, and the `server` extra's `sqlalchemy>=2.0` has
