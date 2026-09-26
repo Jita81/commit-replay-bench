@@ -48,7 +48,11 @@ crashed, and a second pass could take the repository over while the first kept r
 writing. Every tracker call a pass or a Register act makes now renews the lease before and
 after the call. A pass whose lease is taken over while one slow call is in flight stops before
 its next call, acts on nothing that call returned and records the new stop reason
-`lease_lost`; the poll and the Register act answer 409 `intake_busy`.
+`lease_lost`; the poll and the Register act answer 409 `intake_busy`. A write the tracker
+has already applied is not reported as failed when the lease is lost just after it: a moved
+ticket is recorded as `intake.transitioned` and a posted link as `intake.delivered`, so the
+new holder does not repeat them, and the next call stops the pass. Every tracker verb is
+sorted as a read or a write, and a test fails if a new verb is not.
 
 ### 2026-09-25 — SQLAlchemy 2.1 type-checks clean; no pin
 

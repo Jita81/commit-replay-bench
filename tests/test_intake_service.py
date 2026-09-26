@@ -1355,6 +1355,149 @@ def test_the_fence_covers_every_verb_of_the_tracker_protocol(tmp_path: Path) -> 
     assert isinstance(sv.FencedTracker(FakeTracker(), lease), c.TrackerClient)
 
 
+# --- PR #55 review: a write the tracker applied is not reported as failed ----------------
+
+_READ_VERBS = ("entered", "read")
+_WRITE_VERBS = ("comment", "label", "link", "transition")
+
+
+def test_every_tracker_verb_is_sorted_as_a_read_or_a_write() -> None:
+    """The prevention for the class: what the fence does AFTER a call depends on the kind
+    of call. After a read it raises, because nothing may act on what a stale read returned.
+    After a write it only marks the lease lost, because the tracker has already applied
+    the write and the record must say so. A verb added to the protocol must be sorted into
+    exactly one of the two, here and in the fence, or this fails."""
+    verbs = {n for n, v in vars(c.TrackerClient).items() if callable(v) and not n.startswith("_")}
+    assert frozenset(_READ_VERBS) == sv.FENCE_READ_VERBS
+    assert frozenset(_WRITE_VERBS) == sv.FENCE_WRITE_VERBS
+    assert sv.FENCE_READ_VERBS.isdisjoint(sv.FENCE_WRITE_VERBS)
+    assert verbs == sv.FENCE_READ_VERBS | sv.FENCE_WRITE_VERBS
+
+
+def _taken_over_inside(tracker: FakeTracker, verb: str, factory: Any, clock: list[float]) -> None:
+    """Make ``verb`` do its work on the tracker and THEN outlive the lease, which another
+    pass takes over before the call returns."""
+    real = getattr(tracker, verb)
+
+    def overrun(*args: Any) -> Any:
+        out = real(*args)
+        clock[0] += _TTL + 1
+        assert sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]).acquire()
+        return out
+
+    setattr(tracker, verb, overrun)
+
+
+@pytest.mark.parametrize("verb", _WRITE_VERBS)
+def test_a_write_the_tracker_applied_before_the_lease_was_lost_does_not_raise(
+    verb: str, tmp_path: Path
+) -> None:
+    """A write the tracker applied cannot be taken back. Raising after it would report a
+    done write as failed, and the new holder would try it again. So the write returns, the
+    fence marks the lease lost, and the NEXT verb raises ``lease_lost`` without reaching
+    the tracker."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    tracker = _tracker(_ticket())
+    _taken_over_inside(tracker, verb, factory, clock)
+    fenced = sv.FencedTracker(tracker, lease)
+    getattr(fenced, verb)(*_VERB_ARGS[verb])
+    assert tracker.calls == [(verb, "4711")]
+    assert fenced.lost
+    with pytest.raises(c.TrackerError) as err:
+        fenced.read("4711")
+    assert err.value.reason == c.REASON_LEASE_LOST
+    assert tracker.calls == [(verb, "4711")]
+
+
+@pytest.mark.parametrize("verb", _READ_VERBS)
+def test_a_read_that_outlived_the_lease_still_raises(verb: str, tmp_path: Path) -> None:
+    """Reads keep the raising rule: nothing may act on what a stale read returned."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    tracker = _tracker(_ticket())
+    _taken_over_inside(tracker, verb, factory, clock)
+    fenced = sv.FencedTracker(tracker, lease)
+    with pytest.raises(c.TrackerError) as err:
+        getattr(fenced, verb)(*_VERB_ARGS[verb])
+    assert err.value.reason == c.REASON_LEASE_LOST and fenced.lost
+
+
+def test_a_transition_applied_before_the_lease_was_lost_is_recorded_as_done(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """The board moved the ticket, so the chain must say ``intake.transitioned``. If it
+    said ``intake.stopped`` instead, the new holder would ask for the same move again, and
+    a Jira workflow with no move from Done to Done refuses it on every pass."""
+    factory = _switched_on_store(tmp_path)
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())
+    _merged_delivery(home)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    _taken_over_inside(tracker, "transition", factory, clock)
+    fenced = sv.FencedTracker(tracker, lease)
+    moved = sv.apply_outcome_map(
+        fenced, home=home, outcome_map={"merged": "Done"}, evidence=home.evidence(actor="x")
+    )
+    assert moved == ["4711"] and tracker.states["4711"] == "Done"
+    kinds = [e.kind for e in home.events()]
+    assert sv.EV_TRANSITIONED in kinds and sv.EV_STOPPED not in kinds
+    with pytest.raises(c.TrackerError) as err:
+        fenced.transition("4711", "Done")
+    assert err.value.reason == c.REASON_LEASE_LOST
+
+
+def test_a_pull_request_link_applied_before_the_lease_was_lost_is_recorded_as_delivered(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """The same for the delivery note: the ticket carries the link, so the chain must say
+    it was delivered, or the next holder would post the note again."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    tracker = _tracker(_ticket())
+    _taken_over_inside(tracker, "link", factory, clock)
+    fenced = sv.FencedTracker(tracker, lease)
+    assert sv.post_delivery(
+        fenced, "4711", "fake-4711", "https://github.invalid/pr/7", evidence=home.evidence()
+    )
+    assert tracker.links["4711"] == ["https://github.invalid/pr/7"]
+    kinds = [e.kind for e in home.events()]
+    assert sv.EV_DELIVERED in kinds and sv.EV_STOPPED not in kinds
+    assert fenced.lost
+
+
+def test_a_pass_whose_lease_was_lost_after_its_last_write_still_records_the_stop(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """A write no longer raises when the lease is lost after it, so the pass must record
+    the stop itself: ``lease_lost`` on the report, one ``intake.stopped`` on the chain, and
+    no served view written over the new holder's."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    tracker = _tracker(_ticket())
+    _taken_over_inside(tracker, "link", factory, clock)
+    report = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        budget_s=10_000,
+        lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]),
+    )
+    assert report.stopped == c.REASON_LEASE_LOST
+    assert tracker.links.get("4711")  # the write the tracker applied
+    stops = [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    assert [s.payload["reason"] for s in stops] == [c.REASON_LEASE_LOST]
+    assert not sv.store_for(home).path.exists()
+
+
 # --- PR #55 review: no public writer lets a relative link reach a ticket -----------------
 
 #: A builder that marks every link it makes, so a test can look for it on the board.

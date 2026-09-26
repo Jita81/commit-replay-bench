@@ -37,7 +37,8 @@ pass — the worker's timer and an operator's "Re-read" at once — that finds i
 nothing at all and says so (``busy``). A lease left by a crashed pass expires after its
 time to live. A pass that is still working renews it around every tracker call
 (:class:`FencedTracker`), and a pass whose lease was taken over all the same stops before
-its next call and acts on nothing it read (``lease_lost``).
+its next call and acts on nothing it read (``lease_lost``). A write the tracker applied
+before the loss is recorded as done, not as a stop: it cannot be taken back.
 
 Every stop — tracker unreachable, credential missing, a write the tracker refused, the
 column gone — is an ``intake.stopped`` event carrying one of the published reasons, and
@@ -58,7 +59,8 @@ How:          Plain functions over injected callables (the tracker, the route lo
               clock, "is a run active") and an injected lease, so the whole flow is exercised
               by a fake tracker with no HTTP and no model; the lease is a row in the
               ``workers`` table taken by insert (atomic), taken over only when expired, and
-              renewed by the pass around every tracker call (``FencedTracker``); state
+              renewed by the pass around every tracker call (``FencedTracker``, which
+              raises after a read and only marks the loss after a write); state
               the screen reads is one JSON file beside the repository's evidence chain.
 Layer:        server — docs/ARCHITECTURE.md#43-server
 ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
@@ -792,6 +794,16 @@ def intake_lease(
     return IntakeLease(factory, repo, ttl_s=ttl_s, clock=clock)
 
 
+#: The tracker verbs that only read. After one, a lost lease raises: nothing may act on
+#: what a read returned once another pass holds the repository.
+FENCE_READ_VERBS: frozenset[str] = frozenset({"entered", "read"})
+#: The tracker verbs that write on the board. After one, a lost lease is marked and not
+#: raised: the write is applied, and the record must say so. Every verb of
+#: :class:`~crb.intake.client.TrackerClient` is in exactly one of the two
+#: (``tests/test_intake_service.py`` checks it), so a new verb must choose its rule.
+FENCE_WRITE_VERBS: frozenset[str] = frozenset({"comment", "label", "link", "transition"})
+
+
 class FencedTracker:
     """The tracker as a pass holding a lease may use it (PR #55 review).
 
@@ -800,9 +812,18 @@ class FencedTracker:
     more than one request. A pass that looked crashed could then be taken over while it was
     still reading and writing. So every verb renews the lease BEFORE the call, and again
     AFTER it: a pass whose lease was taken over never starts another call, and never acts
-    on what a call returned — a read that outlived the lease registers nothing. Either
-    renewal failing raises ``TrackerError(lease_lost)``, which every caller already handles
-    as a stop; once lost, every later verb raises at once without asking the store.
+    on what a call returned. The renewal BEFORE a call raises ``TrackerError(lease_lost)``
+    when it fails, which every caller already handles as a stop; once lost, every later
+    verb raises at once without asking the store.
+
+    What the renewal AFTER a call does depends on the kind of call
+    (:data:`FENCE_READ_VERBS` / :data:`FENCE_WRITE_VERBS`). After a read it raises too:
+    a read that outlived the lease registers nothing. After a write it only marks the lease
+    lost (``lost``) and returns: the tracker has already applied the write and nothing can
+    take it back, so raising would record a done move or note as failed and the new holder
+    would try it again — on Jira, a move from Done to Done that the workflow refuses on
+    every pass (PR #55 review). The caller records the write as done; the next verb raises,
+    and the pass stops at its next ticket and records ``lease_lost`` itself.
 
     A pass never hands the raw tracker on while it holds a lease: :func:`poll_repository`
     and :func:`register_approved` wrap it here, and ``poll_repository`` hands the fenced
@@ -815,16 +836,26 @@ class FencedTracker:
         self.lease = lease
         self.name = inner.name
         self.lost = False
+        #: ``True`` once a ``lease_lost`` has been raised to a caller, who records the stop.
+        #: A loss found only after a write is not raised, so the pass records it instead.
+        self.announced = False
 
     def _hold(self, verb: str) -> None:
         if not self.lost and self.lease.renew():
             return
         self.lost = True
+        self.announced = True
         raise TrackerError(
             REASON_LEASE_LOST,
             f"this pass held the repository's lease for longer than it lives and another "
             f"pass took it over, so this pass stopped at its {verb}",
         )
+
+    def _held_after_write(self) -> None:
+        """The renewal after a write: the write is applied, so mark a lost lease, never
+        raise (see the class docstring)."""
+        if not self.lost and not self.lease.renew():
+            self.lost = True
 
     def entered(self, column: str, since: str) -> list[TicketRef]:
         self._hold("column read")
@@ -841,22 +872,22 @@ class FencedTracker:
     def comment(self, key: str, text: str, marker: str) -> None:
         self._hold("comment")
         self.inner.comment(key, text, marker)
-        self._hold("comment")
+        self._held_after_write()
 
     def label(self, key: str, value: str) -> None:
         self._hold("label")
         self.inner.label(key, value)
-        self._hold("label")
+        self._held_after_write()
 
     def transition(self, key: str, state: str) -> None:
         self._hold("transition")
         self.inner.transition(key, state)
-        self._hold("transition")
+        self._held_after_write()
 
     def link(self, key: str, url: str, title: str = "") -> None:
         self._hold("link")
         self.inner.link(key, url, title)
-        self._hold("link")
+        self._held_after_write()
 
 
 # ---------------------------------------------------------------------------
@@ -1090,6 +1121,12 @@ def _poll_column(
                 "the repository over after this one outlived its lease, and carries on"
             )
             report.stopped, report.detail = REASON_LEASE_LOST, detail
+            if not tracker.announced:
+                # the loss was found after the ticket's last write, which the tracker had
+                # applied, so nothing raised and nothing recorded it: the pass does
+                evidence.append(
+                    EV_STOPPED, "", step="lease", reason=REASON_LEASE_LOST, detail=detail
+                )
             break
         if check_budget.fired:
             # The budget ran out INSIDE this ticket. `_handle_ticket` records that on the
@@ -1940,6 +1977,8 @@ __all__ = [
     "EV_REGISTERED",
     "EV_STOPPED",
     "EV_TRANSITIONED",
+    "FENCE_READ_VERBS",
+    "FENCE_WRITE_VERBS",
     "INTAKE_EVENTS",
     "OUTCOME_CLOSED",
     "OUTCOME_MERGED",
