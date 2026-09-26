@@ -18,7 +18,7 @@ Invariants
   and its periodic clean-up removes untouched files there.
 * **Automatic sign-in is a development-stack convenience only** (ADR-0027).
   ``CRB_AUTH__DEV_AUTOLOGIN=<username>`` is refused unless ``CRB_ENV=dev`` and the API binds a
-  loopback address (:func:`dev_autologin_refusal_for`), and alongside
+  loopback address (:func:`dev_autologin_refusal_for`), and it is refused whenever
   ``CRB_LOCAL_AUTH_ENABLED=false`` (it signs in a local account); there is no override flag.
 
 Navigation
