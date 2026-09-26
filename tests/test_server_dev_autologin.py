@@ -221,6 +221,15 @@ class TestWhoIsSignedIn:
             ("X-Forwarded-Host", "crb.example.com"),
             ("X-Forwarded-Proto", "https"),
             ("Via", "1.1 proxy"),
+            # client-address headers some proxies, CDNs and tunnels add on their own
+            ("True-Client-IP", "203.0.113.9"),
+            ("CF-Connecting-IP", "203.0.113.9"),
+            ("X-Client-IP", "203.0.113.9"),
+            ("Client-IP", "203.0.113.9"),
+            ("X-Original-Forwarded-For", "203.0.113.9"),
+            ("X-Cluster-Client-IP", "203.0.113.9"),
+            ("Fastly-Client-IP", "203.0.113.9"),
+            ("X-Envoy-External-Address", "203.0.113.9"),
         ],
     )
     def test_a_forwarded_request_from_loopback_is_refused(
@@ -243,10 +252,45 @@ class TestWhoIsSignedIn:
     ) -> None:
         """DNS rebinding: a page on ``evil.example`` whose name now resolves to 127.0.0.1
         reaches this server from a loopback peer, but its ``Host`` header names the page."""
-        with local_client(app, host=host) as c, caplog.at_level(logging.WARNING):
-            r = c.post(AUTOLOGIN)
+        with local_client(app) as c, caplog.at_level(logging.WARNING):
+            r = c.post(AUTOLOGIN, headers={"Host": host})
             assert r.status_code == 404 and SESSION_COOKIE not in c.cookies
-        assert "Host" in caplog.text
+        assert "Host header" in caplog.text
+
+    @pytest.mark.parametrize("local_address", ["192.168.1.20", "10.0.0.5", "0.0.0.0"])
+    def test_a_request_that_arrived_on_a_non_loopback_address_is_refused(
+        self, app: Any, local_address: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """``uvicorn --factory ... --host 0.0.0.0`` binds every interface without the settings
+        ever seeing the address. The address the connection arrived on (ASGI ``server``) is
+        checked on every request, so a stack bound that way still refuses what arrives on a
+        network interface, whatever the peer and ``Host`` say."""
+        c = TestClient(app, base_url=f"http://{local_address}:8000", client=("127.0.0.1", 50123))
+        with c, caplog.at_level(logging.WARNING):
+            r = c.post(AUTOLOGIN, headers={"Host": "localhost:8000"})
+            assert r.status_code == 404 and err(r)["code"] == "dev_autologin_off"
+            assert SESSION_COOKIE not in c.cookies
+        assert f"arrived on {local_address!r}" in caplog.text
+        assert _autologin_events(app) == []
+
+    def test_a_request_with_no_local_address_is_refused(self) -> None:
+        """A connection with no ASGI ``server`` (a Unix socket, an unusual server) is not
+        plainly local, so it is refused rather than assumed to be."""
+        from starlette.requests import Request
+
+        from crb.server.auth import dev_autologin_refusal
+
+        scope: dict[str, Any] = {
+            "type": "http",
+            "method": "POST",
+            "path": AUTOLOGIN,
+            "headers": [(b"host", b"localhost:8000")],
+            "client": ("127.0.0.1", 50123),
+            "server": None,
+        }
+        assert "arrived on" in (dev_autologin_refusal(Request(scope)) or "")
+        scope["server"] = ("127.0.0.1", 8000)
+        assert dev_autologin_refusal(Request(scope)) is None
 
     @pytest.mark.parametrize(
         "headers",
@@ -392,6 +436,25 @@ class TestAuditAndReporting:
         assert local.get(f"{API_PREFIX}/health").json()["dev_autologin"] == "on"
         assert local.get(f"{API_PREFIX}/version").json()["dev_autologin"] is True
 
+    @pytest.mark.parametrize(
+        ("peer", "headers"),
+        [
+            ("203.0.113.9", {}),
+            ("192.168.1.20", {"Host": "localhost:8000"}),
+            ("127.0.0.1", {"X-Forwarded-For": "192.168.1.50"}),
+            ("127.0.0.1", {"Host": "evil.example:5173"}),
+        ],
+    )
+    def test_health_and_version_say_off_to_a_caller_that_could_not_use_it(
+        self, app: Any, peer: str, headers: dict[str, str]
+    ) -> None:
+        """Whether automatic sign-in is on is told only to a caller the route would sign in.
+        Anyone else — another machine, a proxied request, another host name — reads exactly
+        what a stack without it serves, so the answer tells them nothing."""
+        with local_client(app, peer=peer) as c:
+            assert c.get(f"{API_PREFIX}/health", headers=headers).json()["dev_autologin"] == "off"
+            assert c.get(f"{API_PREFIX}/version", headers=headers).json()["dev_autologin"] is False
+
     def test_the_doctor_line_warns_when_on_and_is_ok_when_off(self, tmp_path: Path) -> None:
         from crb.server.routes.system import probe_dev_autologin
 
@@ -402,3 +465,51 @@ class TestAuditAndReporting:
         off = probe_dev_autologin(make_settings(tmp_path, auth={}))
         assert off.status == "ok" and off.detail == "off" and off.data == {"enabled": False}
         assert probe_dev_autologin(None).status == "skipped"
+
+
+# --- the container image -------------------------------------------------------------------
+
+
+ENTRYPOINT = Path(__file__).resolve().parent.parent / "deploy" / "entrypoint.sh"
+
+
+def _run_entrypoint(tmp_path: Path, role: str, autologin: str) -> tuple[int, str, list[str]]:
+    """Run ``deploy/entrypoint.sh <role>`` with ``uvicorn`` and ``python`` replaced by stubs
+    that only record that they ran; returns (exit code, stderr, what ran)."""
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    ran = tmp_path / "ran.txt"
+    for name in ("uvicorn", "python"):
+        stub = bin_dir / name
+        stub.write_text(f'#!/bin/sh\necho "{name} $*" >> "{ran}"\n')
+        stub.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "CRB_AUTH__DEV_AUTOLOGIN": autologin}
+    proc = subprocess.run(
+        ["/bin/sh", str(ENTRYPOINT), role],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    lines = ran.read_text().splitlines() if ran.exists() else []
+    return proc.returncode, proc.stderr, lines
+
+
+class TestTheContainerImage:
+    @pytest.mark.parametrize("role", ["serve", "worker", "migrate"])
+    def test_the_entrypoint_refuses_to_run_anything_with_it_set(
+        self, tmp_path: Path, role: str
+    ) -> None:
+        """A container is never a loopback-only development stack, and ``uvicorn --factory
+        --host`` binds an address the settings never see — so the image refuses before any
+        role starts, whatever ``CRB_BIND_HOST`` says."""
+        code, stderr, ran = _run_entrypoint(tmp_path, role, "root")
+        assert code != 0 and ran == []
+        assert "CRB_AUTH__DEV_AUTOLOGIN" in stderr and "container" in stderr
+
+    def test_the_entrypoint_runs_as_before_with_it_unset(self, tmp_path: Path) -> None:
+        code, _stderr, ran = _run_entrypoint(tmp_path, "serve", "")
+        assert code == 0 and len(ran) == 1 and ran[0].startswith("uvicorn --factory")
