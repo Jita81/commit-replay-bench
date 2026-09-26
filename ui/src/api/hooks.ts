@@ -870,6 +870,23 @@ export function useSetIntakeListener(): UseMutationResult<Intake, ApiError, { re
   })
 }
 
+/** `POST /factory/{repo}/intake/{key}/register` (operator) — the Register act (ADR-0022):
+ *  put the draft waiting for ticket `key` on the frozen backlog, exactly as it was read at
+ *  `revision` (409 `revision_moved` when the ticket changed since). Invalidates the backlog
+ *  and the tasks, because it registers an item. */
+export function useRegisterIntakeTicket(): UseMutationResult<Intake, ApiError, { repo: string; key: string; revision: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, key, revision }) =>
+      api<Intake>(`/factory/${enc(repo)}/intake/${enc(key)}/register`, { method: 'POST', body: { revision } }),
+    onSuccess: (data, { repo }) => {
+      qc.setQueryData(keys.intake(repo), data)
+      void qc.invalidateQueries({ queryKey: keys.factoryBacklog(repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
+    },
+  })
+}
+
 /** `POST /factory/{repo}/intake/poll` (operator) — read the column now. `force` re-reads
  *  every ticket even when its revision was already handled ("Post the feedback again");
  *  the writes are idempotent either way. Invalidates the backlog and the tasks, because a

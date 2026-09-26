@@ -14,7 +14,10 @@ What it does: Pins that the default branch is refused (before any credential is 
               commit the first delivery pushed, opens no second pull request and posts the
               rework comment (a comment that fails after the push is ``comment_error`` on an
               ``updated`` result, never a refusal), with the lease semantics proven against a
-              REAL bare repository.
+              REAL bare repository. PR #55 review: a delivery records the repository its
+              pull request is in, a re-delivery or close through another repository is
+              refused before the forge is called, and a ratchet holds every reuse of a
+              recorded ``.pr_number`` in ``src/crb`` to that check.
 How:          ``Seams`` record the push, the PR and the comment calls instead of reaching a
               forge; the build comes from ``test_factory_build``'s harness; ``_ToBare`` runs
               ``git_push_fn``'s exact argv with the https remote swapped for a local bare repo.
@@ -31,6 +34,7 @@ Touch when:   a forge other than GitHub is supported (a PR + comment seam case; 
 
 from __future__ import annotations
 
+import ast
 import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -39,7 +43,7 @@ from typing import Any
 import pytest
 
 from crb.core.evidence import sha256_text
-from crb.core.git import GitRepo, GitResult
+from crb.core.git import GitError, GitRepo, GitResult
 from crb.factory import delivery as dv
 from crb.factory.build import FACTORY_IDENTITY, BuildResult
 from fixtures import pyrepo as pr
@@ -139,7 +143,7 @@ def test_assert_not_default_branch_allows_new_branches() -> None:
 def test_delivery_branch_name_is_never_a_protected_name() -> None:
     for title in ("main", "master", "Main branch", "develop"):
         b = dv.delivery_branch_name(multiply_item(title=title))
-        assert b.startswith("crb/I-1-")
+        assert b.startswith("crb/i-1-")
         assert dv.assert_not_default_branch(b, "develop") == b
 
 
@@ -151,10 +155,19 @@ def test_deliver_refuses_default_before_touching_creds(harness: Harness) -> None
 
         class Boom:
             def resolve(self, repo: str) -> dv.GitCredentials:
+                """The default-branch target must be refused before any credential is
+                resolved: reaching this fails the test."""
                 raise AssertionError("credentials must not be resolved before the invariant")
 
         with pytest.raises(dv.DefaultBranchProtectionError):
-            dv.deliver(harness.repo.repo, item, build, creds=Boom(), target_default_branch=target)
+            dv.deliver(
+                harness.repo.repo,
+                item,
+                build,
+                creds=Boom(),
+                target_default_branch=target,
+                verdict="accept",
+            )
     finally:
         build.close()
 
@@ -174,6 +187,7 @@ def test_null_provider_fails_closed(harness: Harness) -> None:
                 push_fn=seams.push,
                 open_pr_fn=seams.open_pr,
                 target_default_branch="main",
+                verdict="accept",
             )
         with pytest.raises(dv.NoGitCredentialsError):
             dv.deliver(
@@ -184,6 +198,7 @@ def test_null_provider_fails_closed(harness: Harness) -> None:
                 push_fn=seams.push,
                 open_pr_fn=seams.open_pr,
                 target_default_branch="main",
+                verdict="accept",
             )
         assert not seams.pushes and not seams.prs
     finally:
@@ -234,9 +249,10 @@ def test_deliver_commits_source_and_oracle_on_new_branch_and_opens_pr(harness: H
             target_default_branch="main",
             pack_link="packs/x.json",
             route_decision={"route": "calibrate", "reason": "n=0", "policy_version": "routing.v1"},
+            verdict="accept",
         )
         repo = harness.repo.repo
-        assert res.branch == "crb/I-1-add-multiply-to-calc" and res.base == "main"
+        assert res.branch == "crb/i-1-add-multiply-to-calc" and res.base == "main"
         assert res.pr_url.endswith("/pull/7") and res.pr_number == 7 and res.pr_ref == res.pr_url
         assert res.pack_hash == build.pack_hash
         # the branch exists in the repo, parented at HEAD, with exactly source + oracle
@@ -283,6 +299,7 @@ def test_deliver_refuses_a_build_that_is_not_clean(harness: Harness) -> None:
                 push_fn=seams.push,
                 open_pr_fn=seams.open_pr,
                 target_default_branch="main",
+                verdict="accept",
             )
         assert not seams.pushes
     finally:
@@ -353,6 +370,7 @@ def test_readme_untouched_by_delivery(harness: Harness) -> None:
             push_fn=seams.push,
             open_pr_fn=seams.open_pr,
             target_default_branch="main",
+            verdict="accept",
         )
         assert pr.README not in harness.repo.repo.changed_files(res.commit_sha)
     finally:
@@ -369,7 +387,13 @@ class _Argv(GitRepo):
         super().__init__("/nonexistent")
         self.argv: list[list[str]] = []
 
-    def run(self, *args: str, check: bool = False, cwd: str | Path | None = None) -> GitResult:
+    def run(
+        self,
+        *args: str,
+        check: bool = False,
+        cwd: str | Path | None = None,
+        env: Any = None,
+    ) -> GitResult:
         self.argv.append(list(args))
         return GitResult(0, "", "")
 
@@ -377,39 +401,111 @@ class _Argv(GitRepo):
 def test_git_push_fn_builds_the_exact_lease_argv() -> None:
     """Without ``expected`` the bare lease (what makes a FIRST push refuse a branch that
     already exists); with it ``--force-with-lease=<branch>:<sha>`` — the only lease git can
-    hold when the push goes to a URL, where no remote-tracking ref exists."""
+    hold when the push goes to a URL, where no remote-tracking ref exists. The auth header
+    is not on this argv (D1): it travels in the environment."""
     creds = _creds()
-    header = f"http.{REMOTE}.extraheader={creds.basic_auth_header()}"
     repo = _Argv()
     dv.git_push_fn(repo, branch="crb/x", refspec="crb/x:crb/x", credentials=creds)
-    assert repo.argv == [["-c", header, "push", "--force-with-lease", REMOTE, "crb/x:crb/x"]]
+    assert repo.argv == [["push", "--force-with-lease", REMOTE, "crb/x:crb/x"]]
     repo = _Argv()
     dv.git_push_fn(
         repo, branch="crb/x", refspec="crb/x:crb/x", credentials=creds, expected="a" * 40
     )
-    assert repo.argv == [
-        ["-c", header, "push", f"--force-with-lease=crb/x:{'a' * 40}", REMOTE, "crb/x:crb/x"]
-    ]
+    assert repo.argv == [["push", f"--force-with-lease=crb/x:{'a' * 40}", REMOTE, "crb/x:crb/x"]]
     assert dv.force_with_lease_arg("crb/x", None) == "--force-with-lease"
     with pytest.raises(dv.DeliveryError, match="needs the commit"):
         dv.force_with_lease_arg("crb/x", "  ")
     assert TOKEN not in json.dumps(repo.argv).replace(creds.basic_auth_header(), "")
 
 
+class _ArgvAndEnv(GitRepo):
+    """A ``GitRepo`` that records the argv AND the environment each call is given."""
+
+    def __init__(self) -> None:
+        super().__init__("/nonexistent")
+        self.calls: list[tuple[list[str], dict[str, str]]] = []
+
+    def run(
+        self,
+        *args: str,
+        check: bool = False,
+        cwd: str | Path | None = None,
+        env: Any = None,
+    ) -> GitResult:
+        self.calls.append((list(args), dict(env or {})))
+        return GitResult(0, "", "")
+
+
+def test_the_push_token_travels_in_the_environment_never_on_the_argv() -> None:
+    """D1 (assessment 2026-09-25): the argv of a running process is readable by every user
+    on the host (``/proc/<pid>/cmdline``, ``ps``) and ``GitError`` keeps it for the ledger,
+    so the one-shot auth header travels as ``GIT_CONFIG_COUNT`` / ``GIT_CONFIG_KEY_n`` /
+    ``GIT_CONFIG_VALUE_n`` — the same channel the worker's clone uses — and the argv carries
+    nothing a reader could replay (docs/SECURITY.md §3.3: never argv)."""
+    creds = _creds()
+    repo = _ArgvAndEnv()
+    dv.git_push_fn(repo, branch="crb/x", refspec="crb/x:crb/x", credentials=creds)
+    ((argv, env),) = repo.calls
+    flat = " ".join(argv)
+    assert "Authorization" not in flat and "extraheader" not in flat.lower()
+    assert TOKEN not in flat and creds.basic_auth_header() not in flat
+    assert argv == ["push", "--force-with-lease", REMOTE, "crb/x:crb/x"]
+    # the header is in the environment, scoped to the remote, appended after any count the
+    # process environment already carries
+    n = int(env["GIT_CONFIG_COUNT"]) - 1
+    assert env[f"GIT_CONFIG_KEY_{n}"] == f"http.{REMOTE}.extraheader"
+    assert env[f"GIT_CONFIG_VALUE_{n}"] == creds.basic_auth_header()
+
+
+def test_a_git_error_never_carries_an_auth_header_or_a_token() -> None:
+    """Whatever a caller puts on a git command line, the ``GitError`` it becomes — its
+    ``argv``, its message and its ``repr`` — carries no credential: an ``extraheader``
+    value is replaced whole, and every other element passes through the redactor."""
+    header = _creds().basic_auth_header()
+    argv = ["git", "-C", "/r", "-c", f"http.{REMOTE}.extraheader={header}", "push", TOKEN]
+    err = GitError(argv, 128, f"fatal: {header} refused for {TOKEN}")
+    for text in (str(err), repr(err), json.dumps(err.argv), err.stderr, repr(err.args)):
+        assert TOKEN not in text and header not in text
+        assert header.split()[-1] not in text  # the base64 credential itself
+    assert err.argv[4] == f"http.{REMOTE}.extraheader=[REDACTED]"
+
+
+def test_a_push_that_times_out_raises_a_git_error_without_the_token(tmp_path: Path) -> None:
+    """The forced failure: git hangs, the wrapper's wall clock fires, and the ``GitError``
+    that reaches the loop's ``item.error`` carries the push argv — which must hold no
+    credential and no header."""
+    slow = tmp_path / "slow-git"
+    slow.write_text("#!/bin/sh\nsleep 5\n", encoding="utf-8")
+    slow.chmod(0o755)
+    repo = GitRepo(tmp_path, git_binary=str(slow), timeout=1)
+    creds = _creds()
+    with pytest.raises(GitError) as exc:
+        dv.git_push_fn(repo, branch="crb/x", refspec="crb/x:crb/x", credentials=creds)
+    for text in (str(exc.value), repr(exc.value), json.dumps(exc.value.argv)):
+        assert TOKEN not in text and creds.basic_auth_header() not in text
+        assert "Authorization" not in text
+
+
 class _ToBare(GitRepo):
     """Runs ``git_push_fn``'s exact argv against a REAL local bare repository: only the
     remote argument is swapped (``REMOTE`` → the bare path); the one-shot auth header for
-    the https remote stays on the command line and is simply not consulted for a path."""
+    the https remote stays in the environment and is simply not consulted for a path."""
 
     def __init__(self, path: Path, bare: Path) -> None:
         super().__init__(path)
         self.bare = bare
         self.argv: list[list[str]] = []
 
-    def run(self, *args: str, check: bool = False, cwd: str | Path | None = None) -> GitResult:
+    def run(
+        self,
+        *args: str,
+        check: bool = False,
+        cwd: str | Path | None = None,
+        env: Any = None,
+    ) -> GitResult:
         self.argv.append(list(args))
         swapped = tuple(str(self.bare) if a == REMOTE else a for a in args)
-        return super().run(*swapped, check=check, cwd=cwd)
+        return super().run(*swapped, check=check, cwd=cwd, env=env)
 
 
 def test_lease_semantics_against_a_real_bare_repository(harness: Harness, tmp_path: Path) -> None:
@@ -440,7 +536,7 @@ def test_lease_semantics_against_a_real_bare_repository(harness: Harness, tmp_pa
     # (1) the first push: bare lease, the branch does not exist on the remote → created
     dv.git_push_fn(repo, branch=branch, refspec=refspec, credentials=creds)
     assert remote.rev_parse(branch) == first
-    assert repo.argv[-1][2:4] == ["push", "--force-with-lease"]
+    assert repo.argv[-1][0:2] == ["push", "--force-with-lease"]
     # (2) the rework's commit — pushed the way B-1b pushed it: rejected, `stale info`
     second = commit_on_branch(first, "rework 1")
     with pytest.raises(dv.DeliveryError, match=r"stale info|rejected"):
@@ -455,7 +551,7 @@ def test_lease_semantics_against_a_real_bare_repository(harness: Harness, tmp_pa
     # (3) the fix: lease against the commit the first delivery pushed → the branch moves
     dv.git_push_fn(repo, branch=branch, refspec=refspec, credentials=creds, expected=first)
     assert remote.rev_parse(branch) == second
-    assert repo.argv[-1][2:4] == ["push", f"--force-with-lease={branch}:{first}"]
+    assert repo.argv[-1][0:2] == ["push", f"--force-with-lease={branch}:{first}"]
     # main never moved on either side
     assert repo.rev_parse("main") == harness.head
     assert not remote.run("rev-parse", "--verify", "refs/heads/main").ok
@@ -477,7 +573,7 @@ def test_redelivery_leases_on_the_previous_commit_updates_the_pr_and_comments(
     }
     first_build = _clean_build(harness)
     try:
-        first = dv.deliver(harness.repo.repo, item, first_build, **kw)
+        first = dv.deliver(harness.repo.repo, item, first_build, verdict="accept", **kw)
     finally:
         first_build.close()  # the loop releases the reviewed build before a rework
     rework = _clean_build(harness)
@@ -489,6 +585,7 @@ def test_redelivery_leases_on_the_previous_commit_updates_the_pr_and_comments(
             previous=first,
             rework_n=1,
             after_verdict="accept_with_edit",
+            verdict="accept",
             **kw,
         )
         repo = harness.repo.repo
@@ -531,12 +628,14 @@ def test_redelivery_without_a_comment_seam_updates_the_branch_silently(
     }
     b1 = _clean_build(harness)
     try:
-        first = dv.deliver(harness.repo.repo, item, b1, **kw)
+        first = dv.deliver(harness.repo.repo, item, b1, verdict="accept", **kw)
     finally:
         b1.close()
     b2 = _clean_build(harness)
     try:
-        second = dv.deliver(harness.repo.repo, item, b2, previous=first, rework_n=1, **kw)
+        second = dv.deliver(
+            harness.repo.repo, item, b2, previous=first, rework_n=1, verdict="accept", **kw
+        )
         assert second.updated and second.body_sha256 == "" and not seams.comments
         assert len(seams.prs) == 1 and seams.pushes[-1]["expected"] == first.commit_sha
     finally:
@@ -575,14 +674,21 @@ def test_redelivery_whose_comment_fails_keeps_the_moved_branch_on_the_record(
     }
     b1 = _clean_build(harness)
     try:
-        first = dv.deliver(harness.repo.repo, item, b1, **kw)
+        first = dv.deliver(harness.repo.repo, item, b1, verdict="accept", **kw)
     finally:
         b1.close()
     assert first.comment_error == "" and first.to_dict()["comment_error"] == ""
     b2 = _clean_build(harness)
     try:
         second = dv.deliver(
-            harness.repo.repo, item, b2, previous=first, rework_n=1, after_verdict="x", **kw
+            harness.repo.repo,
+            item,
+            b2,
+            previous=first,
+            rework_n=1,
+            after_verdict="x",
+            verdict="accept",
+            **kw,
         )
         # the push happened (leased against the first commit) and the result says so
         assert seams.pushes[-1]["expected"] == first.commit_sha and len(seams.prs) == 1
@@ -612,7 +718,9 @@ def test_redelivery_refuses_a_different_branch_base_or_item(harness: Harness) ->
     }
     b1 = _clean_build(harness)
     try:
-        first = dv.deliver(harness.repo.repo, item, b1, target_default_branch="main", **kw)
+        first = dv.deliver(
+            harness.repo.repo, item, b1, target_default_branch="main", verdict="accept", **kw
+        )
     finally:
         b1.close()
     b2 = _clean_build(harness)
@@ -626,10 +734,17 @@ def test_redelivery_refuses_a_different_branch_base_or_item(harness: Harness) ->
                 previous=replace(first, branch="crb/I-1-something-else"),
                 target_default_branch="main",
                 **kw,
+                verdict="accept",
             )
         with pytest.raises(dv.DeliveryError, match="re-delivery must update"):
             dv.deliver(
-                harness.repo.repo, item, b2, previous=first, target_default_branch="develop", **kw
+                harness.repo.repo,
+                item,
+                b2,
+                previous=first,
+                target_default_branch="develop",
+                verdict="accept",
+                **kw,
             )
         with pytest.raises(dv.DeliveryError, match="for item"):
             dv.deliver(
@@ -639,6 +754,7 @@ def test_redelivery_refuses_a_different_branch_base_or_item(harness: Harness) ->
                 previous=replace(first, item_id="I-9"),
                 target_default_branch="main",
                 **kw,
+                verdict="accept",
             )
         with pytest.raises(dv.DeliveryError, match="no commit to lease"):
             dv.deliver(
@@ -648,6 +764,7 @@ def test_redelivery_refuses_a_different_branch_base_or_item(harness: Harness) ->
                 previous=replace(first, commit_sha=""),
                 target_default_branch="main",
                 **kw,
+                verdict="accept",
             )
         assert len(seams.pushes) == before and len(seams.prs) == 1 and not seams.comments
     finally:
@@ -685,3 +802,477 @@ def test_github_comment_pr_uses_stdlib_urllib(monkeypatch: pytest.MonkeyPatch) -
     assert seen["headers"]["Authorization"] == f"Bearer {TOKEN}"
     with pytest.raises(dv.DeliveryError, match="cannot comment"):
         dv.github_comment_pr_fn(remote=REMOTE, pr_number=0, body="x", credentials=_creds())
+
+
+# --- C1: nothing but an accepted build is delivered; a weak one is closed ----------
+
+
+def test_deliver_refuses_any_verdict_but_accept_before_touching_creds(harness: Harness) -> None:
+    """The delivery boundary itself refuses a build the review did not accept, before a
+    credential is read or a branch committed: the loop cannot hand it one by mistake."""
+
+    class Exploding:
+        def resolve(self, repo: str) -> dv.GitCredentials:
+            """Fails the test: an unaccepted build must not read credentials."""
+            raise AssertionError("credentials were read for an unaccepted build")
+
+    build = _clean_build(harness)
+    seams = Seams()
+    try:
+        for verdict in ("accept_with_edit", "reject", ""):
+            with pytest.raises(dv.DeliveryRefused, match="review"):
+                dv.deliver(
+                    harness.repo.repo,
+                    multiply_item(),
+                    build,
+                    creds=Exploding(),
+                    push_fn=seams.push,
+                    open_pr_fn=seams.open_pr,
+                    target_default_branch="main",
+                    verdict=verdict,
+                )
+        assert not seams.pushes and not seams.prs
+        # no delivery branch was committed (the oracle's own ``crb/factory/`` staging
+        # branch is the factory's, never pushed)
+        branches = harness.repo.repo.run(
+            "for-each-ref", "--format=%(refname)", "refs/heads/crb"
+        ).stdout.split()
+        assert [b for b in branches if not b.startswith("refs/heads/crb/factory/")] == []
+    finally:
+        build.close()
+
+
+def test_close_pull_request_comments_the_verdict_then_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``close_pull_request`` — the rework path for a pull request an earlier run opened
+    and a later review did not accept: one comment naming the verdict and why, then the
+    pull request is closed through the seam; with no credentials it fails closed."""
+    import urllib.request
+
+    calls: list[dict[str, Any]] = []
+
+    class _Resp:
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"id": 1, "state": "closed"}).encode()
+
+    def fake_urlopen(req: Any, timeout: int = 0) -> _Resp:
+        calls.append(
+            {
+                "url": req.full_url,
+                "method": req.get_method(),
+                "data": json.loads(req.data),
+                "auth": dict(req.header_items())["Authorization"],
+            }
+        )
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    previous = dv.DeliveryResult(
+        item_id="I-1",
+        branch="crb/i-1-add-multiply-to-calc",
+        base="main",
+        commit_sha="c" * 40,
+        pr_url="https://github.com/acme/calc/pull/5",
+        pr_number=5,
+        pack_hash="p" * 64,
+        body_sha256="",
+    )
+    body = dv.close_pull_request(
+        previous,
+        verdict="accept_with_edit",
+        reason="the oracle is weak: 3 escaped mutants",
+        creds=dv.StaticProvider(_creds()),
+        close_pr_fn=dv.github_close_pr_fn,
+        repo_id="/repos/calc",
+    )
+    assert [c["method"] for c in calls] == ["POST", "PATCH"]
+    assert calls[0]["url"] == "https://api.github.com/repos/acme/calc/issues/5/comments"
+    assert "accept_with_edit" in calls[0]["data"]["body"] and "escaped" in calls[0]["data"]["body"]
+    assert calls[1]["url"] == "https://api.github.com/repos/acme/calc/pulls/5"
+    assert calls[1]["data"] == {"state": "closed"}
+    assert all(c["auth"] == f"Bearer {TOKEN}" for c in calls)
+    assert body == calls[0]["data"]["body"] and TOKEN not in body
+    with pytest.raises(dv.NoGitCredentialsError):
+        dv.close_pull_request(
+            previous,
+            verdict="reject",
+            reason="x",
+            creds=None,
+            close_pr_fn=dv.github_close_pr_fn,
+            repo_id="/repos/calc",
+        )
+    with pytest.raises(dv.DeliveryError, match="accept"):
+        dv.close_pull_request(
+            previous,
+            verdict="accept",
+            reason="x",
+            creds=dv.StaticProvider(_creds()),
+            close_pr_fn=dv.github_close_pr_fn,
+            repo_id="/repos/calc",
+        )
+
+
+def test_a_close_resolves_credentials_for_the_repository_never_the_item() -> None:
+    """PR #55 review: a close resolved its credentials with the ITEM id (``I-1``) when the
+    caller named no repository, so a provider keyed on the repository would be asked for
+    the wrong key — a failed close, or another repository's token. The repository is now a
+    required argument, a blank one is refused before any credential is read, and the key
+    the provider sees is exactly the one given."""
+    asked: list[str] = []
+
+    class Recording:
+        def resolve(self, repo: str) -> dv.GitCredentials:
+            """A close must resolve credentials with the supplied repository identifier,
+            never the item id: record the key asked for, then answer with test credentials."""
+            asked.append(repo)
+            return _creds()
+
+    previous = dv.DeliveryResult(
+        item_id="I-1",
+        branch="crb/i-1-add-multiply-to-calc",
+        base="main",
+        commit_sha="c" * 40,
+        pr_url="https://github.com/acme/calc/pull/5",
+        pr_number=5,
+        pack_hash="p" * 64,
+        body_sha256="",
+    )
+    for blank in ("", "   "):
+        with pytest.raises(dv.DeliveryError, match="repository"):
+            dv.close_pull_request(
+                previous,
+                verdict="reject",
+                reason="x",
+                creds=Recording(),
+                close_pr_fn=lambda **kw: None,
+                repo_id=blank,
+            )
+    assert asked == []
+    dv.close_pull_request(
+        previous,
+        verdict="reject",
+        reason="x",
+        creds=Recording(),
+        close_pr_fn=lambda **kw: None,
+        repo_id="/repos/calc",
+    )
+    assert asked == ["/repos/calc"]
+
+
+# --- C6(b): ticket-derived text is data, never markup; the branch is [a-z0-9-] -------
+
+#: A title and criteria a ticket author controls, written to break out of anything:
+#: inline code, emphasis, an HTML comment, a mention, a link, a fence and a heading.
+HOSTILE_TITLE = "Fix `rm -rf` **now** <!-- hide --> @org/admins [go](http://evil.invalid)"
+HOSTILE_CRITERIA = (
+    "````\n## Injected heading\n- [x] approved by @org/admins",
+    "~~~\n<img src=x onerror=alert(1)>",
+)
+
+
+def _fences(body: str) -> list[tuple[bool, str]]:
+    """``(inside_a_fence, line)`` for every line, by CommonMark's rule: a fence opens with
+    three or more backticks or tildes and closes with the SAME character, at least as many."""
+    out: list[tuple[bool, str]] = []
+    open_char, open_len = "", 0
+    for line in body.split("\n"):
+        stripped = line.lstrip(" ")
+        run = len(stripped) - len(stripped.lstrip(stripped[:1])) if stripped else 0
+        ch = stripped[:1]
+        if open_char:
+            if ch == open_char and run >= open_len and not stripped[run:].strip():
+                out.append((True, line))
+                open_char, open_len = "", 0
+                continue
+            out.append((True, line))
+        elif ch in ("`", "~") and run >= 3:
+            open_char, open_len = ch, run
+            out.append((True, line))
+        else:
+            out.append((False, line))
+    assert not open_char, "a fence was left open"
+    return out
+
+
+def test_ticket_text_in_the_pr_body_is_fenced_and_cannot_become_markup(harness: Harness) -> None:
+    """C6(b): the ticket's title became a ``##`` heading and its acceptance criteria were
+    emitted verbatim as list items, so whoever wrote the ticket wrote markup into the
+    customer's pull request — a fake "approved" checkbox, a mention that pages a team, a
+    heading, a link. Ticket-derived text now sits inside ONE fenced block whose fence is
+    longer than any run inside it, and nowhere else."""
+    item = multiply_item(title=HOSTILE_TITLE, acceptance_criteria=HOSTILE_CRITERIA)
+    build = _clean_build(harness)
+    try:
+        body = dv.pr_body(item, build, pack_link="packs/x.json")
+    finally:
+        build.close()
+    lines = _fences(body)
+    outside = "\n".join(line for inside, line in lines if not inside)
+    for fragment in ("rm -rf", "**now**", "<!--", "@org/admins", "](http", "Injected", "<img"):
+        assert fragment not in outside, fragment
+    inside = "\n".join(line for is_in, line in lines if is_in)
+    assert HOSTILE_TITLE in inside and "## Injected heading" in inside
+    # the evidence the reviewer needs is still there, outside the fence
+    assert build.pack_hash in outside and "never the default branch" in outside
+
+
+def test_the_pull_request_title_escapes_the_ticket_titles_markdown(harness: Harness) -> None:
+    item = multiply_item(title="Fix `x` **now**\nand <b>this</b>")
+    build = _clean_build(harness)
+    seams = Seams()
+    try:
+        dv.deliver(
+            harness.repo.repo,
+            item,
+            build,
+            creds=dv.StaticProvider(_creds()),
+            push_fn=seams.push,
+            open_pr_fn=seams.open_pr,
+            target_default_branch="main",
+            verdict="accept",
+        )
+    finally:
+        build.close()
+    title = seams.prs[0]["title"]
+    assert "\n" not in title
+    assert "`x`" not in title and "**now**" not in title and "<b>" not in title
+    assert "\\`x\\`" in title and "\\*\\*now\\*\\*" in title and "\\<b\\>" in title
+    assert title.endswith("[I-1]")
+
+
+@pytest.mark.parametrize(
+    "item_id",
+    ["I-1", "fake-4711.r2", "A..B", "x.lock", "UPPER_case-9"],
+)
+def test_the_delivery_branch_is_lowercase_letters_digits_and_hyphens(item_id: str) -> None:
+    """C6(b): the branch was ``crb/<item id>-<slug>`` with the id as registered, and an id
+    may carry ``.``, ``_`` and capitals (``A..B``, ``x.lock`` — refs git refuses) . The
+    part after ``crb/`` is now ``[a-z0-9-]`` only, whatever the id, and git accepts it."""
+    import re
+    import subprocess
+
+    branch = dv.delivery_branch_name(multiply_item(id=item_id, title="Fix `this` NOW!"))
+    assert re.fullmatch(r"crb/[a-z0-9-]+", branch), branch
+    assert "--" not in branch and not branch.endswith("-")
+    ok = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch], capture_output=True, check=False
+    )
+    assert ok.returncode == 0, branch
+
+
+def test_a_pull_request_opened_under_the_old_branch_name_can_still_be_updated(
+    harness: Harness,
+) -> None:
+    """A pull request an earlier run opened before the branch was reduced to ``[a-z0-9-]``
+    keeps its branch: the re-delivery updates THAT branch rather than refusing it."""
+    item = multiply_item()
+    seams = Seams()
+    legacy = dv.legacy_delivery_branch_name(item)
+    assert legacy == "crb/I-1-add-multiply-to-calc" != dv.delivery_branch_name(item)
+    previous = dv.DeliveryResult(
+        item_id="I-1",
+        branch=legacy,
+        base="main",
+        commit_sha="c" * 40,
+        pr_url="https://github.invalid/acme/calc/pull/3",
+        pr_number=3,
+        pack_hash="p" * 64,
+        body_sha256="",
+    )
+    build = _clean_build(harness)
+    try:
+        res = dv.deliver(
+            harness.repo.repo,
+            item,
+            build,
+            creds=dv.StaticProvider(_creds()),
+            push_fn=seams.push,
+            open_pr_fn=seams.open_pr,
+            target_default_branch="main",
+            previous=previous,
+            verdict="accept",
+        )
+    finally:
+        build.close()
+    assert res.updated and res.branch == legacy and res.pr_number == 3
+    assert seams.pushes[-1]["branch"] == legacy and seams.prs == []
+
+
+# --- PR #55 review: a recorded pull request is only reused in its own repository ---------
+
+
+def _earlier(**over: Any) -> dv.DeliveryResult:
+    """An earlier run's delivery of ``I-1`` to ``acme/calc``, pull request 5."""
+    fields: dict[str, Any] = {
+        "item_id": "I-1",
+        "branch": "crb/i-1-add-multiply-to-calc",
+        "base": "main",
+        "commit_sha": "c" * 40,
+        "pr_url": "https://github.com/acme/calc/pull/5",
+        "pr_number": 5,
+        "pack_hash": "p" * 64,
+        "body_sha256": "",
+    }
+    fields.update(over)
+    return dv.DeliveryResult(**fields)
+
+
+RELINKED = "https://github.com/other/calc.git"
+
+
+def test_a_delivery_records_the_repository_it_went_to(harness: Harness) -> None:
+    """The pull request's number means nothing without its repository, so a delivery
+    records both: ``repository`` (``owner/name``, as the remote it pushed to names it)
+    travels on the chain beside ``pr_number``."""
+    seams = Seams()
+    build = _clean_build(harness)
+    try:
+        res = dv.deliver(
+            harness.repo.repo,
+            multiply_item(),
+            build,
+            creds=dv.StaticProvider(_creds()),
+            push_fn=seams.push,
+            open_pr_fn=seams.open_pr,
+            target_default_branch="main",
+            verdict="accept",
+        )
+    finally:
+        build.close()
+    assert res.repository == "acme/calc" and res.to_dict()["repository"] == "acme/calc"
+
+
+def test_the_repository_of_an_earlier_delivery_is_read_from_its_record() -> None:
+    """``repository`` when the delivery recorded it; for a delivery recorded before it
+    existed, the repository in GitHub's pull request address; otherwise nothing — and
+    nothing is never taken to match."""
+    assert dv.delivered_repository(_earlier(repository="Acme/Calc")) == "acme/calc"
+    assert dv.delivered_repository(_earlier()) == "acme/calc"
+    assert dv.delivered_repository(_earlier(pr_url="https://github.invalid/pr/5")) == ""
+    assert dv.delivered_repository(_earlier(pr_url="")) == ""
+    dv.assert_same_repository(_earlier(), REMOTE)
+    dv.assert_same_repository(_earlier(), "git@github.com:ACME/calc.git")
+    for record in (_earlier(pr_url=""), _earlier(pr_url="https://github.invalid/pr/5")):
+        with pytest.raises(dv.DeliveryError, match="cannot tell"):
+            dv.assert_same_repository(record, REMOTE)
+    with pytest.raises(dv.DeliveryError, match=r"acme/calc.*other/calc"):
+        dv.assert_same_repository(_earlier(), RELINKED)
+
+
+def test_a_re_delivery_to_another_repository_is_refused_before_any_push(
+    harness: Harness,
+) -> None:
+    """After an operator re-links the row, the credentials name the new repository and
+    the record still holds pull request 5 of the old one. The re-delivery pushed the
+    branch to the new repository and commented on ITS pull request 5. It is refused
+    before the push, and nothing reaches either repository."""
+    seams = Seams()
+    build = _clean_build(harness)
+    try:
+        with pytest.raises(dv.DeliveryError, match=r"acme/calc.*other/calc"):
+            dv.deliver(
+                harness.repo.repo,
+                multiply_item(),
+                build,
+                creds=dv.StaticProvider(dv.GitCredentials(remote=RELINKED, token=TOKEN)),
+                push_fn=seams.push,
+                open_pr_fn=seams.open_pr,
+                comment_pr_fn=seams.comment_pr,
+                target_default_branch="main",
+                previous=_earlier(),
+                verdict="accept",
+            )
+    finally:
+        build.close()
+    assert seams.pushes == [] and seams.prs == [] and seams.comments == []
+
+
+def test_a_close_in_another_repository_is_refused_before_the_forge_is_called() -> None:
+    """The close's half: pull request 5 of the new repository is somebody else's. The
+    close is refused before the seam is called."""
+    calls: list[dict[str, Any]] = []
+    with pytest.raises(dv.DeliveryError, match=r"acme/calc.*other/calc"):
+        dv.close_pull_request(
+            _earlier(),
+            verdict="reject",
+            reason="x",
+            creds=dv.StaticProvider(dv.GitCredentials(remote=RELINKED, token=TOKEN)),
+            close_pr_fn=lambda **kw: calls.append(kw),
+            repo_id="/repos/calc",
+        )
+    assert calls == []
+
+
+#: Calls that only RECORD a pull request number (never reach a forge): the chain's outcome
+#: row and the two value types that carry the number.
+_RECORDS_ONLY = frozenset({"DeliveryResult", "DeliveredPr", "record_delivery_outcome"})
+#: The checks that tie a recorded pull request number to the repository it is in.
+_REPOSITORY_CHECKS = frozenset({"assert_same_repository", "repository_mismatch"})
+
+
+def _call_name(node: ast.Call) -> str:
+    f = node.func
+    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+
+
+def _unchecked_pr_number_uses(source: str) -> list[str]:
+    """``function:line`` for every call that hands a RECORDED pull request number
+    (``<something>.pr_number``) to anything but a record, in a function that has not asked
+    a repository check on an earlier line."""
+    out: list[str] = []
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        checks = [
+            n.lineno
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and _call_name(n) in _REPOSITORY_CHECKS
+        ]
+        for n in ast.walk(fn):
+            if not isinstance(n, ast.Call) or _call_name(n) in _RECORDS_ONLY:
+                continue
+            args = [*n.args, *(k.value for k in n.keywords)]
+            if not any(isinstance(a, ast.Attribute) and a.attr == "pr_number" for a in args):
+                continue
+            if not any(line < n.lineno for line in checks):
+                out.append(f"{fn.name}:{n.lineno}")
+    return out
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # a new path that closes a recorded pull request with no check at all
+        "def f(previous, close):\n    close(pr_number=previous.pr_number)\n",
+        # a read of a recorded number, positionally
+        "def f(d, read_pr):\n    read_pr(d.pr_number)\n",
+        # a check asked AFTER the forge call is no check
+        "def f(p, comment, remote):\n"
+        "    comment(pr_number=p.pr_number)\n"
+        "    assert_same_repository(p, remote)\n",
+    ],
+)
+def test_the_repository_ratchet_catches_each_way_back(source: str) -> None:
+    assert _unchecked_pr_number_uses(source) != []
+
+
+def test_every_reuse_of_a_recorded_pull_request_checks_its_repository_first() -> None:
+    """The prevention for the class (PR #55 review): a recorded pull request NUMBER was
+    handed to the forge through whatever repository the row is linked to now — the
+    re-delivery's comment, the close, the outcome sync's read. Every call in ``src/crb``
+    that passes a recorded ``.pr_number`` to anything but a record now follows a
+    repository check in the same function, so a new path that reuses one cannot skip it."""
+    src = Path(__file__).resolve().parents[1] / "src" / "crb"
+    offenders = {
+        f"{p.relative_to(src)}::{hit}"
+        for p in sorted(src.rglob("*.py"))
+        for hit in _unchecked_pr_number_uses(p.read_text(encoding="utf-8"))
+    }
+    assert offenders == set()

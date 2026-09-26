@@ -71,6 +71,28 @@ served intake view, the state file, the evidence chain and the settings body; me
 `tests/test_server_routes_intake.py::test_the_tracker_token_is_in_no_log_no_event_no_state_file_and_no_error`;
 release 2.0.0a1, apparatus 2.2]**.
 
+Since 2026-09-25 (assessment C6, ADR-0022) the intake boundary also holds four more rules.
+The credential is sent only to the tracker's own origin: a request URL whose scheme, host or
+port differ from the configured one is refused before the header is attached **[measured —
+n = 4 foreign URLs refused and never sent (another host, another scheme, another port, a
+lookalike host), the same origin served absolute and relative; method:
+`tests/test_intake_adapters.py::test_an_absolute_url_on_another_origin_is_refused_and_never_sent_the_credential`,
+an `httpx.MockTransport` that records every request; release 2.0.0a1, apparatus 2.2]**. What a
+ticket says reaches a customer's pull request only inside one fenced code block, the title
+is escaped to one inert line and the branch is `[a-z0-9-]` **[measured — n = 1 hostile title
+and 2 hostile criteria (a code span, emphasis, an HTML comment, a mention, a link, a fence and
+a heading, an image tag) and 5 item ids; method:
+`tests/test_factory_delivery.py::test_ticket_text_in_the_pr_body_is_fenced_and_cannot_become_markup`,
+`::test_the_pull_request_title_escapes_the_ticket_titles_markdown`,
+`::test_the_delivery_branch_is_lowercase_letters_digits_and_hyphens` (with
+`git check-ref-format`); release 2.0.0a1, apparatus 2.2]**. A ready ticket is registered only
+by an operator's evented Register act unless its author is on an explicit allowlist, and one
+pass per repository runs at a time under a lease row **[measured — n = 5 cases: a ready ticket
+waits, the act registers the draft read, a moved revision is refused, an allowlisted author
+bypasses and others wait, two overlapping passes register once; method:
+`tests/test_intake_service.py` (the C6 section) and `tests/test_server_routes_intake.py` (the
+same at the API); release 2.0.0a1, apparatus 2.2]**.
+
 There is no telemetry, no update check, no licence phone-home, and the opt-in federated
 export (ADR-0007) is a file the operator produces, never a call the product makes. With the
 builder in its container (ADR-0012) the model endpoint is reachable from exactly one
@@ -169,6 +191,18 @@ made under that override carries it in its apparatus (§5, ADR-0023).
   *whether* each is configured (`crb.server.settings.Settings.redacted_dict`). [measured]
 - Git delivery credentials (forward mode) come from an injected provider; the default
   `NullProvider` fails closed. [measured] `tests/test_factory_delivery.py`
+- The delivery **push** carries its one-shot `Authorization` header in the child's
+  environment (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`,
+  `crb.core.git.git_config_env`), never on the argv; until 2026-09-25 it was a
+  `-c http.<remote>.extraheader=…` argument, readable in `/proc` and `ps` (assessment D1). A
+  `GitError` redacts every `extraheader` value and every credential shape from the argv and
+  stderr it keeps, whoever built the command line. [measured, n = 3 cases: the push argv
+  carries no header and the environment does, a `GitError` built from a header-bearing argv
+  carries no token, a push that times out raises a `GitError` with no token —
+  `tests/test_factory_delivery.py::test_the_push_token_travels_in_the_environment_never_on_the_argv`,
+  `::test_a_git_error_never_carries_an_auth_header_or_a_token`,
+  `::test_a_push_that_times_out_raises_a_git_error_without_the_token`; recording git doubles
+  and a hanging git binary, apparatus 2.2]
 - Repositories connected through the **GitHub App** (ADR-0014) are cloned — and, where the
   installation grants write, delivered to — with **installation tokens** the worker mints per
   use: scoped to the installation (one hour by GitHub's contract), cached in memory until

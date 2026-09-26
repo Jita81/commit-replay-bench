@@ -1,6 +1,6 @@
 # ADR-0017 — The ticket is the backlog item; the column is the consent gate
 
-**Status:** Accepted (operator decision DL-051; built in wave 1, stream I)
+**Status:** Accepted (operator decision DL-051; built in wave 1, stream I) · **Superseded in part by [ADR-0022](0022-intake-approval-by-default.md)** (2026-09-25: the column is the request, an operator's Register act is the consent)
 **Date:** 2026-09-22
 **Apparatus impact:** none — nothing here changes what a belt means, how a cell is keyed
 or how a route is decided. Intake decides *which* items exist, never how one is graded.

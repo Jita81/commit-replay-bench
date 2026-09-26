@@ -9,8 +9,14 @@ What it does: Pins that the same column polled twice writes to the ticket once, 
               ticket edited between polls becomes an EVOLUTION rather than an overwrite,
               that a registration arriving while a factory run is active is queued and
               picked up by the next poll rather than 409ing, that every stop is an
-              ``intake.stopped`` event with a published reason and advice, and that an
-              empty outcome map moves no ticket at all.
+              ``intake.stopped`` event with a published reason and advice, that an
+              empty outcome map moves no ticket at all, and (C6, ADR-0022) that a ready
+              ticket waits as a draft until an operator's Register act registers the
+              revision they read, that an allowlisted author bypasses it on the record, and
+              that two overlapping passes register once because a pass takes a lease that
+              expires when its holder dies. Since the PR #55 review: that no public
+              function taking an ``item_url`` builder lets a relative link reach a ticket
+              (a ratchet lists every such function).
 How:          A real ``FactoryHome`` under ``tmp_path`` (so the hash chain is the real
               one) plus ``fixtures.intake``'s ``FakeTracker``. No HTTP, no
               database, no model — the whole flow is exercised in milliseconds.
@@ -77,6 +83,10 @@ def _poll(
         "home": home,
         "route_for": lambda item: route,
         "item_url": lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+        # the registration MECHANICS these tests pin (idempotency, the queued registration,
+        # evolution) run with operator approval OFF; the approval gate itself — ON by
+        # default in the service and the setting (ADR-0022) — is pinned in its own tests
+        "approval": sv.ApprovalPolicy(required=False),
     }
     defaults.update(kw)
     return sv.poll_repository("alpha", **defaults)
@@ -546,7 +556,7 @@ def test_the_pull_request_link_reaches_the_ticket_it_came_from(home: FactoryHome
     written = sv.post_outcomes_to_tickets(
         tracker,
         home=home,
-        item_url=lambda i: f"/factory?item={i}",
+        item_url=lambda i: f"https://crb.invalid/factory?item={i}",
         evidence=home.evidence(actor="worker"),
     )
     assert written == ["4711"]
@@ -556,7 +566,7 @@ def test_the_pull_request_link_reaches_the_ticket_it_came_from(home: FactoryHome
         sv.post_outcomes_to_tickets(
             tracker,
             home=home,
-            item_url=lambda i: f"/factory?item={i}",
+            item_url=lambda i: f"https://crb.invalid/factory?item={i}",
             evidence=home.evidence(actor="worker"),
         )
         == []
@@ -572,7 +582,7 @@ def test_a_stopped_item_tells_its_ticket_the_status_and_the_way_forward(home: Fa
     assert sv.post_outcomes_to_tickets(
         tracker,
         home=home,
-        item_url=lambda i: f"/factory?item={i}",
+        item_url=lambda i: f"https://crb.invalid/factory?item={i}",
         evidence=home.evidence(actor="worker"),
     ) == ["4711"]
     body = "".join(tracker.comments["4711"].values())
@@ -590,7 +600,7 @@ def test_an_accepted_item_is_not_told_it_was_refused(home: FactoryHome) -> None:
         sv.post_outcomes_to_tickets(
             tracker,
             home=home,
-            item_url=lambda i: f"/factory?item={i}",
+            item_url=lambda i: f"https://crb.invalid/factory?item={i}",
             evidence=home.evidence(actor="worker"),
         )
         == []
@@ -619,7 +629,10 @@ def test_only_the_latest_item_registered_from_a_ticket_writes_its_refusal(
     for _ in range(2):  # twice: a poll runs this every pass
         before = len(tracker.calls)
         written = sv.post_outcomes_to_tickets(
-            tracker, home=home, item_url=lambda i: f"/factory?item={i}", evidence=home.evidence()
+            tracker,
+            home=home,
+            item_url=lambda i: f"https://crb.invalid/factory?item={i}",
+            evidence=home.evidence(),
         )
         writes = [verb for verb, key in tracker.calls[before:] if verb == "comment"]
         assert writes == ["comment"]  # ONE write, not one per item the ticket ever produced
@@ -637,7 +650,10 @@ def test_a_ticket_with_a_pull_request_is_told_about_that_rather_than_an_earlier_
     ev.append("item.outcome", "fake-4711", status="not_ready", error="a gap")
     ev.append("delivery.opened", "fake-4711", pr_url="https://github.invalid/pr/9")
     sv.post_outcomes_to_tickets(
-        tracker, home=home, item_url=lambda i: f"/factory?item={i}", evidence=home.evidence()
+        tracker,
+        home=home,
+        item_url=lambda i: f"https://crb.invalid/factory?item={i}",
+        evidence=home.evidence(),
     )
     body = "".join(tracker.comments["4711"].values())
     assert "https://github.invalid/pr/9" in body
@@ -910,3 +926,684 @@ def test_a_ticket_whose_key_cannot_become_an_item_id_skips_only_itself(
     assert report.rows[1].registered is True
     stops = [e for e in home.events() if e.kind == sv.EV_STOPPED]
     assert [e.payload["step"] for e in stops] == ["draft"]
+
+
+# --- C6 (assessment 2026-09-25): an operator approves the draft; the pass takes a lease ---
+
+
+def test_a_ready_ticket_is_not_registered_until_an_operator_approves_it(
+    home: FactoryHome,
+) -> None:
+    """C6(a): a ticket whose slots are filled was registered and queued with no human step,
+    so anyone who could edit a ticket in the watched column could put work — and its text —
+    into the factory. By default (``ApprovalPolicy()``, the setting's default too) a ready
+    ticket lands as a DRAFT awaiting an operator's Register act: labelled ready, nothing on
+    the frozen record, the draft on the chain for the act to register."""
+    tracker = _tracker(_ticket(author="mallory@example.invalid"))
+    report = sv.poll_repository(
+        "alpha",
+        tracker=tracker,
+        listener=sv.ListenerState(enabled=True),
+        column="Ready",
+        home=home,
+        route_for=lambda item: _deliver(),
+        item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+    )
+    assert report.ok and report.read == 1 and report.registered == 0 and report.awaiting == 1
+    assert home.load_backlog() is None
+    assert tracker.labels["4711"] == c.LABEL_READY
+    assert "4711" not in tracker.links
+    (row,) = report.rows
+    assert row.awaiting_approval and not row.registered and row.author == "mallory@example.invalid"
+    kinds = [e.kind for e in home.events()]
+    assert sv.EV_AWAITING in kinds and sv.EV_REGISTERED not in kinds
+    (awaiting,) = [e for e in home.events() if e.kind == sv.EV_AWAITING]
+    assert awaiting.payload["key"] == "4711" and awaiting.payload["revision"] == "1"
+    assert awaiting.payload["item"]["id"] == "fake-4711"
+    # a second poll of the unchanged ticket neither registers it nor records a second draft
+    again = _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    assert again.registered == 0
+    assert [e.kind for e in home.events()].count(sv.EV_AWAITING) == 1
+
+
+def test_the_register_act_registers_the_draft_the_operator_saw_and_is_evented(
+    home: FactoryHome,
+) -> None:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    row = sv.register_approved(
+        "alpha",
+        "4711",
+        revision="1",
+        tracker=tracker,
+        home=home,
+        item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+        approver="operator:ada",
+    )
+    assert row.registered and not row.awaiting_approval and row.label == c.LABEL_QUEUED
+    backlog = home.load_backlog()
+    assert backlog is not None and [i.id for i in backlog.items] == ["fake-4711"]
+    (reg,) = [e for e in home.events() if e.kind == sv.EV_REGISTERED]
+    assert reg.payload["approved_by"] == "operator:ada" and reg.payload["key"] == "4711"
+    # the ticket learns it is queued, exactly as an unattended registration used to say
+    assert tracker.labels["4711"] == c.LABEL_QUEUED
+    assert tracker.links["4711"] == ["https://crb.invalid/factory?item=fake-4711"]
+    # the served row says so without another poll
+    (served,) = sv.store_for(home).rows()
+    assert served.registered and not served.awaiting_approval
+    # registering twice is refused, and registers nothing more
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=lambda item_id: item_id,
+            approver="operator:ada",
+        )
+    assert err.value.code == "nothing_to_register"
+    assert [e.kind for e in home.events()].count(sv.EV_REGISTERED) == 1
+
+
+def test_an_approval_for_a_revision_that_has_since_moved_is_refused(home: FactoryHome) -> None:
+    """The operator approves what they READ: the act names the revision on their screen,
+    and a ticket edited since is a different draft — refused, nothing registered."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    edited = _ticket(revision="2", body="a new HTTP endpoint on the api — and delete the db")
+    tracker.tickets["4711"] = edited
+    tracker.column = [c.TicketRef(key="4711", revision="2", title=edited.title)]
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=lambda item_id: item_id,
+            approver="operator:ada",
+        )
+    assert err.value.code == "revision_moved" and "2" in err.value.message
+    assert home.load_backlog() is None
+
+
+def test_an_allowlisted_tracker_author_bypasses_approval_and_the_chain_says_so(
+    home: FactoryHome,
+) -> None:
+    policy = sv.ApprovalPolicy(allow_authors=("Ada@Example.invalid",))
+    trusted = _tracker(_ticket(author="ada@example.invalid"))
+    report = _poll(home, trusted, route=_deliver(), approval=policy)
+    assert report.registered == 1 and report.awaiting == 0
+    (reg,) = [e for e in home.events() if e.kind == sv.EV_REGISTERED]
+    assert reg.payload["approved_by"] == "allowlist:ada@example.invalid"
+    # an author who is not on the list, or a ticket with no author, still waits
+    home2 = FactoryHome(home.dir.parent.parent, "beta")
+    for author in ("eve@example.invalid", ""):
+        report = sv.poll_repository(
+            "beta",
+            tracker=_tracker(_ticket(author=author)),
+            listener=sv.ListenerState(enabled=True),
+            column="Ready",
+            home=home2,
+            route_for=lambda item: _deliver(),
+            item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+            approval=policy,
+            force=True,
+        )
+        assert report.registered == 0 and report.awaiting == 1
+
+
+def test_two_overlapping_passes_register_once_because_the_pass_takes_a_lease(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """C6(c): nothing stopped the worker's timed poll and an operator's on-demand poll
+    reading the same column at once — both drafted, both commented, both tried to register.
+    A pass now takes a per-repository lease row (the ``workers`` table); a second pass that
+    finds it held does nothing at all: no tracker call, no chain event, no served view."""
+    from crb.store import init_db, make_engine, make_session_factory
+    from crb.store.models import Repo
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'lease.db'}")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    # the repository's switched-on listener: a pass under the lease asks the committed
+    # switch again (PR #55 review), so the store holds the row the served stack would
+    with factory() as s:
+        on = {sv.CONFIG_KEY: sv.ListenerState(enabled=True).to_dict()}
+        s.add(Repo(name="alpha", language="python", runner="pytest", config_json=on))
+        s.commit()
+    tracker = _tracker(_ticket())
+    inner: list[sv.PollReport] = []
+    real_read = tracker.read
+    started: list[bool] = []
+
+    def read_and_overlap(key: str) -> c.Ticket:
+        # the second pass starts while the first is inside the ticket (once)
+        if started:
+            return real_read(key)
+        started.append(True)
+        inner.append(
+            _poll(
+                home,
+                tracker,
+                route=_deliver(),
+                approval=sv.ApprovalPolicy(required=False),
+                lease=sv.intake_lease(factory, "alpha", ttl_s=300),
+            )
+        )
+        return real_read(key)
+
+    tracker.read = read_and_overlap  # type: ignore[method-assign]
+    outer = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        approval=sv.ApprovalPolicy(required=False),
+        lease=sv.intake_lease(factory, "alpha", ttl_s=300),
+    )
+    (second,) = inner
+    assert second.busy and second.read == 0 and second.registered == 0 and not second.rows
+    assert outer.registered == 1
+    kinds = [e.kind for e in home.events()]
+    assert kinds.count(sv.EV_REGISTERED) == 1 and kinds.count(sv.EV_POLLED) == 1
+    assert not [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    # the lease is released when the pass ends: the next pass runs
+    tracker.read = real_read  # type: ignore[method-assign]
+    third = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        approval=sv.ApprovalPolicy(required=False),
+        lease=sv.intake_lease(factory, "alpha", ttl_s=300),
+    )
+    assert not third.busy and third.skipped == 1
+
+
+def test_a_lease_left_by_a_crashed_pass_expires(tmp_path: Path) -> None:
+    from crb.store import init_db, make_engine, make_session_factory
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'lease.db'}")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    clock = [1000.0]
+    a = sv.intake_lease(factory, "alpha", ttl_s=60, clock=lambda: clock[0])
+    b = sv.intake_lease(factory, "alpha", ttl_s=60, clock=lambda: clock[0])
+    assert a.acquire() and not b.acquire()
+    clock[0] += 61  # the holder died without releasing
+    assert b.acquire()
+    a.release()  # a stale holder cannot release a lease it no longer holds
+    c2 = sv.intake_lease(factory, "alpha", ttl_s=60, clock=lambda: clock[0])
+    assert not c2.acquire()
+    b.release()
+    assert c2.acquire()
+
+
+def test_a_ticket_edited_on_the_board_after_the_last_poll_is_refused_at_register(
+    home: FactoryHome,
+) -> None:
+    """PR #55 review: Register must be bound to the ticket as the tracker serves it now,
+    not to the last poll's read. An edit made after the poll must be refused as
+    ``revision_moved``, and the live read must come before any write."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    # the ticket is edited on the board; nothing polls it again
+    tracker.tickets["4711"] = _ticket(revision="2", title="Add a POST /health route and a GET")
+    tracker.calls.clear()
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+            approver="operator:ada",
+        )
+    assert err.value.code == "revision_moved"
+    assert home.load_backlog() is None
+    assert tracker.calls == [("read", "4711")]  # read first, and nothing written
+    assert sv.EV_REGISTERED not in [e.kind for e in home.events()]
+
+
+# --- PR #55 review: a pass that outlives its lease -------------------------------------
+
+#: The lease's time to live in these tests, in the lease's own clock.
+_TTL = 60.0
+
+
+def _switched_on_store(tmp_path: Path) -> Any:
+    """A real store with repository ``alpha`` switched on, as the served stack holds it."""
+    from crb.store import init_db, make_engine, make_session_factory
+    from crb.store.models import Repo
+
+    engine = make_engine(f"sqlite:///{tmp_path / 'lease.db'}")
+    init_db(engine)
+    factory = make_session_factory(engine)
+    with factory() as s:
+        on = {sv.CONFIG_KEY: sv.ListenerState(enabled=True).to_dict()}
+        s.add(Repo(name="alpha", language="python", runner="pytest", config_json=on))
+        s.commit()
+    return factory
+
+
+def test_a_long_pass_keeps_its_lease_while_it_is_still_calling_the_tracker(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """The lease was stamped once, when the pass took it. A pass still calling the tracker
+    after the time to live looked like a crashed one, and a second pass could take the
+    repository over while the first was still reading and writing. A pass must renew the
+    lease as it works: while it is still calling the tracker, no other pass may take it."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    tracker = _column_of(4)
+    real_read = tracker.read
+    overlapping: list[bool] = []
+
+    def slow_read(key: str) -> c.Ticket:
+        clock[0] += _TTL * 0.6  # each read takes most of the lease; four take far more
+        rival = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+        overlapping.append(rival.acquire())
+        return real_read(key)
+
+    tracker.read = slow_read  # type: ignore[method-assign]
+    report = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        budget_s=10_000,
+        lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]),
+    )
+    assert clock[0] - 1000.0 > _TTL  # the pass ran for longer than the lease lives
+    assert overlapping == [False, False, False, False]
+    assert report.registered == 4 and not report.stopped
+
+
+def test_a_pass_whose_lease_was_taken_over_stops_before_acting_on_what_it_read(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """One tracker call can outlast the lease on its own (a timeout per phase, retries,
+    rate-limit waits), and then another pass may take the repository over. The first pass
+    must not act on what that call returned: it stops before its next tracker call and
+    before it registers anything, and it does not overwrite the new holder's served view."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    tracker = _tracker(_ticket())
+    real_read = tracker.read
+    rivals: list[Any] = []
+
+    def overrun(key: str) -> c.Ticket:
+        clock[0] += _TTL + 1  # this one call outlived the lease
+        rival = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+        assert rival.acquire()  # the lease looked abandoned, so another pass took it
+        rivals.append(rival)
+        return real_read(key)
+
+    tracker.read = overrun  # type: ignore[method-assign]
+    report = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        budget_s=10_000,
+        lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]),
+    )
+    assert report.stopped == c.REASON_LEASE_LOST
+    assert report.registered == 0 and home.load_backlog() is None
+    assert tracker.comments == {} and tracker.labels == {} and tracker.links == {}
+    assert tracker.calls == [("entered", "Ready"), ("read", "4711")]
+    assert not sv.store_for(home).path.exists()  # the new holder writes the view, not this one
+    (stop,) = [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    assert stop.payload["reason"] == c.REASON_LEASE_LOST
+    # the pass that lost the lease did not release the new holder's
+    third = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert not third.acquire()
+    rivals[0].release()
+
+
+def test_a_register_act_whose_lease_was_taken_over_writes_nothing(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """The Register act's live read can outlast the lease too. The act must then be refused
+    as ``intake_busy``: nothing registered, nothing written on the ticket."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    real_read = tracker.read
+
+    def overrun(key: str) -> c.Ticket:
+        clock[0] += _TTL + 1
+        assert sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]).acquire()
+        return real_read(key)
+
+    tracker.read = overrun  # type: ignore[method-assign]
+    tracker.calls.clear()
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+            approver="operator:ada",
+            lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]),
+        )
+    assert err.value.code == "intake_busy"
+    assert home.load_backlog() is None
+    assert tracker.calls == [("read", "4711")]
+
+
+def test_the_callback_after_a_pass_is_handed_the_fenced_tracker(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """``then`` writes on the tickets under the lease (the worker's outcome notes), so it
+    must be handed the fenced tracker, never the raw one: a write it makes after another
+    pass took the repository over must stop like any other."""
+    factory = _switched_on_store(tmp_path)
+    tracker = _tracker(_ticket())
+    handed: list[Any] = []
+    _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL),
+        then=lambda report, fenced: handed.append(fenced),
+    )
+    (fenced,) = handed
+    assert isinstance(fenced, sv.FencedTracker) and fenced.inner is tracker
+
+
+_VERB_ARGS: dict[str, tuple[str, ...]] = {
+    "entered": ("Ready", ""),
+    "read": ("4711",),
+    "comment": ("4711", "text", "marker"),
+    "label": ("4711", c.LABEL_READY),
+    "transition": ("4711", "Done"),
+    "link": ("4711", "https://crb.invalid/x"),
+}
+
+
+@pytest.mark.parametrize("verb", sorted(_VERB_ARGS))
+def test_every_tracker_verb_is_fenced_by_the_lease(verb: str, tmp_path: Path) -> None:
+    """The prevention for the class: a pass never hands the raw tracker on, it hands the
+    fenced one, and the fence covers every verb of the protocol. A verb reached after the
+    lease was taken over must raise ``lease_lost`` without reaching the tracker."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    tracker = _tracker(_ticket())
+    fenced = sv.FencedTracker(tracker, lease)
+    assert fenced.name == tracker.name
+    clock[0] += _TTL + 1
+    assert sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]).acquire()
+    with pytest.raises(c.TrackerError) as err:
+        getattr(fenced, verb)(*_VERB_ARGS[verb])
+    assert err.value.reason == c.REASON_LEASE_LOST
+    assert tracker.calls == []
+
+
+def test_the_fence_covers_every_verb_of_the_tracker_protocol(tmp_path: Path) -> None:
+    """Completeness: a verb added to the tracker protocol must be added to the fence and to
+    the parametrised test above, or this fails."""
+    verbs = {n for n, v in vars(c.TrackerClient).items() if callable(v) and not n.startswith("_")}
+    assert verbs == set(_VERB_ARGS)
+    assert all(n in vars(sv.FencedTracker) for n in verbs)
+    lease = sv.intake_lease(_switched_on_store(tmp_path), "alpha", ttl_s=_TTL)
+    assert isinstance(sv.FencedTracker(FakeTracker(), lease), c.TrackerClient)
+
+
+# --- PR #55 review: a write the tracker applied is not reported as failed ----------------
+
+_READ_VERBS = ("entered", "read")
+_WRITE_VERBS = ("comment", "label", "link", "transition")
+
+
+def test_every_tracker_verb_is_sorted_as_a_read_or_a_write() -> None:
+    """The prevention for the class: what the fence does AFTER a call depends on the kind
+    of call. After a read it raises, because nothing may act on what a stale read returned.
+    After a write it only marks the lease lost, because the tracker has already applied
+    the write and the record must say so. A verb added to the protocol must be sorted into
+    exactly one of the two, here and in the fence, or this fails."""
+    verbs = {n for n, v in vars(c.TrackerClient).items() if callable(v) and not n.startswith("_")}
+    assert frozenset(_READ_VERBS) == sv.FENCE_READ_VERBS
+    assert frozenset(_WRITE_VERBS) == sv.FENCE_WRITE_VERBS
+    assert sv.FENCE_READ_VERBS.isdisjoint(sv.FENCE_WRITE_VERBS)
+    assert verbs == sv.FENCE_READ_VERBS | sv.FENCE_WRITE_VERBS
+
+
+def _taken_over_inside(tracker: FakeTracker, verb: str, factory: Any, clock: list[float]) -> None:
+    """Make ``verb`` do its work on the tracker and THEN outlive the lease, which another
+    pass takes over before the call returns."""
+    real = getattr(tracker, verb)
+
+    def overrun(*args: Any) -> Any:
+        out = real(*args)
+        clock[0] += _TTL + 1
+        assert sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]).acquire()
+        return out
+
+    setattr(tracker, verb, overrun)
+
+
+@pytest.mark.parametrize("verb", _WRITE_VERBS)
+def test_a_write_the_tracker_applied_before_the_lease_was_lost_does_not_raise(
+    verb: str, tmp_path: Path
+) -> None:
+    """A write the tracker applied cannot be taken back. Raising after it would report a
+    done write as failed, and the new holder would try it again. So the write returns, the
+    fence marks the lease lost, and the NEXT verb raises ``lease_lost`` without reaching
+    the tracker."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    tracker = _tracker(_ticket())
+    _taken_over_inside(tracker, verb, factory, clock)
+    fenced = sv.FencedTracker(tracker, lease)
+    getattr(fenced, verb)(*_VERB_ARGS[verb])
+    assert tracker.calls == [(verb, "4711")]
+    assert fenced.lost
+    with pytest.raises(c.TrackerError) as err:
+        fenced.read("4711")
+    assert err.value.reason == c.REASON_LEASE_LOST
+    assert tracker.calls == [(verb, "4711")]
+
+
+@pytest.mark.parametrize("verb", _READ_VERBS)
+def test_a_read_that_outlived_the_lease_still_raises(verb: str, tmp_path: Path) -> None:
+    """Reads keep the raising rule: nothing may act on what a stale read returned."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    tracker = _tracker(_ticket())
+    _taken_over_inside(tracker, verb, factory, clock)
+    fenced = sv.FencedTracker(tracker, lease)
+    with pytest.raises(c.TrackerError) as err:
+        getattr(fenced, verb)(*_VERB_ARGS[verb])
+    assert err.value.reason == c.REASON_LEASE_LOST and fenced.lost
+
+
+def test_a_transition_applied_before_the_lease_was_lost_is_recorded_as_done(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """The board moved the ticket, so the chain must say ``intake.transitioned``. If it
+    said ``intake.stopped`` instead, the new holder would ask for the same move again, and
+    a Jira workflow with no move from Done to Done refuses it on every pass."""
+    factory = _switched_on_store(tmp_path)
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())
+    _merged_delivery(home)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    _taken_over_inside(tracker, "transition", factory, clock)
+    fenced = sv.FencedTracker(tracker, lease)
+    moved = sv.apply_outcome_map(
+        fenced, home=home, outcome_map={"merged": "Done"}, evidence=home.evidence(actor="x")
+    )
+    assert moved == ["4711"] and tracker.states["4711"] == "Done"
+    kinds = [e.kind for e in home.events()]
+    assert sv.EV_TRANSITIONED in kinds and sv.EV_STOPPED not in kinds
+    with pytest.raises(c.TrackerError) as err:
+        fenced.transition("4711", "Done")
+    assert err.value.reason == c.REASON_LEASE_LOST
+
+
+def test_a_pull_request_link_applied_before_the_lease_was_lost_is_recorded_as_delivered(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """The same for the delivery note: the ticket carries the link, so the chain must say
+    it was delivered, or the next holder would post the note again."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    lease = sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0])
+    assert lease.acquire()
+    tracker = _tracker(_ticket())
+    _taken_over_inside(tracker, "link", factory, clock)
+    fenced = sv.FencedTracker(tracker, lease)
+    assert sv.post_delivery(
+        fenced, "4711", "fake-4711", "https://github.invalid/pr/7", evidence=home.evidence()
+    )
+    assert tracker.links["4711"] == ["https://github.invalid/pr/7"]
+    kinds = [e.kind for e in home.events()]
+    assert sv.EV_DELIVERED in kinds and sv.EV_STOPPED not in kinds
+    assert fenced.lost
+
+
+def test_a_pass_whose_lease_was_lost_after_its_last_write_still_records_the_stop(
+    home: FactoryHome, tmp_path: Path
+) -> None:
+    """A write no longer raises when the lease is lost after it, so the pass must record
+    the stop itself: ``lease_lost`` on the report, one ``intake.stopped`` on the chain, and
+    no served view written over the new holder's."""
+    factory = _switched_on_store(tmp_path)
+    clock = [1000.0]
+    tracker = _tracker(_ticket())
+    _taken_over_inside(tracker, "link", factory, clock)
+    report = _poll(
+        home,
+        tracker,
+        route=_deliver(),
+        budget_s=10_000,
+        lease=sv.intake_lease(factory, "alpha", ttl_s=_TTL, clock=lambda: clock[0]),
+    )
+    assert report.stopped == c.REASON_LEASE_LOST
+    assert tracker.links.get("4711")  # the write the tracker applied
+    stops = [e for e in home.events() if e.kind == sv.EV_STOPPED]
+    assert [s.payload["reason"] for s in stops] == [c.REASON_LEASE_LOST]
+    assert not sv.store_for(home).path.exists()
+
+
+# --- PR #55 review: no public writer lets a relative link reach a ticket -----------------
+
+#: A builder that marks every link it makes, so a test can look for it on the board.
+_DEAD = "/NOT-ABSOLUTE"
+
+
+def _relative(item_id: str) -> str:
+    return f"{_DEAD}/factory?item={item_id}"
+
+
+def _on_the_board(tracker: FakeTracker) -> list[str]:
+    """Every comment and link this product has written on the fake board."""
+    return [text for by_marker in tracker.comments.values() for text in by_marker.values()] + [
+        url for urls in tracker.links.values() for url in urls
+    ]
+
+
+def _scenario_poll(home: FactoryHome) -> FakeTracker:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), item_url=_relative)
+    return tracker
+
+
+def _scenario_register(home: FactoryHome) -> FakeTracker:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())  # a draft waits
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=_relative,
+            approver="operator:ada",
+        )
+    assert err.value.code == c.REASON_NO_PUBLIC_URL
+    assert "CRB_PUBLIC_URL" in err.value.message
+    assert home.load_backlog() is None  # refused before the frozen record was touched
+    assert sv.EV_REGISTERED not in [e.kind for e in home.events()]
+    return tracker
+
+
+def _scenario_outcomes(home: FactoryHome) -> FakeTracker:
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver())  # registered, with an absolute link
+    home.evidence(actor="run").append(
+        "item.outcome", "fake-4711", status="no_oracle", error="no authored test"
+    )
+    sv.post_outcomes_to_tickets(
+        tracker, home=home, item_url=_relative, evidence=home.evidence(actor="worker")
+    )
+    return tracker
+
+
+#: Every public function in ``crb.server.intake`` that takes an ``item_url`` builder, with
+#: a scenario that hands it a RELATIVE one after whatever state it needs.
+_ITEM_URL_WRITERS = {
+    "poll_repository": _scenario_poll,
+    "register_approved": _scenario_register,
+    "post_outcomes_to_tickets": _scenario_outcomes,
+}
+
+
+def test_the_register_act_refuses_a_relative_link_before_any_write(home: FactoryHome) -> None:
+    """PR #55 review: the Register act had no address check of its own, so a deployment
+    that lost ``CRB_PUBLIC_URL`` after the switch wrote ``crb:queued``, a comment and a link
+    that all pointed nowhere. It is refused, and nothing after the poll reaches the board."""
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, route=_deliver(), approval=sv.ApprovalPolicy())
+    before = list(tracker.calls)
+    with pytest.raises(sv.ApprovalRefused) as err:
+        sv.register_approved(
+            "alpha",
+            "4711",
+            revision="1",
+            tracker=tracker,
+            home=home,
+            item_url=sv.item_url_for("", "alpha"),
+            approver="operator:ada",
+        )
+    assert err.value.code == c.REASON_NO_PUBLIC_URL
+    assert tracker.calls == before
+    assert home.load_backlog() is None
+
+
+@pytest.mark.parametrize("name", sorted(_ITEM_URL_WRITERS))
+def test_no_writer_puts_a_relative_link_on_a_ticket(name: str, tmp_path: Path) -> None:
+    """The prevention for the class: whichever function is handed a relative builder, no
+    comment and no link it writes carries that link."""
+    tracker = _ITEM_URL_WRITERS[name](FactoryHome(tmp_path, "alpha"))
+    assert [text for text in _on_the_board(tracker) if _DEAD in text] == []
+
+
+def test_every_public_function_that_takes_an_item_url_is_held_to_the_absolute_rule() -> None:
+    """The ratchet: a new public function that takes an ``item_url`` builder fails here until
+    it has a scenario in ``_ITEM_URL_WRITERS`` — so the next writer cannot be the one that
+    forgets the check."""
+    import inspect
+
+    takers = {
+        name
+        for name, fn in vars(sv).items()
+        if inspect.isfunction(fn)
+        and fn.__module__ == sv.__name__
+        and not name.startswith("_")
+        and "item_url" in inspect.signature(fn).parameters
+    }
+    assert takers == set(_ITEM_URL_WRITERS)

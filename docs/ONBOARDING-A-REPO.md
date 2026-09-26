@@ -148,8 +148,10 @@ branch. Every step is in the evidence chain ([API.md](API.md) "Factory").
 
 Steps 1 to 8 assume somebody types the backlog into this product. They do not have to.
 A team's own board can be the front door: move a ticket into **one** watched column and
-that is the request to manufacture — the ticket *is* the backlog item, and the column is
-the consent gate (ADR-0017).
+that is the request to manufacture — the ticket *is* the backlog item (ADR-0017). The
+consent is an operator's: a ready ticket waits on the Intake screen until an operator reads it
+and presses *Register this ticket*, unless its author is on the deployment's allowlist
+(ADR-0022).
 
 **What you get for nothing.** Before any build is paid for, the ticket gets one comment in
 its own thread saying what a good acceptance test still needs answering — each question in

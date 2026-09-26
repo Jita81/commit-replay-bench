@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The factory reviews before it delivers; an operator approves what a ticket asks**
+  ([#55](https://github.com/Jita81/commit-replay-bench/pull/55)). Only an `accept` opens a pull
+  request, and an earlier run's open one is closed naming the verdict (ADR-0021). A ready ticket
+  waits for an operator's evented Register act unless its author is allowlisted (ADR-0022); one
+  intake pass per repository runs under a lease renewed around every tracker call (`lease_lost`,
+  409 `intake_busy`); a 429 is waited out within a cap; the tracker credential never leaves its
+  origin; ticket text is inert in the pull request. The test author and a build rung differ by
+  model, not only label; the push token rides git's environment, never argv. No apparatus impact
+  (DL-059).
+
 - **A two-page summary for assurance readers, honest records, one commit convention**
   ([#54](https://github.com/Jita81/commit-replay-bench/pull/54)).
   `docs/SUMMARY.md` opens README's *Start here* and joins the claims gate; the mining rule is stated

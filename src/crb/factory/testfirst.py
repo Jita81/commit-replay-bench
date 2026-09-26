@@ -20,7 +20,13 @@ identity from every builder that will build the source. The proof is mechanical:
 
 Identity separation is enforced here: :func:`assert_distinct_identity` compares
 rung labels (``builder:model``) and refuses a build whose builder authored the
-oracle it is graded against.
+oracle it is graded against — and, since 2026-09-25 (assessment C3, ADR-0004), it
+compares the MODEL half too: the same model under another builder name
+(``editblock:claude-sonnet-5`` authoring, ``claude_code:claude-sonnet-5`` building) is
+one judgement on both sides of the oracle, so it is refused. Aliases are normalised
+through the pricing table (:func:`canonical_model`): a dated id, case, a
+``[1m]``-style suffix, a ``vendor/`` prefix and a bare family alias (``sonnet``) cannot
+slip a model past the refusal.
 
 Navigation
 ----------
@@ -30,11 +36,14 @@ What it does: Writes the authored test into a fresh worktree at HEAD, runs its t
               scope, and requires RED with attributable failing ids — green, a timeout or
               an unattributable failure is ``NotRed`` (fail closed); records the test's
               SHA-256 as the immutable oracle; refuses a build or review by the identity
-              that authored the oracle; runs a ``TestAuthor`` in a disposable worktree so
-              a stray source edit can never leak into the proof.
+              — or the MODEL — that authored the oracle, naming the rung to change; runs a
+              ``TestAuthor`` in a disposable worktree so a stray source edit can never leak
+              into the proof.
 How:          ``author_test`` (optional) → ``prove_red`` = ``worktree_at`` →
               ``write_authored`` → ``runner.run`` → ``RedProof``;
-              ``assert_distinct_identity`` compares normalised rung labels.
+              ``assert_distinct_identity`` compares normalised rung labels, then
+              ``canonical_model`` of each model half (the pricing table's longest known
+              key, ``src/crb/builders/budget.py``).
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
@@ -43,8 +52,10 @@ Works with:   src/crb/factory/build.py (stages the proven bytes as the oracle co
               src/crb/core/workspace.py (``Workspace.at_ref``), src/crb/core/runners/base.py
               (the run whose failing ids are the proof), src/crb/builders/base.py (the
               builder contract that cannot author tests — hence ``TestAuthor``),
-              src/crb/factory/loop.py (``_oracle`` / ``_prove``)
-Tested by:    tests/test_factory_testfirst.py, tests/test_factory_loop.py
+              src/crb/factory/loop.py (``_oracle`` / ``_prove``), src/crb/builders/budget.py
+              (the pricing table that says which ids are one model)
+Tested by:    tests/test_factory_testfirst.py, tests/test_factory_loop.py,
+              tests/test_factory_author.py
 Touch when:   never for a new repository (the runner and its scope come from the repo
               config); when a new test-author rung is added (it must carry a label
               distinct from every builder rung); when the proof's recorded fields change
@@ -54,12 +65,14 @@ Touch when:   never for a new repository (the runner and its scope come from the
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from crb.builders.budget import DEFAULT_PRICING, Pricing, load_pricing
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
@@ -86,12 +99,82 @@ class SameIdentityError(ValueError):
     """The identity that authored the oracle would also build (or review) against it."""
 
 
-def assert_distinct_identity(author: str, other: str, *, role: str = "builder") -> None:
-    """Refuse when ``author`` (the test author's identity) equals ``other``'s.
+#: Claude Code's family aliases (``--model sonnet``): each names whichever model of the
+#: family is current, so it is read as the WHOLE family — fail closed.
+MODEL_FAMILY_ALIASES: frozenset[str] = frozenset({"opus", "sonnet", "haiku"})
+_CONTEXT_SUFFIX_RE = re.compile(r"\[[^\]]*\]$")
+_ID_BOUNDARY = "-_.:"
 
-    Labels are ``builder:model`` rung labels or ``operator:<name>``; comparison is
-    exact after whitespace/case normalisation so ``Editblock:GPT`` cannot slip past
-    ``editblock:gpt``.
+
+def canonical_model(model: str, table: Mapping[str, Pricing] | None = None) -> str:
+    """The one name for a model id, so two spellings of one model compare equal.
+
+    Lower-cased; a ``@provider`` suffix, a ``[1m]``-style context suffix and a ``vendor/``
+    prefix are dropped; then the LONGEST key of the pricing table (``table``, default the
+    deployment's :func:`crb.builders.budget.load_pricing`) — any key, whether its price is
+    known or a placeholder — that the id equals, or starts
+    with at an id boundary (``claude-sonnet-5-20260901`` → ``claude-sonnet-5``), is the
+    name — the pricing table is the one place the product already says which ids are one
+    priced model. An id no key matches is its own name; a bare family alias is
+    ``family:<alias>`` (see :func:`same_model`).
+    """
+    m = model.strip().lower().split("@", 1)[0].strip()
+    m = _CONTEXT_SUFFIX_RE.sub("", m).strip()
+    if "/" in m:
+        m = m.rsplit("/", 1)[1]
+    if m in MODEL_FAMILY_ALIASES:
+        return f"family:{m}"
+    if table is None:
+        try:
+            table = load_pricing()
+        except (OSError, ValueError):  # a malformed deployment table: the shipped one
+            table = DEFAULT_PRICING
+    # EVERY key, priced or placeholder: whether a price is known says nothing about which
+    # model an id names (PR #55 review — a ``known: false`` key once lost its dated aliases
+    # and the C3 refusal failed open). A provider placeholder (``azure``) therefore reads
+    # every ``azure:…`` id as one model — the fail-closed direction.
+    for key in sorted((k.lower() for k in table), key=len, reverse=True):
+        if m == key or (m.startswith(key) and m[len(key)] in _ID_BOUNDARY):
+            return key
+    return m
+
+
+def same_model(a: str, b: str, table: Mapping[str, Pricing] | None = None) -> bool:
+    """Are ``a`` and ``b`` the same model? Equal canonical names, or one is a bare family
+    alias and the other a model of that family (``sonnet`` ~ ``claude-sonnet-5``)."""
+    ca, cb = canonical_model(a, table), canonical_model(b, table)
+    if not ca or not cb:
+        return False
+    if ca == cb:
+        return True
+    for fam, other in ((ca, cb), (cb, ca)):
+        if fam.startswith("family:"):
+            name = fam.removeprefix("family:")
+            parts = other.removeprefix("family:").replace("_", "-").split("-")
+            if name in parts:
+                return True
+    return False
+
+
+def _model_half(label: str) -> str:
+    """The model of a ``builder:model`` rung label; ``""`` for an ``operator:<name>``
+    identity (a person, not a model) or a label with no model half."""
+    s = label.strip()
+    if s.lower().startswith(OPERATOR_AUTHOR_PREFIX) or ":" not in s:
+        return ""
+    return s.split(":", 1)[1].strip()
+
+
+def assert_distinct_identity(author: str, other: str, *, role: str = "builder") -> None:
+    """Refuse when ``author`` (the test author's identity) equals ``other``'s — as a label
+    or as a model.
+
+    Labels are ``builder:model`` rung labels or ``operator:<name>``; the label comparison
+    is exact after whitespace/case normalisation so ``Editblock:GPT`` cannot slip past
+    ``editblock:gpt``. Two rung labels whose model halves are :func:`same_model` are the
+    same identity for this rule (C3): a different builder process over one model is still
+    one model's judgement on both sides of the oracle. ``role`` names the other side in the
+    refusal (``build rung 2``), so the message says which rung to change.
     """
     a = author.strip().lower()
     b = other.strip().lower()
@@ -101,6 +184,15 @@ def assert_distinct_identity(author: str, other: str, *, role: str = "builder") 
         raise SameIdentityError(
             f"the {role} {other!r} is the identity that authored the oracle — "
             "the test author must never build or review against its own test"
+        )
+    ma, mb = _model_half(author), _model_half(other)
+    if ma and mb and same_model(ma, mb):
+        raise SameIdentityError(
+            f"the {role} {other.strip()!r} runs the same model ({canonical_model(mb)}) as "
+            f"{author.strip()!r}, the identity that authored the oracle — one model on both "
+            "sides of the test is correlated judgement, not independent evidence. Change the "
+            f"model of the {role}, or give the test author a different model "
+            "(CRB_FACTORY__TEST_AUTHOR, or the run's test_author)"
         )
 
 
@@ -387,6 +479,7 @@ def author_test(
 
 
 __all__ = [
+    "MODEL_FAMILY_ALIASES",
     "OPERATOR_AUTHOR_PREFIX",
     "RED_PROOF_SCHEMA",
     "AuthoredTest",
@@ -398,7 +491,9 @@ __all__ = [
     "assert_distinct_identity",
     "author_label",
     "author_test",
+    "canonical_model",
     "prove_red",
+    "same_model",
     "worktree_at",
     "write_authored",
 ]
