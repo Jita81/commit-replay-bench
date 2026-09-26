@@ -23,7 +23,8 @@
  *               element (or a component that spreads onto one) is counted per file and may
  *               not exceed `TITLE_ALLOWLIST` — the count only goes down. (5) No orphan: every
  *               registered id is written as a literal by some source, except `SHARED_IDS`
- *               and the derived `tab.repo.*` family — dead copy fails.
+ *               and the derived `tab.repo.*` family — dead copy fails. (6) A fixture's pool
+ *               answer agrees with its fixture repository: no clone path, no history share.
  * How:          `renderApp` / `mockApi` from ui/src/test/utils.tsx; the shell through a
  *               layout route; `unhinted(container)` (ui/src/help/hints-collector.ts, re-exported
  *               here) walks the selectors the mechanism names and describes each miss
@@ -196,6 +197,33 @@ describe('hint ratchet: the route table', () => {
     }
     for (const r of Object.keys(SCREENS)) expect(routes, `SCREENS names ${r}, which App.tsx does not route`).toContain(r)
     for (const r of ALLOWLIST) expect(routes, `ALLOWLIST names ${r}, which App.tsx does not route`).toContain(r)
+  })
+
+  it('a fixture pool answer agrees with its fixture repository: no clone path, no history share', () => {
+    // the pool contract (docs/API.md `/repos/{name}/pool`): without a clone path on this host
+    // the history fields are null and the answer says `no_clone_path`. A fixture that served a
+    // share for a repository with no clone showed a number its own premise could not produce
+    // (PR #54 review); every fixture pool is held to the contract here.
+    let checked = 0
+    for (const [pattern, entry] of [...Object.entries(SCREENS), ...INSTRUMENT_VARIANTS.map((v) => [v.name, v] as const)]) {
+      for (const [key, pool] of Object.entries(entry.api)) {
+        const m = /^GET \/repos\/([^/]+)\/pool$/.exec(key)
+        if (!m || typeof pool !== 'object' || pool === null) continue
+        const repo = entry.api[`GET /repos/${m[1]}`] as { clone_path?: string; config?: { path?: string } } | undefined
+        if (!repo || typeof repo !== 'object') continue
+        checked += 1
+        if (!repo.clone_path && !repo.config?.path) {
+          const p = pool as { share: unknown; history_commits: unknown; window_commits: unknown; history_unavailable: unknown }
+          expect({ share: p.share, history_commits: p.history_commits, window_commits: p.window_commits, history_unavailable: p.history_unavailable }, `${pattern}: ${key}`).toEqual({
+            share: null,
+            history_commits: null,
+            window_commits: null,
+            history_unavailable: 'no_clone_path',
+          })
+        }
+      }
+    }
+    expect(checked, 'no fixture serves a pool beside its repository').toBeGreaterThan(0)
   })
 
   afterEach(() => vi.unstubAllGlobals())

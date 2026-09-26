@@ -68,8 +68,10 @@ What it does: Readiness aggregates the store probes (db, migrations at head, app
               table) with the
               observability probes
               (sandbox — skipped for the ``api`` role — toolchains, builders) and answers
-              503 when any is ``down``; a read that raises is ``down`` with the fixed
-              ``failure_detail`` naming the request id, the exception logged, never served;
+              503 when any is ``down``, and serves the deployment's ``posture`` beside them
+              (where tests and the builder run, and whether production runs unsealed under
+              ``CRB_ALLOW_UNSEALED_PROD``, ADR-0023); a read that raises is ``down`` with
+              the fixed ``failure_detail`` naming the request id, the exception logged, never served;
               liveness checks the database only; ``/metrics``
               refreshes the ledger gauges then renders the shared registry.
 How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the
@@ -81,7 +83,8 @@ How:          ``collect_health`` = the probe list, each under ``probes.run_probe
               on the docker socket it is not meant to have.
 Layer:        server — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate)
+              docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate),
+              docs/adr/0023-production-refuses-the-unsealed-posture.md (the ``posture`` key)
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
               ``failure_detail`` and ``aggregate``),
               src/crb/store/migrate.py (``head_status_on`` — the one head check),
@@ -95,7 +98,8 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe
               (``CRB_ROLE`` per container and the ``HEALTHCHECK`` on ``/health/live``),
               docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface (the
               ``migrations`` contract the other documents copy)
-Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py
+Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py,
+              tests/test_settings_posture.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
               (``skipped`` elsewhere), whether it may fail readiness, and putting its read
               under ``probes.run_probe`` (never an exception in a ``detail``); a new belt means
@@ -131,7 +135,15 @@ from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
-from crb.store.models import APPEND_ONLY_TABLES, Grade, Repo, Run, User, WorkerRow
+from crb.store.models import (
+    APPEND_ONLY_TABLES,
+    LEASE_ROW_PREFIX,
+    Grade,
+    Repo,
+    Run,
+    User,
+    WorkerRow,
+)
 
 try:  # pragma: no cover — extra installed in [server]
     from prometheus_client import CONTENT_TYPE_LATEST
@@ -242,15 +254,14 @@ def _count_triggers(s: Session) -> int:
     """How many of the expected ``<table>_no_update`` / ``_no_delete`` triggers exist."""
     dialect = s.get_bind().dialect.name
     names = [f"{t}_{kind}" for t in APPEND_ONLY_TABLES for kind in ("no_update", "no_delete")]
+    rows: Iterable[str]
     if dialect == "sqlite":
-        rows: Iterable[str] = s.execute(
-            text("SELECT name FROM sqlite_master WHERE type = 'trigger'")
-        ).scalars()
+        rows = s.execute(text("SELECT name FROM sqlite_master WHERE type = 'trigger'")).scalars()
     elif dialect == "postgresql":
         rows = s.execute(text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")).scalars()
     else:  # pragma: no cover — unsupported by policy
         return 0
-    present = set(rows)
+    present: set[str] = set(rows)
     return sum(1 for n in names if n in present)
 
 
@@ -396,7 +407,14 @@ def probe_worker(
             queued = int(
                 s.execute(select(func.count(Run.id)).where(Run.status == "queued")).scalar_one()
             )
-            rows = list(s.execute(select(WorkerRow).order_by(WorkerRow.worker_id)).scalars())
+            rows = list(
+                s.execute(
+                    select(WorkerRow)
+                    # a lease row (an intake pass holding its repository) is not a worker
+                    .where(~WorkerRow.worker_id.startswith(LEASE_ROW_PREFIX))
+                    .order_by(WorkerRow.worker_id)
+                ).scalars()
+            )
         workers = [
             _worker_view(r, now)
             for r in rows
@@ -721,7 +739,12 @@ def collect_health(
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
         probe_intake(factory, settings, request_id=rid),
     ]
-    return _stamp(probes.aggregate(results), role)
+    out = _stamp(probes.aggregate(results), role)
+    # ADR-0023: where tests and the builder run, and whether production runs unsealed under
+    # CRB_ALLOW_UNSEALED_PROD — a fact every viewer of the Posture page is owed, not a probe
+    # (it cannot fail; it is what this deployment was told)
+    out["posture"] = settings.posture()
+    return out
 
 
 def collect_liveness(

@@ -362,7 +362,11 @@ def _write_transcript(
     if not outcome.transcript:
         return ""
     transcript_dir.mkdir(parents=True, exist_ok=True)
-    name = f"{task.short_id}-{rung.builder}-{uuid.uuid4().hex[:8]}.json"
+    # the task is inside the file and on the pack that cites it; the name carries no task only
+    # so that nothing built from it names a commit. It is not a seal: on the host posture a
+    # builder can read this file, and CRB_HOME, outright (DL-055's residual — production
+    # refuses the host posture, ADR-0023); the sealed builder sees only its exported checkout
+    name = f"{rung.builder}-{uuid.uuid4().hex[:12]}.json"
     path = transcript_dir / name
     body = {
         "task_id": task.task_id,
@@ -590,7 +594,7 @@ def build_fn_for(
                 task_deps = deps_for(task) if deps_for is not None else None
                 deps_kw = {"deps": task_deps} if task_deps is not None else {}
                 with session_factory(
-                    container, sealed, cancel=cancel, label=task.short_id, **deps_kw
+                    container, sealed, cancel=cancel, label=ws.root.name, **deps_kw
                 ) as session:
                     # the session supplies the container-bound spawn / executor; an
                     # explicit override (a test's fake binary) still wins

@@ -58,7 +58,8 @@ from crb.intake.http import DEFAULT_TIMEOUT_S, TrackerHttp, basic_auth
 API = "rest/api/3"
 
 #: Fields the search and the read ask for by name. Anything else on the issue is not read.
-BASE_FIELDS = ("summary", "description", "issuetype", "labels", "status", "updated")
+#: ``creator`` is who created the issue — the operator-approval allowlist reads it (ADR-0022).
+BASE_FIELDS = ("summary", "description", "issuetype", "labels", "status", "updated", "creator")
 
 #: Issues per page of the search. The bound on the whole read is ``JiraConfig.max_refs``;
 #: this is only how many pages it takes.
@@ -105,6 +106,14 @@ class JiraConfig:
     def fields(self) -> tuple[str, ...]:
         extra = tuple(f for f in (self.points_field, self.acceptance_field) if f)
         return (*BASE_FIELDS, *extra)
+
+
+def _creator(value: Any) -> str:
+    """Who created a Jira issue: the ``emailAddress`` when the site shows it, else the
+    ``accountId`` (Jira Cloud hides the email by default) — ``""`` when there is none."""
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get("emailAddress") or value.get("accountId") or "")
 
 
 def _quote(value: str) -> str:
@@ -297,6 +306,7 @@ class JiraTracker:
             revision=str(fields.get("updated", "")),
             url=self._web_url(str(key)),
             state=str(status),
+            author=_creator(fields.get("creator")),
         )
 
     # --- write --------------------------------------------------------------------

@@ -276,16 +276,19 @@ class TestSelfChange:
         login(elsewhere, "root", NEW_PW)
 
     def test_oidc_account_is_sent_to_its_provider(self, client: TestClient, app: Any) -> None:
-        from crb.server.auth import credential_version, issue_session
+        from crb.server.auth import credential_version, csrf_token_for, issue_session
 
         oidc = add_oidc_user(app)
         with app.state.session_factory() as s:
             user = s.get(User, oidc)
             assert user is not None
-            token = issue_session(app.state.settings, oidc, credential_version(user))
+            cv = credential_version(user)
+            token = issue_session(app.state.settings, oidc, cv)
         client.cookies.set(SESSION_COOKIE, token)
-        client.cookies.set(CSRF_COOKIE, "t")
-        client.headers["X-CSRF-Token"] = "t"
+        # the CSRF token is bound to the session (D4): the one the server would have set
+        csrf = csrf_token_for(app.state.settings, oidc, cv)
+        client.cookies.set(CSRF_COOKIE, csrf)
+        client.headers["X-CSRF-Token"] = csrf
         assert client.get(f"{API_PREFIX}/auth/me").json()["id"] == oidc
         r = client.put(
             f"{API_PREFIX}/users/me/password",

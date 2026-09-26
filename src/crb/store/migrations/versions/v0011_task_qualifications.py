@@ -46,7 +46,7 @@ from alembic import context, op
 from crb.store.migrate import install_append_only_triggers_on
 
 revision: str = "0011"
-down_revision: str | None = "0008"
+down_revision: str | None = "0009"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

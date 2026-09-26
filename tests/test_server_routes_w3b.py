@@ -185,7 +185,8 @@ class TestRepoUrlPolicy:
             json={
                 "name": "local",
                 "language": "python",
-                "clone_path": "/srv/repos/local",
+                # under <home>/repos, where an operator may register a clone (D2)
+                "clone_path": str(Path(env.settings.home) / "repos" / "local"),
                 "url": "http://intranet/projects/local",
             },
         )

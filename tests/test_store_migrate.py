@@ -734,6 +734,47 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
     assert migrate.current(backend.url) == "0011" and _autogen_diff(fresh) == []
 
 
+def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
+    backend: Backend,
+) -> None:
+    """Revision 0009 adds ``users.session_nonce`` — rotated to end every session of an
+    account (logout, sign out everywhere). ``NOT NULL DEFAULT ''``: every existing account
+    reads the empty nonce, whose credential version is the one it had before, so the
+    upgrade signs nobody out. A ``create_all`` schema from the release before it adopts at
+    0008 and 0009 adds the column; a downgrade drops it."""
+    migrate.upgrade(backend.url, revision="0008")
+    with backend.engine.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO users (id, subject, issuer, email, display_name, role, "
+                "password_hash, active, created, last_login) VALUES "
+                "('u-old', 'local:old', 'local', '', 'old', 'viewer', '$argon2id$x', "
+                ":active, '', '')"
+            ),
+            {"active": True},
+        )
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == migrate.head_revision() == "0011"
+    with backend.engine.connect() as c:
+        got = c.execute(text("SELECT session_nonce FROM users")).scalar_one()
+    assert got == ""
+    assert not {t for t in backend.trigger_names() if t.startswith("users_")}
+    cfg = migrate.alembic_config(backend.url)
+    with backend.engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0008")
+    assert migrate.current(backend.url) == "0008"
+    assert "session_nonce" not in {c["name"] for c in inspect(backend.engine).get_columns("users")}
+    # a pre-0009 create_all database (users without the column) adopts at 0008
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("ALTER TABLE users DROP COLUMN session_nonce"))
+    assert migrate.current(backend.url) is None
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0011" and _autogen_diff(fresh) == []
+
+
 def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
     backend: Backend,
 ) -> None:

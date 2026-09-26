@@ -94,6 +94,10 @@ REASON_COLUMN_GONE = "column_gone"
 REASON_NOT_CONFIGURED = "not_configured"
 REASON_COLUMN_TOO_LARGE = "column_too_large"
 REASON_NO_PUBLIC_URL = "no_public_url"
+#: A pass ran past its lease and another pass took the repository over: this one stopped
+#: before its next tracker call (PR #55 review). Raised by the server's lease fence, never
+#: by an adapter.
+REASON_LEASE_LOST = "lease_lost"
 STOP_REASONS: tuple[str, ...] = (
     REASON_UNREACHABLE,
     REASON_UNAUTHORISED,
@@ -103,6 +107,7 @@ STOP_REASONS: tuple[str, ...] = (
     REASON_NOT_CONFIGURED,
     REASON_COLUMN_TOO_LARGE,
     REASON_NO_PUBLIC_URL,
+    REASON_LEASE_LOST,
 )
 
 #: What a person can do about each stop, in the words the screen and the health probe
@@ -139,6 +144,11 @@ STOP_ADVICE: dict[str, str] = {
     REASON_NO_PUBLIC_URL: (
         "This deployment does not know its own address, so a link on a ticket would not open. "
         "Set CRB_PUBLIC_URL to the address people use to reach this product, then re-read."
+    ),
+    REASON_LEASE_LOST: (
+        "This pass took longer than its lease allows, and another pass took the column over. "
+        "This pass stopped before its next call to the tracker. The other pass carries on, so "
+        "there is nothing to do."
     ),
 }
 
@@ -296,6 +306,11 @@ class Ticket:
     links: tuple[str, ...] = ()
     url: str = ""
     state: str = ""
+    #: Who created the ticket, as the tracker names them (Azure DevOps ``System.CreatedBy``
+    #: unique name, Jira ``creator`` email or account id), lower-cased; ``""`` when the
+    #: tracker did not say. The ONE input the operator-approval allowlist reads (ADR-0022) —
+    #: never part of the draft's content digest, so it cannot make a ticket evolve.
+    author: str = ""
     #: Anything else the adapter read and a reader may want on the row. Never parsed.
     extra: Mapping[str, str] = field(default_factory=dict)
 
@@ -304,6 +319,7 @@ class Ticket:
             raise ValueError("a ticket needs a key")
         object.__setattr__(self, "key", str(self.key).strip())
         object.__setattr__(self, "revision", str(self.revision))
+        object.__setattr__(self, "author", str(self.author or "").strip().casefold())
         for attr in ("acceptance_criteria", "tags", "links"):
             object.__setattr__(self, attr, _tuple_of_str(getattr(self, attr)))
         object.__setattr__(
@@ -333,6 +349,7 @@ class Ticket:
             "links": list(self.links),
             "url": self.url,
             "state": self.state,
+            "author": self.author,
             "extra": self.extra_map,
         }
 
@@ -351,6 +368,7 @@ class Ticket:
             links=_tuple_of_str(d.get("links")),
             url=str(d.get("url", "")),
             state=str(d.get("state", "")),
+            author=str(d.get("author", "") or ""),
             extra={str(k): str(v) for k, v in dict(d.get("extra") or {}).items()},
         )
 
@@ -414,6 +432,7 @@ __all__ = [
     "LINK_PULL_REQUEST",
     "REASON_COLUMN_GONE",
     "REASON_COLUMN_TOO_LARGE",
+    "REASON_LEASE_LOST",
     "REASON_NOT_CONFIGURED",
     "REASON_NO_PUBLIC_URL",
     "REASON_NO_SECRET",

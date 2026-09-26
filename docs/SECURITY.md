@@ -71,6 +71,28 @@ served intake view, the state file, the evidence chain and the settings body; me
 `tests/test_server_routes_intake.py::test_the_tracker_token_is_in_no_log_no_event_no_state_file_and_no_error`;
 release 2.0.0a1, apparatus 2.2]**.
 
+Since 2026-09-25 (assessment C6, ADR-0022) the intake boundary also holds four more rules.
+The credential is sent only to the tracker's own origin: a request URL whose scheme, host or
+port differ from the configured one is refused before the header is attached **[measured —
+n = 4 foreign URLs refused and never sent (another host, another scheme, another port, a
+lookalike host), the same origin served absolute and relative; method:
+`tests/test_intake_adapters.py::test_an_absolute_url_on_another_origin_is_refused_and_never_sent_the_credential`,
+an `httpx.MockTransport` that records every request; release 2.0.0a1, apparatus 2.2]**. What a
+ticket says reaches a customer's pull request only inside one fenced code block, the title
+is escaped to one inert line and the branch is `[a-z0-9-]` **[measured — n = 1 hostile title
+and 2 hostile criteria (a code span, emphasis, an HTML comment, a mention, a link, a fence and
+a heading, an image tag) and 5 item ids; method:
+`tests/test_factory_delivery.py::test_ticket_text_in_the_pr_body_is_fenced_and_cannot_become_markup`,
+`::test_the_pull_request_title_escapes_the_ticket_titles_markdown`,
+`::test_the_delivery_branch_is_lowercase_letters_digits_and_hyphens` (with
+`git check-ref-format`); release 2.0.0a1, apparatus 2.2]**. A ready ticket is registered only
+by an operator's evented Register act unless its author is on an explicit allowlist, and one
+pass per repository runs at a time under a lease row **[measured — n = 5 cases: a ready ticket
+waits, the act registers the draft read, a moved revision is refused, an allowlisted author
+bypasses and others wait, two overlapping passes register once; method:
+`tests/test_intake_service.py` (the C6 section) and `tests/test_server_routes_intake.py` (the
+same at the API); release 2.0.0a1, apparatus 2.2]**.
+
 There is no telemetry, no update check, no licence phone-home, and the opt-in federated
 export (ADR-0007) is a file the operator produces, never a call the product makes. With the
 builder in its container (ADR-0012) the model endpoint is reachable from exactly one
@@ -172,14 +194,15 @@ TCP, or any service listening on all host interfaces, would be reachable from th
 allowlist is exact-host, so a compromised builder can still talk to the model endpoint —
 that is the intended channel, and spend is bounded by the budget.
 
-**Residual risk (host mode, `CRB_BUILDER__EXECUTOR=host`, the default for development and
-evaluation):** the builder runs in a host worktree that shares the main clone's object
+**Residual risk (host mode, `CRB_BUILDER__EXECUTOR=host`, the default for development
+only — `CRB_ENV=dev`):** the builder runs in a host worktree that shares the main clone's object
 store (the gold commit is reachable, and only the guards stand in the way) with the
 worker's privileges and egress. Run the worker as a dedicated low-privilege user on a
 dedicated node with an egress policy allowing only the model endpoint (Helm ships a
 default-deny `NetworkPolicy`); do not onboard repositories you would not run locally; and
-use container mode for any measurement that will be relied on. The API logs a warning
-when `CRB_ENV=prod` and the builder executor is `host`.
+use container mode for any measurement that will be relied on. With `CRB_ENV=prod` the
+API and the worker refuse to start in host mode unless `CRB_ALLOW_UNSEALED_PROD=1`, and a run
+made under that override carries it in its apparatus (§5, ADR-0023).
 
 ### 3.3 Credentials
 
@@ -189,6 +212,18 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   *whether* each is configured (`crb.server.settings.Settings.redacted_dict`). [measured]
 - Git delivery credentials (forward mode) come from an injected provider; the default
   `NullProvider` fails closed. [measured] `tests/test_factory_delivery.py`
+- The delivery **push** carries its one-shot `Authorization` header in the child's
+  environment (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`,
+  `crb.core.git.git_config_env`), never on the argv; until 2026-09-25 it was a
+  `-c http.<remote>.extraheader=…` argument, readable in `/proc` and `ps` (assessment D1). A
+  `GitError` redacts every `extraheader` value and every credential shape from the argv and
+  stderr it keeps, whoever built the command line. [measured, n = 3 cases: the push argv
+  carries no header and the environment does, a `GitError` built from a header-bearing argv
+  carries no token, a push that times out raises a `GitError` with no token —
+  `tests/test_factory_delivery.py::test_the_push_token_travels_in_the_environment_never_on_the_argv`,
+  `::test_a_git_error_never_carries_an_auth_header_or_a_token`,
+  `::test_a_push_that_times_out_raises_a_git_error_without_the_token`; recording git doubles
+  and a hanging git binary, apparatus 2.2]
 - Repositories connected through the **GitHub App** (ADR-0014) are cloned — and, where the
   installation grants write, delivered to — with **installation tokens** the worker mints per
   use: scoped to the installation (one hour by GitHub's contract), cached in memory until
@@ -221,17 +256,32 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   prefixes, JWTs, `key=value` secrets, URL userinfo, private-key blocks). [measured]
   `tests/test_redact.py`
 - Session cookies are signed (`itsdangerous`), `HttpOnly`, `SameSite=Lax`, `Secure` outside
-  `CRB_ENV=dev`; the secret key is mandatory in production. CSRF is double-submit
-  (`crb_csrf` cookie + `X-CSRF-Token` header) on every unsafe method. [measured]
-  `tests/test_server_auth.py`
-- **Sessions end on a password change and on deactivation.** The cookie carries the
-  credential version it was issued under (a fingerprint of the account's argon2 hash);
-  setting a password re-salts the hash, so every session of that account answers
-  `401 session_revoked` on its next request — no server-side session table to keep or
-  leak. A deactivated account is refused on its very next request and for as long as it
+  `CRB_ENV=dev`; the secret key is mandatory in production. Whenever cookies are `Secure`
+  they are named `__Host-crb_session` / `__Host-crb_csrf`: the browser accepts such a
+  cookie only from a secure response with `Path=/` and no `Domain`, so a sibling host
+  cannot plant or shadow one (a plain-named cookie is ignored). CSRF is **bound to the
+  session**: every unsafe method must carry `X-CSRF-Token` equal to
+  `HMAC(secret, user id, credential version)`, which the middleware recomputes from the
+  signed session cookie — a cookie/header pair chosen by whoever can set cookies is
+  refused, and the token ends with its session. The middleware and the authentication
+  check read the session cookie through one function over the same lenient parser, so a
+  malformed neighbour cookie (a space, JSON, a consent banner's date) cannot hide the
+  session from the CSRF check while the request still authenticates. [measured]
+  `tests/test_server_auth.py::TestCsrfBoundToSession`,
+  `tests/test_server_auth.py::TestCsrfSeesTheSameCookiesAsAuth`
+- **Sessions end on a password change, on logout, on "sign out everywhere" and on
+  deactivation.** The cookie carries the credential version it was issued under (a
+  fingerprint of the account's argon2 hash and its `session_nonce`); setting a password
+  re-salts the hash, and logout (`POST /auth/logout`) or an admin's sign-out-everywhere
+  (`POST /users/{id}/sessions/revoke`, which works for an OIDC account too) rotates the
+  nonce, so every session of that account — on every device, since the nonce is per
+  account — answers `401 session_revoked` on its next request; no server-side session
+  table to keep or leak. A copied cookie therefore dies with the logout, not at
+  `session_ttl`. [measured] `tests/test_server_auth.py::TestSessionRevocation`
+  A deactivated account is refused on its very next request and for as long as it
   is inactive; the active flag is not part of the version, so re-activating within
   `session_ttl` restores the sessions issued before — containing a compromised account
-  means deactivating **and** setting a new password. A self-service change
+  means deactivating **and** signing it out everywhere (or setting a new password). A self-service change
   (`PUT /users/me/password`) requires the current password — a borrowed session cannot
   change it — and re-issues the cookie only to the browser that made the change. The
   break-glass path (`crb users set-password | deactivate` on the host, where database
@@ -258,8 +308,15 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   and deleted the moment the helper has typed it; the token is never in a response, an
   event, a log line or the session directory (the helper scrubs token shapes from
   everything it reports). One session per deployment at a time; ten-minute expiry;
-  admin only. [measured] `tests/test_server_claude_login.py` (a fake CLI replays the real
-  transcript, including a refused code and a token-shaped run in an error line).
+  admin only. The CLI runs with an allowlisted environment — `PATH`, `HOME`, `TERM=dumb`,
+  `NO_COLOR`, a no-op `BROWSER`, the host's proxy and certificate-authority variables
+  (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` in either case, `NODE_EXTRA_CA_CERTS`,
+  `SSL_CERT_FILE`, `SSL_CERT_DIR`, so the sign-in works behind a proxy) and a
+  `CLAUDE_CONFIG_DIR` created for that sign-in and removed after it — so the secret key, the database URL and the OIDC client secret the
+  API process holds never reach it, and it neither reads nor writes the host account's own
+  Claude configuration. [measured] `tests/test_server_claude_login.py` (a fake CLI replays
+  the real transcript, including a refused code and a token-shaped run in an error line;
+  another dumps the environment it was given).
 
 - **Where.** One file per secret under `CRB_SECRETS_DIR` → `$CRB_HOME/secrets` →
   `./.crb/secrets`: `claude_code_oauth_token` (the raw value) and
@@ -311,11 +368,71 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 
 - OIDC (Entra ID or any provider): authorisation-code flow with PKCE and a signed state
   cookie; ID-token validation against the provider's JWKS; role from a configurable claim /
-  group map; users upserted by `(issuer, subject)`. [design — exercised with an injected fake
-  provider in tests; not yet run against a live IdP]
-- Local accounts (argon2id, constant-time compare, per-user+IP rate limit) exist for
-  bootstrap and air-gapped installs; disable with `CRB_LOCAL_AUTH_ENABLED=false` once OIDC
-  works. [measured]
+  group map; users upserted by `(issuer, subject)`. The claims set an account's role on its
+  **first** sign-in only; after that the role is the admin's to change and a sign-in does
+  not revert it. `CRB_OIDC__ROLE_FROM_CLAIMS=always` makes the provider the source of truth
+  instead (a removal from the admin group then demotes at the next sign-in) and records
+  every change it makes as `user.role_overridden` with the role before and after.
+  [design — exercised with an injected fake provider in tests; not yet run against a live
+  IdP]
+- Local accounts (argon2id, constant-time compare) exist for bootstrap and air-gapped
+  installs; disable with `CRB_LOCAL_AUTH_ENABLED=false` once OIDC works. Failed sign-ins are
+  limited in the API process: five a minute per username and address, and twenty a minute
+  per address whatever the usernames (a spray across accounts). The limiter is in memory and
+  per process, so **production must also limit `POST /api/v1/auth/login` per client address
+  at the reverse proxy**, which sees every replica ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)).
+  [measured] `tests/test_server_auth.py::TestLoginRateLimitPerIp`
+- Where a registered repository may live: a `clone_path` must resolve inside
+  `$CRB_HOME/repos`, where the worker clones. A path elsewhere on the host is an admin's
+  decision and is recorded (`repo.clone_path.outside_home`); anyone else — including a model
+  through the MCP write tools, which ride the same route — gets `403
+  clone_path_outside_home`; a path under that directory that resolves outside it (a symbolic
+  link) is refused for every role. The same check runs again where the path is used — the
+  worker before it reads a clone, and the profile walk — because a path that did not exist
+  at registration can gain a link later (for example from another repository's clone).
+  The worker's own clone destination (`$CRB_HOME/repos/<name>`) has a stricter rule, checked
+  before any git process starts: it must be exactly that directory, or nothing yet, and never
+  a symbolic link — whether the link leads outside the directory or to another repository's
+  clone inside it. git is then pointed at the resolved path that was checked;
+  `clone_repo` refuses a destination that is a symbolic link; and a structural test holds
+  every place that opens a stored clone to the one use-time function
+  (`confined_clone_path`), with a second test that fails when a function in `crb.server`
+  calls `GitRepo(…)` or `clone_repo(…)`, or starts any process (through `subprocess`, `os`,
+  `asyncio` or `pty`), and is not on one of that test's lists, and a third that refuses an
+  import of a process starter the second test could not see. These scans resolve an
+  imported alias (`from crb.core.git import GitRepo as G`), and each is run on a
+  throwaway module that uses every import form, so renaming an import does not hide a call.
+  When one name is bound by two imports in a module (a module-level one and one inside a
+  function), a scan that looks for git or the link rule counts the call if either import
+  makes it one, and the use-site test counts a path as confined only if both are the
+  confiner; this can give a false alarm, which renaming the import clears, but never a
+  miss. A name bound some other way — an assignment such as `G = GitRepo` — is not
+  resolved.
+  **[measured — n = 36 tests, all passing on this change (PR #52); method: pytest on the
+  node ids below, which include a link at the destination in five shapes (outside the
+  directory, to another clone inside it, to an empty directory, dangling, and chained). The
+  tests that pin a fix were written before it: 8 of the 9 clone-path tests added first
+  failed on `main` at 8ab88ad (the ninth is the control that must pass), and 8 of the 10 destination-shape tests failed on 7d5a619 (the
+  other 2, the outside shape, already passed there), and the 3 import-form tests failed on
+  ca17168, before the names were resolved, and the 5 colliding-import tests failed on
+  e0a6fce, before every import of a name was kept; apparatus 2.2. A count of tests, not a
+  rate, so no interval]** `tests/test_server_routes_repos.py::TestClonePathConfinement`,
+  `tests/test_worker_clone.py::test_a_clone_path_that_escapes_the_root_at_use_time_fails_the_run`,
+  `tests/test_worker_clone.py::test_a_link_at_the_clone_destination_is_refused_before_any_git_command`,
+  `tests/test_worker_clone.py::test_every_link_at_the_clone_destination_is_refused_before_any_git_command`,
+  `tests/test_worker_clone.py::test_the_destination_rule_is_identity_not_containment`,
+  `tests/test_worker_clone.py::test_git_opens_only_the_confined_path_at_every_use_site`,
+  `tests/test_worker_clone.py::test_the_use_site_list_is_every_place_the_server_opens_git`,
+  `tests/test_worker_clone.py::test_the_server_names_process_starters_only_through_their_module`,
+  `tests/test_worker_clone.py::test_the_git_opener_discovery_sees_every_import_form`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_sees_aliased_openers_and_confiners`,
+  `tests/test_worker_clone.py::test_the_link_rule_scan_sees_an_aliased_import`,
+  `tests/test_worker_clone.py::test_the_git_opener_discovery_sees_every_binding_of_a_colliding_alias`,
+  `tests/test_worker_clone.py::test_the_link_rule_scan_sees_every_binding_of_a_colliding_alias`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_confines_only_when_every_binding_is_a_confiner`,
+  `tests/test_worker_clone.py::test_the_use_site_ratchet_reports_an_opener_called_without_its_path`,
+  `tests/test_git_clone.py::test_clone_refuses_a_destination_that_is_a_symbolic_link`,
+  `tests/test_mcp_server.py::test_register_repo_tool_is_confined_to_the_repos_root`
 - Account lifecycle: an admin sets a password or the active flag (`PUT /users/{id}/password`,
   `PUT /users/{id}/active`); a person changes their own with the current password
   (`PUT /users/me/password`); on the host, `crb users` does the same without a login
@@ -420,10 +537,13 @@ subject to a retention window.
 | T7b | The stored token leaks through the API, the UI, a log or an evidence pack | API / UI / logs | 3.3.1 status-only responses (≤4-char fingerprint), password field never echoed and cleared on save, log lines carry name + fingerprint, verify output redacted |
 | T7c | The verify button is used to burn subscription quota | API | 3.3.1 one probe per 10 s per deployment, one no-tool Haiku turn, admin-only |
 | T7d | API-host compromise | secrets file | token compromise: rotate (`claude setup-token`, paste, revoke the old one) — see 3.3.1 |
+| T7e | The `claude setup-token` CLI reads the API's own secrets from its environment | API host | 3.3.1 allowlisted environment and a throwaway `CLAUDE_CONFIG_DIR` |
 | T8 | An insider edits a past verdict | ledger | 3.5 triggers + hash chain + `/health` proof |
 | T9 | A false pass is recorded because a runner could not attribute a failure | grade | fail-closed parse rule (`unattributed failure` ⇒ belt 3 false), harness errors ⇒ not clean |
 | T10 | A green with no real change is credited (build-cache ghost) | grade | belt 4 `source_changed` |
-| T11 | Session hijack / CSRF / privilege escalation | API | 3.3 cookies, CSRF, 3.4 RBAC |
+| T11 | Session hijack / CSRF / privilege escalation | API | 3.3 `__Host-` cookies, session-bound CSRF, revocable sessions (logout, sign out everywhere), 3.4 RBAC, first-login OIDC roles |
+| T11a | Online password guessing, one account or sprayed across many | API | 3.4 per-(username, address) and per-address limits in the process; the proxy's limiter in production |
+| T11b | An operator, or a model through the MCP tools, points the deployment at an arbitrary host directory | API host | 3.4 `clone_path` confined to `$CRB_HOME/repos`; elsewhere admin-only and recorded; symbolic-link escapes refused |
 | T12 | Cross-organisation data leakage via the federated export | export | allowlist of abstract fields only, k-anonymity, opt-in; consumption not implemented (`crb.core.federated`) |
 | T13 | A weak oracle lets a semantically wrong patch pass | grade | not a mechanical false-Q1; measured and gated by oracle strength (`crb.core.oracle`), routed to `human` below 0.8 |
 | T14 | A dependency fetch runs untrusted code with a network (an install script, a source build) | provision | 3.1.1: wheels only, `npm ci --ignore-scripts`, `go mod download`; anything that must build runs in a second container with `--network=none`; a Python source distribution is refused |
@@ -442,8 +562,35 @@ subject to a retention window.
 - Container mode for the builder (3.2.1) is proven with a scripted builder and a mock
   endpoint plus a zero-spend TLS probe to the real endpoint; a full `claude -p` build
   through the sidecar with a live credential has not yet been run in CI (it needs a
-  credential and spend). Host mode remains the default until an operator sets
-  `CRB_BUILDER__EXECUTOR=docker`. [gap — measured on the fake-model path only]
+  credential and spend). [gap — measured on the fake-model path only]
+- **Production refuses the unsealed posture** (ADR-0023). With `CRB_ENV=prod` the builder
+  defaults to its sealed container (`CRB_BUILDER__EXECUTOR=docker`), and the API and the
+  worker both refuse to start with `CRB_BUILDER__EXECUTOR=host` or
+  `CRB_SANDBOX__EXECUTOR=local` unless `CRB_ALLOW_UNSEALED_PROD=1` is set. That override is
+  the operator's statement that what the deployment measures is a development reading: it is
+  shown on `/health`, `/settings` and the Posture page, and stamped into every run's
+  apparatus and every evidence pack as `unsealed_prod_override`, so a row produced under it
+  can always be told apart. `CRB_ENV=dev` keeps the host defaults. The refusal proves a
+  setting, not a measurement: no row has yet been produced on the sealed posture (below).
+  [measured — `tests/test_settings_posture.py` and `tests/test_worker.py` pin the refusal,
+  the override and the stamp; apparatus 2.2]
+- **Factory builds are not sealed** (ADR-0023 §5). The builder executor setting governs
+  replay builds; a factory run hands its builder a host worktree and no container. A `prod`
+  worker therefore refuses every factory run unless `CRB_ALLOW_UNSEALED_PROD=1`, and with it
+  stamps the run's apparatus (`run_kind: factory`); `/health` reports this as
+  `posture.factory_builds`. [measured — `tests/test_worker.py`,
+  `tests/test_settings_posture.py::TestFactoryBuilds`] Sealing factory builds is not done.
+  [gap — factory builds run on the host]
+- **One builder posture for both processes.** Compose and Helm hand the API (which serves
+  `/health`) and the worker (which runs the builds) the same `CRB_BUILDER__EXECUTOR`.
+  [measured — `tests/test_settings_posture.py::TestHelmOneBuilderPosture` renders the chart]
+- **Worktree names carry nothing of the commit** (DL-055). Trial, mining, control and oracle
+  worktrees are named by a random token, and the mapping to the task is on the run's events,
+  so `pwd`, `basename`, the `.git` pointer and the prompt no longer hand the builder a prefix
+  of the held-out sha. On the host posture the builder can still read anything the worker
+  user can read, including the main clone's history, which is why production refuses it.
+  [measured — `tests/test_run.py`, `tests/test_builders_guard_corpus.py` scan with the
+  fixture's real sha; apparatus 2.2]
 - Reference sandbox images ship and are proven in CI (3.1) **[measured — n = 42 tests passed,
   0 skipped, across `tests/test_sandbox_images_docker.py` (3 images) and
   `tests/test_sandbox_docker.py`; method: a local run on colima, Docker 29.5.2, 2026-09-25;
@@ -462,7 +609,7 @@ subject to a retention window.
   real daemon on colima, 2026-09-25; apparatus 2.2]**. The apparatus 2.3 read rule of ADR-0019
   is in force: a docker row stamped before 2.3, such as each row of run `0c44ff24…`, is left
   out of every rate and counted `unqualified_posture` **[measured — the DoD criterion
-  results.truth.16, `tests/test_server_routes_capability.py::test_pre_2_3_docker_rows_are_excluded_and_counted`;
+  results.truth.17, `tests/test_server_routes_capability.py::test_pre_2_3_docker_rows_are_excluded_and_counted`;
   apparatus 2.3]**. No real repository has yet been qualified in the sealed posture on a live
   stack **[gap — F42]**.
 - Container escape is out of scope for the application layer.

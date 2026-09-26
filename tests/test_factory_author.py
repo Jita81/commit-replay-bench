@@ -11,8 +11,11 @@ What it does: Pins that a reply without a ``FILE:`` line, with an empty block, w
               re-asked with the reason and never returned; that the author's identity is a
               rung label; that a rung whose builder is not registered is refused at
               construction; that ``FactorySpec`` refuses an author that is also on the
-              ladder (the SAME refusal, ``SameIdentityError``, not a new one); and that the
-              happy path returns an ``AuthoredTest`` the RED proof can then judge.
+              ladder (the SAME refusal, ``SameIdentityError``, not a new one) — and, since
+              C3 (2026-09-25), an author whose MODEL is on the ladder under another builder
+              name, aliases normalised through the pricing table, the refusal naming the rung
+              to change; and that the happy path returns an ``AuthoredTest`` the RED proof
+              can then judge.
 How:          A scripted ``chat_fn`` in place of the model (no network, no credential); the
               ``pyrepo`` fixture for the repository layout and its own tests as examples.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -248,3 +251,113 @@ def test_the_author_rung_and_the_build_rung_are_never_the_same_rung(
     # a different rung is accepted, and the author reaches the spec
     spec = _spec(pyrepo, tmp_path, author=author, ladder=(Rung("editblock", "m2"),))
     assert spec.test_author is author
+
+
+# --- C3: the author and the builder are distinct MODELS, not distinct labels ---------
+
+
+def _model_author(model: str, name: str = "editblock") -> Any:
+    return fa.RungTestAuthor(name=name, model=model, chat_fn=_chat(GOOD))
+
+
+def test_the_same_model_under_another_builder_name_is_refused(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """C3 (assessment 2026-09-25): the label check let ``editblock:claude-sonnet-5`` write the
+    test that ``claude_code:claude-sonnet-5`` is graded against — one model's judgement on
+    both sides, which is correlated judgement, not independent evidence. The refusal compares
+    the MODEL half and names the rung to change."""
+    with pytest.raises(SameIdentityError) as exc:
+        _spec(
+            pyrepo,
+            tmp_path,
+            author=_model_author("claude-sonnet-5"),
+            ladder=(Rung("editblock", "gpt-oss-120b"), Rung("claude_code", "claude-sonnet-5")),
+        )
+    msg = str(exc.value)
+    assert "rung 2" in msg and "claude_code:claude-sonnet-5" in msg
+    assert "claude-sonnet-5" in msg and "model" in msg
+
+
+@pytest.mark.parametrize(
+    ("author_model", "rung_model"),
+    [
+        ("claude-sonnet-5", "claude-sonnet-5-20260901"),  # a dated id → the priced family
+        ("claude-sonnet-5", "Claude-Sonnet-5"),  # case
+        ("claude-opus-4-8", "claude-opus-4-8[1m]"),  # a context-window suffix
+        ("gpt-oss-120b", "openai/gpt-oss-120b"),  # a vendor-prefixed id
+        ("claude-sonnet-5", "sonnet"),  # Claude Code's family alias
+    ],
+)
+def test_aliases_of_one_model_are_the_same_model(
+    pyrepo: pr.PyRepo, tmp_path: Path, author_model: str, rung_model: str
+) -> None:
+    """Aliases are normalised through the pricing table (``crb.builders.budget``) — the
+    one place the product already says which ids are one priced model — so a spelling cannot
+    slip a model past the refusal; a bare family alias is read as the whole family (fail
+    closed: ``sonnet`` could be any Sonnet)."""
+    with pytest.raises(SameIdentityError, match="rung 1"):
+        _spec(
+            pyrepo,
+            tmp_path,
+            author=_model_author(author_model),
+            ladder=(Rung("claude_code", rung_model),),
+        )
+
+
+@pytest.mark.parametrize("known", [True, False])
+def test_a_dated_alias_is_its_models_identity_whatever_its_price_status(known: bool) -> None:
+    """PR #55 review: the canonicalisation read only keys with a KNOWN price, so a model a
+    deployment priced as a placeholder (``known: false`` in ``CRB_PRICING_JSON``) lost its
+    dated aliases — ``m-20260901`` stayed itself and the C3 refusal failed open. Whether a
+    price is known says nothing about which model an id names."""
+    from crb.builders.budget import DEFAULT_PRICING, Pricing
+    from crb.factory.testfirst import canonical_model, same_model
+
+    table = {**DEFAULT_PRICING, "m": Pricing(0.0, 0.0, known=known)}
+    assert canonical_model("m-20260901", table) == "m"
+    assert same_model("m", "m-20260901", table)
+    # the prevention: EVERY key the table holds, priced or placeholder, owns its aliases
+    for key in table:
+        assert canonical_model(f"{key}-20260901", table) == key.lower(), key
+
+
+def test_a_placeholder_priced_model_cannot_author_its_own_oracle(
+    pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same, end to end through ``FactorySpec``: a deployment table that prices ``m``
+    as a placeholder still refuses ``m`` authoring the test a ``m-20260901`` rung builds
+    against."""
+    import json
+
+    pricing = tmp_path / "pricing.json"
+    pricing.write_text(json.dumps({"m": {"known": False}}), encoding="utf-8")
+    monkeypatch.setenv("CRB_PRICING_JSON", str(pricing))
+    with pytest.raises(SameIdentityError, match="rung 1"):
+        _spec(
+            pyrepo,
+            tmp_path,
+            author=_model_author("m"),
+            ladder=(Rung("claude_code", "m-20260901"),),
+        )
+
+
+def test_different_models_pass_whatever_the_builder_names(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    author = _model_author("gpt-oss-120b")
+    spec = _spec(
+        pyrepo,
+        tmp_path,
+        author=author,
+        ladder=(Rung("claude_code", "claude-sonnet-5"), Rung("editblock", "zai-glm-4.7")),
+    )
+    assert spec.test_author is author
+    # distinct versions of one family are distinct models
+    spec = _spec(
+        pyrepo,
+        tmp_path,
+        author=_model_author("claude-opus-5"),
+        ladder=(Rung("claude_code", "claude-opus-4-8"),),
+    )
+    assert spec.test_author is not None

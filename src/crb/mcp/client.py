@@ -13,8 +13,8 @@ What it does: Keeps every MCP tool a one-line pass-through: the tool names the p
 How:          ``httpx.Client`` (or any subclass — the tests inject FastAPI's ``TestClient``,
               which is one) with ``base_url`` = ``CRB_API_URL``; ``login()`` POSTs
               ``/auth/login``, then every unsafe request adds ``X-CSRF-Token`` from the
-              ``crb_csrf`` cookie the way the browser does (src/crb/server/app.py's CSRF
-              middleware). Credentials come from the environment (``CRB_MCP_USERNAME`` /
+              ``crb_csrf`` cookie (``__Host-crb_csrf`` on a TLS deployment) the way the
+              browser does (src/crb/server/app.py's CSRF middleware). Credentials come from the environment (``CRB_MCP_USERNAME`` /
               ``CRB_MCP_PASSWORD``) and are never logged or echoed.
 Layer:        mcp — docs/ARCHITECTURE.md#44-outer-layers (a client of the server layer, never
               an importer of it)
@@ -37,8 +37,10 @@ from typing import Any
 import httpx
 
 DEFAULT_API_URL = "http://127.0.0.1:8000/api/v1"
-#: Cookie names and the CSRF header are the server's (src/crb/server/auth.py).
+#: Cookie names and the CSRF header are the server's (src/crb/server/auth.py). A deployment
+#: with secure cookies names the CSRF cookie ``__Host-crb_csrf``; that name is read first.
 CSRF_COOKIE = "crb_csrf"
+CSRF_COOKIE_NAMES: tuple[str, ...] = ("__Host-" + CSRF_COOKIE, CSRF_COOKIE)
 CSRF_HEADER = "X-CSRF-Token"
 #: Paths that must not carry the CSRF header (no session exists before login).
 _PRE_AUTH = ("/auth/login",)
@@ -134,9 +136,10 @@ class CrbApi:
 
     def _headers(self, method: str, path: str) -> dict[str, str]:
         if method in _UNSAFE and not path.startswith(_PRE_AUTH):
-            token = self.client.cookies.get(CSRF_COOKIE)
-            if token:
-                return {CSRF_HEADER: token}
+            for name in CSRF_COOKIE_NAMES:
+                token = self.client.cookies.get(name)
+                if token:
+                    return {CSRF_HEADER: token}
         return {}
 
     # --- requests --------------------------------------------------------------------

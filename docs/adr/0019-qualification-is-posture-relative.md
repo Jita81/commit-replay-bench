@@ -1,6 +1,6 @@
 # ADR-0019 — Qualification is posture-relative: a task is proven in the posture that grades it, its dependencies are provisioned per task outside the test container, and the model is blamed only with a witness from that posture
 
-**Status:** Accepted (F42 part 2 finding, 2026-09-25; built in two streams on one seam, `crb.core.deps`: stream Q, posture-relative qualification, and stream D, dependency provisioning)
+**Status:** Accepted (DL-060; F42 part 2 finding, 2026-09-25; built in two streams on one seam, `crb.core.deps`: stream Q, posture-relative qualification, and stream D, dependency provisioning)
 **Date:** 2026-09-25
 **Apparatus impact:** bumps `APPARATUS_VERSION` to **2.3**. The meaning of a verdict changes in three ways:
 

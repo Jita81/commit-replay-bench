@@ -5,7 +5,9 @@ the reason* locally and a *failure* under ``CRB_TEST_STRICT_WARMUP=1``. This mod
 that policy for the one path a live daemon can break after the initial probe: ``docker image
 inspect`` raising (``TimeoutExpired``, an ``OSError`` from the client) must go through the
 same policy — recorded against the tag, skip or strict-fail — never surface as an
-uncontrolled test error (CodeRabbit on PR #44).
+uncontrolled test error (CodeRabbit on PR #44). It also pins the network gate: a
+``@pytest.mark.network`` test whose registry cannot be reached is a skip with the host and
+the reason locally, and a failure under strict warm-up.
 
 Navigation
 ----------
@@ -14,14 +16,20 @@ What it does: Monkeypatches ``subprocess.run`` to raise while the daemon probe r
               "available", and asserts ``require_docker_image`` / ``ensure_docker_image``
               skip with the reason by default, fail under strict warm-up, and memoise the
               reason against the tag so the next caller sees the same outcome without a
-              second subprocess.
-How:          ``monkeypatch`` on ``subprocess.run`` / ``shutil.which``, ``_DOCKER_REASON``,
-              ``_IMAGES`` and ``STRICT_WARMUP``; ``pytest.raises(pytest.skip.Exception /
+              second subprocess; and that ``require_network`` (driven for every
+              ``@pytest.mark.network`` test by the setup hook in tests/conftest.py) skips with
+              the host and the reason when the registry is unreachable, fails under strict
+              warm-up, counts any HTTP answer as reachable and probes each host once.
+How:          ``monkeypatch`` on ``subprocess.run`` / ``shutil.which`` /
+              ``urllib.request.urlopen``, ``_DOCKER_REASON``, ``_IMAGES``, ``_NETWORK`` and
+              ``STRICT_WARMUP``; ``pytest.raises(pytest.skip.Exception /
               pytest.fail.Exception)``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
-Works with:   tests/conftest_langs.py (the subject), tests/test_sandbox_docker.py and
-              tests/test_sandbox_images_docker.py (the callers whose skip/fail this shapes)
+Works with:   tests/conftest_langs.py (the subject), tests/conftest.py (the network setup
+              hook), tests/test_sandbox_docker.py and tests/test_sandbox_images_docker.py (the
+              callers whose skip/fail this shapes), tests/test_runners_setup.py (the network
+              tests the hook gates)
 Tested by:    tests/test_conftest_langs.py
 Touch when:   the warm-up policy changes shape (a new unavailable reason, a new strict mode),
               or a helper gains another subprocess call that could raise after the probe.
@@ -31,6 +39,9 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
+from email.message import Message
 from typing import Any
 
 import pytest
@@ -157,3 +168,100 @@ def test_a_missing_daemon_is_a_skip_on_every_call_even_under_strict_warmup(
             getattr(langs, helper)(*args)
     assert "crb-sandbox-python:ci" not in langs._IMAGES
     assert "crb-test-py:local" not in langs._IMAGES
+
+
+# ---------------------------------------------------------------------------
+# ``@pytest.mark.network``: skipped by reason when the registry is unreachable
+# ---------------------------------------------------------------------------
+
+
+def _opener(outcome: BaseException | None) -> Any:
+    """A stand-in for ``urllib.request.urlopen`` that records the URL it was asked for."""
+    calls: list[str] = []
+
+    class _Response:
+        def close(self) -> None:
+            pass
+
+    def urlopen(request: urllib.request.Request, *_a: Any, **_kw: Any) -> _Response:
+        calls.append(request.full_url)
+        if outcome is not None:
+            raise outcome
+        return _Response()
+
+    urlopen.calls = calls
+    return urlopen
+
+
+@pytest.fixture
+def no_probe_memo(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(langs, "_NETWORK", {})
+
+
+def test_an_unreachable_registry_skips_a_network_test_with_the_reason(
+    no_probe_memo: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Offline, or behind a proxy that refuses: a skip that names the host and why, asked
+    once per host per session (the assessment's root container failed four such tests)."""
+    monkeypatch.setattr(langs, "STRICT_WARMUP", False)
+    opener = _opener(urllib.error.URLError(OSError("Tunnel connection failed: 403 Forbidden")))
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    for _ in range(2):
+        with pytest.raises(pytest.skip.Exception) as info:
+            langs.require_network(("pypi.org",))
+    msg = str(info.value)
+    assert "https://pypi.org/ is not reachable" in msg and "403 Forbidden" in msg
+    assert "CRB_TEST_STRICT_WARMUP=1" in msg
+    assert opener.calls == ["https://pypi.org/"]
+
+
+def test_an_unreachable_registry_fails_under_strict_warmup(
+    no_probe_memo: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In CI the network is there: a registry it cannot reach is a failure, never a skip."""
+    monkeypatch.setattr(langs, "STRICT_WARMUP", True)
+    monkeypatch.setattr(urllib.request, "urlopen", _opener(TimeoutError("timed out")))
+    with pytest.raises(pytest.fail.Exception, match=r"\[strict warm-up\].*registry\.npmjs\.org"):
+        langs.require_network(("registry.npmjs.org",))
+
+
+def test_any_http_answer_is_reachable_and_the_default_hosts_are_the_python_index(
+    no_probe_memo: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An HTTP status — even 404 or 405 — means the host answered; with no hosts named on the
+    marker the Python package index is what is probed."""
+    monkeypatch.setattr(langs, "STRICT_WARMUP", True)
+    opener = _opener(
+        urllib.error.HTTPError("https://pypi.org/", 405, "Method Not Allowed", Message(), None)
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    langs.require_network()
+    assert opener.calls == [f"https://{h}/" for h in langs.DEFAULT_NETWORK_HOSTS]
+    assert all(langs._NETWORK[h] == "" for h in langs.DEFAULT_NETWORK_HOSTS)
+
+
+class _Item:
+    """The one part of a pytest item the setup hook reads."""
+
+    def __init__(self, *marks: pytest.MarkDecorator) -> None:
+        self._marks = {m.mark.name: m.mark for m in marks}
+
+    def get_closest_marker(self, name: str) -> pytest.Mark | None:
+        return self._marks.get(name)
+
+
+def test_the_setup_hook_probes_only_network_marked_tests_and_their_named_hosts(
+    no_probe_memo: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``tests/conftest.py`` routes every ``@pytest.mark.network`` test through the probe —
+    with the hosts the marker names — and leaves every other test alone."""
+    import conftest as core_conftest
+
+    monkeypatch.setattr(langs, "STRICT_WARMUP", False)
+    opener = _opener(urllib.error.URLError(OSError("Network is unreachable")))
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    core_conftest.pytest_runtest_setup(_Item(pytest.mark.slow))
+    assert opener.calls == []
+    with pytest.raises(pytest.skip.Exception, match=r"registry\.npmjs\.org"):
+        core_conftest.pytest_runtest_setup(_Item(pytest.mark.network("registry.npmjs.org")))
+    assert opener.calls == ["https://registry.npmjs.org/"]

@@ -78,7 +78,9 @@ Honesty properties
 * **Clone once, by policy.** A repo registered by URL only is cloned on its first
   run (:meth:`Worker._load_repo`): https/ssh only, credentials redacted from every
   event and error, ``repo.clone.start`` / ``repo.clone.done`` on the run's trace,
-  the path persisted so no later run clones again.
+  the path persisted so no later run clones again. The stored path AND the clone
+  destination go through ``confined_clone_path`` before any git process starts (a
+  symbolic link off ``<home>/repos`` is refused), and git opens the resolved path.
 * **Fetch before a build on the base (F39).** Before a ``factory`` run on a repository
   with a URL — and before a ``replay`` / ``blind`` / ``mine`` on one linked through the
   GitHub App — the worker fetches the row's URL and fast-forwards the clone's default
@@ -186,6 +188,7 @@ from crb.builders.adapter import (
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
+from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.capability import PROJECTION_CLASS_SIZE
@@ -236,18 +239,19 @@ from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION, __version__
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 from crb.factory.author import author_from_label
 from crb.factory.backlog import BacklogItem
 from crb.factory.delivery import (
     GitCredentials,
     GitCredentialsProvider,
+    github_close_pr_fn,
     github_comment_pr_fn,
     github_open_pr_fn,
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
-from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerError
+from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.provision import make_deps_provider
@@ -255,9 +259,12 @@ from crb.provision.config import ProvisionConfig
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
+    ApprovalPolicy,
     ListenerState,
+    PollReport,
     apply_outcome_map,
     build_tracker,
+    intake_lease,
     item_url_for,
     poll_repository,
     post_outcomes_to_tickets,
@@ -272,7 +279,9 @@ from crb.server.routes.capability import (
     signed_map,
 )
 from crb.server.routes.oracle import latest_controls_verdict
+from crb.server.routes.repos import confined_clone_path
 from crb.server.settings import (
+    ALLOW_UNSEALED_PROD_ENV,
     FactorySettings,
     GitHubAppSettings,
     IntakeSettings,
@@ -501,6 +510,19 @@ class WorkerSettings:
     #: pass that starts without one stops with ``no_public_url`` rather than writing a
     #: relative path a reader on the tracker's site cannot open.
     public_url: str = ""
+    #: The builder's executor as the entrypoint resolved it for ``CRB_ENV`` (``docker`` in
+    #: prod, ADR-0023); ``""`` = read ``CRB_BUILDER__EXECUTOR`` as it stands (unset = host).
+    builder_executor: str = ""
+    #: ADR-0023: in prod without ``CRB_ALLOW_UNSEALED_PROD`` a run may not ask for the local
+    #: executor in its own parameters (the entrypoint already refused it as the default).
+    refuse_unsealed: bool = False
+    #: ADR-0023: a prod worker running unsealed under the override — stamped into every
+    #: run's apparatus and every pack; empty when sealed or in dev.
+    unsealed_override: Mapping[str, Any] = field(default_factory=dict)
+    #: ``CRB_ENV`` as the entrypoint read it. A factory build is never sealed (its builder is
+    #: handed a host worktree), so in ``prod`` a factory run is refused unless the override is
+    #: set, and one run under it is stamped (ADR-0023, ``_run_factory``).
+    env: str = "dev"
     #: Dependency provisioning for the sealed posture (``CRB_PROVISION__*``, ADR-0019):
     #: off by default; the worker's dependency provider is chosen from it
     #: (:meth:`crb.provision.config.ProvisionConfig.from_env`, read by the entrypoint).
@@ -859,7 +881,36 @@ class Worker:
         # relative path in somebody else's comment resolves against THEIR host
         item_url = item_url_for(self.settings.public_url, repo)
         # poll_repository writes the view the screen reads, so nothing is returned that this
-        # caller has to remember to persist
+        # caller has to remember to persist. C6 / ADR-0022: the deployment's approval policy
+        # (an operator registers a ready ticket unless its author is allowlisted) and the
+        # repository's lease (one pass at a time — a busy pass does nothing)
+        budget_s = float(self.settings.intake.poll_budget_s)
+
+        def tell_the_tickets(report: PollReport, tracker: TrackerClient) -> None:
+            """What the loop did with the items this column produced, told to the tickets
+            that produced them: the pull request link when one opened, the refusal and its
+            way forward when the loop stopped, the merge's state move. Read from the
+            chain, posted once per marker — and run by ``poll_repository`` while the
+            repository's lease is still held, so a switch-off cannot land between the
+            column pass and these writes (PR #55 review). ``tracker`` is the one the pass
+            hands over, fenced by the lease, and it shadows the raw one on purpose: a
+            write here must stop when another pass has taken the repository over."""
+            del report
+            post_outcomes_to_tickets(
+                tracker,
+                home=home,
+                item_url=item_url,
+                evidence=home.evidence(actor="worker"),
+            )
+            apply_outcome_map(
+                tracker,
+                home=home,
+                outcome_map=dict(self.settings.intake.outcome_map),
+                evidence=home.evidence(actor="worker"),
+            )
+
+        # a busy pass (another holds the lease, and it posts the outcomes too) or a
+        # withdrawn one (the listener was switched off since it was listed) does nothing
         poll_repository(
             repo,
             tracker=tracker,
@@ -871,22 +922,10 @@ class Worker:
             run_active=lambda: self._factory_run_active(repo),
             actor="worker",
             max_tickets=self.settings.intake.max_per_poll,
-            budget_s=float(self.settings.intake.poll_budget_s),
-        )
-        # what the loop did with the items this column produced, told to the tickets that
-        # produced them: the pull request link when one opened, the refusal and its way
-        # forward when the loop stopped. Read from the chain, posted once per marker.
-        post_outcomes_to_tickets(
-            tracker,
-            home=home,
-            item_url=item_url,
-            evidence=home.evidence(actor="worker"),
-        )
-        apply_outcome_map(
-            tracker,
-            home=home,
-            outcome_map=dict(self.settings.intake.outcome_map),
-            evidence=home.evidence(actor="worker"),
+            budget_s=budget_s,
+            approval=ApprovalPolicy.from_settings(self.settings.intake),
+            lease=intake_lease(self.factory, repo, ttl_s=2 * budget_s + 60),
+            then=tell_the_tickets,
         )
 
     def _factory_run_active(self, repo: str) -> bool:
@@ -1229,9 +1268,11 @@ class Worker:
         cfg.setdefault("runner", row.runner)
         config = RepoConfig.from_dict(row.name, cfg)
         clone = row.clone_path or config.path
+        # D2: the rule again, at use — and git is pointed at the path as checked
+        opened = self._confined_clone(name, clone) if clone else None
         url = str(row.url or config.url or "").strip()
-        if clone and GitRepo(clone).is_repo():
-            git = GitRepo(clone)
+        if opened is not None and GitRepo(opened).is_repo():
+            git = GitRepo(opened)
             if self._fetch_before(kind, cfg, url):
                 self._fetch_default_branch(name, cfg, git, url, emitter)
             return config, git
@@ -1240,6 +1281,9 @@ class Worker:
                 raise LookupError(f"repo {name!r} has no clone path")
             raise LookupError(f"repo {name!r}: {clone!r} is not a git repository")
         dest = self.home / "repos" / name
+        # the clone destination is a stored path in waiting: a link planted there would
+        # otherwise be reused as the clone (PR #52 review) — confined before git runs
+        target = self._confined_clone(name, dest, inside_root=True)
         safe_url = redact_url(url)
         started = time.monotonic()
         # a repository connected through the GitHub App clones with a short-lived
@@ -1255,7 +1299,7 @@ class Worker:
                 github_app=bool(auth_header),
             )
         try:
-            head = clone_repo(url, dest, timeout=DEFAULT_CLONE_TIMEOUT_S, auth_header=auth_header)
+            head = clone_repo(url, target, timeout=DEFAULT_CLONE_TIMEOUT_S, auth_header=auth_header)
         except (CloneUrlError, GitError) as exc:
             if emitter is not None:
                 emitter.error("system", "repo.clone.done", exc, url=safe_url, dest=str(dest))
@@ -1277,7 +1321,23 @@ class Worker:
                 dest=str(dest),
                 head=head,
             )
-        return RepoConfig.from_dict(row.name, {**cfg, "path": str(dest)}), GitRepo(dest)
+        return RepoConfig.from_dict(row.name, {**cfg, "path": str(dest)}), GitRepo(target)
+
+    def _confined_clone(self, name: str, path: str | Path, *, inside_root: bool = False) -> Path:
+        """The path git opens for ``path`` (:func:`confined_clone_path`, D2 at use): the
+        resolved path, or a ``LookupError`` before any git process starts when a symbolic
+        link planted after registration leads a stored path off ``<home>/repos``, or when
+        the clone destination (``inside_root``) is a link at all, wherever it leads."""
+        opened = confined_clone_path(path, self.home, inside_root=inside_root)
+        if opened is None:
+            where = (
+                "is, or passes through, a symbolic link (the worker clones only into a real "
+                "directory of its own there)"
+                if inside_root
+                else "is under the repositories directory but resolves outside it (a symbolic link)"
+            )
+            raise LookupError(f"repo {name!r}: clone_path_escapes: {str(path)!r} {where}")
+        return opened
 
     def _fetch_default_branch(
         self,
@@ -1447,6 +1507,11 @@ class Worker:
         if ctx._executor is not None:
             return ctx._executor
         kind = str(ctx.params.get("executor") or self.settings.executor or "local")
+        if kind != "docker" and self.settings.refuse_unsealed:
+            raise SandboxUnavailable(
+                f"production refuses the {kind} executor (ADR-0023): this run asks for it; use "
+                f"docker, or start the worker with {ALLOW_UNSEALED_PROD_ENV}=1"
+            )
         docker: DockerSettings | None = None
         if kind == "docker":
             docker = docker_settings_for(
@@ -1535,9 +1600,33 @@ class Worker:
             "runner": self._runner(ctx).name,
             "executor": self._executor(ctx).describe(),
             "worker": self.worker_id,
+            **self._override_stamp(),
             **extra,
         }
         self.queue.set_apparatus(ctx.run.id, apparatus, worker_id=self.worker_id)
+
+    def _factory_override_stamp(self) -> dict[str, Any]:
+        """ADR-0023: a factory run's builder works on a host worktree, never in a container, so
+        in ``prod`` (where only the override lets it run) its apparatus always says so — even
+        on a worker whose replay posture is sealed and stamps nothing else."""
+        if self.settings.env != "prod":
+            return {}
+        stamp = {
+            "env": "prod",
+            "sandbox_executor": self.settings.executor,
+            **dict(self.settings.unsealed_override),
+            "builder_executor": "host",
+            "run_kind": "factory",
+            "override": ALLOW_UNSEALED_PROD_ENV,
+            "adr": "0023",
+        }
+        return {"unsealed_prod_override": stamp}
+
+    def _override_stamp(self) -> dict[str, Any]:
+        """ADR-0023: a prod worker running unsealed under the override says so on every
+        apparatus it writes (and so in every pack); nothing when sealed or in dev."""
+        o = dict(self.settings.unsealed_override)
+        return {"unsealed_prod_override": o} if o else {}
 
     def _progress(self, ctx: RunContext, done: int, total: int) -> None:
         self.queue.progress(ctx.run.id, done, total, ctx.counts, worker_id=self.worker_id)
@@ -2021,6 +2110,7 @@ class Worker:
             on_environment=gate.on_environment,
             extra={
                 "worker": self.worker_id,
+                **self._override_stamp(),
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
                 **(
@@ -2055,7 +2145,12 @@ class Worker:
                 else None
             ),
             builder_overrides=dict(p.get("builder_config") or {}),
-            container=container_settings_from_env(),  # CRB_BUILDER__EXECUTOR=docker (ADR-0012)
+            # CRB_BUILDER__EXECUTOR=docker (ADR-0012), defaulted per env (ADR-0023)
+            container=container_settings_from_env(
+                {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
+                if self.settings.builder_executor
+                else None
+            ),
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
             # ADR-0019 (amends ADR-0012): a sealed builder reads the task's PARENT set
@@ -2154,7 +2249,6 @@ class Worker:
             _LOG.exception("ledger health metric failed")
 
     def _run_oracle(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
-        run = ctx.run
         tasks = self._select_tasks(ctx)
         max_mutants = int(ctx.params.get("max_mutants") or DEFAULT_MAX_MUTANTS)
         runner = self._runner(ctx)
@@ -2189,7 +2283,9 @@ class Worker:
                 cancelled = True
                 break
             ctx.task_id = task.task_id
-            dest = self.scratch_dir / f"oracle-{ctx.config.name}-{task.short_id}-{run.id[:8]}"
+            # opaque, never the commit's name (B1); the event maps it back to the task
+            dest = opaque_dest(self.scratch_dir, "oracle", avoid=(task.task_id,))
+            ctx.emit("oracle", "oracle.worktree", task_id=task.task_id, worktree=dest.name)
             with Workspace.create(ctx.git, task.task_id, dest, config=ctx.config) as ws:
                 ws.overlay_tests(task.test_files)
                 ws.overlay_sources(task.src_files)  # the GOLD state: target GREEN
@@ -2287,6 +2383,15 @@ class Worker:
         refused when it is a rung on this run's own ladder."""
         run = ctx.run
         p = ctx.params
+        if self.settings.refuse_unsealed:
+            # ADR-0023: the factory hands its builder a host worktree and no container, so a
+            # sealed production posture cannot admit it — refused before anything is spent
+            raise SandboxUnavailable(
+                "production refuses a factory run (ADR-0023): factory builds run the builder "
+                "on the host and are not sealed yet; start the worker with "
+                f"{ALLOW_UNSEALED_PROD_ENV}=1 to run them on purpose (every factory run's "
+                "apparatus then carries the override)"
+            )
         home = FactoryHome(self.home, run.repo)
         backlog = home.load_backlog()
         if backlog is None or not backlog.frozen:
@@ -2357,6 +2462,7 @@ class Worker:
             # default branch as fetched, or the clone's head when nothing was fetched)
             base_sha=base_sha,
             posture=gate.posture.to_dict(),
+            **self._factory_override_stamp(),
         )
         # delivery through the GitHub App: the linked installation's token pushes the branch
         # and opens the pull request against the repository's default branch (ADR-0014);
@@ -2379,6 +2485,9 @@ class Worker:
         def comment_pr(**kw: Any) -> None:
             github_comment_pr_fn(api_base=api_base, **kw)
 
+        def close_pr(**kw: Any) -> None:  # ADR-0021: a later non-accept closes an open PR
+            github_close_pr_fn(api_base=api_base, **kw)
+
         spec = FactorySpec(
             config=ctx.config,
             runner=runner,
@@ -2396,6 +2505,7 @@ class Worker:
             creds=creds,
             open_pr_fn=open_pr if creds is not None else None,
             comment_pr_fn=comment_pr if creds is not None else None,
+            close_pr_fn=close_pr if creds is not None else None,
             target_default_branch=str(link.get("default_branch") or "main"),
             # the route gate: the same signed (class × size) map the API serves, under the
             # repo's latest controls verdict, sighted rows of the current apparatus — minus
@@ -2457,8 +2567,9 @@ class Worker:
         can decline one a deployment configures. The label is a rung
         (``builder:model[:provider]``) and its builder must be a registered builder name,
         because the invariant the loop enforces — **the author rung and the build rung are
-        never the same rung** — is a comparison of rung labels
-        (:func:`crb.factory.testfirst.assert_distinct_identity`, applied to every rung by
+        never the same rung, nor the same model** — is a comparison of rung labels and of
+        their model halves (:func:`crb.factory.testfirst.assert_distinct_identity`, C3,
+        applied to every rung by
         :class:`~crb.factory.loop.FactorySpec`). Nothing is enforced twice here; this only
         builds the author so the refusal has a label to compare, and names the ladder in the
         message when an operator has to choose another rung.
@@ -2509,7 +2620,10 @@ class Worker:
             ctx.emitter.error("factory", "outcomes.synced", exc, checked=0)
             return
         report = sync_outcomes(
-            home, lambda n: app.pull_request(installation, full_name, n), actor=ctx.run.actor
+            home,
+            lambda n: app.pull_request(installation, full_name, n),
+            actor=ctx.run.actor,
+            repository=full_name,
         )
         ctx.emit(
             "factory",

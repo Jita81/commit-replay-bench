@@ -67,7 +67,7 @@ from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, TestRun, tail_of, with_deps
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.version import APPARATUS_VERSION, __version__
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 
 STATE_QUALIFIED = "qualified"
 STATE_UNQUALIFIED = "unqualified"
@@ -459,9 +459,8 @@ class GoldWitness:
     def control(
         self, scope: Sequence[str], *, why: str, allow_failing: Collection[str] | None = None
     ) -> ControlRun:
-        dest = (
-            self.scratch / f"witness-{self.config.name}-{self.task.short_id}-{uuid.uuid4().hex[:6]}"
-        )
+        # never named after the commit (B1, DL-055); the trial's own events name the task
+        dest = opaque_dest(self.scratch, "witness", avoid=(self.task.task_id,))
         with Workspace.create(self.repo, self.task.task_id, dest, config=self.config) as ws:
             ws.overlay_tests(self.task.test_files)
             ws.overlay_sources(self.task.src_files)
@@ -614,12 +613,15 @@ def qualify_task(
         "run_id": run_id,
     }
     facts: dict[str, Any] = {}
+    #: the opaque worktree names this qualification made, mapped to the task on its event
+    worktrees: list[str] = []
 
     def finish(q: Qualification) -> Qualification:
         _emit(
             on_event,
             "qualify.task",
             task=task.task_id,
+            worktrees=list(worktrees),
             posture_id=posture.posture_id,
             posture_class=posture.posture_class,
             state=q.state,
@@ -663,7 +665,8 @@ def qualify_task(
 
     def measure() -> Qualification:
         # --- 1 + 2 + 3: the parent -------------------------------------------------
-        dest = Path(scratch) / f"qual-{config.name}-{task.short_id}-{uuid.uuid4().hex[:6]}"
+        dest = opaque_dest(scratch, "qual", avoid=(task.task_id,))  # never the commit's name (B1)
+        worktrees.append(dest.name)
         with Workspace.create(repo, task.task_id, dest, config=config) as ws:
             env_probe: dict[str, Any] = {"ran": False}
             with runner.deps_bound(deps.parent):
@@ -757,7 +760,8 @@ def qualify_task(
             facts["baseline_flaky"] = tuple(sorted(flaky))
 
         # --- 4: the gold, in a fresh worktree, at half the wall clock ---------------
-        gdest = Path(scratch) / f"qual-gold-{config.name}-{task.short_id}-{uuid.uuid4().hex[:6]}"
+        gdest = opaque_dest(scratch, "qual", avoid=(task.task_id,))
+        worktrees.append(gdest.name)
         with Workspace.create(repo, task.task_id, gdest, config=config) as gws:
             gws.overlay_tests(task.test_files)
             gws.overlay_sources(task.src_files)

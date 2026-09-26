@@ -334,6 +334,11 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
     last_login: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    #: Rotated to end every session of the account (logout, "sign out everywhere"); part of
+    #: ``crb.server.auth.credential_version``. Empty until the first rotation (0009).
+    session_nonce: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default=""
+    )
 
     __table_args__ = (UniqueConstraint("issuer", "subject", name="uq_users_issuer_subject"),)
 
@@ -359,6 +364,13 @@ class GitHubInstallation(Base):
     updated: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
 
 
+#: A ``workers`` row whose id starts with this is a LEASE, not a worker: one intake pass
+#: per repository holds ``lease:intake:<repo>`` (``crb.server.intake.intake_lease``; C6,
+#: 2026-09-25) — ``hostname`` is the holder token, ``heartbeat`` + ``heartbeat_s`` its
+#: expiry. The health probe and the worker list never count one as a worker.
+LEASE_ROW_PREFIX = "lease:"
+
+
 class WorkerRow(Base):
     """One worker process's liveness, upserted by its loop every ``heartbeat_s`` whether or
     not it holds a run (revision 0007, J-TEL-2). Before this table the only liveness signal
@@ -366,7 +378,9 @@ class WorkerRow(Base):
     healthy. ``heartbeat_s`` is the worker's own interval, so the health probe judges
     staleness against what that worker promised (3 × ``heartbeat_s``), not a server-side
     guess; ``stopped`` is stamped on a clean exit so a shut-down worker is not reported as
-    a crash. Mutable state, no evidence: no append-only triggers."""
+    a crash. Mutable state, no evidence: no append-only triggers. A row whose id starts
+    with :data:`LEASE_ROW_PREFIX` is a lease the same table holds (no new table, no
+    migration), and is never a worker."""
 
     __tablename__ = "workers"
     worker_id: Mapped[str] = mapped_column(String(128), primary_key=True)

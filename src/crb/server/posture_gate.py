@@ -33,7 +33,6 @@ Touch when:   a run kind starts grading (give it the gate); a posture-level stop
 
 from __future__ import annotations
 
-import uuid
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -62,7 +61,7 @@ from crb.core.qualify import (
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 from crb.store import qualifications as store_q
 
 #: Two environment rows in a row stop a build run (``params.env_stop``; 0 disables).
@@ -261,7 +260,7 @@ class PostureGate:
         with the tail to read. Emits ``run.canary``."""
         ctx = self.context_for(task)
         spec = ctx.spec(task)
-        dest = self.scratch / f"canary-{self.config.name}-{task.short_id}-{uuid.uuid4().hex[:6]}"
+        dest = opaque_dest(self.scratch, "canary", avoid=(task.task_id,))  # B1, DL-055
         with Workspace.create(self.repo, task.task_id, dest, config=self.config) as ws:
             ws.overlay_tests(task.test_files)
             ws.overlay_sources(task.src_files)
@@ -281,6 +280,7 @@ class PostureGate:
                 "run.canary",
                 {
                     "task": task.task_id,
+                    "worktree": dest.name,
                     "clean": result.clean,
                     "posture_id": self.posture.posture_id,
                     "why": redact_and_cap(why, max_chars=300),

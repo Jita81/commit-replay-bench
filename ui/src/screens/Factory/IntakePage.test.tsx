@@ -11,7 +11,9 @@
  *               and "Post the feedback again" send the poll with and without `force` and
  *               report tickets read, comments posted and items registered, that a stop shows
  *               the server's reason AND the server's advice, that an unmeasured cell is
- *               named rather than shown as zero, and that the credential is never rendered.
+ *               named rather than shown as zero, that the credential is never rendered, and
+ *               (ADR-0022) that a ready draft waits for an operator's Register act, which
+ *               sends the revision on the screen, with no button for a viewer.
  * How:          `mockApi` + `renderApp` at `/factory/intake?repo=alpha`; every response is
  *               the shape `src/crb/server/routes/factory.py` serves.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -249,5 +251,92 @@ describe('IntakePage', () => {
     setup({ ...OFF, connection: { ...CONNECTION, tracker: 'none', configured: false, credential_set: false } })
     expect(await screen.findByRole('button', { name: /Switch the listener on/ })).toBeDisabled()
     expect(screen.getByText(/An admin configures the tracker for the whole deployment/)).toBeInTheDocument()
+  })
+})
+
+describe('IntakePage — an operator registers a ready ticket (ADR-0022)', () => {
+  const AWAITING_ROW: Intake['rows'][number] = {
+    ...READY_ROW,
+    key: '4714',
+    label: 'crb:ready',
+    item_id: 'ado-4714',
+    item_url: '/factory?repo=alpha&item=ado-4714',
+    revision: '5',
+    registered: false,
+    awaiting_approval: true,
+    author: 'mallory@example.invalid',
+  }
+  const REGISTERED: Intake = {
+    ...ON,
+    rows: [{ ...AWAITING_ROW, registered: true, awaiting_approval: false, label: 'crb:queued' }],
+  }
+
+  it('a ready ticket waits for an operator, who registers the revision they read', async () => {
+    const api = setup({ ...ON, rows: [AWAITING_ROW] }, { 'POST /factory/alpha/intake/4714/register': REGISTERED })
+    const user = userEvent.setup()
+    const row = await screen.findByTestId('intake-row-4714')
+    expect(row.textContent).toContain('Waiting for an operator to register it')
+    expect(row.textContent).toContain('mallory@example.invalid')
+    expect(row.textContent).not.toContain('Registered as')
+    await user.click(within(row).getByRole('button', { name: /Register this ticket/ }))
+    await waitFor(() => expect(screen.getByTestId('intake-success').textContent).toContain('Registered ticket 4714 as ado-4714'))
+    expect(screen.getByTestId('intake-success').textContent).toContain('the ticket has been told')
+    const post = api.calls.find((c) => c.method === 'POST')
+    expect(post?.path).toBe('/factory/alpha/intake/4714/register')
+    expect(JSON.parse(String(post?.init?.body))).toEqual({ revision: '5' })
+  })
+
+  it('a registration whose ticket could not be told says so, not that the ticket was told', async () => {
+    // PR #55 review: the tracker refused the queued label, note or link. The item IS on the
+    // backlog (the act stands), but the ticket was not told, and the message must not say it was.
+    const TOLD_NOTHING: Intake = {
+      ...ON,
+      rows: [
+        {
+          ...AWAITING_ROW,
+          registered: true,
+          awaiting_approval: false,
+          label: '',
+          stopped: 'refused',
+          stopped_advice: 'The tracker refused the write.',
+        },
+      ],
+    }
+    setup({ ...ON, rows: [AWAITING_ROW] }, { 'POST /factory/alpha/intake/4714/register': TOLD_NOTHING })
+    const user = userEvent.setup()
+    const row = await screen.findByTestId('intake-row-4714')
+    await user.click(within(row).getByRole('button', { name: /Register this ticket/ }))
+    await waitFor(() => expect(screen.getByTestId('intake-success').textContent).toContain('Registered ticket 4714 as ado-4714'))
+    const said = screen.getByTestId('intake-success').textContent ?? ''
+    expect(said).not.toContain('the ticket has been told')
+    expect(said).toContain('could not be updated')
+    expect(said).toContain('The tracker refused the write.')
+  })
+
+  it('a viewer sees the draft waiting and who can register it, with no Register button', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': REPOS,
+      'GET /factory/alpha/intake': { ...ON, rows: [AWAITING_ROW] },
+    })
+    renderApp(<IntakePage />, { route: '/factory/intake?repo=alpha', path: '/factory/intake' })
+    const row = await screen.findByTestId('intake-row-4714')
+    expect(row.textContent).toContain('Waiting for an operator to register it')
+    expect(within(row).queryByRole('button', { name: /Register this ticket/ })).not.toBeInTheDocument()
+  })
+
+  it('with the listener off, a waiting draft offers no Register button and says why', async () => {
+    // PR #55 review: registering writes on the board, and the switch is the consent to write
+    // on it — the server refuses with intake_listener_off; the screen does not offer the act
+    setup({ ...ON, listener: { ...ON.listener, enabled: false }, rows: [AWAITING_ROW] })
+    const row = await screen.findByTestId('intake-row-4714')
+    expect(row.textContent).toContain('Waiting for an operator to register it')
+    expect(within(row).queryByRole('button', { name: /Register this ticket/ })).not.toBeInTheDocument()
+    expect(row.textContent).toContain('Switch the listener on to register it')
+  })
+
+  it('the last read counts the drafts waiting for an operator', async () => {
+    setup({ ...ON, last_poll: { ...ON.last_poll!, registered: 0, awaiting: 2 }, rows: [AWAITING_ROW] })
+    expect(await screen.findByText(/2 waiting for an operator to register them/)).toBeInTheDocument()
   })
 })

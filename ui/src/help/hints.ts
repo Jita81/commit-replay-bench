@@ -119,7 +119,7 @@ export const HINTS = {
   'button.shell.theme':
     'Switch between light, dark and your system’s theme. It changes nothing but how the screens look.',
   'button.shell.sign_out':
-    'End your session on this browser. Runs in flight carry on without you.',
+    'End your session here and on every other device signed in to this account. Runs in flight carry on without you.',
   'nav.home':
     'Where this deployment is on the way from an empty install to a change delivered under evidence: the eight tasks and the next one to press.',
   'nav.connect':
@@ -318,10 +318,14 @@ export const HINTS = {
     'The verdict of the latest negative-controls run for this repository: passed, escaped, thin, failed or not run, over n control rows, stamped with the apparatus and controls version that produced it. Only passed licenses deliver anywhere on the map.',
   'stat.results.oracle_strength':
     'The mean of every scored task’s mutation kill-rate (faults caught over faults planted on the changed lines), over n tasks, under the apparatus shown. It is a mean of per-task scores, so it carries no interval; below the policy bar a cell routes to a human.',
+  'stat.results.pool_window':
+    'The stretch of history the mined tasks were drawn from: the oldest and newest task’s author date, and the share of the repository’s non-merge commits authored since the oldest task, with n the commits it is a share of. The miner takes the newest commits that change both source and tests, so every rate on this page describes recent, tested work; older work and changes made without a test are not in it.',
   'stat.results.posture':
     'The posture class every rate on this page was graded in. A number from another posture is never blended in, and old sandbox rows graded against a baseline measured elsewhere are excluded and counted.',
   'stat.results.false_q1':
     'The number of rows credited clean whose own recorded belts contradict them, across every measured cell (n = attempts on the map). It must read 0: one such row halts delivery and is refused when written.',
+  'button.results.retry_tile':
+    'Asks the server again. The last request failed, so nothing is shown here rather than an old value or a guess.',
   'button.results.full_map':
     'The same cells with every number and its method, projections by language and model, and a CSV export of the rows behind them.',
   'stat.results.route_deliver':
@@ -347,7 +351,7 @@ export const HINTS = {
   'map.cell.apparatus':
     'The apparatus version that graded these rows. Rows from different versions are never averaged; a sign-off under an older version is stale.',
   'map.cell.signoff':
-    'Signed with a date means an approver attested this cell under the current apparatus; sign-off due means it routes deliver and no one has signed; sign-off stale means it was signed under an older apparatus; otherwise the reason code that decided the route.',
+    'Signed with a date means an approver attested this cell under the current apparatus; sign-off due means it routes deliver and no one has signed; sign-off stale means it was signed under an older apparatus; sign-off not loaded means the sign-offs did not load, so the state is not known; otherwise the reason code that decided the route.',
   'map.cell.not_measured':
     'No sighted attempt exists for this class and size. It says nothing, not zero.',
   'map.cell.granularize':
@@ -573,9 +577,9 @@ export const HINTS = {
   'step.factory.build':
     'Whether the builder’s change graded clean under every belt inside the sandbox. The status is the server’s word, shown verbatim.',
   'step.factory.delivery':
-    'Whether a branch and pull request were opened. Withheld names why: delivery was off for the run, or the route gate (the cell does not route deliver). Failed means the push was refused.',
+    'Whether a branch and pull request were opened. It comes after the review: only a build the review accepted is delivered. Withheld names why: delivery was off for the run, the route gate (the cell does not route deliver), or the review did not accept the build. Failed means the push was refused.',
   'step.factory.review':
-    'The verdict of the independent review of the built change. It is advisory to a person; it never changes a route.',
+    'The verdict of the independent review of the built change, taken before anything is pushed. Only accept lets a pull request open; it never changes a route.',
   'step.factory.outcome':
     'The item’s final status on the chain, and the error if one stopped it.',
   'pill.factory.step_state':
@@ -651,7 +655,7 @@ export const HINTS = {
   'item.intake.cell_route':
     'What this deployment has measured about changes of this kind and size — the cell’s route, how many graded attempts it rests on and the interval around the rate. It is read before any build, never after.',
   'item.intake.item':
-    'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket.',
+    'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket and an operator registers the draft.',
   'link.factory.intake':
     'The watched column on your own team’s board: which tickets the product has read, what it understood, what each one still needs answering, and where the ones it accepted went. Reading it is a viewer’s act; switching the listener on is an operator’s.',
   'item.intake.unclassified':
@@ -660,6 +664,14 @@ export const HINTS = {
     'This ticket’s own step stopped, with the reason the tracker or the product recorded and what closes it. Everything else in the column was still read.',
   'link.intake.ticket':
     'Open this ticket on your own board, where the product’s comment and label are.',
+  'button.intake.register':
+    'Put this draft on the frozen backlog as it reads now. The ticket is labelled queued and told, the act is recorded against your account, and a ticket edited since you loaded the page is refused.',
+  'item.intake.register_off':
+    'Registering a ticket writes on it: a label, a note and a link. With the listener off nothing on that board is written, so a waiting draft can only be registered once the listener is switched on again.',
+  'item.intake.author':
+    'Who created the ticket, as the tracker names them. Anyone who can edit a ticket in the watched column writes what becomes the backlog item, so an operator reads it before registering it.',
+  'stat.intake.approval':
+    'Whether a ready ticket waits for an operator to register it. It does by default; a deployment may exempt named ticket authors, and every registration records who approved it.',
   'link.intake.item':
     'Open the backlog item this ticket became, with its whole record: readiness, the failing test, the build and the pull request.',
   'pill.intake.needs_info':
@@ -694,6 +706,8 @@ export const HINTS = {
     'Whether this deployment provisions each task’s dependencies for the sealed sandbox. Off by default: switching it on is an operator’s decision, because it fetches packages from a registry.',
   'summary.posture.builder':
     'Where the builder runs and what network it may reach. Shown to admins.',
+  'summary.posture.production':
+    'Whether tests and the builder both run sealed in docker. Production refuses anything else unless CRB_ALLOW_UNSEALED_PROD=1 is set, and then every run records that it ran unsealed. Factory builds always run on the host, so production refuses factory runs unless that override is set.',
   'summary.posture.toolchains':
     'The toolchains the worker host can run, from the health probe.',
   'summary.posture.worker':
@@ -751,7 +765,7 @@ export const HINTS = {
   'field.repo_new.source':
     'Whether the worker clones a git URL on the first run or uses an existing clone on the server host.',
   'field.repo_new.location':
-    'The URL the worker clones (https or ssh only) or the path of an existing clone on the server host.',
+    'The URL the worker clones (https or ssh only) or the path of an existing clone on the server host. A clone path must be inside the deployment’s repos directory (CRB_HOME/repos); only an admin may register one elsewhere, and that is recorded.',
   'field.repo_new.src_prefix':
     'A file is source if its path starts here; empty means anything outside the test prefix. Belt 4 reads this.',
   'field.repo_new.test_prefix':
@@ -863,7 +877,7 @@ export const HINTS = {
   'field.repo_config.runner':
     'The tool that executes the tests inside the sandbox; the probe verifies it.',
   'field.repo_config.clone_path':
-    'Where the clone lives on the server host; empty until the worker’s first run clones the URL.',
+    'Where the clone lives on the server host; empty until the worker’s first run clones the URL. It must be inside CRB_HOME/repos unless an admin registers it elsewhere, which is recorded.',
   'field.repo_config.url':
     'What the worker clones when there is no clone yet (https or ssh only). Informational once a clone path exists.',
   'field.repo_config.src_prefix':
@@ -1569,8 +1583,8 @@ export const MIN_HINTS: Record<string, number> = {
   '/decisions': 6,
   '/signoff': 30,
   '/factory': 28,
-  '/factory/intake': 14,
-  '/posture': 22,
+  '/factory/intake': 16,
+  '/posture': 23,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants
   '/repos/:name': 21,
