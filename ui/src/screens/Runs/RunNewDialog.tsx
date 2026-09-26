@@ -175,7 +175,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
   const [timeout, setTimeoutS] = useState('')
   // ADR-0019: qualify missing tasks in the grading posture first (no model spend); on by default
   const [qualifyFirst, setQualifyFirst] = useState(true)
-  const posture = useRepoPosture(repo)
+  const posture = useRepoPosture(repo, executor) // the executor this dialog will submit
 
   useEffect(() => {
     if (presetRepo) setRepo(presetRepo)

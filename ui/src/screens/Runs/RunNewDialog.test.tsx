@@ -313,6 +313,28 @@ describe('RunNewDialog — posture (ADR-0019)', () => {
     expect(body.qualify_first).toBe(false)
   })
 
+  it('reads the posture of the executor the operator picks, not the deployment default', async () => {
+    // CodeRabbit on PR #56: the count came from the default executor's posture whatever the
+    // dialog would submit, so it could say "qualified" for a run the worker then refuses.
+    const user = userEvent.setup()
+    const body = (executor: string, qualified: number) => ({ repo: 'httpx', executor, image_ref: '', posture_id: `pst_${executor}`, posture_class: `${executor}/copy/sealed`, posture: {}, provisioning: {}, qualified, total: 9, refusals_by_code: [], delta: [], stale_reason: '' })
+    const api = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'GET /repos/httpx/posture': (url: string) => {
+        const ex = new URL(url, 'http://x').searchParams.get('executor')
+        return json(ex === 'local' ? body('local', 2) : body('docker', 4))
+      },
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+    await waitFor(() => expect(screen.getByTestId('run-posture-line')).toHaveTextContent('Qualified 4 of 9 under this posture (docker/copy/sealed).'))
+    await user.selectOptions(screen.getByLabelText(/^Executor/), 'local')
+    await waitFor(() => expect(screen.getByTestId('run-posture-line')).toHaveTextContent('Qualified 2 of 9 under this posture (local/copy/sealed).'))
+    const urls = api.calls.filter((c) => c.path === '/repos/httpx/posture').map((c) => c.url)
+    expect(urls[0]).not.toContain('executor=')
+    expect(urls.at(-1)).toContain('executor=local')
+  })
+
   it('leaves qualify_first out while it is on, and says so when nothing is qualified yet', async () => {
     const user = userEvent.setup()
     const api = mockApi({

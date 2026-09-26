@@ -217,6 +217,34 @@ describe('RunDetailPage', () => {
   })
 })
 
+describe('RunDetailPage — the posture after a run (ADR-0019)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    FakeEventSource.instances = []
+  })
+
+  it.each([['qualify'], ['replay']] as const)('a finished %s run refreshes the repository’s posture reading', async (kind) => {
+    // CodeRabbit on PR #56: the qualify button invalidated the posture when the run was
+    // QUEUED; nothing refreshed it when the run finished, so the panel kept the old count.
+    // A replay with qualify first on qualifies tasks too, so every kind refreshes it.
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': { ...RUN, kind },
+      'GET /runs/run-1/tasks': { items: [], total: 0, limit: 500, offset: 0 },
+    })
+    const { qc } = renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await waitFor(() => expect(screen.getByTestId('tile-clean')).toBeInTheDocument())
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    const es = FakeEventSource.instances[0]!
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ['repos', 'sqlalchemy', 'posture'] })
+    await act(async () => {
+      es.open()
+      es.emit('done', '')
+    })
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['repos', 'sqlalchemy', 'posture'] }))
+  })
+})
+
 describe('RunDetailPage — the failure split (A2)', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
