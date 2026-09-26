@@ -887,7 +887,12 @@ class TestVerifierKind:
     def test_verifier_kind_is_oidc_for_an_identity_provider_account(self, env: Env) -> None:
         """An approver signed in through OIDC stamps ``oidc``; the key is in ``cell_json``
         under the hash and served on the POST, by id and in the list."""
-        from crb.server.auth import credential_version, issue_session, new_user_id
+        from crb.server.auth import (
+            credential_version,
+            csrf_token_for,
+            issue_session,
+            new_user_id,
+        )
         from crb.store.models import User
 
         clear_policy(env)
@@ -906,10 +911,13 @@ class TestVerifierKind:
             s.commit()
             user = s.get(User, uid)
             assert user is not None
-            token = issue_session(env.settings, uid, credential_version(user))
+            cv = credential_version(user)
+            token = issue_session(env.settings, uid, cv)
         env.client.cookies.set("crb_session", token)
-        env.client.cookies.set("crb_csrf", "t")
-        env.client.headers["X-CSRF-Token"] = "t"
+        # the CSRF token is bound to the session (D4): the one the server would have set
+        csrf = csrf_token_for(env.settings, uid, cv)
+        env.client.cookies.set("crb_csrf", csrf)
+        env.client.headers["X-CSRF-Token"] = csrf
         assert env.get("/auth/me").json()["id"] == uid
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 201, r.text
