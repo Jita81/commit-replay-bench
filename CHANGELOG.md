@@ -46,7 +46,9 @@ seam, `crb.core.deps`, and wired end to end.
   - the host never follows a link a fetch or rebuild container planted in its output
     (`PROVISION_UNSAFE_OUTPUT`), removal never changes permissions through a link, and a link
     to a directory inside a set is part of its digest;
-  - the grade-time closure selector reads nothing outside the builder's tree;
+  - the grade-time closure selector reads nothing outside the builder's tree — a Node
+    lockfile that is a link is a `ClosureViolation` too, as Go's `go.mod` is (CodeRabbit on
+    PR #56);
   - `QUAL_ENV_UNLOADABLE`'s fix covers provisioning on as well as off;
   - the count of run `0c44ff24…`'s rows (3 observed, 4 in stream D's reading of an export that
     is not committed) is marked disputed wherever it is cited **[gap]** (F42).

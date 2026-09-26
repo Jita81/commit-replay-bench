@@ -36,8 +36,8 @@ ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/core/deps.py (the seam types and the refusal vocabulary),
               src/crb/core/git.py (``show_blob``: the object store is the only input),
               src/crb/provision/__init__.py (the providers that fetch what this reads),
-              src/crb/core/runners/node_runners.py (``lock_key``: one normalisation of a Node
-              lockfile), src/crb/core/spec.py (``RepoConfig.runner`` and ``runner_opts``)
+              src/crb/core/runners/node_runners.py (``lock_key``: the same normalisation of a
+              Node lockfile, for the host's eras), src/crb/core/spec.py (``RepoConfig.runner`` and ``runner_opts``)
 Tested by:    tests/test_provision.py
 Touch when:   a lock format becomes provisioned (a parser here, a recipe under
               src/crb/provision/, and a row in docs/DEPLOYMENT.md §3.4); never for a new
@@ -69,7 +69,6 @@ from crb.core.deps import (
     ClosureViolation,
     ProvisionRefused,
 )
-from crb.core.runners.node_runners import lock_key as node_lock_key
 
 if TYPE_CHECKING:  # pragma: no cover
     from crb.core.git import GitRepo
@@ -690,12 +689,17 @@ def go_keys(parent: LockInputs, gold: LockInputs, fetch_image_id: str) -> tuple[
     return union, parent_only
 
 
+#: The files a Node lock key is taken from, first present wins — the same names on the
+#: git side (:func:`files_lock_key`) and on the trial's tree (:func:`tree_lock_key`).
+_NODE_LOCK_NAMES: tuple[str, ...] = ("package-lock.json", "npm-shrinkwrap.json", "package.json")
+
+
 def files_lock_key(lang: str, files: Mapping[str, bytes]) -> str:
     """The lock identity of a set of files (path → bytes). Node reuses
     :func:`crb.core.runners.node_runners.lock_key`'s normalisation (the first lockfile's
     sha256, 16 hex); Python hashes every lock file with its path."""
     if lang == LANG_NODE:
-        for name in ("package-lock.json", "npm-shrinkwrap.json", "package.json"):
+        for name in _NODE_LOCK_NAMES:
             if name in files:
                 return sha256_hex(files[name])[:16]
         return ""
@@ -706,9 +710,16 @@ def files_lock_key(lang: str, files: Mapping[str, bytes]) -> str:
 
 
 def tree_lock_key(lang: str, root: Path, paths: Sequence[str]) -> str:
-    """:func:`files_lock_key` over ``paths`` as they stand in the trial tree ``root``."""
+    """:func:`files_lock_key` over ``paths`` as they stand in the trial tree ``root``. Node
+    keys on the first lockfile present, read through :func:`_trial_manifest`: a lockfile
+    that is a link, or that leaves the tree, is a :class:`ClosureViolation` and is never
+    read (the same rule as Go's ``go.mod``)."""
     if lang == LANG_NODE:
-        return node_lock_key(root) or ""
+        for name in _NODE_LOCK_NAMES:
+            f = _trial_manifest(Path(root), name)
+            if f is not None:
+                return files_lock_key(lang, {name: f.read_bytes()})
+        return ""
     files: dict[str, bytes] = {}
     for p in paths:
         f = _inside(Path(root), p)  # a link out of the tree reads as absent

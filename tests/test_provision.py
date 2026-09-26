@@ -444,6 +444,37 @@ def test_a_trial_with_the_parent_or_gold_lock_selects_its_set(tmp_path: Path) ->
     assert nsel.select(nroot) == "parent"
 
 
+
+def test_a_node_lockfile_that_is_a_link_is_a_violation_never_read(tmp_path: Path) -> None:
+    """Node's closure key reads the builder's tree like Go's and Python's do: a lockfile
+    that is a link — here to the gold's own bytes, outside the tree — is a
+    ``ClosureViolation``, never read and never matched to a role (CodeRabbit on PR #56)."""
+    lock1 = _npm_lock({"node_modules/left": _GOOD})
+    lock2 = _npm_lock({"node_modules/left": {**_GOOD, "version": "1.1.0"}})
+    nroot = tmp_path / "node"
+    nrepo, (n0, n1) = _repo(
+        nroot,
+        {"package.json": _PKG, "package-lock.json": lock1},
+        {"package-lock.json": lock2},
+    )
+    nsel = pv.closure_selector(
+        "node",
+        parent=pv.LockInputs.from_git(nrepo, n0, _cfg("node")),
+        gold=pv.LockInputs.from_git(nrepo, n1, _cfg("node")),
+    )
+    outside = tmp_path / "gold-lock.json"
+    outside.write_text(lock2, encoding="utf-8")  # the gold's bytes, outside the tree
+    (nroot / "package-lock.json").unlink()
+    (nroot / "package-lock.json").symlink_to(outside)
+    with pytest.raises(ClosureViolation, match=r"package-lock\.json is a link"):
+        nsel.select(nroot)
+    # a link to a file INSIDE the tree is refused as well: the key is the tree's own file
+    (nroot / "package-lock.json").unlink()
+    (nroot / "lock-copy.json").write_text(lock2, encoding="utf-8")
+    (nroot / "package-lock.json").symlink_to(nroot / "lock-copy.json")
+    with pytest.raises(ClosureViolation, match="is a link"):
+        nsel.select(nroot)
+
 def test_refusals_carry_scope_fix_and_doc() -> None:
     err = ProvisionRefused("PROVISION_DISABLED", "cobra declares go modules")
     d = err.to_dict()
