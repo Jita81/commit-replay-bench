@@ -236,7 +236,8 @@ def dev_autologin(
     :func:`_issue_session`, the one a password sign-in uses — the credential version with the
     session nonce, the session-bound CSRF token — so the role ladder, sign-out, "sign out
     everywhere" and a password change end it exactly as they do a typed password's session.
-    It checks no password, so the login limiter is neither consulted nor reset. Every sign-in
+    It checks no password, so the login limiter is neither consulted nor reset — not the
+    address's bucket, and not the account's own, which a password success clears. Every sign-in
     appends ``auth.dev_autologin`` on the account's trace and logs one warning line."""
     username = settings.auth.dev_autologin
     if not username:

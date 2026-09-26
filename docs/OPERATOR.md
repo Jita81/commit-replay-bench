@@ -851,7 +851,8 @@ the API refuses to sign it in, but there is no reason to rely on that.
 
 **Why production refuses it.** `crb serve` will not start with `CRB_AUTH__DEV_AUTOLOGIN` set
 unless `CRB_ENV=dev` and it binds a loopback address (`127.0.0.1`, `::1` or `localhost`).
-`crb serve --host 0.0.0.0` is refused too. There is no flag to override this. The container
+`crb serve --host 0.0.0.0` is refused too, and so is `CRB_LOCAL_AUTH_ENABLED=false`: it signs
+in a local account, which that setting turns away. There is no flag to override this. The container
 image refuses to start any role with the variable set, so a container stack cannot use it —
 sign in there as usual. If you run the app yourself with `uvicorn --factory` or another
 process manager, `crb` cannot see the address it binds and cannot refuse it at start-up; only

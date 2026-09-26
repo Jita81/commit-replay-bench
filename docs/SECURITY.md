@@ -473,14 +473,16 @@ machine:
 
 - **Refused at start-up outside a development stack.** `Settings` refuses the variable
   unless `CRB_ENV=dev` (the default `prod`, and any other value, refuses) and unless
-  `CRB_BIND_HOST` is a loopback address; `crb serve` checks the address it is about to bind
+  `CRB_BIND_HOST` is a loopback address, and refuses it alongside `CRB_LOCAL_AUTH_ENABLED=false`
+  (it signs in a local account, which that setting turns away at `/auth/login`); `crb serve` checks the address it is about to bind
   again, so `--host 0.0.0.0` is refused too (`dev_autologin_refusal_for`,
   `crb.server.main.serve`). The container image's entrypoint refuses to run any role with the
   variable set, because a container is never a development stack on one machine
-  (`deploy/entrypoint.sh`). There is no override flag. [measured — n = 13 test cases under
+  (`deploy/entrypoint.sh`). There is no override flag. [measured — n = 14 test cases under
   apparatus 2.2 in `tests/test_server_dev_autologin.py::TestSettings`: off by default; `prod`
   refuses, as an argument and from the environment (2); four non-loopback binds refuse and
-  four loopback binds admit (8); a malformed username refuses; `serve` refuses `--host
+  four loopback binds admit (8); local sign-in switched off refuses; a malformed username
+  refuses; `serve` refuses `--host
   0.0.0.0` before uvicorn starts; pass/fail, not a rate] [measured — n = 4 test cases under
   apparatus 2.2 in `tests/test_server_dev_autologin.py::TestTheContainerImage`: the
   entrypoint refuses `serve`, `worker` and `migrate` with the variable set before anything
@@ -525,12 +527,13 @@ machine:
   valid for that session only). So the CSRF check, the role ladder, sign-out, "sign out
   everywhere" and a password change end or refuse it exactly as they do a typed password's
   session. It never skips a role check, and it neither adds to nor clears the login
-  limiter's per-address bucket — it checks no password, and a full bucket still refuses
-  the next password attempt after it. [measured — n = 4 tests in
+  limiter's buckets — the per-address bucket or the account's own (username, address)
+  bucket, which a password success clears — it checks no password, and a full bucket still
+  refuses the next password attempt after it. [measured — n = 4 tests in
   `tests/test_server_dev_autologin.py::TestTheSession`, 6 test cases in
   `::TestTheSessionIsThePasswordSession` (cookies compared with a password sign-in's with
   `Secure` on and off, the nonce in the version, the CSRF token refused on another session,
-  sign out everywhere, sign-out on another device) and 3 in `::TestTheLoginLimit`, apparatus
+  sign out everywhere, sign-out on another device) and 4 in `::TestTheLoginLimit`, apparatus
   2.2; pass/fail, not a rate]
 - **Recorded and visible.** Every sign-in appends `auth.dev_autologin` on the account's trace
   (actor = the account, `payload.client` = the peer) and logs one warning line; start-up logs

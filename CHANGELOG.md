@@ -12,7 +12,8 @@ the meaning of a verdict (see [EVIDENCE-AND-CLAIMS §4](docs/EVIDENCE-AND-CLAIMS
 
 `CRB_AUTH__DEV_AUTOLOGIN=<username>` (off by default, ADR-0027) signs a browser on the same
 computer in as one local account. `crb serve` refuses it unless `CRB_ENV=dev` and the API binds
-a loopback address, and the container image refuses to start with it set. Each request must
+a loopback address, and with `CRB_LOCAL_AUTH_ENABLED=false`, which turns local accounts away;
+the container image refuses to start with it set. Each request must
 come from a loopback peer, arrive on a loopback address, carry no forwarding header and name
 this machine in `Host`; anything else is answered as if it were off. The session is exactly
 the one a password sign-in issues — the same cookies, the credential version with the

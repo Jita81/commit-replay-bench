@@ -18,7 +18,8 @@ Invariants
   and its periodic clean-up removes untouched files there.
 * **Automatic sign-in is a development-stack convenience only** (ADR-0027).
   ``CRB_AUTH__DEV_AUTOLOGIN=<username>`` is refused unless ``CRB_ENV=dev`` and the API binds a
-  loopback address (:func:`dev_autologin_refusal_for`); there is no override flag.
+  loopback address (:func:`dev_autologin_refusal_for`), and alongside
+  ``CRB_LOCAL_AUTH_ENABLED=false`` (it signs in a local account); there is no override flag.
 
 Navigation
 ----------
@@ -672,6 +673,11 @@ class Settings(BaseSettings):
             refusal = dev_autologin_refusal_for(self.env, self.bind_host)
             if refusal:
                 raise ValueError(refusal)
+            if not self.local_auth_enabled:
+                raise ValueError(
+                    "CRB_AUTH__DEV_AUTOLOGIN signs in a local account, but "
+                    "CRB_LOCAL_AUTH_ENABLED=false turns local accounts away; unset one of them"
+                )
         if self.env == "prod" and self.sandbox.executor == "local":
             log.warning("CRB_SANDBOX__EXECUTOR=local in prod: test runs are NOT isolated")
         if self.env == "prod" and self.builder.executor == "host":

@@ -23,7 +23,8 @@ unauthenticated production deployment.
    account (`crb.server.settings.AuthSettings`). Empty means off.
 2. **Refused where it may not run, with no override.** `Settings` refuses to construct with
    it set unless `CRB_ENV=dev` and `CRB_BIND_HOST` is a loopback address
-   (`dev_autologin_refusal_for`). `crb.server.main.serve` checks the address it is about to
+   (`dev_autologin_refusal_for`), and refuses it with `CRB_LOCAL_AUTH_ENABLED=false`: it signs
+   in a local account, and that setting turns local accounts away. `crb.server.main.serve` checks the address it is about to
    bind again, because `crb serve --host` never passes through the settings. `prod`, and any
    other value of `CRB_ENV`, refuses. The container entrypoint refuses to run any role with the
    variable set: a container is never a development stack on one machine. A process manager
@@ -46,7 +47,9 @@ unauthenticated production deployment.
    `session_nonce` — DL-054). Nothing downstream knows how the session began, so the
    session-bound CSRF token, roles, sign-out, "sign out everywhere" and a password change
    behave as they do after a typed password. The route is not exempt from the CSRF check,
-   and it neither counts toward nor clears the login rate limit (it checks no password).
+   and it neither counts toward nor clears the login rate limit — the address's bucket or
+   the account's own (username, address) bucket, which a password success clears (it checks
+   no password).
 5. **Recorded and visible.** Every sign-in appends `auth.dev_autologin` on the account's
    trace (actor = the account, `payload.client` = the peer) and logs one warning line.
    Start-up logs a warning. `GET /health` and `GET /version` carry `dev_autologin`, which
