@@ -259,8 +259,12 @@ _CODE_RE = re.compile(r"`[^`]*`")
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
-#: A fence line: its run of backticks or tildes (three or more), then whatever follows it.
-_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+#: A fence line as CommonMark §4.5 reads it: at most three spaces of indentation (four make
+#: an indented code block), a run of three or more backticks or tildes, then whatever follows
+#: it — which, after backticks, may not itself hold a backtick (that line is inline code).
+_FENCE_RE = re.compile(
+    r"^ {0,3}(?:(?P<marker>`{3,})(?P<rest>[^`]*)|(?P<marker2>~{3,})(?P<rest2>.*))$"
+)
 _ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
 _CHECKLIST_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -301,20 +305,20 @@ def _lines_with_fences(text: str) -> Iterator[tuple[int, str, bool]]:
     (a ``~~~`` inside a backtick fence is content), as CommonMark reads it: the closing line
     is the opener's character, at least as many of them, and nothing after it — so
     ```` ```text ```` and a shorter run inside a longer fence are content (PR #54 review).
-    Every reader of a page's structure goes through here, so a fenced example is never read
+    Opener and closer are indented at most three spaces: a four-space ``~~~`` is an indented
+    code block and cannot hide the rows after it (``FENCE_OPENS`` pins §4.5). Every reader of a page's structure goes through here, so a fenced example is never read
     as prose or as a review's action."""
     marker = ""
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.rstrip()
         m = _FENCE_RE.match(line)
-        if m and not marker:
-            marker = m.group(1)
+        run = (m.group("marker") or m.group("marker2")) if m else ""
+        rest = (m.group("rest") or m.group("rest2") or "") if m else ""
+        if run and not marker:
+            marker = run
             yield number, line, True
         elif (
-            m
-            and m.group(1)[0] == marker[0]
-            and len(m.group(1)) >= len(marker)
-            and not m.group(2).strip()
+            run and marker and run[0] == marker[0] and len(run) >= len(marker) and not rest.strip()
         ):
             marker = ""
             yield number, line, True

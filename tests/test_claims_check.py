@@ -15,12 +15,14 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               that ``--check`` exits non-zero while the default report exits zero; and that
               every numbered action in a review's Actions table has a record in
               docs/DECISION-LOG.md that names the review, the action and its state — so an
-              action cannot disappear without one (the critical friend's #8 and #9 did).
+              action cannot disappear without one (the critical friend's #8 and #9 did);
+              and that the fence reader agrees with a CommonMark parser line for line.
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
-Works with:   scripts/claims_check.py (the code under test), docs/EVIDENCE-AND-CLAIMS.md
+Works with:   scripts/claims_check.py (the code under test), markdown-it-py (the CommonMark
+              reference the fence reader is compared with), docs/EVIDENCE-AND-CLAIMS.md
               (the claim-tag rule these tests enforce a shape for), .github/workflows/ci.yml
               (the claims job that runs --check)
 Tested by:    (this is a test file)
@@ -36,6 +38,9 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -396,7 +401,44 @@ FENCE_CLOSES = [
     ("```", "~~~", True),  # the other character: content
     ("~~~", "```", True),
     ("~~~~", "~~~~~", False),
+    ("```", "   ```", False),  # a closer may be indented up to three spaces
+    ("```", "    ```", True),  # four spaces: content, not a closer (CommonMark §4.5)
 ]
+
+#: Whether a line OPENS a fence, pinned to CommonMark §4.5 (review of PR #54): at most three
+#: spaces of indentation (four make it an indented code block), and a backtick opener's info
+#: string may not itself contain a backtick. Each case is ``(line, opens a fence)``.
+FENCE_OPENS = [
+    ("```", True),
+    ("~~~", True),
+    ("   ```text", True),
+    ("   ~~~", True),
+    ("    ~~~", False),  # four spaces: an indented code block
+    ("    ```", False),
+    ("\t```", False),  # a tab indents to column four
+    ("``", False),  # two is not a fence
+    ("``` a`b", False),  # a backtick in a backtick fence's info string: inline code
+    ("~~~ a`b", True),  # a tilde fence's info string may hold a backtick
+]
+
+
+@pytest.mark.parametrize(("line", "opens"), FENCE_OPENS)
+def test_a_fence_opens_only_where_commonmark_opens_one(line: str, opens: bool) -> None:
+    lines = list(cc._lines_with_fences(f"{line}\n| 7 | example |\n"))
+    assert lines[1][2] is opens, line
+
+
+def test_an_indented_fence_marker_does_not_hide_a_real_action(tree: Path) -> None:
+    """A four-space-indented ``~~~`` is an indented code block, not a fence: the numbered row
+    after it is a real action and must still need its record (review of PR #54)."""
+    indented = REVIEW.replace(
+        "| 2 | Rotate the token. | security | operator |\n",
+        "    ~~~\n| 2 | Rotate the token. | security | operator |\n",
+    )
+    assert [n for n, _ in cc.review_actions(indented)] == [1, 2]
+    _review_tree(tree, "| DL-002 | `2026-09-13-friend` action #1: closed. |\n")
+    _write(tree, "docs/reviews/2026-09-13-friend.md", indented)
+    assert [f.reason for f in cc.check_review_actions(tree)] == ["review action #2 has no record"]
 
 
 @pytest.mark.parametrize(("opener", "inner", "fenced"), FENCE_CLOSES)
@@ -405,6 +447,35 @@ def test_a_fence_closes_only_on_a_commonmark_closing_fence(
 ) -> None:
     lines = list(cc._lines_with_fences(f"{opener}markdown\n{inner}\n| 7 | example |\n"))
     assert lines[2][2] is fenced, (opener, inner)
+
+
+#: The reference reader for the differential test below: CommonMark itself, not our reading
+#: of it. The tables above pin the cases a review found; this pins the rule, so the next
+#: divergence is found by the test rather than by a reviewer (review of PR #54, which found
+#: three fence divergences in turn: the closer's character, its info string, its indent).
+_INDENTS = st.sampled_from(["", " ", "  ", "   ", "    ", "     ", "\t"])
+_RUNS = st.sampled_from(["``", "```", "````", "`````", "~~", "~~~", "~~~~"])
+_INFOS = st.sampled_from(["", " ", "   ", "text", " text", " a`b"])
+_FENCE_LINES = st.builds(lambda i, r, f: i + r + f, _INDENTS, _RUNS, _INFOS)
+_OTHER_LINES = st.sampled_from(["", "prose", "| 7 | example |"])
+
+
+def _commonmark_fenced(text: str) -> list[bool]:
+    """Which lines a CommonMark parser puts inside a fenced code block, delimiters included."""
+    fenced = [False] * len(text.splitlines())
+    for token in MarkdownIt("commonmark").parse(text):
+        if token.type == "fence" and token.map:
+            for i in range(token.map[0], min(token.map[1], len(fenced))):
+                fenced[i] = True
+    return fenced
+
+
+@settings(max_examples=500, deadline=None, derandomize=True)
+@given(st.lists(st.one_of(_FENCE_LINES, _OTHER_LINES), min_size=1, max_size=10))
+def test_the_fence_reader_agrees_with_commonmark_line_for_line(lines: list[str]) -> None:
+    text = "\n".join(lines) + "\n"
+    ours = [fenced for _, _, fenced in cc._lines_with_fences(text)]
+    assert ours == _commonmark_fenced(text), lines
 
 
 def test_a_fence_line_with_an_info_string_keeps_the_example_rows_out(tree: Path) -> None:

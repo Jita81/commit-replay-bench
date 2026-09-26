@@ -51,6 +51,8 @@ dev = [
   "mypy>=1.11",
   "import-linter>=2.0",
   "hypothesis>=6.100",
+  # the CommonMark reference the claims gate's fence reader is tested against
+  "markdown-it-py>=3.0",
 ]
 all = ["commit-replay-bench[openai,claude,server,postgres,mcp,dev]"]
 
