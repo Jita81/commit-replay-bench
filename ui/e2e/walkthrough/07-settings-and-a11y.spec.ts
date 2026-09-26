@@ -32,7 +32,7 @@
  *               state the later specs expect.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/e2e/walkthrough/support.ts (`personaPassword`, `field`, `env`),
+ * Works with:   ui/e2e/walkthrough/support.ts (`personaPassword`, `field`, `env`, `settled`),
  *               ui/src/screens/Settings/SettingsPage.tsx,
  *               ui/src/screens/Settings/ClaudeCodeLoginCard.tsx,
  *               ui/src/screens/Settings/UsersCard.tsx and
@@ -46,7 +46,7 @@
  */
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
-import { env, expect, field, personaPassword, primary, test } from './support'
+import { env, expect, field, personaPassword, primary, settled, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -57,6 +57,7 @@ const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 const APPROVER = 'walk-approver'
 
 async function axeClean(page: Page, where: string): Promise<void> {
+  await settled(page) // read the settled colours, not a transition's middle frame (P-055)
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
   expect(results.violations, `${where}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([])
 }

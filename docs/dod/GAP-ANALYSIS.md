@@ -297,7 +297,7 @@ One row per gap: the change, and how much of the tree it closes.
 
 ## Our own bugs — the prevention register
 
-**54 registered · 49 closed (construction 9, gate 40) · 5 pending.** A defect is closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.
+**55 registered · 49 closed (construction 9, gate 40) · 6 pending.** A defect is closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.
 
 | id | bug | level | gap | what is missing |
 |---|---|---|---|---|
@@ -306,6 +306,7 @@ One row per gap: the change, and how much of the tree it closes.
 | P-045 | In the Helm chart the API serves kept patches and retained transcripts from its own `CRB_HOME` (an `emptyDir`), while the worker writes them to its claim, so `/grades/{hash}/patch` and `/transcript` cannot find them on Kubernetes | advisory | G-706 | the Helm API cannot read the kept patches and transcripts the worker writes (P-045) · share the evidence and transcripts directories between the API and the worker pods the way `secretsStore` shares the secrets directory, with a chart test like tests/test_deploy_secrets_store.py · deploy |
 | P-050 | The worker does not check a run's builder credential when it claims the run, so a credential that is gone by then (a restore without the secrets store, a token removed in Settings) is found only by the run's failed attempts | advisory | G-707 | the worker does not re-check a run's builder credential when it claims the run (P-050) · run `credential_refusal`'s check when the worker claims a build run, and hold or fail the run with the submit check's reason before any attempt, with a worker test for a run whose credential went after it was queued · server |
 | P-053 | `append_system_event` reads the trace's last `seq` and inserts the next one in two statements, so two requests writing to one trace at once break the unique `(trace_id, seq)` and one of them answers a 500. Sign-in now retries (DL-071); every other system event (repository, sign-off, review and account changes) still races | gate | G-987 | `append_system_event` races on the trace's `seq` for every system event but sign-in (P-053) · take the next `seq` and insert in one retrying helper that every caller uses (or a per-trace lock), with a test that stages the conflict for a non-sign-in event · server |
+| P-055 | The tier-1 walkthrough failed three runs in four on a colour-contrast violation on `/connect/<repo>` that no person sees: the Baseline button turns from outlined to filled when the walk's data lands, it carries `transition-colors`, and the axe sweep read a frame in the middle of the transition (3.7:1). A sweep that reads a moving page is a flaky gate, and a flaky gate gets retried until it passes | gate | G-988 | two walkthrough axe sweeps still read the page before its transitions finish (P-055): `11-screens.spec.ts` and `repo-config.spec.ts`, owned by other streams · call `await settled(page)` before each `.analyze()` and remove the spec from `UNSETTLED` in tests/test_walkthrough_axe_settles.py · ui |
 
 ## Every open criterion, ranked
 

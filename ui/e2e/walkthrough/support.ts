@@ -23,7 +23,7 @@
  * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
  *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
  *               `signIn`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
- *               `expectLogAction`, `stackHealth`.
+ *               `expectLogAction`, `stackHealth`, `settled` (before an axe sweep).
  * What it does: Makes every spec drive a REAL stack through the UI only — sign-in through the
  *               form (never cookie injection), runs queued through the dialog, completion
  *               awaited by watching the status pill the page itself polls (never a fixed
@@ -298,6 +298,20 @@ export function liveLog(page: Page): Locator {
 
 export async function expectLogAction(page: Page, action: string): Promise<void> {
   await expect(liveLog(page).getByText(action, { exact: true }).first(), `live log should show ${action}`).toBeVisible()
+}
+
+/**
+ * Resolve once every finite CSS transition and animation on the page has finished, so an axe
+ * sweep reads the colours a person sees, not a frame in between. A button that turns from
+ * outlined to filled when its data lands (`transition-colors`) read as a 3.7:1 contrast failure
+ * when axe caught it mid-transition (docs/PREVENTION.md P-055). Infinite animations (a
+ * spinner) are skipped: they never finish, and their colours do not change.
+ */
+export async function settled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const finite = document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+    await Promise.all(finite.map((a) => a.finished.catch(() => undefined)))
+  })
 }
 
 export interface StartRunOptions {

@@ -31,7 +31,7 @@
  */
 import AxeBuilder from '@axe-core/playwright'
 import type { Browser } from '@playwright/test'
-import { env, expect, field, personaPassword, test } from './support'
+import { env, expect, field, personaPassword, settled, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -142,6 +142,7 @@ test.describe('13 recover an account', () => {
       await field(device.page, 'Password').fill('not-the-password-at-all')
       await device.page.getByRole('button', { name: 'Sign in', exact: true }).click()
       await expect(device.page.getByTestId('login-next-step')).toBeVisible()
+      await settled(device.page)
       const results = await new AxeBuilder({ page: device.page }).withTags(TAGS).analyze()
       expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([])
     } finally {
