@@ -379,12 +379,15 @@ def _generic(expr: ast.expr) -> bool:
 
 def _let_off(tree: ast.AST) -> frozenset[str]:
     """The ``_NOT_A_WORKSPACE`` spellings this file cannot have repointed: a dotted one as
-    listed, a bare name only when nothing in the file binds it but ``from … import`` (a
-    parameter, an assignment, ``import … as``, a ``def`` or ``class`` of that name each
-    make it whatever the file says it is)."""
+    listed, a bare name only when nothing in the file binds it but ``from … import`` of
+    that name under its own spelling (a parameter, an assignment, ``import … as``, a
+    ``def`` or ``class`` of that name, or ``from … import Workspace as <name>`` — any
+    rename — each make it whatever the file says it is; PR #53 review, fifth round)."""
     bound: set[str] = set()
     for n in ast.walk(tree):
-        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+        if isinstance(n, ast.ImportFrom):
+            bound.update(a.asname for a in n.names if a.asname and a.asname != a.name)
+        elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
             bound.add(n.id)
         elif isinstance(n, ast.arg):
             bound.add(n.arg)
