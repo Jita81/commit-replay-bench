@@ -22,10 +22,12 @@ What it does: Pins that ``pyproject.toml``, ``crb.core.version.__version__`` and
               ``semver_of(__version__)``, that ``release.yml``'s tag rule would accept
               ``v<version>``, that ``APPARATUS_VERSION`` is deliberately independent of it,
               that the CHANGELOG has a dated header for the current version, and that the gate
-              tools (mypy, ruff) are pinned exactly with Dependabot moving them and local
-              coverage output is ignored — a gate's verdict must not drift with the day the
-              environment was resolved.
-How:          Reads the files as text / TOML; no subprocess. ``semver_of`` is the one rule.
+              tools (mypy, ruff) are pinned exactly with Dependabot moving them, that local
+              coverage output is ignored, and that CONTRIBUTING's gate commands are the ones
+              CI runs — a gate's verdict must not drift with the day the environment was
+              resolved, nor with where it is run.
+How:          Reads the files as text / TOML (ci.yml's ``run:`` steps split into shell words);
+              no subprocess. ``semver_of`` is the one rule.
 Layer:        tests — docs/ARCHITECTURE.md#74-versioning
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/core/version.py (the source of truth), deploy/helm/crb/Chart.yaml
@@ -33,7 +35,8 @@ Works with:   src/crb/core/version.py (the source of truth), deploy/helm/crb/Cha
               docs/RELEASING.md (§1 — the numbers, and this suite as the check),
               docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp — why the two versions
               differ, §4), .github/dependabot.yml (the ``dev-tooling`` group that bumps the
-              gate tools)
+              gate tools), docs/CONTRIBUTING.md and .github/workflows/ci.yml (the documented
+              gate commands and the ones CI runs)
 Tested by:    tests/test_version_consistency.py
 Touch when:   releasing (bump all four and the CHANGELOG together — this suite is the
               checklist); never tie ``APPARATUS_VERSION`` to the package version.
@@ -43,6 +46,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shlex
 import sys
 import tomllib
 from pathlib import Path
@@ -56,6 +60,8 @@ PYPROJECT = ROOT / "pyproject.toml"
 CHART = ROOT / "deploy" / "helm" / "crb" / "Chart.yaml"
 CHANGELOG = ROOT / "CHANGELOG.md"
 RELEASE = ROOT / ".github" / "workflows" / "release.yml"
+CI = ROOT / ".github" / "workflows" / "ci.yml"
+CONTRIBUTING = ROOT / "docs" / "CONTRIBUTING.md"
 
 _SPEC = importlib.util.spec_from_file_location(
     "check_release_tag", ROOT / "scripts" / "check_release_tag.py"
@@ -179,3 +185,63 @@ def test_local_coverage_output_is_ignored() -> None:
     same command must not leave them untracked in every clone."""
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert ".coverage" in ignored and "coverage.xml" in ignored
+
+
+def _ci_commands() -> list[list[str]]:
+    """Every command a ``run:`` step of ci.yml runs, as shell words: a folded block (``>-``)
+    is one command, a literal block (``|``) is one command per line."""
+    lines = CI.read_text(encoding="utf-8").splitlines()
+    commands: list[str] = []
+    for i, line in enumerate(lines):
+        m = re.match(r"^(\s*)(?:- )?run:\s*(.*)$", line)
+        if not m:
+            continue
+        indent, rest = len(m.group(1)), m.group(2).strip()
+        if rest and rest[0] not in "|>":
+            commands.append(rest)
+            continue
+        body: list[str] = []
+        for following in lines[i + 1 :]:
+            if following.strip() and len(following) - len(following.lstrip()) <= indent:
+                break
+            body.append(following.strip())
+        if rest.startswith(">"):
+            commands.append(" ".join(b for b in body if b))
+        else:
+            commands.extend(b for b in body if b)
+    words: list[list[str]] = []
+    for command in commands:
+        try:
+            words.append(shlex.split(command, comments=True))
+        except ValueError:  # a shell fragment shlex cannot read is no gate command
+            continue
+    return words
+
+
+def _documented_gates() -> list[list[str]]:
+    """The commands in CONTRIBUTING's "The gates" block, as shell words."""
+    section = CONTRIBUTING.read_text(encoding="utf-8").split("## The gates", 1)[1]
+    block = re.search(r"```bash\n(.*?)```", section, re.S)
+    assert block, 'CONTRIBUTING "The gates" has no bash block'
+    return [shlex.split(line, comments=True) for line in block.group(1).splitlines() if line]
+
+
+def _verdict_words(words: list[str]) -> list[str]:
+    """A command without its report-only options: ``--cov-report`` changes what is printed,
+    never whether the gate passes."""
+    return [w for w in words if not w.startswith("--cov-report")]
+
+
+def test_the_documented_gate_commands_are_the_ones_ci_runs() -> None:
+    """CONTRIBUTING tells a contributor that its gate block is what CI runs. The local
+    ``pytest`` line once left out ``--cov-branch``, so it measured line coverage where CI
+    measures branch coverage and could pass the 70% floor locally and fail it in CI (PR #51
+    review). Each documented command must be one CI runs, word for word, apart from
+    report-only options."""
+    ci = [_verdict_words(c) for c in _ci_commands()]
+    documented = _documented_gates()
+    assert documented, 'CONTRIBUTING "The gates" block is empty'
+    for command in documented:
+        assert _verdict_words(command) in ci, (
+            f"CONTRIBUTING documents {shlex.join(command)!r}, which no CI step runs"
+        )
