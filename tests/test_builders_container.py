@@ -39,8 +39,9 @@ What it does: Pins that a ``SealedCheckout`` holds exactly one reachable commit 
 How:          ``SealedCheckout`` on a ``pyrepo`` trial; a local HTTP upstream + the proxy on
               ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``;
               ``os.getuid`` / ``os.getgid`` monkeypatched to 0 after pytest's base temporary
-              directory exists; an ``ast`` walk of tests/ for the ratchet, which resolves a
-              pin's receiver through the file's imports to decide it is the ``os`` module.
+              directory exists; an ``ast`` walk of tests/ for the ratchet, which looks a
+              pin's receiver up in the scopes the pin runs in (its function, the functions
+              that enclose it, the module) to decide it is the ``os`` module.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
@@ -446,40 +447,102 @@ def _resolve(dotted: str) -> object:
     return _UNRESOLVED
 
 
-def _imports(tree: ast.AST) -> dict[str, str]:
-    """Each name an ``import`` binds in a file, mapped to the dotted module path it names:
+_Scope = tuple[dict[str, str], set[str], set[str]]
+"""One scope's names: those an ``import`` binds, mapped to the dotted module path it names;
+those bound any other way; and those the scope declares ``global``."""
+
+
+def _scope(owner: ast.AST) -> _Scope:
+    """The names ``owner`` — a module or a function — binds in its own scope, as Python decides
+    them: anywhere in its own body, not in a function, lambda or class defined in it.
     ``import os as system`` → ``system: os``, ``from crb.builders import container`` →
-    ``container: crb.builders.container``, ``import crb.builders`` → ``crb: crb``."""
-    bound: dict[str, str] = {}
-    for node in ast.walk(tree):
+    ``container: crb.builders.container``, ``import crb.builders`` → ``crb: crb``. A parameter,
+    an assignment (plain, annotated, augmented, walrus, ``for``, ``with … as``, ``del``), an
+    ``except … as``, a ``match`` capture, a relative import, a nested ``def`` or ``class`` of
+    the name, or two imports of it naming different modules, binds it to something other than
+    a module this file can resolve. A comprehension's own variable counts as the function's —
+    the safe side: it can only hide a pin, never invent one."""
+    imports: dict[str, str] = {}
+    other: set[str] = set()
+    declared_global: set[str] = set()
+
+    def bind_import(name: str, path: str) -> None:
+        if imports.setdefault(name, path) != path:
+            other.add(name)
+
+    for node in _own_body(owner):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.asname:
-                    bound[alias.asname] = alias.name
+                    bind_import(alias.asname, alias.name)
                 else:
                     root = alias.name.split(".")[0]
-                    bound[root] = root
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                    bind_import(root, root)
+        elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
-                bound[alias.asname or alias.name] = f"{node.module}.{alias.name}"
-    return bound
+                name = alias.asname or alias.name
+                if node.module and not node.level:
+                    bind_import(name, f"{node.module}.{alias.name}")
+                else:
+                    other.add(name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            other.add(node.id)
+        elif isinstance(node, ast.arg):
+            other.add(node.arg)
+        elif (
+            isinstance(
+                node,
+                ast.FunctionDef
+                | ast.AsyncFunctionDef
+                | ast.ClassDef
+                | ast.ExceptHandler
+                | ast.MatchAs
+                | ast.MatchStar,
+            )
+            and node.name
+        ):
+            other.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            other.add(node.rest)
+        elif isinstance(node, ast.Global):
+            declared_global.update(node.names)
+    return imports, other - declared_global, declared_global
 
 
-def _is_the_os_module(node: ast.AST, imports: dict[str, str]) -> bool:
+def _module_path(name: str, scopes: list[_Scope]) -> str | None:
+    """The dotted module path ``name`` names where a statement runs, or None when it names
+    anything else. ``scopes`` runs from the statement's own function outwards through the
+    functions that enclose it to the module, as Python looks a name up (a class body is not
+    a scope its methods see). The first scope that binds the name decides; ``global`` sends
+    the lookup to the module."""
+    for i, (imports, other, declared_global) in enumerate(scopes):
+        if name in declared_global and i < len(scopes) - 1:
+            return _module_path(name, scopes[-1:])
+        if name in other:
+            return None
+        if name in imports:
+            return imports[name]
+    return None
+
+
+def _is_the_os_module(node: ast.AST, scopes: list[_Scope]) -> bool:
     """True when ``node`` — a name or an attribute chain on one — is the ``os`` module the
-    settings read ``getuid`` from, judged by what the file imports, not by spelling: ``os``,
-    an alias of it (``import os as system``) or a module's ``os`` (``container.os``) are;
-    ``Fake.os`` on a class the test defines is not."""
+    settings read ``getuid`` from, judged by what the name is bound to in the scope the
+    statement runs in, never by its spelling: ``os``, an alias of it (``import os as system``)
+    or a module's ``os`` (``container.os``) are; ``Fake.os`` on a class the test defines is
+    not, and nor is a parameter, local or module-level variable called ``os`` that hides the
+    imported module."""
     attrs: list[str] = []
     while isinstance(node, ast.Attribute):
         attrs.insert(0, node.attr)
         node = node.value
-    if not isinstance(node, ast.Name) or node.id not in imports:
+    if not isinstance(node, ast.Name):
         return False
-    return _resolve(".".join([imports[node.id], *attrs])) is os
+    path = _module_path(node.id, scopes)
+    return path is not None and _resolve(".".join([path, *attrs])) is os
 
 
-def _pins_the_uid(node: ast.AST, imports: dict[str, str]) -> bool:
+def _pins_the_uid(node: ast.AST, scopes: list[_Scope]) -> bool:
     """True for a ``setattr`` call (``monkeypatch.setattr`` or the builtin) that replaces
     ``os.getuid``: on the ``os`` module by attribute name (``setattr(os, "getuid", …)``, also
     through an alias or a module's ``.os``) or by a dotted target whose object before
@@ -501,7 +564,7 @@ def _pins_the_uid(node: ast.AST, imports: dict[str, str]) -> bool:
     return (
         isinstance(second, ast.Constant)
         and second.value == "getuid"
-        and _is_the_os_module(first, imports)
+        and _is_the_os_module(first, scopes)
     )
 
 
@@ -519,7 +582,7 @@ def _own_body(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
 
 
 def _top_level_pins(
-    fn: ast.FunctionDef | ast.AsyncFunctionDef, imports: dict[str, str]
+    fn: ast.FunctionDef | ast.AsyncFunctionDef, scopes: list[_Scope]
 ) -> list[ast.AST]:
     """The pins that are statements of ``fn``'s own body at its top level. A pin nested in a
     ``with``, ``if``, ``try`` or loop may never run (``if False:``) or may be undone when the
@@ -527,7 +590,7 @@ def _top_level_pins(
     return [
         stmt.value
         for stmt in fn.body
-        if isinstance(stmt, ast.Expr) and _pins_the_uid(stmt.value, imports)
+        if isinstance(stmt, ast.Expr) and _pins_the_uid(stmt.value, scopes)
     ]
 
 
@@ -560,25 +623,33 @@ def _settings_on_the_hosts_uid(path: Path) -> set[str]:
     in a nested helper, or is nested in a ``with``, ``if``, ``try`` or loop: such a pin may
     never run, or may be undone when its block ends. A function that only reads
     ``os.getuid()``, names it in a string, or sets ``getuid`` on some other object pins
-    nothing. Whether a receiver is the ``os`` module is decided by what the file imports and
-    what the name resolves to, never by its spelling: ``Fake.os`` is not ``os``, and an alias
-    (``import os as system``) is. Known limits, all on the safe side: a construction inside the same
-    ``with monkeypatch.context()`` block as its pin is reported although it is pinned, and
-    a construction inside a loop is judged by its place in the source, not by the order the
-    loop runs it in.
+    nothing. Whether a receiver is the ``os`` module is decided by what its name is bound to
+    in the scope the pin runs in, as Python looks it up, never by its spelling: ``Fake.os`` is
+    not ``os``, nor is a parameter, local or module-level variable called ``os``; an alias
+    (``import os as system``) is. Known limits, all on the safe side: a construction inside
+    the same ``with monkeypatch.context()`` block as its pin is reported although it is
+    pinned, a construction inside a loop is judged by its place in the source, not by the
+    order the loop runs it in, and a comprehension variable called ``os`` hides the module
+    for the whole function.
     """
     found: set[str] = set()
     rel = path.relative_to(TESTS_DIR.parent).as_posix()
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    imports = _imports(tree)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
+        scopes = [_scope(fn)]
+        outer = parents.get(fn)
+        while outer is not None:
+            if isinstance(outer, ast.FunctionDef | ast.AsyncFunctionDef | ast.Module):
+                scopes.append(_scope(outer))
+            outer = parents.get(outer)
         nodes = list(ast.walk(fn))
         strings = {
             n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)
         }
-        pins = [_at(n) for n in _top_level_pins(fn, imports)]
+        pins = [_at(n) for n in _top_level_pins(fn, scopes)]
         undos = [_at(n) for n in _own_body(fn) if _undoes(n)]
 
         def pinned_before(
