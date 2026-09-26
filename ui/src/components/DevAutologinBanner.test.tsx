@@ -12,7 +12,10 @@
  *               signed in through `POST /auth/dev-autologin` and lands on the screen, never on
  *               the form; that nothing is posted when the setting is off; and that after
  *               Sign out the same page load shows the sign-in form instead of signing straight
- *               back in.
+ *               back in; that an open page's banner follows an API restarted with the setting
+ *               changed; that the sign-in page shows a status, not the form, until the
+ *               automatic sign-in settles; and that only a 403/404 from the POST (or a failed
+ *               `/version`) reads as "no session" — a 5xx or an unreachable API is shown.
  * How:          `mockApi` routes for `/auth/me`, `/version`, `/health` and the autologin POST;
  *               the shell as a layout route and the login page on `/login`; `resetDevAutologin`
  *               between tests stands in for a fresh page load.
@@ -23,11 +26,12 @@
  *               ui/src/screens/Login/LoginPage.tsx, ui/src/help/hints.ts
  *               (`banner.shell.dev_autologin`)
  * Tested by:    ui/src/components/DevAutologinBanner.test.tsx
- * Touch when:   the banner's sentence changes (docs/OPERATOR.md quotes it) or the conditions
- *               under which the UI asks for an automatic sign-in change.
+ * Touch when:   never for a new repository (nothing here reads a client repository); when the
+ *               banner's sentence changes (docs/OPERATOR.md quotes it) or the conditions under
+ *               which the UI asks for an automatic sign-in change.
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -97,6 +101,40 @@ describe('the automatic sign-in banner', () => {
   })
 })
 
+describe('the banner follows the stack, not the page load', () => {
+  // PR #58 review: `/version` was cached for ever, so an API restarted with the setting
+  // switched on (or off) left an open page showing the old answer until a reload.
+  afterEach(() => focusManager.setFocused(undefined))
+
+  it('appears on an open page when the API comes back with automatic sign-in on', async () => {
+    let on = false
+    mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /version': () => new Response(JSON.stringify(on ? VERSION_ON : VERSION_OFF), { status: 200, headers: { 'Content-Type': 'application/json' } }), 'GET /health': HEALTH, 'GET /repos': { items: [] } })
+    renderApp('/results')
+    await screen.findByRole('heading', { name: 'Baseline' })
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toBeInTheDocument())
+    expect(screen.queryByTestId('dev-autologin-banner')).toBeNull()
+    on = true // the API restarted with CRB_AUTH__DEV_AUTOLOGIN set
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true) // the person comes back to the tab
+    })
+    expect(await screen.findByTestId('dev-autologin-banner')).toHaveTextContent(DEV_AUTOLOGIN_SENTENCE)
+  })
+
+  it('goes away on an open page when the API comes back with it off', async () => {
+    let on = true
+    mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /version': () => new Response(JSON.stringify(on ? VERSION_ON : VERSION_OFF), { status: 200, headers: { 'Content-Type': 'application/json' } }), 'GET /health': HEALTH, 'GET /repos': { items: [] } })
+    renderApp('/results')
+    await screen.findByTestId('dev-autologin-banner')
+    on = false
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+    await waitFor(() => expect(screen.queryByTestId('dev-autologin-banner')).toBeNull())
+  })
+})
+
 describe('the automatic sign-in', () => {
   it('a visitor with no session is signed in and lands on the screen, never the form', async () => {
     let signedIn = false
@@ -147,6 +185,69 @@ describe('the automatic sign-in', () => {
       expect(screen.getByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
       expect(screen.getByTestId('dev-autologin-banner')).toBeInTheDocument()
     })
+    expect(calls.some((c) => c.path === '/auth/dev-autologin')).toBe(false)
+  })
+})
+
+describe('while the automatic sign-in settles', () => {
+  it('the sign-in page shows a status, never the form, until it has', async () => {
+    let answer: (r: Response) => void = () => undefined
+    mockApi({
+      'GET /auth/me': () => envelope(401, 'unauthenticated', 'no session'),
+      'GET /version': VERSION_ON,
+      'GET /health': HEALTH,
+      'GET /repos': { items: [] },
+      'POST /auth/dev-autologin': () => new Promise<Response>((resolve) => (answer = resolve)),
+    })
+    renderApp('/login')
+    expect(await screen.findByText('Checking your session…')).toBeInTheDocument()
+    await screen.findByTestId('dev-autologin-banner')
+    expect(screen.queryByRole('form', { name: 'Local account sign in' })).toBeNull()
+    answer(new Response(JSON.stringify(PRINCIPAL), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Local account sign in' })).toBeNull()
+  })
+})
+
+describe('an automatic sign-in that fails is not a refusal', () => {
+  // PR #58 review: every ApiError from the POST became "no session", so a 500 or an
+  // unreachable API showed the plain form with nothing wrong on it.
+  const ROUTES = { 'GET /auth/me': () => envelope(401, 'unauthenticated', 'no session'), 'GET /version': VERSION_ON }
+
+  it('a server error from the POST is shown on the sign-in page', async () => {
+    mockApi({ ...ROUTES, 'POST /auth/dev-autologin': () => envelope(500, 'internal', 'boom') })
+    renderApp('/login')
+    expect(await screen.findByText('Could not check your session')).toBeInTheDocument()
+    expect(screen.getByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
+  })
+
+  it('an unreachable API during the POST is shown on the sign-in page', async () => {
+    const { fetchMock } = mockApi(ROUTES)
+    const inner = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET').toUpperCase() === 'POST') throw new TypeError('Failed to fetch')
+      return inner(input, init)
+    })
+    renderApp('/login')
+    expect(await screen.findByText('Could not check your session')).toBeInTheDocument()
+  })
+
+  it.each([
+    [403, 'dev_autologin_unavailable'],
+    [404, 'dev_autologin_off'],
+  ])('a %s refusal is "no session": the form, with no error', async (status, code) => {
+    mockApi({ ...ROUTES, 'POST /auth/dev-autologin': () => envelope(status, code, 'refused') })
+    renderApp('/login')
+    expect(await screen.findByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
+    expect(screen.queryByText('Could not check your session')).toBeNull()
+  })
+
+  it('a failed /version is "no session" too; the page reports it on its own line', async () => {
+    const { calls } = mockApi({ 'GET /auth/me': () => envelope(401, 'unauthenticated', 'no session'), 'GET /version': () => envelope(500, 'internal', 'boom') })
+    renderApp('/login')
+    expect(await screen.findByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
+    expect(await screen.findByText('Could not check for an organisation sign-in')).toBeInTheDocument()
+    expect(screen.queryByText('Could not check your session')).toBeNull()
     expect(calls.some((c) => c.path === '/auth/dev-autologin')).toBe(false)
   })
 })
