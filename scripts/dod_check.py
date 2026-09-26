@@ -20,9 +20,11 @@ without a resolvable evidence reference, ``partial``/``unmet`` without a gap id,
 defined nowhere, or an ``F-``/``B-`` id that is in no row of the backlog reviews; a gap
 line that does not read "what is missing · the smallest change that closes it · owner", or
 whose owner is not one of ui/server/factory/docs/deploy; the same gap id carrying two
-different lines in two files (one id is one piece of work); an evidence reference that does
-not resolve; and a ``GAP-ANALYSIS.md`` or a ``status:`` line that differs from what the
-artefacts generate. It never edits a criterion.
+different lines in two files (one id is one piece of work); a gap line that no criterion of
+its file cites (or, in the register, no pending row); a ``PLAN.md`` wave item that is not a
+gap id the record defines or has retired; an evidence reference that does not resolve; and a
+``GAP-ANALYSIS.md`` or a ``status:`` line that differs from what the artefacts generate. It
+never edits a criterion.
 
 Navigation
 ----------
@@ -33,8 +35,9 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               (tests, vitest titles, walkthrough specs, hint registry and ratchet, API routes,
               code symbols, doc anchors, CI jobs, ADRs, decision-log rows), computes the
               four-level roll-up and writes docs/dod/GAP-ANALYSIS.md (the order of work, the
-              gaps by fan-out, and every open criterion); --check exits non-zero on any defect
-              or drift.
+              gaps by fan-out, the gap ids retired, and every open criterion); refuses a gap
+              line nothing cites and a PLAN.md wave item that is not a gap; --check exits
+              non-zero on any defect or drift.
 How:          Walk docs/dod/{pages,journeys,streams}/*.md + product.md → parse front matter
               and the criteria table → resolve evidence (one resolver per prefix) → demote
               ``met`` with no resolving reference → roll up child → parent → render.
@@ -45,7 +48,8 @@ Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYS
               a gap may cite), ui/src/App.tsx (the routes every page artefact must cover),
               ui/src/components/Layout.tsx (JOURNEY_STEPS), ui/src/help/hints.ts and
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
-              .github/workflows/ci.yml (the dod job that runs --check)
+              .github/workflows/ci.yml (the dod job that runs --check), docs/dod/PLAN.md
+              (its wave items must be gap ids)
 Tested by:    tests/test_dod_check.py
 Touch when:   a level or category is added to the standard (update CATEGORIES / LEVELS and the
               standard together); a new evidence prefix is needed (add a resolver and a row to
@@ -74,6 +78,7 @@ DECISION_LOG = ROOT / "docs" / "DECISION-LOG.md"
 BACKLOG = ROOT / "docs" / "reviews" / "2026-09-17-enterprise-front-end.md"
 ADR_DIR = ROOT / "docs" / "adr"
 PREVENTION = ROOT / "docs" / "PREVENTION.md"
+PLAN = DOD / "PLAN.md"
 
 LEVELS: tuple[str, ...] = ("page", "journey", "stream", "product")
 LEVEL_DIR: dict[str, str] = {"page": "pages", "journey": "journeys", "stream": "streams"}
@@ -759,6 +764,14 @@ def validate(arts: list[Artefact]) -> list[str]:
                 f"{a.rel}: the product's VALUE criteria come first — move them to the top "
                 "of the table (STANDARD.md §4)"
             )
+        cited = {c.gap for c in a.criteria}
+        for gid in a.gaps:
+            if gid not in cited:
+                errors.append(
+                    f"{a.rel}: gap {gid} is defined but no criterion in this file cites it — "
+                    "delete the line if its work is closed, or cite it from the criterion it "
+                    "blocks (a line nothing cites never reaches the order of work)"
+                )
         for c in a.criteria:
             where = f"{a.rel}:{c.line}"
             if not _ID_RE.match(c.id):
@@ -823,6 +836,103 @@ def roll_up(arts: list[Artefact]) -> None:
         a.status = "done" if own and kids_done else "partial"
 
 
+# ------------------------------------------------------------------ the plan and retired ids
+
+_ANY_GAP_ID = re.compile(r"\bG-\d{3}\b|\bF\d+[a-z]?\b|\bB-\d+[a-z]?\b")
+RETIRED_HEAD = "## Gap ids retired"
+_FANOUT_HEAD = "## Open gaps by fan-out"
+_REGISTER_HEAD = "## Our own bugs"
+
+
+def _gap_key(gid: str) -> tuple[str, int, str]:
+    digits = re.sub(r"\D", "", gid)
+    return (gid[0], int(digits) if digits else 0, gid)
+
+
+def previous_ids(text: str) -> tuple[set[str], set[str]]:
+    """(the ids the previous gap analysis carried as open work, the ids it had retired).
+
+    Open work is the first cell of each *Open gaps by fan-out* row and the gap cell of each
+    pending register row — ids the checker itself validated when it wrote them, so a typo can
+    never reach this list. The retired list is read back from its own section.
+    """
+    open_ids: set[str] = set()
+    retired: set[str] = set()
+    section = ""
+    for line in text.split("\n"):
+        s = line.strip()
+        if s.startswith("## "):
+            section = s
+            continue
+        if section.startswith(RETIRED_HEAD):
+            retired.update(_ANY_GAP_ID.findall(s))
+            continue
+        if not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if section.startswith(_FANOUT_HEAD) and cells and _GAP_RE.match(cells[0]):
+            open_ids.add(cells[0])
+        elif section.startswith(_REGISTER_HEAD) and len(cells) > 3 and _GAP_RE.match(cells[3]):
+            open_ids.add(cells[3])
+    return open_ids, retired
+
+
+def retired_ids(previous: str, defined: set[str]) -> list[str]:
+    """Every id the order of work once carried that nothing defines any more — closed, or
+    merged into another id. It only grows (an id defined again leaves it), so a wave that
+    closes a gap never breaks the plan that named it."""
+    open_ids, retired = previous_ids(previous)
+    return sorted((open_ids | retired) - defined, key=_gap_key)
+
+
+def plan_items(path: Path) -> tuple[list[tuple[int, str]], list[str]]:
+    """``(line, id)`` for every wave item in PLAN.md: each id in the ``gaps`` column of any
+    table that has one. A cell holds gap ids separated by commas and nothing else — the
+    plan batches the order of work; it does not restate it."""
+    if not path.is_file():
+        return [], [
+            "docs/dod/PLAN.md is missing — the batching of the order of work (STANDARD.md §6)"
+        ]
+    items: list[tuple[int, str]] = []
+    errors: list[str] = []
+    col: int | None = None
+    tables = 0
+    for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1):
+        s = line.strip()
+        if not s.startswith("|"):
+            col = None
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if col is None:
+            low = [c.lower() for c in cells]
+            col = low.index("gaps") if "gaps" in low else -1
+            tables += col >= 0
+            continue
+        if col < 0 or all(set(c) <= {"-", ":", " "} for c in cells):
+            continue
+        cell = cells[col] if col < len(cells) else ""
+        tokens = [t.strip().strip("`") for t in cell.split(",")]
+        for tok in tokens:
+            if _GAP_RE.match(tok):
+                items.append((n, tok))
+            else:
+                errors.append(f"docs/dod/PLAN.md:{n}: a wave item is a gap id, not {tok!r}")
+    if not tables:
+        errors.append("docs/dod/PLAN.md names no wave item — no table has a 'gaps' column")
+    return items, errors
+
+
+def validate_plan(items: list[tuple[int, str]], known: set[str]) -> list[str]:
+    """PLAN.md's rule, as a gate: nothing enters a wave that is not a gap id."""
+    return [
+        f"docs/dod/PLAN.md:{n}: wave item {gid} is not a gap id defined under docs/dod, "
+        "docs/PREVENTION.md or the backlog, nor one the order of work has retired — fix the "
+        "artefact first (add the criterion and its gap), then plan it"
+        for n, gid in items
+        if gid not in known
+    ]
+
+
 # ------------------------------------------------------------------ rendering
 
 
@@ -877,6 +987,7 @@ def _rank(arts: list[Artefact]) -> list[tuple[int, int, Artefact, Criterion]]:
 def render(
     arts: list[Artefact],
     register: tuple[list[Prevention], dict[str, str]] | None = None,
+    retired: list[str] | None = None,
 ) -> str:
     by_level: dict[str, list[Artefact]] = {lvl: [] for lvl in LEVELS}
     for a in arts:
@@ -971,6 +1082,18 @@ def render(
     out.append("")
     if register is not None:
         out += render_prevention(*register)
+    if retired is not None:
+        out += [
+            RETIRED_HEAD,
+            "",
+            "Ids the order of work once carried that no artefact, register row or backlog row "
+            "defines any more: each was closed, or merged into another id. `PLAN.md` may go on "
+            "naming one; an id that was never a gap fails the check. Carried forward from the "
+            "previous gap analysis by the generator.",
+            "",
+            ", ".join(retired) if retired else "none",
+            "",
+        ]
     out += [
         "## Every open criterion, ranked",
         "",
@@ -1030,14 +1153,28 @@ def main(argv: list[str] | None = None) -> int:
     errors.extend(validate(arts))
     prevention, pgaps, perrs = parse_prevention(PREVENTION)
     errors.extend(perrs)
-    errors.extend(validate_prevention(prevention, pgaps, backlog_index()))
+    backlog = backlog_index()
+    errors.extend(validate_prevention(prevention, pgaps, backlog))
+    pending_gaps = {r.gap for r in prevention if r.status == "pending"}
+    for gid in pgaps:
+        if gid not in pending_gaps:
+            errors.append(
+                f"docs/PREVENTION.md: gap {gid} is defined but no pending row cites it — "
+                "delete the line when its row closes"
+            )
     # one gap id is one piece of work across the register AND the artefacts
     art_gaps = {gid: " ".join(t.split()) for a in arts for gid, t in a.gaps.items()}
     for gid, text in pgaps.items():
         if gid in art_gaps and art_gaps[gid] != " ".join(text.split()):
             errors.append(f"docs/PREVENTION.md: gap {gid} is defined differently in an artefact")
+    defined = {g for a in arts for g in a.gaps} | set(pgaps) | set(backlog)
+    previous = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
+    retired = retired_ids(previous, defined)
+    items, plan_errors = plan_items(PLAN)
+    errors.extend(plan_errors)
+    errors.extend(validate_plan(items, defined | set(retired)))
     roll_up(arts)
-    rendered = render(arts, (prevention, pgaps))
+    rendered = render(arts, (prevention, pgaps), retired)
     if args.check:
         errors.extend(status_drift(arts))
         if not OUT.is_file() or OUT.read_text(encoding="utf-8") != rendered:

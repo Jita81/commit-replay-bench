@@ -28,17 +28,16 @@ builder, runner, control, review probe, readiness slot and policy is a documente
 loop runs on `crb`'s own repository, and what one team learns reaches another only as
 abstract cells, never code.
 
-> Status: **2.0.0a1 on `main`, 2.0.0b1 in preparation** (apparatus **2.2**, belt set v5) — a public, Apache-2.0
+> Status: **2.0.0a1 on `main`, 2.0.0b1 in preparation** (apparatus **2.3**, belt set v5) — a public, Apache-2.0
 > repository since 2026-09-16 with **CI green on `main`** — every job in
 > [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request, and
-> branch protection requires the ten checks on its required list before anything merges;
-> every other job — `sbom`, `sandbox-images` and each gate added since, this wave's `dod`,
-> `claims`, `ui-unit` and `ui-smoke` among them — runs on every pull request but is not on
-> that list, which only
-> an administrator of the repository can change
-> **[measured 2026-09-22 — the required-checks list read once from the repository setting
-> (`gh api …/branches/main/protection`) against the workflow's job keys, n = 1 reading;
-> apparatus n/a: a repository setting, not a graded number]** — and every change since
+> branch protection requires every one of them before anything merges: 16 required checks
+> (the `test` job once per Python version, `dod`, `claims`, `ui-unit`, `ui-smoke`,
+> `sandbox-images` and `sbom` among them), with a branch required to be up to date
+> **[measured 2026-09-26 — the required-checks list read once from the repository setting
+> (`gh api …/branches/main/protection`) against the workflow's job names, n = 16 required
+> checks and 1 reading; apparatus 2.3 — a repository setting, not a graded number, so no
+> interval]** — and every change since
 > 2026-09-15 reviewed by CodeRabbit (ADR-0013). Every phase of the product plan has shipped (P0–P7: engine, oracle,
 > builders, store, server, UI, factory, deployment) plus the MCP server (P8) so Claude Code
 > can drive a deployment. `v2.0.0a1` is tagged and its image is on GHCR; `v2.0.0b1` will be

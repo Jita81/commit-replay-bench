@@ -8,7 +8,7 @@ children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: done                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Intake (work arriving from your board)

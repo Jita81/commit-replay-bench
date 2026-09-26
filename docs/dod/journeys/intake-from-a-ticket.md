@@ -8,7 +8,7 @@ children: [dod.page.factory-intake]
 persons: [operator, approver, viewer]
 owner: factory
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Take work from a ticket (ADO / Jira column → gap feedback → backlog)
@@ -70,5 +70,4 @@ separate item: this journey delivers the pull request to GitHub through the App 
 | intake-from-a-ticket.recovery.28 | RECOVERY | A busy board and a busy product do not collide: one pass per repository runs at a time under a lease row (a second pass does nothing and says `intake_busy`), a rate-limited tracker is waited out as its `Retry-After` asks within a cap before the pass stops `unreachable`, and the tracker credential is never sent to another origin | `test:tests/test_intake_service.py::test_two_overlapping_passes_register_once_because_the_pass_takes_a_lease` · `test:tests/test_server_routes_intake.py::test_a_poll_while_another_pass_holds_the_repositorys_lease_is_refused_as_busy` · `test:tests/test_intake_adapters.py::test_a_429_honours_retry_after_with_a_capped_backoff` · `test:tests/test_intake_adapters.py::test_an_absolute_url_on_another_origin_is_refused_and_never_sent_the_credential` · `adr:0022` | met | |
 
 ## Gaps
-- **G-931** — the tier-1 walkthrough stops at the queued item: no spec drives the pull-request note, the item link on the ticket or the mapped outcome transition, because reaching them needs a delivered pull request and the walkthrough spends nothing on a model. The half is proved at unit and route level (`test_a_configured_outcome_map_moves_the_ticket_after_the_merge`, `test_the_pull_request_link_reaches_the_ticket_it_came_from`) · record a merge outcome against the fake board from the tier-2 stack and assert the mapped transition and the PR link through the UI · factory
 - **G-928** — the guide says what intake does but not what it costs: no measurement exists of the minutes from column entry to feedback comment and to pull request, or of the £ per ticket · run a timed pass over a real column on the tier-2 stack, record n, method and apparatus, and put the numbers in ONBOARDING step 9 and on the intake row beside the estimate · docs

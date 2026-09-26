@@ -728,16 +728,21 @@ rate is worth a look), `histogram_quantile(0.9, rate(crb_grade_latency_seconds_b
 
 ### 9.3 Health
 
-`GET /api/v1/health` (readiness, 503 on `down`) runs seven probes — `db`, `append_only`,
-`ledger`, `sandbox` (skipped for `CRB_ROLE=api`), `toolchains`, `builders`, `worker` —
-documented in [API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface).
+`GET /api/v1/health` (readiness, 503 on `down`) runs eleven probes — `db`, `migrations`
+(the store's revision is the code's head; `down`, and so 503, when the store is behind, ahead,
+empty or unreadable — [the contract](API.md#the-migrations-probe)), `append_only`, `ledger`,
+`sandbox` (skipped for `CRB_ROLE=api`), `provision` (dependency provisioning, ADR-0019;
+skipped for `CRB_ROLE=api` and while provisioning is off), `toolchains`, `builders`,
+`worker`, `intake` and `build` (the served commits agree) — each documented in
+[API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface).
 `GET /api/v1/health/live` is the liveness probe: the process and its database, nothing else.
 
 The `worker` probe reads the `workers` table: every worker upserts its row every
 `heartbeat_s` (default 10 s) whether or not it holds a run, with the interval it promised,
 so the probe judges a worker alive when it checked in within 3 × its own `heartbeat_s`. The
-UI reads the same probe: the Home screen shows a banner when it is not `ok` and the
-Deployment page lists the workers with their last check-in.
+UI reads the same probe: the Deployment page lists the workers with their last check-in. Home
+raises a banner only for the `sandbox` probe; any other probe that is not `ok` shows as the
+one-word pill in the header, so read `/health` itself when that pill is not `ok`.
 
 ### 9.4 Logs
 

@@ -8,7 +8,7 @@ children: [dod.journey.sign-off-a-cell]
 persons: [approver, operator, viewer, admin]
 owner: server
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Decide & license — decisions inbox → sign-off → licence sentence
@@ -43,10 +43,10 @@ product does not decide; it refuses, and it never creates the second person for 
 | decide-and-license.outcome.12 | OUTCOME | The artefact of value is a hash-chained sign-off record whose fields are the licence sentence, overlaid at read so that a later false-Q1 row invalidates it and an apparatus bump makes it stale | `code:src/crb/core/signoff.py::evaluate_signoff` · `code:src/crb/core/signoff.py::apply_signoffs` · `adr:0015` | met | |
 | decide-and-license.handoff.13 | HANDOFF | The next stream starts from this one's output: a signed structural gap stops blocking readiness without being retyped, and a cell's sign-off licenses the delivery — the factory's gate reads the sign-off as well as the route, so a cell routing `deliver` with no human sign-off does not open a pull request | `test:tests/test_factory_readiness.py::test_signoff_fills_structural_gap_and_is_ledgered` · `test:tests/test_factory_loop.py::test_route_gate_withholds_delivery_when_the_cell_does_not_route_deliver` | partial | G-517 |
 | decide-and-license.measure.14 | MEASURE | The product shows this stream's own numbers: time from a cell routing `deliver` to a signature, and the reviewer minutes each decision cost | `absent` | unmet | G-925 |
-| decide-and-license.automation.15 | AUTOMATION | No step needs a person to do what the product could do: a deployment with one account can sign nothing, and the product tells the admin to invite an approver but cannot create, invite or notify that second person | `absent` | unmet | G-518 |
+| decide-and-license.automation.15 | AUTOMATION | No step needs a person to do what the product could do: an admin invites the second person who signs from inside the product — the product creates the account, sends a one-time link and shows whether it was accepted — so a deployment is never left with one account that can sign nothing | `absent` | unmet | G-518 |
 
 ## Gaps
 - **G-516** — the inbox is derived at read from three APIs: no persistence, no "due since", no assignment, no SLA and no notification, so a decision exists only while someone has the page open · record the moment a row first becomes due and serve its age with the row · server
 - **G-517** — the delivery gate is the route, not the sign-off: `loop` reads `route == deliver` only, so an unsigned cell can license a pull request · decide the question in an ADR and, if signing is to be a precondition, add the clause to the gate with a stated default · factory
 - **G-925** — the product folds no lead time and no spend out of the events it already stores, so backlog → merge and cost per human-verified change cannot be shown (backlog F20; the merge outcome is already recorded by `sync_outcomes`, and B-9's open half is the reviewer-minutes capture) · derive the durations and the spend per stream from the runs and events already stored, capture reviewer minutes on `POST /reviews`, and serve a Flow view with one endpoint per stream · server
-- **G-518** — inviting the second person is a manual out-of-band act: Settings creates a local account but nothing invites, emails or tracks that the approver ever signed in · add an invitation with a one-time link and show the deployment's two-person readiness on Home's task 7 · server
+- **G-518** — inviting the second person is a manual out-of-band act, so a deployment with one account can sign nothing: Settings creates a local account but nothing invites, emails or tracks that the approver ever signed in · add an invitation with a one-time link and show the deployment's two-person readiness on Home's task 7 · server

@@ -8,7 +8,7 @@ children: [dod.journey.connect-a-repository, dod.journey.prove-the-instrument]
 persons: [operator, admin, viewer, approver]
 owner: server
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Connect & prove — repository → probe → oracle reproducible → controls
@@ -20,7 +20,9 @@ strong enough to catch a wrong answer, and the bench proves it catches itself ch
 **Entry → exit.** A developer registers a repository through the GitHub App or by URL →
 a repository whose probe is green, whose mined tasks are gold-clean, whose tasks carry
 task-level oracle strengths, and whose negative-controls report reads `passed` with 0 escapes
-— the precondition under which anything measured afterwards is evidence.
+— the precondition under which anything measured afterwards is evidence. A task is proven in
+the posture that will grade it: qualification is posture-relative, and a replay qualifies
+first (ADR-0019).
 
 **Non-goals.** Nothing here measures a builder or spends money (steps 1–4 of the guide are
 £0). It does not fix the repository's own test suite, propose configuration edits, or connect
@@ -47,5 +49,5 @@ anything but GitHub — GitLab and Azure DevOps connectors are named and not bui
 | connect-and-prove.automation.15 | AUTOMATION | No step needs a person to do what the product could do: the six stages are sequenced from one act, and a repository whose gold target is not green is offered the `runner_opts` change the mine notes imply rather than leaving a developer to write it | `absent` | unmet | G-500 |
 
 ## Gaps
-- **G-500** — nothing sequences the six stages and nothing proposes a reproducibility fix · queue the next £0 stage automatically when the previous one succeeds (opt-in per repository), and turn each `gold_note` into a named candidate config change the developer accepts or rejects · server
+- **G-500** — qualification now runs from one act (a `qualify` run, and `qualify_first` on a replay, ADR-0019) and a refused task carries its fix sentence, but nothing queues the next £0 stage when the previous one passes, and a `gold_note` is not turned into a config change the developer accepts or rejects · queue the next £0 stage automatically when the previous one succeeds (opt-in per repository), and turn each `gold_note` into a named candidate config change the developer accepts or rejects · server
 - **G-925** — the product folds no lead time and no spend out of the events it already stores, so backlog → merge and cost per human-verified change cannot be shown (backlog F20; the merge outcome is already recorded by `sync_outcomes`, and B-9's open half is the reviewer-minutes capture) · derive the durations and the spend per stream from the runs and events already stored, capture reviewer minutes on `POST /reviews`, and serve a Flow view with one endpoint per stream · server
