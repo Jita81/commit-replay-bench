@@ -98,7 +98,10 @@ seam, `crb.core.deps`, and wired end to end.
   so that fetch failed closed with a false refusal. Each stage now holds an exclusive lease
   (`flock` on `.staging/<uuid>.lease`, taken before the directory exists) until it is sealed
   or discarded; `gc` removes a stage only when no process holds its lease, and the kernel
-  drops the lease of a crashed one.
+  drops the lease of a crashed one. A lease counts only once `stage()` has locked it and
+  the path is still that file (a `gc` in the moment between creating and locking it may
+  remove it; `stage()` then takes a new name), `stage()` waits for a `gc` that is probing
+  its lease instead of failing, and `gc` unlinks a lease only while it holds its lock.
 - **A Python pin its marker excludes no longer refuses the task** (product.posture.36;
   CodeRabbit on PR #56). The sealed set's manifest listed every pin, but pip skips a line
   whose environment marker excludes the fetch image's Python (a pip-compile backport such

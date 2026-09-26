@@ -79,6 +79,18 @@ MANIFEST = "bundle.json"
 STAGING = ".staging"
 #: The suffix of a stage's lease file, beside it under :data:`STAGING`.
 _LEASE = ".lease"
+#: How many fresh names ``stage()`` tries when a gc removes its lease before the lock.
+_LEASE_ATTEMPTS = 8
+
+
+def _same_file(fd: int, path: Path) -> bool:
+    """Whether ``path`` (not followed) is still the file open as ``fd``."""
+    try:
+        at = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    mine = os.fstat(fd)
+    return (at.st_dev, at.st_ino) == (mine.st_dev, mine.st_ino)
 
 
 def _now() -> str:
@@ -244,17 +256,31 @@ class BundleStore:
     def stage(self) -> Path:
         """A fresh ``.staging/<uuid>`` (mode 0700) with empty ``in`` and ``out``, leased
         (``.staging/<uuid>.lease``, locked BEFORE the directory exists) until it is sealed
-        or discarded — so a :meth:`gc` in another process never removes it mid-fetch."""
+        or discarded — so a :meth:`gc` in another process never removes it mid-fetch.
+
+        The lease file exists a moment before it is locked. A :meth:`gc` in that moment
+        may hold it (``stage`` waits for it) or remove it as an orphan (then the lock
+        ``stage`` takes is on a file no one else can see); so the lease counts only once
+        the path is still the very file locked, and otherwise ``stage`` takes a new name."""
         base = self.root / STAGING
         base.mkdir(parents=True, exist_ok=True)
-        name = uuid.uuid4().hex
+        for _attempt in range(_LEASE_ATTEMPTS):
+            name = uuid.uuid4().hex
+            lease = base / f"{name}{_LEASE}"
+            fd = os.open(
+                lease, os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600
+            )
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)  # a gc's probe lets go at once: wait for it
+                if _same_file(fd, lease):
+                    break
+            except BaseException:
+                os.close(fd)
+                raise
+            os.close(fd)  # a gc removed it before the lock: this name is spent
+        else:  # pragma: no cover - a gc would have to win the race every time
+            raise OSError(f"could not lease a stage under {base} in {_LEASE_ATTEMPTS} attempts")
         st = base / name
-        fd = os.open(
-            base / f"{name}{_LEASE}",
-            os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-            0o600,
-        )
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self._leases[str(st)] = fd
         st.mkdir(mode=0o700)
         (st / "in").mkdir(mode=0o700)
@@ -350,20 +376,37 @@ class BundleStore:
                 os.close(fd)
 
     @staticmethod
-    def _leased(lease: Path) -> bool:
-        """Whether a live fetch (in any process) holds ``lease``. A lease that is not a
-        regular file is never trusted — nor followed."""
+    def _claim(lease: Path) -> int | None:
+        """Take ``lease`` for :meth:`gc`: an fd that holds its lock (no live fetch in any
+        process holds it), ``None`` when a live fetch does, or ``-1`` when there is no
+        lease file to trust (absent, or not a regular file — never followed). gc removes a
+        lease only while it holds this lock, so it never unlinks one a fetch has just
+        locked."""
         try:
             fd = os.open(lease, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
         except OSError:
-            return False
+            return -1
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            return True
-        finally:
             os.close(fd)
-        return False
+            return None
+        return fd
+
+    def _remove_lease(self, lease: Path, held: int | None) -> None:
+        """Unlink ``lease`` only while holding its lock (``held``, or claimed here) and
+        only when the path is still the file locked; an untrusted entry is unlinked as a
+        name (never followed)."""
+        fd = self._claim(lease) if held is None else held
+        if fd is None:
+            return  # a fetch holds it: live
+        try:
+            if fd < 0 or _same_file(fd, lease):
+                with contextlib.suppress(OSError):
+                    os.unlink(lease)
+        finally:
+            if held is None and fd >= 0:
+                os.close(fd)
 
     # --- reading -----------------------------------------------------------------
     def get(self, lang: str, key: str) -> Sealed | None:
@@ -435,16 +478,19 @@ class BundleStore:
         if staging.is_dir():
             for st in staging.iterdir():
                 if st.name.endswith(_LEASE):
-                    orphan = not st.with_name(st.name[: -len(_LEASE)]).exists()
-                    if orphan and not self._leased(st):
-                        with contextlib.suppress(OSError):
-                            st.unlink()
-                    continue
-                if self._leased(st.with_name(st.name + _LEASE)):
-                    continue
-                remove_tree(st)
-                with contextlib.suppress(OSError):
-                    st.with_name(st.name + _LEASE).unlink()
+                    if not st.with_name(st.name[: -len(_LEASE)]).exists():
+                        self._remove_lease(st, None)  # an orphan: its fetch died early
+                    continue  # a stage's own lease goes with its stage, below
+                lease = st.with_name(st.name + _LEASE)
+                fd = self._claim(lease)
+                if fd is None:
+                    continue  # a live fetch in some process is still filling it
+                try:
+                    remove_tree(st)
+                    self._remove_lease(lease, fd)
+                finally:
+                    if fd >= 0:
+                        os.close(fd)
         sets = self.sets()
         cap = int(max_total_gb * (1 << 30))
         total = sum(s.bytes for s in sets)

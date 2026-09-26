@@ -123,6 +123,103 @@ def test_gc_never_removes_a_stage_a_fetch_is_still_filling(tmp_path: Path) -> No
     assert not any((root / ".staging").iterdir())
 
 
+@pytest.mark.parametrize("gap", ["before_lock", "while_gc_probes", "after_lock"])
+def test_a_gc_between_the_lease_and_its_lock_never_orphans_a_live_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gap: str
+) -> None:
+    """``stage()`` creates ``<uuid>.lease`` and only then locks it. A ``gc`` in another
+    process that runs in that gap sees an unlocked lease with no stage beside it; if it
+    unlinks it, the fetch locks a file no one can see and the NEXT gc removes the live
+    stage. And if gc is holding its own probe lock at the moment ``stage()`` locks, the
+    fetch must wait, never fail. Whatever the interleaving: the live stage keeps a lease
+    another process sees as held, and a later gc leaves it alone (the adversarial check
+    on the answer to CodeRabbit's thread on PR #56)."""
+    import fcntl
+
+    from crb.provision import store as store_mod
+
+    root = tmp_path / "deps"
+    worker, other = BundleStore(root), BundleStore(root)
+    real = fcntl.flock
+    armed = {"on": True}
+
+    def interleaved(fd: int, op: int) -> None:
+        if not (armed["on"] and op & fcntl.LOCK_EX):
+            return real(fd, op)
+        armed["on"] = False  # the first exclusive lock is stage()'s own
+        if gap == "before_lock":
+            assert other.gc(keep=set(), max_total_gb=1) == []
+            return real(fd, op)
+        if gap == "while_gc_probes":
+            lease = next(p for p in (root / ".staging").iterdir() if p.name.endswith(".lease"))
+            probe = os.open(lease, os.O_RDWR)
+            real(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)  # gc's probe holds it right now
+            threading.Timer(0.2, os.close, (probe,)).start()  # ... and lets go
+            return real(fd, op)
+        real(fd, op)
+        assert other.gc(keep=set(), max_total_gb=1) == []
+        return None
+
+    monkeypatch.setattr(store_mod.fcntl, "flock", interleaved)
+    live = worker.stage()
+    monkeypatch.setattr(store_mod.fcntl, "flock", real)
+    (live / "out" / "partial.bin").write_bytes(b"x" * 16)
+    lease = live.with_name(live.name + ".lease")
+    assert lease.is_file(), "the live stage lost its lease"
+    probe = os.open(lease, os.O_RDWR)
+    try:
+        with pytest.raises(BlockingIOError):
+            real(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)  # another process sees it held
+    finally:
+        os.close(probe)
+    assert other.gc(keep=set(), max_total_gb=1) == []
+    assert (live / "out" / "partial.bin").is_file(), "gc removed a live stage"
+    worker.seal(live, {"lang": "go", "key": KEY})
+    assert not any((root / ".staging").iterdir())
+
+
+def test_gc_removes_a_lease_only_while_it_holds_that_lease_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the race: a gc that probes a lease, lets go and THEN unlinks it
+    can unlink the lease a fetch has just locked. So every unlink gc makes of a lease — an
+    orphan's or a dead stage's — happens while gc itself holds that lease's lock."""
+    import fcntl
+
+    from crb.provision import store as store_mod
+
+    root = tmp_path / "deps"
+    staging = root / ".staging"
+    staging.mkdir(parents=True)
+    (staging / ("a" * 32 + ".lease")).write_bytes(b"")  # an orphan: its fetch died early
+    dead = staging / ("b" * 32)  # a stage whose process died, with its lease
+    (dead / "out").mkdir(parents=True)
+    (staging / ("b" * 32 + ".lease")).write_bytes(b"")
+    unlinked: list[tuple[str, bool]] = []
+    real_unlink = os.unlink
+
+    def watched(path: object, *a: object, **k: object) -> None:
+        name = os.fspath(path)  # type: ignore[call-overload]
+        if str(name).endswith(".lease"):
+            fd = os.open(name, os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held = False
+            except BlockingIOError:
+                held = True
+            finally:
+                os.close(fd)
+            unlinked.append((Path(name).name, held))
+        real_unlink(path, *a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store_mod.os, "unlink", watched)
+    monkeypatch.setattr(Path, "unlink", lambda self, missing_ok=False: watched(self))
+    assert BundleStore(root).gc(keep=set(), max_total_gb=1) == []
+    monkeypatch.undo()
+    assert sorted(unlinked) == [("a" * 32 + ".lease", True), ("b" * 32 + ".lease", True)]
+    assert not any(staging.iterdir())
+
+
 def test_a_mount_outside_the_store_or_without_a_key_name_is_refused(tmp_path: Path) -> None:
     store = BundleStore(tmp_path / "deps")
     sealed = store.seal(_fill(store, {"gomod/x": b"x"}), {"lang": "go", "key": KEY})
