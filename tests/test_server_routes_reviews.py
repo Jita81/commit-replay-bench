@@ -379,6 +379,37 @@ class TestRetainedPatch:
         with env.factory() as s:
             assert worktree_name(s, row) == live  # type: ignore[arg-type]
 
+    @pytest.mark.parametrize("latest", [{}, {"worktree": ""}], ids=["missing", "empty"])
+    def test_a_latest_prep_start_that_names_no_worktree_names_none(
+        self, env: Env, latest: dict[str, str]
+    ) -> None:
+        """PR #53 review: the lookup skipped a latest ``prep.start`` that named no worktree
+        and fell back to an OLDER attempt's, serving that stale patch for the row the later
+        attempt wrote. The latest attempt's event is the only one that may answer; when it
+        names nothing, nothing is named."""
+        run_id, task_id = "7f" * 16, "e" * 40
+        stale = "run-" + "c" * 12
+        payloads = [{"worktree": stale}, latest]
+        with env.factory() as s:
+            for seq, extra in enumerate(payloads, start=1):
+                s.add(
+                    Event(
+                        event_id=f"{seq + 10:032d}",
+                        trace_id=run_id,
+                        seq=seq,
+                        timestamp=f"2026-09-25T11:0{seq}:00+00:00",
+                        stage="build",
+                        action="prep.start",
+                        status="in_progress",
+                        task_id=task_id,
+                        payload_json={"trial": "r1", "rung": "r1", **extra},
+                    )
+                )
+            s.commit()
+        row = SimpleNamespace(run_id=run_id, task_id=task_id, trial="r1")
+        with env.factory() as s:
+            assert worktree_name(s, row) == ""  # type: ignore[arg-type]
+
     def test_not_retained_worktree_reason(self, env: Env, tmp_path: Path) -> None:
         r = Retained(env, tmp_path)
         with env.factory() as s:
