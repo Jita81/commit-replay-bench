@@ -19,3 +19,8 @@ data:
   {{ $k }}: {{ $v | toString | quote }}
   {{- end }}
   CRB_WEB_CONCURRENCY: {{ .Values.api.webConcurrency | toString | quote }}
+  # One builder posture for both processes (ADR-0023): the worker runs the builds, the API
+  # serves the posture on /health — the same value, or /health could say "sealed" while
+  # every build ran on the host. Empty = the env's default (docker in prod).
+  CRB_BUILDER__EXECUTOR: {{ .Values.worker.builder.executor | toString | quote }}
+  CRB_BUILDER__IMAGE: {{ .Values.worker.builder.image | toString | quote }}

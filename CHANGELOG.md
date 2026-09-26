@@ -12,15 +12,40 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **A two-page summary for assurance readers, honest records, one commit convention** ([pull
-  request](https://github.com/Jita81/commit-replay-bench/pulls?q=head%3Adocs%2Fcustomer-summary-honesty-records)).
+- **A two-page summary for assurance readers, honest records, one commit convention**
+  ([#54](https://github.com/Jita81/commit-replay-bench/pull/54)).
   `docs/SUMMARY.md` opens README's *Start here* and joins the claims gate; the mining rule is stated
   (README step 1, EVIDENCE-AND-CLAIMS §6b) and `GET /repos/{name}/pool` puts the pool's date range
   and share of history on the Results screen; README says the learning loop proposes and a named
-  person acts; DL-053 records the critical friend's ten actions and the claims gate checks each
+  person acts; DL-057 records the critical friend's ten actions and the claims gate checks each
   action and its record both ways; a `commit-subjects` workflow that re-runs on an edited title;
   this changelog frozen to one paragraph per pull request; a ReposPage test; one timeout guard
   in the UI client.
+
+- **The builder is not told where the answer is; production runs sealed**
+  ([#53](https://github.com/Jita81/commit-replay-bench/pull/53)). A worktree is named by a random
+  token, never by the held-out commit's sha, and a source ratchet stops the pattern returning
+  (DL-055); each evidence pack names the worktree its row graded. Production refuses the host
+  builder, the local test executor and a factory run unless `CRB_ALLOW_UNSEALED_PROD=1`, and the
+  override shows on `/health`, the Posture page and every run's apparatus (ADR-0023, DL-056). No
+  apparatus bump.
+
+- **Signing out ends the session; a clone lives in `$CRB_HOME/repos`; the sign-in CLI sees only
+  what it needs** ([#52](https://github.com/Jita81/commit-replay-bench/pull/52)). A per-account
+  `session_nonce` (migration `0009`) ends every session on sign-out or an admin's *sign out
+  everywhere*; the CSRF token is an HMAC bound to the session; one address may fail twenty
+  sign-ins a minute; a single sign-on keeps an admin's role change. A registered `clone_path`
+  outside `$CRB_HOME/repos` is admin-only and recorded, a link out of it is refused, and every
+  place that opens a stored clone re-checks it. `claude setup-token` gets an allowlisted
+  environment (DL-054).
+
+- **The gate tools are pinned; the suite no longer depends on the machine it runs on**
+  ([#51](https://github.com/Jita81/commit-replay-bench/pull/51)). mypy and ruff are pinned exactly
+  (Dependabot moves them) and CI runs daily on `main`, because a SQLAlchemy release, not a commit,
+  moved a verdict. Tests name a non-root builder user (a ratchet refuses one that does not), the
+  doctor tests never ask the host's daemon, and a `network` test is skipped with its reason when the
+  host is unreachable (a failure under `CRB_TEST_STRICT_WARMUP=1`). The local pytest gate measures
+  branch coverage as CI does, and `docs/CONTRIBUTING.md` joined the claims gate (DL-053).
 
 - **SQLAlchemy 2.1 type-checks clean; no pin** ([#50](https://github.com/Jita81/commit-replay-bench/pull/50)).
   SQLAlchemy 2.1.1 reached PyPI on 2026-09-25 and the `server` extra has no ceiling, so CI's fresh

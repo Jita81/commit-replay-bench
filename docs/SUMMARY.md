@@ -107,7 +107,7 @@ Each of these is **[gap]** — named so that nobody assumes it is closed. None i
   the host posture. The sealed builder and the Docker executor are built and tested, but no
   ledger row on the sealed posture has been published.
 - **No independent human review of the core.** The grader, ledger, controls and guards
-  have been read by an AI reviewer only ([DL-053](DECISION-LOG.md), critical-friend
+  have been read by an AI reviewer only ([DL-057](DECISION-LOG.md), critical-friend
   action #8).
 - **`deliver` without a measured oracle strength.** The routing rule on `main` can route a
   cell `deliver` without a measured oracle strength, and `crb route` without a controls

@@ -324,7 +324,7 @@ class RepoPool(BaseModel):
     window_commits: int | None
     #: ``window_commits / history_commits`` to four places
     share: float | None
-    #: ``""`` | ``no_clone_path`` | ``clone_unavailable`` | ``git_failed``
+    #: ``""`` | ``no_clone_path`` | ``clone_path_escapes`` | ``clone_unavailable`` | ``git_failed``
     history_unavailable: str
 
 

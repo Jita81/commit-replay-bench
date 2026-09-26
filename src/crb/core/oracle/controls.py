@@ -126,7 +126,7 @@ from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, tail_of
 from crb.core.spec import BELT_AFFECTED_DIRS, BELT_TARGET_ONLY, Language, RepoConfig, TaskSpec
 from crb.core.version import APPARATUS_VERSION
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 
 CONTROLS_SCHEMA = "crb.negative_controls.v1"
 CONTROLS_VERSION = "controls.v2"  # v2: Go + JavaScript transforms
@@ -1209,9 +1209,11 @@ def _red_at_parent(
     executor: Executor,
     scratch: Path,
     timeout: int,
+    on_event: EventFn | None = None,
 ) -> tuple[bool, str]:
     """(is_red, note). Vacuous controls are never a violation — but a harness error is."""
-    dest = Path(scratch) / f"ctrl-{config.name}-{task.short_id}-red"
+    dest = opaque_dest(scratch, "ctrl", avoid=(task.task_id,))  # never the commit's name (B1)
+    _emit(on_event, "controls.red_check", task=task.task_id, worktree=dest.name)
     with Workspace.create(repo, task.task_id, dest, config=config) as ws:
         ws.overlay_tests(task.test_files)
         run = runner.run_for(
@@ -1276,6 +1278,7 @@ def controls_for_task(
             executor=executor,
             scratch=scratch,
             timeout=timeout,
+            on_event=on_event,
         )
     except SandboxUnavailable:
         raise
@@ -1291,8 +1294,8 @@ def controls_for_task(
 
     for name in controls:
         started = time.monotonic()
-        dest = Path(scratch) / f"ctrl-{config.name}-{task.short_id}-{name}"
-        _emit(on_event, "controls.control", task=task.task_id, control=name)
+        dest = opaque_dest(scratch, "ctrl", avoid=(task.task_id,))
+        _emit(on_event, "controls.control", task=task.task_id, control=name, worktree=dest.name)
         try:
             with Workspace.create(repo, task.task_id, dest, config=config) as ws:
                 ws.overlay_tests(task.test_files)

@@ -119,7 +119,7 @@ export const HINTS = {
   'button.shell.theme':
     'Switch between light, dark and your system’s theme. It changes nothing but how the screens look.',
   'button.shell.sign_out':
-    'End your session on this browser. Runs in flight carry on without you.',
+    'End your session here and on every other device signed in to this account. Runs in flight carry on without you.',
   'nav.home':
     'Where this deployment is on the way from an empty install to a change delivered under evidence: the eight tasks and the next one to press.',
   'nav.connect':
@@ -694,6 +694,8 @@ export const HINTS = {
     'Whether tests run in a sealed docker sandbox (rows count as evidence) or locally (a development reading, not evidence).',
   'summary.posture.builder':
     'Where the builder runs and what network it may reach. Shown to admins.',
+  'summary.posture.production':
+    'Whether tests and the builder both run sealed in docker. Production refuses anything else unless CRB_ALLOW_UNSEALED_PROD=1 is set, and then every run records that it ran unsealed. Factory builds always run on the host, so production refuses factory runs unless that override is set.',
   'summary.posture.toolchains':
     'The toolchains the worker host can run, from the health probe.',
   'summary.posture.worker':
@@ -751,7 +753,7 @@ export const HINTS = {
   'field.repo_new.source':
     'Whether the worker clones a git URL on the first run or uses an existing clone on the server host.',
   'field.repo_new.location':
-    'The URL the worker clones (https or ssh only) or the path of an existing clone on the server host.',
+    'The URL the worker clones (https or ssh only) or the path of an existing clone on the server host. A clone path must be inside the deployment’s repos directory (CRB_HOME/repos); only an admin may register one elsewhere, and that is recorded.',
   'field.repo_new.src_prefix':
     'A file is source if its path starts here; empty means anything outside the test prefix. Belt 4 reads this.',
   'field.repo_new.test_prefix':
@@ -845,7 +847,7 @@ export const HINTS = {
   'field.repo_config.runner':
     'The tool that executes the tests inside the sandbox; the probe verifies it.',
   'field.repo_config.clone_path':
-    'Where the clone lives on the server host; empty until the worker’s first run clones the URL.',
+    'Where the clone lives on the server host; empty until the worker’s first run clones the URL. It must be inside CRB_HOME/repos unless an admin registers it elsewhere, which is recorded.',
   'field.repo_config.url':
     'What the worker clones when there is no clone yet (https or ssh only). Informational once a clone path exists.',
   'field.repo_config.src_prefix':
@@ -1546,7 +1548,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/signoff': 30,
   '/factory': 28,
   '/factory/intake': 14,
-  '/posture': 22,
+  '/posture': 23,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants
   '/repos/:name': 14,

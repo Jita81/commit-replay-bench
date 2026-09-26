@@ -103,6 +103,7 @@ function day(iso: string | null): string {
 /** Why the share of history is unknown, in the words a reader can act on. */
 const POOL_UNAVAILABLE: Record<Exclude<RepoPool['history_unavailable'], ''>, string> = {
   no_clone_path: 'no clone of the repository on this host, so the share of its history is not known',
+  clone_path_escapes: 'the clone path now leads outside the repositories directory, so its history is not read',
   clone_unavailable: 'the clone path is not a git repository on this host, so the share is not known',
   git_failed: 'git could not read the clone’s history, so the share is not known',
 }

@@ -9,7 +9,7 @@ What it does: Pins that only HTTPS and SSH URLs are accepted (``file://`` only u
               ``CRB_ALLOW_LOCAL_CLONE`` developer switch), that refusals and errors never echo an
               embedded credential, that ``redact_url`` / ``redact_urls_in`` scrub free text, and
               that a clone takes the full history without tags, is idempotent, refuses a
-              non-empty non-repository destination, and cleans up on failure or timeout (rc 124).
+              non-empty non-repository destination and a destination that is a symbolic link, and cleans up on failure or timeout (rc 124).
 How:          ``bare_remote`` from ``fixtures.remote`` serves ``pyrepo``; a URL to a closed port
               proves the fail-fast error path without a network.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -206,6 +206,26 @@ def test_clone_refuses_a_non_empty_non_repo_destination(remote: str, tmp_path: P
     empty = tmp_path / "empty"
     empty.mkdir()
     assert len(clone_repo(remote, empty, allow_local=True)) == 40
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_clone_refuses_a_destination_that_is_a_symbolic_link(
+    pyrepo: pr.PyRepo, remote: str, tmp_path: Path, dangling: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR #52 review: the idempotent reuse followed a link at ``dest`` and returned the
+    repository behind it — git ran there and the caller recorded the link as its clone.
+    A link is refused, dangling or not, before any git process starts; it is left alone."""
+    import crb.core.git as git_mod
+
+    dest = tmp_path / "clones" / "pyrepo"
+    dest.parent.mkdir()
+    dest.symlink_to(tmp_path / "gone" if dangling else pyrepo.path, target_is_directory=True)
+    calls: list[object] = []
+    monkeypatch.setattr(git_mod.subprocess, "run", lambda *a, **kw: calls.append(a))
+    with pytest.raises(GitError, match="symbolic link"):
+        clone_repo(remote, dest, allow_local=True)
+    assert calls == [] and dest.is_symlink()
+    assert sorted(p.name for p in dest.parent.iterdir()) == ["pyrepo"]  # no temp clone left
 
 
 def test_clone_failure_is_git_error_with_redacted_argv(tmp_path: Path) -> None:

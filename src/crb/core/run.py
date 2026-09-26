@@ -73,7 +73,7 @@ from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES, GradeResult, grade
 from crb.core.ledger import PROCESS_REPLAY, GradeRow, JsonlLedger, grade_row_from_result
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -250,8 +250,9 @@ def run_task(
     clean = disqualified = False
     for i, rung in enumerate(spec.ladder, start=1):
         trial = f"r{i}"
-        dest = spec.scratch / f"run-{spec.config.name}-{task.short_id}-{spec.run_id[:8]}-{trial}"
-        _emit(on_event, "prep.start", task=task.task_id, trial=trial, rung=rung)
+        # opaque: the builder's cwd must not name the future commit (B1); the event maps it
+        dest = opaque_dest(spec.scratch, "run", avoid=(task.task_id,))
+        _emit(on_event, "prep.start", task=task.task_id, trial=trial, rung=rung, worktree=dest.name)
         ws = Workspace.create(repo, task.task_id, dest, config=spec.config)
         try:
             # blind: the held-out tests reach the worktree only inside grade()
@@ -309,6 +310,10 @@ def run_task(
                         {"transcript_ref": attempt.transcript_ref} if attempt.transcript_ref else {}
                     ),
                     **dict(attempt.notes),
+                    # the row's own link to the worktree it graded: a reclaimed run writes
+                    # two rows under one trial, so no event key names one attempt (PR #53).
+                    # Last, so a builder's notes cannot point the row at another worktree.
+                    "worktree": dest.name,
                 },
             )
             # pack first, row second: a row exists only for a pack that is on disk
