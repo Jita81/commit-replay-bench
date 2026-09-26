@@ -183,6 +183,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
 8. **Posture is a filter, never a blend.**
    - By default, the capability map, the factory's route gate and the sign-off overlay read the deployment's posture class (`crb.server.routes.capability.rows_for_posture`). The API and the worker derive it by one rule (`crb.core.posture.expected_posture_class`): the sandbox is `sealed` with the repository's `sandbox_tree`, else the deployment's; the host executor is `sealed` when provisioning is on and `host-env` when it is off (PR #56).
    - `posture=all` pools two classes only over tasks whose qualification fingerprints match in both. It counts the rest as `excluded_posture_divergent`.
+   - A row from before 2.3 that the host graded (`legacy:local`) reads as `local/inplace/host-env` and as nothing else. It has no fingerprint, so `posture=all` pools it only when every row reads as that one class, never with another (PR #56).
    - A cell lists its `posture_ids`, as it lists its apparatus versions.
 
 9. **Every stop is a code with a fix.** There is one closed vocabulary, served as `{code, message, fix, doc}`. A code with run scope stops the run; a code with task scope skips the task.

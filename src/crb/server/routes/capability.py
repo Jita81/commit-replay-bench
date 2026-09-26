@@ -138,6 +138,16 @@ POSTURE_DEPLOYMENT = "deployment"
 POSTURE_ALL = "all"
 #: The class a pre-2.3 row derives from its run's apparatus stamp (``legacy:<executor>``).
 LEGACY_CLASS_PREFIX = "legacy:"
+#: What a pre-2.3 row the HOST graded measured: the host's own environment against the
+#: discovery baseline — the class it may be read with, and no other (provisioning did not
+#: exist before 2.3, so never ``local/inplace/sealed``).
+LEGACY_LOCAL_EQUIVALENT = "local/inplace/host-env"
+
+
+def comparable_class(cls: str) -> str:
+    """The class a row is compared as: its own, and ``legacy:local`` as
+    :data:`LEGACY_LOCAL_EQUIVALENT`."""
+    return LEGACY_LOCAL_EQUIVALENT if cls == LEGACY_CLASS_PREFIX + "local" else cls
 
 
 @dataclass(frozen=True)
@@ -171,9 +181,12 @@ def rows_for_posture(
       baseline measured somewhere else: excluded from every rate, counted
       ``unqualified_posture``;
     * ``posture`` is a posture class (``docker/copy/sealed``): only that class's rows,
-      and a ``legacy:local`` row only under a ``local/…`` class (the host graded it);
+      and a ``legacy:local`` row only under ``local/inplace/host-env`` (the host graded it
+      in its own environment);
     * ``all``: every class, pooled ONLY over tasks whose qualification fingerprints match
-      in every class present — the rest are counted ``excluded_posture_divergent``.
+      in every class present — the rest are counted ``excluded_posture_divergent``. A
+      legacy row has no fingerprint, so it is pooled only when every row reads as ONE
+      class (``legacy:local`` with ``local/inplace/host-env``), never with another.
     """
     unqualified = 0
     classified: list[tuple[str, GradeRow]] = []
@@ -184,23 +197,21 @@ def rows_for_posture(
             continue
         classified.append((cls, r))
     if posture != POSTURE_ALL:
-        kept = [
-            r
-            for cls, r in classified
-            if cls == posture
-            or (cls == LEGACY_CLASS_PREFIX + "local" and posture.startswith("local/"))
-        ]
+        kept = [r for cls, r in classified if comparable_class(cls) == posture]
         return PostureFilter(kept, posture, unqualified_posture=unqualified)
-    present = sorted({cls for cls, _ in classified if not cls.startswith(LEGACY_CLASS_PREFIX)})
-    if len(present) <= 1:
+    if len({comparable_class(cls) for cls, _ in classified}) <= 1:
         return PostureFilter(
             [r for _, r in classified], POSTURE_ALL, unqualified_posture=unqualified
         )
-    fps = fingerprints(present)
+    present = sorted({cls for cls, _ in classified if not cls.startswith(LEGACY_CLASS_PREFIX)})
+    fps = fingerprints(present) if len(present) > 1 else {}
     kept, divergent = [], 0
     for cls, r in classified:
         if cls.startswith(LEGACY_CLASS_PREFIX):
             divergent += 1  # a legacy row has no fingerprint to prove it invariant
+            continue
+        if len(present) == 1:
+            kept.append(r)  # the one current class: nothing to be invariant against
             continue
         mine = fps.get(cls, {}).get(r.task_id)
         if mine and all(fps.get(c, {}).get(r.task_id) == mine for c in present):

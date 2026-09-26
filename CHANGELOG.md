@@ -59,6 +59,13 @@ seam, `crb.core.deps`, and wired end to end.
   It is now an `environment:` row (`LINT_UNWITNESSED`, harness, revokes nothing); a gold
   lint verdict other than `true`, `false` or `null` raises `MisattributionViolation`. Within
   apparatus 2.3, which this change set introduces.
+- **A legacy host row is never pooled with another class** (product.posture.39; CodeRabbit
+  on PR #56). `posture=all` returned every row when exactly one current class was present,
+  so `legacy:local` rows (graded on the host against the discovery baseline) were pooled
+  with, say, `docker/copy/sealed`; and a class filter admitted them under any `local/…`
+  class, `local/inplace/sealed` included. A legacy host row now reads as
+  `local/inplace/host-env` only, and `posture=all` counts it `excluded_posture_divergent`
+  whenever another class is present.
 - **The default map reads the class the worker grades in** (product.posture.38; CodeRabbit
   on PR #56). The API's default posture filter said `local/inplace/host-env` for the host
   executor with provisioning on (the worker grades `local/inplace/sealed`) and ignored a

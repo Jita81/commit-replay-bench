@@ -896,3 +896,34 @@ def test_pre_2_3_docker_rows_are_excluded_and_counted(env: Env) -> None:
     assert cell["n"] == 2 and cell["clean"] == 2 and cell["n_builder_red"] == 0
     everything = _beta(env, "&apparatus=2.2&posture=all")
     assert everything["summary"]["unqualified_posture"] == 4  # excluded from EVERY rate
+
+
+def test_legacy_host_rows_never_pool_with_another_class(env: Env) -> None:
+    """A pre-2.3 row the HOST graded (``legacy:local``) is a host-env measurement against the
+    discovery baseline: ``posture=all`` never pools it with a single current class that is
+    something else (``docker/copy/sealed``), and no class filter but
+    ``local/inplace/host-env`` admits it — posture is a filter, never a blend (CodeRabbit
+    on PR #56)."""
+    from crb.store.models import Run
+
+    with env.factory() as s:
+        s.add(
+            Run(
+                id="5" * 32,
+                repo=BETA,
+                kind="replay",
+                status="succeeded",
+                apparatus_json={"executor": {"executor": "local"}},
+            )
+        )
+        s.commit()
+    _posture_rows(env, 2, cls="", pid="", run_id="5" * 32, apparatus_version="2.2")
+    _posture_rows(env, 3, cls="docker/copy/sealed", pid="pst_docker", first=100)
+    pooled = _beta(env, "&apparatus=all&posture=all")
+    assert [c["n"] for c in pooled["cells"]] == [3]
+    assert pooled["summary"]["excluded_posture_divergent"] == 2
+    _posture_rows(env, 1, cls="local/inplace/sealed", pid="pst_ls", first=200)
+    sealed = _beta(env, "&apparatus=all&posture=local/inplace/sealed")
+    assert [c["n"] for c in sealed["cells"]] == [1]  # the legacy host rows stay out
+    host = _beta(env, "&apparatus=all&posture=local/inplace/host-env")
+    assert [c["n"] for c in host["cells"]] == [2]
