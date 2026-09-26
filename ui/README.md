@@ -77,8 +77,8 @@ e2e/          smoke.spec.ts (login + shell against a mocked API, axe WCAG 2.1 AA
 ## The API client
 
 - `api<T>(path, {method, body, signal, timeoutMs})` — prefixes `/api/v1`,
-  sends `credentials: 'include'`, adds `X-CSRF-Token` from the `crb_csrf`
-  cookie on POST/PUT/PATCH/DELETE, JSON-encodes bodies, and aborts after
+  sends `credentials: 'include'`, adds `X-CSRF-Token` from the CSRF cookie
+  (`__Host-crb_csrf` on a TLS deployment, else `crb_csrf`) on POST/PUT/PATCH/DELETE, JSON-encodes bodies, and aborts after
   25 s.
 - Failures are always an `ApiError { status, code, message, detail }` parsed
   from the contract's envelope. A timeout is `code: 'timeout'`, a network

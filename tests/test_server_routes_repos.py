@@ -8,8 +8,12 @@ What it does: Pins the list shape (probe, counts, last run), pagination, viewer 
               401, detail with config and 404, create RBAC / validation / the recorded event /
               duplicate 409 / invalid config 422, update RBAC with a redacted diff event, the
               per-repo audit trail newest first, probe RBAC and enqueue (queue unavailable
-              handled), profile computed / cached / refreshed and 409 without a clone, and the
-              task list with filters.
+              handled), profile computed / cached / refreshed and 409 without a clone, the
+              task list with filters, and the pool window: the mined tasks' date range from
+              the store and the share of the clone's non-merge history since the oldest task —
+              unknown, with the reason, when the clone is not on this host; the walk cached
+              on HEAD and the shallow boundary (a deepened shallow clone is re-read); any git
+              failure on the read answers ``git_failed``, never a server error.
 How:          ``make_env`` over the seed; ``fake_jobs`` stands in for ``crb.store.jobs`` and
               persists the run so the API can read it back.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -26,6 +30,7 @@ Touch when:   a ``RepoConfig`` field is added (a validation case and the redacte
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import types
 from collections.abc import Iterator
@@ -39,7 +44,17 @@ from crb.server.app import API_PREFIX
 from crb.server.routes.runs import system_trace_id
 from crb.store.models import Event, Run
 from fixtures import pyrepo as pr
-from fixtures.server_seed import ALPHA, BETA, Env, assert_rbac, envelope, login, make_env
+from fixtures.server_seed import (
+    ALPHA,
+    BETA,
+    USERS,
+    Env,
+    assert_rbac,
+    envelope,
+    login,
+    make_env,
+    user_id,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +69,11 @@ def env(tmp_path: Path) -> Iterator[Env]:
     """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
+
+
+def _inside(env: Env, name: str) -> str:
+    """A clone path under ``<home>/repos`` — where an operator may register one (D2)."""
+    return str(Path(env.settings.home) / "repos" / name)
 
 
 @pytest.fixture
@@ -157,20 +177,22 @@ class TestDetail:
 
 class TestCreate:
     def test_rbac(self, env: Env) -> None:
+        # a clone under <home>/repos: the rule for a path outside it is TestClonePathConfinement's
         assert_rbac(
             env,
             "POST",
             "/repos",
             min_role="operator",
-            json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"},
+            json={"name": "gamma", "language": "python", "clone_path": _inside(env, "gamma")},
         )
 
     def test_create_validates_and_records_event(self, env: Env) -> None:
         login(env.client, "operator")
+        gamma = _inside(env, "gamma")
         body = {
             "name": "gamma",
             "language": "py",
-            "clone_path": "/srv/gamma",
+            "clone_path": gamma,
             "src_prefix": "gamma/",
             "test_prefix": "tests/",
             "belt_scope": ["tests/unit"],
@@ -185,7 +207,7 @@ class TestCreate:
         d = r.json()
         assert d["name"] == "gamma" and d["language"] == "python" and d["runner"] == "pytest"
         assert d["config"]["belt_scope"] == ["tests/unit"]
-        assert d["config"]["path"] == "/srv/gamma" and d["clone_path"] == "/srv/gamma"
+        assert d["config"]["path"] == gamma and d["clone_path"] == gamma
         assert d["probe"]["status"] == "not_probed"
         with env.factory() as s:
             ev = s.execute(select(Event).where(Event.repo == "gamma")).scalar_one()
@@ -283,7 +305,7 @@ class TestEvents:
         login(env.client, "operator")
         r = env.post(
             "/repos",
-            json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"},
+            json={"name": "gamma", "language": "python", "clone_path": _inside(env, "gamma")},
         )
         assert r.status_code == 201, r.text
         r = env.put(
@@ -434,3 +456,331 @@ class TestTasks:
         r = env.client.get("/repos")
         assert r.status_code == 404 or r.headers["content-type"].startswith("text/html")
         assert env.client.get(f"{API_PREFIX}/repos").status_code == 200
+
+
+class TestClonePathConfinement:
+    """D2 (assessment 2026-09-25): a registered ``clone_path`` names a directory on the API
+    host that every later run reads and profiles, so it is confined to ``<home>/repos``. A
+    path outside it is an admin's decision and is evented; an operator — through the API or
+    the MCP write tool, which rides the same route — is refused; a path written under the
+    root that resolves outside it (a symlink escape) is refused for every role."""
+
+    def _events(self, env: Env, name: str) -> list[Event]:
+        with env.factory() as s:
+            return list(
+                s.execute(
+                    select(Event)
+                    .where(Event.trace_id == system_trace_id("repo", name))
+                    .order_by(Event.seq)
+                ).scalars()
+            )
+
+    def test_operator_may_register_a_path_inside_the_repos_root(self, env: Env) -> None:
+        login(env.client, "operator")
+        inside = Path(env.settings.home) / "repos" / "gamma"
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": str(inside)}
+        )
+        assert r.status_code == 201, r.text
+        assert [e.action for e in self._events(env, "gamma")] == ["repo.created"]
+
+    def test_operator_is_refused_a_path_outside_the_repos_root(self, env: Env) -> None:
+        login(env.client, "operator")
+        for outside in ("/etc", "/srv/gamma", str(Path(env.settings.home) / "secrets")):
+            r = env.post(
+                "/repos", json={"name": "gamma", "language": "python", "clone_path": outside}
+            )
+            assert r.status_code == 403, (outside, r.text)
+            assert envelope(r)["code"] == "clone_path_outside_home"
+        assert env.get("/repos/gamma").status_code == 404
+
+    def test_dot_dot_out_of_the_root_is_outside(self, env: Env) -> None:
+        login(env.client, "operator")
+        sneaky = str(Path(env.settings.home) / "repos" / ".." / ".." / "etc")
+        r = env.post("/repos", json={"name": "gamma", "language": "python", "clone_path": sneaky})
+        assert r.status_code == 403 and envelope(r)["code"] == "clone_path_outside_home"
+
+    def test_relative_path_is_refused(self, env: Env) -> None:
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": "repos/gamma"}
+        )
+        assert r.status_code == 422 and envelope(r)["code"] == "clone_path_not_absolute"
+
+    def test_symlink_escape_is_refused_even_for_an_admin(self, env: Env, tmp_path: Path) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        root = Path(env.settings.home) / "repos"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "link").symlink_to(elsewhere, target_is_directory=True)
+        for role in ("operator", "admin"):
+            login(env.client, role)
+            r = env.post(
+                "/repos",
+                json={"name": "gamma", "language": "python", "clone_path": str(root / "link")},
+            )
+            assert r.status_code == 422, (role, r.text)
+            assert envelope(r)["code"] == "clone_path_escapes"
+        assert env.get("/repos/gamma").status_code == 404
+
+    def test_admin_may_register_outside_and_it_is_evented(self, env: Env) -> None:
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"}
+        )
+        assert r.status_code == 201, r.text
+        events = self._events(env, "gamma")
+        assert [e.action for e in events] == ["repo.created", "repo.clone_path.outside_home"]
+        payload = events[-1].payload_json
+        assert payload["path"] == "/srv/gamma"
+        assert payload["clone_root"] == str((Path(env.settings.home) / "repos").resolve())
+        assert events[-1].actor == user_id(USERS["admin"])
+
+    def test_update_is_confined_the_same_way(self, env: Env) -> None:
+        login(env.client, "operator")
+        r = env.put(f"/repos/{ALPHA}", json={"clone_path": "/etc"})
+        assert r.status_code == 403 and envelope(r)["code"] == "clone_path_outside_home"
+        inside = str(Path(env.settings.home) / "repos" / ALPHA)
+        r = env.put(f"/repos/{ALPHA}", json={"clone_path": inside})
+        assert r.status_code == 200, r.text
+        assert r.json()["clone_path"] == inside
+
+    def test_an_unchanged_legacy_path_does_not_block_other_edits(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        # a repository an admin registered outside the root stays editable by an operator,
+        # as long as the edit does not move the path
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": "/srv/gamma"}
+        )
+        assert r.status_code == 201, r.text
+        login(env.client, "operator")
+        r = env.put("/repos/gamma", json={"probe": "tests/"})
+        assert r.status_code == 200, r.text
+        r = env.put("/repos/gamma", json={"clone_path": "/srv/other"})
+        assert r.status_code == 403 and envelope(r)["code"] == "clone_path_outside_home"
+
+    def test_a_link_planted_after_registration_is_refused_when_the_path_is_used(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        """The rule is checked where the path is USED, not only where it is written. A path
+        under the root that does not exist yet passes registration; if a symbolic link
+        later appears on it (a cloned repository can carry one), reading the clone must
+        not follow it off the root."""
+        login(env.client, "operator")
+        root = Path(env.settings.home) / "repos"
+        later = root / "alpha-clone" / "link"
+        r = env.post(
+            "/repos", json={"name": "gamma", "language": "python", "clone_path": str(later)}
+        )
+        assert r.status_code == 201, r.text
+        host_repo = pr.build(tmp_path / "host-repo")  # a git repository off the root
+        later.parent.mkdir(parents=True)
+        later.symlink_to(host_repo.path, target_is_directory=True)
+        r = env.get("/repos/gamma/profile?refresh=true")
+        assert r.status_code == 422, r.text
+        assert envelope(r)["code"] == "clone_path_escapes"
+
+
+def _dated_repo(root: Path, dates: list[str]) -> Path:
+    """A git repository with one non-merge commit per author date, oldest first."""
+    root.mkdir(parents=True)
+
+    def git(*args: str, date: str = "") -> None:
+        env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else None
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, env=env)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "t")
+    git("config", "commit.gpgsign", "false")
+    for i, date in enumerate(dates):
+        (root / f"f{i}.txt").write_text(date)
+        git("add", "-A")
+        git("commit", "-q", "-m", f"chore: commit {i}", date=date)
+    return root
+
+
+def _git(root: Path, *args: str, date: str = "") -> None:
+    env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else None
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, env=env)
+
+
+def _commit(root: Path, date: str) -> None:
+    """One more non-merge commit on the current branch, authored at ``date``."""
+    (root / f"c-{date[:10]}.txt").write_text(date)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"chore: {date}", date=date)
+
+
+def _merge_side_commit(root: Path, date: str) -> None:
+    """A side-branch commit brought back with a real merge commit (``--no-ff``)."""
+    _git(root, "checkout", "-q", "-b", "side")
+    _commit(root, date)
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "-m", "Merge side", "side", date=date)
+
+
+class TestPool:
+    """``GET /repos/{name}/pool`` — the pool's date range and the share of history it covers
+    (assessment 2026-09-25, B4: the miner's recency bias is shown where the oracle is)."""
+
+    def test_date_range_from_the_store_and_no_history_without_a_clone(self, env: Env) -> None:
+        r = env.get(f"/repos/{ALPHA}/pool")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["repo"] == ALPHA and body["n_tasks"] == 8
+        assert body["oldest_authored"] == "2026-08-01T12:00:00+00:00"
+        assert body["newest_authored"] == "2026-08-08T12:00:00+00:00"
+        # no clone on this host: the share is unknown, and the answer says why — never a guess
+        assert body["history_commits"] is None and body["window_commits"] is None
+        assert body["share"] is None and body["history_unavailable"] == "no_clone_path"
+        # a repository with no tasks has no range
+        empty = env.get(f"/repos/{BETA}/pool").json()
+        assert empty["n_tasks"] == 0 and empty["oldest_authored"] is None and empty["share"] is None
+
+    def test_share_counts_the_non_merge_commits_since_the_oldest_task(self, tmp_path: Path) -> None:
+        clone = _dated_repo(
+            tmp_path / "dated",
+            [
+                "2026-06-01T12:00:00+00:00",
+                "2026-07-01T12:00:00+00:00",
+                "2026-08-01T12:00:00+00:00",  # the seed's oldest task is authored at this instant
+                "2026-08-04T12:00:00+00:00",
+                "2026-08-08T12:00:00+00:00",
+            ],
+        )
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            assert body["history_unavailable"] == ""
+            assert body["history_commits"] == 5 and body["window_commits"] == 3
+            assert body["share"] == 0.6
+            assert body["history_first_authored"] == "2026-06-01T12:00:00+00:00"
+
+    def test_a_clone_path_that_is_not_a_repository_says_so(self, tmp_path: Path) -> None:
+        (tmp_path / "plain").mkdir()
+        with make_env(tmp_path, clone_path=str(tmp_path / "plain")) as env:
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            assert body["history_unavailable"] == "clone_unavailable" and body["share"] is None
+
+    def test_a_clone_path_that_escapes_the_repositories_directory_is_not_walked(
+        self, tmp_path: Path
+    ) -> None:
+        """The pool walk opens a stored clone, so the clone-path rule of PR #52 applies here
+        as it does to the profile walk: a path written under ``<home>/repos`` that now
+        resolves outside it (a symbolic link planted after registration) is not read, and
+        the answer says why. Integration of #52 with #54."""
+        outside = _dated_repo(tmp_path / "outside", ["2026-08-01T12:00:00+00:00"])
+        link = tmp_path / "repos" / "alpha"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(outside, target_is_directory=True)
+        with make_env(tmp_path, clone_path=str(link)) as env:
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            assert body["history_unavailable"] == "clone_path_escapes"
+            assert body["history_commits"] is None and body["share"] is None
+            assert body["oldest_authored"] == "2026-08-01T12:00:00+00:00"
+
+    def test_a_merge_commit_is_not_counted_as_history(self, tmp_path: Path) -> None:
+        """The miner walks non-merge commits only, so the share must too: a merge commit in
+        the window would otherwise inflate both counts and understate the recency bias."""
+        clone = _dated_repo(
+            tmp_path / "merged",
+            ["2026-07-01T12:00:00+00:00", "2026-08-01T12:00:00+00:00"],
+        )
+        _merge_side_commit(clone, "2026-08-05T12:00:00+00:00")
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            # three authored commits (two on main, one on the side branch) and one merge
+            assert body["history_commits"] == 3 and body["window_commits"] == 2
+
+    def test_the_history_walk_runs_once_per_clone_head(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Any viewer may read the pool, so the full-history walk is cached against the
+        clone's HEAD: a repeat read does not walk again, and a new commit does."""
+        from crb.core.git import GitRepo
+
+        walks: list[tuple[str, ...]] = []
+        real_run = GitRepo.run
+
+        def counting_run(self: GitRepo, *args: str, **kw: Any) -> Any:
+            if args and args[0] in ("log", "rev-list"):
+                walks.append(args)
+            return real_run(self, *args, **kw)
+
+        monkeypatch.setattr(GitRepo, "run", counting_run)
+        clone = _dated_repo(
+            tmp_path / "cached",
+            ["2026-07-01T12:00:00+00:00", "2026-08-01T12:00:00+00:00"],
+        )
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            first = env.get(f"/repos/{ALPHA}/pool").json()
+            second = env.get(f"/repos/{ALPHA}/pool").json()
+            assert first == second and first["history_commits"] == 2
+            assert len(walks) == 1, walks
+            _commit(clone, "2026-08-09T12:00:00+00:00")
+            third = env.get(f"/repos/{ALPHA}/pool").json()
+            assert third["history_commits"] == 3 and len(walks) == 2
+
+    def test_deepening_a_shallow_clone_is_read_although_head_did_not_move(
+        self, tmp_path: Path
+    ) -> None:
+        """A shallow clone deepened by ``git fetch --deepen`` has more history at the same
+        HEAD, so HEAD alone cannot key the cache: the shallow boundary is part of the key
+        (review of PR #54). Everything the walk reads is in the key."""
+        origin = _dated_repo(
+            tmp_path / "origin",
+            [
+                "2026-06-01T12:00:00+00:00",
+                "2026-07-01T12:00:00+00:00",
+                "2026-08-01T12:00:00+00:00",
+                "2026-08-04T12:00:00+00:00",
+                "2026-08-08T12:00:00+00:00",
+            ],
+        )
+        clone = tmp_path / "shallow"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "2", f"file://{origin}", str(clone)],
+            check=True,
+            capture_output=True,
+        )
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            assert env.get(f"/repos/{ALPHA}/pool").json()["history_commits"] == 2
+            _git(clone, "fetch", "-q", "--deepen=2")
+            body = env.get(f"/repos/{ALPHA}/pool").json()
+            assert body["history_commits"] == 4 and body["window_commits"] == 3
+
+    @pytest.mark.parametrize(
+        "failing",
+        [("rev-parse", "--is-inside-work-tree"), ("rev-parse", "--verify"), ("log",)],
+        ids=["is_repo", "head", "walk"],
+    )
+    def test_a_git_failure_anywhere_on_the_read_is_git_failed_not_a_500(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing: tuple[str, ...]
+    ) -> None:
+        """A git call that times out raises ``GitError`` even without ``check=True``; the
+        repository check once ran outside the ``try`` and a timeout there escaped as a server
+        error (review of PR #54). Every git call the pool read makes sits in one ``try``, so
+        any of them failing answers ``git_failed`` with null history fields."""
+        from crb.core.git import GitError, GitRepo
+
+        real_run = GitRepo.run
+
+        def failing_run(self: GitRepo, *args: str, **kw: Any) -> Any:
+            if args[: len(failing)] == failing:
+                raise GitError(list(args), 124, "timed out after 60s")
+            return real_run(self, *args, **kw)
+
+        monkeypatch.setattr(GitRepo, "run", failing_run)
+        clone = _dated_repo(tmp_path / "slow", ["2026-08-01T12:00:00+00:00"])
+        with make_env(tmp_path, clone_path=str(clone)) as env:
+            r = env.get(f"/repos/{ALPHA}/pool")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["history_unavailable"] == "git_failed"
+            assert body["history_commits"] is None and body["share"] is None
+            assert body["oldest_authored"] == "2026-08-01T12:00:00+00:00"
+
+    def test_viewer_reads_anonymous_401_unknown_404(self, env: Env) -> None:
+        login(env.client, "viewer")
+        assert env.get(f"/repos/{ALPHA}/pool").status_code == 200
+        assert env.get("/repos/nope/pool").status_code == 404
+        assert_rbac(env, "GET", f"/repos/{ALPHA}/pool", min_role="viewer")

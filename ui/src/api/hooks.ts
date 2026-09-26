@@ -6,6 +6,9 @@
  *     (no swallowed `.catch`, no fabricated data);
  *   - `retry: false` by default so a missing endpoint shows an honest error,
  *     not a 3× delayed spinner;
+ *   - a query whose last request failed keeps its earlier data: a screen reads
+ *     `currentData(q)`, never `q.data`, where showing that data would present an old
+ *     value as current (PR #54 review);
  *   - polling only while a run is non-terminal, never in a background tab;
  *   - `useRunEvents` is the SSE hook (EventSource, `?after=` resume,
  *     reconnection, bounded buffer) — see `sse.ts`.
@@ -37,7 +40,10 @@
  *               ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/src/screens/Signoff/SignoffPage.test.tsx,
- *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks)
+ *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks),
+ *               ui/src/screens/Results/ResultsPage.test.tsx and
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx (`currentData`, with the
+ *               source ratchet that refuses a `<query>.data` read on those pages)
  *               (every screen test exercises its hooks through `mockApi`)
  * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
  *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
@@ -81,6 +87,7 @@ import type {
   Principal,
   RepoCreateRequest,
   RepoDetail,
+  RepoPool,
   RepoProfile,
   RepoSummary,
   Role,
@@ -111,6 +118,16 @@ import { isRunTerminal } from './types'
  * read it is meant to refresh. Keys nest (`['runs', id, 'tasks']` under `['runs', id]`) so
  * invalidating a prefix reaches its children.
  */
+/**
+ * The data a query holds only while its last request succeeded. TanStack Query keeps the
+ * earlier data when a refetch fails and sets `isError` beside it, so reading `q.data` would
+ * show an old value as if it were current; a screen that must not do that reads this, and
+ * shows the query's error instead (PR #54 review).
+ */
+export function currentData<T>(q: { data: T | undefined; isError: boolean }): T | undefined {
+  return q.isError ? undefined : q.data
+}
+
 export const keys = {
   health: ['health'] as const,
   version: ['version'] as const,
@@ -118,6 +135,7 @@ export const keys = {
   repos: ['repos'] as const,
   repo: (name: string) => ['repos', name] as const,
   repoProfile: (name: string) => ['repos', name, 'profile'] as const,
+  repoPool: (name: string) => ['repos', name, 'pool'] as const,
   repoTasks: (name: string, p?: PageParams) => ['repos', name, 'tasks', p ?? {}] as const,
   runs: (p?: RunListParams) => ['runs', p ?? {}] as const,
   run: (id: string) => ['runs', id] as const,
@@ -277,6 +295,16 @@ export function useRepoProfile(name: string): UseQueryResult<RepoProfile, ApiErr
   return useQuery({
     queryKey: keys.repoProfile(name),
     queryFn: () => api<RepoProfile>(`/repos/${enc(name)}/profile`),
+    enabled: name.length > 0,
+    retry: false,
+  })
+}
+
+/** `GET /repos/{name}/pool` — the mined tasks' date range and the share of history it covers. */
+export function useRepoPool(name: string): UseQueryResult<RepoPool, ApiError> {
+  return useQuery({
+    queryKey: keys.repoPool(name),
+    queryFn: () => api<RepoPool>(`/repos/${enc(name)}/pool`),
     enabled: name.length > 0,
     retry: false,
   })

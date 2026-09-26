@@ -208,7 +208,7 @@ export function RepoNewDialog({ open, onClose, onCreated }: Props) {
           required
           value={location}
           onChange={(e) => setLocation(e.target.value)}
-          placeholder={source === 'clone_path' ? '/srv/repos/sqlalchemy' : 'https://github.com/org/repo.git'}
+          placeholder={source === 'clone_path' ? '/srv/crb/repos/sqlalchemy' : 'https://github.com/org/repo.git'}
           error={locationError}
         />
         <TextField label="Source prefix" hint="field.repo_new.src_prefix" value={srcPrefix} onChange={(e) => setSrcPrefix(e.target.value)} placeholder="src/" description="A file is source if it starts here (empty = anything outside the test prefix)" />

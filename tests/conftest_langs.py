@@ -3,7 +3,9 @@
 Deliberately NOT a ``conftest.py`` (that file belongs to the core test suite):
 test modules import this explicitly. It owns three things:
 
-* **availability probes** — :func:`has_tool`, :func:`docker_available`;
+* **availability probes** — :func:`has_tool`, :func:`docker_available`, and
+  :func:`require_network` (the gate ``tests/conftest.py`` runs before every
+  ``@pytest.mark.network`` test);
 * **once-per-session warm-ups** — the npm dev-dependency caches under
   ``tests/.cache/node_modules_<tool>``, the Maven local-repository warm-up, and
   the sandbox image builds (the inline python test image, and the shipped
@@ -23,18 +25,21 @@ Navigation
 ----------
 What it is:   Shared helpers for the toolchain and sandbox integration suites (imported
               explicitly; not a conftest).
-What it does: Answers "is go/node/mvn/cargo/docker available", warms the npm dev-dependency
+What it does: Answers "is go/node/mvn/cargo/docker available" and "can this host reach the
+              registry a network test installs from", warms the npm dev-dependency
               caches, the Maven local repository and the sandbox images once per session — the
               inline python test image (``CRB_TEST_SANDBOX_IMAGE`` names a present one instead)
               and the shipped reference images built from ``deploy/sandbox/Dockerfile.<lang>``
               (``CRB_TEST_SANDBOX_IMAGE_<LANG>`` likewise) — and performs the two instrument
               steps every language module repeats — mine the feat candidate, open a trial
               worktree at the parent with the tests overlaid. A warm-up that cannot complete is
-              a skip with the reason offline and a failure in CI (``CRB_TEST_STRICT_WARMUP``); a
-              missing tool or daemon is always a skip.
-How:          Memoised probes → on-disk caches under ``tests/.cache`` → ``docker build`` from
-              stdin or from a Dockerfile + context → ``iter_candidates`` + ``Workspace.create``
-              + ``overlay_tests`` through the real runner and executor.
+              a skip with the reason offline and a failure in CI (``CRB_TEST_STRICT_WARMUP``); an
+              unreachable registry follows the same policy; a missing tool or daemon is always
+              a skip.
+How:          Memoised probes (``docker info``; an HTTPS ``HEAD`` per registry host, where any
+              HTTP status is an answer) → on-disk caches under ``tests/.cache`` → ``docker
+              build`` from stdin or from a Dockerfile + context → ``iter_candidates`` +
+              ``Workspace.create`` + ``overlay_tests`` through the real runner and executor.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/langs/__init__.py (the two-commit fixture shape these steps rely
@@ -59,6 +64,8 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
@@ -128,6 +135,50 @@ def docker_unavailable_reason() -> str:
 def docker_available() -> bool:
     """True when a daemon answered ``docker info`` (memoised per process)."""
     return docker_unavailable_reason() == ""
+
+
+#: The hosts a ``@pytest.mark.network`` test needs when its marker names none: the Python
+#: package index a ``uv`` / ``pip`` install resolves from and downloads from.
+DEFAULT_NETWORK_HOSTS: tuple[str, ...] = ("pypi.org", "files.pythonhosted.org")
+NETWORK_PROBE_TIMEOUT_S = 5
+_NETWORK: dict[str, str] = {}
+
+
+def network_unreachable_reason(host: str) -> str:
+    """'' when ``https://<host>/`` answers; else why not (memoised per process).
+
+    Any HTTP status is an answer — a 404 or 405 still proves the route. The probe goes
+    through ``urllib``'s environment proxy handling, the way the installers do, so a proxy
+    that refuses the tunnel (``403``) or a host with no route is unreachable.
+    """
+    if host in _NETWORK:
+        return _NETWORK[host]
+    url = f"https://{host}/"
+    try:
+        urllib.request.urlopen(
+            urllib.request.Request(url, method="HEAD"), timeout=NETWORK_PROBE_TIMEOUT_S
+        ).close()
+        reason = ""
+    except urllib.error.HTTPError as e:  # the host answered
+        e.close()
+        reason = ""
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        reason = f"{url} is not reachable from this host ({getattr(e, 'reason', e)})"
+    _NETWORK[host] = reason
+    return reason
+
+
+def require_network(hosts: Sequence[str] = ()) -> None:
+    """Skip (default) or fail (strict) the calling test when a host it needs is unreachable.
+
+    ``hosts`` are the ``@pytest.mark.network(...)`` arguments; none means
+    :data:`DEFAULT_NETWORK_HOSTS`. Offline is not a defect, so the default is a skip that
+    names the host and the reason; in CI the network is there, so strict warm-up fails.
+    """
+    for host in hosts or DEFAULT_NETWORK_HOSTS:
+        reason = network_unreachable_reason(host)
+        if reason:
+            warmup_unavailable(f"@pytest.mark.network: {reason}")
 
 
 # ---------------------------------------------------------------------------

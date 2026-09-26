@@ -32,9 +32,16 @@ What it does: Pins that a ``SealedCheckout`` holds exactly one reachable commit 
               clean on it, a sandbox failure propagates, an unsealable builder keeps the real
               worktree; and that a session names exactly the spawned streams — and the
               tool-loop executors' commands — whose kill went unconfirmed
-              (``unconfirmed_kills``) for the worker's reaper.
+              (``unconfirmed_kills``) for the worker's reaper. Every test here runs as if the
+              worker were uid 0 (the ``worker_runs_as_root`` autouse fixture), and a ratchet
+              refuses any test under tests/ that builds the settings on the host's own uid, so
+              the suite gives the same answer in a root container as on a developer's laptop.
 How:          ``SealedCheckout`` on a ``pyrepo`` trial; a local HTTP upstream + the proxy on
-              ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``.
+              ephemeral ports; ``FakeSession`` stands in for ``ContainerSession``;
+              ``os.getuid`` / ``os.getgid`` monkeypatched to 0 after pytest's base temporary
+              directory exists; an ``ast`` walk of tests/ for the ratchet, which looks a
+              pin's receiver up in the scopes the pin runs in (its function, the functions
+              that enclose it, the module) to decide it is the ``os`` module.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
@@ -51,7 +58,9 @@ Touch when:   a hardening flag, mount or environment rule of the builder contain
 
 from __future__ import annotations
 
+import ast
 import http.server
+import importlib
 import os
 import socket
 import subprocess
@@ -93,6 +102,26 @@ from crb.core.run import RunSpec, run
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.workspace import HARNESS_SYMLINK, Workspace, sha256_bytes
 from fixtures import pyrepo as pr
+
+TESTS_DIR = Path(__file__).resolve().parent
+#: A named non-root uid:gid: the settings under test never depend on who runs the suite.
+NON_ROOT = "10001:10001"
+
+
+@pytest.fixture(autouse=True)
+def worker_runs_as_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Every test in this module runs as if the worker were uid 0 (a root container).
+
+    The settings' default ``user`` is the worker's own uid, and root is refused, so a test
+    that leans on the default passes on a laptop and fails in a root container. Pinning the
+    uid to 0 here makes that dependency fail on every machine. pytest's base temporary
+    directory is created first: its ownership check reads ``os.getuid`` too.
+    """
+    tmp_path_factory.getbasetemp()
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "getgid", lambda: 0)
 
 
 def _git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -333,7 +362,9 @@ def test_settings_from_env_default_is_host() -> None:
     assert BuilderContainerSettings.from_env({}) is None
     assert BuilderContainerSettings.from_env({"CRB_BUILDER__EXECUTOR": "host"}) is None
     with pytest.raises(SandboxUnavailable, match="IMAGE"):
-        BuilderContainerSettings.from_env({"CRB_BUILDER__EXECUTOR": "docker"})
+        BuilderContainerSettings.from_env(
+            {"CRB_BUILDER__EXECUTOR": "docker", "CRB_BUILDER__USER": NON_ROOT}
+        )
     with pytest.raises(SandboxUnavailable, match="not one of"):
         BuilderContainerSettings.from_env({"CRB_BUILDER__EXECUTOR": "podman"})
 
@@ -366,15 +397,553 @@ def test_settings_fail_closed() -> None:
     with pytest.raises(SandboxUnavailable, match="root"):
         BuilderContainerSettings(image="i", user="root")
     with pytest.raises(SandboxUnavailable, match="allowlist"):
-        BuilderContainerSettings(image="i", allow_hosts=("bad host",))
+        BuilderContainerSettings(image="i", allow_hosts=("bad host",), user=NON_ROOT)
     with pytest.raises(SandboxUnavailable, match="allowlist"):
-        BuilderContainerSettings(image="i", allow_hosts=("*.anthropic.com",))
+        BuilderContainerSettings(image="i", allow_hosts=("*.anthropic.com",), user=NON_ROOT)
     with pytest.raises(SandboxUnavailable, match=r"docker\.sock"):
-        BuilderContainerSettings(image="i", extra_ro_mounts={"/var/run/docker.sock": "/x"})
-    s = BuilderContainerSettings(image="i", allow_hosts=())
+        BuilderContainerSettings(
+            image="i", extra_ro_mounts={"/var/run/docker.sock": "/x"}, user=NON_ROOT
+        )
+    s = BuilderContainerSettings(image="i", allow_hosts=(), user=NON_ROOT)
     assert not s.networked and s.describe()["egress_network"] == "none"
-    assert s.user == f"{os.getuid()}:{os.getgid()}"
+    assert s.user == NON_ROOT
     assert s.proxy_image == "i"
+
+
+def test_the_default_user_is_the_workers_own_uid_and_root_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default is the worker's uid:gid (the bind-mounted checkout stays writable) and a
+    worker running as root is refused, whether the uid is implicit or named."""
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    monkeypatch.setattr(os, "getgid", lambda: 10002)
+    assert BuilderContainerSettings(image="i").user == "10001:10002"
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "getgid", lambda: 0)
+    with pytest.raises(SandboxUnavailable, match="root"):
+        BuilderContainerSettings(image="i")
+    with pytest.raises(SandboxUnavailable, match="root"):
+        BuilderContainerSettings(image="i", user="0:0")
+    # a named non-root user runs as that user whoever the worker is
+    assert BuilderContainerSettings(image="i", user="10001:10001").user == "10001:10001"
+
+
+_UNRESOLVED = object()
+
+
+def _resolve(dotted: str) -> object:
+    """The object a dotted name names, found the way ``monkeypatch.setattr`` finds a string
+    target: import the longest importable prefix, then read the rest as attributes. A name
+    that does not resolve (``Fake.os``, a class local to a test) gives ``_UNRESOLVED``."""
+    parts = dotted.split(".")
+    for i in range(len(parts), 0, -1):
+        try:
+            obj: object = importlib.import_module(".".join(parts[:i]))
+        except (ImportError, ValueError):
+            continue
+        for part in parts[i:]:
+            obj = getattr(obj, part, _UNRESOLVED)
+        return obj
+    return _UNRESOLVED
+
+
+_Scope = tuple[dict[str, str], set[str], set[str]]
+"""One scope's names: those an ``import`` binds, mapped to the dotted module path it names;
+those bound any other way; and those the scope declares ``global``."""
+
+
+def _scope(owner: ast.AST) -> _Scope:
+    """The names ``owner`` — a module or a function — binds in its own scope, as Python decides
+    them: anywhere in its own body, not in a function, lambda or class defined in it.
+    ``import os as system`` → ``system: os``, ``from crb.builders import container`` →
+    ``container: crb.builders.container``, ``import crb.builders`` → ``crb: crb``. A parameter,
+    an assignment (plain, annotated, augmented, walrus, ``for``, ``with … as``, ``del``), an
+    ``except … as``, a ``match`` capture, a relative import, a nested ``def`` or ``class`` of
+    the name, or two imports of it naming different modules, binds it to something other than
+    a module this file can resolve. A comprehension's own variable counts as the function's —
+    the safe side: it can only hide a pin, never invent one."""
+    imports: dict[str, str] = {}
+    other: set[str] = set()
+    declared_global: set[str] = set()
+
+    def bind_import(name: str, path: str) -> None:
+        if imports.setdefault(name, path) != path:
+            other.add(name)
+
+    for node in _own_body(owner):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    bind_import(alias.asname, alias.name)
+                else:
+                    root = alias.name.split(".")[0]
+                    bind_import(root, root)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                name = alias.asname or alias.name
+                if node.module and not node.level:
+                    bind_import(name, f"{node.module}.{alias.name}")
+                else:
+                    other.add(name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            other.add(node.id)
+        elif isinstance(node, ast.arg):
+            other.add(node.arg)
+        elif (
+            isinstance(
+                node,
+                ast.FunctionDef
+                | ast.AsyncFunctionDef
+                | ast.ClassDef
+                | ast.ExceptHandler
+                | ast.MatchAs
+                | ast.MatchStar,
+            )
+            and node.name
+        ):
+            other.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            other.add(node.rest)
+        elif isinstance(node, ast.Global):
+            declared_global.update(node.names)
+    return imports, other - declared_global, declared_global
+
+
+def _module_path(name: str, scopes: list[_Scope]) -> str | None:
+    """The dotted module path ``name`` names where a statement runs, or None when it names
+    anything else. ``scopes`` runs from the statement's own function outwards through the
+    functions that enclose it to the module, as Python looks a name up (a class body is not
+    a scope its methods see). The first scope that binds the name decides; ``global`` sends
+    the lookup to the module."""
+    for i, (imports, other, declared_global) in enumerate(scopes):
+        if name in declared_global and i < len(scopes) - 1:
+            return _module_path(name, scopes[-1:])
+        if name in other:
+            return None
+        if name in imports:
+            return imports[name]
+    return None
+
+
+def _is_the_os_module(node: ast.AST, scopes: list[_Scope]) -> bool:
+    """True when ``node`` — a name or an attribute chain on one — is the ``os`` module the
+    settings read ``getuid`` from, judged by what the name is bound to in the scope the
+    statement runs in, never by its spelling: ``os``, an alias of it (``import os as system``)
+    or a module's ``os`` (``container.os``) are; ``Fake.os`` on a class the test defines is
+    not, and nor is a parameter, local or module-level variable called ``os`` that hides the
+    imported module."""
+    attrs: list[str] = []
+    while isinstance(node, ast.Attribute):
+        attrs.insert(0, node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return False
+    path = _module_path(node.id, scopes)
+    return path is not None and _resolve(".".join([path, *attrs])) is os
+
+
+def _pins_the_uid(node: ast.AST, scopes: list[_Scope]) -> bool:
+    """True for a ``setattr`` call (``monkeypatch.setattr`` or the builtin) that replaces
+    ``os.getuid``: on the ``os`` module by attribute name (``setattr(os, "getuid", …)``, also
+    through an alias or a module's ``.os``) or by a dotted target whose object before
+    ``getuid`` resolves to the ``os`` module (``setattr("os.getuid", …)``,
+    ``setattr("crb.builders.container.os.getuid", …)``). ``getuid`` set on any other object —
+    ``Fake``, ``Fake.os``, ``"shutil.getuid"`` — pins nothing: the settings still read the
+    host's uid. Keyword forms are not recognised — the safe side."""
+    if not isinstance(node, ast.Call):
+        return False
+    callee = node.func
+    name = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
+    if name != "setattr" or not node.args:
+        return False
+    first = node.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        owner, _, attr = first.value.rpartition(".")
+        return attr == "getuid" and bool(owner) and _resolve(owner) is os
+    second = node.args[1] if len(node.args) > 1 else None
+    return (
+        isinstance(second, ast.Constant)
+        and second.value == "getuid"
+        and _is_the_os_module(first, scopes)
+    )
+
+
+def _own_body(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+    """The nodes of ``fn``'s own body, not those of a function, lambda or class defined in
+    it: a pin inside a helper the test may never call runs nothing."""
+    out: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(fn))
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
+            stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def _top_level_pins(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef, scopes: list[_Scope]
+) -> list[ast.AST]:
+    """The pins that are statements of ``fn``'s own body at its top level. A pin nested in a
+    ``with``, ``if``, ``try`` or loop may never run (``if False:``) or may be undone when the
+    block ends (``with monkeypatch.context() as m:``), so it pins nothing — the safe side."""
+    return [
+        stmt.value
+        for stmt in fn.body
+        if isinstance(stmt, ast.Expr) and _pins_the_uid(stmt.value, scopes)
+    ]
+
+
+def _undoes(node: ast.AST) -> bool:
+    """True for any ``….undo()`` call: ``monkeypatch.undo()`` reverts every pin made before it."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "undo"
+    )
+
+
+def _at(node: ast.AST) -> tuple[int, int]:
+    return (getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
+
+
+def _settings_on_the_hosts_uid(path: Path) -> set[str]:
+    """Sites in one test file that build builder-container settings without naming a user.
+
+    Two shapes: a ``BuilderContainerSettings(...)`` call with no ``user=`` keyword (a
+    ``**mapping`` is trusted: the docker suite's ``_settings`` runs as the worker's own uid by
+    design and is docker-marked), and a function that sets ``CRB_BUILDER__EXECUTOR`` to
+    ``docker`` without ``CRB_BUILDER__USER``. A PIN of the uid —
+    ``setattr(os, "getuid", …)`` or ``setattr("os.getuid", …)``, through ``monkeypatch`` or
+    not — that is a top-level statement of the function's own body exempts what comes after
+    it, up to the next ``….undo()`` call anywhere in that body: a construction that follows
+    it, and the executor shape when the pin precedes every mention of the executor and
+    ``docker``. What comes before the pin, or after an undo that no later pin repins, still
+    ran on the host's uid and is reported. So is everything in a function whose only pin sits
+    in a nested helper, or is nested in a ``with``, ``if``, ``try`` or loop: such a pin may
+    never run, or may be undone when its block ends. A function that only reads
+    ``os.getuid()``, names it in a string, or sets ``getuid`` on some other object pins
+    nothing. Whether a receiver is the ``os`` module is decided by what its name is bound to
+    in the scope the pin runs in, as Python looks it up, never by its spelling: ``Fake.os`` is
+    not ``os``, nor is a parameter, local or module-level variable called ``os``; an alias
+    (``import os as system``) is. Known limits, all on the safe side: a construction inside
+    the same ``with monkeypatch.context()`` block as its pin is reported although it is
+    pinned, a construction inside a loop is judged by its place in the source, not by the
+    order the loop runs it in, and a comprehension variable called ``os`` hides the module
+    for the whole function.
+    """
+    found: set[str] = set()
+    rel = path.relative_to(TESTS_DIR.parent).as_posix()
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        scopes = [_scope(fn)]
+        outer = parents.get(fn)
+        while outer is not None:
+            if isinstance(outer, ast.FunctionDef | ast.AsyncFunctionDef | ast.Module):
+                scopes.append(_scope(outer))
+            outer = parents.get(outer)
+        nodes = list(ast.walk(fn))
+        strings = {
+            n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        }
+        pins = [_at(n) for n in _top_level_pins(fn, scopes)]
+        undos = [_at(n) for n in _own_body(fn) if _undoes(n)]
+
+        def pinned_before(
+            node: ast.AST,
+            pins: list[tuple[int, int]] = pins,
+            undos: list[tuple[int, int]] = undos,
+        ) -> bool:
+            at = _at(node)
+            return any(pin < at and not any(pin < u < at for u in undos) for pin in pins)
+
+        for call in (n for n in nodes if isinstance(n, ast.Call)):
+            callee = call.func
+            name = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", "")
+            if (
+                name == "BuilderContainerSettings"
+                and not any(k.arg in {"user", None} for k in call.keywords)
+                and not pinned_before(call)
+            ):
+                found.add(f"{rel}:{call.lineno}")
+        if {"CRB_BUILDER__EXECUTOR", "docker"} <= strings and "CRB_BUILDER__USER" not in strings:
+            executor = [
+                n
+                for n in nodes
+                if isinstance(n, ast.Constant) and n.value in {"CRB_BUILDER__EXECUTOR", "docker"}
+            ]
+            if not pinned_before(min(executor, key=_at)):
+                found.add(f"{rel}:{fn.lineno} ({fn.name})")
+    return found
+
+
+def test_no_test_builds_builder_settings_on_the_hosts_uid() -> None:
+    """The class, not the instance: a test that builds the settings on the host's own uid
+    passes as a developer and fails in a root container (12 did, assessment 2026-09-25 §E2).
+    Every construction under tests/ names its user, or pins the uid it depends on."""
+    offenders: set[str] = set()
+    for path in sorted(TESTS_DIR.rglob("*.py")):
+        if ".cache" not in path.parts:  # the per-session toolchain caches are not tests
+            offenders |= _settings_on_the_hosts_uid(path)
+    assert not offenders, (
+        "these tests build BuilderContainerSettings on the host's uid — pass user= "
+        "(or CRB_BUILDER__USER) with a non-root uid:gid: " + ", ".join(sorted(offenders))
+    )
+
+
+_RATCHET_SAMPLE = """\
+import os
+import os as system
+
+from crb.builders import container
+
+
+def test_reads_the_uid():
+    print(os.getuid())
+    BuilderContainerSettings(image="i")  # a read pins nothing
+
+
+def test_names_getuid_in_a_string():
+    assert "getuid" in "os.getuid"
+    BuilderContainerSettings(image="i")  # a string pins nothing
+
+
+def test_sets_getuid_on_another_object(monkeypatch):
+    class Fake:
+        pass
+
+    monkeypatch.setattr(Fake, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a fake's getuid pins nothing
+
+
+def test_sets_getuid_on_another_dotted_name(monkeypatch):
+    monkeypatch.setattr("shutil.getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # another module's getuid pins nothing
+
+
+def test_sets_getuid_on_the_os_attribute_of_another_object(monkeypatch):
+    class Fake:
+        class os:
+            pass
+
+    monkeypatch.setattr(Fake.os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # Fake.os is not the os module: pins nothing
+
+
+def test_sets_getuid_on_a_dotted_os_that_is_not_the_module(monkeypatch):
+    monkeypatch.setattr("Fake.os.getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # Fake.os is not the os module: pins nothing
+
+
+def test_pins_the_uid(monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_through_an_alias_of_os(monkeypatch):
+    monkeypatch.setattr(system, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_through_a_module_that_imports_os(monkeypatch):
+    monkeypatch.setattr(container.os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_by_its_dotted_name(monkeypatch):
+    monkeypatch.setattr("os.getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_by_a_longer_dotted_name(monkeypatch):
+    monkeypatch.setattr("crb.builders.container.os.getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_builds_before_it_pins_the_uid(monkeypatch):
+    BuilderContainerSettings(image="i")  # built before the pin: pins nothing
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_reads_the_env_before_it_pins_the_uid(monkeypatch):  # pins nothing
+    monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    BuilderContainerSettings.from_env()
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+
+
+def test_pins_the_uid_before_it_sets_the_env(monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    BuilderContainerSettings.from_env()
+
+
+def test_pins_the_uid_only_in_a_helper_it_never_calls(monkeypatch):
+    def pin():
+        monkeypatch.setattr(os, "getuid", lambda: 10001)
+
+    BuilderContainerSettings(image="i")  # an uncalled helper's pin pins nothing
+
+
+def test_pins_the_uid_in_a_context_it_then_leaves(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")  # the context undid its pin: pins nothing
+
+
+def test_pins_the_uid_in_a_branch_that_never_runs(monkeypatch):
+    if False:
+        monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")  # a pin that never ran pins nothing
+
+
+def test_undoes_the_pin_before_it_builds(monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    monkeypatch.undo()
+    BuilderContainerSettings(image="i")  # an undone pin pins nothing
+
+
+def test_pins_the_uid_again_after_an_undo(monkeypatch):
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    monkeypatch.undo()
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_pins_the_uid_through_a_local_import_of_os(monkeypatch):
+    import os as local_os
+
+    monkeypatch.setattr(local_os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+
+
+def test_sets_getuid_on_a_local_variable_named_os(monkeypatch):
+    os = SimpleNamespace()
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a local os is not the module: pins nothing
+
+
+def test_sets_getuid_on_an_annotated_local_named_os(monkeypatch):
+    os: object = SimpleNamespace()
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a local os is not the module: pins nothing
+
+
+def test_sets_getuid_on_a_parameter_named_os(monkeypatch, os):
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a fixture named os is not the module: pins nothing
+
+
+def test_sets_getuid_on_a_loop_variable_named_os(monkeypatch):
+    for os in [SimpleNamespace()]:
+        pass
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a loop's os is not the module: pins nothing
+
+
+def test_sets_getuid_on_a_with_target_named_os(monkeypatch):
+    with nullcontext(SimpleNamespace()) as os:
+        pass
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a with's os is not the module: pins nothing
+
+
+def test_sets_getuid_on_a_walrus_named_os(monkeypatch):
+    if (os := SimpleNamespace()):
+        pass
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # a walrus's os is not the module: pins nothing
+
+
+def test_sets_getuid_on_an_exception_named_os(monkeypatch):
+    try:
+        raise ValueError
+    except ValueError as os:
+        pass
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # an exception is not the module: pins nothing
+
+
+def test_sets_getuid_on_an_import_of_another_module_as_os(monkeypatch):
+    import shutil as os
+
+    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+    BuilderContainerSettings(image="i")  # shutil is not the os module: pins nothing
+
+
+def test_sets_getuid_in_a_closure_over_a_local_os(monkeypatch):
+    os = SimpleNamespace()
+
+    def inner():
+        monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)
+        BuilderContainerSettings(image="i")  # the enclosing os is not the module: pins nothing
+
+    inner()
+
+
+def test_pins_the_uid_on_the_global_os(monkeypatch):
+    global os
+    monkeypatch.setattr(os, "getuid", lambda: 10001)
+    BuilderContainerSettings(image="i")
+"""
+
+
+def test_the_ratchet_exempts_a_pinned_uid_and_not_a_read_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a test that PINS the uid is independent of the host's: one that merely reads
+    ``os.getuid()`` (or names it in a string) and then builds settings on the default still
+    depends on the machine, and the ratchet must still see it (PR #51 review). A pin covers
+    only what runs after it in the test's own body: settings built, or the executor set,
+    before the pin or after an undo, and a pin inside a helper the test never calls or
+    nested in a block that may not run or may undo it, are still reported (PR #51 review).
+    A pin counts only on the ``os`` module itself, found through the file's imports: ``getuid``
+    set on ``Fake.os`` or on ``"Fake.os.getuid"`` is still reported, and an alias of ``os`` is
+    still a pin (PR #51 review). A name is looked up in the scope the pin runs in, as Python
+    does: a parameter, local variable, loop, ``with``, walrus or ``except`` target, or local
+    import of another module named ``os`` hides the imported module, so a pin on it is still
+    reported; a local import of ``os`` or a ``global os`` is still a pin (PR #51 review)."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    sample = tests_dir / "test_sample.py"
+    sample.write_text(_RATCHET_SAMPLE, encoding="utf-8")
+    monkeypatch.setitem(globals(), "TESTS_DIR", tests_dir)
+    unpinned = {
+        (
+            f"tests/test_sample.py:{i} ({line[4:].split('(')[0]})"
+            if line.startswith("def ")
+            else f"tests/test_sample.py:{i}"
+        )
+        for i, line in enumerate(_RATCHET_SAMPLE.splitlines(), start=1)
+        if "pins nothing" in line
+    }
+    assert len(unpinned) == 21
+    assert _settings_on_the_hosts_uid(sample) == unpinned
+
+
+def test_the_ratchet_sees_a_module_level_name_that_hides_the_os_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file that imports ``os`` and then rebinds the name at module level has no ``os``
+    module under that name: a pin on it pins nothing and is still reported (PR #51 review)."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    sample = tests_dir / "test_sample.py"
+    sample.write_text(
+        "import os\n"
+        "os = SimpleNamespace()\n"
+        "\n"
+        "\n"
+        "def test_sets_getuid_on_a_module_level_os(monkeypatch):\n"
+        '    monkeypatch.setattr(os, "getuid", lambda: 10001, raising=False)\n'
+        '    BuilderContainerSettings(image="i")\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "TESTS_DIR", tests_dir)
+    assert _settings_on_the_hosts_uid(sample) == {"tests/test_sample.py:7"}
 
 
 def test_builder_run_args_hardening_and_secret_handling(tmp_path: Path) -> None:
@@ -443,10 +1012,11 @@ def test_probe_reports_off_and_down(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CRB_BUILDER__EXECUTOR", raising=False)
     assert probe_builder_container()[0] == "off"
     status, detail = probe_builder_container(
-        BuilderContainerSettings(image="i", docker_binary="/nonexistent/docker")
+        BuilderContainerSettings(image="i", docker_binary="/nonexistent/docker", user=NON_ROOT)
     )
     assert status == "down" and "docker" in detail
     monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    monkeypatch.setenv("CRB_BUILDER__USER", NON_ROOT)
     status, detail = probe_builder_container()
     assert status == "down" and "IMAGE" in detail
 
@@ -720,7 +1290,7 @@ def test_adapter_sealed_path_grades_clean_on_the_real_worktree(
         executor=spec.executor,
         config=pyrepo.config,
         on_event=lambda a, p: events.append((a, dict(p))),
-        container=BuilderContainerSettings(image="crb-builder:test"),
+        container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
     )
     summary = run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
@@ -750,7 +1320,7 @@ def test_adapter_sealed_path_fails_closed(
         runner=spec.runner,
         executor=spec.executor,
         config=pyrepo.config,
-        container=BuilderContainerSettings(image="crb-builder:test"),
+        container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
     )
     summary = run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
@@ -779,7 +1349,7 @@ def test_adapter_unsealable_builder_keeps_the_real_worktree(
         runner=spec.runner,
         executor=spec.executor,
         config=pyrepo.config,
-        container=BuilderContainerSettings(image="crb-builder:test"),
+        container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
     )
     run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
@@ -817,7 +1387,7 @@ def test_session_reports_the_spawned_containers_whose_kill_went_unconfirmed(
     stream's own bound, so the adapter can hand them to the worker's reaper."""
     executor = _ExecutorStub([None, True, False])
     session = ContainerSession(
-        BuilderContainerSettings(image="crb-builder:test"),
+        BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         sealed,
         executor=executor,  # type: ignore[arg-type]
         label="kills",
@@ -843,7 +1413,7 @@ def test_session_reports_the_tools_executors_unconfirmed_kills_too(
     fake.write_text("#!/bin/sh\nexit 0\n")
     fake.chmod(0o755)
     session = ContainerSession(
-        BuilderContainerSettings(image="crb-builder:test", docker_binary=str(fake)),
+        BuilderContainerSettings(image="crb-builder:test", docker_binary=str(fake), user=NON_ROOT),
         sealed,
         executor=_ExecutorStub([False]),  # type: ignore[arg-type]
         label="tools",
@@ -864,5 +1434,6 @@ def test_container_settings_from_env_is_the_worker_hook(monkeypatch: pytest.Monk
     assert adapter.container_settings_from_env() is None
     monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:local")
+    monkeypatch.setenv("CRB_BUILDER__USER", NON_ROOT)
     s = adapter.container_settings_from_env()
     assert s is not None and s.image == "crb-builder:local"

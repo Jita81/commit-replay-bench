@@ -149,10 +149,34 @@ export interface WorkerProbeData {
   unconfirmed_containers?: number
 }
 
+/**
+ * Where tests and the builder run, as the API reads the deployment's environment (ADR-0023):
+ * production refuses an unsealed posture unless `CRB_ALLOW_UNSEALED_PROD=1`, and then says so.
+ */
+export interface DeploymentPosture {
+  env: 'dev' | 'prod'
+  /** `docker` (sealed) or `local`. */
+  sandbox_executor: string
+  /** `docker` (sealed) or `host`. */
+  builder_executor: string
+  sealed: boolean
+  /** Production running unsealed under `CRB_ALLOW_UNSEALED_PROD=1`; every run's apparatus carries it. */
+  unsealed_prod_override: boolean
+  /**
+   * The factory's own posture: a factory build hands the builder a host worktree, never a
+   * container. `refused` in prod without the override (the worker refuses the run); `host`
+   * otherwise (in prod every factory run's apparatus then carries the override). Absent on an
+   * older server.
+   */
+  factory_builds?: 'refused' | 'host'
+}
+
 /** `GET /health` — overall status is the worst probe. */
 export interface Health {
   status: ProbeStatus
   probes: Probe[]
+  /** The deployment's posture (ADR-0023). Absent on an older server. */
+  posture?: DeploymentPosture
 }
 
 /** `GET /version` — the package, the apparatus (the instrument's version, ADR-0001) and the routing policy. */
@@ -330,6 +354,24 @@ export interface RepoProfile {
   classes: string[]
   sizes: string[]
   cells: ProfileCell[]
+}
+
+/**
+ * `GET /repos/{name}/pool` — which stretch of history the mined tasks come from. The miner
+ * takes the newest non-merge commits that touch both source and tests, so this is the pool's
+ * recency bias, shown. The history fields and `share` are `null` when the clone cannot be read
+ * on the API host, and `history_unavailable` says why.
+ */
+export interface RepoPool {
+  repo: string
+  n_tasks: number
+  oldest_authored: string | null
+  newest_authored: string | null
+  history_commits: number | null
+  history_first_authored: string | null
+  window_commits: number | null
+  share: number | null
+  history_unavailable: '' | 'no_clone_path' | 'clone_path_escapes' | 'clone_unavailable' | 'git_failed'
 }
 
 // ---------------------------------------------------------------------------

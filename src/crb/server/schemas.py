@@ -304,6 +304,30 @@ class RepoProfile(BaseModel):
     computed_at: str
 
 
+class RepoPool(BaseModel):
+    """``GET /repos/{name}/pool`` — which stretch of history the mined tasks were drawn from.
+
+    The miner walks the newest ``log_n`` non-merge commits and keeps those that touch both
+    source and tests within the pool caps, so every rate describes recent, tested work. The
+    date range comes from the stored tasks; the share needs the clone and is ``None`` (with
+    ``history_unavailable`` saying why) when it is not on this host — never a guess.
+    """
+
+    repo: str
+    n_tasks: int
+    oldest_authored: str | None
+    newest_authored: str | None
+    #: non-merge commits reachable from the clone's HEAD, and the first one's author date
+    history_commits: int | None
+    history_first_authored: str | None
+    #: non-merge commits authored on or after the pool's oldest task
+    window_commits: int | None
+    #: ``window_commits / history_commits`` to four places
+    share: float | None
+    #: ``""`` | ``no_clone_path`` | ``clone_path_escapes`` | ``clone_unavailable`` | ``git_failed``
+    history_unavailable: str
+
+
 class TaskSpecOut(BaseModel):
     """:meth:`crb.core.spec.TaskSpec.to_dict`."""
 

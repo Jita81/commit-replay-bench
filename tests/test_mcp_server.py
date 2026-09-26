@@ -231,3 +231,50 @@ def test_cli_lists_the_tools_without_connecting(capsys: pytest.CaptureFixture[st
     assert main(["mcp", "--list"]) == 0
     listed = json.loads(capsys.readouterr().out)
     assert set(listed) == EXPECTED_TOOLS
+
+
+def test_register_repo_tool_is_confined_to_the_repos_root(tmp_path: Path) -> None:
+    """D2: the MCP write tool rides ``POST /repos``, so a model acting as an operator cannot
+    point the deployment at an arbitrary host directory; the refusal is data, not a crash.
+    An admin may, and the route records it."""
+    with make_env(tmp_path, role=None) as env:
+        server = build_server(_api(env, "operator"))
+        out = call(
+            server,
+            "crb_register_repo",
+            config={"name": "gamma", "language": "python", "clone_path": "/etc"},
+        )
+        assert out["error"] is True and out["status"] == 403
+        assert out["code"] == "clone_path_outside_home"
+        inside = str(Path(env.settings.home) / "repos" / "gamma")
+        made = call(
+            server,
+            "crb_register_repo",
+            config={"name": "gamma", "language": "python", "clone_path": inside},
+        )
+        assert made.get("error") in ("", None) and made["clone_path"] == inside, made
+        moved = call(server, "crb_update_repo", name="gamma", config={"clone_path": "/etc"})
+        assert moved["error"] is True and moved["code"] == "clone_path_outside_home"
+
+
+def test_csrf_is_carried_under_the_host_prefixed_name_on_a_tls_deployment(
+    tmp_path: Path,
+) -> None:
+    """D4: a deployment with secure cookies names them ``__Host-crb_session`` /
+    ``__Host-crb_csrf``; the MCP client finds the token under either name, or every write
+    tool would fail ``csrf_failed`` the day the deployment moves to TLS."""
+    from fastapi.testclient import TestClient
+
+    from crb.server.app import create_app
+    from fixtures.server_seed import add_users, make_factory, make_settings, seed
+
+    factory = make_factory(tmp_path)
+    seed(factory)
+    add_users(factory)
+    app = create_app(make_settings(tmp_path, cookie_secure=True), factory)
+    with TestClient(app, base_url="https://testserver") as client:
+        api = CrbApi(client, prefix=API_PREFIX, username=USERS["operator"], password=USER_PW)
+        server = build_server(api)
+        created = call(server, "crb_start_run", request={"repo": ALPHA, "kind": "mine"})
+        assert created.get("error") in ("", None) and created["status"] == "queued", created
+        assert "__Host-crb_csrf" in client.cookies

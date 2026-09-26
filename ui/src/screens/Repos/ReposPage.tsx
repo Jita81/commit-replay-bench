@@ -18,7 +18,8 @@
  *               ui/src/screens/Repos/RepoNewDialog.tsx, ui/src/screens/Repos/RepoDetail.tsx
  *               (where a row leads), ui/src/lib/verdict.ts (`probeDisplay`,
  *               `runStatusDisplay`), src/crb/server/routes/repos.py
- * Tested by:    ui/e2e/walkthrough/02-repo-onboard.spec.ts (Add repo → the repo page),
+ * Tested by:    ui/src/screens/Repos/ReposPage.test.tsx (rows, probe pills, the empty state per
+ *               role), ui/e2e/walkthrough/02-repo-onboard.spec.ts (Add repo → the repo page),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe)
  * Touch when:   a column is worth adding from `GET /repos` (docs/API.md); never for a new
  *               repository — it appears here once added.

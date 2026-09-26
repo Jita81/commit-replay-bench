@@ -9,7 +9,9 @@
  *               values never appear: what is shown is the reference the deployment resolves
  *               at run time, and whether it is configured.
  * What it does: Answers the review board's questions on one page that prints: which
- *               instrument, which policies, how people sign in, where tests run, what leaves
+ *               instrument, which policies, how people sign in, where tests and the builder
+ *               run and whether production runs unsealed under CRB_ALLOW_UNSEALED_PROD
+ *               (ADR-0023, from `/health`, to every viewer), what leaves
  *               the tenant, what the factory may write to a repository and under which gate,
  *               what is retained, whether the ledger verifies. Rows an unprivileged viewer
  *               cannot see say so rather than guess. Every row whose value is not the
@@ -19,7 +21,8 @@
  *               `useGitHubApp`; every row is a fact from one of them; `<Term>` on the
  *               apparatus and belt words, `<DocLink>` for the next step.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ * ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+ *               docs/adr/0023-production-refuses-the-unsealed-posture.md
  * Works with:   ui/src/components/govuk.tsx (SummaryList), ui/src/components/Help.tsx (`Term`,
  *               `DocLink`), ui/src/screens/Settings/SettingsPage.tsx (where an admin acts),
  *               src/crb/server/worker.py (`_delivery_credentials` — what the Delivery rows
@@ -33,6 +36,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useGitHubApp, useHealth, useLedgerVerify, useSettings, useVersion } from '../../api/hooks'
+import type { DeploymentPosture } from '../../api/types'
 import { DocLink, Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, PageTitle, SummaryList, type SummaryRow } from '../../components/govuk'
@@ -54,6 +58,51 @@ function NextStep({ children, admin, doc }: { children: ReactNode; admin: boolea
         </>
       ) : null}
     </span>
+  )
+}
+
+const POSTURE_DOC = <DocLink to="DEPLOYMENT#21-environment-reference">Environment reference (DEPLOYMENT)</DocLink>
+
+/**
+ * What happens to a factory run (ADR-0023), said after a sealed posture: a factory build runs
+ * the builder on the host and is never sealed, so production refuses it unless the override
+ * is set — and then every factory run's apparatus carries it.
+ */
+function factoryClause(p: DeploymentPosture): string {
+  if (p.factory_builds === 'refused')
+    return '; in production factory runs are refused, because factory builds run the builder on the host and are not sealed yet'
+  if (p.factory_builds === 'host' && p.env === 'prod')
+    return "; factory builds run on the host under CRB_ALLOW_UNSEALED_PROD=1, and every factory run's apparatus carries the override"
+  if (p.factory_builds === 'host') return '; factory builds run on the host'
+  return ''
+}
+
+/**
+ * The production posture row (ADR-0023), from `/health` so every viewer sees it: sealed, a
+ * development reading in dev, or production running unsealed under the override — never
+ * silent about the override, because every run's apparatus carries it.
+ */
+function postureValue(p: DeploymentPosture | undefined, failed: boolean, admin: boolean): ReactNode {
+  if (!p) return failed ? 'the health check could not be read' : 'not reported by this deployment'
+  if (p.sealed) return `sealed — tests and the builder run in docker${factoryClause(p)}`
+  const where = `tests run ${p.sandbox_executor}, the builder runs ${p.builder_executor}`
+  if (p.unsealed_prod_override) {
+    return (
+      <>
+        unsealed in production under CRB_ALLOW_UNSEALED_PROD=1 — {where}; every run's apparatus carries the override, and what it measures is a development reading, not evidence.{' '}
+        <NextStep admin={admin} doc={POSTURE_DOC}>
+          Remove CRB_ALLOW_UNSEALED_PROD and set both executors to docker on the API and the worker.
+        </NextStep>
+      </>
+    )
+  }
+  return (
+    <>
+      development ({p.env}) — {where}: a development reading, not evidence.{' '}
+      <NextStep admin={admin} doc={POSTURE_DOC}>
+        To count runs as evidence run with CRB_ENV=prod, where both executors default to docker.
+      </NextStep>
+    </>
   )
 }
 
@@ -165,6 +214,11 @@ export function PosturePage() {
               </NextStep>
             </>
           ),
+        },
+        {
+          key: 'Production posture',
+          hint: 'summary.posture.production',
+          value: postureValue(health.data?.posture, health.isError, admin),
         },
         { key: 'Builder posture', hint: 'summary.posture.builder', value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : adminOnly(undefined) },
         { key: 'Toolchains', hint: 'summary.posture.toolchains', value: probeText('toolchains') },
