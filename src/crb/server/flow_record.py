@@ -60,6 +60,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.store.models import Event, Repo, User
 
+# Every writer below names its action as a literal (the event-vocabulary ratchet,
+# tests/test_event_vocabulary.py, reads literals); these constants are what readers match.
 #: A cell of a repository first routed ``deliver`` in a scope (written once per cell and scope).
 DELIVER_ROUTED = "cell.routed_deliver"
 #: The recorder's first look at a repository in a scope, naming the cells already at deliver.
@@ -118,7 +120,7 @@ def record_deliver_transitions(
         append_system_event(
             session,
             trace_id=trace,
-            action=RECORDER_STARTED,
+            action="flow.recorder_started",  # RECORDER_STARTED, as a literal
             repo=repo,
             actor=ACTOR,
             payload={
@@ -142,7 +144,7 @@ def record_deliver_transitions(
         append_system_event(
             session,
             trace_id=trace,
-            action=DELIVER_ROUTED,
+            action="cell.routed_deliver",  # DELIVER_ROUTED, as a literal
             repo=repo,
             actor=ACTOR,
             payload={
@@ -192,7 +194,7 @@ def record_install(session: Session, *, fresh: bool) -> bool:
     append_system_event(
         session,
         trace_id=system_trace_id("flow", "deployment"),
-        action=INSTALLED,
+        action="deployment.installed",  # INSTALLED, as a literal
         actor=ACTOR,
         payload={"moment": MOMENT_OBSERVED if fresh else MOMENT_UNKNOWN},
     )
@@ -207,7 +209,7 @@ def record_first_healthy(session: Session, *, status: str) -> bool:
     append_system_event(
         session,
         trace_id=system_trace_id("flow", "deployment"),
-        action=FIRST_HEALTHY,
+        action="deployment.first_healthy",  # FIRST_HEALTHY, as a literal
         actor=ACTOR,
         payload={"status": status},
     )
