@@ -1191,3 +1191,18 @@ class TestSse:
             return [chunk async for chunk in gen]
 
         assert asyncio.run(drive()) == []  # no events for the running run; client went away
+
+
+def test_the_suite_never_sees_the_hosts_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P-037: the suite-wide pin makes ``claude_cli_on_path`` read ``False`` whatever this
+    machine has, so a ``cli``-auth run with no token is refused here exactly as on a bare CI
+    runner; a test that wants the CLI present says so, and is then accepted."""
+    from crb.builders import claude_code
+    from crb.builders.claude_code import credential_missing
+
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setenv("CRB_SECRETS_DIR", "/nonexistent-crb-secrets")
+    assert claude_code.claude_cli_on_path() is False
+    assert "no `claude` CLI on PATH" in credential_missing("cli", secrets_dir=Path("/nonexistent"))
+    monkeypatch.setattr(claude_code, "claude_cli_on_path", lambda: True)
+    assert credential_missing("cli", secrets_dir=Path("/nonexistent")) == ""

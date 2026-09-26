@@ -1117,6 +1117,14 @@ def auth_status(binary: str = "", timeout_s: int = 15) -> tuple[str, str, str]:
     return TOKEN_SOURCE_NONE, "", "no token and no CLI login — run `claude setup-token`"
 
 
+def claude_cli_on_path() -> bool:
+    """``True`` when a ``claude`` CLI is on PATH — the one host fact :func:`credential_missing`
+    reads. A named seam so the test suite pins it (``tests/conftest.py``): a test must never
+    pass or fail on whether the machine running it has the CLI installed
+    (docs/PREVENTION.md P-037)."""
+    return shutil.which("claude") is not None
+
+
 def credential_missing(auth: str = "", *, secrets_dir: Path | None = None) -> str:
     """Why a ``claude_code`` build under ``auth`` would have no credential — ``""`` when one
     is present. PRESENCE ONLY: an environment variable is set, a token file exists and is
@@ -1149,7 +1157,7 @@ def credential_missing(auth: str = "", *, secrets_dir: Path | None = None) -> st
                 return ""
         except (OSError, SecretsError):
             pass  # an unreadable store is not a credential; the message below names the fix
-        if shutil.which("claude"):
+        if claude_cli_on_path():
             return ""
         return (
             "the claude_code builder with auth 'cli' needs a Claude Code login and none is "
@@ -1304,6 +1312,7 @@ __all__ = [
     "StreamStats",
     "SubprocessHandle",
     "auth_status",
+    "claude_cli_on_path",
     "cli_version",
     "credential_missing",
     "default_auth",

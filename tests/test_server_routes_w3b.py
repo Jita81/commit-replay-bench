@@ -85,7 +85,12 @@ def jobs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
 
 
 class TestBuilderConfig:
-    def test_stored_under_params_and_served(self, env: Env, jobs: list[Run]) -> None:
+    def test_stored_under_params_and_served(
+        self, env: Env, jobs: list[Run], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # auth 'cli' is refused at submit without a credential (P-003); this case is about
+        # storage, so a PRESENT placeholder token (never a real one) — not the host's CLI.
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "placeholder-not-a-token")
         cfg = {"auth": "cli", "effort": "high", "extra_args": ["--x"], "keep_transcript": True}
         r = env.post(
             "/runs",
