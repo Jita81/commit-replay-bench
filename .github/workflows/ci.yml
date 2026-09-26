@@ -47,6 +47,8 @@
 #                  Playwright report + traces are uploaded on failure
 #
 # Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
+# mypy and ruff are pinned exactly in the dev extra and moved by the same Dependabot; the
+# daily scheduled run catches any other dependency whose new release moves a verdict.
 
 name: ci
 
@@ -56,6 +58,13 @@ on:
     tags-ignore: ["v*"]
   pull_request:
   workflow_dispatch:
+  # Daily on main with nothing changed: the dependencies are resolved fresh on every run, so
+  # an upstream release can move a gate's verdict with no commit (SQLAlchemy 2.1.0, published
+  # 2026-09-24, turned eight untyped query results into mypy errors on an unchanged tree).
+  # The scheduled run finds that the day it happens and names the release, instead of
+  # failing the next unrelated pull request. The gate tools themselves are pinned exactly.
+  schedule:
+    - cron: "17 5 * * *"
 
 permissions:
   contents: read

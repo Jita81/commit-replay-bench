@@ -1,6 +1,6 @@
 # ADR-0027 — Automatic sign-in for a development stack, on loopback only
 
-**Status:** Accepted (operator request 2026-09-26; decision DL-053, which may be renumbered at merge)
+**Status:** Accepted (operator request 2026-09-26; decision DL-054, which may be renumbered at merge)
 **Date:** 2026-09-26
 **Apparatus impact:** none — this changes who is signed in on a development stack, never
 what a belt means, how a cell is keyed or how a route is decided.
