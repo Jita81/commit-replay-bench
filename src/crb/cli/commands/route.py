@@ -93,16 +93,26 @@ def load_policy(spec: str) -> RoutingPolicy:
 
 
 def cmd_route(args: argparse.Namespace) -> int:
-    """Route every measured cell; exit 1 when any is ``do_not_ship``."""
+    """Route every measured cell of one checks arm; exit 1 when any is ``do_not_ship``,
+    or when the ledger has rows but none of them is of the selected arm (that arm is
+    unmeasured, which is never a successful route)."""
     wd = workdir_of(args)
     path = Path(args.path).expanduser() if args.path else wd.ledger_path
     policy = load_policy(args.policy_json)
-    rows = rows_for_checks(JsonlLedger(path).rows(), args.checks)
+    every = list(JsonlLedger(path).rows())
+    rows = rows_for_checks(every, args.checks)
+    by_arm: dict[str, int] = {}
+    for r in every:
+        by_arm[r.checks_arm] = by_arm.get(r.checks_arm, 0) + 1
+    unmeasured = bool(every) and not rows
     decisions = [route(s, policy=policy) for s in all_cell_stats(rows)]
     decisions.sort(key=lambda d: tuple(d.cell.values()))
     out: dict[str, Any] = {
         "ledger": str(path),
+        "checks": args.checks,
         "rows": len(rows),
+        "rows_by_arm": dict(sorted(by_arm.items())),
+        "unmeasured": unmeasured,
         "policy": policy.to_dict(),
         "decisions": [d.to_dict() for d in decisions],
         "summary": {
@@ -144,10 +154,20 @@ def cmd_route(args: argparse.Namespace) -> int:
         ]
         lines = list(table(headers, body))
         lines.append("")
+        if unmeasured:
+            others = ", ".join(f"{arm}: {n}" for arm, n in sorted(by_arm.items()))
+            lines.append(
+                f"no rows graded under the checks arm {args.checks!r} — that arm is unmeasured, "
+                f"not routed. The ledger's rows are of other arms ({others}); pass --checks "
+                "with one of them to route it."
+            )
         lines.append(
+            f"checks arm {args.checks!r}: "
             f"{len(decisions)} cell(s) from {len(rows)} rows; policy {policy.version} "
             f"(n≥{policy.min_n}, point≥{policy.min_point}, Wilson-low≥{policy.min_ci_low}, "
             f"oracle≥{policy.min_oracle_strength} when measured); summary {out['summary']}"
         )
         print_lines(lines)
+    if unmeasured:
+        return EXIT_NEGATIVE
     return EXIT_NEGATIVE if any(d.route == ROUTE_DO_NOT_SHIP for d in decisions) else EXIT_OK
