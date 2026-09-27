@@ -2,7 +2,14 @@
  * 11-screens — every route × persona × width, captured, the About block on every one, and the
  * hints: a sample opens on hover (or tap at phone width), axe stays clean with one open.
  *
- * Runs after 01–09 so the stack carries the data they produced. For each persona (viewer /
+ * Its own CI jobs run it on a stack of its own (the tier-1 walk is split so each part finishes
+ * inside its budget), so it never assumes state another spec made: its first test SEEDS the
+ * primary repository through the API — onboard, probe, mine, oracle, controls, a two-task
+ * `fixture_gold` replay, the same runs 02–05 queue through the UI — unless the repository is
+ * already there (run after 01–10 in one invocation, it reuses what they made and seeds
+ * nothing). `CRB_E2E_SCREENS_SHARD=k/n` runs every n-th persona from the k-th, so the n
+ * parallel jobs cover every persona by construction; unset, it runs all four.
+ * For each persona (viewer /
  * operator / approver / admin) it visits every route at desktop (1280×900) and phone
  * (375×812) widths, waits for the page to settle (load + bounded network-idle + the main
  * heading), writes a full-page PNG named `<persona>__<route-slug>__<width>.png` under
@@ -41,7 +48,9 @@
  * ----------
  * What it is:   Walkthrough spec 11 (screens) — the visual record of every route for every
  *               role at two widths, and the About-block ratchet on the live stack.
- * What it does: Creates the three non-admin accounts if missing (and, for one that exists,
+ * What it does: Seeds the primary repository's history through the API when the stack has
+ *               none (a stack of its own, in CI), selects the personas of its shard,
+ *               creates the three non-admin accounts if missing (and, for one that exists,
  *               asserts the stable password signs into it), finds a finished run and a
  *               task to anchor the detail routes, then for each persona × width signs in
  *               through the form, visits every route, saves a full-page screenshot under
@@ -62,26 +71,50 @@
  *               `aria-describedby`, never by text, so the spec needs no import from src.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/e2e/walkthrough/support.ts (`env`, `signIn`, `primary`),
+ * Works with:   ui/e2e/walkthrough/support.ts (`env`, `signIn`, `primary`, the seeding helpers),
+ *               .github/workflows/ci.yml (the `walkthrough-screens` jobs, one per shard),
  *               ui/src/components/Help.tsx (the About block this asserts),
  *               ui/src/components/Hint.tsx (the `data-hint` triggers and `role="tooltip"`
  *               bubbles this opens), ui/src/components/Layout.tsx (mounts the About block
  *               once; its nav is always in the sample), ui/src/App.tsx (the routes this list
  *               must cover), ui/e2e/walkthrough/README.md (the spec table)
  * Tested by:    ui/e2e/walkthrough/11-screens.spec.ts (this file; run by scripts/walkthrough.sh)
- * Touch when:   a screen is added (add its route and slug to `routes()`); a persona is added.
+ * Touch when:   never for a new repository (it reads the primary tier target); a screen is
+ *               added (add its route and slug to `routes()`); a persona is added (the shards
+ *               pick it up; a fifth persona makes one shard run two).
  */
 import AxeBuilder from '@axe-core/playwright'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { env, personaPassword, primary, signIn } from './support'
+import { apiPost, env, personaPassword, primary, signIn, startRunApi, waitRunApi } from './support'
 
 const OUT = join(process.env.CRB_E2E_OUTPUT_DIR ?? 'test-results-walkthrough', 'screens')
 mkdirSync(OUT, { recursive: true })
 
 const PERSONAS = ['viewer', 'operator', 'approver', 'admin'] as const
 type Persona = (typeof PERSONAS)[number]
+
+/**
+ * The personas this run covers. `CRB_E2E_SCREENS_SHARD=k/n` takes every n-th persona starting
+ * at the k-th (1-based), so shards 1/n … n/n are disjoint and together are every persona — a
+ * persona added to `PERSONAS` lands in a shard with no list to update. CI runs one job per
+ * shard, in parallel (.github/workflows/ci.yml `walkthrough-screens`). Unset: all of them. A
+ * malformed value, or a shard that would select nobody, throws at load, so a job can never
+ * pass having covered no persona.
+ */
+function personasOfShard(spec: string, all: readonly Persona[] = PERSONAS): readonly Persona[] {
+  if (!spec) return all
+  const m = /^([1-9]\d*)\/([1-9]\d*)$/.exec(spec.trim())
+  if (!m) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec}: expected k/n, for example 2/4`)
+  const k = Number(m[1])
+  const n = Number(m[2])
+  if (k > n) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec}: shard ${k} of ${n} does not exist`)
+  const chosen = all.filter((_, i) => i % n === k - 1)
+  if (chosen.length === 0) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec} selects no persona (there are ${all.length})`)
+  return chosen
+}
+const SHARD_PERSONAS = personasOfShard(process.env.CRB_E2E_SCREENS_SHARD ?? '')
 const VIEWPORTS = [
   { width: 1280, height: 900 },
   { width: 375, height: 812 },
@@ -400,6 +433,42 @@ async function hintSample(page: Page, where: string, width: number): Promise<voi
 }
 
 test.describe('11-screens: every route × persona × width, with the About block', () => {
+  test('the primary repository has a probed, mined, measured and replayed history (seeded through the API on a stack of its own)', async ({ page }) => {
+    const t = primary()
+    test.setTimeout(t.probeTimeoutMs + t.mineTimeoutMs + 12 * 60_000)
+    await signIn(page)
+    const existing = await page.request.get(`${env.baseUrl}/api/v1/repos/${encodeURIComponent(t.name)}`)
+    if (existing.ok()) {
+      test.info().annotations.push({ type: 'note', description: `${t.name} exists: the specs before this one made its history; nothing seeded` })
+      return
+    }
+    expect(existing.status(), `GET /repos/${t.name} → ${existing.status()}`).toBe(404)
+    // tier 2 onboards public repositories with their own presets and installs (02/03): seeding
+    // them here would be a second, unreviewed onboarding path
+    expect(env.publicTier, 'tier 2: run 11-screens after 02 and 03 in the same invocation; it seeds only the tier-1 fixture').toBe(false)
+    // the fields 02's "Add a repository" dialog sends for the python-src-layout preset
+    await apiPost(page, '/repos', {
+      name: t.name,
+      language: 'python',
+      runner: 'pytest',
+      url: t.url,
+      src_prefix: 'src/',
+      test_prefix: 'tests/',
+      ext: '.py',
+      belt_scope: t.beltScope,
+      probe: t.probe,
+      runner_opts: t.runnerOpts,
+    })
+    const probe = await apiPost(page, `/repos/${encodeURIComponent(t.name)}/probe`, {})
+    await waitRunApi(page, String(probe.id), t.probeTimeoutMs)
+    // the runs 03, 04 and 05 queue through the dialog, with their limits
+    await startRunApi(page, { repo: t.name, kind: 'mine', limit: t.mineLimit }, t.mineTimeoutMs)
+    await startRunApi(page, { repo: t.name, kind: 'oracle', limit: 1 }, 4 * 60_000)
+    await startRunApi(page, { repo: t.name, kind: 'controls', limit: 1 }, 4 * 60_000)
+    await startRunApi(page, { repo: t.name, kind: 'replay', builder: 'fixture_gold', model: 'gold', limit: 2 }, 4 * 60_000)
+    test.info().annotations.push({ type: 'note', description: `${t.name} seeded through the API: probe, mine ${t.mineLimit}, oracle, controls, replay fixture_gold 2` })
+  })
+
   test('accounts exist and the run / task anchors are known (admin, via the API)', async ({ page, request }) => {
     await signIn(page)
     const headers = await csrfHeaders(page)
@@ -435,10 +504,13 @@ test.describe('11-screens: every route × persona × width, with the About block
       const tj = (await tasks.json()) as { items: Array<{ task_id?: string; id?: string }> }
       ctx.taskId = (tj.items[0]?.task_id ?? tj.items[0]?.id ?? '') as string
     }
-    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} accounts_reused=${reused} out=${OUT}` })
+    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} accounts_reused=${reused} personas=${SHARD_PERSONAS.join(',')} out=${OUT}` })
+    // the detail routes are anchored to a real run and a real task, or they would sweep the 404
+    expect(ctx.runId, 'no finished run to anchor /runs/:id').not.toBe('')
+    expect(ctx.taskId, `no task of ${ctx.repo} to anchor /tasks/:repo/:taskId`).not.toBe('')
   })
 
-  for (const persona of PERSONAS) {
+  for (const persona of SHARD_PERSONAS) {
     for (const vp of VIEWPORTS) {
       test(`${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen`, async ({ page }) => {
         test.setTimeout(6 * 60_000)

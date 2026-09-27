@@ -48,7 +48,19 @@
 #   walkthrough    the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack that
 #                  scripts/walkthrough.sh boots in a temp dir — tier 1: hermetic, no network,
 #                  no model (fixture repo over file://, test-only fixture_gold builder); the
-#                  Playwright report + traces are uploaded on failure
+#                  Playwright report + traces are uploaded on failure. This job runs the
+#                  stateful story — every spec except 11-screens, in order
+#   walkthrough-screens  11-screens (every route x persona x width) split four ways by persona
+#                  (CRB_E2E_SCREENS_SHARD=k/4), each shard on a stack of its own that the
+#                  spec seeds through the API; the four run in parallel beside `walkthrough`.
+#                  Not on main's required-checks list until an administrator adds the four
+#                  contexts (docs/DEPLOYMENT.md §3.4)
+#   job budget     `test`, `walkthrough` and `walkthrough-screens` start a clock in their first
+#                  step and end with scripts/ci_job_budget.py: past 80 % of the job's own
+#                  timeout-minutes it writes an alarm into the job summary, and the walkthrough
+#                  jobs fail — a job that creeps to its timeout blocks every merge, so it is
+#                  split before it gets there (docs/PREVENTION.md P-051). The test job only
+#                  warns: its py3.13 leg already runs past 80 % until the suite is split (G-708)
 #
 # Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
 # mypy and ruff are pinned exactly in the dev extra and moved by the same Dependabot; the
@@ -225,6 +237,8 @@ jobs:
       # is a repository defect, not missing infrastructure: fail, never skip.
       CRB_TEST_STRICT_WARMUP: "1"
     steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -266,6 +280,11 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
           retention-days: 7
+      # warn, not fail: py3.13 ran 58 of its 60 minutes on PR #57, so failing past 80 % would
+      # block every merge until the suite is split and parallelised (G-708, docs/PREVENTION.md)
+      - name: Job budget (warns in the summary past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 60 --mode warn
 
   ui-unit:
     name: ui-unit (tsc -b + vitest, the hint ratchet included)
@@ -659,13 +678,17 @@ jobs:
   walkthrough:
     name: walkthrough (browser, live stack, tier 1)
     runs-on: ubuntu-latest
-    # The tier-1 walk is 56 specs and grows with the product: this wave added the hint sample
-    # on every route x persona x width (11-screens) and the two-person sign-off walk, taking it
-    # past the old 25-minute budget on a GitHub runner (run 35741391422 was cancelled at 25m18s
-    # with the walk still running). 40 leaves headroom; if a future wave needs more, split the
-    # job rather than raising this again — a gate nobody can finish is not a gate.
+    # The tier-1 walk grew past its budget twice: 25 minutes (run 35741391422, cancelled at
+    # 25m18s) and then 40 (PR #57, cancelled twice at 40 minutes with every spec so far
+    # passing) — 11-screens alone was ~34 of them (8 persona x width passes at ~4.3 min each).
+    # So the job was split, not raised: this one runs the stateful story (every spec but
+    # 11-screens, ~9-12 min on a hosted runner) and `walkthrough-screens` runs 11-screens as
+    # four parallel shards. The guard at the end fails the job past 80 % of this budget; if
+    # a future wave needs more, split again — a gate nobody can finish is not a gate.
     timeout-minutes: 40
     steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -696,14 +719,15 @@ jobs:
           git config --global user.email "ci@crb.invalid"
           git config --global user.name "crb ci"
           git config --global init.defaultBranch main
-      - name: Walkthrough — boot a fresh stack, drive it through the browser, tear it down
+      - name: Walkthrough — the stateful story (every spec but 11-screens), on a fresh stack
         # Hermetic: no network (file:// fixture, pinned interpreter), no model (fixture_gold),
         # a temp CRB_HOME + SQLite on a free port. The report is pointed into ui/ for upload.
+        # --grep-invert matches the file name, so a spec added later runs here by default.
         env:
           CI: "1"
           CRB_E2E_REPORT_DIR: ${{ github.workspace }}/ui/playwright-report-walkthrough
           CRB_E2E_OUTPUT_DIR: ${{ github.workspace }}/ui/test-results-walkthrough
-        run: scripts/walkthrough.sh
+        run: scripts/walkthrough.sh --grep-invert '11-screens\.spec\.ts'
       - name: Upload the Playwright report + traces
         if: failure()
         uses: actions/upload-artifact@v7
@@ -715,3 +739,75 @@ jobs:
             ui/test-results-walkthrough
           if-no-files-found: ignore
           retention-days: 7
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 40 --mode fail
+
+  walkthrough-screens:
+    # 11-screens, every route x persona x width, one persona per shard (k/4 takes every 4th
+    # persona from the k-th, so the four shards are every persona by construction). Each shard
+    # boots its own stack and the spec's first test seeds the primary repository through the
+    # API (onboard, probe, mine, oracle, controls, a two-task fixture_gold replay) — it never
+    # assumes state the `walkthrough` job made. ~8.5 min of passes + ~1.5 min seed + ~1 min
+    # setup on a hosted runner, estimated from PR #57's log: under half of this budget.
+    name: walkthrough screens (browser, live stack, tier 1, shard ${{ matrix.shard }} of 4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install crb (server + dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[server,dev]' --python .venv/bin/python
+      - name: Install the UI + Playwright Chromium (with system deps)
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund --legacy-peer-deps
+          npx playwright install --with-deps chromium
+      - name: Build the UI bundle the API serves
+        working-directory: ui
+        run: npm run build
+      - name: Configure git identity for the fixture repository
+        run: |
+          git config --global user.email "ci@crb.invalid"
+          git config --global user.name "crb ci"
+          git config --global init.defaultBranch main
+      - name: 11-screens for this shard's personas, on a fresh stack the spec seeds
+        env:
+          CI: "1"
+          CRB_E2E_SCREENS_SHARD: ${{ matrix.shard }}/4
+          CRB_E2E_REPORT_DIR: ${{ github.workspace }}/ui/playwright-report-walkthrough
+          CRB_E2E_OUTPUT_DIR: ${{ github.workspace }}/ui/test-results-walkthrough
+        run: scripts/walkthrough.sh e2e/walkthrough/11-screens.spec.ts
+      - name: Upload the Playwright report + traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: walkthrough-screens-playwright-report-${{ matrix.shard }}
+          path: |
+            ui/playwright-report-walkthrough
+            ui/test-results-walkthrough
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 25 --mode fail

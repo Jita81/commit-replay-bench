@@ -8,7 +8,7 @@ children: [dod.journey.orient, dod.journey.deploy-and-go-live, dod.journey.recov
 persons: [admin, operator, approver, viewer]
 owner: deploy
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-25
+updated: 2026-09-27
 ---
 
 # Run the platform — deploy, go live, operate, recover
@@ -46,6 +46,7 @@ and the product does not perform. It does not federate or manage more than one d
 | run-the-platform.automation.15 | AUTOMATION | No step here needs a person to do by hand what the product could do: a password reset, a deactivation and a reactivation are API and CLI only — Settings offers create and role change — so a locked-out user is recovered on the host | `absent` | unmet | F23 |
 | run-the-platform.operations.16 | OPERATIONS | `/health` serves the commit the server was started from, the checkout's commit now and the commit the served UI bundle was built from, with `stale` and the fix when any two disagree (a degraded `build` probe, never a 503); `crb doctor` fails (exit 1) when the UI bundle was not built from the code it runs and warns when the checkout trails `origin/main` | `test:tests/test_server_system.py::test_health_serves_the_served_commits_and_a_stale_flag` · `test:tests/test_cli_doctor.py::test_crb_doctor_exits_1_on_a_stale_bundle` · `test:tests/test_cli_doctor.py::test_a_checkout_behind_origin_main_warns_with_the_count` · `test:tests/test_build_stamp.py::test_the_vite_build_writes_the_stamp_this_module_reads` · `route:GET /health` · `doc:docs/OPERATOR.md#11-check-the-installation-crb-doctor` | met | |
 | run-the-platform.evidence.17 | EVIDENCE | Every CI job's rendered check-run name (matrix values expanded) is under 100 characters, so any job can be made a required status check, and a test fails the build when one is not | `test:tests/test_ci_job_names.py::test_every_ci_job_name_is_under_100_characters` · `test:tests/test_ci_job_names.py::test_a_long_name_and_a_long_matrix_value_are_caught` · `ci:test` | met | |
+| run-the-platform.evidence.18 | EVIDENCE | No CI job creeps to its timeout unseen: the `test`, `walkthrough` and `walkthrough-screens` jobs start a clock in their first step and end with a guard that writes the job's elapsed share of its own `timeout-minutes` into the job summary and, past 80 %, an alarm — the walkthrough jobs fail there, the `test` job warns until its suite is split (G-708) — and a test fails the build when a guarded job's guard measures a timeout other than its own | `test:tests/test_ci_job_budget.py::test_fail_mode_fails_a_job_past_80_percent_with_an_alarm_and_an_error` · `test:tests/test_ci_job_budget.py::test_warn_mode_passes_past_the_threshold_but_says_so_unmissably` · `test:tests/test_ci_job_budget.py::test_each_guarded_job_starts_the_clock_first_and_ends_with_the_guard_on_its_timeout` · `ci:walkthrough` · `ci:walkthrough-screens` · `ci:test` | met | |
 
 ## Gaps
 - **G-580** — the product never names this stream · give Home's task list a preceding "Set up the deployment" group (or a Deployment task list) whose rows are the go-live lines, so the work before task 1 is visible · ui
