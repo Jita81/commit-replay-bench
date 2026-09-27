@@ -26,6 +26,7 @@
  * Tested by:    ui/src/components/Layout.test.tsx
  * Touch when:   a journey step is added or the shell's chrome changes.
  */
+import { useEffect, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -203,6 +204,76 @@ describe('Layout: the phone menu (F26)', () => {
     await userEvent.keyboard('{Escape}')
     expect(button).toHaveAttribute('aria-expanded', 'false')
     expect(button).toHaveFocus()
+  })
+
+  it('an Escape spent by another layer (a drawer or dialog holding focus) leaves the menu open', async () => {
+    mockApi(API)
+    // a layer like the evidence drawer: a window keydown listener closes it on Escape without
+    // default-preventing, and focus sits inside it while it is open
+    function Drawer() {
+      const [open, setOpen] = useState(false)
+      useEffect(() => {
+        if (!open) return
+        const onKey = (e: KeyboardEvent) => {
+          if (e.key === 'Escape') setOpen(false)
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+      }, [open])
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open evidence
+          </button>
+          {open && (
+            <div role="dialog" aria-label="Evidence">
+              <button type="button" autoFocus>
+                Close evidence
+              </button>
+            </div>
+          )}
+        </>
+      )
+    }
+    renderShell('/results', '/results', <Drawer />)
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toBeInTheDocument())
+    const button = screen.getByRole('button', { name: 'Menu' })
+    await userEvent.click(button)
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(screen.getByRole('button', { name: 'Open evidence' }))
+    expect(screen.getByRole('button', { name: 'Close evidence' })).toHaveFocus()
+    // one press closes the innermost thing: the drawer, not the menu as well
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Evidence' })).toBeNull()
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    // with focus back on the menu's own button, Escape closes the menu (the first press
+    // closes the button's own hint bubble, which opens on focus)
+    button.focus()
+    await userEvent.keyboard('{Escape}{Escape}')
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('a health that is not OK stays signalled on the closed Menu button, where the folded pill cannot be seen', async () => {
+    mockApi({ ...API, 'GET /health': { status: 'degraded', probes: [] } })
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    // the pill itself is folded into the menu below 640 px ...
+    const pill = await screen.findByLabelText('Instrument health: Degraded')
+    expect(document.getElementById(SHELL_MENU_IDS[0])).toContainElement(pill)
+    // ... so the button that stays on the bar carries the probe's glyph and says it in words
+    const button = screen.getByRole('button', { name: 'Menu, instrument health: Degraded' })
+    expect(button.textContent).toContain('⚠')
+    expect(button.textContent).not.toContain('☰')
+    // open, it shows the pill itself and the button goes back to its plain name
+    await userEvent.click(button)
+    expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('an OK health adds nothing to the Menu button', async () => {
+    mockApi(API)
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    await screen.findByLabelText('Instrument health: OK')
+    const button = screen.getByRole('button', { name: 'Menu' })
+    expect(button.textContent).toContain('☰')
   })
 
   it('following a link inside it closes it, so the next screen starts with the navigation folded', async () => {

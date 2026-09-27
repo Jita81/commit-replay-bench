@@ -17,7 +17,9 @@
  *               the *Signed by a second person* row is pending (○), not satisfied, until a row
  *               is named, because the attested row is judged only then; the action is
  *               disabled until the preview says `signable` AND the approver has named a
- *               row, ticked "I have read this accepted diff" and written a statement. Every
+ *               row, ticked "I have read this accepted diff" and written a statement; while
+ *               a newly named row's preview loads, the gate is pending and the action
+ *               disabled, never the previous row's verdict (P-053). Every
  *               recorded sign-off carries a `verifier_kind` tag next to the approver (local
  *               account / identity provider / service — delegated, not a person / kind not
  *               recorded) with its meaning on hover. A 409
@@ -290,11 +292,16 @@ export function SignoffPage() {
     setRead(false)
   }, [cellKey])
 
+  // `previewData` may be the previous row's preview, kept as a placeholder while the named
+  // row's loads: it may keep the Accepted row select, its rows and the cell's evidence on
+  // screen (G-905), never a verdict. The gate, the refusals and `signable` read `current`,
+  // which is the preview of the form as it stands or nothing (P-053).
   const previewData = preview.data
+  const current = preview.isPlaceholderData ? undefined : preview.data
   const attested = read && rowHash.length > 0 && statement.trim().length > 0
-  const criteria = criteriaFor(previewData, cell !== null, attested)
-  const refusals = previewData?.refusals ?? []
-  const signable = Boolean(previewData?.signable) && attested
+  const criteria = criteriaFor(current, cell !== null, attested)
+  const refusals = current?.refusals ?? []
+  const signable = Boolean(current?.signable) && attested
   const previewFailed = preview.isError
 
   const refusal = useMemo(() => {

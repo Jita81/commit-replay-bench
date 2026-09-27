@@ -12,11 +12,13 @@
  *               only from `sm` up), theme cycling, Help as a compact "?" icon (the footer
  *               carries the words) and sign-out. Below 640 px the cluster and both nav rows
  *               fold behind one "Menu" disclosure (F26: `aria-expanded`, Escape closes it and
- *               returns focus to the button, following a link closes it), so a phone's first
- *               screen is the page, not three rows of chrome. The instrument row offers every
- *               role the pages its API lets that role read (G-914). `AboutThisScreen` is mounted
- *               once after the outlet so every
- *               screen carries its help with no wiring. The footer carries crb / apparatus /
+ *               returns focus to the button, an Escape spent by another layer such as the
+ *               evidence drawer leaves it open, following a link closes it), so a phone's
+ *               first screen is the page, not three rows of chrome; a health that is not OK
+ *               stays on the closed Menu button as the probe's glyph and in its name. The
+ *               instrument row offers every role the pages its API lets that role read
+ *               (G-914). `AboutThisScreen` is mounted once after the outlet so every screen
+ *               carries its help with no wiring. The footer carries crb / apparatus /
  *               policy versions — the one place internals appear, because an auditor needs
  *               the provenance of what they are reading — and links to Help and the glossary.
  *               `journeyEyebrow(pathname, sub?)` derives `Journey · 2 of 4 · Baseline` from
@@ -157,8 +159,16 @@ export const SHELL_MENU_BUTTON_ID = 'shell-menu-button'
  * inside it closes it (the next screen starts with the navigation folded away) without an
  * effect that resets state after render. Escape closes it and puts focus back on the button
  * — unless the Escape was already spent closing a hint bubble (`Hint` default-prevents it and
- * stops it in the capture phase), so one press closes the innermost thing, as in a dialog.
+ * stops it in the capture phase), or focus is in another layer such as the evidence drawer
+ * (whose own Escape closes it), so one press closes the innermost thing, as in a dialog.
  */
+/** Focus is on the Menu button, inside one of the blocks it discloses, or on no element at all. */
+function focusIsOnTheMenu(): boolean {
+  const a = document.activeElement
+  if (a === null || a === document.body) return true
+  return [SHELL_MENU_BUTTON_ID, ...SHELL_MENU_IDS].some((id) => document.getElementById(id)?.contains(a))
+}
+
 function useShellMenu(): { open: boolean; toggle: () => void } {
   const { pathname, search } = useLocation()
   const here = `${pathname}${search}`
@@ -168,6 +178,9 @@ function useShellMenu(): { open: boolean; toggle: () => void } {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return
+      // an Escape pressed while focus is in another layer (the evidence drawer, a native
+      // dialog) belongs to that layer: it closes it, and the menu stays open underneath
+      if (!focusIsOnTheMenu()) return
       setOpenAt(null)
       document.getElementById(SHELL_MENU_BUTTON_ID)?.focus()
     }
@@ -192,6 +205,9 @@ export function Layout() {
   const health = useHealth()
   const version = useVersion()
   const h = health.data ? probeDisplay(health.data.status) : null
+  // the health pill folds into the menu below 640 px: anything but OK stays on the closed
+  // Menu button as the probe's glyph and in its name, so a phone still sees a degraded instrument
+  const unwell = h !== null && health.data?.status !== 'ok'
   const menu = useShellMenu()
   // below sm the three blocks show only while the menu is open; from sm up, always
   const folded = menu.open ? '' : 'max-sm:hidden'
@@ -219,11 +235,13 @@ export function Layout() {
               type="button"
               className="ml-auto inline-flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-[var(--radius-control)] border border-on-primary bg-transparent px-2.5 text-[14px] font-semibold text-on-primary hover:bg-[#002265] sm:hidden"
               aria-expanded={menu.open}
+              // the visible word "Menu" starts the name (WCAG 2.5.3); the health follows it only while the pill is folded away
+              aria-label={unwell && !menu.open ? `Menu, instrument health: ${h.label}` : undefined}
               aria-controls={SHELL_MENU_IDS.join(' ')}
               onClick={menu.toggle}
               data-testid="shell-menu-button"
             >
-              <span aria-hidden>{menu.open ? '✕' : '☰'}</span> Menu
+              <span aria-hidden>{menu.open ? '✕' : unwell ? h.glyph : '☰'}</span> Menu
             </Hint>
             {/* the gaps and the role pill are tighter below sm; on a phone this cluster is the menu's first row */}
             <div

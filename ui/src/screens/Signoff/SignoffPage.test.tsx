@@ -503,6 +503,49 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(within(picker).getByRole('option', { name: /fix: task 3 · dddddddddd/ })).toBeInTheDocument()
   })
 
+  it('while a newly named row’s preview loads, the gate is pending and Sign off stays disabled: the previous row’s verdict is never shown as this row’s (P-053)', async () => {
+    let row2Asked = false
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED, cells: [{ ...MAP.cells[0]!, route: 'deliver', reason: 'ok', reason_code: 'deliver' }] },
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /signoffs/preview': (url: string) => {
+        const h = new URL(url, 'http://x').searchParams.get('reviewed_row_hash')
+        // ROW2's preview never answers: what matters is the screen while it loads
+        if (h === ROW2) {
+          row2Asked = true
+          return new Promise<Response>(() => undefined)
+        }
+        return json(h ? signablePreview({ refusals: [], signable: true, attestation: SIGNED.attestation }) : signablePreview())
+      },
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const picker = screen.getByLabelText(/^Accepted row/)
+    await waitFor(() => expect(picker).toBeEnabled())
+    await user.selectOptions(picker, ROW)
+    await waitFor(() => expect(screen.queryByTestId('signoff-refusals')).toBeNull())
+    await user.click(screen.getByTestId('attest-read'))
+    await user.type(screen.getByLabelText(/^Attestation statement/), 'I read the diff.')
+    const submit = screen.getByRole('button', { name: 'Sign off' })
+    // the control: ROW's own preview says signable, so Sign off is enabled for ROW
+    expect(submit).toBeEnabled()
+    await user.selectOptions(picker, ROW2)
+    await waitFor(() => expect(row2Asked).toBe(true))
+    await user.click(screen.getByTestId('attest-read'))
+    // ROW2's preview has not answered: nothing says ROW2 is signable, and ROW's hash is not cited
+    expect(submit).toBeDisabled()
+    const gate = screen.getByTestId('signoff-gate')
+    expect(gate).toHaveAttribute('data-state', 'PENDING')
+    expect(gate.textContent).not.toContain('cccccccc')
+    // the select still keeps its rows and the choice for the keyboard person (G-905)
+    expect(picker).toBeEnabled()
+    expect(picker).toHaveValue(ROW2)
+  })
+
   it('the revoke confirmation takes focus when it opens, and Cancel gives it back to the Revoke button (G-905)', async () => {
     mockApi({
       'GET /auth/me': PRINCIPAL,

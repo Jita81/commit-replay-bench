@@ -8,14 +8,14 @@ children: [dod.page.ledger]
 persons: [operator, admin, viewer, approver]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-27
 ---
 
 # Operate (health, runs, cancel, budget, stop conditions)
 
 **Purpose.** Keep the instrument honest and the spend visible: the probes green and each one's fix named, every run watchable and stoppable, a budget declared before a run starts, the ledger chain verified and exportable, and delivery halted the moment a false-Q1 row exists. An operator does this day to day; an admin owns Settings; a viewer or an auditor reads the runs and the ledger.
 
-**Entry → exit.** Arrive at the health pill in the header on any screen (`GET /health`, every page), at the shell's stop-condition banner when the ledger probe reports a false-Q1 row, or at the instrument nav — Ledger for every role, Runs for an operator, Settings for an admin. Leave with a signed reading of the deployment: probe by probe on Settings, a run either finished or cancelled within 30 s with nothing already graded lost, and an export of the ledger that verifies standalone with `crb ledger verify` plus the last `row_hash` to record out of band.
+**Entry → exit.** Arrive at the health pill in the header on any screen (`GET /health`, every page; on a phone it is behind Menu, whose button shows a health that is not OK), at the shell's stop-condition banner when the ledger probe reports a false-Q1 row, or at the instrument nav — Ledger for every role, Runs for an operator, Settings for an admin. Leave with a signed reading of the deployment: probe by probe on Settings, a run either finished or cancelled within 30 s with nothing already graded lost, and an export of the ledger that verifies standalone with `crb ledger verify` plus the last `row_hash` to record out of band.
 
 **Non-goals.** Does not measure, sign off or deliver (Measure, Sign off a cell and Manufacture do); does not set a deployment-wide or repository-wide budget — caps are per run; does not replace the host checks (`crb doctor` runs in the operator's own terminal); does not show dashboards, alert rules or logs (Prometheus, the alert rules in DEPLOYMENT §9.2 and the JSON logs do).
 

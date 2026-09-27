@@ -8,7 +8,7 @@ children: [dod.journey.orient, dod.journey.deploy-and-go-live, dod.journey.recov
 persons: [admin, operator, approver, viewer]
 owner: deploy
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-25
+updated: 2026-09-27
 ---
 
 # Run the platform — deploy, go live, operate, recover
@@ -30,7 +30,7 @@ and the product does not perform. It does not federate or manage more than one d
 | id | category | criterion | evidence | state | gap |
 |---|---|---|---|---|---|
 | run-the-platform.purpose.1 | PURPOSE | A person signed in can read, in the product, that deploying, going live, operating and recovering are one named piece of work: Home's task list starts at "Connect GitHub", after the stack is already installed, and no screen names this stream | `absent` | unmet | G-580 |
-| run-the-platform.entry-exit.2 | ENTRY-EXIT | A deployment that has just started states its own condition without anyone running a command: `GET /health` answers with the database, the append-only ledger and the worker, and the shell shows the instrument-health pill on the first screen after sign-in | `route:GET /health` · `spec:ui/e2e/walkthrough/01-login.spec.ts::"the stack answers /health with a database, an append-only ledger and a worker"` | met | |
+| run-the-platform.entry-exit.2 | ENTRY-EXIT | A deployment that has just started states its own condition without anyone running a command: `GET /health` answers with the database, the append-only ledger and the worker, and the shell shows the instrument-health pill on the first screen after sign-in — from 640 px up on the bar; on a phone the pill is behind Menu, and a health that is not OK shows on the Menu button itself as the probe's symbol and in its name | `route:GET /health` · `spec:ui/e2e/walkthrough/01-login.spec.ts::"the stack answers /health with a database, an append-only ledger and a worker"` · `vitest:ui/src/components/Layout.test.tsx::"a health that is not OK stays signalled on the closed Menu button, where the folded pill cannot be seen"` | met | |
 | run-the-platform.truth.3 | TRUTH | The chain state and the false-Q1 total a reader sees come from a live verification of the ledger, not a stored summary, and the apparatus and policy versions under them are the ones this deployment reports | `route:GET /ledger/verify` · `route:GET /version` · `spec:ui/e2e/walkthrough/05-replay-fake.spec.ts::"the Ledger page: chain verifies, false-Q1 = 0, the rows are listed"` | met | |
 | run-the-platform.actions.4 | ACTIONS | Every operator action in this stream reports its outcome: Cancel run stops the run after the attempt in flight, lands within 30 seconds, and the Runs list then reads it as cancelled — nothing already graded is lost | `route:POST /runs/{id}/cancel` · `spec:ui/e2e/walkthrough/06-cancel.spec.ts::"a running mine run is cancelled within 30 s of clicking Cancel run"` · `spec:ui/e2e/walkthrough/06-cancel.spec.ts::"the Runs list shows the run as cancelled"` | met | |
 | run-the-platform.explanation.5 | EXPLANATION | Every section of the guide that governs this stream is reachable from the screen it governs: the go-live checklist and the Users section are bundled in the UI but linked from no screen and named in no `help.ts` entry | `doc:docs/DEPLOYMENT.md#8-go-live-checklist` · `doc:docs/OPERATOR.md#9-users` · `doc:docs/DEPLOYMENT.md#9-observability` | partial | G-581 |

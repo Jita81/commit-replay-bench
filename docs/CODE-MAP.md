@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-580 files with a header · 1 exempt (listed at the end).
+582 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -494,13 +494,15 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`ui/e2e/walkthrough/repo-config.spec.ts`](../ui/e2e/walkthrough/repo-config.spec.ts) | Walkthrough spec for the Configuration tab, on a repo it registers itself from the tier-1 fixture with a deliberately bare config. | [`ui/e2e/walkthrough/repo-config.spec.ts`](../ui/e2e/walkthrough/repo-config.spec.ts) | a `RepoConfig` field is added (assert its round-trip here) or the audit event payload changes. |
 | [`ui/e2e/walkthrough/support.ts`](../ui/e2e/walkthrough/support.ts) | The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract), `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`, `signIn`, `signOut`, `axeScan` (every axe scan, after transitions settle), `personaPassword`, `startRun`, `waitForRun`, `runStatus`, `expectLogAction`, `stackHealth`. | every spec under [`ui/e2e/walkthrough`](../ui/e2e/walkthrough) (they all import this) | a walkthrough variable, a tier target or a form label changes; for a new repository in tier 2, add a `RepoTarget` to `publicTargets()`. |
 
-## `ui/src` (3 files)
+## `ui/src` (5 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
 | [`ui/src/App.reachability.test.ts`](../ui/src/App.reachability.test.ts) | A source-level ratchet over `[`ui/src/App.tsx`](../ui/src/App.tsx)`: each route it mounts must be linked to from somewhere in the app, or be named here as a deliberate exception with the reason. | itself | a route is added — link to it from a screen or the nav, or add it below with the reason it has no door. |
 | [`ui/src/App.tsx`](../ui/src/App.tsx) | The `App` component: the auth provider and the route table. | [`ui/e2e/smoke.spec.ts`](../ui/e2e/smoke.spec.ts) (login and the shell), [`ui/e2e/walkthrough/01-login.spec.ts`](../ui/e2e/walkthrough/01-login.spec.ts); screen tests mount screens directly through [`ui/src/test/utils.tsx`](../ui/src/test/utils.tsx) | a screen is added — one `<Route>` here, its `NAV` entry in [`ui/src/components/Layout.tsx`](../ui/src/components/Layout.tsx) and its `HELP` entry in [`ui/src/help/help.ts`](../ui/src/help/help.ts); never for a new repository. |
+| [`ui/src/escape-layers.ratchet.test.ts`](../ui/src/escape-layers.ratchet.test.ts) | A source-level ratchet (P-054) over `[`ui/src`](../ui/src)`: each non-test file that adds a `keydown` listener to `document` or `window` is named here with its layer — `innermost` (spends the press: `preventDefault` and `stopPropagation`), `top` (a modal layer that holds focus) or `under` (a layer others open on top of, which must skip a spent press and a press made with focus elsewhere). | itself (the negative control below) | a component listens for keys on `document` or `window` — declare its layer below, and if others can open on top of it, check focus before it acts. |
 | [`ui/src/main.tsx`](../ui/src/main.tsx) | The Vite entry module (`index.html` → `#root`). | [`ui/e2e/smoke.spec.ts`](../ui/e2e/smoke.spec.ts) (the built bundle boots against a mocked API); screen tests build their own client in [`ui/src/test/utils.tsx`](../ui/src/test/utils.tsx) | a query default changes for every screen (keep [`ui/src/test/utils.tsx`](../ui/src/test/utils.tsx) in step); never for a new repository. |
+| [`ui/src/placeholder-data.ratchet.test.ts`](../ui/src/placeholder-data.ratchet.test.ts) | A source-level ratchet (P-053) over `[`ui/src`](../ui/src)`: each file that gives a query `placeholderData` (or `keepPreviousData`) is named here with the hook it exports, and every non-test file that calls that hook reads `isPlaceholderData`. | itself (the negative control below) | a query is given `placeholderData` — declare it below with its hook and make every caller read `isPlaceholderData` before it builds a gate or a verdict. |
 
 ## `ui/src/api` (7 files)
 

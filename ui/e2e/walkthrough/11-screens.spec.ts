@@ -43,19 +43,31 @@
  *               role at two widths, and the About-block ratchet on the live stack.
  * What it does: Creates the three non-admin accounts if missing (and, for one that exists,
  *               asserts the stable password signs into it), finds a finished run and a
- *               task to anchor the detail routes, then for each persona × width signs in
- *               through the form, visits every route, saves a full-page screenshot under
- *               `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block is present on
- *               every route that is not a help page or the unknown address and, at 375 px,
- *               that the top bar is at most two rows (a wrapped "Sign out" is a phone-width
- *               defect) and the document does not scroll sideways (or is on the shrinking
- *               `SIDEWAYS_SCROLL_RATCHET` with its gap); opens a sample of
- *               the route's hints (hover, or a touch pointerdown at 375 px) and asserts each bubble shows and axe stays
- *               clean with it open; tabs the route itself at 1280 for the keyboard path;
- *               opens the Add-a-repository dialog once (operator, 1280) for the top-layer,
- *               typing and Escape checks a jsdom test cannot make. It
- *               changes no data; the fixture context goes into the test's annotations, never
- *               stdout.
+ *               task to anchor the detail routes, then for each persona × width first
+ *               checks /login signed out (`loginChecks`: no sideways scroll and Sign in on
+ *               the first screen at 375, axe, the keyboard pass and the hint sample —
+ *               G-192), signs in through the form, visits every route, saves a full-page
+ *               screenshot under `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block
+ *               is present on every route that is not a help page or the unknown address
+ *               and, at 375 px, that the top bar is ONE row (`TOP_BAR_ONE_ROW_PX`), that the
+ *               Menu disclosure (F26, `phoneMenu`) is closed with the nav and Sign out
+ *               hidden, opens with axe clean, takes Tab inside and closes on Escape with
+ *               focus back on the button, and that the document does not scroll sideways
+ *               (or is on the `SIDEWAYS_SCROLL_RATCHET`, now empty, with its gap); opens a
+ *               sample of the route's hints (hover, or a touch pointerdown at 375 px) and
+ *               asserts each bubble shows and axe stays clean with it open; tabs the route
+ *               itself at 1280 for the keyboard path; opens the Add-a-repository dialog
+ *               once (operator, 1280) for the top-layer, typing and Escape checks a jsdom
+ *               test cannot make. Five keyboard steps (G-905) then drive, by Tab and keys
+ *               alone, a map cell and its reason code (/capability), a reason code on
+ *               Routes, a term on Oracle (each opening and closing with `aria-expanded`),
+ *               the sign-off form to an enabled Sign off and the revoke confirmation to an
+ *               enabled Revoke sign-off, left by Cancel (/signoff), and the freeze dialog
+ *               with focus in and back (/factory); a negative control takes the map cells
+ *               out of the tab order and asserts the keyboard step then fails. It presses
+ *               neither Sign off, Revoke sign-off, Freeze nor Run (G-992, G-993), so it
+ *               changes no data; the fixture context goes into the test's annotations,
+ *               never stdout.
  * How:          Playwright; `signIn` from support.ts; the routes list is built from the
  *               primary repo, the run and the task found through the API as the admin;
  *               `axeScan` (axe with the WCAG tags, after transitions settle); the bubble is found through the trigger's

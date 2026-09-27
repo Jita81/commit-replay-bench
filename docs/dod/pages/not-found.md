@@ -8,7 +8,7 @@ children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 # This page does not exist
@@ -22,7 +22,8 @@ It is the screen a lost person lands on, so it has to say where they are and wha
 address, a stale bookmark, a link from an older version — while an unmatched URL with no session
 bounces to `/login?next=` first, so nothing about the route space is shown before sign-in. Leaves
 by "Back to Home" (`button.notfound.home`), the journey's start, or by any shell nav entry: the
-nav, the health pill, the role chip and the stop-condition banner are all still on screen.
+nav, the health pill, the role chip and the stop-condition banner are all still on screen (on a phone the
+nav, the pill and the chip are behind Menu, whose button shows a health that is not OK).
 
 **Non-goals.** The page does not search for what the person meant, suggest a near match, report a
 broken link, or offer the repositories list (which is not in the journey nav). It calls no API, so
@@ -42,7 +43,7 @@ the API's 404 on its own page, not this one.
 | not-found.evidence.7 | EVIDENCE | The page's two facts — it shows the path, it leads back to Home — are unit-tested, the shell-intact behaviour is asserted end to end, and a CI job runs both suites | `vitest:ui/src/screens/NotFoundPage.test.tsx::"shows the path and leads back to Home"` · `spec:ui/e2e/smoke.spec.ts::"unknown routes render the 404 inside the shell"` · `ci:ui-unit` · `ci:ui-smoke` | met |  |
 | not-found.evidence.8 | EVIDENCE | An unknown address is walked on the live stack and captured, like every other route | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` | met |  |
 | not-found.roles.9 | ROLES | Every role sees the same page and no role sees it sooner: the route sits inside `RequireAuth`, so an unmatched URL with no session lands on `/login?next=` and the product tells an anonymous visitor nothing about which addresses exist | `code:ui/src/lib/auth.tsx::RequireAuth` · `code:ui/src/App.tsx::App` · `spec:ui/e2e/smoke.spec.ts::"a protected route redirects to /login with ?next="` · `spec:ui/e2e/smoke.spec.ts::"unknown routes render the 404 inside the shell"` | met | |
-| not-found.operations.10 | OPERATIONS | A person who lands here still sees the platform's state: the page renders inside the shell, so the health pill, the version line and the stop-condition banner (the red "Delivery halted" row a false-Q1 ledger raises above every screen) are on screen, and the page itself calls no API, so it cannot add a failure of its own | `code:ui/src/components/Layout.tsx::StopConditionBanner` · `spec:ui/e2e/smoke.spec.ts::"unknown routes render the 404 inside the shell"` · `route:GET /health` | met | |
+| not-found.operations.10 | OPERATIONS | A person who lands here still sees the platform's state: the page renders inside the shell, so the health pill, the version line and the stop-condition banner (the red "Delivery halted" row a false-Q1 ledger raises above every screen) are on screen — on a phone the pill is behind Menu, and a health that is not OK shows on the Menu button itself — and the page itself calls no API, so it cannot add a failure of its own | `code:ui/src/components/Layout.tsx::StopConditionBanner` · `spec:ui/e2e/smoke.spec.ts::"unknown routes render the 404 inside the shell"` · `route:GET /health` · `vitest:ui/src/components/Layout.test.tsx::"a health that is not OK stays signalled on the closed Menu button, where the folded pill cannot be seen"` | met | |
 | not-found.accessibility.11 | ACCESSIBILITY | An axe (WCAG 2.1 AA) scan of an unknown address at 375 and 1280 reports no violation | `spec:ui/e2e/smoke.spec.ts::"unknown routes render the 404 inside the shell"` · `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` | met |  |
 | not-found.non-goals.12 | NON-GOALS | The page states what it will not do — it does not search, guess a near match or report the link — so a person does not wait for it to recover for them | `vitest:ui/src/screens/NotFoundPage.test.tsx::"says why the address failed, what to do, and what the page will not do"` | met | |
 
