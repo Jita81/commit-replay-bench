@@ -40,7 +40,7 @@ A **posture** is everything outside the patch that can change a test's outcome: 
 - DEPLOYMENT §3.4 tells a cluster to run it;
 - the go-live checklist proves the probe inside the sandbox.
 
-The finding says production settings refuse `local`. They do not: `Settings._secrets_fail_closed` logs "test runs are NOT isolated" and carries on. The conclusion still holds for every deployment that follows the guide.
+The finding says production settings refuse `local`. When this ADR was written they did not: `Settings._secrets_fail_closed` logged "test runs are NOT isolated" and carried on. That has since changed (PR #53, ADR-0023): `prod` now refuses to start with the local test executor, or the host builder, unless `CRB_ALLOW_UNSEALED_PROD=1` is set, and with that override every run's apparatus carries `unsealed_prod_override` ([DEPLOYMENT §2.1](../DEPLOYMENT.md#21-environment-reference)). Either way, the conclusion holds for every deployment that follows the guide.
 
 As shipped, such a deployment would read close to 0% for every Go repository with a third-party dependency, and would say the model failed **[hypothesis — one repository measured; the mechanism of D1 and D2 applies to any repository whose tests import a module the image does not carry]**.
 

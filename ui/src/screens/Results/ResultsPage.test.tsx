@@ -40,7 +40,7 @@
  *               ui/src/help/hints-collector.ts (`unhinted`),
  *               ui/src/test/source-ratchets.ts (`queryDataReads`)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx
- * Touch when:   a headline fact or the deliver wording changes.
+ * Touch when:   never for a new repository; a headline fact or the deliver wording changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
@@ -111,6 +111,22 @@ describe('ResultsPage', () => {
     // no customer-facing backlog id; the honest "mean only" statement stays
     expect(screen.queryByText(/backlog F35/)).toBeNull()
     expect(screen.getAllByText(/no interval yet: the API serves the mean only/)).toHaveLength(2)
+  })
+
+  it('the posture tile carries its apparatus and says no interval applies; every map tile names the apparatus (PR #56 review)', async () => {
+    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, summary: { ...MAP.summary, posture_class: 'docker/copy/sealed', unqualified_posture: 2 } } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const posture = await screen.findByTestId('tile-posture')
+    expect(posture).toHaveTextContent('docker/copy/sealed')
+    expect(posture).toHaveTextContent('apparatus 2.2')
+    expect(posture).toHaveTextContent('95% CI—')
+    expect(posture).toHaveTextContent('no interval: a posture and row counts, not a rate')
+    // the class, not the instance: every headline tile on the page carries its apparatus
+    // (the pool tile is exempt by name: its dates come from git history, not a graded row)
+    const missing = [...document.querySelectorAll('[data-component="stat-tile"]')]
+      .filter((t) => t.getAttribute('data-testid') !== 'tile-pool-window' && !/apparatus 2\.2/.test(t.textContent ?? ''))
+      .map((t) => t.getAttribute('data-testid') ?? t.textContent)
+    expect(missing).toEqual([])
   })
 
   it('the bar in the oracle tile follows the policy in force, not a constant', async () => {

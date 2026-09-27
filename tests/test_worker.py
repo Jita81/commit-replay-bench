@@ -43,8 +43,8 @@ Works with:   src/crb/server/worker.py (under test), src/crb/store/jobs.py (the 
               tests/test_worker_clone.py and tests/test_worker_budget_ladder.py (the same
               harness for one kind or seam each; so are the other test_worker_*.py files)
 Tested by:    tests/test_worker.py
-Touch when:   a run kind is added (``stage_for``, a run case here and the queue's
-              ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
+Touch when:   never for a new repository; a run kind is added (``stage_for``, a run case here and
+              the queue's ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
               ``succeeded`` honestly.
 """
 
@@ -2110,6 +2110,67 @@ def test_only_a_control_that_ran_red_revokes_a_qualification(tmp_path: Path) -> 
     gate.on_environment(task, red)  # type: ignore[arg-type]
     revoked = gate.qualifications[task.task_id]
     assert revoked.state == "revoked" and revoked.code == "QUAL_ENV_WITNESS_RED"
+
+
+def test_the_gate_hashes_each_sealed_set_once_and_fails_closed_on_first_use(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit on PR #56: ``context_for`` re-hashed every sealed set for every task, so
+    N tasks sharing one lockfile hashed the same ``node_modules`` N times. The gate verifies
+    a key once; a set that fails is never remembered as verified, so every use of it keeps
+    stopping the run ``BUNDLE_INTEGRITY`` (the mount's own write-bit check,
+    ``validate_mount``, still runs at every use)."""
+    from crb.core.deps import DepsBinding, ProvisionRefused, TaskDeps
+    from crb.core.qualify import adhoc_posture
+    from crb.server.posture_gate import PostureGate
+    from fixtures.posture import discovery_qualification
+
+    repo = pr.build(tmp_path / "repo")
+    first = repo.feat_task()
+    second = replace(first, task_id="f" * 40)
+    ex = LocalExecutor()
+
+    class CountingProvider:
+        deps_mode = "host-env"
+
+        def __init__(self) -> None:
+            self.verified: list[tuple[str, ...]] = []
+            self.broken = False
+
+        def resolve(self, *a: Any, **k: Any) -> TaskDeps:
+            shared = DepsBinding(role="gold", lang="python", key="k-shared", digest="sha256:0")
+            return TaskDeps.uniform(shared, mode="host-env", lang="python")
+
+        def verify(self, deps: TaskDeps) -> None:
+            self.verified.append(deps.keys)
+            if self.broken:
+                raise ProvisionRefused("BUNDLE_INTEGRITY", "k-shared: digest does not match")
+
+    provider = CountingProvider()
+    gate = PostureGate(
+        repo=repo.repo,
+        config=repo.config,
+        runner=PytestRunner(repo.config),
+        executor=ex,
+        scratch=tmp_path / "scratch",
+        provider=provider,  # type: ignore[arg-type]
+        posture=adhoc_posture(ex),
+    )
+    for t in (first, second):  # two tasks citing one set (one lockfile), resolved once each
+        gate.qualifications[t.task_id] = discovery_qualification(t, ex)
+        gate._deps[t.task_id] = provider.resolve()
+    for t in (first, second, first):
+        gate.context_for(t)
+    assert provider.verified == [("k-shared",)]  # one hash for three uses of one set
+
+    broken = CountingProvider()
+    broken.broken = True
+    gate.provider = broken  # type: ignore[assignment]
+    gate._verified.clear()
+    for _ in range(2):  # fail-closed on first use, and a failure is never remembered
+        with pytest.raises(ProvisionRefused, match="BUNDLE_INTEGRITY"):
+            gate.context_for(first)
+    assert broken.verified == [("k-shared",), ("k-shared",)]
 
 
 def test_qualify_run_spends_nothing(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -18,7 +18,8 @@
  *               ui/src/screens/Repos/repoFixtures.ts (`REPO`), ui/src/lib/verdict.ts
  *               (`probeDisplay`), ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`)
  * Tested by:    ui/src/screens/Repos/ReposPage.test.tsx
- * Touch when:   a column is added to the list or the role rule for Add repo changes.
+ * Touch when:   never for a new repository; a column is added to the list or the role rule for
+ *               Add repo changes.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'

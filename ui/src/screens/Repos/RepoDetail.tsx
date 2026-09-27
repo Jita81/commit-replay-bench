@@ -30,8 +30,8 @@
  *               run button), ui/e2e/walkthrough/02-repo-onboard.spec.ts (probe pill reads OK
  *               with the runner's summary), ui/e2e/walkthrough/03-mine.spec.ts (the Tasks tab
  *               lists a mined task), ui/e2e/walkthrough/repo-config.spec.ts
- * Touch when:   a field is added to `GET /repos/{name}` or the profile (docs/API.md "Repos")
- *               — type it in ui/src/api/types.ts first; never for a new repository.
+ * Touch when:   never for a new repository; a field is added to `GET /repos/{name}` or the
+ *               profile (docs/API.md "Repos") — type it in ui/src/api/types.ts first.
  */
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'

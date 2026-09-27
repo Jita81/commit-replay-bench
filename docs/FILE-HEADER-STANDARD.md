@@ -44,7 +44,15 @@ Rules:
   hyperlink graph a reader walks. Three to eight entries; the most-read neighbour first.
 - `Touch when` is written for the developer onboarding a client repository first, the
   contributor second. If nothing in the file ever changes for a new repository, say so:
-  "never for a new repository; …".
+  "never for a new repository; …". `scripts/code_map.py --check` refuses a `Touch when` whose
+  first clause (up to the first `;`, full stop, dash or bracket) does not speak about
+  onboarding: it must name onboarding, a new or client repository, or a repository of an
+  ecosystem the runners serve ("a Go repository needs cgo"). A repository inside a code span
+  or a path, or one such as "the image repository", does not count. Files older than that check are listed in
+  `scripts/code_map_onboarding_baseline.txt`; the list only shrinks, so when you edit one of
+  them, fix its `Touch when` and delete its line. On a pull request CI runs the check with
+  `--changed-since` the base branch, which refuses a listed file the change edits and any path
+  the change adds to the list.
 - Prose above the block: keep it. Do not restate the block. Do not pad. A reader should be able
   to read the summary line, the block, and know whether to open the file.
 - Wrap at 100 columns. British English. No marketing.

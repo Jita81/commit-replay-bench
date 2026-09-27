@@ -37,14 +37,13 @@
  *               ui/src/components/StatTile.tsx (value + n + CI + apparatus, always)
  * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx, ui/e2e/walkthrough/05-replay-fake.spec.ts,
  *               ui/e2e/walkthrough/06-cancel.spec.ts
- * Touch when:   a field is added to GET /runs/{id} or /runs/{id}/tasks (docs/API.md) — update
- *               ui/src/api/types.ts first, then the tile or column here; never for a new
- *               repository.
+ * Touch when:   never for a new repository; a field is added to GET /runs/{id} or /runs/{id}/tasks
+ *               (docs/API.md) — update ui/src/api/types.ts first, then the tile or column here.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
-import { useCancelRun, useHealth, useRun, useRunEvents, useRunTasks } from '../../api/hooks'
+import { keys, useCancelRun, useHealth, useRun, useRunEvents, useRunTasks } from '../../api/hooks'
 import type { EventSourceFactory } from '../../api/sse'
 import { isRunTerminal, ladderEntryLabel, type Health, type Run, type RunTaskRow, type StepEvent, type WorkerProbeData } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
@@ -414,6 +413,14 @@ export function RunDetailPage({ eventSourceFactory, clock = systemClock }: RunDe
       void qc.invalidateQueries({ queryKey: ['runs'] })
     }
   }, [events.status, qc])
+  // A finished run may have qualified tasks (a qualify run, or any run with qualify first
+  // on): refresh every posture reading of its repository (ADR-0019, PR #56 review).
+  const repoName = run.data?.repo ?? ''
+  useEffect(() => {
+    if (repoName && (events.status === 'done' || terminal)) {
+      void qc.invalidateQueries({ queryKey: keys.repoPostures(repoName) })
+    }
+  }, [events.status, terminal, repoName, qc])
 
   return (
     <>
