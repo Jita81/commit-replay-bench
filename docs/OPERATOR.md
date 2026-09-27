@@ -1246,3 +1246,48 @@ repository (the product never writes a customer's tests), score the oracle again
 apparatus shows how many rows it still needs, the estimated cost and the `POST /runs` bodies to
 queue. Queue the ones worth paying for from **Runs**; nothing is queued for you.
 
+
+## 14. The context library
+
+The **Context library** of a repository (`/library/<repo>`, from the repository's page) holds
+what people know about it that a test cannot say, in one vocabulary: its **components**, its
+**work types** (kinds of change), the **decisions** in force, its **conventions**, the
+**patterns** that recur and its **standards**. Each entry has the id `<kind>/<slug>`, a
+statement of at most 400 characters and where it came from — a file at a commit, the graded
+rows it was learned from, or the person who wrote it (ADR-0026 item 10, DL-099).
+
+**Two people sign every entry.** An operator proposes an entry and becomes its sponsor; an
+entry a miner or a model proposed waits in Decisions until a person adopts it with
+**Sponsor**. A different approver then **Signs** it. The approver can never be the sponsor —
+the page disables the sponsor's own Sign button and the API refuses it (`409
+library_refused`, `same_person`) — and a miner or a model is never a person. A signature
+names the version the approver read: a changed entry is a new version and needs a new
+signature.
+
+**Nothing is edited.** A revocation (the entry was wrong) and a retirement (it no longer
+holds) are appended with a reason and kept as history. An entry read from a file goes
+**stale** when that file changes or goes at the repository's head — the worker reads the
+cited files at the head after every mine, and `POST /library/{repo}/freshness` takes the head
+commit and the files' sha256 from any other reader — returns to Decisions, and counts for nothing
+until an approver signs it again or retires it. Every act is a `system/library.*` event with
+the actor and the entry.
+
+**The page for a work type** says what the kind of change is (its definition and example
+commits), what a ticket of that kind must carry today, the signed context — each entry with
+its sponsor, signer, date, provenance and measured effect — what is proven for each size (the
+standard arm with its distinct commits, interval and apparatus, or "No proven standard" and
+the reading that would prove it), and which of the repository's switched-on checks evidence
+which ISO/IEC 25010 characteristic. A **standard** entry names the characteristic it refines
+and the check that evidences it; without a check the repository runs, it is advisory and
+counts as no evidence.
+
+**Time and money.** Proposing and signing an entry spends nothing: no act on the library starts
+a run or calls a model. **[measured — n = 1 scripted pass from the repository's page through
+proposing, the sponsor's refused signature, the second person's signature from Decisions and
+the work type's page; method: `ui/e2e/walkthrough/14-library.spec.ts`, timed by the spec on the
+tier-1 walkthrough stack on 2026-09-27; apparatus 2.3]** the scripted pass took 1.4 seconds,
+with nothing read. How long a person takes to write and check an entry has not been timed.
+
+**No entry reaches a builder's brief in this release.** An entry reaches a brief only inside a
+context arm whose effect was measured against the same arm without it, and the switch for that
+is off. Until then every entry's measured effect reads `unmeasured`.
