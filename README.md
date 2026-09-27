@@ -272,7 +272,8 @@ on its allowlist, finds the sentences that quantify something, and fails when on
 tag — or when a `[measured]` one carries no `n`, no method and no apparatus version. On this
 page a `[measured]` tag must also name the rows it rests on (`rows: data/<campaign>/`), kept
 in the repository with a checksum manifest that verifies, and `tests/test_measured_claims.py`
-re-derives every number such a tag states from those rows. The script's own docstring says
+re-derives every number such a tag covers from those rows, each held to the figure it is
+meant to be. The script's own docstring says
 what the heuristic deliberately does not catch, and which pages are not yet covered.
 
 **A number without its method is a slogan.** Every figure the product shows carries its

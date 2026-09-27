@@ -7,7 +7,8 @@
 two claims on ``main`` were wrong for weeks and a reader found them, not a gate. This is the
 gate: it reads the pages on ``ALLOWLIST``, finds the sentences that quantify something, and
 fails when one carries no tag — or when a ``[measured]`` one does not carry what the tag
-requires.
+requires, or says its own rows are not in this repository (a reading nobody can re-derive
+here is a ``[hypothesis]`` with that reason, DL-100).
 
     python scripts/claims_check.py            # report what is untagged
     python scripts/claims_check.py --check    # CI: exit non-zero on any finding
@@ -27,18 +28,26 @@ thereby tagged the sentence around it.
   exactly the claims §7 forbids; a reader still has to read;
 - claims inside tables, headings, fenced code, checklist items and a sentence that ends in a
   colon to introduce the thing it counts (the list below it is its own evidence); and what a
-  reader never sees as prose: an HTML comment (a file's Navigation header), a page's front
-  matter, and the text of a link to a heading on the same page (a contents line);
-- a gap register line (``**G-nnn** — what is missing · what closes it``, or a backlog id
-  such as ``**F42**``) is taken as its own ``[gap]`` tag: its form names what is absent and
+  reader never sees as prose: an HTML comment (a file's Navigation header — text after its
+  closing ``-->`` on the same line is rendered, so it is read), a page's front matter, and,
+  on a contents line only, the text of a link to a heading on the same page;
+- a gap register line, where ``dod_check`` reads one — ``- **G-nnn** — what is missing ·
+  what closes it · owner`` under ``## Gaps`` on a definition-of-done page or in
+  docs/PREVENTION.md — is taken as its own ``[gap]`` tag: its form names what is absent and
   what would close it, which is what the tag must cite (a ``[measured]`` figure inside one
-  still owes its n, method and apparatus); and a sentence under a heading
-  that lists what must never be said is quoted in order to forbid it, not claimed;
+  still owes its n, method and apparatus); the same line anywhere else is prose. A sentence
+  under a heading that lists what must never be said is quoted in order to forbid it, not
+  claimed;
 - a percentage that is itself the confidence level ("Wilson 95% interval", "95% CI") — a
   result standing beside one ("65% passed (Wilson 95% interval)") *is* caught — a four-digit
   year, and a number written with a leading zero, which is an identifier ("ADR-0011"), or
   written after ``§``, ``#``, a lettered prefix and a hyphen ("§9", "PR #48", "G-674") or a
-  noun that names one member of a numbered series ("belt 3", "stage 3", "item 11");
+  noun on ``NAMING_NOUNS`` that names one member of a numbered series ("belt 3", "stage 3",
+  "item 11") — and only where it reads as a noun: capitalised, at the start of a sentence,
+  or after a determiner, a preposition or an identifier ("at stage 3"), never after a
+  subject or a modal ("the worker can batch 40 jobs"). A word that is mostly a verb or a
+  gerund ("pass", "finding") is not on the list, and the list is pinned by a test beside
+  the evasions every exemption must still refuse (P-120);
 - whether the tag is the *right* one, and whether a ``[measured]`` figure is true: it checks
   that ``n``, a method and an apparatus version are *present*, never that they are sound.
   Only a person reading the ledger can do that;
@@ -85,10 +94,14 @@ characteristics its checks evidence part of (``crb.core.quality_model``, EVIDENC
 or is certified against an ISO standard is refused on README, on the guides (the ones the UI
 bundles, read from ``DOC_NAMES`` in ``ui/src/help/docs.ts``, and every other page directly
 under ``docs/``) and in the factory's pull-request body template (the string literals of
-``pr_body`` and ``rework_comment``). A sentence that only names a standard passes, and so
-does one that denies, forbids or refuses the claim, or sits in a section headed "never"
-(EVIDENCE-AND-CLAIMS §7 lists the sentence in order to forbid it). It reads words, not
-meaning: "our pipeline is ISO-aligned" passes, and a reader still has to read.
+``pr_body`` and ``rework_comment``, of the module's functions they call and of the module
+constants they read). A sentence that only names a standard passes, and so does one whose
+conformity word is negated in its own clause ("does not mean the code complies") or
+refused ("the gate refuses a sentence that says code conforms"), or that sits in a section
+listing what must never be said (EVIDENCE-AND-CLAIMS §7 quotes it to forbid it). A negation
+elsewhere in the sentence denies nothing: "conforms to ISO/IEC 25010 and needs no review" is
+refused (P-120). It reads words, not meaning: "our pipeline is ISO-aligned" passes, and a
+reader still has to read.
 
 **How a file opts in.** Add its repository-relative path, or a glob for its folder, to
 ``ALLOWLIST`` below and make it pass in the same change. The list only grows: a page that
@@ -100,7 +113,8 @@ What it is:   The claim-tag gate over the public pages (CI's ``claims`` job; nee
               stdlib and markdown-it-py, which reads where a fenced code block ends).
 What it does: Parses each allowlisted Markdown page into blocks, finds quantified sentences,
               and reports any that carry no permitted tag — and any ``[measured]`` tag
-              without an n, a method or an apparatus version; reports every numbered action
+              without an n, a method or an apparatus version, or that says its rows are not
+              in this repository (DL-100); reports every numbered action
               in a review's Actions table that has no stated record in the decision log,
               and every record whose review no longer lists the action or is no longer on
               disk; reports a registered promise stated in the present tense before its
@@ -348,6 +362,7 @@ FUNCTION_WORDS: frozenset[str] = frozenset(
 #: ("ADR-0011"), never a count, and is excluded in ``is_claim``.
 _CARDINAL = r"(?:\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d{4,}(?:\.\d+)?|" + "|".join(NUMBER_WORDS) + r")"
 _COUNT_RE = re.compile(rf"\b({_CARDINAL})\s+(?:([a-z][\w'-]*)\s+)?([a-z][\w'-]{{2,}}s)\b", re.I)
+_PLURAL_RE = re.compile(r"[a-z][\w'-]{2,}s", re.I)
 _PERCENT = r"\d[\d,]*(?:\.\d+)?\s?%"
 _PERCENT_RE = re.compile(_PERCENT)
 #: A percentage that *is* a confidence level, matched by its construction rather than by a
@@ -378,19 +393,101 @@ _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _FORBIDDEN_SECTION_RE = re.compile(
     r"\bmust\s+never\s+be\s+said\b|\bmust\s+not\s+be\s+said\b|\bnever\s+be\s+said\b", re.I
 )
-#: A noun that names a member of a numbered series: the cardinal after it says which one
-#: ("belt 3", "stage 3", "Wave 2", "item 11", "rank 23"), not how many.
-_NAMING_NOUN_RE = re.compile(
-    r"\b(?:belt|step|stage|wave|item|rank|phase|rung|round|tier|level|section|table|figure|"
-    r"chapter|appendix|arm|action|question|finding|column|row|line|page|version|mutation|"
-    r"migration|revision|criterion|slice|batch|pass)\s+$",
-    re.I,
+#: Nouns that name a member of a numbered series: the cardinal after one says which one
+#: ("belt 3", "stage 3", "Wave 2", "rank 23"), not how many — when it reads as a noun
+#: (``_names_one``). A word that is mostly a verb or a gerund ("pass 45 tests", "finding 40
+#: defects", "round 12 estimates") is not on it, and the list is pinned by a test, because it
+#: exempts counts on every gated page (P-120).
+NAMING_NOUNS: tuple[str, ...] = (
+    "belt",
+    "step",
+    "stage",
+    "wave",
+    "item",
+    "rank",
+    "phase",
+    "rung",
+    "tier",
+    "level",
+    "section",
+    "table",
+    "figure",
+    "chapter",
+    "appendix",
+    "arm",
+    "column",
+    "page",
+    "version",
+    "mutation",
+    "migration",
+    "revision",
+    "criterion",
+    "slice",
+    "batch",
 )
+_NAMING_NOUN_RE = re.compile(rf"\b(?:{'|'.join(NAMING_NOUNS)})\s+$", re.I)
+#: Words after which a naming noun reads as a noun ("at stage 3", "the belt 3 check"), not
+#: as a verb ("can batch 40 jobs", "will stage 12 releases"). "to" is absent on purpose:
+#: "to batch 40 jobs" is a verb.
+_NOUN_CONTEXT: frozenset[str] = frozenset(
+    {
+        "a",
+        "after",
+        "and",
+        "at",
+        "before",
+        "by",
+        "each",
+        "every",
+        "for",
+        "from",
+        "in",
+        "into",
+        "its",
+        "of",
+        "on",
+        "or",
+        "per",
+        "the",
+        "their",
+        "this",
+        "through",
+        "under",
+        "until",
+        "with",
+    }
+)
+
+
+def _names_one(before: str) -> bool:
+    """True when the text before a cardinal ends in a naming noun that reads as a noun:
+    capitalised ("Belt 3", "Wave 2"), at the start of the sentence or after a bracket or
+    a comma, after a determiner or a preposition ("at stage 3"), or after an identifier
+    ("ADR-0026 item 11"). After anything else — a subject or a modal — it is a verb, and
+    the count after it is a count ("the worker can batch 40 jobs", P-120)."""
+    m = _NAMING_NOUN_RE.search(before)
+    if not m:
+        return False
+    if m.group(0)[0].isupper():
+        return True
+    preceding = before[: m.start()].rstrip()
+    if not preceding or preceding[-1] in "([,;:\u2014\u2013":
+        return True
+    word = preceding.split()[-1]
+    return word.lower() in _NOUN_CONTEXT or any(ch.isdigit() for ch in word)
+
+
 _ANCHOR_LINK_RE = re.compile(r"\[[^\]]*\]\(#[^)]*\)")
-#: A definition-of-done gap register line: ``**G-nnn** — what is missing · what closes it``
-#: (also a backlog id, ``**F42**``, ``**B-9**``). Its form is a [gap] tag: it names what is
-#: absent and what would close it, which is what the tag must cite (EVIDENCE-AND-CLAIMS §1).
-_GAP_LINE_RE = re.compile(r"^\*\*(?:G-\d+|F\d+[a-z]?|B-\d+[a-z]?)\*\*\s+—")
+#: What may sit between the links of a contents line: separators and a short label.
+_CONTENTS_REST_RE = re.compile(r"^[\s·|•,;:>*+-]*(?:[A-Za-z ]{1,20}:)?[\s·|•,;:>*+-]*$")
+#: A definition-of-done gap register line, in ``dod_check``'s own grammar:
+#: ``- **G-nnn** — what is missing · what closes it · owner``. Its form is a [gap] tag — it
+#: names what is absent and what would close it, which is what the tag must cite
+#: (EVIDENCE-AND-CLAIMS §1) — but only where ``dod_check`` reads it as a gap: under a
+#: ``## Gaps`` heading on a definition-of-done page or in the prevention register (P-120).
+_GAP_LINE_RE = re.compile(r"^\*\*G-\d{3}\*\*\s*—\s*\S.*·.*·")
+_GAP_PAGES_RE = re.compile(r"^(?:docs/dod/.+\.md|docs/PREVENTION\.md)$")
+_GAPS_HEADING_RE = re.compile(r"^#{2}\s+Gaps\b", re.I)
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s")
 #: The CommonMark parser that decides where a fenced code block starts and ends. Tables are
@@ -399,6 +496,12 @@ _MARKDOWN = MarkdownIt("commonmark").enable("table")
 _ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
 _CHECKLIST_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\]")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+#: A ``[measured]`` tag that says its own rows are not here contradicts itself (DL-100): a
+#: reading nobody can re-derive from the repository is a ``[hypothesis]`` with that reason.
+_NOT_HERE_RE = re.compile(
+    r"\bnot\s+in\s+this\s+repository\b|\bnot\s+vendored\b|\boperator's\s+(?:stack|export)\b",
+    re.I,
+)
 #: A method is checked for presence only: words inside the tag beyond its n and its apparatus.
 METHOD_MIN_WORDS = 5
 
@@ -427,7 +530,6 @@ def _strip_markup(text: str) -> str:
     """Inline code, link targets and HTML comments carry no claims of their own."""
     text = _COMMENT_RE.sub(" ", text)
     text = _CODE_RE.sub(" ", text)
-    text = _ANCHOR_LINK_RE.sub(" ", text)  # a link to a heading here: a heading is no claim
     text = _LINK_RE.sub(r"\1", text)
     return text.replace("**", "").replace("*", "").replace("> ", " ")
 
@@ -457,10 +559,13 @@ def _lines_with_fences(text: str) -> Iterator[tuple[int, str, bool]]:
         yield number, raw.rstrip(), fenced[number - 1]
 
 
-def _unrendered(text: str) -> set[int]:
-    """Line numbers (1-based) a reader never sees as prose: an HTML comment block (a file's
-    Navigation header, even across blank lines) and a leading front-matter block."""
+def _unrendered(text: str) -> tuple[set[int], dict[int, str]]:
+    """``(hidden, tails)``: the line numbers (1-based) a reader never sees as prose — an HTML
+    comment block (a file's Navigation header, even across blank lines) and a leading
+    front-matter block — and, for a comment block whose closing line carries text after
+    ``-->``, that text, which GitHub renders and the gate therefore reads (P-120)."""
     hidden: set[int] = set()
+    tails: dict[int, str] = {}
     lines = re.sub(r"\r\n?", "\n", text).split("\n")
     if lines and lines[0].strip() == "---":
         for i in range(1, len(lines)):
@@ -469,8 +574,24 @@ def _unrendered(text: str) -> set[int]:
                 break
     for token in _MARKDOWN.parse(text):
         if token.type == "html_block" and token.map and token.content.lstrip().startswith("<!--"):
-            hidden.update(range(token.map[0] + 1, token.map[1] + 1))
-    return hidden
+            first, last = token.map[0] + 1, token.map[1]
+            hidden.update(range(first, last + 1))
+            closing = lines[last - 1] if last - 1 < len(lines) else ""
+            tail = closing.rsplit("-->", 1)[1].strip() if "-->" in closing else ""
+            if tail:
+                tails[last] = tail
+    return hidden, tails
+
+
+def _contents_prose(text: str) -> str:
+    """A block as the gate reads it. On a contents line — nothing but links, at least one to
+    a heading on the same page, joined by separators and at most a short label
+    ("Contents:") — a same-page link's text is dropped: a heading is not a claim, so its
+    link is not one either. Anywhere else, and for a contents line's links to other pages, a
+    link reads as the words it shows (P-120)."""
+    if _ANCHOR_LINK_RE.search(text) and _CONTENTS_REST_RE.match(_LINK_RE.sub(" ", text)):
+        return _ANCHOR_LINK_RE.sub(" ", text)
+    return text
 
 
 def blocks_of(text: str) -> list[Block]:
@@ -490,20 +611,27 @@ def blocks_of(text: str) -> list[Block]:
     def close_paragraph() -> None:
         nonlocal paragraph, intro
         if paragraph:
-            intro = " ".join(paragraph)
-            out.append(Block(start, intro, intro, heading))
+            intro = _contents_prose(" ".join(paragraph))
+            if intro.strip():
+                out.append(Block(start, intro, intro, heading))
             paragraph = []
 
     def close_item() -> None:
         nonlocal item
         if item:
-            body = " ".join(item)
-            out.append(Block(item_start, body, f"{intro} {body}", heading))
+            body = _contents_prose(" ".join(item))
+            if body.strip():
+                out.append(Block(item_start, body, f"{intro} {body}", heading))
             item = []
 
-    hidden = _unrendered(text)
-    for number, line, fenced in _lines_with_fences(text):
-        if fenced or number in hidden:
+    hidden, tails = _unrendered(text)
+    for number, raw, fenced in _lines_with_fences(text):
+        line = raw
+        if number in tails and not fenced:
+            close_paragraph()
+            close_item()
+            line = tails[number]
+        elif fenced or number in hidden:
             close_paragraph()
             close_item()
             continue
@@ -551,6 +679,10 @@ def claim_numbers(sentence: str) -> list[str]:
             out.append(match.group(0))
     for match in _COUNT_RE.finditer(text):
         cardinal, between, noun = match.group(1), match.group(2), match.group(3)
+        if between and noun.lower() in FUNCTION_WORDS and _PLURAL_RE.fullmatch(between):
+            # "12 releases this year": the optional middle word took the plural noun and left
+            # a function word that merely ends in "s" in its place (P-120)
+            between, noun = None, between
         if between and between.lower() in FUNCTION_WORDS:
             continue
         if noun.lower() in STRUCTURAL or noun.lower() in FUNCTION_WORDS:
@@ -558,7 +690,7 @@ def claim_numbers(sentence: str) -> list[str]:
         before = text[: match.start(1)]
         if before.endswith(("§", "#")) or re.search(r"[A-Za-z]-$", before):
             continue  # "§9", "PR #48", "G-674" — a section, a pull request, an id: not a count
-        if _NAMING_NOUN_RE.search(before):
+        if _names_one(before):
             continue  # "belt 3", "stage 3", "item 11" — which one, not how many
         digits = cardinal.replace(",", "")
         if digits.replace(".", "").isdigit():
@@ -597,6 +729,11 @@ def tag_defects(cover: str) -> list[str] | None:
         defects.append("[measured] without a method")
     if not _APPARATUS_RE.search(cover):
         defects.append("[measured] without an apparatus version")
+    if any(_NOT_HERE_RE.search(detail) for detail in details):
+        defects.append(
+            "[measured] whose rows are not in this repository — nobody can re-derive it here, "
+            "so tag it [hypothesis] with that reason (DL-100)"
+        )
     return defects
 
 
@@ -620,7 +757,12 @@ def check_text(rel: str, text: str) -> list[Finding]:
         if _FORBIDDEN_SECTION_RE.search(block.heading):
             continue  # a sentence quoted in order to forbid it is not a claim
         defects = tag_defects(block.cover)
-        if defects is None and _GAP_LINE_RE.match(block.text):
+        if (
+            defects is None
+            and _GAP_PAGES_RE.match(rel)
+            and _GAPS_HEADING_RE.match(block.heading)
+            and _GAP_LINE_RE.match(block.text)
+        ):
             continue  # a gap register line is its own [gap] tag; a [measured] in it still owes
         reasons = ["no claim tag"] if defects is None else defects
         for reason in reasons:
@@ -814,17 +956,46 @@ _CONFORM_RE = re.compile(
 )
 #: An ISO standard, named: "ISO/IEC 25010", "ISO 9001", "an ISO standard".
 _ISO_RE = re.compile(r"\bISO\b")
-#: A sentence that denies, forbids or refuses the claim is not making it.
-_DENIAL_RE = re.compile(r"\b(?:never|not|no|nor|cannot|without|refus\w*|forbid\w*)\b|n't\b", re.I)
-#: A section that lists what must never be said names the forbidden sentence, not says it.
-_NEVER_SECTION_RE = re.compile(r"\bnever\b|\bmust not\b", re.I)
+#: A negation denies a conformity word only when it governs it: it stands within
+#: ``NEGATION_REACH`` words before the word, in the same clause ("does not mean the code
+#: complies"). A negation elsewhere in the sentence ("conforms … and needs no review",
+#: "compliant, not merely aligned") denies nothing (P-120).
+_NEGATIONS: frozenset[str] = frozenset({"never", "not", "no", "nor", "cannot", "without"})
+NEGATION_REACH = 5
+#: What ends a clause when looking back from a conformity word for its negation.
+_CLAUSE_BREAKS: frozenset[str] = frozenset(
+    {",", ";", ":", "\u2014", "\u2013", "(", ")", "but", "and", "or", "while", "although", "though"}
+)
+#: A verb that refuses or forbids the claim, anywhere before it: "the gate refuses a sentence
+#: that says code conforms …".
+_REFUSAL_RE = re.compile(r"^(?:refus|forbid)", re.I)
+_WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?|[,;:\u2014\u2013()]")
+
+
+def _denied(words: list[str], at: int) -> bool:
+    """True when the conformity word at ``words[at]`` is refused earlier in the sentence or
+    negated within its own clause."""
+    if any(_REFUSAL_RE.match(w) for w in words[:at]):
+        return True
+    for w in reversed(words[max(0, at - NEGATION_REACH) : at]):
+        lower = w.lower()
+        if lower in _CLAUSE_BREAKS:
+            return False
+        if lower in _NEGATIONS or lower.endswith("n't"):
+            return True
+    return False
 
 
 def conformity_claim(sentence: str) -> bool:
     """True when the sentence says code conforms to, complies with or is certified against
-    an ISO standard — a sentence that only names a standard, or denies the claim, is not."""
+    an ISO standard: it names one, and some conformity word in it is neither negated in its
+    own clause nor refused. A sentence that only names a standard, or denies the claim, is
+    not one."""
     text = _strip_markup(sentence)
-    return bool(_ISO_RE.search(text) and _CONFORM_RE.search(text) and not _DENIAL_RE.search(text))
+    if not _ISO_RE.search(text):
+        return False
+    words = _WORD_RE.findall(text)
+    return any(_CONFORM_RE.fullmatch(w) and not _denied(words, i) for i, w in enumerate(words))
 
 
 def bundled_guides(root: Path) -> tuple[str, ...] | None:
@@ -840,32 +1011,65 @@ def bundled_guides(root: Path) -> tuple[str, ...] | None:
     return tuple(f"docs/{n}.md" for n in names) or None
 
 
+def _literals(node: ast.AST) -> list[tuple[int, str]]:
+    """``(line, text)`` for every string literal under ``node``; the constant parts of an
+    f-string are joined, so a sentence split by a value still reads."""
+    out: list[tuple[int, str]] = []
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.JoinedStr):
+            parts = [
+                v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else " "
+                for v in sub.values
+            ]
+            out.append((sub.lineno, "".join(parts)))
+        elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            out.append((sub.lineno, sub.value))
+    return out
+
+
 def _pr_body_literals(root: Path) -> list[tuple[int, str]] | None:
-    """``(line, text)`` for every string literal in the pull-request body functions; the
-    constant parts of an f-string are joined, so a sentence split by a value still reads."""
+    """``(line, text)`` for every string the pull-request body can emit: the literals of the
+    body functions, of every module-level function they call (and those call), and of every
+    module-level constant any of them reads — the body is what ``pr_body`` returns, not
+    only what is written inside it (P-120)."""
     path = root / PR_BODY_SOURCE
     if not path.is_file():
         return None
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    found = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name in PR_BODY_FUNCTIONS
-    ]
-    if not found:
+    functions = {
+        n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    constants: dict[str, ast.AST] = {}
+    for n in tree.body:
+        if isinstance(n, ast.Assign) and n.value is not None:
+            for target in n.targets:
+                if isinstance(target, ast.Name):
+                    constants[target.id] = n.value
+        elif (
+            isinstance(n, ast.AnnAssign) and n.value is not None and isinstance(n.target, ast.Name)
+        ):
+            constants[n.target.id] = n.value
+    if not any(name in functions for name in PR_BODY_FUNCTIONS):
         return None
-    out: list[tuple[int, str]] = []
-    for fn in found:
-        for node in ast.walk(fn):
-            if isinstance(node, ast.JoinedStr):
-                parts = [
-                    v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else " "
-                    for v in node.values
-                ]
-                out.append((node.lineno, "".join(parts)))
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                out.append((node.lineno, node.value))
-    return out
+    queue = [name for name in PR_BODY_FUNCTIONS if name in functions]
+    seen_fn: set[str] = set()
+    seen_const: set[str] = set()
+    found: set[tuple[int, str]] = set()
+    while queue:
+        name = queue.pop()
+        if name in seen_fn:
+            continue
+        seen_fn.add(name)
+        fn = functions[name]
+        found.update(_literals(fn))
+        for sub in ast.walk(fn):
+            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
+                if sub.id in functions and sub.id not in seen_fn:
+                    queue.append(sub.id)
+                elif sub.id in constants and sub.id not in seen_const:
+                    seen_const.add(sub.id)
+                    found.update(_literals(constants[sub.id]))
+    return sorted(found)
 
 
 def check_conformity(root: Path, pages: tuple[str, ...] | None = None) -> list[Finding]:
@@ -916,8 +1120,8 @@ def check_conformity(root: Path, pages: tuple[str, ...] | None = None) -> list[F
         if not path.is_file():
             continue
         for block in blocks_of(path.read_text(encoding="utf-8")):
-            if _NEVER_SECTION_RE.search(block.heading):
-                continue
+            if _FORBIDDEN_SECTION_RE.search(block.heading):
+                continue  # a section that lists what must never be said quotes it to forbid it
             for sentence in _SENTENCE_SPLIT.split(block.text):
                 if conformity_claim(sentence):
                     findings.append(Finding(rel, block.line, sentence.strip(), reason))

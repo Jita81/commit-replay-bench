@@ -67,7 +67,7 @@ constraints (for `cobra-1918`: "by identity of the cobra-built command objects, 
 | Ledger rows | `3416f2fa…`, and the rework's | `b79c22ec…` |
 
 Totals: 3 builds, 3 clean, 0 disqualified, 0 harness errors, **$0.69**, 11 min wall clock
-**[measured — n = 3 builds; method: the run's own record on the operator's stack, `/runs/e9acd89c…`, not in this repository; apparatus 2.2, local executor: a development reading]**.
+**[hypothesis, recorded as measured — n = 3 builds; method: the run's own record on the operator's stack, `/runs/e9acd89c…`, not in this repository; apparatus 2.2, local executor: a development reading]**.
 
 The fixes themselves, for a reader who knows cobra: PR #1 passes `cmd.Flags().Args()` to the
 help function in the `flag.ErrHelp` branch and `Find`'s remaining args from the `help` command;
@@ -125,7 +125,7 @@ the name-match the adversarial pass had shown would slip through a weaker test.
 - Three factory rows joined the cobra ledger under the `process: factory` label. They were
   built against operator-authored oracles, not mined commits; a reader pooling the cell should
   know the map now mixes the two (finding 2 is the sharper version of this) **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
-- 602 → 605 rows, chain intact, false-Q1 0 **[measured — n = 605 rows; method: the stack's ledger verification read after the run, not in this repository; apparatus 2.2]**.
+- 602 → 605 rows, chain intact, false-Q1 0 **[hypothesis, recorded as measured — n = 605 rows; method: the stack's ledger verification read after the run, not in this repository; apparatus 2.2]**.
 
 ## How to repeat it
 

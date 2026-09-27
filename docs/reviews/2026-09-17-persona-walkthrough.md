@@ -87,7 +87,7 @@ after the revoke (two cobra cells due, one click cell routed to a human).
 - One test backlog (`T-1 walkthrough test item`, hash `1644eba4…`) is frozen on cobra; the
   factory was not run on it.
 - Ledger after the walk: 602 rows, chain intact, false-Q1 0, 0 clean rows without a pack
-  **[measured — n = 602 rows; method: the stack's ledger verification read after the walk,
+  **[hypothesis, recorded as measured — n = 602 rows; method: the stack's ledger verification read after the walk,
   not in this repository; exact counts, no interval; apparatus 2.2]**.
 - The two WCAG figures (4.4:1 before, 4.7:1 after) are contrast ratios computed from the
   tokens, not sampled rates: no `n`, no interval **[hypothesis — recorded at the time; not re-checked since]**.

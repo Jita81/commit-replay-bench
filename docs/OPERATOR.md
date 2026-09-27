@@ -672,7 +672,7 @@ the run's apparatus says which applied and why (`extra.spend.sources`).
 Why: in the 2026-09-25 export, 40 escalated attempts (a same-model retry: a bare `r2` / `r3`
 rung is the run's own builder and model at the same budget, on a fresh worktree with the same
 brief) produced 2 clean patches for $20.70, against $1.35 per clean patch on a first blind
-attempt; and 47 attempts stopped at their budget cost $28.87 for no output **[measured
+attempt; and 47 attempts stopped at their budget cost $28.87 for no output **[hypothesis, recorded as measured
 2026-09-25; n = 322 valid of 618 rows, apparatus 2.0–2.2, builder claude_code /
 claude-sonnet-5; method: the product's failure rule over the export, by
 `scripts/spend_from_export.py`; the export is the operator's and is not in this repository]**. Every row a rule shaped says so: `labels.escalation` and

@@ -3,31 +3,40 @@
 A ``[measured]`` tag on README names its rows (``rows: data/<campaign>/``, enforced by
 ``scripts/claims_check.py``). This file does what a reader would: it verifies the rows'
 checksum manifest, recomputes the campaign's figures from the rows with the product's own
-code, and fails when any number the claim states — a count, a fraction, a point, an interval
-bound, a percentage — or the apparatus it names is not what the rows give. A claim that stops
-being true fails here rather than waiting for a reader.
+code, and fails when the claim does not state a figure in its role — "49 of 55" is the
+cell's clean count of its attempts, "point 0.891" its point, "0.78 to 0.95" its interval —
+when it states any other number, anywhere the tag covers, or when it names another
+apparatus. A figure is bound to its role, never to whichever figure it happens to equal:
+"false-Q1 = 1" fails although a point rounds to 1 (P-122). A claim that stops being true
+fails here rather than waiting for a reader.
 
 Navigation
 ----------
 What it is:   The re-derivation test for every README ``[measured]`` claim that names rows.
-What it does: Finds each README block whose ``[measured]`` tag names ``rows: data/<campaign>/``;
-              checks the campaign's manifest; derives its figures (``DERIVATIONS``); and
-              compares every number the claim sentences and the tag state, at the precision
-              they state it, and the apparatus, with what the rows give. A locator with no
-              derivation fails, so a new campaign cannot be cited without one.
+What it does: Finds each README block whose ``[measured]`` tag names ``rows: data/<campaign>/``,
+              with every sentence of the block and every list item it introduces; checks the
+              campaign's manifest; derives its figures and renders the phrases its
+              derivation says a claim states (``DERIVATIONS``); requires each phrase and
+              refuses any number left over; and checks the apparatus. A locator with no
+              derivation fails, so a new campaign cannot be cited without one. The
+              branch-protection reading is compared with the workflow vendored beside it,
+              never with the working tree's ci.yml.
 How:          ``claims_check.blocks_of`` / ``claim_numbers`` / ``verify_manifest`` read the
               page; ``crb.core.legacy.import_census`` and ``crb.core.ledger.cell_stats``
-              recompute the census; ``check_branch_protection.job_contexts`` reads ci.yml.
+              recompute the census; ``check_branch_protection.job_contexts`` /
+              ``compare`` read the vendored workflow and the reading.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md (false-Q1 at write)
 Works with:   README.md (the claims), data/census-2026-07-08/ and
-              data/branch-protection-2026-09-27/ (the rows), scripts/claims_check.py (the
-              locator rule), scripts/check_branch_protection.py (the workflow's check names),
+              data/branch-protection-2026-09-27/ (the rows, and the workflow the reading was
+              compared with), scripts/claims_check.py (the locator rule),
+              scripts/check_branch_protection.py (the workflow's check names),
               tests/test_census_gate.py (the census's own invariants), docs/dod/product.md
               (product.claims.201, G-660)
 Tested by:    (this is a test file)
 Touch when:   README gains a [measured] claim on a new campaign — vendor its rows with a
-              manifest under data/ and add its derivation to ``DERIVATIONS`` in the same change.
+              manifest under data/ and add its derivation, with the phrases the claim
+              states, to ``DERIVATIONS`` in the same change.
 """
 
 from __future__ import annotations
@@ -62,10 +71,18 @@ bp = _load("check_branch_protection")
 
 @dataclass(frozen=True)
 class Derived:
-    """What a campaign's rows give: its apparatus and every figure a claim may state."""
+    """What a campaign's rows give: its apparatus, its figures, and the phrases a claim on
+    them states — each a template naming the figure in its role (``"{cell_clean} of
+    {cell_n}"``), so a number is held to the figure it is meant to be, never to whichever
+    figure it happens to equal (P-122)."""
 
     apparatus: str
     figures: dict[str, float]
+    says: tuple[str, ...]
+
+    def phrases(self) -> list[str]:
+        """The phrases rendered from the rows, in the order they are matched."""
+        return [t.format(**self.figures) for t in self.says]
 
 
 def _census(root: Path) -> Derived:
@@ -99,21 +116,36 @@ def _census(root: Path) -> Derived:
             "cell_ci_low": stats.ci.low,
             "cell_ci_high": stats.ci.high,
         },
+        (
+            "{cell_clean} of {cell_n}",
+            "point {cell_point:.3f}",
+            "{cell_ci_low:.2f} to {cell_ci_high:.2f}",
+            "of the {rows:,}",
+            "false-Q1 = {false_q1}",
+            "n = {cell_n} attempts",
+            "{rows:,} rows",
+        ),
     )
 
 
 def _branch_protection(root: Path) -> Derived:
-    """The vendored reading of main's required checks, which must be exactly ci.yml's jobs
-    (the claim is that every job is required)."""
-    reading = json.loads(
-        (root / "data" / "branch-protection-2026-09-27" / "required_status_checks.json").read_text(
-            encoding="utf-8"
-        )
+    """The vendored reading of main's required checks, which must be exactly the jobs of the
+    workflow in force when it was read (the claim is that every job was required), vendored
+    beside it. It is never compared with the working tree's ci.yml: a pull request that adds
+    a job cannot be required before it merges, and ``scripts/check_branch_protection.py`` is
+    the operator's live comparison."""
+    data = root / "data" / "branch-protection-2026-09-27"
+    reading = json.loads((data / "required_status_checks.json").read_text(encoding="utf-8"))
+    workflow = json.loads((data / "workflow_jobs.json").read_text(encoding="utf-8"))
+    problems = bp.compare(workflow["jobs"], reading["contexts"], reading["strict"])
+    assert problems == [], (
+        f"the reading does not match the workflow it was read against: {problems}"
     )
-    jobs = bp.job_contexts((root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    problems = bp.compare(jobs, reading["contexts"], reading["strict"])
-    assert problems == [], f"the reading no longer matches ci.yml: {problems}"
-    return Derived(reading["_apparatus"], {"required_checks": len(reading["contexts"])})
+    return Derived(
+        reading["_apparatus"],
+        {"required_checks": len(reading["contexts"])},
+        ("n = {required_checks} required checks", "{required_checks} required checks"),
+    )
 
 
 #: Every campaign a README [measured] tag may cite, and how its figures are derived.
@@ -147,17 +179,9 @@ def stated_numbers(text: str) -> list[str]:
     return out
 
 
-def _matches(stated: str, derived: dict[str, float]) -> bool:
-    """``stated`` equals some derived figure at the precision it is written with."""
-    percent = stated.endswith("%")
-    raw = stated.rstrip("%").strip().replace(",", "")
-    places = len(raw.split(".")[1]) if "." in raw else 0
-    value = float(raw)
-    for fig in derived.values():
-        candidate = fig * 100 if percent else fig
-        if round(candidate, places) == round(value, places):
-            return True
-    return False
+def _phrase_re(phrase: str) -> re.Pattern[str]:
+    """``phrase`` as whole figures: "49 of 55" is not found inside "149 of 555"."""
+    return re.compile(rf"(?<![\d.,]){re.escape(phrase)}(?![.,]?\d)")
 
 
 @dataclass(frozen=True)
@@ -169,22 +193,30 @@ class Claim:
 
 
 def measured_claims(text: str) -> list[Claim]:
-    """Each README block's [measured] tag that names rows, with the block's claim text."""
+    """Each README block's [measured] tag that names rows, with ALL the text the tag covers:
+    every sentence of its block, whether or not the gate counts it as a claim, and every
+    list item the block introduces (the gate lets the intro's tag cover them)."""
     out: list[Claim] = []
-    for block in cc.blocks_of(text):
+    blocks = cc.blocks_of(text)
+    for i, block in enumerate(blocks):
         prose = cc._CODE_RE.sub(" ", cc._COMMENT_RE.sub(" ", block.text))
         for name, detail in cc._TAG_RE.findall(prose):
             if name.lower() != "measured":
                 continue
-            claims = [s for s in cc._SENTENCE_SPLIT.split(block.text) if cc.is_claim(s)]
+            covered = [block.text]
+            for item in blocks[i + 1 :]:
+                if item.cover != f"{block.text} {item.text}":
+                    break
+                covered.append(item.text)
             for campaign in cc.rows_locators(detail):
-                out.append(Claim(block.line, campaign, detail, " ".join(claims)))
+                out.append(Claim(block.line, campaign, detail, " ".join(covered)))
     return out
 
 
 def problems(claim: Claim, root: Path = ROOT) -> list[str]:
-    """Why ``claim`` is not what its rows give; empty when every stated number and the
-    apparatus re-derive."""
+    """Why ``claim`` is not what its rows give; empty when it states every phrase its
+    derivation renders from the rows, states no other figure, and names the rows' apparatus.
+    Each phrase binds a number to its role, so a real figure in the wrong role fails."""
     derive = DERIVATIONS.get(claim.campaign)
     if derive is None:
         return [f"{claim.campaign} has no derivation in tests/test_measured_claims.py"]
@@ -195,12 +227,14 @@ def problems(claim: Claim, root: Path = ROOT) -> list[str]:
         found.append(
             f"the tag names apparatus {stated_apparatus}; the rows are {derived.apparatus}"
         )
-    numbers = stated_numbers(f"{claim.text} {claim.tag}")
-    if not numbers:
-        found.append("the claim states no number to re-derive")
-    for n in numbers:
-        if not _matches(n, derived.figures):
-            found.append(f"{n} is not what the rows give ({derived.figures})")
+    rest = " ".join(cc._strip_markup(claim.text).split())  # the tag is part of the text
+    for phrase in derived.phrases():
+        pattern = _phrase_re(phrase)
+        if not pattern.search(rest):
+            found.append(f"the claim does not state {phrase!r}, which is what the rows give")
+        rest = pattern.sub(" ", rest)
+    for n in stated_numbers(rest):
+        found.append(f"{n} is stated, but no figure the rows give is bound to it")
     return found
 
 
@@ -247,3 +281,84 @@ def test_stated_numbers_skip_dates_versions_and_confidence_levels() -> None:
         "0.78 to 0.95), n = 55; apparatus 1.0-census"
     )
     assert sorted(stated_numbers(text)) == sorted(["55", "49", "55", "55", "0.78", "0.95"])
+
+
+#: A stated figure swapped for ANOTHER figure the rows give: each is a number the rows do
+#: give, in the wrong role, so a bag-of-figures comparison accepted every one (P-122).
+COINCIDENT: tuple[tuple[str, str], ...] = (
+    ("false-Q1 = 0", "false-Q1 = 1"),
+    ("false-Q1 = 0", "false-Q1 = 55"),
+    ("point 0.891", "point 0.95"),
+    ("49 of 55", "55 of 55"),
+    ("49 of 55", "1 of 55"),
+    ("0.78 to 0.95", "0.95 to 0.78"),
+    ("of the 1,071", "of the 55"),
+    ("n = 55 attempts", "n = 1,071 attempts"),
+)
+
+
+@pytest.mark.parametrize(("right", "wrong"), COINCIDENT)
+def test_a_real_figure_in_the_wrong_role_fails(right: str, wrong: str) -> None:
+    census = next(c for c in _live() if c.campaign == "data/census-2026-07-08")
+    assert right in f"{census.text} {census.tag}", f"the census claim no longer states {right!r}"
+    bent = Claim(
+        census.line,
+        census.campaign,
+        census.tag.replace(right, wrong),
+        census.text.replace(right, wrong),
+    )
+    assert problems(bent) != [], wrong
+
+
+def _census_paragraph() -> str:
+    census = next(c for c in _live() if c.campaign == "data/census-2026-07-08")
+    text = README.read_text(encoding="utf-8")
+    return next(b.text for b in cc.blocks_of(text) if b.line == census.line)
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        # a list item the measured paragraph introduces is covered by its tag, so it is read
+        "{p}\n\n- 99% of all 1,071 rows were clean.\n",
+        # a sentence of the block with numbers but no count of a plural noun is read too
+        "{p} Its Wilson interval is 0.10 to 0.20.\n",
+    ],
+)
+def test_every_number_the_tag_covers_is_re_derived(page: str) -> None:
+    claims = measured_claims("# t\n\n" + page.format(p=_census_paragraph()))
+    assert [c.campaign for c in claims] == ["data/census-2026-07-08"]
+    assert problems(claims[0]) != []
+
+
+def test_the_branch_protection_reading_is_compared_with_the_workflow_it_was_read_against(
+    tmp_path: Path,
+) -> None:
+    """The reading is compared with the workflow in force when it was taken, vendored beside
+    it — never with the working tree's ci.yml, which a later pull request may change before
+    an admin can honestly require the new job."""
+    import shutil
+
+    campaign = "data/branch-protection-2026-09-27"
+    shutil.copytree(ROOT / campaign, tmp_path / campaign)
+    derived = _branch_protection(tmp_path)
+    assert derived.figures["required_checks"] == 16
+
+
+def test_the_vendored_workflow_is_ci_yml_at_the_commit_it_names() -> None:
+    snapshot = json.loads(
+        (ROOT / "data" / "branch-protection-2026-09-27" / "workflow_jobs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    import subprocess
+
+    shown = subprocess.run(
+        ["git", "-C", str(ROOT), "show", f"{snapshot['commit']}:.github/workflows/ci.yml"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if shown.returncode != 0:
+        pytest.skip(f"this clone does not hold {snapshot['commit']} (a shallow clone)")
+    assert bp.job_contexts(shown.stdout) == snapshot["jobs"]

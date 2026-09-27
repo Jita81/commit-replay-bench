@@ -24,8 +24,12 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               is refused in the present tense until its criterion is met, on a fixture and
               on the live pages (P-115); that a sentence claiming ISO conformity is refused
               on README, a guide and the factory's pull-request body template while one that
-              only names a standard passes (ADR-0026 item 11); and that a number after
-              ``§``, ``#`` or an id prefix is an identifier, not a count.
+              only names a standard passes (ADR-0026 item 11), whatever incidental negation
+              or "never" heading surrounds it, and in the constants and helpers the
+              pull-request body uses; that a number after ``§``, ``#`` or an id prefix is an
+              identifier, not a count; that every exemption still refuses the evasions in
+              ``EVASIONS`` and the naming nouns are pinned (P-120); and that a ``[measured]``
+              tag whose rows are not in this repository is refused (DL-100, P-121).
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -888,23 +892,28 @@ def test_a_link_elsewhere_keeps_its_words(tree: Path) -> None:
 
 
 def test_a_gap_register_line_is_its_own_gap_tag(tree: Path) -> None:
-    """A definition-of-done gap line — ``**G-nnn** — what is missing · what closes it`` — is
-    a [gap] by its form: it names what is absent and what would close it, which is exactly
-    what the tag must cite. A sentence that only mentions a gap id is not one."""
+    """A definition-of-done gap line — ``- **G-nnn** — what is missing · what closes it`` under
+    ``## Gaps`` — is a [gap] by its form: it names what is absent and what would close it,
+    which is exactly what the tag must cite. A sentence that only mentions a gap id is not
+    one, and the same line anywhere else is prose (P-120)."""
+    (tree / "docs" / "dod").mkdir()
+    page = "docs/dod/x.md"
     _write(
         tree,
-        "README.md",
-        "# t\n\n- **G-214** — the walkthrough asserts two of the 24 rows · assert them all · ui\n"
-        "- **F42** — no builder measured on four repositories · measure them · you\n",
+        page,
+        "# t\n\n## Gaps\n\n- **G-214** — the walkthrough asserts two of the 24 rows · assert "
+        "them all · ui\n",
     )
-    assert cc.check_tree(tree, ("README.md",)) == []
-    _write(tree, "README.md", "# t\n\n- The walkthrough asserts two of the 24 rows (G-214).\n")
-    assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
+    assert cc.check_tree(tree, (page,)) == []
+    _write(tree, page, "# t\n\n## Gaps\n\n- The walkthrough asserts two of the 24 rows (G-214).\n")
+    assert [f.reason for f in cc.check_tree(tree, (page,))] == ["no claim tag"]
     # a [measured] figure inside a gap line still owes its evidence
     _write(
-        tree, "README.md", "# t\n\n- **G-9** — covers five pages **[measured]** · add more · docs\n"
+        tree,
+        page,
+        "# t\n\n## Gaps\n\n- **G-009** — covers five pages **[measured]** · add · docs\n",
     )
-    assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == [
+    assert [f.reason for f in cc.check_tree(tree, (page,))] == [
         "[measured] without n",
         "[measured] without a method",
         "[measured] without an apparatus version",
@@ -937,3 +946,154 @@ def test_a_sentence_listed_as_what_must_never_be_said_is_not_a_claim(tree: Path)
     assert cc.check_tree(tree, ("README.md",)) == []
     _write(tree, "README.md", f"# t\n\n## 7. What we found\n\n{forbidden}")
     assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
+
+
+# ─── every exemption stays as narrow as the case it was written for (P-120) ───────────────
+
+#: Sentences the gate must refuse on README, however the exemptions grow. Each one got
+#: through an exemption that was wider than its case (the stream C verifiers, 2026-09-27).
+#: The list only grows: a new exemption is written with its refused cases here first.
+EVASIONS: tuple[tuple[str, str], ...] = (
+    # a naming noun that is also a verb or a plural-capable noun is not "which one"
+    ("README.md", "Its patches pass 1,040 tests on the first attempt.\n"),
+    ("README.md", "The builder can round 12 estimates up to the next whole minute.\n"),
+    ("README.md", "The reviewers question 12 findings in every report.\n"),
+    ("README.md", "Every audit row 12 defects deep was triaged.\n"),
+    ("README.md", "The team began finding 40 defects a week.\n"),
+    ("README.md", "The printer will line 30 labels up on the tray.\n"),
+    ("README.md", "The operator will action 12 tickets a day.\n"),
+    # a naming noun used as a verb, after a subject or a modal, counts what follows
+    ("README.md", "The worker can batch 40 jobs at a time.\n"),
+    ("README.md", "The release team will stage 12 releases this year.\n"),
+    ("README.md", "Reviewers table 3 motions at every meeting.\n"),
+    # a plural noun followed by a function word that ends in "s" is still counted
+    ("README.md", "The team shipped 12 releases this year.\n"),
+    # text after an HTML comment on the same line is rendered
+    ("README.md", "<!-- nav --> The factory merges 95% of its pull requests unaided.\n"),
+    ("README.md", "<!--\nNavigation\n--> The factory merges 95% of its pull requests unaided.\n"),
+    # a link to a heading is only skipped on a contents line
+    (
+        "README.md",
+        "The factory merges [97% of its pull requests unaided](#what-has-been-measured).\n",
+    ),
+    # a gap line is its own tag only under a definition-of-done page's "## Gaps"
+    ("README.md", "- **G-999** — the factory merges 99% of its pull requests unaided.\n"),
+    ("docs/dod/x.md", "- **G-999** — the factory merges 99% of its pull requests unaided.\n"),
+    ("docs/dod/x.md", "## Notes\n\n- **F42** — the factory merges 99% of its pull requests.\n"),
+    # a contents line drops only its links to headings; a link to another page is read
+    ("README.md", "Contents: [1 Install](#1-install) · [The gate found 12 defects](docs/X.md)\n"),
+)
+
+
+@pytest.mark.parametrize(("rel", "body"), EVASIONS)
+def test_the_gate_still_refuses_every_known_evasion(tree: Path, rel: str, body: str) -> None:
+    (tree / "docs" / "dod").mkdir(exist_ok=True)
+    _write(tree, rel, f"# t\n\n{body}")
+    assert [f.reason for f in cc.check_tree(tree, (rel,))] == ["no claim tag"]
+
+
+def test_the_naming_nouns_are_pinned() -> None:
+    """A naming noun exempts the count after it on every gated page, README included, so the
+    list cannot grow unseen: a word that is mostly a verb ("pass 45 tests") or a gerund
+    ("finding 40 defects") is not on it, and one that can be a verb exempts only where it
+    reads as a noun ("the worker can batch 40 jobs" is a count). Adding one means adding
+    its refused case to ``EVASIONS`` and its word here in the same change."""
+    assert set(cc.NAMING_NOUNS) == {
+        "belt", "step", "stage", "wave", "item", "rank", "phase", "rung", "tier", "level",
+        "section", "table", "figure", "chapter", "appendix", "arm", "column", "page",
+        "version", "mutation", "migration", "revision", "criterion", "slice", "batch",
+    }  # fmt: skip
+
+
+def test_a_gap_line_is_its_own_tag_only_where_dod_check_reads_gaps(tree: Path) -> None:
+    """``dod_check`` reads a gap line only under ``## Gaps`` on a definition-of-done page or
+    in the prevention register, in the grammar ``- **G-nnn** — …``; there, and only there,
+    the line is its own ``[gap]`` tag."""
+    (tree / "docs" / "dod").mkdir()
+    gaps = "## Gaps\n\n- **G-999** — the walkthrough asserts two of the 24 rows · assert · ui\n"
+    _write(tree, "docs/dod/x.md", f"# x\n\n{gaps}")
+    _write(tree, "docs/PREVENTION.md", f"# p\n\n{gaps}")
+    assert cc.check_tree(tree, ("docs/dod/x.md", "docs/PREVENTION.md")) == []
+
+
+# ─── a [measured] tag is what its rows re-derive (DL-100, P-121) ──────────────────────────
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "[measured — n = 161 rows; method: the controls of §2 on the operator's stack, whose "
+        "rows are not in this repository; apparatus 2.0]",
+        "[measured, n = 11, single run; method: the latest sighted attempt per task on the "
+        "operator's stack, rows not in this repository; apparatus 2.1]",
+        "[measured, n = 16, single run; method: the replay rows of §2 the harness let the "
+        "builder attempt, on the operator's stack; apparatus 2.0]",
+    ],
+)
+def test_a_measured_tag_whose_rows_are_not_in_the_repository_is_refused(
+    tree: Path, tag: str
+) -> None:
+    """DL-100: a reading whose rows are not vendored is a ``[hypothesis]`` with that reason;
+    a ``[measured]`` tag that says its own rows are not here contradicts itself."""
+    _write(tree, "README.md", f"# t\n\nThe floor held across 161 negative-control rows. {tag}\n")
+    reasons = [f.reason for f in cc.check_tree(tree, ("README.md",))]
+    assert len(reasons) == 1 and "not in this repository" in reasons[0]
+    hyp = "[hypothesis — as measured on the operator's stack; its rows are not in this repository]"
+    _write(tree, "README.md", f"# t\n\nThe floor held across 161 negative-control rows. {hyp}\n")
+    assert cc.check_tree(tree, ("README.md",)) == []
+
+
+# ─── the conformity rule refuses the claim whatever else the sentence says (P-120) ─────────
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "The change conforms to ISO/IEC 25010 and needs no further review.",
+        "Every clean row is certified against ISO/IEC 25010, not just tested.",
+        "Every change the factory delivers conforms to ISO/IEC 25010 with no exceptions.",
+        "Delivered code is ISO/IEC 25010 compliant, not merely aligned.",
+        "The factory's code complies with ISO 9001 without any manual review.",
+        "It is not certified by an auditor, but it conforms to ISO/IEC 25010.",
+    ],
+)
+def test_an_incidental_negation_does_not_hide_a_conformity_claim(tree: Path, sentence: str) -> None:
+    _conformity_tree(tree, readme=sentence, guide="Nothing.", planted="Nothing.")
+    assert [f.path for f in cc.check_conformity(tree)] == ["README.md"]
+
+
+def test_a_section_headed_never_is_still_read_unless_it_lists_forbidden_sayings(
+    tree: Path,
+) -> None:
+    """Only a section that lists what must never be said quotes a claim to forbid it; a
+    heading that merely contains "never" (EVIDENCE-AND-CLAIMS §9, "named, never claimed")
+    is read like any other."""
+    guide = (
+        "## 9. The quality baseline — named, never claimed\n\n"
+        "Code that passes the belts conforms to ISO/IEC 25010.\n\n"
+        "## Never ship an unreviewed change\n\n"
+        "Every change we deliver conforms to ISO/IEC 25010.\n"
+    )
+    _conformity_tree(tree, readme="Nothing.", guide=guide, planted="Nothing.")
+    assert [(f.path, f.line) for f in cc.check_conformity(tree)] == [
+        ("docs/OPERATOR.md", 5),
+        ("docs/OPERATOR.md", 9),
+    ]
+
+
+def test_the_pr_body_rule_reads_the_constants_and_helpers_the_body_uses(tree: Path) -> None:
+    """The pull-request body is what ``pr_body`` emits: a module constant it reads and a
+    helper it calls are part of the template."""
+    source = (
+        '_FOOTER = "The delivered code conforms to ISO/IEC 25010."\n\n'
+        "def _trailer():\n"
+        '    return "Every change is certified against ISO 9001."\n\n'
+        "def pr_body(item, build):\n"
+        '    return "\\n".join([f"## item {item}", _FOOTER, _trailer()])\n\n'
+        "def rework_comment(item):\n"
+        '    return "rework"\n'
+    )
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    _write(tree, "src/crb/factory/delivery.py", source)
+    found = [(f.path, f.line) for f in cc.check_conformity(tree)]
+    assert found == [("src/crb/factory/delivery.py", 1), ("src/crb/factory/delivery.py", 4)]

@@ -60,7 +60,7 @@ Consistent with the cobra finding in the critical-friend review: mechanically cl
 
 ## 6. What this licenses
 - "On three public NHS repositories the instrument runs end to end — mines, checks gold, measures oracle strength, runs negative controls with 0 escapes on 2.1, grades Sonnet 5 with false-Q1 = 0 — and every row carries its failure kind." **[measured]**
-- "Sighted Sonnet 5 reproduced 9 of the 11 NHS tasks it was allowed to finish, at $0.25–0.62; the two misses were the guard, not the model." **[measured, n = 11, single run; method: the latest sighted attempt per task on the operator's stack, graded by the belts, rows not in this repository; apparatus 2.1]**
+- "Sighted Sonnet 5 reproduced 9 of the 11 NHS tasks it was allowed to finish, at $0.25–0.62; the two misses were the guard, not the model." **[hypothesis, recorded as measured, n = 11, single run; method: the latest sighted attempt per task on the operator's stack, graded by the belts, rows not in this repository; apparatus 2.1]**
 - **Not:** any blind capability claim (budget-capped), any per-class or per-repo rate, any `deliver` route (largest cell n = 5; nhsuk-frontend's oracle is 0.36), anything about the SCSS/template halves of design-system changes.
 
 ## 7. Next (priced by the product itself)

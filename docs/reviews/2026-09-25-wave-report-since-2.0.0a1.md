@@ -989,7 +989,7 @@ numbers were never trusted.
   walkthrough's axe sweep. Figures from the stack, tagged: the operator's run
   `6fb61af9…` (cobra, replay, sighted, `claude_code / claude-sonnet-5`, apparatus 2.2) made
   10 attempts, 9 clean, $2.57 builder-reported, against the Measure page's ±20 % planning
-  band around the repository's measured mean [measured — n = 10 attempts; method: the run's
+  band around the repository's measured mean [hypothesis, recorded as measured — n = 10 attempts; method: the run's
   ledger rows on the operator's stack, not in this repository; apparatus 2.2]; during the
   walk cobra's `bug.fix × S` cell moved from *calibrate* (23 of 24 clean, 95.8 %, 95 %
   Wilson [79.8 %, 99.3 %] — lower below the 80 % bar) to *deliver* (24 of 25 clean,

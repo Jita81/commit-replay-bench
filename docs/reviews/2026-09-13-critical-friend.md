@@ -176,8 +176,8 @@ upstream T2 ledger tallied on 2026-09-26; apparatus n/a — the upstream harness
 
 ## 9. What the evidence *does* license today
 
-- Saying: "We have an instrument that grades AI code changes against a repository's own held-out tests, fails closed, cannot record a false pass, and proves it on 161 negative-control rows and every live row so far." **[measured — n = 161 negative-control rows and 29 live rows; method: the controls and replay runs of §2 on the operator's stack, whose rows are not in this repository; apparatus 2.0]**
-- Saying: "On three public libraries, Sonnet 5 reproduced 14 of 16 changes the harness let it attempt, at $0.17–0.43 and 1–4 minutes each." **[measured, n = 16, single run, no CI; method: the replay rows of §2 the harness let the builder attempt, on the operator's stack; apparatus 2.0]**
+- Saying: "We have an instrument that grades AI code changes against a repository's own held-out tests, fails closed, cannot record a false pass, and proves it on 161 negative-control rows and every live row so far." **[hypothesis, recorded as measured — n = 161 negative-control rows and 29 live rows; method: the controls and replay runs of §2 on the operator's stack, whose rows are not in this repository; apparatus 2.0]**
+- Saying: "On three public libraries, Sonnet 5 reproduced 14 of 16 changes the harness let it attempt, at $0.17–0.43 and 1–4 minutes each." **[hypothesis, recorded as measured, n = 16, single run, no CI; method: the replay rows of §2 the harness let the builder attempt, on the operator's stack; apparatus 2.0]**
 - Saying: "Mechanically clean is not mergeable: in a 3-patch sample, 3 had reviewer-visible defects or divergences." **[measured, n = 3]**
 - **Not** saying: any per-class capability, any `deliver` routing, any semantic-correctness rate, anything about NHS code (the three NHS repos are validated but not yet run) **[hypothesis — recorded at the time; not re-checked since]**.
 

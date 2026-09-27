@@ -33,10 +33,14 @@ Every claim in this repository — README, ADRs, architecture, UI copy — carri
 **The rule is a gate.** CI's `claims` job runs `scripts/claims_check.py`, which reads the
 pages on its allowlist, finds the sentences that quantify something, and fails when one
 carries no tag — or when a `[measured]` one carries no `n`, no method and no apparatus
-version. On README, the most public page, a `[measured]` tag must also say where its rows
+version, or says its own rows are not in this repository: a reading nobody can re-derive
+here is a `[hypothesis]` with that reason (DL-100). On README, the most public page, a `[measured]` tag must also say where its rows
 are — `rows: data/<campaign>/`, a directory the repository carries with a checksum manifest
 (`MANIFEST.sha256`) that verifies — and `tests/test_measured_claims.py` re-derives every
-number such a claim states, and its apparatus, from those rows with the product's own code.
+number the tag covers, and its apparatus, from those rows with the product's own code. Each
+number is held to the figure it is meant to be ("49 of 55" to the cell's clean count of its
+attempts), so a real figure in the wrong role fails, and so does a number no figure is
+bound to.
 Elsewhere the gate checks the *shape* of the evidence, never whether a figure is sound, and it
 reads only the pages on the allowlist; the script's docstring states both limits and the
 gap analysis names the pages still ungated. The allowlist holds four entries: README, every
@@ -46,8 +50,10 @@ is gated the day it lands **[measured — n = 4 entries on `ALLOWLIST`; method: 
 of `scripts/claims_check.py`, which prints the same count in its own report; apparatus n/a —
 a count, not a rate, so no interval]**. The decision records and CHANGELOG are not on it yet
 (G-945), and the generated code map and gap analysis are held by their own generators'
-checks. A gap register line (`**G-nnn** — what is missing · what closes it`) is a `[gap]`
-statement by its form, so it needs no separate tag. The same job holds a review to its own actions:
+checks. A gap register line (`- **G-nnn** — what is missing · what closes it · owner`,
+under `## Gaps` on a definition-of-done page or in the prevention register, where the
+definition-of-done check reads it) is a `[gap]` statement by its form, so it needs no
+separate tag; the same line anywhere else is prose. The same job holds a review to its own actions:
 every numbered row of a review's *Actions* table needs a line in the
 [decision log](DECISION-LOG.md) that names the review, the action and its state (`closed`,
 `open`, `declined` or `[gap]`), and every such record needs its action still in the table,
@@ -235,7 +241,7 @@ oracle was never scored would be attesting to a number whose *meaning* was never
 measured — precisely the "a green suite proves correctness" claim §7 forbids, dressed as
 an attestation. The NHS reading that earned the clause: an oracle of 0.36 on
 nhsuk-frontend with 2 of 6 tasks scoreable, and 4 of 10 clean rows failing their own
-repository's type check **[measured 2026-09-14 — n = 6 tasks and 10 clean rows; method: the
+repository's type check **[hypothesis, recorded as measured 2026-09-14 — n = 6 tasks and 10 clean rows; method: the
 oracle run and a type check of each clean row's patch in the NHS measurement
 (docs/reviews/2026-09-14-nhs-public-repos.md), whose rows are the operator's and not in this
 repository; apparatus 2.2]** — a weak or unmeasured oracle is where a human sign-off is most
@@ -420,7 +426,9 @@ ISO/IEC 5055: not evidenced — none of its measures is computed; one may enter 
 claims gate (`scripts/claims_check.py`) refuses any sentence that says code conforms to,
 complies with or is certified against an ISO standard in README, the guides the product
 bundles and the factory's pull-request body template. A sentence that only names a standard,
-as this one names ISO/IEC 25010, passes. An organisation's own standard with a runnable check
+as this one names ISO/IEC 25010, passes, and so does one that negates the claim within
+its own clause, as the first sentence of this paragraph does; a negation elsewhere in the
+sentence denies nothing. An organisation's own standard with a runnable check
 becomes a finish-gate or belt command on its repository; without one it is shown and signed
 but counts as no evidence.
 
