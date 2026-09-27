@@ -253,8 +253,8 @@ def test_the_provisioning_row_says_what_a_fetch_sends_and_never_sends() -> None:
 #: The verbs that say a flow CHANGES something outside the deployment: a pushed or
 #: re-pointed branch, a comment or post, an opened, created, updated, merged, closed or
 #: deleted object, a label, a transition, an HTTP write method. Each is matched in every
-#: form a row may use — the stem, ``-s`` / ``-es`` and ``-d`` / ``-ed`` / ``-led`` — so a
-#: verb added here is recognised in the past tense by construction (P-115).
+#: form a row may use — see ``_stem_forms`` — with or without a ``re`` / ``re-`` prefix, so
+#: a verb added here is recognised in every tense by construction (P-115, P-117).
 _WRITE_STEMS: tuple[str, ...] = (
     "push",
     "re-point",
@@ -270,13 +270,25 @@ _WRITE_STEMS: tuple[str, ...] = (
     "transition",
     "patch",
 )
+
+
+def _stem_forms(stem: str) -> str:
+    """A pattern for every form of ``stem``: the base, ``-s`` / ``-es``, ``-d`` / ``-ed`` /
+    ``-led`` and ``-ing`` / ``-ling``, a final ``e`` dropped before ``-ing`` ("merging",
+    "closing"). The forms are built here, not listed, so a stem added above is recognised in
+    every one of them (P-115, P-117)."""
+    if stem.endswith("e"):
+        return re.escape(stem[:-1]) + r"(?:e|es|ed|ing)"
+    return re.escape(stem) + r"(?:s|es|ed|led|ing|ling)?"
+
+
 #: A word in a row's "What is sent" cell that says the flow writes: one of the stems above in
 #: any form, an HTTP ``PUT``, or a write TO something. A bare "writes" is not one: the
 #: builder row's "the diff it writes" is content sent to the model (pinned both ways by the
 #: two tests below the write-statement test).
 _WRITE_VERB = re.compile(
-    r"\b(?:(?:" + "|".join(map(re.escape, _WRITE_STEMS)) + r")(?:e?s|e?d|led)?"
-    r"|put|(?:writes?|wrote|written)\s+to)\b",
+    r"\b(?:(?:re-?)?(?:" + "|".join(map(_stem_forms, _WRITE_STEMS)) + r")"
+    r"|put|(?:writes?|writing|wrote|written)\s+to)\b",
     re.IGNORECASE,
 )
 
@@ -353,6 +365,19 @@ def test_a_name_that_is_not_an_endpoint_is_not_discovered() -> None:
         "transitioned the work item",
         "patched the ticket",
         "wrote to the tracker",
+        "pushing a branch",
+        "re-pointing the branch",
+        "opening a pull request",
+        "closing the pull request",
+        "merging the pull request",
+        "creating an issue",
+        "updating the state",
+        "labelling the ticket",
+        "writing to the tracker",
+        "reopens the pull request",
+        "reopened the issue",
+        "re-opens the issue",
+        "reposts the note",
     ],
 )
 def test_a_row_that_writes_in_any_of_the_usual_words_counts_as_a_writer(cell: str) -> None:
@@ -363,13 +388,17 @@ def test_a_row_that_writes_in_any_of_the_usual_words_counts_as_a_writer(cell: st
     assert _WRITE_VERB.search(cell), cell
 
 
-def test_every_write_stem_counts_in_every_tense() -> None:
-    """Each write verb counts in its base, third-person and past forms (P-115)."""
+def test_every_write_stem_counts_in_every_form() -> None:
+    """Each write verb counts in its base, third-person, past and ``-ing`` forms, with or
+    without a ``re``/``re-`` prefix (P-115, P-117)."""
     for stem in _WRITE_STEMS:
         third = stem + ("es" if stem.endswith(("sh", "ch")) else "s")
         past = stem + ("d" if stem.endswith("e") else "ed")
-        for form in (stem, third, past):
-            assert _WRITE_VERB.search(f"it {form} the object"), form
+        ing = (stem[:-1] if stem.endswith("e") else stem) + "ing"
+        for form in (stem, third, past, ing):
+            prefixes = ("",) if stem.startswith("re-") else ("", "re", "re-")
+            for prefix in prefixes:
+                assert _WRITE_VERB.search(f"it {prefix}{form} the object"), prefix + form
 
 
 @pytest.mark.parametrize(
@@ -379,6 +408,7 @@ def test_every_write_stem_counts_in_every_tense() -> None:
         "a read of a repository's metadata and of a delivered pull request's state",
         "requests for the installations, one installation's repositories",
         "the image references (name, tag or digest)",
+        "the diff the builder is writing in its worktree",
     ],
 )
 def test_a_row_that_only_sends_and_reads_is_not_a_writer(cell: str) -> None:
