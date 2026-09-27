@@ -105,9 +105,10 @@ default**.
 - **Not a standards authority.** It does not decide an organisation's standards — it proposes,
   measures and records the ones that organisation's people sign — and it never certifies that
   code conforms to ISO/IEC 25010, ISO/IEC 5055 or any other standard. Its checks evidence
-  parts of only some of ISO/IEC 25010's characteristics;
-  [ADR-0026](docs/adr/0026-the-context-standard.md) proposes which (its item 11), and the
-  product will name them (G-674).
+  parts of only some of ISO/IEC 25010's characteristics, and the product names which:
+  `crb.core.quality_model` holds the table and
+  [EVIDENCE-AND-CLAIMS §9](docs/EVIDENCE-AND-CLAIMS.md#9-the-quality-baseline--named-never-claimed)
+  carries it ([ADR-0026](docs/adr/0026-the-context-standard.md) item 11).
 
 ---
 

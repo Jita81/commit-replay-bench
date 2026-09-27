@@ -14,7 +14,8 @@ Contents: [1 Claim tags](#1-claim-tags) · [2 CLEAN, semantic Q1, false-Q1](#2-c
 [4 The apparatus stamp — evidence expires](#4-the-apparatus-stamp--evidence-expires) ·
 [5 The legacy-belt caveat](#5-the-legacy-belt-caveat-on-the-census-ledger) ·
 [6 Permitted claim shapes](#6-permitted-claim-shapes-by-maturity) ·
-[7 What must never be said](#7-what-must-never-be-said) · [8 Principles](#8-validation-principles-we-inherit)
+[7 What must never be said](#7-what-must-never-be-said) · [8 Principles](#8-validation-principles-we-inherit) ·
+[9 The quality baseline](#9-the-quality-baseline--named-never-claimed)
 
 ---
 
@@ -359,6 +360,47 @@ that what was recorded is true. Evidence ranks, weakest first:
 7. **The system must be capable of becoming less autonomous** — a later row can demote a
    cell; a stop condition (any false-Q1, sandbox escape, ledger chain break, secret in an
    artefact) halts delivery until root cause, correction and re-qualification.
+
+## 9. The quality baseline — named, never claimed
+
+A clean row says the repository's own tests passed and, where it configures one, its own
+linter accepted the change. This section names which qualities that evidences, against ISO/IEC
+25010:2023's product quality model, so a reader can tell what a clean row says and what it says
+nothing about. The table is data in the product (`crb.core.quality_model`) and is copied here
+exactly; a test compares the two ([ADR-0026](adr/0026-the-context-standard.md) item 11).
+
+| ISO/IEC 25010:2023 characteristic | counted as evidence of part of it, and when each runs | argued secondary, not counted | note |
+|---|---|---|---|
+| Functional suitability | belt 2 `target_green` (functional correctness) — at every grade: every replay and factory attempt that reaches the grader; belt 3 `no_new_failures` (functional correctness) — at every grade: every replay and factory attempt that reaches the grader; review verdict `defect` (functional correctness) — when a person reviews an accepted row or a factory pull request; review verdict `regression` (functional correctness) — when a person reviews an accepted row or a factory pull request | — | completeness only as far as the tests assert; mutation strength says how far to trust them; belt 3 is regression correctness and counts here only |
+| Performance efficiency | — | — | not evidenced |
+| Compatibility | — | belt 6 `api_stable` (interoperability) — at every grade, only where `checks.api_stable` is switched on | not evidenced; belt 6 is argued as a secondary here and not counted |
+| Interaction capability | — | — | not evidenced |
+| Reliability | — | — | not evidenced; belt 3 is regression correctness and counts under functional suitability only |
+| Security | — | — | not evidenced; F31 proposes the repository's own security scanner as a review probe |
+| Maintainability | belt 5 `repo_lint_clean` (analysability) — at every grade, only where the repository configures a linter; the format step (analysability) — before the grade, only where `checks.format_step` is switched on; belt 6 `api_stable` (modifiability) — at every grade, only where `checks.api_stable` is switched on; review verdict `style` (analysability) — when a person reviews an accepted row or a factory pull request; review verdict `api_change` (modifiability) — when a person reviews an accepted row or a factory pull request | — | by the repository's own rules, not ISO/IEC 5055's |
+| Flexibility | — | — | not evidenced |
+| Safety | — | — | not evidenced |
+
+The belts evidence parts of two of the standard's nine characteristics: functional suitability
+and maintainability **[measured — n = 9 characteristics of ISO/IEC 25010:2023; method: each
+characteristic read against the belt, review-verdict and check definitions in
+`crb.core.quality_model`, and the count taken from its `evidenced()`; apparatus n/a — a count
+of a table, not a rate, so no interval]**. Belt 3 is regression correctness and counts under
+functional suitability only, never under reliability. Belt 6 counts as modifiability; the
+compatibility it may also say something about is argued, not counted. Belts 1 and 4, the
+negative controls and mutation strength evidence the instrument's integrity, not a quality of
+the product.
+
+ISO/IEC 5055: not evidenced — none of its measures is computed; one may enter only as the repository's own analyser, run as a gate (ADR-0011).
+
+**Named, never claimed.** Passing these checks does not mean the code conforms to ISO/IEC
+25010, to ISO/IEC 5055 or to any other standard, and nothing may say that it does (§7). The
+claims gate (`scripts/claims_check.py`) refuses any sentence that says code conforms to,
+complies with or is certified against an ISO standard in README, the guides the product
+bundles and the factory's pull-request body template. A sentence that only names a standard,
+as this one names ISO/IEC 25010, passes. An organisation's own standard with a runnable check
+becomes a finish-gate or belt command on its repository; without one it is shown and signed
+but counts as no evidence.
 
 Related: [ADR-0001](adr/0001-four-belts-and-false-q1-at-write.md) ·
 [ADR-0003](adr/0003-one-routing-rule.md) · [ARCHITECTURE §7.4](ARCHITECTURE.md#74-versioning) ·

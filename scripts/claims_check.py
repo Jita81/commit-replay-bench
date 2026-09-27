@@ -29,7 +29,8 @@ thereby tagged the sentence around it.
   colon to introduce the thing it counts (the list below it is its own evidence);
 - a percentage that is itself the confidence level ("Wilson 95% interval", "95% CI") — a
   result standing beside one ("65% passed (Wilson 95% interval)") *is* caught — a four-digit
-  year, and a number written with a leading zero, which is an identifier ("ADR-0011");
+  year, and a number written with a leading zero, which is an identifier ("ADR-0011"), or
+  written after ``§``, ``#`` or a lettered prefix and a hyphen ("§9", "PR #48", "G-674");
 - whether the tag is the *right* one, and whether a ``[measured]`` figure is true: it checks
   that ``n``, a method and an apparatus version are *present*, never that they are sound.
   Only a person reading the ledger can do that;
@@ -62,6 +63,17 @@ checks evidence while the criterion that builds that table was unmet (P-115). It
 the promises registered here; an unregistered capability sentence still needs a reader
 (G-935).
 
+**A standard is named, never claimed.** The product names which ISO/IEC 25010
+characteristics its checks evidence part of (``crb.core.quality_model``, EVIDENCE-AND-CLAIMS
+§9) and never that code conforms to one. A sentence that says code conforms to, complies with
+or is certified against an ISO standard is refused on README, on the guides (the ones the UI
+bundles, read from ``DOC_NAMES`` in ``ui/src/help/docs.ts``, and every other page directly
+under ``docs/``) and in the factory's pull-request body template (the string literals of
+``pr_body`` and ``rework_comment``). A sentence that only names a standard passes, and so
+does one that denies, forbids or refuses the claim, or sits in a section headed "never"
+(EVIDENCE-AND-CLAIMS §7 lists the sentence in order to forbid it). It reads words, not
+meaning: "our pipeline is ISO-aligned" passes, and a reader still has to read.
+
 **How a file opts in.** Add its repository-relative path to ``ALLOWLIST`` below and make it
 pass in the same change. The list only grows: a page that has been cleaned never leaves it,
 because leaving is how a gate quietly stops gating.
@@ -76,7 +88,9 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               in a review's Actions table that has no stated record in the decision log,
               and every record whose review no longer lists the action or is no longer on
               disk; reports a registered promise stated in the present tense before its
-              criterion is met (P-115); --check exits non-zero.
+              criterion is met (P-115); reports a sentence that claims ISO conformity on
+              README, a guide or the factory's pull-request body template (ADR-0026 item
+              11); --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
@@ -85,10 +99,15 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
               the log names → its action numbers ⇄ the records in
               docs/DECISION-LOG.md, each under a head that names the review's stem in
               backticks, then ``action #N: <state>``. Then each ``PROMISES`` pattern over the
-              sentences of ``PROMISE_PAGES`` ⇄ its criterion's state in docs/dod/.
+              sentences of ``PROMISE_PAGES`` ⇄ its criterion's state in docs/dod/. Then
+              each sentence of README, the guides and the pull-request body's literals
+              (``ast``) → an ISO mention and a conformity word with no denial.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
-ADRs:         none
-Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
+ADRs:         docs/adr/0026-the-context-standard.md (item 11, the conformity rule)
+Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of; §9,
+              the quality baseline), src/crb/core/quality_model.py (the table a page may
+              name), ui/src/help/docs.ts (the bundled guides), src/crb/factory/delivery.py
+              (the pull-request body template),
               README.md (the first page on ``ALLOWLIST``; docs/RELEASING.md,
               docs/CONTRIBUTING.md, docs/SUMMARY.md and
               docs/reviews/2026-09-25-value-baseline.md are the others),
@@ -105,6 +124,7 @@ Touch when:   a tag is added to the policy (update TAGS and EVIDENCE-AND-CLAIMS 
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import sys
 from collections.abc import Iterator
@@ -332,6 +352,7 @@ class Block:
     line: int
     text: str
     cover: str
+    heading: str = ""
 
 
 def _strip_markup(text: str) -> str:
@@ -379,19 +400,20 @@ def blocks_of(text: str) -> list[Block]:
     intro = ""
     item: list[str] = []
     item_start = 0
+    heading = ""
 
     def close_paragraph() -> None:
         nonlocal paragraph, intro
         if paragraph:
             intro = " ".join(paragraph)
-            out.append(Block(start, intro, intro))
+            out.append(Block(start, intro, intro, heading))
             paragraph = []
 
     def close_item() -> None:
         nonlocal item
         if item:
             body = " ".join(item)
-            out.append(Block(item_start, body, f"{intro} {body}"))
+            out.append(Block(item_start, body, f"{intro} {body}", heading))
             item = []
 
     for number, line, fenced in _lines_with_fences(text):
@@ -406,6 +428,7 @@ def blocks_of(text: str) -> list[Block]:
             close_item()
             if _HEADING_RE.match(quoted):
                 intro = ""
+                heading = quoted
             continue
         if _CHECKLIST_RE.match(quoted):
             close_paragraph()
@@ -443,6 +466,9 @@ def is_claim(sentence: str) -> bool:
             continue
         if noun.lower() in STRUCTURAL or noun.lower() in FUNCTION_WORDS:
             continue
+        before = text[: match.start(1)]
+        if before.endswith(("§", "#")) or re.search(r"[A-Za-z]-$", before):
+            continue  # "§9", "PR #48", "G-674" — a section, a pull request, an id: not a count
         digits = cardinal.replace(",", "")
         if digits.replace(".", "").isdigit():
             if digits.startswith("0") and not digits.startswith("0."):
@@ -578,6 +604,138 @@ def check_promises(root: Path, pages: tuple[str, ...]) -> list[Finding]:
     return findings
 
 
+# ─── the quality baseline is named, never claimed (ADR-0026 item 11) ─────────────────────
+
+#: Where the UI declares the guides it bundles; the conformity rule reads those guides.
+BUNDLED_GUIDES_TS = "ui/src/help/docs.ts"
+#: The factory's pull-request body template: the string literals of these functions.
+PR_BODY_SOURCE = "src/crb/factory/delivery.py"
+PR_BODY_FUNCTIONS: tuple[str, ...] = ("pr_body", "rework_comment")
+
+_DOC_NAMES_RE = re.compile(r"export const DOC_NAMES\s*=\s*\[([^\]]*)\]")
+#: A verb or adjective of conformity: conforms, complies, compliant, certified …
+#: ("certificate" is not one — the TLS guides name certificates).
+_CONFORM_RE = re.compile(
+    r"\b(?:conform(?:s|ed|ing|ant|ance|ity)?|compl(?:y|ies|ied|iant|iance)"
+    r"|certif(?:y|ies|ied|ication))\b",
+    re.I,
+)
+#: An ISO standard, named: "ISO/IEC 25010", "ISO 9001", "an ISO standard".
+_ISO_RE = re.compile(r"\bISO\b")
+#: A sentence that denies, forbids or refuses the claim is not making it.
+_DENIAL_RE = re.compile(r"\b(?:never|not|no|nor|cannot|without|refus\w*|forbid\w*)\b|n't\b", re.I)
+#: A section that lists what must never be said names the forbidden sentence, not says it.
+_NEVER_SECTION_RE = re.compile(r"\bnever\b|\bmust not\b", re.I)
+
+
+def conformity_claim(sentence: str) -> bool:
+    """True when the sentence says code conforms to, complies with or is certified against
+    an ISO standard — a sentence that only names a standard, or denies the claim, is not."""
+    text = _strip_markup(sentence)
+    return bool(_ISO_RE.search(text) and _CONFORM_RE.search(text) and not _DENIAL_RE.search(text))
+
+
+def bundled_guides(root: Path) -> tuple[str, ...] | None:
+    """The guides the UI bundles (``DOC_NAMES``), as repository paths; ``None`` when the
+    list cannot be read."""
+    path = root / BUNDLED_GUIDES_TS
+    if not path.is_file():
+        return None
+    m = _DOC_NAMES_RE.search(path.read_text(encoding="utf-8"))
+    if not m:
+        return None
+    names = re.findall(r"['\"]([A-Za-z0-9_-]+)['\"]", m.group(1))
+    return tuple(f"docs/{n}.md" for n in names) or None
+
+
+def _pr_body_literals(root: Path) -> list[tuple[int, str]] | None:
+    """``(line, text)`` for every string literal in the pull-request body functions; the
+    constant parts of an f-string are joined, so a sentence split by a value still reads."""
+    path = root / PR_BODY_SOURCE
+    if not path.is_file():
+        return None
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name in PR_BODY_FUNCTIONS
+    ]
+    if not found:
+        return None
+    out: list[tuple[int, str]] = []
+    for fn in found:
+        for node in ast.walk(fn):
+            if isinstance(node, ast.JoinedStr):
+                parts = [
+                    v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else " "
+                    for v in node.values
+                ]
+                out.append((node.lineno, "".join(parts)))
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                out.append((node.lineno, node.value))
+    return out
+
+
+def check_conformity(root: Path, pages: tuple[str, ...] | None = None) -> list[Finding]:
+    """A sentence that claims ISO conformity (ADR-0026 item 11), on README, the guides (the
+    ones the UI bundles, read from ``DOC_NAMES`` so a newly bundled guide is read the day it
+    ships, and every other page directly under docs/) and the factory's pull-request body
+    template — or on ``pages`` when given."""
+    reason = (
+        "a conformity claim — the product names ISO/IEC 25010 and never claims it: say which "
+        "characteristics the checks evidence part of (EVIDENCE-AND-CLAIMS §9), not that code "
+        "conforms"
+    )
+    findings: list[Finding] = []
+    literals: list[tuple[int, str]] | None = []
+    if pages is None:
+        guides = bundled_guides(root)
+        if guides is None:
+            findings.append(
+                Finding(
+                    BUNDLED_GUIDES_TS,
+                    0,
+                    "",
+                    "cannot read the bundled guides' names (DOC_NAMES); the conformity rule "
+                    "would read no guide",
+                )
+            )
+            guides = ()
+        others = sorted(
+            q.relative_to(root).as_posix()
+            for q in (root / "docs").glob("*.md")
+            if q.relative_to(root).as_posix() not in guides
+        )
+        pages = ("README.md", *guides, *others)
+        literals = _pr_body_literals(root)
+        if literals is None:
+            findings.append(
+                Finding(
+                    PR_BODY_SOURCE,
+                    0,
+                    "",
+                    "cannot find the pull-request body template "
+                    f"({', '.join(PR_BODY_FUNCTIONS)}); the conformity rule would read none",
+                )
+            )
+            literals = []
+    for rel in pages:
+        path = root / rel
+        if not path.is_file():
+            continue
+        for block in blocks_of(path.read_text(encoding="utf-8")):
+            if _NEVER_SECTION_RE.search(block.heading):
+                continue
+            for sentence in _SENTENCE_SPLIT.split(block.text):
+                if conformity_claim(sentence):
+                    findings.append(Finding(rel, block.line, sentence.strip(), reason))
+    for line, text in literals:
+        for sentence in _SENTENCE_SPLIT.split(text):
+            if conformity_claim(sentence):
+                findings.append(Finding(PR_BODY_SOURCE, line, sentence.strip(), reason))
+    return findings
+
+
 _ACTIONS_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s.*\bActions\b")
 _ACTION_ROW_RE = re.compile(r"^\s*\|\s*(\d+)\s*\|")
 _ACTION_STATE_RE = re.compile(
@@ -706,7 +864,12 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root).resolve() if args.root else ROOT
     allow = tuple(args.allow) if args.allow else ALLOWLIST
     pages = tuple(args.allow) if args.allow else PROMISE_PAGES
-    findings = check_tree(root, allow) + check_review_actions(root) + check_promises(root, pages)
+    findings = (
+        check_tree(root, allow)
+        + check_review_actions(root)
+        + check_promises(root, pages)
+        + check_conformity(root, tuple(args.allow) if args.allow else None)
+    )
     stream = sys.stderr if args.check else sys.stdout
     for f in findings:
         where = f"{f.path}:{f.line}" if f.line else f.path

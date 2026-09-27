@@ -21,7 +21,10 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               without one (the critical friend's #8 and #9 did); that the fence reader
               agrees with a CommonMark parser line for line; and that a registered promise
               is refused in the present tense until its criterion is met, on a fixture and
-              on the live pages (P-115).
+              on the live pages (P-115); that a sentence claiming ISO conformity is refused
+              on README, a guide and the factory's pull-request body template while one that
+              only names a standard passes (ADR-0026 item 11); and that a number after
+              ``§``, ``#`` or an id prefix is an identifier, not a count.
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -161,6 +164,10 @@ def test_a_missing_allowlisted_file_is_itself_a_finding(tree: Path) -> None:
         "Exactly one process reaches the model endpoint.\n",  # "one" never counts a plural
         "The package version is one number in three files.\n",  # a structural noun
         "The fixture repository carries `12 tasks` in it.\n",  # inline code is stripped
+        # a section, a pull request or a gap is named by its number, not counted by it
+        "The table is in EVIDENCE-AND-CLAIMS §9 carries it.\n",
+        "PR #48 reviews closed the finding.\n",
+        "G-674 entries name the gap.\n",
     ],
 )
 def test_prose_that_makes_no_claim_is_not_flagged(tree: Path, body: str) -> None:
@@ -657,3 +664,102 @@ def test_the_live_pages_make_no_promise_ahead_of_its_criterion() -> None:
     """The live pages the promise rule reads (the allowlist and EVIDENCE-AND-CLAIMS)."""
     assert cc.check_promises(ROOT, cc.PROMISE_PAGES) == []
     assert "docs/EVIDENCE-AND-CLAIMS.md" in cc.PROMISE_PAGES
+
+
+# ─── the quality baseline is named, never claimed (G-674, product.claims.210) ─────────────
+
+DOCS_TS = (
+    "/** The guides the UI bundles. */\n"
+    "export const DOC_NAMES = ['OPERATOR', 'SECURITY'] as const\n"
+)
+PR_BODY_PY = '''\
+def pr_body(item, build):
+    """The pull request's description."""
+    lines = [
+        f"## crb factory: backlog item `{item}`",
+        "This targets a NEW branch. A human reviews and merges.",
+        {planted!r},
+    ]
+    return "\\n".join(lines)
+'''
+
+
+def _conformity_tree(tree: Path, *, readme: str, guide: str, planted: str) -> None:
+    (tree / "ui/src/help").mkdir(parents=True)
+    (tree / "src/crb/factory").mkdir(parents=True)
+    _write(tree, "ui/src/help/docs.ts", DOCS_TS)
+    _write(tree, "README.md", f"# t\n\n{readme}\n")
+    _write(tree, "docs/OPERATOR.md", f"# Operator\n\n{guide}\n")
+    _write(tree, "docs/SECURITY.md", "# Security\n\nNothing to see.\n")
+    _write(tree, "src/crb/factory/delivery.py", PR_BODY_PY.replace("{planted!r}", repr(planted)))
+
+
+def test_the_claims_gate_refuses_a_conformity_claim_in_readme_a_guide_and_the_pr_body_template(
+    tree: Path,
+) -> None:
+    """ADR-0026 item 11: the product names ISO/IEC 25010 and never claims it. A sentence that
+    says code conforms to, complies with or is certified against an ISO standard is refused
+    on README, on the guides (every guide the UI bundles, read from ``DOC_NAMES`` so a new
+    one is read the day it is bundled, and every other page under docs/) and in the
+    factory's pull-request body template."""
+    _conformity_tree(
+        tree,
+        readme="Code the factory delivers conforms to ISO/IEC 25010.",
+        guide="A clean row is ISO 25010 compliant, so a reviewer can skip the read.",
+        planted="This change is certified against ISO/IEC 5055.",
+    )
+    findings = cc.check_conformity(tree)
+    assert [(f.path, f.line) for f in findings] == [
+        ("README.md", 3),
+        ("docs/OPERATOR.md", 3),
+        ("src/crb/factory/delivery.py", 6),
+    ]
+    assert all("conformity" in f.reason for f in findings)
+    assert cc.main(["--check", "--root", str(tree)]) == 1
+    # the bundled guide that makes no such claim passes
+    assert not any(f.path == "docs/SECURITY.md" for f in findings)
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "The belts evidence parts of two of ISO/IEC 25010's characteristics.",
+        "The product names which ISO/IEC 25010 characteristics its checks evidence.",
+        "It never certifies that code conforms to ISO/IEC 25010 or any other standard.",
+        "Passing these checks does not mean the code complies with ISO/IEC 5055.",
+        "The gate refuses a sentence that says code conforms to an ISO standard.",
+        "The mesh sandbox presents the era's server certificate over TLS.",
+    ],
+)
+def test_a_sentence_that_names_iso_without_claiming_conformity_passes(
+    tree: Path, sentence: str
+) -> None:
+    _conformity_tree(tree, readme=sentence, guide=sentence, planted=sentence)
+    assert cc.check_conformity(tree) == []
+
+
+def test_a_forbidden_claim_listed_under_what_must_never_be_said_is_not_made(tree: Path) -> None:
+    """EVIDENCE-AND-CLAIMS §7 lists what must never be said; naming the forbidden sentence
+    there is the opposite of saying it."""
+    guide = (
+        "## 7. What must never be said\n\n"
+        "- That code conforms to ISO/IEC 25010 because the checks mapped to it pass.\n\n"
+        "## 8. Next\n\nCode that passes conforms to ISO/IEC 25010."
+    )
+    _conformity_tree(tree, readme="Nothing.", guide=guide, planted="Nothing.")
+    assert [(f.path, f.line) for f in cc.check_conformity(tree)] == [("docs/OPERATOR.md", 9)]
+
+
+def test_the_live_readme_guides_and_pr_body_make_no_conformity_claim() -> None:
+    assert cc.check_conformity(ROOT) == []
+    guides = cc.bundled_guides(ROOT)
+    assert "docs/EVIDENCE-AND-CLAIMS.md" in guides and "docs/OPERATOR.md" in guides
+
+
+def test_a_missing_bundled_guide_list_or_pr_body_is_itself_a_finding(tree: Path) -> None:
+    """The rule reads the guides' names from the UI and the template from the factory; if
+    either moves, the rule would silently read nothing, so the move is a finding."""
+    _write(tree, "README.md", "# t\n\nNothing.\n")
+    reasons = [f.reason for f in cc.check_conformity(tree)]
+    assert any("bundled guides" in r for r in reasons)
+    assert any("pull-request body" in r for r in reasons)
