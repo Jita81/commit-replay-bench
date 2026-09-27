@@ -53,7 +53,7 @@ in parallel, so changes here are changes to both.
 The one statement of the contract. [DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist),
 [OPERATOR §1.1](OPERATOR.md#11-check-the-installation-crb-doctor) and the CHANGELOG repeat
 its sentence and link here; `crb doctor`'s `migrations` line renders the same
-`migrations_result`, so the two surfaces cannot disagree. In one sentence: `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id.
+`migrations_result`, so the doctor line and the probe cannot disagree. In one sentence: `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id.
 
 | State | HTTP | `detail` | `data` |
 |---|---|---|---|
@@ -160,7 +160,7 @@ factory chain's `intake.registered` / `backlog.frozen` / `delivery.opened` / `de
 `user.password_set` event and the account's next sign-in), and the spend from the graded rows'
 `cost_usd` with `cost_known` honoured. Nothing is written.
 
-Three rules the client can rely on. **An unmeasured figure is `null`, never 0**: `median_s`,
+The client can rely on these rules. **An unmeasured figure is `null`, never 0**: `median_s`,
 `min_s`, `max_s`, `spend.usd` and `per_unit` are `null` when nothing has been measured, and
 `lead_times[].reason` then says why in one sentence. **An unknown cost is never counted as
 zero**: `spend.usd` sums only the rows whose cost is a measurement and `spend.rows_unpriced`
@@ -204,7 +204,7 @@ A review is a person's post-hoc verdict on ONE graded row (`crb.core.review.Revi
 
 ## Learn (the learning loop — three derivations, three decisions)
 
-Three reports derived from the repository's own ledger rows (`src/crb/core/learn.py`, `docs/LEARNING-LOOP.md`), and the three writes a NAMED person authorises from the report that computed them. The reads are pure and viewer-readable: the same rows give byte-identical output, and no verdict is invented. The writes are operator-gated and share two rules. **The decider is the session, not the body**: none of them takes a `decided_by` field — the signed-in operator is the decider, and a corpus line's provenance comment names their display name while the event carries their account id. **The caller chooses, the product composes**: the corpus line, the backlog item and the `POST /runs` body are all re-derived from the ledger by the same function the read uses, so a request names an id and never supplies a body. Each write records one `learn.*` event on the repository's `learn:<repo>` system trace (see [Event vocabulary](#event-vocabulary)); the backlog write also lands on the factory's own item chain as `backlog.frozen` / `backlog.evolved`.
+The reports derived from the repository's own ledger rows (`src/crb/core/learn.py`, `docs/LEARNING-LOOP.md`), and the writes a NAMED person authorises from the report that computed them. The reads are pure and viewer-readable: the same rows give byte-identical output, and no verdict is invented. The writes are operator-gated and share the rules that follow. **The decider is the session, not the body**: none of them takes a `decided_by` field — the signed-in operator is the decider, and a corpus line's provenance comment names their display name while the event carries their account id. **The caller chooses, the product composes**: the corpus line, the backlog item and the `POST /runs` body are all re-derived from the ledger by the same function the read uses, so a request names an id and never supplies a body. Each write records one `learn.*` event on the repository's `learn:<repo>` system trace (see [Event vocabulary](#event-vocabulary)); the backlog write also lands on the factory's own item chain as `backlog.frozen` / `backlog.evolved`.
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
@@ -255,7 +255,9 @@ verify is `409 prevention_chain_broken`, and nothing is written onto it. The gui
 | POST | `/learn/links` | operator | `?repo=` `{signatures: [1–20], ref (1–200), note?}` → 201 `{record}` — a `linked` record: a fix made outside the loop, measured from this record forward only, with its before window and comparability key frozen here. 422 `unknown_class` for a class not in the register. |
 
 Every write above answers 409 `prevention_concurrent_append` (`detail.kind` = the record's kind)
-when other writers kept moving the chain through three attempts; nothing is recorded and the
+when other writers kept moving the chain through three attempts **[measured — n = 3 attempts;
+method: the retry bound of the prevention chain's writer in the server, read at this commit;
+apparatus n/a]**; nothing is recorded and the
 act can be retried.
 
 ### The three learning reports
@@ -477,7 +479,7 @@ UI's shape was adopted (2026-09-13, W2-B):
 - The retained artefacts are REACHABLE from the evidence drill-down (C13): `GET /grades/{row_hash}/patch` / `/transcript` / `/retained` and the `/reviews` family. The UI's readings live in `ui/src/screens/Runs/contract.ts` (types, hooks, a dependency-free SHA-256 and the diff parser) until they are folded into `api/types.ts` / `api/hooks.ts`. The evidence drawer's Patch tab fetches the patch as bytes, hashes them in the browser and compares with the pack's `diff_sha256`; the Review panel sends that hash as `patch_sha256` and stays disabled until the Patch tab was loaded in the session and the hashes agree. The API host must see the worker's `CRB_HOME` (the walkthrough and the compose stack share it); on a split deployment the patch route answers 404 `patch_unavailable` with the reason.
 - **The budget is a measured variable, not a fixed cap (C8).** `POST /runs` accepts a run-level
   `budget` and object rungs `{builder, model, provider?, budget?}` in `ladder` (above). The
-  worker stamps every ledger row it writes with two hashed labels: `labels.budget_tier` =
+  worker stamps every ledger row it writes with these hashed labels: `labels.budget_tier` =
   `<max_tool_calls>/<max_turns>/<wall_clock_s>` of the budget the attempt actually ran under
   (`25/25/900` is the builder default; when a token or dollar cap is also engaged the tier
   appends `/tok=<n>` and/or `/usd=<x>`, because attempts that differ only there were not the
@@ -489,7 +491,8 @@ UI's shape was adopted (2026-09-13, W2-B):
   (`/grades` rows carry `labels`; `/runs/{id}/tasks` carries `budget_tier` / `budget_tiers`).
   **Contract: a blind rate quoted without its budget tier is not a claim** — the NHS
   measurement (docs/reviews/2026-09-14-nhs-public-repos.md §3) found 6 of 8 blind misses
-  were `budget` at the fixed `25/25/900`; the rate at that tier is a fact about the cap, and
+  were `budget` at the fixed `25/25/900` **[hypothesis — as that measurement reported them;
+  its rows are the operator's and not in this repository]**; the rate at that tier is a fact about the cap, and
   only a rate stated *at a tier* (or a sweep across tiers) says anything about the model.
 - `/repos` items carry `clone_path` (empty for a URL-only registration until the worker's
   first run clones it — W3-B).
