@@ -366,7 +366,7 @@ class RefusalAcceptIn(BaseModel):
     @classmethod
     def _note_is_one_line(cls, v: str) -> str:
         """The note becomes a provenance COMMENT in a line-oriented corpus file: a line break
-        would end the comment and write the rest as a corpus line nobody decided (P-054)."""
+        would end the comment and write the rest as a corpus line nobody decided (P-094)."""
         if has_line_break(v):
             raise ValueError("a note is one line: it is written into the corpus as a comment")
         return v
@@ -753,7 +753,7 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     cell = matches[0]
     api = require_jobs()
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
-    # whole or not at all (P-053 — the gate is the one POST /runs applies)
+    # whole or not at all (P-093 — the gate is the one POST /runs applies)
     runs = []
     for request in cell.requests:
         payload = {k: v for k, v in request.to_dict().items() if k != "note"}

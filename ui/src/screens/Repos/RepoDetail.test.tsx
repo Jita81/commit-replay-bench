@@ -81,7 +81,7 @@ describe('RepoDetail', () => {
     expect(links).toHaveLength(1)
     expect(links[0]).toHaveAttribute('href', `/runs?repo=${REPO.name}&new=mine&tasks=${failed}`)
     // "Re-qualify" is posture qualification (ADR-0019, kind qualify, offered on Learn): the
-    // mine hand-off never borrows its name, so one label never starts two acts (P-056)
+    // mine hand-off never borrows its name, so one label never starts two acts (P-096)
     expect(screen.queryByRole('link', { name: /re-qualify/i })).toBeNull()
     expect(screen.getByRole('columnheader', { name: /Re-check gold/ })).toBeInTheDocument()
   })

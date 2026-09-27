@@ -299,7 +299,7 @@ def normalise_reason(reason: str) -> str:
 
 #: Every character ``str.splitlines`` ends a line at — the way the corpus files are read
 #: (``_existing_lines``, ``tests/test_builders_guard_corpus.py``). Free text written into a
-#: corpus file must carry none of them, or one decision writes lines nobody decided (P-054).
+#: corpus file must carry none of them, or one decision writes lines nobody decided (P-094).
 LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
 _LINE_BREAK_RE = re.compile("[" + re.escape("".join(sorted(LINE_BREAKS))) + "]")
 
@@ -318,7 +318,7 @@ def one_line(text: str) -> str:
 def encode_corpus_line(command: str) -> str:
     """A command as one corpus line (``\\n`` for a newline, a lone CR read as one; secrets
     redacted). Any other line break is written as its escape (``\\x0b``, ``\\u2028``) —
-    the line stays one line and still says which character the command carried (P-054)."""
+    the line stays one line and still says which character the command carried (P-094)."""
     text = redact(command.replace("\r\n", "\n").replace("\r", "\n")).replace("\n", "\\n")
     return _LINE_BREAK_RE.sub(
         lambda m: m.group().encode("unicode_escape").decode("ascii"), text
@@ -627,7 +627,7 @@ def _provenance(group: RefusalGroup, *, verdict: str, who: str, date: str, note:
     where = ", ".join(group.tasks[:3]) + (" …" if len(group.tasks) > 3 else "")
     rows = ", ".join(h[:12] for h in group.rows[:3]) + (" …" if len(group.rows) > 3 else "")
     tail = f" — {one_line(note)}" if note else ""
-    # the name and the note are free text inside a one-line comment (P-054)
+    # the name and the note are free text inside a one-line comment (P-094)
     return f"# learned {date} from {where} row {rows} ({verdict}→{one_line(who)}){tail}"
 
 

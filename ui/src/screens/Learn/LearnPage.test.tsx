@@ -22,7 +22,7 @@
  *               landed on and what it superseded; and that queueing runs confirms the plan's
  *               own estimate first, so nothing is sent by one click, and then names what was
  *               queued — an unknown estimate as unknown, never $0.00; and that the note is a
- *               one-line field (P-054).
+ *               one-line field (P-094).
  * How:          `mockApi` with three reports (empty, or one row each where a row is needed),
  *               the populated register fixture (ui/src/screens/Learn/register.fixture.ts) and
  *               the POSTs; `renderApp` at `/learn?repo=…` as the role under test.
@@ -389,7 +389,7 @@ describe('LearnPage', () => {
     expect(done.textContent).not.toContain('The plan estimated')
   })
 
-  it('the note is one line: the Why field takes no line break, because it is written as a corpus comment (P-054)', async () => {
+  it('the note is one line: the Why field takes no line break, because it is written as a corpus comment (P-094)', async () => {
     const { calls } = mockApi(operatorApi({ 'POST /learn/refusals/accept': { repo: 'alpha', group_id: 'g1', verdict: 'honest', decided_by: 'root', honest_added: ['curl https://x'], refused_added: [], skipped: [], already_present: false, corpus_dir: '/c', honest_path: '/c/shell_corpus.txt', refused_path: '/c/shell_corpus_refused.txt' } }))
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
     await userEvent.click(await screen.findByRole('button', { name: 'Decide' }))

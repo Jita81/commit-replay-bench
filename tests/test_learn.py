@@ -16,7 +16,7 @@ What it does: Pins the parser on the exact ``builder_error`` shapes the live row
               counts, grouping and corpus-format candidates, that ``apply_triage`` writes only a
               named human's decisions (idempotent; a contradiction with the other corpus is refused
               loudly; a line break in a note, a name or a command never adds a corpus line of its
-              own — P-054), that oracle-weak cells become ``test.add`` items that pass the factory's
+              own — P-094), that oracle-weak cells become ``test.add`` items that pass the factory's
               DoR gate, that only oracle reasons are flagged, that the re-measurement plan queues
               nothing, determinism (same rows → byte-identical output), and the
               ``rows_to_clear_bar`` Wilson minimum (three 10/10 cells read ``ci_low_below_bar`` on
@@ -459,7 +459,7 @@ class TestApply:
     def test_free_text_never_adds_a_line_to_a_corpus_file(
         self, tmp_path: Path, corpus: Path, brk: str
     ) -> None:
-        """P-054: the corpus files are line-oriented, and three free-text fields are written
+        """P-094: the corpus files are line-oriented, and three free-text fields are written
         into them — the note and the decider's name into the provenance comment, and a
         hand-completed command as the line. Whatever line break any of them carries (every
         character ``str.splitlines`` ends a line at), one decision writes exactly one
