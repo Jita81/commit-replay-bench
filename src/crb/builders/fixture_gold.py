@@ -39,7 +39,10 @@ What it does: Overlays the commit's non-test files onto the parent worktree and 
               outcome that names itself unmistakably (builder ``fixture_gold``, model
               ``gold``, provider ``fixture``, ``extra.fixture: true``), spends nothing and
               claims nothing (``done=False``). It is registered only under
-              ``CRB_ENABLE_FIXTURE_BUILDER=1``.
+              ``CRB_ENABLE_FIXTURE_BUILDER=1``. With ``builder_config {"attempt": cmd}`` it
+              first asks the real shell guard about ``cmd`` (never running it); a refusal is
+              recorded as a protocol violation and the attempt stops with no patch — how
+              the Learn walkthrough gets a real refusal row on a hermetic stack.
 How:          ``source_files``: the commit's changed files minus tests and deletions →
               ``Workspace.overlay_sources`` → a zero-cost ``BuildOutcome``.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
@@ -70,6 +73,7 @@ from crb.builders.base import (
     BuildBrief,
     BuildOutcome,
     EventFn,
+    GitArchaeologyGuard,
     emit,
 )
 from crb.core.workspace import Workspace
@@ -99,12 +103,19 @@ class FixtureGoldBuilder:
 
     name = NAME
 
-    def __init__(self, *, model: str = MODEL, provider: str = "", **_ignored: Any) -> None:
+    def __init__(
+        self, *, model: str = MODEL, provider: str = "", attempt: str = "", **_ignored: Any
+    ) -> None:
         # The rung may say anything; the recorded identity is always the fixture's, so a
         # row can never be read back as a model measurement.
         del model, provider
         self.model = MODEL
         self.provider = PROVIDER
+        #: ``builder_config {"attempt": "<shell command>"}`` — one command put to the REAL
+        #: shell guard as a builder's tool call would be. The fixture never runs it; a
+        #: refusal is recorded the way the agentic builders record one, so a hermetic stack
+        #: can produce a genuine ``protocol`` row for the Learn walkthrough (G-913).
+        self.attempt = str(attempt or "").strip()
 
     def describe(self) -> dict[str, Any]:
         """The apparatus stamp — carries ``fixture: true`` and the warning on purpose."""
@@ -115,6 +126,7 @@ class FixtureGoldBuilder:
             "process": "overlay the commit's own source files (gold) — instrument check",
             "fixture": True,
             "warning": WARNING,
+            **({"attempt": self.attempt} if self.attempt else {}),
         }
 
     def source_files(self, workspace: Workspace, brief: BuildBrief) -> list[str]:
@@ -143,7 +155,17 @@ class FixtureGoldBuilder:
     ) -> BuildOutcome:
         """Overlay the gold sources; the budget is ignored (nothing is spent)."""
         started = time.monotonic()
-        files = self.source_files(workspace, brief)
+        errors: list[str] = []
+        if self.attempt:
+            # asked of the guard, never executed: the fixture has no shell tool
+            reason = GitArchaeologyGuard(cwd=workspace.root).check_shell(self.attempt)
+            if reason:
+                errors.append(f"{reason} (attempted: {self.attempt[:120]})")
+            emit(on_event, "build.tool", name="shell", ok=not reason, fixture=True)
+        # a refused attempt stops there, as a builder whose one move was refused would: no
+        # patch, so the grade is not clean and the row is `protocol` (a clean grade would
+        # outrank the refusal, and the gold overlay is harness-written, so it is not undone)
+        files = [] if errors else self.source_files(workspace, brief)
         emit(on_event, "build.attempt", builder=self.name, files=files, fixture=True)
         if files:
             workspace.overlay_sources(files)
@@ -164,8 +186,14 @@ class FixtureGoldBuilder:
             latency_s=time.monotonic() - started,
             attempts=1,
             stop_reason=STOP_DONE,
+            errors=tuple(errors),
             budget=budget,
-            extra={"fixture": True, "warning": WARNING, "files": files},
+            extra={
+                "fixture": True,
+                "warning": WARNING,
+                "files": files,
+                **({"attempt": self.attempt} if self.attempt else {}),
+            },
         )
 
 

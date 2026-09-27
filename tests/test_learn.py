@@ -12,14 +12,15 @@ Navigation
 What it is:   The learning loop's test suite — refusal triage, oracle-strengthening backlog and
               the re-measurement plan, over synthetic ledgers.
 What it does: Pins the parser on the exact ``builder_error`` shapes the live rows carried on
-              2026-09-13/14 (quoted parens, two violations in one row, the recorder cap),
-              triage's counts, grouping and corpus-format candidates, that ``apply_triage`` writes
-              only a named human's decisions (idempotent; a contradiction with the other corpus is
-              refused loudly), that oracle-weak cells become ``test.add`` items that pass the
-              factory's DoR gate, that only oracle reasons are flagged, that the re-measurement
-              plan queues nothing, determinism (same rows → byte-identical output), and the
-              ``rows_to_clear_bar`` Wilson minimum (three 10/10 cells read ``ci_low_below_bar``
-              on 2.2, 2026-09-15).
+              2026-09-13/14 (quoted parens, two violations in one row, the recorder cap), triage's
+              counts, grouping and corpus-format candidates, that ``apply_triage`` writes only a
+              named human's decisions (idempotent; a contradiction with the other corpus is refused
+              loudly; a line break in a note, a name or a command never adds a corpus line of its
+              own — P-094), that oracle-weak cells become ``test.add`` items that pass the factory's
+              DoR gate, that only oracle reasons are flagged, that the re-measurement plan queues
+              nothing, determinism (same rows → byte-identical output), and the
+              ``rows_to_clear_bar`` Wilson minimum (three 10/10 cells read ``ci_low_below_bar`` on
+              2.2, 2026-09-15).
 How:          Rows as a ledger returns them (hashed, chained) → ``triage_refusals`` /
               ``strengthening_backlog`` / ``remeasure_plan``; a temp corpus directory for apply.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -454,6 +455,52 @@ class TestApply:
             if line.strip() and not line.startswith("#"):
                 assert line.rpartition("\t")[2] in ("archaeology:", "network:")
 
+    @pytest.mark.parametrize("brk", sorted(learn.LINE_BREAKS))
+    def test_free_text_never_adds_a_line_to_a_corpus_file(
+        self, tmp_path: Path, corpus: Path, brk: str
+    ) -> None:
+        """P-094: the corpus files are line-oriented, and three free-text fields are written
+        into them — the note and the decider's name into the provenance comment, and a
+        hand-completed command as the line. Whatever line break any of them carries (every
+        character ``str.splitlines`` ends a line at), one decision writes exactly one
+        comment line and one corpus line, and the corpus line is the decided one."""
+        rep = learn.triage_refusals(_tonight(tmp_path))
+        by_shape = {g.shape: g for g in rep.groups}
+        find = by_shape['find . -iname "<str>" -o -iname "<str>" | grep -v "<str>"']
+        curl = by_shape["curl -sk <url>"]
+        payload = f"fine{brk}rm -rf / --no-preserve-root"
+        honest_before = (corpus / learn.CORPUS_HONEST_FILE).read_text(encoding="utf-8")
+        refused_before = (corpus / learn.CORPUS_REFUSED_FILE).read_text(encoding="utf-8")
+        applied = learn.apply_triage(
+            [
+                learn.RefusalDecision(find.group_id, "honest", note=payload),
+                learn.RefusalDecision(
+                    curl.group_id, "refuse", note=payload, command=f"curl -sk{brk}rm -rf /"
+                ),
+            ],
+            rep,
+            corpus_dir=corpus,
+            decided_by=f"paul{brk}rm -rf ~",
+            date="2026-09-27",
+        )
+        for name, before, added in (
+            (learn.CORPUS_HONEST_FILE, honest_before, applied.honest_added),
+            (learn.CORPUS_REFUSED_FILE, refused_before, applied.refused_added),
+        ):
+            after = (corpus / name).read_text(encoding="utf-8")
+            assert after.startswith(before)
+            new_lines = after[len(before) :].splitlines()
+            assert len(new_lines) == 2, (name, new_lines)
+            comment, line = new_lines
+            assert comment.startswith("# learned 2026-09-27 ")
+            assert [line] == list(added)
+            assert not line.startswith("rm ")
+            assert learn._existing_lines(corpus / name) == {
+                x.strip() for x in before.splitlines() if x.strip() and not x.startswith("#")
+            } | {line.strip()}
+        assert learn.has_line_break(payload)
+        assert not learn.has_line_break(learn.one_line(payload))
+
     def test_idempotent(self, tmp_path: Path, corpus: Path) -> None:
         rep = learn.triage_refusals(_tonight(tmp_path))
         g = next(g for g in rep.groups if g.shape == "uv run pytest -q <path>")
@@ -750,6 +797,30 @@ class TestStrengthen:
         assert cmap.cells[0].reason_code == REASON_CONTROLS_ESCAPES
         bl = learn.strengthening_backlog(cmap, [_score(TASK_A)], generated_at="x")
         assert len(bl.items) == 1 and bl.items[0].labels["reason_code"] == REASON_CONTROLS_ESCAPES
+
+    def test_a_held_cell_whose_scored_tasks_are_all_strong_still_gets_one_item(self) -> None:
+        """A controls escape holds the cell, but every scored task kills its mutants: the work
+        is the escaped CONTROL, not a mutant. Without an item here the flag was dropped
+        silently — the report counted the cell and offered nothing to register (G-984, found
+        by the Learn walkthrough on a fresh stack: controls 1 escape, oracle 4 of 4 killed)."""
+        strong = [
+            _clean(task_id=TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")
+        ] * 10
+        controls = ControlsVerdict(passed=True, constructible=6, total=7, escapes=1)
+        cmap = build_capability_map(strong, projection=PROJECTION_CLASS_SIZE, controls=controls)
+        assert cmap.cells[0].reason_code == REASON_CONTROLS_ESCAPES
+        score = _score(TASK_A, oracle_strength=0.95, killed=3, escaped=[], total=3)
+        score["escaped"] = 0
+        bl = learn.strengthening_backlog(cmap, [score], generated_at="x")
+        assert bl.cells_flagged == ("bug.fix|S",) and bl.cells_without_scores == ()
+        (item,) = bl.items
+        assert item.labels["reason_code"] == REASON_CONTROLS_ESCAPES
+        assert item.title == "strengthen the target tests for cell bug.fix|S"
+        assert "negative control" in item.description
+        assert assess(BacklogItem.from_dict(item.to_dict())).route_hint == ROUTE_BUILD
+        # deterministic: the same map gives the same id
+        again = learn.strengthening_backlog(cmap, [score], generated_at="y").items[0]
+        assert again.id == item.id
 
     def test_strong_scored_task_in_a_held_cell_is_not_work(self) -> None:
         cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)

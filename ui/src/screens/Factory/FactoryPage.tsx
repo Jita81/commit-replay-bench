@@ -64,7 +64,7 @@
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useRegisterBacklog, useRuns, useSignGap } from '../../api/hooks'
 import { isRunTerminal, type CapabilityMap, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
@@ -863,6 +863,12 @@ function ItemRow({
             </Button>
           )}
           <PrefilledEvolution t={t} />
+          {t.status === 'oracle_needs_strengthening' && (
+            // G-348 — a weak-test stop is the strengthen report's work: it links there
+            <Hint as={Link} id="link.factory.learn" to={`/learn?repo=${encodeURIComponent(repo)}#strengthen`} className="text-xs underline underline-offset-4">
+              Strengthen the tests on Learn
+            </Hint>
+          )}
         </div>
       )}
       {narrow && (

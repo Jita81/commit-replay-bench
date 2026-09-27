@@ -374,6 +374,9 @@ export const ACTION_HELP: Record<string, string> = {
   'deployment.installed': 'The deployment’s install was recorded — dated only when the database held nothing before.',
   'deployment.first_healthy': 'The deployment read green on /health for the first time.',
   'review.corrected': 'A review whose stored mergeable answer contradicted its own words was corrected by a new record; the original is kept.',
+  'learn.refusal.accepted': 'An operator judged one class of refused rows honest or refused; the line was written into the guard corpus under their name.',
+  'learn.strengthen.registered': 'An operator registered strengthening items on this repository’s backlog from the Learn report; a re-registered item supersedes the earlier one.',
+  'learn.remeasure.queued': 'An operator queued the re-measurement runs the plan computed for one cell; the payload names what the plan estimated it would cost.',
   // legacy — the CLI's ledger import, never on a run's live log
   'legacy.tasks': 'A legacy task file was read for import; the payload counts the tasks.',
   'legacy.skip': 'A legacy line was skipped on import; the payload names the reason.',

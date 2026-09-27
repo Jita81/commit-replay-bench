@@ -431,6 +431,14 @@ export function ConnectRepoPage() {
                         </>
                       )}
                     </p>
+                    {s.status === 'warn' && (s.id === 'controls' || s.id === 'oracle') && (
+                      // G-348 / G-432 — the amber finding's way forward is the Learn strengthen report
+                      <p className="m-0 mt-1 text-xs">
+                        <Hint as={Link} id="link.walk.learn" to={`/learn?repo=${encodeURIComponent(name)}#strengthen`} className="underline underline-offset-4">
+                          Strengthen the tests on Learn
+                        </Hint>
+                      </p>
+                    )}
                     {live && <InFlight run={live} stage={s} canCancel={can('operator')} cancelling={cancel.isPending} onCancel={() => cancelRun(live)} />}
                   </div>
                   <div className="text-right">

@@ -8,23 +8,42 @@ so nothing is stale until the query asks about a newer one.
 
 Navigation
 ----------
-What it is:   ``/learn/{refusals, strengthen, remeasure}``'s test suite — the three learning
-              reports over the seed.
+What it is:   ``/learn/*``'s test suite — the three learning reports over the seed, and the
+              three operator-gated writes they hand off to.
 What it does: Pins RBAC and 404, refusals empty then one after a protocol row lands through the
               write path, that strengthen uses the controls verdict and the per-task
               ``oracle.score`` events from the store, that the CLI over the exports derives the
               same route items, that nothing is stale until the apparatus moves, and that a
-              false-Q1 row inserted around the ledger refuses to load.
+              false-Q1 row inserted around the ledger refuses to load. For the writes (G-532):
+              that all three need ``operator``; that an accepted refusal lands in the corpus
+              under a provenance comment naming the DECIDER, is served back with the report, is
+              on the chain with the account as actor and is idempotent; that the API refuses
+              exactly what the CLI refuses; that registering freezes the first item, evolves the
+              rest and supersedes a re-registered one; that an unknown id and an in-flight
+              factory run are refused with nothing written; that queueing enqueues the
+              PLAN's own run bodies, never the caller's, through the submit gate ``POST /runs``
+              applies (a cell whose builder has no credential is refused whole — P-093), and
+              refuses a what-if plan (P-098); that a note with a line break is refused
+              (P-094); that each write refuses a field it does not name; that the reads and
+              writes follow the repository's checks arm (ADR-0024); and that a viewer, a
+              request with no CSRF token and one with another session's token are each
+              refused with nothing written.
 How:          ``make_env`` over the seed; a protocol row appended through ``DbLedger``; the CLI
-              invoked over the API's own exports for the parity case.
+              invoked over the API's own exports for the parity case; the writes driven through
+              ``env.post`` and checked against ``GET /factory/{repo}/backlog``, ``GET /runs`` and
+              the ``events`` table.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/server/routes/learn.py (under test), src/crb/core/learn.py (the
-              derivations), tests/test_cli_learn.py (the CLI half of the parity),
-              tests/fixtures/server_seed.py, docs/LEARNING-LOOP.md, docs/API.md
+              derivations and ``apply_triage`` — the writer both halves share),
+              tests/test_cli_learn.py (the CLI half of the parity),
+              tests/fixtures/server_seed.py (``make_env``, ``assert_rbac``, ``user_id``),
+              src/crb/server/factory_state.py (the backlog the register write moves),
+              docs/LEARNING-LOOP.md (the contract these writes implement), docs/API.md
 Tested by:    tests/test_server_routes_learn.py
 Touch when:   a learn report gains a field (the CLI must read the export the same way — add the
-              parity case); the event shapes the reports read change.
+              parity case); the event shapes the reports read change; a fourth write path lands
+              (pin its role, its refusals and its event here).
 """
 
 from __future__ import annotations
@@ -41,15 +60,20 @@ from sqlalchemy import select
 from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND
 from crb.core.version import APPARATUS_VERSION
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, Grade
+from crb.store.models import Event, Grade, Run
 from fixtures.server_seed import (
     ALPHA,
     BETA,
     RUN_IDS,
+    USERS,
     Env,
     assert_rbac,
     envelope,
+    login,
+    logout,
     make_env,
+    task_id,
+    user_id,
 )
 
 ERR_NHS = (
@@ -105,6 +129,47 @@ def _add_protocol_row(env: Env) -> None:
     from crb.core.ledger import GradeRow
 
     ledger.append(GradeRow.from_dict(d))
+
+
+#: The plan cell :func:`_add_stale_rows` makes: a thin cell of the seed, its editblock rows
+#: graded under apparatus 2.0 (belt set v4) — genuinely stale at the running apparatus.
+STALE_CELL = "replay|backend.route.add|M|python|editblock|gpt-oss-120b|cerebras"
+
+
+def _add_stale_rows(env: Env, n: int = 2, *, labels: dict[str, str] | None = None) -> None:
+    """Append ``n`` rows of seed task 5 graded under apparatus 2.0 through the write path, so
+    the plan AT THE RUNNING APPARATUS holds :data:`STALE_CELL` (an editblock cell, so its
+    runs need a builder credential). ``labels`` are merged into the rows' own."""
+    from crb.core.ledger import GradeRow
+
+    ledger = DbLedger(env.factory)
+    template = next(r for r in ledger.rows(repo=ALPHA) if r.clean and r.builder == "editblock")
+    for i in range(n):
+        d = template.to_dict()
+        d.update(
+            {
+                "apparatus_version": "2.0",
+                "belt_set": "v4",
+                "task_id": task_id(5),
+                "capability_class": "backend.route.add",
+                "size": "M",
+                "cost_usd": 0.3,
+                "trial": f"stale{i}",
+                "labels": {**template.labels, **(labels or {})},
+                "row_id": "",
+                "prev_hash": "",
+                "row_hash": "",
+            }
+        )
+        d.pop("failure_kind", None)
+        d.pop("cost_known", None)
+        ledger.append(GradeRow.from_dict(d))
+
+
+def _legacy_cell(env: Env) -> str:
+    """The seed's own stale cell at the running apparatus (apparatus 1.0-census rows)."""
+    cells = env.get(f"/learn/remeasure?repo={ALPHA}").json()["cells"]
+    return str(next(c["label"] for c in cells if c["stale_versions"] == ["1.0-census"]))
 
 
 def test_rbac(env: Env) -> None:
@@ -274,3 +339,428 @@ def test_false_q1_row_refuses_to_load(env: Env) -> None:
         r = env.get(f"{path}?repo={ALPHA}")
         assert r.status_code == 409, (path, r.text)
         assert envelope(r)["code"] == "false_q1_refused"
+
+
+# ---------------------------------------------------------------------------
+# The three writes (G-532): a named operator's decision, from the report that computed it
+# ---------------------------------------------------------------------------
+
+
+def _accept(env: Env, group_id: str, verdict: str, **extra: Any) -> Any:
+    return env.post(
+        f"/learn/refusals/accept?repo={ALPHA}",
+        json={"group_id": group_id, "verdict": verdict, **extra},
+    )
+
+
+def _group(env: Env, prefix: str) -> dict[str, Any]:
+    """One refusal class of ALPHA's current report, by guard family."""
+    groups = env.get(f"/learn/refusals?repo={ALPHA}").json()["groups"]
+    return next(g for g in groups if g["prefix"] == prefix)
+
+
+def test_the_three_writes_are_operator_gated(env: Env) -> None:
+    """Reading the reports is a viewer's; deciding is an operator's — at the API, not only
+    in the UI. The bodies are the smallest valid ones: RBAC is checked before they are."""
+    _add_protocol_row(env)
+    gid = _group(env, "archaeology")["group_id"]
+    assert_rbac(
+        env,
+        "POST",
+        f"/learn/refusals/accept?repo={ALPHA}",
+        min_role="operator",
+        json={"group_id": gid, "verdict": "honest"},
+    )
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    assert_rbac(
+        env,
+        "POST",
+        f"/learn/strengthen/register?repo={ALPHA}",
+        min_role="operator",
+        json={"item_ids": [item_id]},
+    )
+    assert_rbac(
+        env,
+        "POST",
+        f"/learn/remeasure/queue?repo={ALPHA}",
+        min_role="operator",
+        json={"cell": _legacy_cell(env)},
+    )
+
+
+def _learn_writes(env: Env) -> list[tuple[str, dict[str, Any]]]:
+    """The three writes with the smallest bodies the current reports make valid."""
+    gid = _group(env, "archaeology")["group_id"]
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    return [
+        (f"/learn/refusals/accept?repo={ALPHA}", {"group_id": gid, "verdict": "refuse"}),
+        (f"/learn/strengthen/register?repo={ALPHA}", {"item_ids": [item_id]}),
+        (f"/learn/remeasure/queue?repo={ALPHA}", {"cell": _legacy_cell(env)}),
+    ]
+
+
+def _nothing_written(env: Env, runs_before: int) -> None:
+    """No learn event on the chain, no corpus file, no backlog and no new run."""
+    with env.factory() as s:
+        learn_events = list(s.execute(select(Event).where(Event.action.like("learn.%"))).scalars())
+    assert learn_events == []
+    assert not (env.settings.home / "learn" / "corpus").exists()
+    assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404
+    assert env.get("/runs").json()["total"] == runs_before
+
+
+def test_a_viewer_is_refused_every_learn_write_and_nothing_is_written(env: Env) -> None:
+    """Operator-gated at the SERVER: a viewer who posts the body the operator's screen would
+    post is refused 403 ``forbidden``, and the refusal leaves nothing behind — no corpus
+    line, no backlog item, no run and no event. The UI hiding the three controls is a
+    convenience; this is the gate."""
+    _add_protocol_row(env)
+    writes = _learn_writes(env)
+    runs_before = env.get("/runs").json()["total"]
+    logout(env.client)
+    login(env.client, "viewer")
+    for path, body in writes:
+        r = env.post(path, json=body)
+        assert r.status_code == 403, (path, r.text)
+        assert envelope(r)["code"] == "forbidden", (path, r.text)
+    login(env.client, "admin")
+    _nothing_written(env, runs_before)
+
+
+def test_every_learn_write_needs_this_sessions_csrf_token(env: Env) -> None:
+    """#52's session rules hold on the three writes: an operator's request with no
+    ``X-CSRF-Token``, or with ANOTHER session's token, is refused 403 ``csrf_failed`` before
+    the route runs, so nothing is written. The token is bound to the session (``HMAC(secret,
+    uid, cv)``), so a token lifted from a viewer's page cannot carry an operator's decision."""
+    _add_protocol_row(env)
+    writes = _learn_writes(env)
+    runs_before = env.get("/runs").json()["total"]
+    logout(env.client)
+    login(env.client, "viewer")
+    viewer_token = env.client.headers["X-CSRF-Token"]
+    logout(env.client)
+    login(env.client, "operator")
+    own_token = env.client.headers.pop("X-CSRF-Token")
+    assert own_token != viewer_token
+    for path, body in writes:
+        missing = env.post(path, json=body)
+        assert missing.status_code == 403, (path, missing.text)
+        assert envelope(missing)["code"] == "csrf_failed", (path, missing.text)
+        foreign = env.post(path, json=body, headers={"X-CSRF-Token": viewer_token})
+        assert foreign.status_code == 403, (path, foreign.text)
+        assert envelope(foreign)["code"] == "csrf_failed", (path, foreign.text)
+    env.client.headers["X-CSRF-Token"] = own_token
+    _nothing_written(env, runs_before)
+    # and with its own token the same operator's decision goes through
+    path, body = writes[0]
+    assert env.post(path, json=body).status_code == 201
+
+
+def test_accepting_a_refusal_writes_the_line_under_the_operators_name(env: Env) -> None:
+    """The verdict the report never makes, made once on the screen's behalf: the line lands
+    in the corpus under a provenance comment that names WHO decided, the decision is served
+    back with the report, and repeating it writes nothing."""
+    _add_protocol_row(env)
+    group = _group(env, "archaeology")
+    r = _accept(env, group["group_id"], "honest", note=".git inside a quoted argument")
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["decided_by"] == USERS["admin"] and d["verdict"] == "honest"
+    assert d["honest_added"] == [group["candidate_honest"]] and d["refused_added"] == []
+    assert d["already_present"] is False
+    corpus = Path(d["honest_path"])
+    assert corpus.is_file()
+    text = corpus.read_text(encoding="utf-8")
+    assert group["candidate_honest"] in text
+    assert f"(honest→{USERS['admin']})" in text and "quoted argument" in text
+    # the decision is now part of what the report serves — nobody has to remember it
+    served = env.get(f"/learn/refusals?repo={ALPHA}").json()["decisions"]
+    assert [x["group_id"] for x in served] == [group["group_id"]]
+    assert served[0]["decided_by"] == USERS["admin"] and served[0]["verdict"] == "honest"
+    assert served[0]["lines"] == [group["candidate_honest"]]
+    # and it is on the chain, once, with the actor
+    with env.factory() as s:
+        events = list(
+            s.execute(
+                select(Event).where(Event.action == "learn.refusal.accepted", Event.repo == ALPHA)
+            ).scalars()
+        )
+    assert len(events) == 1 and events[0].actor == user_id(USERS["admin"])
+    assert events[0].payload_json["guard"] == "archaeology"
+    # idempotent: the same decision again adds nothing and says the line was already there
+    again = _accept(env, group["group_id"], "honest")
+    assert again.status_code == 201, again.text
+    assert again.json()["honest_added"] == [] and again.json()["already_present"] is True
+    assert corpus.read_text(encoding="utf-8") == text
+
+
+def test_accepting_refuses_exactly_what_the_cli_refuses(env: Env) -> None:
+    """The API and ``crb learn refusals --apply`` share ``apply_triage``, so they refuse the
+    same things: an unknown class, a verdict the report may not carry, and a line that would
+    contradict the other corpus (never weaken a refusal to make a line pass)."""
+    _add_protocol_row(env)
+    assert _accept(env, "no-such-group", "honest").status_code == 404
+    curl = _group(env, "network")
+    assert _accept(env, curl["group_id"], "unsure").status_code == 422  # the report's own word
+    assert _accept(env, curl["group_id"], "refuse").status_code == 201
+    contradiction = _accept(env, curl["group_id"], "honest")
+    assert contradiction.status_code == 422
+    assert envelope(contradiction)["code"] == "refusal_refused"
+    assert "OTHER corpus" in envelope(contradiction)["message"]
+
+
+def test_the_corpus_directory_defaults_under_home_and_is_overridable(tmp_path: Path) -> None:
+    """Unset, the accepted lines are this deployment's own record under ``CRB_HOME``. A
+    deployment running from a source checkout points ``CRB_LEARN_CORPUS_DIR`` at that
+    checkout's fixtures, and an accepted line then binds the guard-corpus test directly."""
+    from crb.server.routes.learn import corpus_dir
+
+    class _S:
+        home = tmp_path
+        learn_corpus_dir = ""
+
+    assert corpus_dir(_S()) == tmp_path / "learn" / "corpus"
+    _S.learn_corpus_dir = str(tmp_path / "checkout" / "tests" / "fixtures")
+    assert corpus_dir(_S()) == tmp_path / "checkout" / "tests" / "fixtures"
+
+
+def test_registering_strengthening_items_freezes_then_evolves(env: Env) -> None:
+    """The hand-off that used to be a paste into ``POST /factory/{repo}/backlog``: the first
+    item freezes the backlog, the next is an evolution, and an item already on the record is
+    registered as a NEW id superseding the latest of its lineage — a frozen record never
+    mutates, so re-registering after a re-score chains rather than overwrites."""
+    assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404
+    items = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"]
+    assert len(items) >= 2, items
+    first, second = items[0]["id"], items[1]["id"]
+    r = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [first, second]})
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert [x["how"] for x in d["registered"]] == ["frozen", "evolved"]
+    assert [x["item_id"] for x in d["registered"]] == [first, second]
+    assert all(x["supersedes"] == "" for x in d["registered"])
+    backlog = env.get(f"/factory/{ALPHA}/backlog").json()
+    assert backlog["hash"] == d["backlog_hash"]
+    ids = [i["id"] for i in backlog["items"]]
+    assert first in ids and second in ids
+    # the same item again: a new id that supersedes the one on the record
+    again = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [first]})
+    assert again.status_code == 201, again.text
+    row = again.json()["registered"][0]
+    assert (
+        row["item_id"] == f"{first}-v2" and row["supersedes"] == first and row["how"] == "evolved"
+    )
+    # a third registration chains onto the SECOND, never onto the superseded first
+    third = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [first]}).json()
+    assert third["registered"][0]["supersedes"] == f"{first}-v2"
+    with env.factory() as s:
+        events = list(
+            s.execute(
+                select(Event).where(
+                    Event.action == "learn.strengthen.registered", Event.repo == ALPHA
+                )
+            ).scalars()
+        )
+    assert len(events) == 3 and all(e.actor == user_id(USERS["admin"]) for e in events)
+    assert events[0].payload_json["items"][0]["item_id"] == first
+
+
+def test_registering_refuses_an_unknown_id_and_a_factory_run_in_flight(env: Env) -> None:
+    """The body names ids and nothing else, so an id the report does not hold is refused
+    before anything is written; and the backlog a queued run verifies against cannot change
+    under it."""
+    bad = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": ["strengthen-x"]})
+    assert bad.status_code == 422 and envelope(bad)["code"] == "validation_error"
+    assert envelope(bad)["detail"]["unknown"] == ["strengthen-x"]
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    with env.factory() as s:
+        s.add(Run(id="ab" * 16, repo=ALPHA, kind="factory", status="queued", mode="sighted"))
+        s.commit()
+    blocked = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [item_id]})
+    assert blocked.status_code == 409 and envelope(blocked)["code"] == "factory_run_active"
+    assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404  # nothing was written
+
+
+@pytest.fixture
+def builder_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Placeholder builder credentials, as tests/test_server_routes_runs.py sets them: the
+    submit gate checks PRESENCE only, so a queue test that passes proves the gate was met."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-placeholder-not-a-key")
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk-test-placeholder-not-a-key")
+
+
+def _queue(env: Env, **body: Any) -> Any:
+    return env.post(f"/learn/remeasure/queue?repo={ALPHA}", json=body)
+
+
+def _queued_events(env: Env) -> list[Event]:
+    with env.factory() as s:
+        return list(
+            s.execute(
+                select(Event).where(Event.action == "learn.remeasure.queued", Event.repo == ALPHA)
+            ).scalars()
+        )
+
+
+def test_queueing_a_remeasurement_enqueues_the_plans_own_bodies(
+    env: Env, builder_keys: None
+) -> None:
+    """Money is spent only on an operator's instruction, and only on the bodies the plan
+    computed: the caller names a cell, the product composes the runs. The cell is genuinely
+    stale at the RUNNING apparatus, and its builder has a credential (a placeholder)."""
+    del builder_keys
+    _add_stale_rows(env)
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
+    cell = next(c for c in plan["cells"] if c["label"] == STALE_CELL)
+    before = env.get("/runs").json()["total"]
+    r = _queue(env, cell=cell["label"])
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert len(d["run_ids"]) == len(cell["requests"]) == 2
+    assert d["n_needed"] == cell["n_needed"] and d["cost_known"] is True
+    assert env.get("/runs").json()["total"] == before + len(d["run_ids"])
+    queued = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
+    for run, request in zip(queued, cell["requests"], strict=True):
+        assert run["status"] == "queued" and run["repo"] == ALPHA
+        assert run["kind"] == request["kind"] and run["mode"] == request["mode"]
+        assert run["builder"] == request["builder"] == "editblock"
+        assert run["model"] == request["model"]
+        assert run["task_ids"] == request["task_ids"]
+    (event,) = _queued_events(env)
+    assert event.actor == user_id(USERS["admin"])
+    assert event.payload_json["run_ids"] == d["run_ids"]
+    assert event.payload_json["cell"] == cell["label"]
+    assert event.payload_json["apparatus"] == APPARATUS_VERSION
+
+
+def test_queueing_refuses_a_cell_whose_builder_has_no_credential(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-003's class on the Learn write: ``POST /runs`` refuses a build whose builder has no
+    credential, because every attempt could only fail at $0. Queueing the plan's runs goes
+    through the SAME submit gate, for every run of the cell before any is enqueued, so the
+    whole cell is refused with nothing queued and nothing on the chain."""
+    for key in ("ANTHROPIC_API_KEY", "CEREBRAS_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    r = _queue(env, cell=STALE_CELL)
+    assert r.status_code == 422, r.text
+    err = envelope(r)
+    assert err["code"] == "builder_credential_missing"
+    assert "nothing was queued" in err["message"]
+    assert err["detail"]["builder"] == "editblock"
+    assert env.get("/runs").json()["total"] == before
+    assert _queued_events(env) == []
+
+
+def test_a_what_if_plan_queues_nothing(env: Env, builder_keys: None) -> None:
+    """A plan read against another apparatus (the CLI's ``--apparatus``) is a preview: its
+    runs would grade under the RUNNING apparatus and could never clear the plan they were
+    queued from. The server refuses it, not only the page, with nothing queued."""
+    del builder_keys
+    _add_stale_rows(env)
+    whatif = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()
+    assert whatif["cells"], whatif
+    before = env.get("/runs").json()["total"]
+    for cell in (whatif["cells"][0]["label"], STALE_CELL):
+        r = _queue(env, cell=cell, apparatus="9.9")
+        assert r.status_code == 422, r.text
+        assert envelope(r)["code"] == "validation_error"
+        assert "what-if" in envelope(r)["message"]
+        assert APPARATUS_VERSION in envelope(r)["message"]
+    assert env.get("/runs").json()["total"] == before
+    assert _queued_events(env) == []
+    # naming the running apparatus is the same as naming none
+    assert _queue(env, cell=STALE_CELL, apparatus=APPARATUS_VERSION).status_code == 201
+
+
+def test_queueing_refuses_a_cell_the_plan_does_not_hold(env: Env) -> None:
+    """A cell that is not in the plan — or is not planned in the mode asked for, since
+    sighted and blind are never pooled — is refused with the plan's own cells named."""
+    legacy = _legacy_cell(env)
+    before = env.get("/runs").json()["total"]
+    missing = _queue(env, cell="replay|nope|S")
+    assert missing.status_code == 422 and envelope(missing)["code"] == "validation_error"
+    assert envelope(missing)["detail"]["available"]
+    wrong_mode = _queue(env, cell=legacy, mode="blind")
+    assert wrong_mode.status_code == 422
+    assert env.get("/runs").json()["total"] == before  # nothing was queued
+
+
+def test_every_learn_write_refuses_a_field_it_does_not_name(env: Env) -> None:
+    """The caller names an id; the product composes the body and the session is the decider.
+    A request that also supplies a decider, a composed corpus line, an item body or run
+    bodies is refused 422 whole — never accepted with the extra field ignored — and nothing
+    is written."""
+    _add_protocol_row(env)
+    writes = _learn_writes(env)
+    runs_before = env.get("/runs").json()["total"]
+    smuggled: list[dict[str, Any]] = [
+        {"decided_by": "somebody else"},
+        {"line": "rm -rf /"},
+        {"items": [{"id": "x", "title": "composed by the caller"}]},
+        {"requests": [{"repo": ALPHA, "kind": "replay", "builder": "editblock"}]},
+    ]
+    for path, body in writes:
+        for extra in smuggled:
+            r = env.post(path, json={**body, **extra})
+            assert r.status_code == 422, (path, extra, r.text)
+            assert envelope(r)["code"] == "validation_error", (path, extra, r.text)
+    _nothing_written(env, runs_before)
+
+
+def test_a_note_is_one_line_so_it_can_never_write_a_corpus_line(env: Env) -> None:
+    """The note is written into the corpus as a provenance COMMENT. A line break in it would
+    end the comment and put the rest of the note in the corpus as a line nobody decided and
+    no event names — so the API refuses a note with any line break, before anything is
+    written (P-094)."""
+    _add_protocol_row(env)
+    gid = _group(env, "archaeology")["group_id"]
+    for brk in ("\n", "\r", "\r\n", "\u2028", "\x85", "\x0b"):
+        r = _accept(env, gid, "honest", note=f"fine{brk}rm -rf / --no-preserve-root")
+        assert r.status_code == 422, (repr(brk), r.text)
+        assert envelope(r)["code"] == "validation_error"
+    assert not (env.settings.home / "learn" / "corpus").exists()
+    with env.factory() as s:
+        assert list(s.execute(select(Event).where(Event.action.like("learn.%"))).scalars()) == []
+
+
+def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
+    env: Env, builder_keys: None
+) -> None:
+    """ADR-0024: a row graded with belt 6 on is never counted with one graded without. The
+    strengthen and remeasure reads, and the register and queue writes that re-derive them,
+    read the arm the repository grades under now — so a write can never act on a cell its
+    report did not show, and a switch of arm moves both together."""
+    del builder_keys
+    from crb.core.checks import LABEL_CHECKS
+    from crb.core.ledger import LABEL_API_STABLE
+
+    # the stamp the adapter writes with belt 6 switched on by the repository
+    belt6 = "fmt=0:default;gate=0:default;api=1:repo;cfg=0123456789ab"
+    _add_stale_rows(env, labels={LABEL_CHECKS: belt6, LABEL_API_STABLE: "true"})
+    legacy = _legacy_cell(env)
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+
+    def planned() -> list[str]:
+        r = env.get(f"/learn/remeasure?repo={ALPHA}")
+        assert r.status_code == 200, r.text
+        return [c["label"] for c in r.json()["cells"]]
+
+    # every switch off: the belt-6 rows are another arm's, and neither read nor write sees them
+    assert planned() == [legacy]
+    assert _queue(env, cell=STALE_CELL).status_code == 422
+    # the repository switches belt 6 on: only the belt-6 arm is read, by the reads AND writes
+    assert env.put(f"/repos/{ALPHA}", json={"checks": {"api_stable": True}}).status_code == 200
+    assert planned() == [STALE_CELL]
+    assert _queue(env, cell=legacy).status_code == 422
+    strengthen = env.get(f"/learn/strengthen?repo={ALPHA}")
+    assert strengthen.status_code == 200, strengthen.text
+    assert "bug.fix|S" not in strengthen.json()["cells_flagged"]
+    stale = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [item_id]})
+    assert stale.status_code == 422 and envelope(stale)["detail"]["unknown"] == [item_id]
+    before = env.get("/runs").json()["total"]
+    queued = _queue(env, cell=STALE_CELL)
+    assert queued.status_code == 201, queued.text
+    assert env.get("/runs").json()["total"] == before + len(queued.json()["run_ids"])

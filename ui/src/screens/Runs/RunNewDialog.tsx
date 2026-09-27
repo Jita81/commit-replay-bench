@@ -14,7 +14,10 @@
  *               typed ones are sent; blank = the builder's default shown), and a validated
  *               builder-config JSON with a one-click "Use my Claude Code login (dev)" toggle.
  *               A non-build kind hides all of that. The executor default shown is the
- *               server's `sandbox_mode` when the viewer may read `/settings`.
+ *               server's `sandbox_mode` when the viewer may read `/settings`. "Only these
+ *               tasks" sends `task_ids` for any kind; a hand-off (Learn's re-qualify and
+ *               re-score links, the Tasks tab's re-qualify) opens the dialog with them filled
+ *               in, and a hand-off from Learn says which step of the learning loop it is.
  * How:          Local state per field; `parseBuilderConfig` validates the JSON with the
  *               server's rules; `valid` gates the submit; `rungToEntry` and `budgetFromDraft`
  *               emit only what was set; on 201 the caller navigates to the run.
@@ -117,6 +120,11 @@ interface Props {
   onClose: () => void
   repo?: string
   initialKind?: RunKind
+  /** Task ids a hand-off already chose (Learn's re-qualify and re-score links, G-352): the
+   *  dialog opens with them in "Only these tasks", and they are sent as `task_ids`. */
+  initialTaskIds?: string[]
+  /** The screen that handed the reader here; `learn` says which step of the loop this is (G-348). */
+  from?: string
   onCreated?: (run: Run) => void
 }
 
@@ -155,7 +163,15 @@ const BUILDER_CONFIG_HELP: Record<string, string> = {
 /** The kinds the worker gates on a qualification in the grading posture (ADR-0019). */
 const POSTURE_KINDS: ReadonlySet<RunKind> = new Set<RunKind>(['replay', 'blind', 'oracle', 'controls'])
 
-export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'replay', onCreated }: Props) {
+/** "a, b\nc" → ["a", "b", "c"]: the ids a person typed or a hand-off put in the field. */
+export function parseTaskIds(text: string): string[] {
+  return text
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'replay', initialTaskIds, from, onCreated }: Props) {
   const repos = useRepos()
   const create = useCreateRun()
   const { can } = useAuth()
@@ -170,6 +186,8 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
   const [budget, setBudget] = useState<BudgetDraft>(EMPTY_BUDGET)
   const [builderConfig, setBuilderConfig] = useState('')
   const [limit, setLimit] = useState('')
+  const taskIdsKey = (initialTaskIds ?? []).join(', ')
+  const [taskIds, setTaskIds] = useState(taskIdsKey)
   const [pool, setPool] = useState('')
   const [executor, setExecutor] = useState('')
   const [timeout, setTimeoutS] = useState('')
@@ -183,6 +201,9 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
   useEffect(() => {
     if (open) setKind(initialKind)
   }, [open, initialKind])
+  useEffect(() => {
+    if (open) setTaskIds(taskIdsKey)
+  }, [open, taskIdsKey])
 
   const needsBuilder = BUILD_KINDS.includes(kind)
   const mode: GradeMode = kind === 'blind' ? 'blind' : 'sighted'
@@ -244,6 +265,8 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
       if (caps) body.budget = caps
     }
     if (limit) body.limit = Number(limit)
+    const ids = parseTaskIds(taskIds)
+    if (ids.length) body.task_ids = ids
     if (pool) body.pool = pool
     if (executor) body.executor = executor
     if (timeout) body.timeout = Number(timeout)
@@ -271,6 +294,11 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
         </>
       }
     >
+      {from === 'learn' && (
+        <Hint as="p" id="text.run_new.learn_step" className="mt-0 mb-4 text-sm" data-testid="run-new-learn-step">
+          Learning loop, step 4 of 6: re-measure the item’s task now that its tests are stronger. The kind and the task come from the Learn report; queueing is still your decision.
+        </Hint>
+      )}
       <form id="run-new-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
         <SelectField label="Repo" hint="field.run_new.repo" required value={repo} onChange={(e) => setRepo(e.target.value)} disabled={Boolean(presetRepo)}>
           <option value="">Choose…</option>
@@ -431,6 +459,14 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
           </>
         )}
         <TextField label="Task limit" hint="field.run_new.limit" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} description="Leave blank for all tasks" />
+        <TextField
+          label="Only these tasks"
+          hint="field.run_new.task_ids"
+          value={taskIds}
+          onChange={(e) => setTaskIds(e.target.value)}
+          placeholder="commit shas, separated by commas"
+          description="Leave blank for every task. A hand-off from Learn fills this with the tasks its item names."
+        />
         <SelectField label="Pool" hint="field.run_new.pool" value={pool} onChange={(e) => setPool(e.target.value)}>
           <option value="">all</option>
           <option value="standard">standard</option>

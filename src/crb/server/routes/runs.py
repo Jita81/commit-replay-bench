@@ -30,8 +30,9 @@ What it is:   The ``/runs`` API — create, list, inspect, cancel a run; its per
 What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_config, retain,
               outage_stop, preflight, budget_profile, escalation, checks, learning) into a
               queued ``Run`` row, refusing at submit (422 ``builder_credential_missing``,
-              presence only) a run whose builder auth has no credential; serves run views
-              with counts re-derived from the ledger when the worker wrote none; streams
+              presence only) a run whose builder auth has no credential — through
+              ``submit_refusals``, the one gate every route that queues a run calls; serves
+              run views with counts re-derived from the ledger when the worker wrote none; streams
               events as SSE with resume-by-seq; cancellation is a flag the worker honours.
 How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQLAlchemy
               queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``.
@@ -666,6 +667,33 @@ def credential_refusal(run: Run, settings: Any) -> None:
             )
 
 
+def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
+    """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
+    route that enqueues a run cannot skip one (docs/PREVENTION.md P-093: the Learn queue
+    enqueued the plan's runs with no credential check, the class P-003 closed on
+    ``POST /runs``). ``tests/test_server_routes_runs.py`` fails when a function that
+    enqueues a run does not call this.
+
+    * 422 ``builder_credential_missing`` — a builder this run would call has no credential
+      (P-003; presence only);
+    * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
+      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker.
+    """
+    credential_refusal(run, settings)
+    if body.qualify_first is False:
+        repo_row = db.get(Repo, body.repo)
+        if repo_row is None:
+            raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+        refuse_unqualified(
+            db,
+            repo_row,
+            kind=body.kind,
+            task_ids=list(body.task_ids),
+            executor=deployment_executor(settings, body.executor),
+            image_ref=deployment_image(settings, repo_row),
+        )
+
+
 @router.post(
     "/runs",
     response_model=RunOut,
@@ -694,7 +722,7 @@ def create_run(
         raise ApiError(422, "validation_error", f"{named} apply to factory runs only")
     api = require_jobs()
     run = new_run(body, actor=operator.id)
-    credential_refusal(run, settings)
+    submit_refusals(db, settings, body, run)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the
         # evolutions chain, since an evolution registered in the same window changes what
@@ -721,21 +749,6 @@ def create_run(
             require_role_now(operator, "approver")
             params["deliver_override_by"] = operator.id
         run.params_json = params
-    if body.qualify_first is False:
-        # ADR-0019 §3: a build run with nothing qualified where it would be graded can only
-        # fail POSTURE_UNQUALIFIED on the worker — refuse it here, with the fix
-        repo_row = db.get(Repo, body.repo)
-        if repo_row is None:  # pragma: no cover — refused 404 above
-            raise ApiError(404, "not_found", f"no repo {body.repo!r}")
-        executor = deployment_executor(settings, body.executor)
-        refuse_unqualified(
-            db,
-            repo_row,
-            kind=body.kind,
-            task_ids=list(body.task_ids),
-            executor=executor,
-            image_ref=deployment_image(settings, repo_row),
-        )
     run = api.enqueue(factory, run)
     stored = db.get(Run, run.id)
     return run_out(db, stored if stored is not None else run)
@@ -976,5 +989,6 @@ __all__ = [
     "run_out",
     "run_task_rows",
     "sse_frame",
+    "submit_refusals",
     "system_trace_id",
 ]

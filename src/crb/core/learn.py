@@ -31,7 +31,11 @@ moment it happened (§5 play 04 asks for a *person* to read refusals); a
 strengthening item pulled into a sprint by the product would spend a builder on an
 oracle nobody reviewed (§5 play 03); a re-measurement queued by the product would
 spend money without an operator's consent. Each derivation stops exactly where a
-decision needs a name attached.
+decision needs a name attached. **Where the name is attached is not this module's
+business**: a named person decides on the host (``crb learn refusals --apply``) or on the
+screen (the operator-gated ``POST /learn/{refusals/accept,strengthen/register,
+remeasure/queue}``, which record the decision with the signed-in operator's identity).
+Nothing here decides either way.
 
 Navigation
 ----------
@@ -67,7 +71,8 @@ Touch when:   never for a new repository; a new guard prefix, a new routing reas
               change to ``BacklogItem`` must be mirrored here (the core cannot import the
               builders or the factory — tests/test_learn.py pins the mirrors); the human
               steps are deliberate (docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate)
-              — do not add a path that accepts, builds or queues.
+              — nothing in this module may accept, build or queue on its own; the writes
+              belong to src/crb/server/routes/learn.py, behind a named person.
 """
 
 from __future__ import annotations
@@ -292,9 +297,32 @@ def normalise_reason(reason: str) -> str:
     return " ".join(text.split())
 
 
+#: Every character ``str.splitlines`` ends a line at — the way the corpus files are read
+#: (``_existing_lines``, ``tests/test_builders_guard_corpus.py``). Free text written into a
+#: corpus file must carry none of them, or one decision writes lines nobody decided (P-094).
+LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+_LINE_BREAK_RE = re.compile("[" + re.escape("".join(sorted(LINE_BREAKS))) + "]")
+
+
+def has_line_break(text: str) -> bool:
+    """True when ``text`` would take more than one line of a corpus file."""
+    return _LINE_BREAK_RE.search(text) is not None
+
+
+def one_line(text: str) -> str:
+    """Free text as one line of a corpus-file comment: every line break (and a CRLF pair)
+    becomes one space, so a note or a name can never end the comment it is written into."""
+    return _LINE_BREAK_RE.sub(" ", text.replace("\r\n", "\n"))
+
+
 def encode_corpus_line(command: str) -> str:
-    """A command as one corpus line (``\\n`` for a newline; secrets redacted)."""
-    return redact(command.replace("\r\n", "\n")).replace("\n", "\\n").strip()
+    """A command as one corpus line (``\\n`` for a newline, a lone CR read as one; secrets
+    redacted). Any other line break is written as its escape (``\\x0b``, ``\\u2028``) —
+    the line stays one line and still says which character the command carried (P-094)."""
+    text = redact(command.replace("\r\n", "\n").replace("\r", "\n")).replace("\n", "\\n")
+    return _LINE_BREAK_RE.sub(
+        lambda m: m.group().encode("unicode_escape").decode("ascii"), text
+    ).strip()
 
 
 @dataclass(frozen=True)
@@ -408,8 +436,10 @@ class RefusalReport:
             "verdicts": list(VERDICTS),
             "groups": [g.to_dict() for g in self.groups],
             "note": (
-                "every verdict is 'unsure': the product never accepts a corpus line; "
-                "a human decides per group and `apply_triage` appends with provenance"
+                "every verdict is 'unsure': this derivation never decides; a NAMED person "
+                "does, and `apply_triage` appends their decision with provenance — from the "
+                "host (`crb learn refusals --apply`) or from the screen "
+                "(`POST /learn/refusals/accept`, recorded with the operator's identity)"
             ),
         }
 
@@ -596,8 +626,9 @@ def _provenance(group: RefusalGroup, *, verdict: str, who: str, date: str, note:
     """``# learned <date> from <repo>/<task> row <hash> (<verdict>→<who>) — <note>``."""
     where = ", ".join(group.tasks[:3]) + (" …" if len(group.tasks) > 3 else "")
     rows = ", ".join(h[:12] for h in group.rows[:3]) + (" …" if len(group.rows) > 3 else "")
-    tail = f" — {note}" if note else ""
-    return f"# learned {date} from {where} row {rows} ({verdict}→{who}){tail}"
+    tail = f" — {one_line(note)}" if note else ""
+    # the name and the note are free text inside a one-line comment (P-094)
+    return f"# learned {date} from {where} row {rows} ({verdict}→{one_line(who)}){tail}"
 
 
 def apply_triage(
@@ -922,8 +953,11 @@ class StrengthenBacklog:
             "cells_without_scores": list(self.cells_without_scores),
             "items": [i.to_dict() for i in self.items],
             "note": (
-                "items are proposals in the frozen-backlog shape; a human pulls one into a "
-                "sprint (freeze) — the product never registers or builds them"
+                "items are proposals in the frozen-backlog shape; this derivation registers "
+                "and builds nothing. A NAMED person pulls one into a sprint — "
+                "`POST /learn/strengthen/register` registers the ones they choose (an "
+                "evolution supersedes; the frozen record never mutates) and a factory run, "
+                "queued separately, is what builds one"
             ),
         }
 
@@ -1047,6 +1081,48 @@ def _item_for_cell(cell: CapabilityCell, *, threshold: float, registered: str) -
     )
 
 
+def _item_for_held_strong_cell(
+    cell: CapabilityCell, *, threshold: float, registered: str
+) -> StrengthenItem:
+    """The one item a held cell gets when every scored task in it is strong: the routing
+    rule holds it for its negative controls (an escape, or too few constructible), so the
+    test work is to make the target tests refuse the cheat a control got through."""
+    assert cell.stats is not None
+    label = cell.label
+    strength = _fmt_strength(cell.stats.oracle_strength_mean)
+    return StrengthenItem(
+        id=f"{STRENGTHEN_ID_PREFIX}{_short_hash(cell.key.label, 'controls')}",
+        title=f"strengthen the target tests for cell {label}",
+        description=(
+            f"every scored task in cell {label} kills its mutants (mean oracle strength "
+            f"{strength} vs threshold {threshold:.2f}), but the cell routes {cell.route} "
+            f"({cell.reason_code}): {cell.reason}. A negative control the grader should refuse "
+            "graded clean, so the target tests cannot tell an implementation from that cheat; "
+            "the controls run on the repository lists which control escaped on which task."
+        ),
+        acceptance_criteria=(
+            "a controls run on the repository reports 0 escapes for the tasks in the cell",
+            f"mean oracle strength for the cell stays >= {threshold:.2f}",
+            "only test files change (belt 1: the oracle is edited by a human, on purpose)",
+        ),
+        structural_facts=(
+            f"subject_under_test: the target tests of every task in cell {label}",
+            "behaviour_asserted: the target tests fail on the negative control that escaped",
+        ),
+        labels={
+            "source": "crb.core.learn",
+            "cell": label,
+            "reason_code": cell.reason_code,
+            "route": cell.route,
+            "oracle_strength": strength,
+            "threshold": f"{threshold:.2f}",
+            "slots": "structural",
+            "n": str(cell.n),
+        },
+        registered=registered,
+    )
+
+
 def strengthening_backlog(
     cmap: CapabilityMap,
     oracle_scores: Iterable[OracleTaskScore | Mapping[str, Any]] = (),
@@ -1062,7 +1138,8 @@ def strengthening_backlog(
     :data:`STRENGTHEN_REASONS`. For each, one item per scored task that belongs to
     the cell AND is weak (strength < ``policy.min_oracle_strength``, or unscoreable,
     or has escaped mutants); a held cell with no per-task score gets ONE cell-level
-    item so the flag is never dropped silently. ``since`` keeps only cells that
+    item, and so does a held cell whose scored tasks are all strong (the controls hold it),
+    so the flag is never dropped silently. ``since`` keeps only cells that
     carry evidence stamped with an apparatus ≥ ``since`` (and scores likewise, when
     stamped). ``generated_at`` is the ``registered`` stamp of every item — pass a
     fixed value for a byte-identical backlog. Item ids are ``sha(cell, repo, task)``
@@ -1112,6 +1189,10 @@ def strengthening_backlog(
                     registered=when,
                 )
             )
+        if not weak:
+            # every scored task kills its mutants, yet the cell is held (a controls escape or
+            # a thin control set): the work is the control, so the flag still becomes ONE item
+            items.append(_item_for_held_strong_cell(cell, threshold=threshold, registered=when))
     items.sort(key=lambda i: (i.labels.get("cell", ""), i.labels.get("repo", ""), i.id))
     return StrengthenBacklog(
         items=tuple(items),
@@ -1262,7 +1343,8 @@ class RemeasurePlan:
             },
             "note": (
                 "requests are POST /runs bodies for an operator to queue; nothing here "
-                "was sent. One entry per (cell, mode) — sighted and blind are never pooled. "
+                "was sent (POST /learn/remeasure/queue sends one cell's, on an operator's "
+                "instruction and with their identity on the runs). One entry per (cell, mode) — sighted and blind are never pooled. "
                 "Costs are that cell's own mean row cost x rows needed x attempts per row "
                 "(1 sighted; the ladder's rungs blind) — an estimate, unknown where no row "
                 "recorded a cost. tasks_stale / tasks_current say how many DISTINCT commits "
@@ -1527,6 +1609,7 @@ __all__ = [
     "CORPUS_REFUSED_PREFIXES",
     "DECISIONS_SCHEMA",
     "GUARD_PREFIXES",
+    "LINE_BREAKS",
     "REFUSALS_SCHEMA",
     "REMEASURE_SCHEMA",
     "STRENGTHEN_REASONS",
@@ -1551,10 +1634,12 @@ __all__ = [
     "apply_triage",
     "dumps",
     "encode_corpus_line",
+    "has_line_break",
     "load_decisions",
     "load_oracle_scores",
     "normalise_command",
     "normalise_reason",
+    "one_line",
     "parse_violations",
     "remeasure_plan",
     "render_refusals",

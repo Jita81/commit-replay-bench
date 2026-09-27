@@ -1021,6 +1021,14 @@ export const HINTS = {
     'Constructor overrides applied to every rung and stamped into the run’s apparatus. Model, provider and credential keys are refused here: identity comes from the ladder, secrets from the worker’s environment.',
   'field.run_new.limit':
     'The most tasks to attempt; blank means every eligible task.',
+  'field.run_new.task_ids':
+    'Only these tasks, as commit shas separated by commas. Blank means every task. A hand-off from Learn fills it with the tasks its item names, so a re-score or a re-qualify reaches exactly those.',
+  'text.run_new.learn_step':
+    'Where this run sits in the learning loop: the Learn report handed the reader here with the kind and the task filled in, and queueing it is still a person’s act.',
+  'col.tasks.recheck_gold':
+    'Re-checks the gold of a task that is not gold-clean, without re-mining the history, after the runner or the repository’s configuration changed. This is not qualifying a posture: that is a qualify run. Only an operator sees this column.',
+  'link.tasks.recheck_gold':
+    'Opens the Runs dialog with a mine run for this task’s commit filled in. It re-checks RED at the parent and GREEN with the commit, and queueing it is still your decision.',
   'field.run_new.pool':
     'Limit the run to the standard or the hard pool of tasks.',
   'field.run_new.executor':
@@ -1396,9 +1404,9 @@ export const HINTS = {
   'col.learn_refusals.cost':
     'Dollars spent on the attempts in this class before they were refused.',
   'col.learn_refusals.verdict':
-    'Always unsure here: a person decides whether the refusal was honest or should be allowed, and writes the line into the guard corpus.',
+    'Unsure until a person decides whether the guard was right. Once decided it reads honest or refused and names who decided it.',
   'pill.learn.verdict':
-    'The product never decides: a person writes honest or refuse for this class with the command-line tool.',
+    'The product never decides. Nobody has judged this class yet, so nothing has been written into the guard corpus for it.',
   'stat.learn.oracle_held':
     'Cells withheld from deliver because their oracle is under the bar or their controls escaped or were thin, under the routing policy and threshold shown. More attempts will not move these; stronger tests will.',
   'stat.learn.items':
@@ -1480,8 +1488,82 @@ export const HINTS = {
     'Why you are throwing the switch; it is recorded with your name on the prevention chain.',
   'field.learn.revert_reason':
     'Why this change is being undone; it is recorded with your name, and the loop never re-applies it.',
+  // the three decisions beside the reports (G-532), each one a named operator's decision
+  'pill.learn.decided':
+    'The verdict a named person recorded for this class, and the corpus the line was written into: honest allows the command, refused keeps the guard refusing it.',
+  'col.learn_refusals.decide':
+    'Records your verdict on this class. Only an operator sees this column, and the decision is stored with the name of whoever made it.',
+  'button.learn.decide_refusal':
+    'Opens the form that records your verdict on this refusal class and writes the line into the guard corpus.',
+  'field.learn.verdict':
+    'Honest means the guard was wrong and this command must be allowed. Refused means the guard was right and must keep refusing it.',
+  'field.learn.note':
+    'One line saying why, written into the corpus file as a comment above the line, for whoever reads it next. It stays one line: a line break would end the comment.',
+  'field.learn.command':
+    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line.',
+  'field.learn.prefix':
+    'Which guard family to file the refusal under. The refused corpus takes archaeology and network lines only; an attempt to tamper with the tests is judged elsewhere.',
+  'button.learn.accept_refusal':
+    'Writes the line into the guard corpus under your name and records the decision. Repeating it writes nothing.',
+  'button.learn.cancel_decision':
+    'Closes the form. Nothing is written and the class stays unsure.',
+  'button.learn.close_decision':
+    'Closes the form. The decision is already recorded.',
+  'banner.learn.decision':
+    'What the decision wrote: the verdict, who made it, and the corpus file the line landed in.',
+  'col.learn_strengthen.register':
+    'Puts this item on the repository’s backlog. Only an operator sees this column.',
+  'button.learn.register_strengthening':
+    'Registers this item on the repository’s backlog. Registering the same item again supersedes it rather than overwriting it, so the earlier record is kept.',
+  'banner.learn.registered':
+    'What the registration did: the item id, the backlog it is on now, and the item it replaced if any.',
+  'link.learn.factory':
+    'The factory for this repository, where the backlog is read and a run that builds the item is queued.',
+  'col.learn_remeasure.queue':
+    'Queues this cell’s re-measurement runs. Only an operator sees this column, and the estimate is shown before anything is sent.',
+  'button.learn.queue_remeasure':
+    'Shows what queueing this cell would run and cost before anything is sent.',
+  'button.learn.cancel_queue':
+    'Closes the confirmation. Nothing is queued and nothing is spent.',
+  'button.learn.confirm_queue':
+    'Sends the plan’s runs for this cell. This spends the deployment’s budget.',
+  'button.learn.close_queue':
+    'Closes the confirmation. The runs are already queued.',
+  'banner.learn.queued':
+    'What was queued: how many runs, for which cell and mode, the rows the rule still needs, and what the plan estimated.',
+  'link.learn.queued_runs':
+    'The runs page for this repository, where the runs just queued report their progress.',
 
   // ── /ledger (screens/Ledger/LedgerPage.tsx)
+  // the loop's hand-offs and position (G-172, G-348, G-352)
+  'col.learn_strengthen.remeasure':
+    'Opens a run for this item’s task once the tests are stronger: re-qualify it, re-score its oracle, or re-run the negative controls. Only an operator sees this column.',
+  'link.learn.requalify':
+    'Opens the Runs dialog with a qualify run for this item’s task filled in. It proves the task in the posture that grades it and spends no model budget.',
+  'link.learn.rescore':
+    'Opens the Runs dialog with an oracle run for this item’s task filled in, to measure whether the stronger tests now kill the mutants that escaped.',
+  'link.learn.recontrols':
+    'Opens the Runs dialog with a negative-controls run for this item’s task filled in, to check that the grader now refuses the cheat that escaped.',
+  'link.learn.connect':
+    'The Connection page, where a repository is registered and walked. Learn needs one repository’s ledger rows to derive its reports.',
+  'step.learn.loop':
+    'The six steps of the learning loop and where each happens: two on this page, one on Oracle, one in your repository, one on Runs, and the decisions back here.',
+  'field.learn.plan_apparatus':
+    'A version to plan against, such as 2.4, to see what re-measuring would cost if the apparatus moved to it. Blank plans for the version this deployment runs.',
+  'button.learn.plan_apparatus':
+    'Reads the plan as if the apparatus were the version typed. It queues nothing and spends nothing.',
+  'button.learn.plan_running':
+    'Returns the plan to the version this deployment runs, where the runs it lists can be queued.',
+  'banner.learn.plan_whatif':
+    'Says the plan below is a preview against another apparatus version, so its rows are not stale yet and no run is offered for them.',
+  'text.learn.strengthen_cost':
+    'The one measured record of what strengthening a test took: a person’s time, not the runs’ spend. It is a single item, so it says what can happen, not what usually does.',
+  'link.oracle.learn':
+    'The Learn page’s strengthening report for this repository: the test work that closes a controls escape or a weak oracle, where it is registered and the oracle re-run.',
+  'link.walk.learn':
+    'The Learn page’s strengthening report for this repository: the finding on this stage is closed by stronger tests, and that report names the work and re-runs the oracle and the controls.',
+  'link.factory.learn':
+    'The Learn page’s strengthening report for this repository: an item stopped for a weak test is closed by stronger tests, and that report names the work.',
   'button.ledger.export_jsonl':
     'Download the rows (filtered to the repository if one is chosen) as JSON lines, the form the chain verifies.',
   'button.ledger.export_csv':

@@ -19,10 +19,11 @@
  * Touch when:   a run kind is added — extend the expected option list; the role that may
  *               start a run changes — update the ?new= gate test.
  */
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Run } from '../../api/types'
-import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, json, mockApi, renderApp } from '../../test/utils'
 import { RunsPage } from './RunsPage'
 
 const RUN: Run = {
@@ -96,5 +97,25 @@ describe('RunsPage', () => {
     expect(screen.queryByRole('dialog', { name: 'Start a run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Start a run' })).toBeNull()
     expect(screen.getByText(/An operator starts a run/)).toBeInTheDocument()
+  })
+  it('?new=&tasks= arrives pre-filled: the kind and the tasks a hand-off named are what is sent (G-352)', async () => {
+    const a = 'a'.repeat(40)
+    const b = 'b'.repeat(40)
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 200, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 200, offset: 0 },
+      'POST /runs': () => json({ ...RUN, id: 'run-new', kind: 'oracle' }, 201),
+    })
+    renderApp(<RunsPage />, { route: `/runs?repo=alpha&new=oracle&tasks=${a},${b}&from=learn`, path: '/runs' })
+    const dialog = await screen.findByRole('dialog', { name: 'Start a run' })
+    // the screen says which step of the learning loop the reader is on (G-348)
+    expect(within(dialog).getByTestId('run-new-learn-step')).toHaveTextContent('Learning loop, step 4 of 6')
+    expect(within(dialog).getByLabelText(/^Kind/)).toHaveValue('oracle')
+    expect(within(dialog).getByLabelText(/^Only these tasks/)).toHaveValue(`${a}, ${b}`)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Queue run' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
+    const body = JSON.parse(String(calls.find((c) => c.method === 'POST' && c.path === '/runs')!.init!.body)) as Record<string, unknown>
+    expect(body).toMatchObject({ repo: 'alpha', kind: 'oracle', task_ids: [a, b] })
   })
 })
