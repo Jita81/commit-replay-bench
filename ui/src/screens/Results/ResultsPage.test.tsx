@@ -28,7 +28,9 @@
  *               field; that a run poll that fails shows "Could not read the measurement in
  *               progress" with a Try again, never a queued or running banner; that every
  *               query the page reads has a test for its failure state; and that the page's
- *               source reads no query's `data` directly in any form `queryDataReads` finds.
+ *               source reads no query's `data` directly in any form `queryDataReads` finds;
+ *               and that the throughput callout names what it lacks without denying the
+ *               merge outcomes the factory records.
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`; `qc.refetchQueries()` for a
  *               refetch; the page's own source as `?raw` text for the `currentData` ratchet.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -222,6 +224,15 @@ describe('ResultsPage', () => {
     renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     await waitFor(() => expect(screen.getByText('Loading the baseline for alpha…')).toBeInTheDocument())
     expect(screen.queryByText('Is the instrument trustworthy here?')).toBeNull()
+  })
+
+  it('the throughput callout names what cost per accepted change lacks: human hours, and a join from the merge outcomes the factory records', async () => {
+    mockApi(ROUTES)
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const callout = await screen.findByText(/cost per accepted change cannot be shown here honestly/)
+    // the factory records merges (`delivery.merged`, `delivery.closed`); the map's replay rows are not joined to them
+    expect(callout).toHaveTextContent('The ledger records no human hours, and the merge outcomes the factory records are not joined to the replay rows behind this map')
+    expect(callout).not.toHaveTextContent(/neither human hours nor merge outcomes/)
   })
 
   it('a controls or oracle 404 is "not run" / "not scored", never an alert', async () => {

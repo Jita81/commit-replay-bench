@@ -358,43 +358,44 @@ is not measured yet **[hypothesis — about 1 to 3 minutes per cobra task with a
 build cache, extrapolated from run `0c44ff24…`'s attempt latencies; the first live qualify
 run replaces this with a measured figure]**.
 
-The `sandbox-images` job is meant to block a merge to `main` exactly as `container` does —
-it has no `continue-on-error` and fails on any skipped smoke test — but a job blocks only
-when its context is in the branch's required status checks, which is a repository setting,
-not a workflow file **[measured — `GET /repos/Jita81/commit-replay-bench/branches/main/protection`,
-2026-09-22: the context is absent; a red `sandbox-images` would not block a merge]**. The
-repository administrator adds it once:
+Every job in `.github/workflows/ci.yml` blocks a merge to `main` only while its check name is
+on the branch's required-status-checks list, which is a repository setting, not a workflow
+file. The list names every job, `sandbox-images` and `sbom` among them, and is strict (a
+branch must be up to date) **[measured 2026-09-27 — n = 16 required checks against 16 check
+names the workflow renders, method: `scripts/check_branch_protection.py` against
+`GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
+apparatus 2.3; the same list was read on 2026-09-26]**.
+
+`scripts/check_branch_protection.py` compares the two both ways. It fails on a required check
+that no job reports (every pull request would wait on it for ever), a job that no required
+check names (it could fail and the change still merge), a setting that is not strict, and a
+job name of 100 characters or more. The daily `branch-protection` workflow
+(`.github/workflows/branch-protection.yml`) runs it against the live setting. Reading the
+setting needs a token with Administration: read, which a workflow's own `GITHUB_TOKEN` can
+never be given, so an administrator adds a fine-grained token with that one permission on
+this repository as the secret `BRANCH_PROTECTION_TOKEN`. Until then the workflow fails, by
+design (G-930).
+
+When a pull request adds or renames a job, the administrator changes the list before it
+merges (a renamed job leaves its old name required, so the pull request waits until then).
+`PATCH` replaces the whole list, so read it first and send all of it back:
 
 ```bash
+gh api repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
+  --jq '{strict: .strict, contexts: .contexts}' > required.json
+# edit required.json: add or rename the check name exactly as ci.yml renders it
 gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
-  --input - <<'JSON'
-{"strict": true, "contexts": ["lint (ruff)", "types (mypy --strict)", "layers (import-linter)",
- "code-map (every file has a valid header; docs/CODE-MAP.md is current)",
- "test (py3.12)", "test (py3.13)", "test-postgres (store suite on PostgreSQL 16)",
- "security (gitleaks + pip-audit)", "container (docker build + smoke + helm lint)",
- "walkthrough (browser, live stack, tier 1)",
- "ui-unit (tsc -b + vitest, the hint ratchet included)",
- "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
- "dod (every route, journey and stream has its definition of done; evidence resolves)",
- "claims (every quantified sentence on a covered page carries its tag)",
- "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
-JSON
+  --input required.json
+python scripts/check_branch_protection.py --repo Jita81/commit-replay-bench   # must say "match"
 ```
+
+Then save the new reading as `tests/fixtures/branch_protection_main.json`: the test that
+compares the last reading with ci.yml fails on every pull request until the two agree.
 
 A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
 characters — a `name:` longer than that can never satisfy the context it is required under
 (it blocked PR #48 until the two job names were shortened). Keep every `name:` in
 `.github/workflows/ci.yml` under 100 characters.
-
-(the list is the current set plus the new contexts — `PATCH` replaces it, so send all of
-them; `GET …/protection` first to confirm the set has not moved). Until then the job's
-verdict is visible on every pull request but advisory. The same holds for the two UI jobs
-`ui-unit` and `ui-smoke`, added to the list above: they run the type-check, the vitest suites
-(the hint ratchet and the native-`title=` allowlist among them) and the mocked browser smoke
-on every pull request, and they block a merge only once their contexts are in this set. The
-same holds for `dod` and `claims`, also added to the list above: the definition-of-done record
-and the claim-tag rule are gates in the workflow and advisory on a branch until an
-administrator sends this call.
 
 ## 4. Azure
 
@@ -728,16 +729,21 @@ rate is worth a look), `histogram_quantile(0.9, rate(crb_grade_latency_seconds_b
 
 ### 9.3 Health
 
-`GET /api/v1/health` (readiness, 503 on `down`) runs seven probes — `db`, `append_only`,
-`ledger`, `sandbox` (skipped for `CRB_ROLE=api`), `toolchains`, `builders`, `worker` —
-documented in [API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface).
+`GET /api/v1/health` (readiness, 503 on `down`) runs eleven probes — `db`, `migrations`
+(the store's revision is the code's head; `down`, and so 503, when the store is behind, ahead,
+empty or unreadable — [the contract](API.md#the-migrations-probe)), `append_only`, `ledger`,
+`sandbox` (skipped for `CRB_ROLE=api`), `provision` (dependency provisioning, ADR-0019;
+skipped for `CRB_ROLE=api` and while provisioning is off), `toolchains`, `builders`,
+`worker`, `intake` and `build` (the served commits agree) — each documented in
+[API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface).
 `GET /api/v1/health/live` is the liveness probe: the process and its database, nothing else.
 
 The `worker` probe reads the `workers` table: every worker upserts its row every
 `heartbeat_s` (default 10 s) whether or not it holds a run, with the interval it promised,
 so the probe judges a worker alive when it checked in within 3 × its own `heartbeat_s`. The
-UI reads the same probe: the Home screen shows a banner when it is not `ok` and the
-Deployment page lists the workers with their last check-in.
+UI reads the same probe: the Deployment page lists the workers with their last check-in. Home
+raises a banner only for the `sandbox` probe; any other probe that is not `ok` shows as the
+one-word pill in the header, so read `/health` itself when that pill is not `ok`.
 
 ### 9.4 Logs
 

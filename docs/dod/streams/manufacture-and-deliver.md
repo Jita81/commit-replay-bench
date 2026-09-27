@@ -8,7 +8,7 @@ children: [dod.journey.intake-from-a-ticket, dod.journey.manufacture]
 persons: [operator, approver, viewer, admin]
 owner: factory
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Manufacture & deliver — ticket → backlog → readiness → run → PR on the customer repo → outcome
@@ -21,7 +21,8 @@ refusal or its merge recorded.
 per repository, default off) → a branch `crb/<item>-<slug>` and a pull request on the
 customer's repository against a non-default branch, whose body is the evidence summary, whose
 verdict was recorded before any edit, and whose merge or closure lands back on the item's
-chain and on the ticket.
+chain and on the ticket. The review is accepted before the pull request opens (ADR-0021), and
+a ready ticket is registered only when an operator approves it (ADR-0022).
 
 **Non-goals.** It never writes to the customer's default branch and never merges: the pull
 request is where the product's authority ends. It never creates tickets, never edits ticket
@@ -47,8 +48,10 @@ reads a column it was not pointed at.
 | manufacture-and-deliver.handoff.13 | HANDOFF | Both ends of the stream join without a person carrying data: the readiness and routing answer for a ticket is posted back on that ticket as one comment with a tag, and the merge outcome lands on the item chain and the cell's counts — both halves are built | `code:src/crb/intake/feedback.py::render_feedback` · `code:src/crb/server/factory_state.py::sync_outcomes` · `test:tests/test_intake_service.py::test_the_pull_request_link_reaches_the_ticket_it_came_from` · `test:tests/test_intake_worker.py::test_a_configured_outcome_map_moves_the_ticket_after_the_merge` | met |  |
 | manufacture-and-deliver.measure.14 | MEASURE | The product shows this stream's own numbers: lead time from the item arriving to the pull request opening and to its merge, and the cost of each certified change | `absent` | unmet | G-925 |
 | manufacture-and-deliver.automation.15 | AUTOMATION | No step needs a person to do what the product could do: the backlog arrives from the tracker, a `test_author` rung in the served worker offers the RED test for an item that has none, and a stopped item's evolution is proposed rather than hand-registered | `code:src/crb/server/worker.py::_test_author` · `test:tests/test_worker_test_author.py::test_the_deployment_setting_names_the_author_rung` · `test:tests/test_server_routes_factory.py::test_a_weak_oracle_stop_serves_the_superseding_item_pre_filled` · `code:src/crb/server/worker.py::poll_intake` · `test:tests/test_intake_worker.py::test_a_poll_registers_the_ticket_and_writes_the_row_the_screen_reads` · `dl:DL-050` · `dl:DL-051` | met |  |
+| manufacture-and-deliver.truth.16 | TRUTH | A pull request opens only when the delivered change's own measured cell routes `deliver`: after the build the measured size is compared with the item's estimate, a change larger than the cell its licence came from stops `size_exceeds_licence` unless its measured cell routes `deliver`, both sizes are on the item's evidence, and an item with no size is `unsized` and routes `human` | `absent` | unmet | G-975 |
 
 ## Gaps
-- **G-548** — the product's account of itself starts at a frozen backlog · name the stream on Home and on the Factory page from the ticket onwards, with the intake state (listening / not configured) on the same line · ui
+- **G-548** — Home's task 8 reads "Deliver your first change" and the Factory page links to the intake screen, which says whether it is listening, but neither Home nor the Factory page says that work enters from the enterprise's board, or whether intake is listening, so the product's account of the stream still starts at a frozen backlog · say on task 8 and at the head of the Factory page that work enters from the board, with the intake state (listening / not configured) on the same line · ui
 - **G-549** — the only delivery against a real repository ran on the local executor and is stamped a development reading; the sealed (docker) rerun is not done · rerun the B-1b items under `CRB_BUILDER__EXECUTOR=docker` and record the result beside the first · factory
 - **G-925** — the product folds no lead time and no spend out of the events it already stores, so backlog → merge and cost per human-verified change cannot be shown (backlog F20; the merge outcome is already recorded by `sync_outcomes`, and B-9's open half is the reviewer-minutes capture) · derive the durations and the spend per stream from the runs and events already stored, capture reviewer minutes on `POST /reviews`, and serve a Flow view with one endpoint per stream · server
+- **G-975** — the delivery gate reads the item's estimated size (a ticket with no story points is `S`) while the build writes its row in the measured size, and nothing compares the two, so an L change can open a pull request under an S licence (external assessment 2026-09-25, C4) · after the build, compare the measured size with the estimate, read the route again on the measured cell and stop `size_exceeds_licence` when it is not `deliver`; record both sizes on the item; an item with no points is `unsized` and routes `human` · factory

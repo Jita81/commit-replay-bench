@@ -397,9 +397,10 @@ non-zero value is a stop condition) at `/metrics`; the **worker** serves
 meanings, the scrape targets per deployment shape and the alert rules are
 [DEPLOYMENT.md §9](DEPLOYMENT.md#9-observability). JSON logs pass through the same
 redaction as evidence packs (message, arguments, extras and tracebacks). `/health` runs
-seven probes — `db`, `append_only`, `ledger`, `sandbox` (skipped for the api role),
-`toolchains`, `builders`, `worker` (the `workers` table every worker upserts each
-`heartbeat_s`, idle or not) — and `/health/live` one (`db`).
+the readiness probes the `GET /health` row of [API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface)
+lists, one per dependency (the `worker` probe reads the `workers` table every worker upserts
+each `heartbeat_s`, idle or not), and `/health/live` one (`db`); the list is named here only
+by reference, because a copy of it drifted (docs/PREVENTION.md P-059).
 
 ### 7.3 Data model (store, P4)
 

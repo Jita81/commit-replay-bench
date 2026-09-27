@@ -21,8 +21,8 @@
  *               page; and that axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a run
  *               detail with real rows, Capability, Ledger and Sign-off — against the live
  *               data the earlier specs produced.
- * How:          `AxeBuilder` with the WCAG tags per screen; the fake token is shape-valid and
- *               deliberately not real.
+ * How:          axe with the WCAG tags per screen, once transitions settle (ui/e2e/axe.ts);
+ *               the fake token is shape-valid and deliberately not real.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Settings/SettingsPage.tsx and
@@ -32,19 +32,18 @@
  * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a screen is added (add it to the axe sweep) or the settings fields change.
  */
-import AxeBuilder from '@axe-core/playwright'
+import { axeViolations } from '../axe'
 import type { Page } from '@playwright/test'
 import { env, expect, primary, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
-const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 //: Shape-valid (prefix, length, alphabet) and deliberately not a real token.
 const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 
 async function axeClean(page: Page, where: string): Promise<void> {
-  const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
-  expect(results.violations, `${where}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([])
+  const violations = await axeViolations(page)
+  expect(violations, `${where}: ${JSON.stringify(violations, null, 2)}`).toEqual([])
 }
 
 test.describe('07 settings + accessibility', () => {

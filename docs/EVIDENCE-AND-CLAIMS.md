@@ -302,7 +302,8 @@ that what was recorded is true. Evidence ranks, weakest first:
 - **Any throughput headline** (changes or stories per hour) derived from this benchmark.
   The only rate-of-work numbers it licenses are verified changes per unit time and human
   hours per verified change, each with `n`, mode, builder and apparatus — and the ledger
-  records neither human hours nor merge outcomes yet (DL-038, backlog B-9).
+  records no human hours yet, while the merge outcomes the factory records (B-9) are not yet
+  joined to the replay rows (DL-038).
 - That mutation strength measures specification completeness or production safety. It
   measures whether the **target tests** notice crude faults on the changed lines: a suite can
   be strong on what it asserts and silent on what it never mentions (cobra #1559,

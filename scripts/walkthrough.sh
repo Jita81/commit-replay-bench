@@ -32,6 +32,8 @@
 #   CRB_PYTHON=…          interpreter with crb[server,dev] installed (default .venv/bin/python)
 #   CRB_E2E_REPORT_DIR=…  Playwright HTML report dir (default <tmp>/playwright-report)
 #   CRB_E2E_OUTPUT_DIR=…  Playwright traces/screenshots dir (default <tmp>/test-results)
+#   CRB_E2E_PREFLIGHT_ONLY=1  run the checks (interpreter, which checkout crb imports from) and
+#                         stop before creating anything
 #
 # Exit code is Playwright's. Server/worker log tails are printed on failure.
 #
@@ -45,7 +47,9 @@
 #               repositories and a real model. It refuses to run when ``CRB_HOME`` or
 #               ``CRB_DATABASE_URL`` is already set and never binds port 8000, so it cannot touch an
 #               operator's live stack.
-# How:          Refuse-if-configured → build ``ui/dist`` if stale → build and bare-clone the
+# How:          Refuse-if-configured → put this checkout's ``src`` first on ``PYTHONPATH`` and
+#               refuse if any ``crb`` module the stack loads comes from another checkout →
+#               build ``ui/dist`` if stale → build and bare-clone the
 #               fixture → export a fresh env (secret, admin, local sandbox, dev switches) →
 #               ``crb migrate`` → ``crb serve`` + ``crb worker`` on a free port → wait for
 #               ``/health`` → export the ``CRB_E2E_*`` contract → ``npx playwright test``; the
@@ -58,8 +62,9 @@
 #               (the fixture it pads), src/crb/builders/fixture_gold.py (the builder it enables),
 #               src/crb/cli/main.py (``migrate`` / ``serve`` / ``worker``), .github/workflows/ci.yml
 #               (the ``walkthrough`` job)
-# Tested by:    ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
-#               (the suite it drives; the script itself has no unit test — CI runs it end to end)
+# Tested by:    tests/test_walkthrough_script.py (the preflight: which checkout the stack
+#               imports), ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
+#               (the suite it drives; CI runs it end to end)
 # Touch when:   a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in
 #               the README); the server or worker CLI flags change; never to inherit an existing
 #               home, database or port.
@@ -97,6 +102,46 @@ fi
 if ! "$PY" -c "import crb.server.app" 2>/dev/null; then
   echo "walkthrough: the server layer is not installed in $PY (pip install -e '.[server,dev]')" >&2
   exit 2
+fi
+# The stack must serve THIS checkout. An interpreter whose editable install points at another
+# checkout (a shared venv used from a worktree) would otherwise import that tree's crb, and the
+# walkthrough would pass or fail on code that is not under test (docs/PREVENTION.md P-061). This
+# checkout's src goes first on the path of everything started below, and any crb module the
+# server, worker or CLI loads from anywhere else stops the run.
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+if ! "$PY" - "$ROOT/src" <<'PYEOF'
+import importlib
+import os
+import sys
+
+src = os.path.realpath(sys.argv[1])
+entry = ("crb.cli.main", "crb.server.app")  # `crb serve`, `crb worker` and `crb migrate`
+for name in entry:
+    importlib.import_module(name)
+foreign = sorted(
+    (
+        f"{n} ({os.path.realpath(m.__file__)})"
+        for n, m in list(sys.modules.items())
+        if n.split(".")[0] == "crb"
+        and getattr(m, "__file__", None)
+        and not os.path.realpath(m.__file__).startswith(src + os.sep)
+    ),
+    key=lambda f: (f.split(" ")[0] not in entry, f),
+)
+if foreign:
+    print(f"walkthrough: the stack would serve crb from outside {src}:", file=sys.stderr)
+    for f in foreign[:10]:
+        print(f"  {f}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+then
+  echo "walkthrough: refusing to run — $PY imports another checkout's crb; use an interpreter" >&2
+  echo "  with this checkout installed (pip install -e '.[server,dev]'), or fix its path" >&2
+  exit 2
+fi
+echo "walkthrough: crb imports from $ROOT/src" >&2
+if [[ "${CRB_E2E_PREFLIGHT_ONLY:-0}" == "1" ]]; then
+  exit 0   # tests/test_walkthrough_script.py: the preflight, and nothing created
 fi
 command -v git >/dev/null || { echo "walkthrough: git is required" >&2; exit 2; }
 command -v npx >/dev/null || { echo "walkthrough: node/npx is required" >&2; exit 2; }

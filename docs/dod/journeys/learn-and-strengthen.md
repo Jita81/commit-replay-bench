@@ -8,7 +8,7 @@ children: [dod.page.learn]
 persons: [operator, viewer, approver]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Learn and strengthen an oracle
@@ -21,7 +21,7 @@ ledger teaches, as three reports … Nothing here acts; a person does" (`help.ts
 named person writes each refusal verdict.
 
 **Entry → exit.** Arrive at `/learn?repo=` from the Instrument nav entry `Learn`
-(`Layout.tsx:121`) — the loop has no entry on Home and no journey position, so a person finds
+(the `INSTRUMENT` list in `Layout.tsx`) — the loop has no entry on Home and no journey position, so a person finds
 it only by knowing it is there. Ordered path: read the three reports → open `/oracle?repo=` for
 the weak cells and a task's escaped mutants → strengthen the target tests in the repository
 (outside the product, by design) → re-score the oracle and re-run the negative controls →

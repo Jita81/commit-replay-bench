@@ -93,6 +93,17 @@ Rules for the table:
   per band: pages `G-100`–`G-299`, journeys `G-300`–`G-499`, streams `G-500`–`G-599`, the
   product `G-600`–`G-699`, the prevention register (`docs/PREVENTION.md`, §7) `G-700`–`G-799`,
   and gaps shared across files `G-900`–`G-999`.
+- **A gap line is cited, or it goes.** Every `G-nnn` under `## Gaps` is the gap of at least
+  one criterion in the same file (in the register, of a pending row); the checker refuses a line
+  nothing cites. When the work closes, the criterion flips to `met` and the line is deleted —
+  the generator then carries the id into `GAP-ANALYSIS.md`'s *Gap ids retired* list, so a plan
+  that named it stays valid.
+- **Tags in the record's own prose.** A criterion's `criterion` cell is a specification and
+  carries no claims tag. Prose outside the table — a purpose paragraph, a gap line, a wave row
+  — carries a tag on every statement that quantifies something (`docs/EVIDENCE-AND-CLAIMS.md`
+  §1), and a `[measured]` one carries its n, its method and its apparatus version. A gap id and
+  a typed evidence reference never carry a tag. The claims gate does not read `docs/dod/**`
+  yet; that is G-929 (CodeRabbit on PR #47 and PR #48).
 
 ## 3. Evidence references (typed, resolvable)
 
@@ -185,6 +196,26 @@ The next feature is the top of `GAP-ANALYSIS.md`, or it is not the next feature.
 request that adds a screen without a page artefact, or a stream step without its criterion,
 fails the `dod` CI job. When a gap closes, the author changes the criterion's `state` and
 evidence in the artefact in the same PR; the checker verifies the evidence resolves.
+
+`PLAN.md` batches the order of work into waves, and the checker holds it to this rule: every
+cell of a wave table's `gaps` column is a list of gap ids and nothing else, and each id is a gap
+an artefact or the register defines, a backlog row that a criterion or a pending register row
+cites, or one the order of work has retired. A wave that closes a gap therefore never breaks
+the plan that named it, while an id that was never a gap (a typo, an id no artefact defines, a
+backlog row nothing asks for) fails the `dod` job. Every gap among the first 25 rows of the
+order of work must also sit in some wave, so the plan cannot skip the top of the list.
+
+The retired list is carried forward by the generator, but the generated file never vouches
+for itself: an id stays retired only while the git history of the artefacts and the register
+shows it was once a gap, or the gap analysis committed on the base branch (`--base`, else the
+`DOD_BASE` environment variable, else `origin/main`; CI sets `DOD_BASE` to the pull request's
+base) carried it. The base is there because a
+squash merge drops a branch's own commits. An id inserted into `GAP-ANALYSIS.md` by hand is
+dropped by the generator and named by `--check`. The `dod` job therefore needs the full
+history (`fetch-depth: 0`); a shallow clone can only refuse more, never admit more.
+
+The check reads ids, not meaning: a real gap's id written against another gap's change still
+passes, so a reviewer reads each wave row against the lines its ids carry.
 
 ## 7. A defect is closed only with the artefact that fails if its class recurs
 
