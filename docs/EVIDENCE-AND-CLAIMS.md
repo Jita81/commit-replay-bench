@@ -33,7 +33,11 @@ Every claim in this repository — README, ADRs, architecture, UI copy — carri
 **The rule is a gate.** CI's `claims` job runs `scripts/claims_check.py`, which reads the
 pages on its allowlist, finds the sentences that quantify something, and fails when one
 carries no tag — or when a `[measured]` one carries no `n`, no method and no apparatus
-version. It checks the *shape* of the evidence, never whether a figure is sound, and it
+version. On README, the most public page, a `[measured]` tag must also say where its rows
+are — `rows: data/<campaign>/`, a directory the repository carries with a checksum manifest
+(`MANIFEST.sha256`) that verifies — and `tests/test_measured_claims.py` re-derives every
+number such a claim states, and its apparatus, from those rows with the product's own code.
+Elsewhere the gate checks the *shape* of the evidence, never whether a figure is sound, and it
 reads only the pages on the allowlist; the script's docstring states both limits and the
 gap analysis names the pages still ungated. The same job holds a review to its own actions:
 every numbered row of a review's *Actions* table needs a line in the

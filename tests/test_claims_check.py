@@ -219,8 +219,10 @@ def test_check_exits_non_zero_and_the_default_report_exits_zero(
     assert cc.main(["--root", str(tree), "--allow", "README.md"]) == 0
     assert "1 claim" in capsys.readouterr().out
 
-    _write(tree, "README.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
-    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 0
+    # (README's own [measured] tags must also name their rows — tested below — so the
+    # passing case is a guide's page)
+    _write(tree, "docs/PAGE.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
+    assert cc.main(["--check", "--root", str(tree), "--allow", "docs/PAGE.md"]) == 0
 
 
 def test_the_repository_itself_passes_the_gate() -> None:
@@ -763,3 +765,74 @@ def test_a_missing_bundled_guide_list_or_pr_body_is_itself_a_finding(tree: Path)
     reasons = [f.reason for f in cc.check_conformity(tree)]
     assert any("bundled guides" in r for r in reasons)
     assert any("pull-request body" in r for r in reasons)
+
+
+# ─── a README [measured] tag names the rows it rests on (G-660, product.claims.201) ───────
+
+ROWS_TAG = (
+    "[measured — n = 13 jobs; method: a count of the job keys in the workflow file; "
+    "rows: data/c1/; apparatus 2.3]"
+)
+
+
+def _campaign(tree: Path, files: dict[str, str], *, manifest: bool = True) -> Path:
+    import hashlib
+
+    d = tree / "data" / "c1"
+    d.mkdir(parents=True)
+    for rel, body in files.items():
+        (d / rel).write_text(body, encoding="utf-8")
+    if manifest:
+        lines = [
+            f"{hashlib.sha256((d / rel).read_bytes()).hexdigest()}  ./{rel}"
+            for rel in sorted(files)
+        ]
+        (d / "MANIFEST.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return d
+
+
+def test_a_readme_measured_tag_must_name_rows_the_repository_carries(tree: Path) -> None:
+    """G-660: a README [measured] tag says where its rows are (``rows: data/<campaign>/``),
+    and those rows are in the repository with a checksum manifest that verifies, so a reader
+    can re-derive the claim (tests/test_measured_claims.py does). A tag that names no rows,
+    rows that are absent, rows with no manifest, or rows that no longer match it, fail."""
+
+    def reasons() -> list[str]:
+        return [f.reason for f in cc.check_rows(tree)]
+
+    _write(tree, "README.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
+    assert ["names no rows" in r for r in reasons()] == [True]
+
+    _write(tree, "README.md", f"# t\n\nCI runs eleven jobs. {ROWS_TAG}\n")
+    assert ["does not carry" in r for r in reasons()] == [True]
+
+    d = _campaign(tree, {"rows.jsonl": '{"clean": true}\n'}, manifest=False)
+    assert ["no checksum manifest" in r for r in reasons()] == [True]
+
+    import shutil
+
+    shutil.rmtree(d)
+    d = _campaign(tree, {"rows.jsonl": '{"clean": true}\n', "README.md": "# c1\n"})
+    assert reasons() == []
+    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 0
+
+    (d / "rows.jsonl").write_text('{"clean": false}\n', encoding="utf-8")
+    assert ["do not verify" in r and "rows.jsonl" in r for r in reasons()] == [True]
+
+    (d / "rows.jsonl").write_text('{"clean": true}\n', encoding="utf-8")
+    (d / "extra.jsonl").write_text("{}\n", encoding="utf-8")
+    assert ["do not verify" in r and "extra.jsonl" in r for r in reasons()] == [True]
+
+
+def test_only_readme_measured_tags_need_a_rows_locator(tree: Path) -> None:
+    _write(tree, "docs/PAGE.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
+    _write(tree, "README.md", "# t\n\nNothing measured here.\n")
+    assert cc.check_rows(tree) == []
+
+
+def test_the_vendored_campaigns_verify_against_their_manifests() -> None:
+    campaigns = sorted(p for p in (ROOT / "data").iterdir() if p.is_dir())
+    assert campaigns, "no campaign is vendored under data/"
+    for d in campaigns:
+        rel = d.relative_to(ROOT).as_posix()
+        assert cc.verify_manifest(ROOT, rel) == [], rel

@@ -63,6 +63,13 @@ checks evidence while the criterion that builds that table was unmet (P-115). It
 the promises registered here; an unregistered capability sentence still needs a reader
 (G-935).
 
+**README's measured claims name their rows.** A ``[measured]`` tag on README (``ROWS_PAGES``)
+must say where its rows are — ``rows: data/<campaign>/``, written plain inside the tag — and
+that directory must be in the repository with a ``MANIFEST.sha256`` that verifies: every
+listed file present and unchanged, and no file beside it that the manifest does not list
+(its README excepted). The gate holds that shape; ``tests/test_measured_claims.py``
+re-derives the numbers and the apparatus from the rows (G-660).
+
 **A standard is named, never claimed.** The product names which ISO/IEC 25010
 characteristics its checks evidence part of (``crb.core.quality_model``, EVIDENCE-AND-CLAIMS
 §9) and never that code conforms to one. A sentence that says code conforms to, complies with
@@ -90,7 +97,8 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               disk; reports a registered promise stated in the present tense before its
               criterion is met (P-115); reports a sentence that claims ISO conformity on
               README, a guide or the factory's pull-request body template (ADR-0026 item
-              11); --check exits non-zero.
+              11); reports a README ``[measured]`` tag that names no vendored rows, or rows
+              whose checksum manifest does not verify (G-660); --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
@@ -101,13 +109,15 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
               backticks, then ``action #N: <state>``. Then each ``PROMISES`` pattern over the
               sentences of ``PROMISE_PAGES`` ⇄ its criterion's state in docs/dod/. Then
               each sentence of README, the guides and the pull-request body's literals
-              (``ast``) → an ISO mention and a conformity word with no denial.
+              (``ast``) → an ISO mention and a conformity word with no denial. Then each
+              README ``[measured]`` tag → its ``rows:`` locator → the manifest's hashes.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         docs/adr/0026-the-context-standard.md (item 11, the conformity rule)
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of; §9,
               the quality baseline), src/crb/core/quality_model.py (the table a page may
               name), ui/src/help/docs.ts (the bundled guides), src/crb/factory/delivery.py
-              (the pull-request body template),
+              (the pull-request body template), data/ (the vendored rows a README
+              ``[measured]`` tag names), tests/test_measured_claims.py (re-derives them),
               README.md (the first page on ``ALLOWLIST``; docs/RELEASING.md,
               docs/CONTRIBUTING.md, docs/SUMMARY.md and
               docs/reviews/2026-09-25-value-baseline.md are the others),
@@ -125,6 +135,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import re
 import sys
 from collections.abc import Iterator
@@ -451,15 +462,18 @@ def blocks_of(text: str) -> list[Block]:
     return out
 
 
-def is_claim(sentence: str) -> bool:
-    """True when the sentence quantifies something (see the module docstring)."""
+def claim_numbers(sentence: str) -> list[str]:
+    """The figures that make the sentence a claim — each percentage that is not a confidence
+    level and each cardinal qualifying a plural noun (see the module docstring); empty when
+    the sentence quantifies nothing. tests/test_measured_claims.py re-derives these."""
     text = _strip_markup(sentence).strip()
     if not text or text.endswith(":"):
-        return False
+        return []
+    out: list[str] = []
     confidence = [m.span() for m in _CONFIDENCE_PERCENT_RE.finditer(text)]
     for match in _PERCENT_RE.finditer(text):
         if not any(start <= match.start() < end for start, end in confidence):
-            return True
+            out.append(match.group(0))
     for match in _COUNT_RE.finditer(text):
         cardinal, between, noun = match.group(1), match.group(2), match.group(3)
         if between and between.lower() in FUNCTION_WORDS:
@@ -476,8 +490,13 @@ def is_claim(sentence: str) -> bool:
             value = float(digits)
             if value <= 1 or (value.is_integer() and 1900 <= value <= 2099):
                 continue
-        return True
-    return False
+        out.append(cardinal)
+    return out
+
+
+def is_claim(sentence: str) -> bool:
+    """True when the sentence quantifies something (see the module docstring)."""
+    return bool(claim_numbers(sentence))
 
 
 def tag_defects(cover: str) -> list[str] | None:
@@ -601,6 +620,97 @@ def check_promises(root: Path, pages: tuple[str, ...]) -> list[Finding]:
                                 "with its gap",
                             )
                         )
+    return findings
+
+
+# ─── a README [measured] tag names the rows it rests on (G-660) ──────────────────────────
+
+#: The pages whose ``[measured]`` tags must name vendored rows: the most public page.
+ROWS_PAGES: tuple[str, ...] = ("README.md",)
+#: The checksum manifest every vendored campaign carries (``shasum -a 256`` format).
+MANIFEST = "MANIFEST.sha256"
+#: Files a campaign directory may hold outside its manifest: the manifest and its README.
+UNMANIFESTED: frozenset[str] = frozenset({MANIFEST, "README.md"})
+#: ``rows: data/<campaign>/`` inside the tag, written plain (not in backticks).
+_ROWS_RE = re.compile(r"\brows:\s*(data/[A-Za-z0-9._-]+)/?")
+
+
+def rows_locators(detail: str) -> list[str]:
+    """The ``data/<campaign>`` directories a ``[measured …]`` tag's text names."""
+    return _ROWS_RE.findall(detail)
+
+
+def verify_manifest(root: Path, campaign: str) -> list[str]:
+    """What is wrong with a vendored campaign's rows: a listed file absent or changed, a
+    file present but not listed. Empty when the manifest verifies."""
+    base = root / campaign
+    manifest = base / MANIFEST
+    if not manifest.is_file():
+        return [f"no checksum manifest ({MANIFEST})"]
+    problems: list[str] = []
+    listed: set[str] = set()
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        digest, _, rel = line.partition("  ")
+        rel = rel.strip().removeprefix("./")
+        listed.add(rel)
+        path = base / rel
+        if not path.is_file():
+            problems.append(f"{rel} is listed but absent")
+        elif hashlib.sha256(path.read_bytes()).hexdigest() != digest.strip():
+            problems.append(f"{rel} does not match its checksum")
+    for path in sorted(base.rglob("*")):
+        rel = path.relative_to(base).as_posix()
+        if path.is_file() and rel not in listed and rel not in UNMANIFESTED:
+            problems.append(f"{rel} is not in the manifest")
+    return problems
+
+
+def check_rows(root: Path, pages: tuple[str, ...] = ROWS_PAGES) -> list[Finding]:
+    """Every ``[measured]`` tag on ``pages`` names rows the repository carries, under a
+    checksum manifest that verifies (G-660). The numbers themselves are re-derived from
+    those rows by tests/test_measured_claims.py; this gate holds the shape."""
+    findings: list[Finding] = []
+    for rel in pages:
+        path = root / rel
+        if not path.is_file():
+            continue
+        for block in blocks_of(path.read_text(encoding="utf-8")):
+            prose = _CODE_RE.sub(" ", _COMMENT_RE.sub(" ", block.text))
+            for name, detail in _TAG_RE.findall(prose):
+                if name.lower() != "measured":
+                    continue
+                sentence = _SENTENCE_SPLIT.split(block.text)[0].strip()
+                locators = rows_locators(detail)
+                if not locators:
+                    findings.append(
+                        Finding(
+                            rel,
+                            block.line,
+                            sentence,
+                            "[measured] on this page names no rows — add rows: "
+                            "data/<campaign>/ for rows the repository carries, or retag the "
+                            "claim (G-660)",
+                        )
+                    )
+                for loc in locators:
+                    if not (root / loc).is_dir():
+                        reason = (
+                            f"[measured] names rows at {loc}/, which the repository does not carry"
+                        )
+                    else:
+                        problems = verify_manifest(root, loc)
+                        if not problems:
+                            continue
+                        if problems[0].startswith("no checksum manifest"):
+                            reason = f"[measured] names rows at {loc}/, which have {problems[0]}"
+                        else:
+                            reason = (
+                                f"[measured] names rows at {loc}/, which do not verify against "
+                                f"their manifest: {'; '.join(problems)}"
+                            )
+                    findings.append(Finding(rel, block.line, sentence, reason))
     return findings
 
 
@@ -869,6 +979,7 @@ def main(argv: list[str] | None = None) -> int:
         + check_review_actions(root)
         + check_promises(root, pages)
         + check_conformity(root, tuple(args.allow) if args.allow else None)
+        + check_rows(root, tuple(p for p in pages if p in ROWS_PAGES))
     )
     stream = sys.stderr if args.check else sys.stdout
     for f in findings:

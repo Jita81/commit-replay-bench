@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-625 files with a header · 1 exempt (listed at the end).
+626 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -272,7 +272,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py) | a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (220 files)
+## `tests` (221 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -387,6 +387,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_legacy.py`](../tests/test_legacy.py) | The importers' test suite — the census and the benchmark ledger. | [`tests/test_legacy.py`](../tests/test_legacy.py) | the census format gains a field (a synthetic row per shape here — the real data must not change); never to make an import more lenient. |
 | [`tests/test_lint.py`](../tests/test_lint.py) | Belt 5's test suite — the lint rule, its wiring into the grader and the miner, and the real toolchains. | [`tests/test_lint.py`](../tests/test_lint.py) | onboarding a repository whose linter the detection misses (add a detection case on its shape, or declare ``lint`` in the repo config — [`docs/OPERATOR.md`](../docs/OPERATOR.md)); a linter's output format changes (the attribution regex); a new language runner adds ``detect_lint``. |
 | [`tests/test_mcp_server.py`](../tests/test_mcp_server.py) | The MCP server's test suite — every tool called through ``MCPServer.call_tool`` against the seeded app (FastAPI's ``TestClient`` is an ``httpx.Client``, so the server's HTTP client runs unchanged over the real routes). | [`tests/test_mcp_server.py`](../tests/test_mcp_server.py) | a tool is added (add it to ``EXPECTED_TOOLS`` and one call); the seed's cells change (the map assertions name the seeded cobra-like cell). |
+| [`tests/test_measured_claims.py`](../tests/test_measured_claims.py) | The re-derivation test for every README ``[measured]`` claim that names rows. | (this is a test file) | README gains a [measured] claim on a new campaign — vendor its rows with a manifest under data/ and add its derivation to ``DERIVATIONS`` in the same change. |
 | [`tests/test_mine.py`](../tests/test_mine.py) | The miner's test suite — candidate discovery, the RED check, the baseline and the gold check on the fixture repository. | [`tests/test_mine.py`](../tests/test_mine.py) | the candidate rule changes (what counts as coupled source + test, the pools); the gold check gains a belt; a new repository layout needs a support-file rule. |
 | [`tests/test_node_eras.py`](../tests/test_node_eras.py) | The JavaScript dependency-era suite (``_NodeBase.ensure_era``). | [`tests/test_node_eras.py`](../tests/test_node_eras.py) | another package manager's lockfile is supported (a ``lock_key`` case); the eviction or free-space policy changes. |
 | [`tests/test_observability_logging.py`](../tests/test_observability_logging.py) | The logging suite — ``RedactingFilter``, ``JsonFormatter`` and ``configure_logging``. | [`tests/test_observability_logging.py`](../tests/test_observability_logging.py) | a new log field type is allow-listed in ``JsonFormatter``, or a new call site passes structured extras. |
