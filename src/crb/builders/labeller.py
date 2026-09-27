@@ -116,6 +116,7 @@ LABEL_OUTPUT_SCHEMA: dict[str, Any] = {
     "required": ["class", "confidence", "rationale"],
 }
 
+#: The labeller's own reply cap, used while the operator sets no ``CRB_OPENAI_MAX_TOKENS``.
 DEFAULT_MAX_TOKENS = 400
 DEFAULT_TIMEOUT_S = 120
 
@@ -210,7 +211,7 @@ class OpenAILabeller:
         provider: str = "",
         endpoint: EndpointConfig | None = None,
         chat_fn: ChatFn | None = None,
-        max_tokens: int = DEFAULT_MAX_TOKENS,
+        max_tokens: int | None = None,
         temperature: float | None = 0.0,
     ) -> None:
         if not model.strip():
@@ -218,10 +219,16 @@ class OpenAILabeller:
         self.model = model.strip()
         # the configured endpoint when none is passed, and the provider it IS: the
         # labeller id ``…@provider`` never names a provider it does not call
-        self.endpoint, self.provider = resolve_endpoint(
-            endpoint, provider, injected=chat_fn is not None
-        )
+        self.endpoint, self.provider = resolve_endpoint(endpoint, provider, seam=chat_fn)
         self._chat_fn = chat_fn
+        # the reply cap: a caller's (a run's builder_config) wins, then the operator's
+        # CRB_OPENAI_MAX_TOKENS, then the labeller's own short default — a label is one
+        # short JSON object, but a reasoning model the operator raised the cap for is not
+        # silently cut off at 400
+        if max_tokens is None:
+            max_tokens = (
+                self.endpoint.max_tokens if self.endpoint.max_tokens_set else DEFAULT_MAX_TOKENS
+            )
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.usage = _Usage(self.model)

@@ -257,9 +257,7 @@ class RungTestAuthor:
         # provider it IS: a rung naming another provider is refused here, before any call
         # (ProviderMismatch). The provider is stamped, never identity — the refusal that
         # keeps the author off the ladder compares builder:model only (ADR-0021)
-        self.endpoint, self.provider = resolve_endpoint(
-            endpoint, provider, injected=chat_fn is not None
-        )
+        self.endpoint, self.provider = resolve_endpoint(endpoint, provider, seam=chat_fn)
         self._chat_fn = chat_fn
         self.attempts = attempts
         self.max_examples = max_examples

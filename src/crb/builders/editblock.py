@@ -355,9 +355,7 @@ class EditBlockBuilder:
         self.model = model
         # the configured endpoint (CRB_OPENAI_BASE_URL …) when none is passed, and the
         # provider it IS — a rung naming another provider is refused here, not stamped
-        self.endpoint, self.provider = resolve_endpoint(
-            endpoint, provider, injected=chat_fn is not None
-        )
+        self.endpoint, self.provider = resolve_endpoint(endpoint, provider, seam=chat_fn)
         self._chat_fn = chat_fn
         self.max_files = max_files
         self.max_file_chars = max_file_chars

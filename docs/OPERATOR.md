@@ -653,22 +653,39 @@ export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
 ```
 
 - **What a row says.** The provider on every row, cell and label is the endpoint's own —
-  `cerebras`, `azure`, or the URL's host (`gpu-box.internal:8080`) — so a self-hosted model is
-  its own cell, never pooled with Cerebras. Write rungs as `openai_agent:qwen3@gpu-box.internal:8080`
-  (the `@` form: a host carries a `:`) or leave the provider empty and it is filled in.
+  `cerebras` for a host in the `cerebras.ai` domain, `azure`, or otherwise the URL's host and
+  port (`gpu-box.internal:8080`) — so a self-hosted model is its own cell, never pooled with
+  Cerebras, even when its host name contains `cerebras` (a mirror). Write rungs as
+  `openai_agent:qwen3@gpu-box.internal:8080` (the `@` form: a host carries a `:`) or leave the
+  provider empty and it is filled in.
+- **Never put the key in the URL.** The URL is stamped on every row and the ledger is
+  append-only, so a `CRB_OPENAI_BASE_URL` (or `CRB_AZURE_ENDPOINT`) with a user name or key
+  before the host (`https://user:key@host/v1`), a query string (`?api-key=…`) or a fragment is
+  refused by name, and the value is not repeated in the message. The key goes in the variable
+  `CRB_OPENAI_KEY_ENV` names.
 - **What it refuses.** A rung that names a provider the endpoint is not
   (`openai_agent:qwen3@cerebras` while the URL is your server) stops the attempt as
   `builder unavailable: ProviderMismatch: …`, with the fix in the sentence, before any call is
   made. A tuning value that is out of range or not a number stops it the same way and names
-  the variable.
+  the variable. A run's `builder_config` cannot get round this: the keys that name a
+  builder's own seams (`model_fn`, `chat_fn`, `spawn`, `runner_factory`, `endpoint`,
+  `executor`) are refused by `POST /runs` with a 422.
+- **Reply length.** `CRB_OPENAI_MAX_TOKENS` is the reply cap of the builders, the test author
+  and the intent labeller. While it is unset the labeller keeps its own shorter cap of 400
+  tokens (a label is one short JSON object); set it for a reasoning model that needs longer,
+  or set `max_tokens` in a label run's `builder_config`, which wins.
 - **Timeouts.** A model that generates slowly needs a timeout longer than one reply takes:
   at 15 tokens a second a 4,000-token reply takes about 270 s **[hypothesis — arithmetic from
   a stated rate, not measured on a model]**. Keep retries low — a timed-out call is retried
   from the start, so four retries can cost five full generations.
 - **Proof.** The request lands on the configured URL, the row carries its host, a mismatched
-  rung is refused and the timeout and retry count are the ones set **[measured — n = 20 test
-  cases in `tests/test_builders_endpoint.py` against a fake OpenAI-compatible server on
-  127.0.0.1, no model called; each fix reverted in turn made them fail; apparatus 2.3]**.
+  rung is refused and the timeout, reply length and retry count are the ones set **[measured —
+  n = 44 test cases in `tests/test_builders_endpoint.py`: 10 point a builder, the labeller or
+  the test author at a fake OpenAI-compatible server on 127.0.0.1 and check where the request
+  landed, what it carried and the provider stamped; the other 34 check the settings'
+  defaults and refusals, the provider rule, the seams a run request cannot set and a source
+  ratchet, and the module's own count; no model called; each fix reverted in turn made them
+  fail; apparatus 2.3]**.
   The factory's test author (§10) follows the same rule: it calls this endpoint, stamps its
   provider, and a test-author rung naming another provider is refused before any call.
 
@@ -1076,9 +1093,11 @@ the test author asks the OpenAI-compatible endpoint the worker's environment nam
 `CRB_OPENAI_BASE_URL`, or Azure when `CRB_AZURE_ENDPOINT` is set, or Cerebras when neither is.
 What authoring returns and each `author.attempt` it records carry that endpoint's provider —
 `cerebras`, `azure` or the URL's host. An author rung that names a different provider
-(`editblock:qwen3:cerebras` while the URL is your own server), or inherits one from the run's
-provider, is refused with `ProviderMismatch` before anything is built or paid for; name the
-host the endpoint is (`editblock:qwen3@gpu-box.internal:8080`) or leave the provider empty.
+(`editblock:qwen3:cerebras` while the URL is your own server) is refused with
+`ProviderMismatch` before anything is built or paid for; name the host the endpoint is
+(`editblock:qwen3@gpu-box.internal:8080`) or leave the provider empty. The author never takes
+the run's provider: that belongs to the build ladder, so a Claude ladder with an author on
+Cerebras (`CRB_FACTORY__TEST_AUTHOR=editblock:gpt-oss-120b`) runs.
 The provider is recorded, never compared as identity: the same model behind two providers is
 still one model, and the refusal above still stops it.
 

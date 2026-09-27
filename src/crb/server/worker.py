@@ -2734,9 +2734,12 @@ class Worker:
         raw = str(ctx.params.get("test_author", "") or "").strip()
         if not raw:
             raw = self.settings.factory.test_author.strip()
-        default_provider = str(ctx.run.provider or ctx.params.get("provider") or "")
+        # no provider is inherited from the run: the run's belongs to its build ladder (a
+        # Claude ladder's is `anthropic`), while the author calls the configured
+        # OpenAI-compatible endpoint and stamps ITS provider; only a provider the author's
+        # own label names is checked against that endpoint (G-611)
         try:
-            author = author_from_label(raw, default_provider=default_provider)
+            author = author_from_label(raw)
         except ValueError as exc:
             raise ValueError(
                 f"test author {raw!r} cannot be used: {exc} "

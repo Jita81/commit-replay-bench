@@ -24,7 +24,9 @@ What it does: Builds a client for Cerebras / Azure OpenAI / any base URL from an
               ``EndpointConfig`` — the operator's (``from_env``: ``CRB_OPENAI_BASE_URL`` and
               the validated ``CRB_OPENAI_TIMEOUT_S`` / ``_MAX_TOKENS`` / ``_MAX_RETRIES``)
               unless a caller passes one; ``resolve_endpoint`` gives every builder that
-              endpoint and ITS provider, refusing a rung that names another; refuses to
+              endpoint and ITS provider (``host:port``; ``cerebras`` only for the
+              ``cerebras.ai`` domain), refusing a rung that names another and, through
+              ``url_refusal``, a URL that carries a key (P-968); refuses to
               start without the named credential, retries transient failures with jittered
               backoff, decodes tool calls tolerantly (bad JSON → ``parse_error``, not a
               crash) and meters every attempt.
@@ -61,6 +63,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from crb.builders.budget import CostMeter, Pricing, price_for
 
@@ -85,6 +88,34 @@ ENV_LIMITS: dict[str, tuple[float, float, float]] = {
     "CRB_OPENAI_MAX_TOKENS": (float(DEFAULT_MAX_TOKENS), 1.0, 200_000.0),
     "CRB_OPENAI_MAX_RETRIES": (float(DEFAULT_MAX_RETRIES), 0.0, 10.0),
 }
+
+
+def url_refusal(url: str, *, https_only: bool = False) -> str:
+    """Why ``url`` cannot be an endpoint — ``""`` when it can. The endpoint is stamped on
+    every row (the provider column, the apparatus stamp) and the ledger is append-only, so
+    a URL that carries a credential — ``user:key@`` userinfo, a ``?api-key=`` query or a
+    fragment — is refused, never stored (P-968). The reason never repeats the URL: a
+    refusal's text reaches logs and run errors."""
+    schemes = ("https",) if https_only else ("http", "https")
+    try:
+        parts = urlsplit(url)
+        _ = parts.port  # a port that is not a number raises here
+    except ValueError:
+        return "must be a URL of the form scheme://host[:port]/path"
+    if parts.scheme.lower() not in schemes or not parts.hostname:
+        return f"must be an {'https' if https_only else 'http(s)'}://host[:port]/path URL"
+    if "@" in parts.netloc:
+        return (
+            "must not carry a user name or key before the host (user:key@host): the URL is "
+            "stamped on every row — put the key in the variable CRB_OPENAI_KEY_ENV (or "
+            "CRB_AZURE_KEY_ENV) names"
+        )
+    if parts.query or parts.fragment or url.rstrip().endswith(("?", "#")):
+        return (
+            "must not carry a query string or fragment (?…, #…): the URL is stamped on every "
+            "row — put the key in the variable CRB_OPENAI_KEY_ENV (or CRB_AZURE_KEY_ENV) names"
+        )
+    return ""
 
 
 class MissingCredential(RuntimeError):
@@ -187,8 +218,9 @@ class AzureConfig:
     api_key_env: str = AZURE_KEY_ENV
 
     def __post_init__(self) -> None:
-        if not self.endpoint.startswith("https://"):
-            raise ValueError("azure endpoint must be an https:// URL")
+        refusal = url_refusal(self.endpoint, https_only=True)
+        if refusal:
+            raise ValueError(f"the azure endpoint (CRB_AZURE_ENDPOINT) {refusal}")
         if not self.api_version or not self.deployment:
             raise ValueError("azure config needs api_version and deployment")
 
@@ -464,14 +496,29 @@ class EndpointConfig:
     max_retries: int = DEFAULT_MAX_RETRIES
     temperature: float | None = 0.2
     max_tokens: int = DEFAULT_MAX_TOKENS
+    #: whether ``max_tokens`` is the operator's (``CRB_OPENAI_MAX_TOKENS`` was set) rather
+    #: than the default — a caller with a shorter default of its own (the labeller) keeps
+    #: it only while the operator has set nothing. Not stamped: ``max_tokens`` is.
+    max_tokens_set: bool = field(default=False, compare=False)
+
+    def __post_init__(self) -> None:
+        refusal = url_refusal(self.base_url)
+        if refusal:
+            raise ValueError(f"the endpoint's base URL (CRB_OPENAI_BASE_URL) {refusal}")
 
     @property
     def provider(self) -> str:
-        """``azure`` | ``cerebras`` | the base URL's host — the ledger's provider column."""
+        """``azure`` | ``cerebras`` | the base URL's ``host[:port]`` — the ledger's provider
+        column. ``cerebras`` only for a host in the ``cerebras.ai`` domain: a mirror or a
+        look-alike whose name merely contains it is its own provider, never pooled into
+        Cerebras's cell. Never the URL's userinfo (refused at construction anyway)."""
         if self.azure is not None:
             return "azure"
-        host = self.base_url.split("//", 1)[-1].split("/", 1)[0]
-        return "cerebras" if "cerebras" in host else host
+        parts = urlsplit(self.base_url)
+        host = (parts.hostname or "").lower()
+        if host == "cerebras.ai" or host.endswith(".cerebras.ai"):
+            return "cerebras"
+        return parts.netloc.rpartition("@")[2].lower()
 
     def to_dict(self) -> dict[str, Any]:
         """The apparatus-stamp shape (the key's NAME, never its value)."""
@@ -504,8 +551,9 @@ class EndpointConfig:
                 api_key_env=e.get("CRB_AZURE_KEY_ENV", AZURE_KEY_ENV),
             )
         base_url = e.get("CRB_OPENAI_BASE_URL", "").strip() or CEREBRAS_BASE_URL
-        if not base_url.startswith(("https://", "http://")):
-            raise ValueError(f"CRB_OPENAI_BASE_URL must be an http(s):// URL, got {base_url!r}")
+        refusal = url_refusal(base_url)
+        if refusal:  # the value is never echoed: it may be the credential itself
+            raise ValueError(f"CRB_OPENAI_BASE_URL {refusal}")
         return cls(
             base_url=base_url,
             api_key_env=e.get("CRB_OPENAI_KEY_ENV", "").strip() or CEREBRAS_KEY_ENV,
@@ -513,6 +561,7 @@ class EndpointConfig:
             timeout_s=_env_number(e, "CRB_OPENAI_TIMEOUT_S"),
             max_tokens=int(_env_number(e, "CRB_OPENAI_MAX_TOKENS", integer=True)),
             max_retries=int(_env_number(e, "CRB_OPENAI_MAX_RETRIES", integer=True)),
+            max_tokens_set=bool(e.get("CRB_OPENAI_MAX_TOKENS", "").strip()),
         )
 
 
@@ -573,7 +622,7 @@ def credential_missing(
 
 
 def resolve_endpoint(
-    endpoint: EndpointConfig | None, provider: str = "", *, injected: bool = False
+    endpoint: EndpointConfig | None, provider: str = "", *, seam: object = None
 ) -> tuple[EndpointConfig, str]:
     """The endpoint a builder will call and the provider its rows must carry.
 
@@ -581,12 +630,14 @@ def resolve_endpoint(
     ``CRB_OPENAI_BASE_URL`` is the endpoint every OpenAI-compatible builder calls,
     not only the labeller. The provider stamped is the endpoint's own
     (:attr:`EndpointConfig.provider`); a rung that names a different one is
-    :class:`ProviderMismatch`. ``injected`` is the test seam (a ``model_fn`` /
-    ``chat_fn`` stands in for the endpoint and calls nothing): with no explicit
-    endpoint the named provider is kept, because no endpoint is called to disagree."""
+    :class:`ProviderMismatch`. ``seam`` is the builder's test seam (a ``model_fn`` /
+    ``chat_fn`` that stands in for the endpoint and calls nothing): when it is CALLABLE and
+    no endpoint is explicit, the named provider is kept, because no endpoint is called to
+    disagree. Anything else passed as a seam (a string from a run's ``builder_config``) is
+    not one, and the named provider is checked like any other."""
     ep = resolved_endpoint(endpoint)
     named = provider.strip()
-    if injected and endpoint is None:
+    if callable(seam) and endpoint is None:
         return ep, named or ep.provider
     if named and named.lower() != ep.provider.lower():
         raise ProviderMismatch(
@@ -648,5 +699,6 @@ __all__ = [
     "parse_tool_calls",
     "resolve_endpoint",
     "resolved_endpoint",
+    "url_refusal",
     "with_retries",
 ]

@@ -42,6 +42,7 @@ Touch when:   a new ``CRB_OPENAI_*`` variable is read (a default case and a refu
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import time
@@ -51,11 +52,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
-from crb.builders import base, builder_for_rung
+from crb.builders import base, builder_for_rung, labeller
 from crb.builders import openai_client as oc
 from crb.builders.editblock import EditBlockBuilder
-from crb.builders.labeller import OpenAILabeller
+from crb.builders.labeller import OpenAILabeller, make_labeller
 from crb.builders.openai_agent import OpenAIAgentBuilder
 from crb.core.classify import PathStat
 from crb.factory.author import RungTestAuthor, author_from_label
@@ -66,6 +68,7 @@ from crb.factory.testfirst import (
     author_label,
     author_test,
 )
+from crb.server.schemas import RunCreateRequest
 from fixtures import pyrepo as pr
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -440,8 +443,6 @@ def test_no_caller_stamps_a_named_provider_over_the_endpoints() -> None:
     when the endpoint called is another — the test author did so until G-611 closed. Every
     OpenAI-compatible caller takes its provider from ``resolve_endpoint``, which refuses a
     mismatch."""
-    import re
-
     pattern = re.compile(r"provider\s+or\s+(?:\(\s*endpoint\b|resolved_endpoint\()")
     root = Path(oc.__file__).resolve().parents[1]  # src/crb
     offenders = sorted(
@@ -450,3 +451,203 @@ def test_no_caller_stamps_a_named_provider_over_the_endpoints() -> None:
         if pattern.search(p.read_text(encoding="utf-8"))
     )
     assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# The provider column is the endpoint's host — never a credential, never a look-alike
+# ---------------------------------------------------------------------------
+
+_SECRET = "hunter2-s3cret"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"https://ops:{_SECRET}@gpu-box.internal:8080/v1",
+        f"https://{_SECRET}@gpu-box.internal/v1",
+        f"http://gpu-box.internal:8080/v1?api-key={_SECRET}",
+        f"http://gpu-box.internal:8080/v1#{_SECRET}",
+    ],
+)
+def test_a_base_url_carrying_a_credential_is_refused_by_name_and_never_echoed(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    """P-968: the provider column (and the endpoint in every apparatus stamp) is written
+    as-is to the append-only ledger, so a key in the URL's userinfo, query or fragment
+    would be recorded on every row. It is refused where the URL is read — naming the
+    variable, never echoing the value — and a direct ``EndpointConfig`` refuses it too."""
+    with pytest.raises(ValueError, match="CRB_OPENAI_BASE_URL") as exc:
+        oc.EndpointConfig.from_env({"CRB_OPENAI_BASE_URL": url})
+    assert _SECRET not in str(exc.value)
+    with pytest.raises(ValueError) as direct:
+        oc.EndpointConfig(base_url=url)
+    assert _SECRET not in str(direct.value)
+    monkeypatch.setenv("CRB_OPENAI_BASE_URL", url)
+    for build in (
+        lambda: OpenAIAgentBuilder(model="qwen3"),
+        lambda: author_from_label("editblock:qwen-small"),
+    ):
+        with pytest.raises(ValueError) as built:
+            build()
+        assert _SECRET not in str(built.value)
+
+
+def test_an_azure_endpoint_carrying_a_credential_is_refused_and_never_echoed() -> None:
+    with pytest.raises(ValueError, match="CRB_AZURE_ENDPOINT") as exc:
+        oc.EndpointConfig.from_env(
+            {
+                "CRB_AZURE_ENDPOINT": f"https://ops:{_SECRET}@tenant.openai.azure.com",
+                "CRB_AZURE_DEPLOYMENT": "d1",
+            }
+        )
+    assert _SECRET not in str(exc.value)
+
+
+def test_a_base_url_without_a_scheme_is_refused_without_echoing_it() -> None:
+    with pytest.raises(ValueError, match="CRB_OPENAI_BASE_URL") as exc:
+        oc.EndpointConfig.from_env({"CRB_OPENAI_BASE_URL": f"ops:{_SECRET}@gpu-box/v1"})
+    assert _SECRET not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("url", "provider"),
+    [
+        ("https://api.cerebras.ai/v1", "cerebras"),
+        ("https://API.Cerebras.AI:443/v1", "cerebras"),
+        ("http://cerebras-mirror.lab.internal:8080/v1", "cerebras-mirror.lab.internal:8080"),
+        ("https://api.cerebras.ai.attacker.example/v1", "api.cerebras.ai.attacker.example"),
+        ("https://notcerebras.ai/v1", "notcerebras.ai"),
+        ("http://GPU-Box.internal:8080/v1", "gpu-box.internal:8080"),
+        ("http://[::1]:8080/v1", "[::1]:8080"),
+    ],
+)
+def test_only_a_cerebras_ai_host_is_stamped_cerebras(url: str, provider: str) -> None:
+    """A host that merely CONTAINS ``cerebras`` (a self-hosted mirror, a look-alike domain)
+    is its own provider, so its rows never pool into Cerebras's cell."""
+    assert oc.EndpointConfig.from_env({"CRB_OPENAI_BASE_URL": url}).provider == provider
+
+
+def test_a_cerebras_rung_is_refused_on_a_mirror_that_is_not_cerebras(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CRB_OPENAI_BASE_URL", "http://cerebras-mirror.lab.internal:8080/v1")
+    with pytest.raises(oc.ProviderMismatch):
+        builder_for_rung(base.Rung("openai_agent", "qwen3-local", "cerebras"))
+
+
+# ---------------------------------------------------------------------------
+# A test seam is a callable, never a value a run request can carry
+# ---------------------------------------------------------------------------
+
+
+def test_a_seam_that_is_not_callable_never_bypasses_the_provider_refusal() -> None:
+    """A ``model_fn`` / ``chat_fn`` that is not callable calls nothing in its place, so it
+    is not a seam: the provider the rung names is checked against the endpoint like any
+    other (with nothing configured the endpoint is Cerebras, and ``azure`` is refused)."""
+    with pytest.raises(oc.ProviderMismatch):
+        builder_for_rung(base.Rung("openai_agent", "gpt-4o", "azure"), model_fn="x")
+    with pytest.raises(oc.ProviderMismatch):
+        builder_for_rung(base.Rung("editblock", "gpt-4o", "azure"), chat_fn="x")
+    with pytest.raises(oc.ProviderMismatch):
+        make_labeller(
+            "editblock", model="gpt-4o", provider="azure", builder_config={"chat_fn": "x"}
+        )
+    with pytest.raises(oc.ProviderMismatch):
+        RungTestAuthor(name="editblock", model="m", provider="azure", chat_fn="x")  # type: ignore[arg-type]
+    # a real (callable) seam still stands in for the endpoint and keeps the named provider
+    assert EditBlockBuilder(model="m", provider="azure", chat_fn=lambda _m: "").provider == "azure"
+
+
+@pytest.mark.parametrize(
+    "key", ["model_fn", "chat_fn", "endpoint", "spawn", "runner_factory", "executor"]
+)
+def test_a_run_request_cannot_set_a_builder_seam(key: str) -> None:
+    """``builder_config`` is JSON from ``POST /runs``: an in-process seam or object a
+    builder takes (the model call, the transport, the endpoint, the executor) is refused
+    at the schema, with the reason, before it can reach ``builder_for_rung``."""
+    with pytest.raises(ValidationError, match=rf"{key}.*seam"):
+        RunCreateRequest.model_validate(
+            {
+                "repo": "pyrepo",
+                "kind": "replay",
+                "builder": "openai_agent",
+                "model": "gpt-4o",
+                "builder_config": {key: "x"},
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# The labeller's reply length is the operator's when the operator sets one
+# ---------------------------------------------------------------------------
+
+
+def _label(lab: OpenAILabeller) -> None:
+    lab.label(
+        subject="fix: add returns the sum",
+        message="",
+        diff_stats=[PathStat(path="pkg/calc.py", added=1, deleted=1)],
+        changed_paths=["pkg/calc.py"],
+        path_class="bug.fix",
+    )
+
+
+def test_the_labeller_sends_the_configured_reply_length(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeModel
+) -> None:
+    """``CRB_OPENAI_MAX_TOKENS`` reaches the labeller's request, as it does the builders';
+    unset, the labeller keeps its own shorter default; a run's ``builder_config`` still wins."""
+    _point_at(monkeypatch, fake)
+    _label(OpenAILabeller(model="qwen-local"))
+    monkeypatch.setenv("CRB_OPENAI_MAX_TOKENS", "16000")
+    _label(OpenAILabeller(model="qwen-local"))
+    _label(make_labeller("openai_agent", model="qwen-local", builder_config={"max_tokens": 64}))
+    sent = [r["body"]["max_tokens"] for r in fake.requests]
+    assert sent == [labeller.DEFAULT_MAX_TOKENS, 16000, 64]
+
+
+# ---------------------------------------------------------------------------
+# The guides' count of this module's cases is this module's count
+# ---------------------------------------------------------------------------
+
+_CLAIM = re.compile(
+    r"n = (\d+) test\s+cases in `tests/test_builders_endpoint\.py`: (\d+) point",
+)
+
+
+def _case_counts() -> tuple[int, int]:
+    """(cases, fake-server cases) in this module, read from its own source: a test's cases
+    are the product of its literal ``parametrize`` lists; it is a fake-server case when it
+    takes the ``fake`` fixture or starts a ``FakeModel`` itself."""
+    import ast
+
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    total = fake_cases = 0
+    for node in tree.body:
+        if not (isinstance(node, ast.FunctionDef) and node.name.startswith("test_")):
+            continue
+        cases = 1
+        for dec in node.decorator_list:
+            if isinstance(dec, ast.Call) and ast.unparse(dec.func) == "pytest.mark.parametrize":
+                values = dec.args[1]
+                assert isinstance(values, ast.List), f"{node.name}: parametrize a literal list"
+                cases *= len(values.elts)
+        uses_fake = any(a.arg == "fake" for a in node.args.args) or "FakeModel(" in ast.unparse(
+            node
+        )
+        total += cases
+        fake_cases += cases if uses_fake else 0
+    return total, fake_cases
+
+
+def test_the_guides_count_of_these_cases_is_this_modules() -> None:
+    """P-973: the guides said n = 20 cases against a fake server when the module collected
+    21 and about half used the server; ``claims_check`` checks that a tag is there, never
+    its n. The two guides that cite this module state the count this module has."""
+    total, fake_cases = _case_counts()
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for page in ("OPERATOR.md", "DEPLOYMENT.md"):
+        text = " ".join((docs / page).read_text(encoding="utf-8").split())
+        found = _CLAIM.findall(text)
+        assert found, f"docs/{page} no longer states this module's count"
+        assert {(int(t), int(f)) for t, f in found} == {(total, fake_cases)}, page

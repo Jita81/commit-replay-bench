@@ -489,9 +489,7 @@ class OpenAIAgentBuilder:
         self.model = model
         # the configured endpoint (CRB_OPENAI_BASE_URL …) when none is passed, and the
         # provider it IS — a rung naming another provider is refused here, not stamped
-        self.endpoint, self.provider = resolve_endpoint(
-            endpoint, provider, injected=model_fn is not None
-        )
+        self.endpoint, self.provider = resolve_endpoint(endpoint, provider, seam=model_fn)
         self._model_fn = model_fn
         self.executor: Executor = executor or LocalExecutor()
         self.runner_factory = runner_factory

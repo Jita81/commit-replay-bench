@@ -107,6 +107,13 @@ BUILDER_CONFIG_SECRET_MARKERS: tuple[str, ...] = (
     "passwd",
     "credential",
 )
+#: ``builder_config`` keys that name a builder's in-process seam or object — the model
+#: call, the transport, the endpoint, the executor. A request body is JSON and cannot carry
+#: one; a string in their place is not a seam and would let a rung skip the provider check
+#: (P-970), so they are refused with the reason.
+BUILDER_CONFIG_SEAM_KEYS: frozenset[str] = frozenset(
+    {"model_fn", "chat_fn", "spawn", "runner_factory", "endpoint", "executor"}
+)
 BUILDER_CONFIG_MAX_KEYS = 32
 BUILDER_CONFIG_MAX_BYTES = 8192
 
@@ -748,6 +755,12 @@ class RunCreateRequest(BaseModel):
                 raise ValueError(
                     f"builder_config must not carry credentials ({key!r}); "
                     "provider keys come from the worker's environment"
+                )
+            if key in BUILDER_CONFIG_SEAM_KEYS:
+                raise ValueError(
+                    f"builder_config must not set {key!r}: it is a builder's in-process seam, "
+                    "not a setting — the endpoint comes from the worker's CRB_OPENAI_* / "
+                    "CRB_AZURE_* variables and the executor from the run's `executor`"
                 )
         if len(json.dumps(v, ensure_ascii=False)) > BUILDER_CONFIG_MAX_BYTES:
             raise ValueError(f"builder_config exceeds {BUILDER_CONFIG_MAX_BYTES} bytes")
@@ -1392,6 +1405,7 @@ __all__ = [
     "BUILDER_CONFIG_IDENTITY_KEYS",
     "BUILDER_CONFIG_MAX_BYTES",
     "BUILDER_CONFIG_MAX_KEYS",
+    "BUILDER_CONFIG_SEAM_KEYS",
     "BUILDER_CONFIG_SECRET_MARKERS",
     "BUILD_KINDS",
     "EXECUTORS",

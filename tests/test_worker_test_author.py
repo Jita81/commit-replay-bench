@@ -9,8 +9,9 @@ What it does: Pins that a deployment with no ``CRB_FACTORY__TEST_AUTHOR`` has no
               state in which an item without an operator-authored test stops ``no_oracle``);
               that the setting produces an author whose identity is that rung label; that a
               run's ``params.test_author`` wins over the setting and that ``none`` in either
-              place declines one; that the run's provider is the author's default and is
-              refused when it is not the configured endpoint's (G-611); that an unregistered
+              place declines one; that the author stamps the configured endpoint's provider,
+              never the run's (a Claude ladder with a Cerebras author runs), and a provider
+              its own label names that the endpoint is not is refused (G-611); that an unregistered
               builder name is refused with the run's ladder named; and that the environment
               reaches ``WorkerSettings`` the way every other shared key does.
 How:          ``Worker.__new__`` with only ``settings`` set (the resolution reads nothing
@@ -105,25 +106,29 @@ def test_a_rung_that_is_not_a_registered_builder_is_refused_with_the_ladder_name
     assert "editblock:gpt-oss-120b" in str(exc.value)
 
 
-def test_the_run_provider_is_the_authors_default_provider(
+def test_the_author_stamps_the_endpoints_provider_never_the_runs(
     pyrepo: pr.PyRepo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for name in ("CRB_OPENAI_BASE_URL", "CRB_OPENAI_KEY_ENV", "CRB_AZURE_ENDPOINT"):
-        monkeypatch.delenv(name, raising=False)
+    """The run's provider belongs to its build ladder, not to the test author: a Claude
+    ladder (``claude_code@anthropic``) with a Cerebras-served author is the canonical
+    ADR-0021 set-up and must not be refused. The author stamps the provider of the endpoint
+    it calls (G-611); only a provider its own label names is checked against it."""
     sink = MemorySink()
     ctx = _ctx(pyrepo, sink)
-    ctx.run.provider = "azure"
-    # the author calls the configured endpoint, so the run's provider must BE that endpoint's
-    # (G-611): with Azure configured it is accepted and stamped …
+    ctx.run.builder, ctx.run.model, ctx.run.provider = "claude_code", "claude-sonnet-5", "anthropic"
+    claude = EscalationLadder((Rung("claude_code", "claude-sonnet-5", "anthropic"),))
+    author = _worker("editblock:gpt-oss-120b")._test_author(ctx, claude)
+    assert author is not None and author.provider == "cerebras"
+    # with Azure configured the same author calls Azure and stamps it, whatever the run says
     monkeypatch.setenv("CRB_AZURE_ENDPOINT", "https://tenant.openai.azure.com")
     monkeypatch.setenv("CRB_AZURE_DEPLOYMENT", "d1")
+    ctx.run.provider = "cerebras"
     author = _worker("editblock:m1")._test_author(ctx, LADDER)
     assert author is not None and author.provider == "azure"
-    # … and with no Azure endpoint configured the same run is refused before any call,
-    # naming the ladder, rather than stamping a provider the author does not call
-    monkeypatch.delenv("CRB_AZURE_ENDPOINT")
-    with pytest.raises(ValueError, match=r"names provider 'azure'.*this run's ladder"):
-        _worker("editblock:m1")._test_author(ctx, LADDER)
+    # a provider the author's OWN label names that the endpoint is not is still refused
+    # before any call, naming the ladder
+    with pytest.raises(ValueError, match=r"names provider 'cerebras'.*this run's ladder"):
+        _worker("editblock:m1:cerebras")._test_author(ctx, LADDER)
 
 
 # --- the environment ------------------------------------------------------------------
