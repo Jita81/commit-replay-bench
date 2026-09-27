@@ -335,7 +335,17 @@ UV_LOCK = "uv.lock"
 UV_PUBLIC_INDEX: frozenset[str] = frozenset({"https://pypi.org/simple", "https://pypi.org/simple/"})
 #: A package reached by more marker paths than this is refused, not approximated.
 _UV_MAX_PATHS = 32
-_HASH = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
+_HASH = re.compile(r"sha256:[0-9a-fA-F]{64}\Z")
+#: A project name as PEP 508 spells it, and a version as a pin may write it: the whole
+#: string, so a newline or an option can never ride inside one (``\Z``, not ``$``).
+_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?\Z")
+_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+!_-]*\Z")
+#: What an environment marker is written with: names, quoted values, comparisons and
+#: parentheses. No newline, ``#``, ``;`` or backslash, and no word that starts with ``-``
+#: (an option) — a marker is repository text that reaches the file pip reads.
+_MARKER_CHARS = re.compile(r"[A-Za-z0-9_.'\"()<>=!~ ,*+@/:-]*\Z")
+_OPTION_WORD = re.compile(r"(?:^|\s)-")
+
 #: A node of a uv lock's graph: a package (by identity) and the extra it was reached for.
 _UvNode = tuple[int, str]
 
@@ -353,6 +363,27 @@ class PyPin:
     @property
     def norm(self) -> str:
         return re.sub(r"[-_.]+", "-", self.name).lower()
+
+
+def safe_marker(marker: str) -> bool:
+    """True when ``marker`` (an environment marker, without its ``;``) cannot write a
+    second line, a comment or an option into a requirements file."""
+    return bool(_MARKER_CHARS.match(marker)) and not _OPTION_WORD.search(marker)
+
+
+def pin_line_refusal(pin: PyPin) -> str:
+    """Why ``pin`` cannot be written as one ``name==version [; marker] --hash=…`` line,
+    or ``""``: each field is matched whole, never trusted because a reader produced it."""
+    if not _NAME.match(pin.name):
+        return f"the name {pin.name!r} is not a package name"
+    if not _VERSION.match(pin.version):
+        return f"{pin.name}: the version {pin.version!r} is not a version"
+    if pin.marker and not (pin.marker.startswith(";") and safe_marker(pin.marker[1:])):
+        return f"{pin.name}=={pin.version}: the marker {pin.marker!r} is not a marker"
+    bad = [h for h in pin.hashes if not _HASH.match(h)]
+    if bad:
+        return f"{pin.name}=={pin.version}: {bad[0]!r} is not a sha256 hash"
+    return ""
 
 
 def _logical_lines(text: str) -> Iterable[tuple[int, str]]:
@@ -430,9 +461,11 @@ def parse_requirements(
         m = _PIN.match(spec)
         if not m or _RANGE.search(spec.split(";")[0]):
             raise ProvisionRefused("PROVISION_UNPINNED", f"{where}: {spec!r} is not name==version")
-        pins.append(
-            PyPin(m.group("name"), m.group("version"), hashes, (m.group("marker") or ""), where)
-        )
+        pin = PyPin(m.group("name"), m.group("version"), hashes, (m.group("marker") or ""), where)
+        why = pin_line_refusal(pin)
+        if why:
+            raise ProvisionRefused("PROVISION_SOURCE_REFUSED", f"{where}: {why}")
+        pins.append(pin)
     return files, pins
 
 
@@ -635,11 +668,26 @@ def parse_uv_lock(
 
     def reach(edge: Mapping[str, Any], via: frozenset[str]) -> None:
         pkg = resolve(edge)
+        extras = [str(x) for x in edge.get("extra", []) or []]
         if _uv_is_project(pkg):
-            return  # the tree under test (an edge back to the project, or a self-extra)
+            # the tree under test is never fetched, but an extra of its own that an edge
+            # names (``{ name = "proj", extra = ["testing"] }``) is followed like any other
+            missing = [x for x in extras if x not in optional]
+            if missing:
+                raise ProvisionRefused(
+                    "PROVISION_NO_LOCK",
+                    f"{norm}: the project declares no extra named {missing[0]!r}",
+                )
+            if not extras:
+                return
         marker = str(edge.get("marker", "")).strip()
+        if marker and not safe_marker(marker):
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED",
+                f"{norm}: the marker {marker!r} on {edge.get('name')!r} is not a marker",
+            )
         clause = via | {marker} if marker else via
-        for extra in ("", *[str(x) for x in edge.get("extra", []) or []]):
+        for extra in extras if _uv_is_project(pkg) else ("", *extras):
             node = (id(pkg), extra)
             ident[id(pkg)] = pkg
             held = paths.setdefault(node, set())
@@ -662,11 +710,18 @@ def parse_uv_lock(
 
     pins: list[PyPin] = []
     for pid, pkg in ident.items():
+        if _uv_is_project(pkg):
+            continue  # reached only for its own extras
         clauses = paths.get((pid, ""), set())
         name = str(pkg.get("name", ""))
         version = str(pkg.get("version", ""))
         if not version:
-            raise ProvisionRefused("PROVISION_UNPINNED", f"{norm}: {name} has no version")
+            raise ProvisionRefused("PROVISION_UNPINNED", f"{norm}: {name!r} has no version")
+        if not _NAME.match(name) or not _VERSION.match(version):
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED",
+                f"{norm}: {name!r}=={version!r} is not a package name and version",
+            )
         _uv_check_source(norm, name, pkg.get("source"))
         marker = _uv_marker(clauses)
         hashes = tuple(
@@ -1101,6 +1156,7 @@ __all__ = [
     "parse_go_mod",
     "parse_requirements",
     "parse_uv_lock",
+    "pin_line_refusal",
     "select_role",
     "tree_lock_key",
 ]

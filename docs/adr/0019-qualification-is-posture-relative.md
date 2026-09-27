@@ -275,7 +275,11 @@ may never do has changed, and the apparatus does not move. The selection is part
 bundle key, so a set sealed for one set of groups never serves another. A `uv.lock` is still
 refused, each with its code, when it names an index other than the public one it was
 resolved against, when a package every environment needs has no wheel, when it is a
-workspace or another lock version, and when an edge resolves to more than one package.
+workspace or another lock version, and when an edge resolves to more than one package. A
+lock is repository text, so it is never trusted to be well formed: a name, version or marker
+that is not plain package text — a newline, a comment, an option — and a hash that is not a
+whole sha256 are refused before anything is fetched, and the file pip reads is written line
+by line from pins that are each matched again, so no option can reach pip from a lock (P-119).
 
 `runner_opts.deps_lock` may also name alternatives, as a list inside the list: a commit
 reads the first one it carries, and a commit that carries none is refused `PROVISION_NO_LOCK`
