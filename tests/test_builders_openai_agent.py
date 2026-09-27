@@ -526,6 +526,9 @@ def test_builder_without_credential_records_model_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+    # the builder calls the CONFIGURED endpoint: no shell setting may point it elsewhere
+    for name in ("CRB_OPENAI_BASE_URL", "CRB_OPENAI_KEY_ENV", "CRB_AZURE_ENDPOINT"):
+        monkeypatch.delenv(name, raising=False)
     fx = make_fixture(tmp_path)
     ws = fx.workspace(tmp_path / "wt")
     brief = base.BuildBrief.from_task(fx.task, config=fx.config)

@@ -123,21 +123,19 @@ brief composer for the wave.
 | F · the factory's licence and entry | G-662, G-975, G-707, G-934, G-671, G-933 | the required, scoreable strength probe; the delivered change's own cell; the credential re-check at claim; one brief composer for replay and the factory, and the replay `S1` arm; the leak guard; readiness reads the cell's standard, stops `no_proven_standard` or `needs_context` before any spend, runs calibration builds that never deliver, and applies the size rule |
 | H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970, G-987 | `uv.lock` and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap; the reaper test on a fake clock; shared evidence directories; the docker-wait sites and their ratchet; one retrying helper for every system event's trace seq |
 | E2 · economics in one scope | G-990, G-991, G-989 | a cell's flat cost and latency means, the Pareto frontier, the best config and the forecast's price read one apparatus version and one posture class or are withheld; `GET /value` filters by posture class and refuses to pool two; a help-copy ratchet ties "not yet served" sentences to the API's fields (opened by Wave 1's stream E) |
-
-The builder-endpoint work parked on `feat/w3-x` (stream X) joins this wave when its criteria
-reach the record; until then it is not a wave item.
+| X · a configured builder endpoint | G-611 | every OpenAI-compatible builder and the labeller call the endpoint `CRB_OPENAI_BASE_URL` names, stamp its provider and use its timeout, reply length and retry count (`product.truth.26`, brought in from the parked `feat/w3-x`); the factory's test author stamps the provider of the endpoint it calls and refuses a rung naming another (`product.truth.27`) |
 
 **Done when:** truth.202, truth.203, posture.204, roles.7, evidence.205, go-live.15, go-live.20,
 claims.21, value.111, truth.206, truth.207, truth.214, truth.216 and claims.210 read `met`, as
 do the learn stream's automation.25 and measure.27, intake's recovery.23 and manufacture's
-non-goals.12; `APPARATUS_VERSION` reads 2.4; tests show a cell of many attempts on too few
-commits routing `calibrate`, rows of more than one context arm or class-set version refused a
-pooled reading, a planted leaking context line refused, a ticket in a cell with no proven
-standard stopped before any spend with delivery off, a calibration build that never opens a pull
-request, the code's look rule reproducing ADR-0026's operating characteristics, a build that
-cannot be scored stopping before any push, and a production start under the override writing an
-event that names who set it; the fresh-clone job passes every gate as root without a docker
-daemon, installing from `uv.lock`.
+non-goals.12, and product truth.26 and truth.27; `APPARATUS_VERSION` reads 2.4; tests show a
+cell of many attempts on too few commits routing `calibrate`, rows of more than one context arm
+or class-set version refused a pooled reading, a planted leaking context line refused, a ticket
+in a cell with no proven standard stopped before any spend with delivery off, a calibration
+build that never opens a pull request, the code's look rule reproducing ADR-0026's operating
+characteristics, a build that cannot be scored stopping before any push, and a production start
+under the override writing an event that names who set it; the fresh-clone job passes every gate
+as root without a docker daemon, installing from `uv.lock`.
 
 ## Wave 3 — the measurement (needs the operator)
 
