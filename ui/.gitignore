@@ -5,3 +5,4 @@ test-results
 *.local
 playwright-report-walkthrough
 test-results-walkthrough
+.tsbuild

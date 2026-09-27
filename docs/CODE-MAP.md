@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-634 files with a header · 1 exempt (listed at the end).
+635 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -276,7 +276,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py) | a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (221 files)
+## `tests` (222 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -481,6 +481,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py) | The store tests for ``task_qualifications`` on both dialects (SQLite always; PostgreSQL in CI's ``test-postgres`` job). | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py) | a new reading of the records is added to the store module. |
 | [`tests/test_store_reviews.py`](../tests/test_store_reviews.py) | ``DbReviewLedger``'s test suite — chain, anchor against the stored pack, append-only, on SQLite and PostgreSQL. | [`tests/test_store_reviews.py`](../tests/test_store_reviews.py) | the anchor rule changes (both ledgers and the route together); a review column is added (a migration and the parity case). |
 | [`tests/test_test_infra.py`](../tests/test_test_infra.py) | The test-infrastructure table's test suite — every rule with a positive and a negative case, and the section-aware compare on every file it knows. | [`tests/test_test_infra.py`](../tests/test_test_infra.py) | onboarding a repository whose test configuration lives in a file the table does not know (add the rule WITH a reason, a positive and a negative case, and a section parser if only part of the file is oracle-relevant). |
+| [`tests/test_ui_typecheck_state.py`](../tests/test_ui_typecheck_state.py) | The guard that the UI type-check's incremental state belongs to one checkout. | (this is a test file) | never for a new repository (the UI's own build settings); a new tsconfig with build info is added, or the type-check stops being ``tsc -b``. |
 | [`tests/test_value.py`](../tests/test_value.py) | The test suite for ``crb.core.value`` — the north-star number, clean → working precision, the process-loss share, the learning curve, the register seam and the prospective routing precision. | [`tests/test_value.py`](../tests/test_value.py) | a measure is added to the scorecard, the valid denominator changes, or the register behind ``default_register`` changes (pin its statuses here). |
 | [`tests/test_value_baseline_script.py`](../tests/test_value_baseline_script.py) | The test suite for ``[`scripts/value_baseline.py`](../scripts/value_baseline.py)``, the reader that turns an exported ledger (pipe-separated, or the product's own JSONL) and an exported review file into the scorecard. | [`tests/test_value_baseline_script.py`](../tests/test_value_baseline_script.py) | the export's columns or error classes change (add the class to ``ERRCLASS`` and a case here), or the review export gains a column. |
 | [`tests/test_value_wiring.py`](../tests/test_value_wiring.py) | The cross-stream test suite of the value wave (streams K, W, L, S, D merged). | [`tests/test_value_wiring.py`](../tests/test_value_wiring.py) | a stream's seam changes (a status, a writable switch, a shipped mechanism, the register's inputs); never for a new repository. |

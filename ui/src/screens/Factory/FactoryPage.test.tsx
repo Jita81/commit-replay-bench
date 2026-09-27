@@ -326,6 +326,7 @@ describe('FactoryPage — the shipped contract', () => {
         step: 'readiness',
         reason: "the cell routes deliver but nobody has signed it off (verification tier automated-pass): it is not built. A second person signs the cell, or an approver's named override licenses this one run (it lifts only the sign-off; ADR-0018)",
         reason_code: 'unsigned_cell',
+        measured_route: 'deliver',
       },
     }
     mockApi(base({ 'GET /factory/alpha/tasks': [unsigned, TASKS[1]] }))
