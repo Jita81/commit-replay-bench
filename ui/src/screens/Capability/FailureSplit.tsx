@@ -4,7 +4,8 @@
  * Navigation
  * ----------
  * What it is:   Three small components: `FailureSplitPills` (red · lint · budget · protocol ·
- *               harness · outage, with its `login` part — pilot D1 · DQ), `ModelPointLine` (the model's rate on fair attempts,
+ *               harness · outage, with its `login` part — pilot D1 · DQ),
+ *               `ModelPointLine` (the model's rate on fair attempts,
  *               next to the routing rate) and `ControlsPill` (the repo's controls verdict).
  * What it does: Puts the WHY behind every pass rate on the page: how many misses were the
  *               model's, how many the budget's, how many the instrument's (protocol /

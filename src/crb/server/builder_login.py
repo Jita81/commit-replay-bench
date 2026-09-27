@@ -51,7 +51,8 @@ Works with:   src/crb/builders/claude_code.py (``verify_login`` / ``login_resolu
               verify and the source it names), src/crb/server/routes/runs.py
               (``submit_refusals`` calls ``login_refusal``), src/crb/server/routes/builders.py
               (``GET /builders/logins``, ``POST /builders/{builder}/login/verify``),
-              src/crb/server/routes/system.py (the ``builders`` probe), src/crb/server/routes/admin.py
+              src/crb/server/routes/system.py (the ``builders`` probe),
+              src/crb/server/routes/admin.py
               (the stored-token verify records here), src/crb/server/worker.py (a build that
               meets a refused login records it), src/crb/store/events.py (``append_event``),
               src/crb/server/settings.py (``BuilderSettings.login_ttl_s``)
