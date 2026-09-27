@@ -33,13 +33,20 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from crb.builders.brief import ARM_S2
+from crb.builders.brief import (
+    ACCEPTANCE_HELD_OUT,
+    ACCEPTANCE_NONE,
+    ARM_S2,
+    LABEL_ACCEPTANCE,
+    counts_as_s2_first_attempt,
+)
 from crb.factory import evidence as fe
 from crb.factory import loop as fl
 from crb.factory.standard import (
     STOP_GRANULARIZE,
     STOP_NEEDS_CONTEXT,
     STOP_NO_PROVEN_STANDARD,
+    STOP_UNSIGNED_CELL,
     Calibration,
     CellRef,
     Readers,
@@ -381,6 +388,7 @@ def test_a_change_larger_than_its_licence_stops_size_exceeds_licence(
         "size": "S",
         "builder": "fake",
         "model": "multi",
+        "arm": ARM_S2,
     }
 
 
@@ -448,3 +456,147 @@ def test_calibration_is_one_grant_for_one_run() -> None:
         calibration=grant,
     )
     assert entry.code == STOP_GRANULARIZE  # a grant never lifts the size rule
+
+
+# --- the arm the build carries is the standard's arm (verifier findings, 2026-09-27) -------
+
+
+def _s1_alpha(cell: CellRef) -> Standard | None:
+    return Standard("S1@alpha", signed=True)
+
+
+def test_a_build_on_another_author_than_the_standards_stops_before_any_spend(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The cell's standard is ``S1@alpha``; this run's test author is ``t1``. Building
+    ``S1@t1`` would deliver an arm nobody measured on alpha's licence, so the item stops
+    ``needs_context`` before the author or the builder is called — and so does a caller's
+    own test by another author."""
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        readers=_readers(_s1_alpha),
+        author=_author(),
+        deliver=True,
+        creds=_creds(),
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_NEEDS_CONTEXT
+    _not_built(rig)
+    assert not rig.prs
+    refused = rig.evidence.events_for("I-1", fe.EV_ENTRY_REFUSED)[0].payload
+    assert refused["code"] == STOP_NEEDS_CONTEXT
+    assert "S1@alpha" in refused["reason"] and "t1" in refused["reason"]
+    assert refused["needs"] == ["a failing test written by alpha, the standard's test author"]
+
+    rig2 = _rig(pyrepo, _sub(tmp_path, "caller"), readers=_readers(_s1_alpha))
+    caller = authored_multiply(author="author:t2")
+    out2 = rig2.loop().run_item(multiply_item(), authored=caller)
+    assert out2.status == fl.STATUS_NEEDS_CONTEXT
+    _not_built(rig2)
+
+
+def _class_s1_rung_xs_s1_s_s2(cell: CellRef) -> Standard | None:
+    """``S1@t1`` is every class × size cell's standard; for the building rung the XS cell's
+    standard is ``S1@t1`` and the S cell's is ``S2``."""
+    if cell.builder and cell.size != "XS":
+        return Standard(ARM_S2, signed=True)
+    return Standard("S1@t1", signed=True)
+
+
+def test_the_licence_is_read_on_the_arm_the_build_carried(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A change built on ``S1@t1`` that turns out S-sized is licensed only if ``S1@t1``
+    is the standard of its own S cell — an ``S2`` standard there (a person's test, which
+    this build never carried) licenses nothing. The licence names the arm."""
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        readers=_readers(_class_s1_rung_xs_s1_s_s2),
+        author=_author(),
+        builder=MultiBuilder(first_edit=BIG_MULTIPLY),
+        deliver=True,
+        creds=_creds(),
+    )
+    out = rig.loop().run_item(multiply_item())
+    assert out.status == fl.STATUS_SIZE_EXCEEDS_LICENCE
+    assert not rig.pushes and not rig.prs
+    refused = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)[-1].payload
+    assert refused["licence"]["cell"]["arm"] == "S1@t1"
+    assert refused["licence"]["standard"]["arm"] == ARM_S2
+    assert "S1@t1" in refused["reason"]
+
+    # before the build: no rung holds a licence for the build's arm at the item's size
+    def rung_s2_only(cell: CellRef) -> Standard | None:
+        return Standard(ARM_S2, signed=True) if cell.builder else Standard("S1@t1", signed=True)
+
+    rig2 = _rig(
+        pyrepo,
+        _sub(tmp_path, "pre"),
+        readers=_readers(rung_s2_only),
+        author=_author(),
+        deliver=True,
+        creds=_creds(),
+    )
+    assert rig2.loop().run_item(multiply_item()).status == fl.STATUS_NOT_LICENSED
+    _not_built(rig2)
+
+
+def test_a_factory_s2_row_is_not_a_routing_first_attempt_without_held_out_acceptance(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """ADR-0026 item 8: a calibration build yields an ``S2`` row that can promote a ceiling
+    only when it is also graded on held-out acceptance tests a second person wrote
+    (``product.truth.215``, not built yet). Until then every factory ``S2`` row — the
+    calibration build's and an ordinary one's — is stamped ``acceptance: none`` and the
+    reading's predicate refuses it."""
+    rig = _rig(pyrepo, tmp_path, readers=_readers(lambda c: Standard("S3")))
+    rig.evidence.record_calibration("I-1", approver="approver:ada", reason="measure the arm")
+    cal = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert cal.status == fl.STATUS_CALIBRATION_BUILD
+    (row,) = list(rig.ledger.rows())
+    assert row.labels["context_arm"] == ARM_S2
+    assert row.labels[LABEL_ACCEPTANCE] == ACCEPTANCE_NONE
+    assert not counts_as_s2_first_attempt(row.labels)
+
+    rig2 = _rig(pyrepo, _sub(tmp_path, "s2"), readers=_readers(lambda c: Standard(ARM_S2)))
+    out2 = rig2.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out2.status == fl.STATUS_ACCEPTED
+    (row2,) = list(rig2.ledger.rows())
+    assert row2.labels[LABEL_ACCEPTANCE] == ACCEPTANCE_NONE
+    assert not counts_as_s2_first_attempt(row2.labels)
+    # only positive evidence of held-out acceptance grading counts, and only on S2
+    held = {"context_arm": ARM_S2, LABEL_ACCEPTANCE: ACCEPTANCE_HELD_OUT}
+    assert counts_as_s2_first_attempt(held)
+    assert not counts_as_s2_first_attempt({**held, "context_arm": "S1@t1"})
+    assert not counts_as_s2_first_attempt({"context_arm": ARM_S2})
+
+
+def test_an_unsigned_estimate_cell_is_not_hidden_by_a_signed_larger_cell() -> None:
+    """Where a signed cell is required, every cell the size rule read must be signed: an
+    XS estimate whose own XS cell is proven but unsigned stops ``unsigned_cell`` even when
+    the S cell is signed."""
+    by_size = {"XS": Standard("S1@t1", signed=False), "S": Standard("S1@t1", signed=True)}
+    entry = decide_entry(
+        capability_class="bug.fix",
+        size="XS",
+        standard_for=lambda c: by_size[c.size],
+        agreement_passed=False,
+        missing_slots=(),
+        person_test=False,
+        require_signed_cell=True,
+    )
+    assert entry.code == STOP_UNSIGNED_CELL
+    assert "bug.fix XS" in entry.reason
+    lifted = decide_entry(
+        capability_class="bug.fix",
+        size="XS",
+        standard_for=lambda c: by_size[c.size],
+        agreement_passed=False,
+        missing_slots=(),
+        person_test=False,
+        require_signed_cell=True,
+        override_by="approver:ada",
+    )
+    assert lifted.enters and lifted.override_by == "approver:ada"

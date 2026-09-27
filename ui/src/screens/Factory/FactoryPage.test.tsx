@@ -39,6 +39,7 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryBacklog, FactoryEvolutionPrefill, FactoryTask } from '../../api/types'
+import { HINTS } from '../../help/hints'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { FactoryPage, deliverableCount, estimateFromMap, nextId, refusalSentence, stepsFor, withEvolution } from './FactoryPage'
 
@@ -249,6 +250,17 @@ describe('stepsFor — every refusal carries its reason (J-FAC-4)', () => {
     expect(delivery.detail).toBe('Delivery withheld — the route gate: bug.fix × XS routes calibrate (ci_low_below_bar: the lower bound sits under the bar). Built, graded and reviewed; no pull request opened.')
   })
 
+  it('the route gate and the entry gate are told apart: a cell that does not route deliver opens no pull request, and only the entry gate says not built', () => {
+    // the route gate withholds the pull request of an item that was built, graded and reviewed
+    expect(HINTS['factory.cell_route.withheld']).toContain('no pull request opens for it')
+    expect(HINTS['factory.cell_route.withheld']).toContain('Whether it is built is the entry gate’s decision')
+    expect(HINTS['factory.cell_route.withheld']).not.toContain('not built')
+    // with delivery off, the entry gate still stops what it stops: not every item is built
+    expect(HINTS['field.factory.deliver']).toContain('an item the entry gate admits is built and graded locally only')
+    expect(HINTS['field.factory.deliver']).not.toContain('every item is built')
+    expect(HINTS['stat.factory.deliverable']).toContain('opens no pull request')
+  })
+
   it('delivery that was off for the run says so; a refused push is a failure with the reason', () => {
     const off = task({ status: 'accepted', route_hint: 'build', red_proof: true, build_status: 'clean', review_verdict: 'accept', cell_route: DELIVER, refusal: { step: 'delivery', reason: 'delivery is opt-in and OFF — built and graded locally only', reason_code: '', measured_route: '' } })
     expect(stepsFor(off)[4]).toMatchObject({ status: 'skipped', detail: 'Delivery withheld — delivery was off for this run. Built and graded locally only.' })
@@ -430,7 +442,7 @@ describe('FactoryPage — the shipped contract', () => {
     // the estimate rests on the map's measured mean, with its n and apparatus, and names the band
     await waitFor(() => expect(box).toHaveTextContent("this repository's measured mean over n = 40 attempts with a known cost at apparatus 2.2"))
     expect(box).toHaveTextContent('$0.27 to $0.41 for 1 item at about $0.34 each')
-    expect(box).toHaveTextContent('1 of 2 can be built (1 waits on a signed gap); 1 sits in a cell that routes deliver; the rest are not built')
+    expect(box).toHaveTextContent('1 of 2 can be built (1 waits on a signed gap); 1 sits in a cell that routes deliver; the rest open no pull request')
     // ADR-0026 item 8 — the page states its limit where the person acts
     expect(box).toHaveTextContent('An item whose cell has no proven context standard, or that lacks what the standard needs, is not built. An approver’s calibration build is recorded as one and never delivers.')
     expect(box).toHaveTextContent('no spend cap yet')

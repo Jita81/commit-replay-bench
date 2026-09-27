@@ -46,6 +46,7 @@ from crb.builders.brief import (
     novel_tokens,
 )
 from crb.core.execution import LocalExecutor
+from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger
 from crb.core.playbook import PlaybookLine, taught_before
 from crb.core.prevention import AUTO_CONTEXT, LearningSnapshot
@@ -316,7 +317,6 @@ def test_a_planted_line_naming_an_identifier_the_commit_introduced_is_refused_an
         mode="blind",
         facts=(planted, "The package is calc."),
         novel=novel,
-        retrospective=True,
     )
     assert composed.refused == (planted,)
     assert composed.brief.spec_facts == ("The package is calc.",)
@@ -422,3 +422,99 @@ def test_a_person_written_entry_never_reaches_a_retrospective_brief() -> None:
         library=entries,
     )
     assert len(forward.brief.spec_facts) == 3
+
+
+def test_a_planted_line_naming_only_what_the_held_out_test_introduced_is_refused(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The gold post-image includes the commit's own tests. ``test_subtract_negative``
+    exists only in the held-out test the feat commit added; a learned line naming it (its
+    slots carry nothing, so the playbook's file-name gate passes it) is refused by the
+    composer and counted on the row. It fails if the guard reads the source files alone."""
+    line = PlaybookLine(
+        line_id="pl-test-leak",
+        template_id="keep_public_api",
+        signature="api:y",
+        text="Cover the case test_subtract_negative checks before you finish.",
+        taught_by_tasks=("c-old-1", "c-old-2"),
+    )
+    snap = LearningSnapshot(repo="pyrepo", auto_apply=AUTO_CONTEXT, lines=(line,))
+
+    def dates(shas: Any) -> dict[str, str]:
+        return {s: ("000000000001" if s.startswith("c-old") else "000000000009") for s in shas}
+
+    rows, _ = _replay(pyrepo, tmp_path, learning=snap, commit_dates=dates)
+    (row,) = rows
+    assert row.labels[LABEL_CTX_REFUSED] == "1"
+    assert "pl-test-leak" in row.labels["learn_dropped"]
+    assert Recorder.briefs[-1].playbook == ()
+
+
+def test_a_literal_only_the_held_out_test_introduced_is_novel(tmp_path: Path) -> None:
+    """An expected value that appears only in the commit's new test is a token the commit
+    introduced: a context line naming it is refused."""
+    root = tmp_path / "lit"
+    root.mkdir()
+    pr.git(root, "init", "-q")
+    (root / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    pr.git(root, "add", "-A")
+    pr.git(root, "commit", "-q", "-m", "init")
+    parent = pr.git(root, "rev-parse", "HEAD")
+    (root / "calc.py").write_text(
+        "def add(a, b):\n    return a + b\n\n\ndef subtract(a, b):\n    return a - b\n",
+        encoding="utf-8",
+    )
+    (root / "tests").mkdir()
+    (root / "tests" / "test_subtract.py").write_text(
+        "from calc import subtract\n\n\ndef test_sign():\n    assert subtract(1000, 1337) == -337\n",
+        encoding="utf-8",
+    )
+    pr.git(root, "add", "-A")
+    pr.git(root, "commit", "-q", "-m", "feat: add subtract")
+    commit = pr.git(root, "rev-parse", "HEAD")
+    novel = novel_tokens(
+        GitRepo(root),
+        parent=parent,
+        commit=commit,
+        paths=("calc.py", "tests/test_subtract.py"),
+    )
+    assert {"1000", "1337", "337"} <= novel
+    line = "The expected result for these inputs is 337 below zero."
+    composed = compose(
+        "A0",
+        Ticket("feat: add subtract", "feat: add subtract"),
+        repo="lit",
+        language="python",
+        mode="blind",
+        learned=(line,),
+        novel=novel,
+        retrospective=True,
+    )
+    assert composed.refused == (line,) and composed.brief.playbook == ()
+
+
+def test_a_bare_fact_never_reaches_a_retrospective_brief() -> None:
+    """A fact with no provenance cannot show it was produced mechanically before the pool
+    began, so a retrospective brief refuses it and counts it; a prospective brief (the
+    factory) takes it."""
+    back = compose(
+        "A0",
+        Ticket("feat: add subtract", "feat: add subtract"),
+        repo="pyrepo",
+        language="python",
+        mode="blind",
+        facts=("The package is calc.",),
+        retrospective=True,
+    )
+    assert back.brief.spec_facts == ()
+    assert back.refused == ("The package is calc.",)
+    assert back.labels[LABEL_CTX_REFUSED] == "1"
+    forward = compose(
+        "S2",
+        Ticket("x", "x", "ticket@2026-09-27"),
+        repo="pyrepo",
+        language="python",
+        mode="sighted",
+        facts=("The package is calc.",),
+    )
+    assert forward.brief.spec_facts == ("The package is calc.",)

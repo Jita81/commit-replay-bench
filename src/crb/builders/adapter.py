@@ -958,8 +958,16 @@ def build_fn_for(
         if isinstance(gate, str):
             return _failed_attempt(rung_label, mode, gate)
         texts, _ids, dropped, id_of = context_lines(ws, task)
+        # the gold post-image is the commit's source AND its own (held-out) tests: a token
+        # only the held-out test introduced — an expected value, a test's name — is the
+        # answer too. The set is harness-side; the builder never sees it (ADR-0026 item 7)
         novel = (
-            novel_tokens(ws.repo, parent=ws.parent, commit=task.task_id, paths=task.src_files)
+            novel_tokens(
+                ws.repo,
+                parent=ws.parent,
+                commit=task.task_id,
+                paths=(*task.src_files, *task.test_files),
+            )
             if texts
             else frozenset()
         )

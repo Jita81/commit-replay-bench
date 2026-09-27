@@ -2333,6 +2333,21 @@ def test_a_run_whose_builder_credential_went_after_it_was_queued_stops_at_claim(
     assert "run.credential_refused" in claimed
 
 
+def test_an_s1_run_whose_test_authors_credential_went_stops_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-050 / G-707 for the S1 arm's test author: the claim-time check names every builder
+    the run would call, the author's included, so a dead author key fails the run before
+    any attempt instead of writing an authoring failure per commit."""
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    run = h.enqueue("blind", params_json={"arm": "S1", "test_author": "editblock:gpt-oss-120b"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_credential_missing: ")
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+
+
 def test_a_factory_run_builds_nothing_in_a_cell_with_no_proven_standard(h: Harness) -> None:
     """ADR-0026 item 8, as the worker runs it: with no registered reading (the seam's truth
     until stream R lands) the item stops ``no_proven_standard`` before any spend, delivery

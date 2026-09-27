@@ -572,9 +572,9 @@ export const HINTS = {
   'summary.factory.budget_cap':
     'There is no cap on the run’s total spend yet. The builder’s ladder caps turns, tool calls and wall clock per attempt.',
   'field.factory.deliver':
-    'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
+    'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, an item the entry gate admits is built and graded locally only. The gate stops the rest either way.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; an item in any other cell is not built.',
+    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; an item in any other cell opens no pull request.',
   'field.factory.override':
     'Lift a missing sign-off for this run only, under your name: an item whose cell has a proven standard nobody has signed off is built. It never lifts a missing standard, missing context or a calibration build. Approver only.',
   'item.factory.entry_stop':
@@ -608,7 +608,7 @@ export const HINTS = {
   'factory.cell_route.deliverable':
     'The item’s cell routes deliver on the signed map right now, so a clean build may open a pull request. The n, rate with interval and apparatus follow.',
   'factory.cell_route.withheld':
-    'The item’s cell routes something other than deliver (the reason code follows), so the item is not built: nothing is spent on it and no pull request opens.',
+    'The item’s cell routes something other than deliver (the reason code follows), so no pull request opens for it. Whether it is built is the entry gate’s decision: only when its cell has a proven context standard, and then it is built, graded and reviewed.',
   'factory.cell_route.unmeasured':
     'Nobody has measured this class and size on this repository, so an item in it is not built and nothing is spent on it.',
   'item.factory.cell_prov':

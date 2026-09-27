@@ -626,15 +626,23 @@ CREDENTIAL_EXEMPT: dict[str, str] = {
 }
 
 
-def run_builders(run: Run) -> list[str]:
+def run_builders(run: Run, *, default_author: str = "") -> list[str]:
     """Every builder the run can call: the run's own and each rung's (a ``builder:model``
-    label or an object rung; ``rN`` labels are the run's own builder)."""
+    label or an object rung; ``rN`` labels are the run's own builder) — and, on the replay
+    ``S1`` arm (ADR-0026 item 1), its test author's (``params.test_author``, else the
+    deployment's ``default_author``), whose dead key would otherwise write an authoring
+    failure for every commit at $0 (docs/PREVENTION.md P-003's class)."""
     names = [run.builder] if run.builder else []
     for entry in run.ladder_json or []:
         if isinstance(entry, Mapping):
             names.append(str(entry.get("builder", "")))
         elif isinstance(entry, str) and ":" in entry:
             names.append(entry.split(":", 1)[0])
+    params = dict(run.params_json or {})
+    if str(params.get("arm") or "") == "S1":
+        author = str(params.get("test_author") or default_author or "").strip()
+        if ":" in author:
+            names.append(author.split(":", 1)[0])
     return list(dict.fromkeys(n for n in names if n))
 
 
@@ -648,7 +656,9 @@ def credential_refusal(run: Run, settings: Any) -> None:
     if run.kind not in BUILD_KINDS:
         return
     cfg = dict((run.params_json or {}).get("builder_config") or {})
-    for name in run_builders(run):
+    factory = getattr(settings, "factory", None)
+    default_author = str(getattr(factory, "test_author", "") or "")
+    for name in run_builders(run, default_author=default_author):
         check = CREDENTIAL_CHECKS.get(name)
         if check is None:
             continue
@@ -727,13 +737,14 @@ def create_run(
         raise ApiError(422, "validation_error", f"{named} apply to factory runs only")
     api = require_jobs()
     run = new_run(body, actor=operator.id)
-    submit_refusals(db, settings, body, run)
     if s1:
+        # set before the refusals: the credential check names the S1 test author's builder
         run.params_json = {
             **dict(run.params_json or {}),
             "arm": body.arm,
             **({"test_author": body.test_author.strip()} if body.test_author is not None else {}),
         }
+    submit_refusals(db, settings, body, run)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the
         # evolutions chain, since an evolution registered in the same window changes what

@@ -755,7 +755,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           {
             key: 'Items',
             hint: 'summary.factory.items',
-            value: `${worked} of ${total} can be built${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell that routes deliver${funded ? `, ${funded} as a funded calibration build` : ''}; the rest are not built`,
+            value: `${worked} of ${total} can be built${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell that routes deliver${funded ? `, ${funded} as a funded calibration build` : ''}; the rest open no pull request`,
             note: 'Readiness and the entry gate are assessed again at the run: an item whose cell has no proven context standard, or with an unsigned structural gap, is not built and nothing is spent on it.',
           },
           {
@@ -795,7 +795,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             Open pull requests where the map routes <code>deliver</code>
             {tasks && (
               <Hint id="stat.factory.deliverable" className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
-                {deliverable} of {tasks.length} items sit in a cell that routes <code>deliver</code> today; the rest are not built
+                {deliverable} of {tasks.length} items sit in a cell that routes <code>deliver</code> today; the rest open no pull request
               </Hint>
             )}
           </span>
@@ -1127,9 +1127,11 @@ export function deliverableCount(tasks: FactoryTask[]): number {
 
 /**
  * F28 / J-FAC-14 — the item's cell route BEFORE the run, from the same signed map the
- * delivery gate reads: "routes deliver" (green), "routes calibrate · not built" (amber),
- * or "not measured · not built" (grey) — ADR-0026 item 8: an item whose cell has no proven
- * standard is not built. The pill is short; the n · point [interval] ·
+ * delivery gate reads: "routes deliver" (green), "routes calibrate · no pull request"
+ * (amber) — the route gate withholds the pull request; whether the item is built is the
+ * entry gate's decision, shown on the item — or "not measured · not built" (grey) —
+ * ADR-0026 item 8: an unmeasured cell has no proven standard, so an item in it is not
+ * built. The pill is short; the n · point [interval] ·
  * apparatus follow in a span that wraps at phone width (the aria-label carries them all).
  * Never a guess: `route: ''` means nobody has measured the cell.
  */
@@ -1151,8 +1153,8 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
           routes deliver
         </Pill>
       ) : (
-        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: an item in it is not built — ${r.reason}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
-          routes {r.route} · not built
+        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: an item in it opens no pull request — ${r.reason}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
+          routes {r.route} · no pull request
         </Pill>
       )}
       <Hint id="item.factory.cell_prov" tabStop={false} className="font-mono text-[11px] text-on-surface-muted" aria-hidden data-testid={`cell-route-${t.id}-prov`}>

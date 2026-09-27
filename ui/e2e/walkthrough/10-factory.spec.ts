@@ -101,7 +101,7 @@ test.describe('10 factory (fixture_gold)', () => {
     for (const id of ['I-1', 'I-2']) {
       await expect(page.getByTestId(`step-${id}-readiness`)).toContainText('Not built — no context standard is proven')
       // the pill's text after its glyph (✓ / ⊘ / ○) is the short route phrase; the n · point [interval] · apparatus sit in the span after it
-      await expect(page.getByTestId(`cell-route-${id}`)).toHaveText(/^[^a-z]*(routes (deliver|calibrate|human|granularize)( · not built)?|not measured · not built)$/)
+      await expect(page.getByTestId(`cell-route-${id}`)).toHaveText(/^[^a-z]*(routes (deliver|calibrate|human|granularize)( · no pull request)?|not measured · not built)$/)
       // a measured cell carries its n · point [interval] · apparatus beside the pill (J-FAC-14); an unmeasured one has no span
       const prov = page.getByTestId(`cell-route-${id}-prov`)
       if ((await prov.count()) > 0) await expect(prov).toHaveText(/^n = \d+ · \d+ % \[\d+ %, \d+ %\] · apparatus /)

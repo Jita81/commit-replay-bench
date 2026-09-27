@@ -262,6 +262,17 @@ def is_outage_error(error: str) -> bool:
     return any(m in e for m in OUTAGE_ERROR_MARKERS)
 
 
+def authoring_outage(error: str) -> bool:
+    """``True`` when an ``authoring:`` error's cause is the TEST AUTHOR's provider refusing
+    the call — the ``model_error: …`` the author's builder recorded, matched by
+    :func:`is_outage_error`. Such a row observed nothing, so it is an ``outage``, never an
+    ``authoring`` failure counted against the arm (docs/PREVENTION.md P-005's class)."""
+    if not error.startswith(AUTHORING_ERROR_PREFIX):
+        return False
+    at = error.lower().find("model_error")
+    return at >= 0 and is_outage_error(error[at:])
+
+
 #: The kinds where the model finished and was judged on its own terms (the
 #: denominator of ``model_point`` together with clean).
 MODEL_FAILURE_KINDS: tuple[str, ...] = (FAILURE_BUILDER_RED, FAILURE_LINT, FAILURE_API)
@@ -393,7 +404,9 @@ def derive_failure_kind(
        (the builder was refused by a guard; the belts then judge an empty patch)
     3b. ``error`` starts with ``authoring:``                → ``authoring``
        (the ``S1`` arm's test author produced no RED test: against the arm, never the
-       builder, never the harness — ADR-0026 item 1)
+       builder, never the harness — ADR-0026 item 1) — unless the author's own call was
+       refused by its provider (:func:`authoring_outage`)       → ``outage``
+       (nothing was observed, exactly as rule 4 for the builder: excluded from ``n``)
     4. a ``model_error: …`` naming a provider refusal (usage
        limit, 429, quota, dead credential)                   → ``outage``
        (the call never happened: no observation of anything; excluded from ``n``)
@@ -432,7 +445,7 @@ def derive_failure_kind(
     ):
         return FAILURE_PROTOCOL
     if error.startswith(AUTHORING_ERROR_PREFIX):
-        return FAILURE_AUTHORING
+        return FAILURE_OUTAGE if authoring_outage(error) else FAILURE_AUTHORING
     if error:
         return FAILURE_OUTAGE if is_outage_error(error) else FAILURE_HARNESS
     if stop_reason in BUDGET_STOP_REASONS:

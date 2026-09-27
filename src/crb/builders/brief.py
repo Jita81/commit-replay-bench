@@ -26,7 +26,8 @@ and filterable, never a pooling key:
 **The leak guard** (ADR-0026 item 7). A context line — a structural fact, a learned
 playbook line, a library entry — never names what the commit introduced:
 :func:`novel_tokens` computes, harness-side, the identifiers and literals present in the
-gold post-image of the changed files and absent from the whole parent tree, and
+gold post-image of the changed files — the commit's source AND its own tests — and absent
+from the whole parent tree, and
 :func:`compose` refuses every line naming one, counting it on the row; the builder never
 sees the tokens or the diff that powers the check. A retrospective brief (a replay) takes a
 fact or library entry only when it was produced mechanically — no person's edit or
@@ -38,8 +39,9 @@ Navigation
 ----------
 What it is:   The one brief composer (``compose``), the context-arm name (``context_arm_for``,
               a seam until stream R's ``crb.core.context_arm`` lands), the leak guard
-              (``novel_tokens``, ``refuse_novel``, ``admit_retrospective``) and the replay
-              ``S1`` arm's hook (``S1Arm``).
+              (``novel_tokens``, ``refuse_novel``, ``admit_retrospective``), the replay
+              ``S1`` arm's hook (``S1Arm``) and the rule for which factory ``S2`` rows a
+              reading may count (``counts_as_s2_first_attempt``).
 What it does: Builds every replay and factory ``BuildBrief`` from one arm and one ticket,
               refuses any context line naming a token the commit introduced, admits a
               retrospective fact or library entry only when it was produced mechanically
@@ -104,6 +106,14 @@ CTX_LABELS: tuple[str, ...] = (
 #: ``ctx_ticket`` for a replay: the commit message stands in for the ticket.
 TICKET_MESSAGE = "message"
 
+#: How a factory ``S2`` row was graded (ADR-0026 items 2 and 8): ``held_out`` only when a
+#: second person's acceptance tests, kept outside the builder's tree, were graded too
+#: (``product.truth.215`` — not built yet); ``none`` when the grade read only the test the
+#: builder saw. Only ``held_out`` makes an ``S2`` row a routing first attempt.
+LABEL_ACCEPTANCE = "acceptance"
+ACCEPTANCE_HELD_OUT = "held_out"
+ACCEPTANCE_NONE = "none"
+
 #: The shortest identifier the leak guard compares; shorter words are too common to say
 #: anything about the commit (the playbook's leak gate uses the same floor).
 NOVEL_MIN = 4
@@ -140,6 +150,22 @@ def context_arm_for(
     if plus_l:
         arm += MODIFIER_LOOP
     return arm
+
+
+def arm_base(arm: str) -> str:
+    """The base of an arm id: ``S1@t1+L`` → ``S1``."""
+    return arm.split("+", 1)[0].split("@", 1)[0]
+
+
+def counts_as_s2_first_attempt(labels: Mapping[str, str]) -> bool:
+    """Whether a factory row may count toward an ``S2`` reading (ADR-0026 items 2 and 8):
+    only an ``S2`` row that carries POSITIVE evidence of held-out acceptance grading. A row
+    graded only on the test the builder saw is clean almost by construction, so the
+    absence of the stamp — or ``none`` — never counts. The reading (stream R) reads this."""
+    return (
+        arm_base(labels.get(LABEL_CONTEXT_ARM, "")) == ARM_S2
+        and labels.get(LABEL_ACCEPTANCE, "") == ACCEPTANCE_HELD_OUT
+    )
 
 
 def arm_carries_loop(arm: str) -> bool:
@@ -310,14 +336,19 @@ def compose(
 
     ``facts`` and ``learned`` are context lines (structural facts; the loop's playbook lines,
     already held out and time-ordered); ``library`` the entries the arm carries. A
-    retrospective brief admits a library entry only through :func:`admit_retrospective`;
+    retrospective brief admits a library entry only through :func:`admit_retrospective`,
+    and refuses every bare fact (it carries no provenance to admit it by);
     every context line naming a ``novel`` token is refused and counted. A blind brief
     discloses no test (``BuildBrief`` refuses one that would). ``root`` — the worktree the
     brief is for — is kept out of the provenance hashes."""
     admitted = list(library)
     lib_refused: list[str] = []
+    bare_refused: list[str] = []
     if retrospective:
         admitted, lib_refused = admit_retrospective(library, pool_began=pool_began)
+        # a bare fact carries no provenance, so it cannot show it was produced mechanically
+        # before the pool began: a retrospective brief takes facts only as library entries
+        bare_refused, facts = list(facts), ()
     kept_facts, refused_facts = refuse_novel(facts, novel)
     kept_learned, refused_learned = refuse_novel(learned, novel)
     lib_texts, refused_lib = refuse_novel([e.text for e in admitted], novel)
@@ -339,7 +370,7 @@ def compose(
         finish_checks=tuple(finish_checks),
         playbook=tuple(kept_learned),
     )
-    refused = (*refused_facts, *refused_learned, *refused_lib)
+    refused = (*bare_refused, *refused_facts, *refused_learned, *refused_lib)
     parts = {
         "subject": brief.subject,
         "message": brief.message,
@@ -399,12 +430,15 @@ class S1Arm:
 
 
 __all__ = [
+    "ACCEPTANCE_HELD_OUT",
+    "ACCEPTANCE_NONE",
     "ARM_A0",
     "ARM_S1",
     "ARM_S2",
     "ARM_S3",
     "BASES",
     "CTX_LABELS",
+    "LABEL_ACCEPTANCE",
     "LABEL_CONTEXT_ARM",
     "LABEL_CTX_AUTHOR",
     "LABEL_CTX_BRIEF",
@@ -422,9 +456,11 @@ __all__ = [
     "S1Arm",
     "Ticket",
     "admit_retrospective",
+    "arm_base",
     "arm_carries_loop",
     "compose",
     "context_arm_for",
+    "counts_as_s2_first_attempt",
     "names_novel",
     "novel_tokens",
     "refuse_novel",

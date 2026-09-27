@@ -96,7 +96,15 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from crb.builders.base import Budget, Builder, Rung
-from crb.builders.brief import ARM_S1, ARM_S2, arm_carries_loop, context_arm_for
+from crb.builders.brief import (
+    ACCEPTANCE_NONE,
+    ARM_S1,
+    ARM_S2,
+    LABEL_ACCEPTANCE,
+    arm_base,
+    arm_carries_loop,
+    context_arm_for,
+)
 from crb.core.deps import TaskDeps
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
@@ -567,6 +575,7 @@ class FactoryLoop:
             calibration=self._calibration(item),
             require_signed_cell=s.require_signed_cell,
             override_by=s.deliver_override_by,
+            author=self._s1_author(authored),
         )
         if not entry.enters:
             self._stop_entry(item, r, entry)
@@ -600,7 +609,11 @@ class FactoryLoop:
         if s.deliver and entry.calibration is None:
             rungs = [(rung.builder, rung.model) for rung in s.ladder]
             if not licensing_rungs(
-                item.capability_class, item.size_estimate, rungs, standard_for=g.standard_for
+                item.capability_class,
+                item.size_estimate,
+                rungs,
+                arm=entry.arm,
+                standard_for=g.standard_for,
             ):
                 self._stop_entry(
                     item,
@@ -608,9 +621,9 @@ class FactoryLoop:
                     Entry(
                         STOP_NOT_LICENSED,
                         f"delivery is on and no rung of this run's ladder "
-                        f"({', '.join(f'{b}:{m}' for b, m in rungs)}) holds a licence in the "
-                        f"{item.capability_class} {item.size_estimate} cell for its own "
-                        "builder and model: not built",
+                        f"({', '.join(f'{b}:{m}' for b, m in rungs)}) holds a licence for "
+                        f"{entry.arm} in the {item.capability_class} {item.size_estimate} "
+                        "cell for its own builder and model: not built",
                         reason_code=STOP_NOT_LICENSED,
                         standard=entry.standard,
                         cells=entry.cells,
@@ -632,6 +645,19 @@ class FactoryLoop:
                 answers=entry.reason_code,
             )
         return r, route, entry
+
+    def _s1_author(self, authored: AuthoredTest | None) -> str | None:
+        """The canonical model that would write this item's ``S1`` test — a caller's own
+        (non-person) test's author, else the run's test author — or ``None`` when there is
+        none (the oracle step then stops ``no_oracle``). The entry gate compares it with an
+        ``S1@<author>`` standard, before any spend (ADR-0026 items 1 and 8)."""
+        if authored is not None and not authored.operator_authored:
+            model = authored.author.split(":", 1)[-1]
+            return canonical_model(model) or model
+        ta = self.spec.test_author
+        if ta is None:
+            return None
+        return canonical_model(ta.model) or ta.model
 
     @staticmethod
     def _arm_base(entry: Entry, authored: AuthoredTest | None) -> str:
@@ -795,6 +821,7 @@ class FactoryLoop:
         previous: DeliveryResult | None = None,
         rework_n: int = 0,
         after_verdict: str = "",
+        arm: str = "",
     ) -> tuple[DeliveryResult | None, str]:
         """The LAST step: delivery of a build the review ACCEPTED (ADR-0021) — skipped and
         RECORDED when opt-in is off; a failure stops the item (``delivery_failed``).
@@ -804,8 +831,9 @@ class FactoryLoop:
         ``previous`` is the item's OPEN pull request from an earlier run: the same pull
         request is updated, never a second one opened; its comment failing (after the push
         has moved the branch) is recorded on the ``delivery.updated`` event as
-        ``comment_error`` and emitted as a ``delivery.comment_failed`` warning. Returns
-        ``(result, pr_ref)``."""
+        ``comment_error`` and emitted as a ``delivery.comment_failed`` warning. ``arm`` is
+        the context arm the build carried: the change's own cell must license THAT arm.
+        Returns ``(result, pr_ref)``."""
         s = self.spec
         if not verdict.accepted or verdict.pack_hash != final.pack_hash:
             raise DeliveryError(
@@ -823,8 +851,9 @@ class FactoryLoop:
             return None, ""
         # THE LICENCE OF THE DELIVERED CHANGE (ADR-0025 item 12, C4): the change's OWN cell —
         # its class, the size tier of the churn actually built, the final rung's builder and
-        # model — must license delivery in the map read before the run. Both sizes and both
-        # cells go on the evidence; nothing (no override) lifts this.
+        # model, and the arm the build carried — must license delivery in the map read
+        # before the run. Both sizes and both cells go on the evidence; nothing (no
+        # override) lifts this.
         built_by = final.pack.builder
         rung_builder, _, rung_model = final.rung.partition(":")
         lic = own_cell_licence(
@@ -833,6 +862,7 @@ class FactoryLoop:
             measured=final.task.size,
             builder=built_by.name if built_by is not None else rung_builder,
             model=built_by.model if built_by is not None else rung_model,
+            arm=arm,
             standard_for=s.gate.standard_for,
         )
         if not lic.licensed:
@@ -1200,8 +1230,13 @@ class FactoryLoop:
             open_pr = None if calibrating else self._open_delivery(item)
             oracle, arm = self._oracle(item, readiness, authored, entry)
             # the arm is composed into the brief and stamped by the composer; the loop adds
-            # only what the build cannot know — that it is an approver's calibration build
+            # only what the build cannot know — that it is an approver's calibration build,
+            # and, on an S2 row, that no second person's held-out acceptance tests graded
+            # it (ADR-0026 item 8; product.truth.215 builds them): such a row is never a
+            # routing first attempt (``crb.builders.brief.counts_as_s2_first_attempt``)
             labels = {LABEL_CALIBRATION: "true"} if calibrating else {}
+            if arm_base(arm) == ARM_S2:
+                labels[LABEL_ACCEPTANCE] = ACCEPTANCE_NONE
             proof = self._prove(item, readiness, oracle)
             results = self._build(
                 item, readiness, oracle, proof, trial_prefix="r", labels=labels, arm=arm
@@ -1310,6 +1345,7 @@ class FactoryLoop:
                     previous=open_pr,
                     rework_n=reworks,
                     after_verdict=verdicts[-2].verdict if len(verdicts) > 1 else "",
+                    arm=arm,
                 )
                 status = STATUS_ACCEPTED
             else:

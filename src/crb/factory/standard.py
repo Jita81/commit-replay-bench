@@ -45,9 +45,11 @@ What it is:   The entry gate, the calibration grant and the licence of the deliv
               standards.
 What it does: ``decide_entry`` returns the stop (or the entry) for one item before any spend:
               the size rule, the standard, what the ticket must carry, the sign-off clause and
-              the override that lifts only it, the calibration grant; ``licensing_rungs`` and
-              ``own_cell_licence`` read the builder × model licence before the build and on the
-              delivered change's measured cell after it.
+              the override that lifts only it (every cell the size rule read must be signed),
+              the calibration grant, and that an ``S1@<author>`` standard is built only by that
+              author; ``licensing_rungs`` and ``own_cell_licence`` read the builder × model × arm
+              licence before the build and on the delivered change's measured cell after it —
+              a standard of another arm licenses nothing.
 How:          ``CellRef`` → ``StandardFor`` (a callable the worker binds to the pre-run map) →
               ``Standard`` (arm, ceiling, signed); ``more_demanding`` orders two cells;
               ``Entry`` / ``Licence`` are the recorded decisions.
@@ -115,26 +117,40 @@ def _base(arm: str) -> str:
     return arm.split("+", 1)[0].split("@", 1)[0]
 
 
+def _author(arm: str) -> str:
+    """The test author an ``S1@<author>`` arm names (``""`` for any other base)."""
+    head = arm.split("+", 1)[0]
+    return head.split("@", 1)[1] if "@" in head else ""
+
+
 @dataclass(frozen=True)
 class CellRef:
     """One cell to read: its class and size, and — for a licence — the building rung's
-    builder and model (empty for the class × size standard)."""
+    builder and model and the context ARM the build carried (empty for the class × size
+    standard). The map is per arm (ADR-0026 items 1 and 6, ``?arm=``): a licence read asks
+    whether THAT arm is proven in the cell, and the licence also refuses a standard of any
+    other arm, whatever the reader answers."""
 
     capability_class: str
     size: str
     builder: str = ""
     model: str = ""
+    arm: str = ""
 
     def key(self) -> str:
         parts = [self.capability_class, self.size]
         if self.builder or self.model:
             parts += [self.builder, self.model]
+        if self.arm:
+            parts.append(self.arm)
         return "|".join(parts)
 
     def to_dict(self) -> dict[str, str]:
         out = {"capability_class": self.capability_class, "size": self.size}
         if self.builder or self.model:
             out |= {"builder": self.builder, "model": self.model}
+        if self.arm:
+            out["arm"] = self.arm
         return out
 
 
@@ -213,7 +229,11 @@ def standard_for(repo: str, cell: CellRef) -> Standard | None:
     or ``None`` when no registered reading of a certifying arm delivers there. Until R's
     readings land nothing has been registered, so nothing is proven — the true answer on
     this branch is ``None`` for every cell. The integration replaces this body with R's
-    ``crb.core.reading`` reader; the worker binds it once per run, before any build."""
+    ``crb.core.reading`` reader; the worker binds it once per run, before any build.
+
+    A cell with an ``arm`` (a licence read) asks about THAT arm on the per-arm map: R's
+    reader answers with that arm's standard when it is proven there, else ``None`` — the
+    licence refuses any other arm it is handed either way."""
     del repo, cell
     return None
 
@@ -357,6 +377,7 @@ def decide_entry(
     calibration: Calibration | None = None,
     require_signed_cell: bool = False,
     override_by: str = "",
+    author: str | None = None,
 ) -> Entry:
     """The entry gate for one item, before any spend (ADR-0026 item 8).
 
@@ -364,6 +385,11 @@ def decide_entry(
     whether a person attached a failing test. ``calibration`` is an approver's grant: it
     admits an item stopped ``no_proven_standard`` or ``needs_context`` (never any other
     stop) as a calibration build. ``override_by`` lifts ``unsigned_cell`` and nothing else.
+    ``author`` is the canonical model of whoever would write the ``S1`` test (the run's
+    test author, or the author of a test a caller handed in): on an ``S1@<x>`` standard it
+    must be ``x``, or the build would carry an arm nobody measured and stops
+    ``needs_context``. ``None`` — the caller does not know who would author (the intake's
+    ticket feedback) — skips that clause; the factory's own check always passes it.
     """
     if size == SIZE_UNSIZED or size not in SIZE_TIER_NAMES:
         return Entry(
@@ -417,6 +443,24 @@ def decide_entry(
             standard=standard,
             cells=cells,
         )
+    elif (
+        standard.base == BASE_S1
+        and author is not None
+        and _author(standard.arm)
+        and author != _author(standard.arm)
+    ):
+        want = _author(standard.arm)
+        stop = Entry(
+            STOP_NEEDS_CONTEXT,
+            f"the {cell} {_cells(named)} standard is {standard.arm}, measured with tests "
+            f"written by {want}; this run's test would be written by {author or 'nobody'}, "
+            "an arm nobody measured, so it is not built. Run it with the standard's test "
+            "author, or an approver may fund one calibration build of the other arm",
+            reason_code=BASE_S1,
+            needs=(f"a failing test written by {want}, the standard's test author",),
+            standard=standard,
+            cells=cells,
+        )
     elif standard.base == BASE_S2 and not person_test:
         stop = Entry(
             STOP_NEEDS_CONTEXT,
@@ -438,11 +482,16 @@ def decide_entry(
             )
         return stop
     assert standard is not None  # every path without one stopped above
-    if require_signed_cell and not standard.signed:
+    # EVERY cell the size rule read must be signed, not only the one applied: a signed
+    # larger cell never hides an unsigned estimate cell (none read is missing a standard
+    # or a ceiling here — either would have been the more demanding and stopped above)
+    unsigned = [sz for sz, st in read if st is None or not st.signed]
+    if require_signed_cell and unsigned:
         if not override_by:
+            where = f"{capability_class} {' and '.join(unsigned)}"
             return Entry(
                 STOP_UNSIGNED_CELL,
-                f"the {cell} {_cells(named)} standard {standard.arm} is proven but has no active "
+                f"the {where} {_cells(unsigned)} standard is proven but has no active "
                 "sign-off: it is not built. A second person signs the cell, or an approver's "
                 "named override licenses this one run (it lifts only the sign-off)",
                 reason_code=STOP_UNSIGNED_CELL,
@@ -482,19 +531,28 @@ class Licence:
         }
 
 
+def _licenses_arm(std: Standard | None, arm: str) -> bool:
+    """A cell's standard licenses a build only when it certifies AND is the very arm the
+    build carried (ADR-0026 items 1 and 6: the map is per arm; another arm's reading says
+    nothing about this one)."""
+    return std is not None and std.licenses and std.arm == arm
+
+
 def licensing_rungs(
     capability_class: str,
     size: str,
     rungs: Iterable[tuple[str, str]],
     *,
+    arm: str,
     standard_for: StandardFor,
 ) -> list[tuple[str, str]]:
-    """The ``(builder, model)`` rungs whose own cell at ``size`` licenses delivery — the
-    class × size × builder × model projection, never one that pools models."""
+    """The ``(builder, model)`` rungs whose own cell at ``size`` licenses delivery of a
+    build on ``arm`` — the class × size × builder × model × arm projection, never one that
+    pools models or arms."""
     out: list[tuple[str, str]] = []
     for builder, model in rungs:
-        std = standard_for(CellRef(capability_class, size, builder, model))
-        if std is not None and std.licenses:
+        std = standard_for(CellRef(capability_class, size, builder, model, arm))
+        if _licenses_arm(std, arm):
             out.append((builder, model))
     return out
 
@@ -506,22 +564,30 @@ def own_cell_licence(
     measured: str,
     builder: str,
     model: str,
+    arm: str,
     standard_for: StandardFor,
 ) -> Licence:
-    """The delivered change's OWN cell — its class, the size tier of the build's churn and
-    the final rung's builder and model — must license delivery (ADR-0025 item 12). A change
-    larger than its estimate whose own cell does not license it stops
+    """The delivered change's OWN cell — its class, the size tier of the build's churn, the
+    final rung's builder and model, and the context ``arm`` the build carried — must
+    license delivery (ADR-0025 item 12, ADR-0026 item 6): its standard must be that arm. A
+    change larger than its estimate whose own cell does not license it stops
     ``size_exceeds_licence``; any other unlicensed cell stops ``cell_not_licensed``."""
-    cell = CellRef(capability_class, measured, builder, model)
+    cell = CellRef(capability_class, measured, builder, model, arm)
     std = standard_for(cell)
-    if std is not None and std.licenses:
+    if _licenses_arm(std, arm):
         return Licence("", "", cell, std, estimate, measured)
     larger = (
         estimate in SIZE_TIER_NAMES
         and measured in SIZE_TIER_NAMES
         and SIZE_TIER_NAMES.index(measured) > SIZE_TIER_NAMES.index(estimate)
     )
-    what = "no standard" if std is None else f"only {std.arm}, a ceiling"
+    what = (
+        "no standard"
+        if std is None
+        else f"only {std.arm}, a ceiling"
+        if not std.licenses
+        else f"the standard {std.arm}, not {arm}, the arm this build carried"
+    )
     if larger:
         return Licence(
             STOP_SIZE_EXCEEDS_LICENCE,
@@ -562,10 +628,13 @@ def gate_for(
     calibration: Calibration | None = None,
     require_signed_cell: bool = False,
     override_by: str = "",
+    author: str | None = None,
 ) -> Entry:
     """:func:`decide_entry` for one backlog item and its readiness — the ONE call the loop's
     pre-build check and the intake's ticket feedback both make, so the ticket, the intake
-    row and the factory item name the same stop."""
+    row and the factory item name the same stop. ``author`` (see :func:`decide_entry`) is
+    known to the loop only; a deployment whose test author differs from the standard's
+    stops at the factory, and that is the operator's configuration, not the ticket's."""
     return decide_entry(
         capability_class=item.capability_class,
         size=item.size_estimate,
@@ -576,6 +645,7 @@ def gate_for(
         calibration=calibration,
         require_signed_cell=require_signed_cell,
         override_by=override_by,
+        author=author,
     )
 
 

@@ -139,3 +139,23 @@ def test_a_weak_oracle_is_a_major_finding_never_a_required_failure(
     assert out.status == fl.STATUS_ORACLE_NEEDS_STRENGTHENING and not rig.prs
     mut = next(p for p in out.verdicts[-1].probes if p.name == rv.MutationStrengthProbe.name)
     assert mut.passed is False and not mut.failed
+
+
+def test_a_probe_that_crashes_while_scoring_stops_the_item_before_any_push(
+    pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The probe fails closed when scoring itself raises (a harness failure): the result is
+    a required failure, so the item stops ``oracle_not_scoreable`` with nothing pushed —
+    a crashed probe is never an accepted, delivered build."""
+
+    def crash(ws: Any, task: Any, **_: Any) -> CommitOracleScore:
+        raise RuntimeError("the mutant runner could not start")
+
+    monkeypatch.setattr(rv, "score_task", crash)
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds())
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ORACLE_NOT_SCOREABLE
+    assert out.delivery is None and not rig.pushes and not rig.prs
+    mut = next(p for p in out.verdicts[-1].probes if p.name == rv.MutationStrengthProbe.name)
+    assert mut.required and mut.passed is None and mut.failed
+    assert "RuntimeError" in mut.detail and "could not start" in out.error

@@ -1248,7 +1248,9 @@ class ProbeWaiverOut(BaseModel):
 def _entry_preview(home: FactoryHome, item: BacklogItem) -> Entry | None:
     """The entry gate for an item no factory run has reached yet — the SAME call the next
     run's pre-build check makes (ADR-0026 item 8), over the repository's readers; ``None``
-    when it would enter."""
+    when it would enter. One clause is the run's own: whether its test author is the one an
+    ``S1@<author>`` standard names — a run parameter the preview cannot know — so the run
+    may still stop ``needs_context`` for it."""
     readiness = assess(item, home.gap_ledger().for_item(item.id))
     entry = gate_for(
         item,

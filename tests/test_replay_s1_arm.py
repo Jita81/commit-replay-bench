@@ -129,7 +129,11 @@ def test_an_authoring_failure_counts_against_the_arm_never_the_builder(
     assert derive_failure_kind(clean=False, disqualified=False, error="authoring: x") == "authoring"
 
 
-def test_post_runs_takes_arm_s1_on_a_blind_run_only(tmp_path: Path) -> None:
+def test_post_runs_takes_arm_s1_on_a_blind_run_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the S1 test author's builder is credential-checked at submit, like every rung
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-present")
     with make_env(tmp_path) as env:
         login(env.client, "operator")
         body = {"repo": ALPHA, "kind": "replay", "builder": "fixture_gold", "model": "gold"}
@@ -176,3 +180,46 @@ def test_the_s1_author_is_never_a_build_rungs_model(pyrepo: pr.PyRepo) -> None:
     arm = _worker()._s1_arm(other, ladder, "blind")
     assert arm is not None and arm.arm.startswith("S1@") and "qwen" in arm.arm
     assert _worker()._s1_arm(_ctx(pyrepo, sink), ladder, "blind") is None
+
+
+def test_an_author_outage_is_an_outage_never_an_authoring_failure() -> None:
+    """The S1 test author's provider refused the call (a usage limit, a 429): nothing was
+    observed, so the row is an ``outage`` — outside n — not an ``authoring`` failure
+    counted against the arm. An author that ran and produced no RED test stays
+    ``authoring``."""
+    outage = "authoring: the test author failed: ModelError: model_error: 429 usage limit reached"
+    assert derive_failure_kind(clean=False, disqualified=False, error=outage) == "outage"
+    red = "authoring: the authored test 'tests/test_x.py' is not RED at the parent: it passes"
+    assert derive_failure_kind(clean=False, disqualified=False, error=red) == "authoring"
+    other = "authoring: the test author failed: ModelError: model_error: bad json"
+    assert derive_failure_kind(clean=False, disqualified=False, error=other) == "authoring"
+
+
+def test_an_s1_run_whose_test_author_has_no_credential_is_refused_at_submit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-003's class for the S1 test author: a run whose author cannot call its provider
+    would write an authoring failure for every commit at $0. The submit check names the
+    author's builder, and nothing is queued."""
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    with make_env(tmp_path) as env:
+        login(env.client, "operator")
+        body = {
+            "repo": ALPHA,
+            "kind": "blind",
+            "builder": "fixture_gold",
+            "model": "gold",
+            "arm": "S1",
+            "test_author": "openai_agent:gpt-oss-120b",
+        }
+        r = env.post("/runs", json=body)
+        assert r.status_code == 422, r.text
+        err = envelope(r)
+        assert err["code"] == "builder_credential_missing"
+        assert err["detail"]["builder"] == "openai_agent"
+        # a blind run NOT on the S1 arm never calls the author: no author check
+        r = env.post(
+            "/runs", json={k: v for k, v in body.items() if k not in ("arm", "test_author")}
+        )
+        assert r.status_code == 201, r.text

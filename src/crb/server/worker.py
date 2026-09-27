@@ -1228,7 +1228,7 @@ class Worker:
         ONLY: the check names the variable or the file, never reads a value into anything
         this returns. ``""`` when every builder the run would call has its credential."""
         try:
-            credential_refusal(run, SimpleNamespace(home=self.home))
+            credential_refusal(run, SimpleNamespace(home=self.home, factory=self.settings.factory))
         except ApiError as exc:
             why = exc.message.removesuffix(" — nothing was queued")
             return (
