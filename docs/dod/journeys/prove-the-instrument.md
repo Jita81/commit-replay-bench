@@ -19,14 +19,14 @@ rate is evidence. In the product's words: "Two runs before any model attempt …
 pass rate is a rumour" (ONBOARDING-A-REPO step 3); on the walk, "a weak oracle routes to a
 human whatever the pass rate" and "a cheat that grades clean is an escape, and one escape
 withholds deliver" (`connection.ts` stage `why`). The governance reader reads the result on
-the Oracle screen.
+the Oracle screen **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Entry → exit.** Arrive on `/connect/:name` with stages 1–2 (registered, probed) done — the
 walk derives every stage from what the API already knows, so it resumes where the repository
 is — or on `/repos/:name` → `Start a run`. Step order: mine (stage 3) → oracle (stage 4) →
 controls (stage 5) → read the three instrument gates on `/results`. Leave with stage 6 `First
 measurement` unlocked (`connection.ts:318-338`), the controls gate on `/oracle` OPEN, or a
-named finding (amber `passed with …`) with deliver withheld for the repository.
+named finding (amber `passed with …`) with deliver withheld for the repository **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** No step spends model budget (`spends: false` on stages 1–5); the journey does
 not measure a model, does not strengthen a test (Learn names that work), does not sign
