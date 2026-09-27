@@ -318,6 +318,24 @@ def signoff_tampered(row: Signoff) -> bool:
     return row.row_hash != signoff_hash(row)
 
 
+def signoff_chain_intact(rows: Sequence[Signoff]) -> bool:
+    """Whether the WHOLE sign-off chain (every row, in ``seq`` order) links from genesis and
+    every row still hashes to its own name. Licensing is decided on this, never per row: an
+    edited revocation names whatever scope the editor chose, so reading it as "a revocation
+    of the scope it names" would revive the attestation it withdrew (EI-6 variant, 2026-09-27)."""
+    prev = GENESIS_HASH
+    for r in rows:
+        if r.prev_hash != prev or signoff_tampered(r):
+            return False
+        prev = r.row_hash
+    return True
+
+
+def signoff_store_intact(session: Session) -> bool:
+    """:func:`signoff_chain_intact` over every stored sign-off row, whatever its repository."""
+    return signoff_chain_intact(load_signoff_rows(session))
+
+
 def _iter_signoffs(session: Session, batch: int = 1000) -> Iterable[Signoff]:
     """Every sign-off row in ``seq`` order, keyset-paged."""
     last = 0
@@ -517,20 +535,16 @@ def load_signoff_records(session: Session, repo: str | None = None) -> list[Sign
     Feed these to :func:`crb.core.signoff.apply_signoffs_to_map`, which collapses to the
     latest per scope and re-checks the cell's current false-Q1.
 
-    A row that no longer hashes to its ``row_hash`` (:func:`signoff_tampered`) fails
-    closed: it is read as a REVOCATION of the scope it names — it lifts nothing and shadows
-    any earlier attestation of that scope — and one whose altered fields cannot even be
-    read as a record is left out (EI-6, 2026-09-27)."""
-    out: list[SignoffRecord] = []
-    for r in load_signoff_rows(session, repo):
-        if not signoff_tampered(r):
-            out.append(to_record(r))
-            continue
-        try:
-            out.append(replace(to_record(r), revoked=True, attestation=None))
-        except ValueError:
-            continue
-    return out
+    A broken chain lifts NOTHING, in any repository: when any row no longer hashes to its
+    own ``row_hash`` or no longer links to the row before it (:func:`signoff_chain_intact`
+    over the whole store), no record is returned. A per-row check is not enough — an
+    edited row's scope, repository and kind are the editor's choice, so no reading of it can
+    be trusted to withdraw what it withdrew (EI-6, 2026-09-27). ``/signoffs/verify`` and the
+    ``/health`` ``ledger`` probe name the break."""
+    rows = load_signoff_rows(session)
+    if not signoff_chain_intact(rows):
+        return []
+    return [to_record(r) for r in rows if not repo or r.repo in (repo, WILDCARD)]
 
 
 # ---------------------------------------------------------------------------
@@ -957,12 +971,22 @@ def _display_name(session: Session, user_id: str) -> str:
 
 
 def signoff_out(
-    session: Session, row: Signoff, all_rows: Sequence[Signoff], *, posture_current: str = ""
+    session: Session,
+    row: Signoff,
+    all_rows: Sequence[Signoff],
+    *,
+    posture_current: str = "",
+    chain_ok: bool | None = None,
 ) -> SignoffWithPolicyOut:
     """One attestation as served: the stored snapshot plus the LIVE ``active`` /
     ``current_false_q1`` — a cell that has since acquired a false-Q1 row is shown
     inactive even though its row is untouched — and ``tampered``: a row that no longer
-    hashes to its own ``row_hash`` is served inactive whatever it says (EI-6)."""
+    hashes to its own ``row_hash`` is served inactive whatever it says (EI-6). ``chain_ok``
+    is the whole store's chain (:func:`signoff_store_intact`, read here when the caller has not
+    already): when it is broken EVERY attestation is served inactive, as the overlay lifts
+    none of them."""
+    if chain_ok is None:
+        chain_ok = signoff_store_intact(session)
     revocation = _revocation_for(row, all_rows)
     current_fq1, _ = (
         cell_false_q1(session, row.repo, scope_of(row)) if row.repo != WILDCARD else (0, [])
@@ -990,6 +1014,7 @@ def signoff_out(
         and current_fq1 == 0
         and not stale
         and not tampered
+        and chain_ok
     )
     return SignoffWithPolicyOut(
         id=row.signoff_id,
@@ -1016,6 +1041,7 @@ def signoff_out(
         posture_class=signed_posture,
         posture_class_current=posture_current,
         tampered=tampered,
+        chain_ok=chain_ok,
         evidence=_evidence(row),
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,
@@ -1235,9 +1261,16 @@ def list_signoffs(
     ]
     attestations.reverse()  # newest first
     window = attestations[page.offset : page.offset + page.limit]
+    chain_ok = signoff_store_intact(db)  # once per page, not once per row
     return Page[SignoffWithPolicyOut](
         items=[
-            signoff_out(db, r, rows, posture_current=posture_now(db, settings, r.repo))
+            signoff_out(
+                db,
+                r,
+                rows,
+                posture_current=posture_now(db, settings, r.repo),
+                chain_ok=chain_ok,
+            )
             for r in window
         ],
         total=len(attestations),
@@ -1733,8 +1766,10 @@ __all__ = [
     "run_actors",
     "scope_of",
     "signoff_body",
+    "signoff_chain_intact",
     "signoff_hash",
     "signoff_out",
+    "signoff_store_intact",
     "signoff_tampered",
     "to_record",
     "verifier_kind_of",

@@ -16,22 +16,30 @@ re-hash to its name.
 
 EI-6: nothing on the server walked the sign-off or the review chain; now ``/ledger/verify``,
 ``GET /signoffs/verify`` and the ``ledger`` probe of ``/health`` do, and a tampered sign-off
-is served inactive and lifts no cell.
+is served inactive and lifts no cell. The skeptic's pass found the first fix failed closed per
+ROW, so re-scoping a revocation revived the licence it withdrew, and that the tamper test read
+a projection a full-cell sign-off never lifts; now a broken chain lifts nothing anywhere
+(DL-146) and every licence assertion reads ``/routes``' full cell, lifted first.
+
+EI-2 residual: a reader's view (an explicit apparatus or ``all``) routes imported rows; every
+cell and decision now names them (``rows_imported``).
 
 Navigation
 ----------
 What it is:   The regression tests for the audit's evidence-and-import findings EI-2, EI-3 and
-              EI-6 (docs/PREVENTION.md P-255, P-256, P-257).
+              EI-6 and the skeptic's follow-up (docs/PREVENTION.md P-255..P-259, P-267).
 What it does: Replays the skeptic's end-to-end (fabricated rows imported → sign-off → route
               deliver) and pins that the sign-off is now refused with a named reason, that
               imported rows are stamped and audited and never enter a licensing read, and that
               a row's own oracle number is never read; drives the worker's ``_RunLedger`` with
-              a missing, a forged and an unstorable pack; tampers a sign-off and a review row
-              under the triggers and reads the break from every verifier.
+              a missing, a forged and an unstorable pack; tampers a sign-off, a revocation and
+              a review row under the triggers, reads the break from every verifier and pins
+              that the full cell the delivery gate reads is lifted before and not after.
 How:          ``make_env`` over the seed (``tests/fixtures/server_seed.py``) with the sign-off
               helpers (``tests/fixtures/signoff_seed.py``); rows cloned from the seed's
               accepted rows; the worker's ``_RunLedger`` with a stub run context; tampering
-              through raw SQL after dropping the table's append-only trigger.
+              through raw SQL after dropping the table's append-only trigger, or with an
+              ``INSERT OR REPLACE`` that fires none.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md,
@@ -39,8 +47,9 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
 Works with:   src/crb/server/routes/ledger.py (import, verify), src/crb/store/ledger.py
               (``import_rows``), src/crb/core/ledger.py (``rows_measured_here``),
               src/crb/server/routes/signoffs.py (``cell_rows``, ``resolve_attestation``,
-              ``verify_signoffs``), src/crb/server/worker.py (``_RunLedger``),
-              src/crb/server/routes/system.py (the ``ledger`` probe)
+              ``verify_signoffs``, ``signoff_chain_intact``, ``load_signoff_records``),
+              src/crb/core/capability.py (``rows_imported``), src/crb/server/worker.py
+              (``_RunLedger``), src/crb/server/routes/system.py (the ``ledger`` probe)
 Tested by:    tests/test_evidence_import_governance.py
 Touch when:   onboarding a client repository never needs it; the import stamp, the licensing
               read or a verifier changes — the refusal names asserted here are what an
@@ -59,11 +68,12 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from crb.core.ledger import GradeRow
+from crb.core.ledger import CELL_FIELDS, GradeRow
+from crb.core.version import APPARATUS_VERSION
 from crb.server.app import API_PREFIX
 from crb.server.worker import _RunLedger
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, EvidencePackRow, Grade
+from crb.store.models import Event, EvidencePackRow, Grade, Signoff
 from fixtures.server_seed import ALPHA, DELIVER_CELL, Env, envelope, login, make_env, user_id
 from fixtures.signoff_seed import (
     STATEMENT,
@@ -81,6 +91,8 @@ def env(tmp_path: Path) -> Iterator[Env]:
 
 
 LARGE_CELL = {**DELIVER_CELL, "size": "L"}
+#: The seed's deliver cell as ``/routes`` labels it (the full seven-field key).
+_DELIVER_LABEL = "|".join(DELIVER_CELL[f] for f in CELL_FIELDS)
 
 
 def _hex(seed: str) -> str:
@@ -174,6 +186,33 @@ class TestImportedRowsNeverLicense:
         assert not [c for c in cells if c["capability_class"] == "bug.fix" and c["size"] == "L"]
         routes = env.get(f"/routes?repo={ALPHA}").json()["decisions"]
         assert not [d for d in routes if d["cell"]["size"] == "L"]
+
+    def test_a_readers_view_names_the_imported_rows_behind_every_cell_and_route(
+        self, env: Env
+    ) -> None:
+        """The skeptic's EI-2 residual: under an explicit apparatus (or ``all``) imported rows
+        are read, and the fabricated ``bug.fix|L`` cell routes ``deliver`` there. That view
+        licenses nothing, but it must say whose evidence it is: every cell and every route
+        decision carries ``rows_imported`` beside ``rows``."""
+        pass_controls(env)
+        assert _import(env, _fabricated(env)).status_code == 200
+        for view in (APPARATUS_VERSION, "all"):
+            cells = env.get(f"/capability-map?repo={ALPHA}&apparatus={view}").json()["cells"]
+            large = next(
+                c for c in cells if c["capability_class"] == "bug.fix" and c["size"] == "L"
+            )
+            assert large["rows_imported"] == large["rows"] == 40
+            small = next(
+                c for c in cells if c["capability_class"] == "bug.fix" and c["size"] == "S"
+            )
+            assert small["rows_imported"] == 0 and small["rows"] > 0
+            decisions = env.get(f"/routes?repo={ALPHA}&apparatus={view}").json()["decisions"]
+            fab = next(d for d in decisions if d["cell"]["size"] == "L")
+            assert fab["rows_imported"] == 40
+            assert next(d for d in decisions if d["label"] == _DELIVER_LABEL)["rows_imported"] == 0
+        # the licensing reading never sees them, so it has none to name
+        cur = env.get(f"/routes?repo={ALPHA}").json()["decisions"]
+        assert cur and all(d["rows_imported"] == 0 for d in cur)
 
     def test_every_imported_row_is_stamped_inside_its_hashed_body(self, env: Env) -> None:
         forged = _fabricated(env, 3)
@@ -387,6 +426,24 @@ def _probe(env: Env, name: str) -> dict[str, Any]:
     return next(p for p in body["probes"] if p["name"] == name)
 
 
+def _tier(env: Env) -> str:
+    """The seed's deliver cell's tier on ``/routes`` — the FULL cell projection, the one the
+    worker's delivery gate reads (a class x size projection is never lifted by a sign-off on
+    a full cell, so a tier read there could not tell a live licence from none)."""
+    decisions = env.get(f"/routes?repo={ALPHA}").json()["decisions"]
+    return str(next(d for d in decisions if d["label"] == _DELIVER_LABEL)["verification_tier"])
+
+
+#: Moves the revocation row to another scope in place: ``INSERT OR REPLACE`` on its own
+#: ``seq`` fires no UPDATE or DELETE trigger, so the append-only triggers stay in force.
+_MOVE_REVOCATION = text(
+    "INSERT OR REPLACE INTO signoffs (seq, signoff_id, repo, cell_json, tier, verifier, note,"
+    " revoke, evidence_rows, created, prev_hash, row_hash)"
+    " SELECT seq, signoff_id, repo, json_set(cell_json, '$.size', 'XL'), tier, verifier, note,"
+    " revoke, evidence_rows, created, prev_hash, row_hash FROM signoffs WHERE revoke = 1"
+)
+
+
 class TestSignoffAndReviewChainsAreVerified:
     def test_an_intact_store_verifies_every_chain(self, env: Env) -> None:
         clear_policy(env)
@@ -410,8 +467,11 @@ class TestSignoffAndReviewChainsAreVerified:
         self, env: Env
     ) -> None:
         clear_policy(env)
+        assert _tier(env) == "automated-pass"
         created = env.post("/signoffs", json=attested_body(env, DELIVER_CELL)).json()
-        assert created["active"] is True
+        assert created["active"] is True and created["chain_ok"] is True
+        # not vacuous: the sign-off lifts the full cell before anything is altered
+        assert _tier(env) == "human-verified"
         _drop_trigger(env.factory, "signoffs")
         with env.factory() as s:
             s.execute(
@@ -429,9 +489,33 @@ class TestSignoffAndReviewChainsAreVerified:
         assert env.get("/health").status_code == 503
         served = env.get(f"/signoffs/{created['id']}").json()
         assert served["active"] is False and served["tampered"] is True
-        cells = env.get(f"/capability-map?repo={ALPHA}").json()["cells"]
-        bug = next(c for c in cells if c["capability_class"] == "bug.fix" and c["size"] == "S")
-        assert bug["verification_tier"] != "human-verified"
+        assert served["chain_ok"] is False
+        # the full cell, the one the delivery gate reads, is no longer lifted
+        assert _tier(env) == "automated-pass"
+
+    def test_a_tampered_revocation_never_revives_the_licence_it_withdrew(self, env: Env) -> None:
+        """The skeptic's variant: re-scoping a REVOCATION row un-revokes the attestation it
+        withdrew. A per-row check reads the edited row as a revocation of the scope the
+        attacker chose; a broken chain lifts nothing at all."""
+        clear_policy(env)
+        created = env.post("/signoffs", json=attested_body(env, DELIVER_CELL)).json()
+        assert _tier(env) == "human-verified"
+        r = env.post(f"/signoffs/{created['id']}/revoke", json={"note": "withdrawn"})
+        assert r.status_code == 200, r.text
+        assert _tier(env) == "automated-pass"
+        with env.factory() as s:
+            s.execute(_MOVE_REVOCATION)
+            s.commit()
+            moved = s.execute(select(Signoff).where(Signoff.revoke.is_(True))).scalar_one()
+            assert moved.cell_json["size"] == "XL"
+        # the revoked cell stays unlicensed on the delivery gate's projection
+        assert _tier(env) == "automated-pass"
+        served = env.get(f"/signoffs/{created['id']}").json()
+        assert served["active"] is False and served["chain_ok"] is False
+        listed = env.get(f"/signoffs?repo={ALPHA}&include_revoked=true").json()["items"]
+        assert listed and not [i for i in listed if i["active"]]
+        assert env.get("/signoffs/verify").json()["ok"] is False
+        assert env.get("/health").status_code == 503
 
     def test_a_tampered_review_is_reported_by_the_ledger_verify_and_the_probe(
         self, env: Env

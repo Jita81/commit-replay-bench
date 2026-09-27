@@ -355,9 +355,11 @@ export function SignoffPage() {
         key: 'status',
         header: 'Status',
         hint: 'col.signoff.status',
-        sortValue: (s) => (s.revoked ? 3 : s.active ? 0 : s.stale ? 1 : 2),
+        sortValue: (s) => (s.chain_ok === false || s.tampered ? 4 : s.revoked ? 3 : s.active ? 0 : s.stale ? 1 : 2),
         cell: (s) =>
-          s.revoked ? (
+          s.chain_ok === false || s.tampered ? (
+            <Pill tone="red" glyph="✗" size="xs" label={`The sign-off chain no longer verifies${s.tampered ? ' — this row was altered after it was written' : ''}: no attestation lifts a cell until it is restored (GET /signoffs/verify names the row)`} hint="pill.signoff.status">chain broken</Pill>
+          ) : s.revoked ? (
             <Pill tone="amber" glyph="⊘" size="xs" label={`Revoked by ${s.revoked_by_name || s.revoked_by || '—'} at ${fmtDate(s.revoked_at)}`} hint="pill.signoff.status">revoked</Pill>
           ) : s.active ? (
             <Pill tone="green" glyph="✓" size="xs" label="Active attestation" hint="pill.signoff.status">active</Pill>

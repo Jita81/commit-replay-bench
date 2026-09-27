@@ -1016,6 +1016,11 @@ class CapabilityCellOut(BaseModel):
     disqualified: int
     errors: int
     rows: int
+    #: Rows of ``rows`` that were imported, not measured here (EI-2 residual). Always 0 on the
+    #: default ``apparatus=current`` reading, which counts measured rows only; under an explicit
+    #: apparatus or ``all`` a cell may rest on imported rows, and its route is then a reader's
+    #: view, never a licence.
+    rows_imported: int = 0
     repos: int
     point: float
     ci_low: float
@@ -1271,6 +1276,10 @@ class SignoffOut(BaseModel):
     #: triggers (EI-6, 2026-09-27). A tampered record is served ``active: false`` and lifts no
     #: cell whatever it says; ``/signoffs/verify`` and ``/health`` report the break.
     tampered: bool = False
+    #: The whole sign-off chain verifies (every row links and hashes to its own name). When it
+    #: does not, EVERY record is served ``active: false`` and none lifts a cell: an edited row's
+    #: scope is the editor's choice, so no row of a broken chain is trusted (EI-6, 2026-09-27).
+    chain_ok: bool = True
     evidence: SignoffEvidence
     prev_hash: str
     row_hash: str

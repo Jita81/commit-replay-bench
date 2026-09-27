@@ -118,6 +118,7 @@ OUT_KEYS = {
     "posture_class",
     "posture_class_current",
     "tampered",
+    "chain_ok",
     "created",
     "revoked",
     "revoked_by",

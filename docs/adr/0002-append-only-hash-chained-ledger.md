@@ -52,7 +52,10 @@ measurement]`. Convention is not evidence.
    record of someone else's measurement and never counts toward a sign-off or the route
    the delivery gate reads. The `signoffs` and `reviews` chains are verified on the
    server as the `grades` chain is (`/ledger/verify`, `/signoffs/verify`, the `/health`
-   `ledger` probe).
+   `ledger` probe). *Amended 2026-09-27 (DL-146):* a sign-off chain that does not verify end
+   to end lifts nothing in any repository and every record is served inactive
+   (`chain_ok: false`) — trust is decided on the chain, never on a row, since an edited
+   row's scope is the editor's choice.
 7. Statistics are computed only from ledger rows (`cell_stats`, `all_cell_stats`), and
    `cell_stats.false_q1` re-derives `clean == all recorded belts True` at read time.
 

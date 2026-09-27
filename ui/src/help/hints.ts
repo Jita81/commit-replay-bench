@@ -518,9 +518,9 @@ export const HINTS = {
   'col.signoff.cell':
     'The class and size (and language or model where projected) the attestation covers.',
   'col.signoff.status':
-    'Active counts now; stale was signed under an older apparatus; invalidated means a false-Q1 row appeared since; superseded means a later attestation covers the same scope; revoked was withdrawn by an approver.',
+    'Active counts now; stale was signed under an older apparatus; invalidated means a false-Q1 row appeared since; superseded means a later attestation covers the same scope; revoked was withdrawn by an approver; chain broken means a stored sign-off was altered, so none lifts a cell until the chain is restored.',
   'pill.signoff.status':
-    'Active counts now; stale lifts nothing until re-signed; invalidated means the cell now has a false-Q1 row; superseded means a later attestation covers the same scope; revoked was withdrawn, with who and when.',
+    'Active counts now; stale lifts nothing until re-signed; invalidated means the cell now has a false-Q1 row; superseded means a later attestation covers the same scope; revoked was withdrawn, with who and when; chain broken means a stored sign-off was altered and no attestation lifts a cell until the chain is restored.',
   'col.signoff.approver':
     'The named person who signed, with the kind of account they signed from. The server refused this record at write if that person had produced the evidence themselves.',
   'pill.signoff.verifier_kind':

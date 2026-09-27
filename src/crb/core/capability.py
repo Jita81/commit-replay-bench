@@ -86,6 +86,7 @@ from crb.core.economics import Economics, fold_economics
 from crb.core.git import GitError, GitRepo
 from crb.core.ledger import (
     CELL_FIELDS,
+    PROVENANCE_MEASURED,
     CellKey,
     CellStats,
     GradeRow,
@@ -223,6 +224,12 @@ class CapabilityCell:
     cost_known: bool
     latency_known: bool
     economics: Economics | None = None
+    #: How many of ``rows`` were imported — a record of someone else's measurement, not one
+    #: this deployment made (``provenance`` other than ``measured``). A licensing reading
+    #: counts measured rows only, so it is 0 there; a reader's view that pools imported rows
+    #: (an explicit apparatus, ``all``, a census JSONL) names them rather than hiding whose
+    #: evidence a route rests on (EI-2 residual, 2026-09-27).
+    rows_imported: int = 0
 
     def __post_init__(self) -> None:
         # the invariants of the module docstring, enforced at construction: honest-empty
@@ -348,6 +355,7 @@ class CapabilityCell:
             "sigma": None if self.sigma is None else round(self.sigma, 4),
             "repos": self.repos,
             "rows": self.rows,
+            "rows_imported": self.rows_imported,
             "belt_sets": list(self.belt_sets),
             "cost_known": self.cost_known,
             "latency_known": self.latency_known,
@@ -456,6 +464,7 @@ def measure_cell(
         cost_known=economics.cost_known > 0,
         latency_known=economics.latency_known > 0,
         economics=economics,
+        rows_imported=sum(1 for r in rows if r.provenance != PROVENANCE_MEASURED),
     )
 
 

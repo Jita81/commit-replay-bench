@@ -400,6 +400,7 @@ def cell_out(
         disqualified=s.disqualified,
         errors=s.errors,
         rows=c.rows,
+        rows_imported=c.rows_imported,
         repos=c.repos,
         point=round(s.point, 4),
         ci_low=round(s.ci.low, 4),
@@ -595,6 +596,7 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
                 model_ci_low=None if c.model_point is None else round(c.stats.model_ci.low, 4),
                 model_ci_high=None if c.model_point is None else round(c.stats.model_ci.high, 4),
                 failure_split=split_out(c),
+                rows_imported=c.rows_imported,
             )
         )
     return RoutesWithControlsResponse(
