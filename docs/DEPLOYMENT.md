@@ -725,12 +725,17 @@ Histogram buckets: 1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800 seconds.
 
 ### 9.2 Alert rules
 
-Four rules cover the operating posture. Expressions assume both targets are scraped.
+Four rules cover the operating posture. Expressions assume both targets are scraped. The
+chart ships them as a `PrometheusRule` (`prometheusRule.enabled`, off by default; its
+`labels` are what your Prometheus's `ruleSelector` matches), with these expressions word for
+word — `tests/test_deploy_alert_rules.py` fails when the chart and this table disagree — so
+no deployment retypes them. The render refuses the rules while `worker.metrics.port` is 0:
+three of them read series only the worker serves.
 
 | Alert | Expression | Meaning and action |
 |---|---|---|
-| **False-Q1** | `max(crb_false_q1_total) > 0` | the honesty floor is breached — stop delivery, [OPERATOR §8](OPERATOR.md#8-stop-conditions). `/health` is also `down` |
-| **No worker** | `/health` probe `worker` is not `ok` (`crb_http_*` cannot see it; probe `/api/v1/health` with a blackbox exporter, or alert on `crb_queue_depth > 0` with no fresh worker scrape for 3 × `heartbeat_s`) | queued runs will not start: no worker has checked in, one stopped checking in (the probe names it and its age), or a running run's heartbeat is stale |
+| **False-Q1** | `max(crb_false_q1_total) > 0` | the honesty floor is breached — stop delivery, [OPERATOR §8](OPERATOR.md#8-stop-conditions). `/health` is also `down`. Critical, fires at once |
+| **No worker** | `absent_over_time(crb_queue_depth[5m])` | no worker's exposition has been scraped for 5 minutes (`prometheusRule.noWorkerFor`; keep it several scrape intervals long), so queued runs will not start. A worker that is up but stopped checking in, or a running run whose heartbeat is stale, still serves the series: the `/health` probe `worker` names those (probe `/api/v1/health` with a blackbox exporter to alert on them too) |
 | **Sandbox failing closed** | `increase(crb_sandbox_unavailable_total[15m]) > 0` | the docker daemon, image or mounts are wrong on the worker host ([OPERATOR §7](OPERATOR.md#7-when-the-sandbox-is-unavailable)); no test ran on the host as a fallback |
 | **Deliveries failing** | `increase(crb_deliveries_total{outcome="failed"}[1h]) > 0` | the push or the pull-request call errored — the GitHub App's installation, permissions or the repository's default branch |
 

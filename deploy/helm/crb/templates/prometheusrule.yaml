@@ -1,0 +1,61 @@
+{{- /*
+DEPLOYMENT §9.2's four alert rules as a PrometheusRule (the Prometheus Operator's resource),
+off by default. Each expression is the guide's, word for word: tests/test_deploy_alert_rules.py
+reads the table and fails when the two disagree. Three of the four read the worker's own
+series, so the rules are refused while the worker's metrics port is off.
+*/}}
+{{- if .Values.prometheusRule.enabled }}
+{{- if and .Values.worker.enabled (eq (int .Values.worker.metrics.port) 0) }}
+{{- fail "prometheusRule.enabled needs the worker's metrics (worker.metrics.port > 0): the no-worker, sandbox and delivery rules read series only the worker serves, so with the port off they could never fire, or would fire for ever — docs/DEPLOYMENT.md §9.2" }}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "crb.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: crb.operating-posture
+      rules:
+        - alert: CrbFalseQ1
+          expr: max(crb_false_q1_total) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The honesty floor is breached: a clean ledger row has a failed belt"
+            description: "crb_false_q1_total is {{ "{{" }} $value {{ "}}" }}. Stop delivery; /health is down. Read the ledger and follow OPERATOR §8."
+            runbook_url: https://github.com/Jita81/commit-replay-bench/blob/main/docs/OPERATOR.md#8-stop-conditions
+        - alert: CrbNoWorker
+          expr: absent_over_time(crb_queue_depth[{{ .Values.prometheusRule.noWorkerFor }}])
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No worker has been scraped for {{ .Values.prometheusRule.noWorkerFor }}: queued runs will not start"
+            description: "No crb_queue_depth sample from any worker. Check the worker pods and their metrics port; the /health worker probe names a worker that is up but stopped checking in."
+            runbook_url: https://github.com/Jita81/commit-replay-bench/blob/main/docs/DEPLOYMENT.md#92-alert-rules
+        - alert: CrbSandboxFailingClosed
+          expr: increase(crb_sandbox_unavailable_total[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A run stopped because the sandbox failed closed"
+            description: "The docker daemon, image or mounts are wrong on the worker host; no test ran on the host as a fallback. Follow OPERATOR §7."
+            runbook_url: https://github.com/Jita81/commit-replay-bench/blob/main/docs/OPERATOR.md#7-when-the-sandbox-is-unavailable
+        - alert: CrbDeliveriesFailing
+          expr: increase(crb_deliveries_total{outcome="failed"}[1h]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A factory delivery failed: the push or the pull-request call errored"
+            description: "Check the GitHub App's installation, its permissions and the repository's default branch."
+            runbook_url: https://github.com/Jita81/commit-replay-bench/blob/main/docs/DEPLOYMENT.md#92-alert-rules
+{{- end }}
