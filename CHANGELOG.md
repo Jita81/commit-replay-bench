@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A host tool can no longer change a verdict, and a package that names no failing test fails
+  belt 3** (north-star Wave 2, stream Q2; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-q2);
+  ADR-0048; DL-143). On the host, the Go, Python and Node runners' tests see only the tools
+  they declare, never the worker's `PATH`; a repository names others in `runner_opts.tools`.
+  The tools' versions and bytes are a digest on the posture, every qualification and every
+  pack, so a changed tool asks for the pool to be qualified again. The Posture panel names the
+  environment. A Go package that stops compiling beside baseline failures now fails belt 3.
+
 - **The grade says why, and a distinct commit is a distinct change**
   (north-star Wave 2, stream G; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-g);
   ADR-0025 items 5, 6, 7 and 13; DL-105, DL-106). Belt 5 records why it holds what it holds.
