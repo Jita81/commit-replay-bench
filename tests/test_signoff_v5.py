@@ -172,7 +172,7 @@ def test_the_policy_is_signoff_policy_v4() -> None:
 
 
 def test_the_ui_names_the_signoff_policy_the_server_writes() -> None:
-    """P-130: the Sign-off and Posture screens read the policy version from ONE UI constant
+    """P-132: the Sign-off and Posture screens read the policy version from ONE UI constant
     (the served ``policy_version`` replaces it once the preview answers), and that constant is
     the one the server writes — a bump that forgets the UI fails here, not in a walkthrough."""
     import re

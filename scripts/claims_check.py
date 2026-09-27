@@ -77,7 +77,7 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               and every record whose review no longer lists the action or is no longer on
               disk; reports a registered promise stated in the present tense before its
               criterion is met (P-115); reports README's routing bar when it differs from
-              ``RoutingPolicy.describe()`` (ADR-0025 item 10, P-127); --check exits non-zero.
+              ``RoutingPolicy.describe()`` (ADR-0025 item 10, P-129); --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
@@ -714,7 +714,7 @@ def check_routing_bar(root: Path, bar: str | None = None) -> list[Finding]:
     """README's routing bar is the code's, byte for byte once line wrapping is undone: the text
     between :data:`BAR_BEGIN` and :data:`BAR_END` must equal ``RoutingPolicy.describe()``
     (ADR-0025 item 10). The class of defect — the published bar drifting from the code's —
-    gets a gate, not a sentence (docs/PREVENTION.md P-127)."""
+    gets a gate, not a sentence (docs/PREVENTION.md P-129)."""
     path = root / BAR_PAGE
     if not path.is_file():
         return []

@@ -664,7 +664,7 @@ def test_the_live_pages_make_no_promise_ahead_of_its_criterion() -> None:
 
 def test_readme_carries_the_routing_bar_the_code_describes() -> None:
     """README's bar is ``RoutingPolicy.describe()``: the repository passes, and a copy whose
-    bar says anything else — one number moved — fails (docs/PREVENTION.md P-127)."""
+    bar says anything else — one number moved — fails (docs/PREVENTION.md P-129)."""
     assert cc.check_routing_bar(ROOT) == []
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     assert cc.BAR_BEGIN in text and cc.BAR_END in text

@@ -365,9 +365,6 @@ LABEL_LINT_REASON = "lint_reason"
 #: ``git patch-id --stable``, a revert's that of its original) — hashed, from 2.4, so a
 #: reader counts distinct CHANGES, never two commits of one change.
 LABEL_CHANGE_ID = "change_id"
-#: The labels only apparatus 2.4 defines (DL-106 (2)): a row below 2.4 never carries one,
-#: whichever writer built it — refused by the row itself, at write and on read (P-127).
-V2_ONLY_LABELS: tuple[str, ...] = (LABEL_LINT_REASON, LABEL_CHANGE_ID)
 #: Where the builder ran (``docker`` = the sealed container of ADR-0012, ``host``) — written
 #: by the builder adapter on every attempt, kept on a row from 2.4: with the posture class it
 #: says whether the row was graded in the SEALED posture a reading counts (ADR-0026 item 2).
@@ -630,11 +627,15 @@ def is_sealed_class(posture_class: str) -> bool:
     return posture_class.startswith("docker/") and posture_class.endswith("/sealed")
 
 
-#: The labels a row keeps only from :data:`V2_APPARATUS` (a caller may pass them at any
-#: apparatus; a row below it is written as a 2.3 row always was).
+#: The labels only apparatus 2.4 defines (DL-106 (2)): a row below 2.4 never carries one,
+#: whichever writer built it — refused by the row itself, at write and on read (P-127). A
+#: writer that is handed one for an older apparatus writes the row as a 2.3 row always was.
 V2_ONLY_LABELS: frozenset[str] = frozenset(
-    {LABEL_CHANGE_ID, LABEL_BUILDER_EXECUTOR, LABEL_CONTEXT_ARM, LABEL_TAXONOMY}
+    {LABEL_LINT_REASON, LABEL_CHANGE_ID, LABEL_CONTEXT_ARM, LABEL_TAXONOMY}
 )
+#: The labels a replay row KEEPS only from 2.4: the helper's (:data:`V2_ONLY_LABELS`) and
+#: the builder executor the adapter writes on every attempt, which a row below 2.4 drops.
+V2_KEPT_LABELS: frozenset[str] = V2_ONLY_LABELS | {LABEL_BUILDER_EXECUTOR}
 
 
 def is_environment_error(error: str) -> bool:
@@ -1275,13 +1276,13 @@ def grade_row_from_result(
             **{
                 k: str(v)
                 for k, v in task.labels.items()
-                if k not in V2_ONLY_LABELS or is_v2_apparatus(apparatus)
+                if k not in V2_KEPT_LABELS or is_v2_apparatus(apparatus)
             },
             **({"builder_error": builder_error[:300]} if builder_error else {}),
             **{
                 k: v
                 for k, v in given.items()
-                if k not in V2_ONLY_LABELS or is_v2_apparatus(apparatus)
+                if k not in V2_KEPT_LABELS or is_v2_apparatus(apparatus)
             },
             **written,
             **(
