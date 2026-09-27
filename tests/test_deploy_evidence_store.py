@@ -37,7 +37,10 @@ Touch when:   the API or the worker reads or writes another directory under ``$C
 
 from __future__ import annotations
 
+import os
 import posixpath
+import subprocess
+from pathlib import Path
 from typing import Any
 
 from crb.core.patches import PATCHES_DIRNAME
@@ -128,3 +131,62 @@ def test_the_placement_refusal_names_the_store_that_needs_the_pin() -> None:
 def test_an_evidence_access_mode_other_than_once_or_many_is_refused() -> None:
     err = _refused("--set", "evidenceStore.accessMode=ReadOnlyMany")
     assert "evidenceStore.accessMode must be ReadWriteOnce | ReadWriteMany" in err, err
+
+
+# --- the upgrade from a chart whose worker kept its evidence on the work volume -----------
+
+
+def _carry(deployment: dict[str, Any]) -> dict[str, Any] | None:
+    pod = deployment["spec"]["template"]["spec"]
+    return next((c for c in pod.get("initContainers", []) if c["name"] == "evidence-carry"), None)
+
+
+def test_an_upgrade_carries_the_workers_old_evidence_into_the_store() -> None:
+    """Before the evidence store, the worker kept its patches and transcripts on its work
+    claim (``workDir.type: pvc``), under the very paths the store is now mounted over, so
+    ``helm upgrade`` would shadow them: rows written before it could no longer have their
+    patch or transcript read. An init container copies them into the store first; a pod
+    work directory (``emptyDir``) kept nothing across restarts and needs none."""
+    worker = _deployment(_render(), "worker")
+    carry = _carry(worker)
+    assert carry is not None, "the worker has no evidence-carry init container"
+    mounts = {m["name"]: m for m in carry["volumeMounts"]}
+    assert mounts["work"]["mountPath"] == "/work" and mounts["work"]["readOnly"] is True
+    assert mounts["evidence-store"]["mountPath"] == "/store"
+    assert "subPath" not in mounts["evidence-store"]  # the whole store: both sub-paths
+    script = carry["command"][-1]
+    assert "evidence" in script and "transcripts" in script
+    assert _carry(_deployment(_render("--set", "worker.workDir.type=emptyDir"), "worker")) is None
+
+
+def _run_carry(script: str, work: Path, store: Path) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "CRB_CARRY_FROM": str(work), "CRB_CARRY_TO": str(store)}
+    return subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True)
+
+
+def test_the_carry_copies_the_old_evidence_once_and_never_again(tmp_path: Path) -> None:
+    """The script the init container runs, run here: the first start copies both trees and
+    leaves a marker; a later start copies nothing, so a patch the store has since lost is
+    not brought back from a stale work volume; a work volume with nothing kept is a no-op."""
+    script = _carry(_deployment(_render(), "worker"))["command"][-1]  # type: ignore[index]
+    work, store = tmp_path / "work", tmp_path / "store"
+    (work / "evidence" / "patches").mkdir(parents=True)
+    (work / "evidence" / "patches" / "ab.diff").write_text("patch\n")
+    (work / "transcripts" / "run1").mkdir(parents=True)
+    (work / "transcripts" / "run1" / "t.jsonl").write_text("{}\n")
+    store.mkdir()
+    first = _run_carry(script, work, store)
+    assert first.returncode == 0, first.stderr
+    assert (store / "evidence" / "patches" / "ab.diff").read_text() == "patch\n"
+    assert (store / "transcripts" / "run1" / "t.jsonl").read_text() == "{}\n"
+    assert (store / ".carried-from-work").exists()
+    (store / "evidence" / "patches" / "ab.diff").unlink()
+    again = _run_carry(script, work, store)
+    assert again.returncode == 0, again.stderr
+    assert not (store / "evidence" / "patches" / "ab.diff").exists()
+    empty_work, fresh = tmp_path / "w2", tmp_path / "s2"
+    empty_work.mkdir()
+    fresh.mkdir()
+    none = _run_carry(script, empty_work, fresh)
+    assert none.returncode == 0, none.stderr
+    assert sorted(p.name for p in fresh.iterdir()) == [".carried-from-work"]

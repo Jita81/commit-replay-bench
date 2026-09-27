@@ -625,6 +625,17 @@ its sessions. On a deployment whose cookies are `Secure` (the default outside
 everybody signs in once more after the upgrade. From this release, signing out ends the
 account's sessions on every device.
 
+**Upgrading to the chart with the evidence store** (`evidenceStore`, P-045): before it, the
+worker kept its kept patches, evidence packs and transcripts on its own work claim, at
+`$CRB_HOME/evidence` and `$CRB_HOME/transcripts`. The new chart mounts the evidence claim
+over those two paths, which would hide what the worker kept. So when `worker.workDir.type`
+is `pvc`, the worker pod runs an init container, `evidence-carry`, before the worker starts:
+it copies both directories from the work claim into the evidence claim once, then leaves a
+marker (`.carried-from-work`) so later starts copy nothing. Nothing is deleted from the work
+claim; once `/grades/{row_hash}/patch` serves a patch written before the upgrade, you may
+remove the old directories from it. With `workDir.type: emptyDir` the worker kept nothing
+across restarts, and no carry runs (`tests/test_deploy_evidence_store.py`).
+
 Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up -d`
 ([deploy/README.md §5](../deploy/README.md#5-upgrade)).
 
