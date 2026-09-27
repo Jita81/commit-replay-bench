@@ -11,6 +11,9 @@ run whose output did not parse as kills (external assessment 2026-09-25, A6). v2
 * counts a ``timeout`` and an ``unattributed`` run apart — neither a kill nor an escape;
 * reads a score with more than half its planned mutants excluded as not scoreable.
 
+v2 is the scorer of apparatus 2.4 (ADR-0025 item 14): these tests set the stamp stream R's
+bump will set, and one test pins that below 2.4 the scorer is v1 as it stood (P-121).
+
 Navigation
 ----------
 What it is:   The tests of the v2 sampler and outcome rule, on a two-file change with a
@@ -18,7 +21,8 @@ What it is:   The tests of the v2 sampler and outcome rule, on a two-file change
 What it does: Pins that the sample reaches both files, is exactly the hash-ranked round-robin,
               is deterministic and differs between commits; that timeouts and unparsed exit-0
               runs are counted apart; that more than half excluded is not scoreable while half
-              is; and the provenance and version stamps.
+              is; the provenance and version stamps; and that below apparatus 2.4 the scorer,
+              its stamp and its operator-set hash are v1's.
 How:          A bound ``Workspace`` over a temporary directory holding two source files, the
               ``PythonAstMutator`` and a stub runner that scripts the baseline and each mutant.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -28,7 +32,8 @@ Works with:   src/crb/core/oracle/mutation.py (under test), tests/test_oracle_mu
               scorer's own suite on a real repository), docs/dod/journeys/prove-the-instrument.md
               (prove-the-instrument.truth.19, the criterion this closes)
 Tested by:    tests/test_oracle_mutation_v2.py
-Touch when:   the sampler or the exclusion rule changes (a ``MUTATION_VERSION`` bump).
+Touch when:   the sampler or the exclusion rule changes (a new ``mutation_version``, with the
+              apparatus bump it rides).
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ from typing import Any
 
 import pytest
 
+from crb.core import version as crb_version
 from crb.core.execution import LocalExecutor
 from crb.core.git import GitRepo
 from crb.core.oracle import mutation as ms
@@ -110,10 +116,18 @@ def _score(tmp_path: Path, *runs: Run, task_id: str = "a" * 40, **kw: Any) -> ms
     )
 
 
+@pytest.fixture(autouse=True)
+def _at_apparatus_2_4(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``mutation.v2`` is the scorer of apparatus 2.4 (ADR-0025 item 14): these tests run
+    the stamp stream R's bump will set; below it the scorer is ``mutation.v1``."""
+    monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.4")
+
+
 def test_the_version_and_the_sampler_are_stamped(tmp_path: Path) -> None:
     score = _score(tmp_path, RED)
-    assert ms.MUTATION_VERSION == "mutation.v2"
+    assert ms.mutation_version() == ms.MUTATION_V2 == "mutation.v2"
     prov = score.provenance.to_dict()
+    assert prov["apparatus_version"] == "2.4"
     assert prov["mutation_version"] == "mutation.v2" and prov["sampler"] == "hash-rr.v1"
     every_a = ms.generate_mutants(SRC_A, _lines(SRC_A), max_mutants=10_000, path=A)
     every_b = ms.generate_mutants(SRC_B, _lines(SRC_B), max_mutants=10_000, path=B)
@@ -182,3 +196,33 @@ def test_a_timed_out_outcome_cannot_be_a_kill() -> None:
         ms.MutantOutcome("m01", "cmp_flip", 1, "x", True, "", timed_out=True)
     with pytest.raises(ValueError, match="unattributed"):
         ms.MutantOutcome("m01", "cmp_flip", 1, "x", False, "", unattributed=True)
+
+
+def test_below_2_4_the_scorer_is_mutation_v1_as_it_stood(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-121: the scoring rule follows the apparatus, so a score stamped 2.3 is a v1 score —
+    the stable prefix of the first file's earliest candidates, a timeout read as a kill, no
+    sampler in the stamp — and never one of v2 under a 2.3 stamp."""
+    monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.3")
+    score = _score(tmp_path, HUNG, RED)
+    prov = score.provenance.to_dict()
+    assert prov["apparatus_version"] == "2.3" and prov["mutation_version"] == "mutation.v1"
+    assert "sampler" not in prov and "candidates_per_file" not in prov
+    assert ms.PythonAstMutator().describe()["version"] == "mutation.v1"
+    every_b = ms.generate_mutants(SRC_B, _lines(SRC_B), max_mutants=10_000, path=B)
+    prefix = [*every_b, *ms.generate_mutants(SRC_A, _lines(SRC_A), max_mutants=10_000, path=A)]
+    taken = [(o.path, o.line, o.op, o.description) for o in score.outcomes]
+    want = prefix[: ms.DEFAULT_MAX_MUTANTS]
+    assert taken == [(m.path, m.line, m.op, m.description) for m in want]
+    assert score.outcomes[0].timed_out and score.outcomes[0].killed is True
+    assert score.timeouts == 0 and score.killed == score.total == ms.DEFAULT_MAX_MUTANTS
+
+
+def test_the_operator_set_hash_moves_with_the_scorer() -> None:
+    """The hash names the scorer too: a 2.3 score and a 2.4 score never share one."""
+    mut = ms.PythonAstMutator()
+    v2 = ms.operator_set_hash(mut)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(crb_version, "APPARATUS_VERSION", "2.3")
+        assert ms.operator_set_hash(mut) != v2

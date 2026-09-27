@@ -101,15 +101,20 @@ def test_a_clean_2_4_row_pins_the_empty_kind_its_lint_reason_and_its_change() ->
 
 
 def test_a_2_3_row_is_written_as_before() -> None:
-    """Below 2.4 nothing new is pinned: no empty kind on a clean row, no lint reason."""
+    """Below 2.4 nothing new is pinned: no empty kind on a clean row, no lint reason, and
+    no change identity even when the task carries one (a mined task does) — so a 2.3 row
+    written after stream G hashes as a 2.3 row did before it (DL-106 (2))."""
+    task = _task()
+    assert task.labels[lg.LABEL_CHANGE_ID] == CHANGE
     row = lg.grade_row_from_result(
         _result(lint_status=lint_mod.LINT_NONE_DETECTED),
-        _task(),
+        task,
         pack_hash="c" * 64,
         apparatus_version="2.3",
     )
     assert lg.LABEL_FAILURE_KIND not in row.labels
     assert lg.LABEL_LINT_REASON not in row.labels
+    assert lg.LABEL_CHANGE_ID not in row.labels
 
 
 @pytest.mark.parametrize("key", [lg.LABEL_FAILURE_KIND, lg.LABEL_LINT_REASON, lg.LABEL_CHANGE_ID])

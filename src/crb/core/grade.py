@@ -689,7 +689,25 @@ def grade(
             "extra": {"control": run.to_dict()},
         }
 
+    #: set once the first test run starts: from then on every return names what the tests
+    #: wrote (ADR-0025 item 13), whichever belt it stops at
+    tests_ran: list[bool] = [False]
+    touched_pre: list[str] = []
+
+    def post_run() -> tuple[str, ...]:
+        """The files touched after the first test run started and not before it — a
+        diagnostic for the pack, read by no belt, so a failed walk records nothing and
+        can never turn a verdict into a harness error."""
+        pre = set(touched_pre)
+        try:
+            post = ws.touched_files()
+        except Exception:  # a diagnostic never decides a verdict
+            return ()
+        return tuple(sorted(f for f in post if f not in pre)[:200])
+
     def done(**changes: Any) -> GradeResult:
+        if tests_ran[0] and "touched_post_run" not in changes:
+            changes["touched_post_run"] = post_run()
         merged: dict[str, Any] = {
             "clean": False,
             "belts": belts,
@@ -705,12 +723,13 @@ def grade(
         # --- pre-flight (both modes): the worktree's git view is still the harness's.
         #     HEAD is the parent, the gitdir is the clone's, no index entry carries a
         #     skip-worktree / assume-unchanged bit, the shared info/exclude holds only
-        #     what it held at create time (read, never rewritten) and the worktree's own
-        #     excludes file only the harness's patterns (anything else is reported). The
-        #     independent review pass (2026-09-14, finding 1) graded a hidden
-        #     conftest.py clean by each of these routes. A violation is a DQ, never a
-        #     verdict — and touched_files() below reads the tree, not git's views, so
-        #     the check is a belt over the ground, not the only thing holding it. ----
+        #     what it held when the harness first used the clone (read, never rewritten)
+        #     and the worktree's own excludes file only the harness's patterns (anything
+        #     else is reported). The independent review pass (2026-09-14, finding 1)
+        #     graded a hidden conftest.py clean by each of these routes. A violation is a
+        #     DQ, never a verdict — and touched_files() below reads the tree, not git's
+        #     views, so the check is a belt over the ground, not the only thing holding
+        #     it. ----
         violations = ws.enforce_integrity()
         if violations:
             files = sorted({f for v in violations for f in v.files})
@@ -730,7 +749,7 @@ def grade(
             )
 
         # --- belt 1b (both modes, pre-run): no test-infrastructure file touched ---
-        touched_pre = ws.touched_files()
+        touched_pre[:] = ws.touched_files()
         infra = infra_tampered(ws, touched_pre, exclude=task.test_files, config=config)
         if infra:
             _emit(on_event, "grade.tamper", task=task.task_id, files=infra[:10], kind="test_infra")
@@ -836,6 +855,7 @@ def grade(
         diff = ws.diff_stats(exclude=task.test_files)
 
         # --- belt 2: target green -------------------------------------------------
+        tests_ran[0] = True
         target_run = runner.run_for(
             executor,
             ws.root,
@@ -955,14 +975,8 @@ def grade(
                 note = f"lint: {lint_run.note}"
         if evaluate_lint:
             kw["lint_status"] = lint_status(lint_run, disabled=disabled)
-        # the files the tests wrote: a diagnostic for the pack, read by no belt (item 13) —
-        # so it can never turn a verdict into a harness error: a failed walk records nothing
-        pre = set(touched_pre)
-        try:
-            post = ws.touched_files()
-        except Exception:  # a diagnostic never decides a verdict
-            post = []
-        touched_post_run = tuple(sorted(f for f in post if f not in pre)[:200])
+        # the files the tests wrote, read before belt 6 runs (item 13)
+        touched_post_run = post_run()
         api_run = _belt_six(ws, task, changed, on_event) if evaluate_api else None
         belts = Belts(
             tests_unmodified=True,

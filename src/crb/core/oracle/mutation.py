@@ -17,6 +17,12 @@ prevention artifact (each escape names a missing assertion, deterministically).
 
 Honesty properties (all correct-by-construction, none advisory)
 ---------------------------------------------------------------
+* **The scoring rule is the apparatus's, never ahead of it.** ``mutation.v2`` (below) is
+  the rule of apparatus 2.4 (ADR-0025 item 14); below 2.4 the scorer is ``mutation.v1``
+  as it stood — a stable prefix of the changed files' candidates, a timeout read as a
+  kill — and its stamp and operator-set hash are v1's byte for byte
+  (:func:`mutation_version`, read at call time). So no score stamped 2.3 is a v2 score,
+  and a reader that keeps one apparatus keeps one rule (P-121).
 * **No randomness anywhere, and every changed file is reached** (``mutation.v2``,
   ADR-0025 item 7). Every candidate of every changed file is generated, with no cap per
   file; within a file the candidates are ranked by the SHA-256 of
@@ -91,9 +97,9 @@ Tested by:    tests/test_oracle_mutation.py, tests/test_oracle_mutation_text.py,
               tests/test_oracle_mutation_v2.py
 Touch when:   never for a new repository (an oracle run needs only a configured runner —
               docs/OPERATOR.md); adding an operator changes ``PYTHON_OPERATORS``, the rank
-              table and therefore the operator-set hash — a ``MUTATION_VERSION`` bump and a
-              note in docs/EVIDENCE-AND-CLAIMS.md; a new language is a mutator in
-              src/crb/core/oracle/mutators_text.py, not an edit here.
+              table and therefore the operator-set hash — a new ``mutation_version`` (with the
+              apparatus bump it rides) and a note in docs/EVIDENCE-AND-CLAIMS.md; a new
+              language is a mutator in src/crb/core/oracle/mutators_text.py, not an edit here.
 Claims:       A strength is comparable only within one language and one operator-set hash;
               it measures the target tests, not the patch (docs/EVIDENCE-AND-CLAIMS.md).
 """
@@ -111,26 +117,40 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from crb.core import version as _version
 from crb.core.evidence import canonical_json, sha256_text
 from crb.core.execution import Executor, SandboxUnavailable
+from crb.core.ledger import is_v2_apparatus
 from crb.core.oracle.mutant import DEFAULT_MAX_MUTANTS, Mutant, Mutator
 from crb.core.oracle.mutators_text import MUTATOR_FAMILY_TEXT, text_mutators
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, TestRun
 from crb.core.spec import RepoConfig, TaskSpec
-from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace, sha256_bytes
 
 MUTATION_SCHEMA = "crb.oracle_strength.v1"
-#: The scoring rule (ADR-0025 item 7): v2 samples every changed file (``SAMPLER_HASH_RR``)
-#: and counts timeouts and unparsed exit-0 runs apart from kills. A score is comparable only
-#: with scores of the same version.
-MUTATION_VERSION = "mutation.v2"
+#: The scoring rule below apparatus 2.4: a stable prefix of the changed files' candidates in
+#: file order, and a timeout read as a kill (recorded ``timed_out``).
+MUTATION_V1 = "mutation.v1"
+#: The scoring rule from apparatus 2.4 (ADR-0025 items 7 and 14): every changed file sampled
+#: (``SAMPLER_HASH_RR``), timeouts and unparsed exit-0 runs counted apart from kills, more
+#: than half excluded not scoreable. A score is comparable only with scores of its version.
+MUTATION_V2 = "mutation.v2"
 #: Hash-ranked within a file, round-robin across files in path order.
 SAMPLER_HASH_RR = "hash-rr.v1"
 #: The generation bound handed to a mutator: none (v2 generates every candidate).
 _EVERY_CANDIDATE = 1 << 31
 MUTATOR_FAMILY_AST = "ast"
+
+
+def mutation_version(apparatus_version: str | None = None) -> str:
+    """The scoring rule of ``apparatus_version`` (the live apparatus, read at call time, by
+    default): :data:`MUTATION_V2` from 2.4, :data:`MUTATION_V1` below it. The rule follows
+    the apparatus stamp and never runs ahead of it, so no score stamped 2.3 is a v2 score
+    (P-121)."""
+    apparatus = apparatus_version if apparatus_version is not None else _version.APPARATUS_VERSION
+    return MUTATION_V2 if is_v2_apparatus(apparatus) else MUTATION_V1
+
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -429,7 +449,7 @@ class PythonAstMutator:
             "language": self.language,
             "mutator": type(self).__name__,
             "family": self.family,
-            "version": MUTATION_VERSION,
+            "version": mutation_version(),
             "operators": [{"op": op, "rank": _OP_RANK[op]} for op in self.operators],
             "cmp_flips": sorted(desc for _, desc in _CMP_FLIPS.values()),
             "arith_flips": sorted(desc for _, desc in _ARITH_FLIPS.values()),
@@ -548,6 +568,9 @@ class MutantOutcome:
     error: str = ""
     uncompilable: bool = False
     unattributed: bool = False
+    #: ``mutation.v1``'s reading: a run that timed out is a kill. Only a v1 score sets it;
+    #: without it a timed-out outcome cannot be graded (v2). Never serialised.
+    timeout_is_kill: bool = False
 
     def __post_init__(self) -> None:
         # Poka-yoke: an outcome cannot be both excluded and graded.
@@ -555,7 +578,7 @@ class MutantOutcome:
             raise ValueError("an uncompilable mutant cannot also be killed/escaped")
         if self.unattributed and self.killed is not None:
             raise ValueError("an unattributed mutant run cannot also be killed/escaped")
-        if self.timed_out and self.killed is not None:
+        if self.timed_out and self.killed is not None and not self.timeout_is_kill:
             raise ValueError("a mutant run that timed out cannot also be killed/escaped (v2)")
 
     @property
@@ -596,8 +619,11 @@ class MutantOutcome:
 class MutationProvenance:
     """Which instrument produced the strength number. Evidence expires with it."""
 
-    apparatus_version: str = APPARATUS_VERSION
-    mutation_version: str = MUTATION_VERSION
+    #: read at construction, so the stamp is the apparatus the score was measured under
+    apparatus_version: str = field(default_factory=lambda: _version.APPARATUS_VERSION)
+    #: ``""`` means "the apparatus's rule" (:func:`mutation_version`), filled in at
+    #: construction
+    mutation_version: str = ""
     language: str = ""
     mutator: str = ""
     mutator_family: str = ""  # "ast" | "text" — strengths compare only within one
@@ -605,14 +631,19 @@ class MutationProvenance:
     max_mutants: int = DEFAULT_MAX_MUTANTS
     runner: str = ""
     executor: Mapping[str, Any] = field(default_factory=dict)
-    #: How the mutants were chosen (:data:`SAMPLER_HASH_RR`) and from how many candidates
-    #: each changed file offered (path → count).
-    sampler: str = SAMPLER_HASH_RR
+    #: How the mutants were chosen (:data:`SAMPLER_HASH_RR` under ``mutation.v2``; ``""``
+    #: under v1, whose prefix has no sampler) and from how many candidates each changed file
+    #: offered (path → count, v2 only).
+    sampler: str = ""
     candidates_per_file: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "executor", dict(self.executor))
         object.__setattr__(self, "candidates_per_file", dict(self.candidates_per_file))
+        if not self.mutation_version:
+            object.__setattr__(self, "mutation_version", mutation_version(self.apparatus_version))
+        if self.mutation_version == MUTATION_V2 and not self.sampler:
+            object.__setattr__(self, "sampler", SAMPLER_HASH_RR)
 
     def to_dict(self) -> dict[str, Any]:
         """The stamp as stored with every score and report."""
@@ -626,8 +657,15 @@ class MutationProvenance:
             "max_mutants": self.max_mutants,
             "runner": self.runner,
             "executor": dict(self.executor),
-            "sampler": self.sampler,
-            "candidates_per_file": dict(sorted(self.candidates_per_file.items())),
+            # a v1 stamp is written as v1 always wrote it: it has no sampler
+            **(
+                {
+                    "sampler": self.sampler,
+                    "candidates_per_file": dict(sorted(self.candidates_per_file.items())),
+                }
+                if self.mutation_version == MUTATION_V2
+                else {}
+            ),
         }
 
 
@@ -859,7 +897,9 @@ def score_task(
             total=0, killed=0, oracle_strength=None, note=note, baseline=baseline, **base
         )
 
-    # --- generate every candidate (pure), then sample hash-rr.v1 ---------------------
+    # --- generate: v2 takes every candidate (pure) and samples hash-rr.v1; v1 took a
+    #     stable prefix of each file's candidates, in the commit's file order ------------
+    v2 = prov.mutation_version == MUTATION_V2
     originals: dict[str, bytes] = {}
     per_file: dict[str, list[Mutant]] = {}
     for rel in targets:
@@ -874,10 +914,14 @@ def score_task(
             if changed_lines is not None
             else changed_lines_for(ws, rel)
         )
-        per_file[rel] = mut.generate(text, lines, max_mutants=_EVERY_CANDIDATE, path=rel)
-    planned = sample_mutants(task.task_id, per_file, max(0, max_mutants))
-    prov = replace(prov, candidates_per_file={p: len(ms) for p, ms in per_file.items()})
-    base["provenance"] = prov
+        bound = _EVERY_CANDIDATE if v2 else max_mutants
+        per_file[rel] = mut.generate(text, lines, max_mutants=bound, path=rel)
+    if v2:
+        planned = sample_mutants(task.task_id, per_file, max(0, max_mutants))
+        prov = replace(prov, candidates_per_file={p: len(ms) for p, ms in per_file.items()})
+        base["provenance"] = prov
+    else:
+        planned = [m for ms in per_file.values() for m in ms][: max(0, max_mutants)]
     mutants = [
         Mutant(
             f"m{i:02d}_{m.op}_L{m.line}",
@@ -946,7 +990,7 @@ def score_task(
             finally:
                 tick = _next_tick(tick)
                 _write_version(files[m.path], originals[m.path], tick)
-            if run.timed_out or (run.returncode == 0 and run.parse_error):
+            if v2 and (run.timed_out or (run.returncode == 0 and run.parse_error)):
                 # the oracle observed nothing it finished saying: neither a kill nor an
                 # escape (v2) — a timeout, or an exit-0 run whose output did not parse
                 outcomes.append(
@@ -999,7 +1043,8 @@ def score_task(
                     returncode=run.returncode,
                 )
                 continue
-            killed = not run.green  # RED = the fault was observable
+            # RED = the fault was observable; under v1 a timeout reached here and was a kill
+            killed = not run.green
             outcomes.append(
                 MutantOutcome(
                     m.mutant_id,
@@ -1012,6 +1057,7 @@ def score_task(
                     timed_out=run.timed_out,
                     returncode=run.returncode,
                     tail=redact_and_cap(run.tail, max_chars=600),
+                    timeout_is_kill=not v2,
                 )
             )
             _emit(
@@ -1043,9 +1089,15 @@ def score_task(
         f"harness errors={errors}, uncompilable={uncompilable_n}, timeouts={timeouts_n}, "
         f"unattributed={unattributed_n}"
     )
-    if not total:
+    if not total and not v2:  # v1's words, as it wrote them
+        strength = None
+        note = (
+            f"no mutant reached a verdict (uncompilable={uncompilable_n}, harness "
+            f"errors={errors}) — not scoreable"
+        )
+    elif not total:
         strength, note = None, f"no mutant reached a verdict ({causes}) — not scoreable"
-    elif 2 * excluded > len(mutants):
+    elif v2 and 2 * excluded > len(mutants):
         strength = None
         note = (
             f"{excluded} of {len(mutants)} mutants excluded ({causes}) — more than half, "
@@ -1246,7 +1298,8 @@ def oracle_strength_stamp(score: CommitOracleScore) -> str:
 __all__ = [
     "DEFAULT_MAX_MUTANTS",
     "MUTATION_SCHEMA",
-    "MUTATION_VERSION",
+    "MUTATION_V1",
+    "MUTATION_V2",
     "MUTATOR_FAMILIES",
     "MUTATOR_FAMILY_AST",
     "OUTCOME_ERROR",
@@ -1270,6 +1323,7 @@ __all__ = [
     "compile_failure",
     "eligible_lines",
     "generate_mutants",
+    "mutation_version",
     "mutator_family",
     "mutator_for",
     "operator_set_hash",

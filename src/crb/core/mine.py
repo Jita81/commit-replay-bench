@@ -36,10 +36,14 @@ its ``git patch-id --stable``, or — for a commit whose message says ``This rev
   against the parent its author wrote it for; the copy is skipped, naming the kept one;
 * a revert is **never** kept — its change is its original's (the same diff inverted, whose
   "oracle" is the original's tests going away), so the original is kept when the walk
-  reaches it, and neither counts twice.
+  reaches it, and neither counts twice;
+* a change the store already holds is **never mined again**, whichever of its commits the
+  store holds — the newer copy, the revert, or a commit outside this walk's window: every
+  commit of a held identity is skipped as ``already mined``, naming the known task.
 
 The identity travels on the task as the label ``change_id`` and, from apparatus 2.4, on
-every replay row (``crb.core.ledger.LABEL_CHANGE_ID``), so a reader counts changes.
+every replay row (``crb.core.ledger.LABEL_CHANGE_ID``; no row below 2.4 carries it), so a
+reader counts changes.
 
 Navigation
 ----------
@@ -82,7 +86,7 @@ from __future__ import annotations
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -236,9 +240,12 @@ class ChangeIndex:
                 self.kept.setdefault(self.identity(sha), sha)
 
     def identity(self, sha: str, _depth: int = 0) -> str:
-        """``sha``'s change identity: its original's for a revert, else its patch-id."""
+        """``sha``'s change identity: its original's for a revert, else its patch-id. A
+        commit outside the walk's window (an original, or a task already mined) is read on
+        its own; one the repository does not hold is ``commit:<sha>``, which no other
+        commit shares."""
         orig = self.reverts.get(sha)
-        if orig is None and sha not in self._msgs and _depth:
+        if orig is None and sha not in self._msgs:
             orig = reverted_commit(
                 self._repo, self._repo.run("log", "-1", "--format=%B", sha).stdout
             )
@@ -246,9 +253,21 @@ class ChangeIndex:
             return self.identity(orig, _depth + 1)
         pid = self._ids.get(sha)
         if pid is None:
-            pid = _patch_ids(self._repo, ["-1", sha]).get(sha, "")
+            resolves = self._repo.run("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}").ok
+            # a sha this repository does not hold holds no change here; any other git
+            # failure (a timeout) propagates rather than reading as "no change"
+            pid = _patch_ids(self._repo, ["-1", sha]).get(sha, "") if resolves else ""
             self._ids[sha] = pid
         return pid or f"commit:{sha}"
+
+    def held(self, known: Iterable[str]) -> dict[str, str]:
+        """change identity → the known (already mined) commit that holds it. A candidate
+        with a held identity is the same change as a task the store already has, whichever
+        of the two the walk would otherwise keep (DL-105)."""
+        out: dict[str, str] = {}
+        for sha in sorted(known):
+            out.setdefault(self.identity(sha), sha)
+        return out
 
     def skip_reason(self, sha: str) -> str:
         """Why the walk does not keep ``sha``, or ``""`` when it does."""
@@ -289,13 +308,16 @@ def iter_candidates(
     are skipped with a ``mine.skip`` event naming the commit that is kept.
 
     ``only`` restricts the walk to those shas (re-qualifying known tasks after the
-    miner changed); ``skip`` drops shas already mined."""
+    miner changed); ``skip`` drops shas already mined — and every other commit of a change
+    one of them holds (``already mined``), so extending a store never adds a second task
+    for a change it has, whichever commit of the change it holds."""
     caps = pool_caps(config, pool)
     n = log_n or int(config.mining.get("log_n", 3000))
     shas = repo.log_shas(n, ref=ref)
     if not shas:
         return
     changes = ChangeIndex(repo, shas, ["--no-merges", "-n", str(n), ref])
+    held = changes.held(skip)
     for sha in shas:
         if sha in skip or (only is not None and sha not in only):
             continue
@@ -310,7 +332,13 @@ def iter_candidates(
 
         if not (caps.src_min <= len(src) <= caps.src_max and len(lang_files) <= caps.files_max):
             continue
-        why = changes.skip_reason(sha)
+        known = held.get(changes.identity(sha))
+        why = (
+            f"already mined: the same change as known task {known[:12]} (git patch-id "
+            "--stable, or the commit a revert reverts)"
+            if known
+            else changes.skip_reason(sha)
+        )
         if why:
             _emit(on_event, "mine.skip", sha=sha, reason=why)
             continue

@@ -135,8 +135,11 @@ stamp is an anecdote.
 (`model`, `provider`), so a new model id is a new cell; no capability is inherited.
 
 **The oracle score carries its own rule.** Every oracle-strength score is stamped with its
-`mutation_version`, and a score is read only beside scores of the same version. `mutation.v2`
-(ADR-0025 item 7) samples every changed file (`hash-rr.v1`: each file's candidates ranked by a
+`mutation_version`, and the rule follows the apparatus stamp: below apparatus 2.4 the scorer
+is `mutation.v1` as it stood, and `mutation.v2` is the scorer of 2.4 (ADR-0025 items 7 and
+14). So the scores of one apparatus version share one rule; reading a cell's strength only
+from scores of one version, once 2.4 scores sit beside 2.3 ones, is the 2.4 readers' work
+(`routing.v2`), not yet built. `mutation.v2` samples every changed file (`hash-rr.v1`: each file's candidates ranked by a
 hash of the commit and the mutant's place, one file after another in turn), counts a mutant
 whose run timed out or exited 0 without parsed results apart from kills and escapes, and reads
 a task with more than half its mutants excluded as not scoreable. `mutation.v1` took the first
@@ -144,9 +147,10 @@ mutants in file order and counted a timeout as a kill, so its scores are history
 
 **A row names its own classification.** From apparatus 2.4 every measured row carries its
 failure kind from write (`failure_kind`, empty on a clean row), why belt 5 holds what it holds
-(`lint_reason`) and, on a replay row, the change it observed (`change_id`); a row below 2.4 is
-read by the failure rule frozen at 2.3 and is never re-derived under a later one (ADR-0025
-item 6; DL-105; DL-106).
+(`lint_reason`) and, on a replay row, the change it observed (`change_id`); a row below 2.4
+carries none of these new labels and is read by the failure rule frozen at 2.3, whose code and
+markers are pinned by their hashes, and never re-derived under a later one (ADR-0025 item 6;
+DL-105; DL-106).
 
 ## 5. The legacy-belt caveat on the census ledger
 
@@ -300,7 +304,8 @@ engineering", a rate on XL work) is not licensed by anything in the ledger.
 the repository's `mining` configuration moves the window, the task target and the candidate
 cap; the file caps are fixed per pool. It keeps a single commit per change — of two commits
 with the same patch (`git patch-id --stable`, a cherry-pick) the older, and never a revert,
-whose change is the commit it reverts — so a distinct commit is a distinct change (DL-105).
+whose change is the commit it reverts — and never mines a change the store already holds,
+whichever of its commits the store holds, so a distinct commit is a distinct change (DL-105).
 The pool therefore over-represents
 recent work and work that was tested at the time, and holds nothing older than the window
 **[hypothesis — that a recent, tested-commits-only pool is easier than the repository's other

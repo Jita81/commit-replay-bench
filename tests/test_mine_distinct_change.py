@@ -14,8 +14,10 @@ What it is:   The tests of the distinct-change rule in the miner and the replay 
 What it does: Pins that two cherry-picks of one change mine as one task (the older kept),
               that a revert and its original mine as one (the original kept), that both
               commits of a pair share one change identity, that a revert whose original lies
-              outside the walk is still never kept, and that a replay of a task mined before
-              the rule stamps the identity on its row.
+              outside the walk is still never kept, that a change the store already holds is
+              never mined again whichever of its commits the store holds (in the walk or
+              outside it), that a replay of a task mined before the rule stamps the identity on
+              its 2.4 row, and that a row below 2.4 carries none (P-122, P-123).
 How:          ``tests/fixtures/distinct_changes.py`` (pyrepo plus the two pairs, dated a day
               apart) through ``iter_candidates``, ``mine`` (no gold: RED and baseline only) and
               ``run_task`` with the gold patch.
@@ -109,6 +111,54 @@ def test_a_revert_whose_original_is_outside_the_walk_is_still_never_kept(
     assert _skip(events, two.revert).startswith("revert of")
 
 
+def test_a_change_already_mined_under_its_newer_copy_is_not_mined_again(
+    two: dc.DistinctRepo,
+) -> None:
+    """The store may hold the NEWER copy (mined before the rule, or in a smaller window):
+    the walk must not then mine the older copy as a second task of the same change."""
+    cands, events = _walk(two, skip=frozenset({two.pick_new}))
+    assert two.pick_old not in {c.sha for c in cands}
+    reason = _skip(events, two.pick_old)
+    assert reason.startswith("already mined") and two.pick_new[:12] in reason
+
+
+def test_a_change_already_mined_as_its_revert_is_not_mined_again(two: dc.DistinctRepo) -> None:
+    cands, events = _walk(two, skip=frozenset({two.revert}))
+    assert two.original not in {c.sha for c in cands}
+    reason = _skip(events, two.original)
+    assert reason.startswith("already mined") and two.revert[:12] in reason
+
+
+def test_a_known_task_outside_the_walk_still_holds_its_change(two: dc.DistinctRepo) -> None:
+    """A known sha the window does not reach is identified on its own (``change_identity``);
+    a known sha the repository does not hold holds no change and skips nothing."""
+    # the window holds revert, original and pick_new; the known pick_old lies below it
+    cands, events = _walk(two, log_n=3, skip=frozenset({two.pick_old, "f" * 40}))
+    assert {c.sha for c in cands} == {two.original}
+    assert two.pick_old[:12] in _skip(events, two.pick_new)
+
+
+def test_extending_a_mine_never_adds_a_second_task_for_a_known_change(
+    two: dc.DistinctRepo, tmp_path: Path
+) -> None:
+    outcomes = list(
+        m.mine(
+            two.repo,
+            two.config,
+            runner=PytestRunner(two.config),
+            executor=LocalExecutor(),
+            scratch=tmp_path / "scratch",
+            gold=False,
+            target_count=10,
+            known=frozenset({two.pick_new, two.revert}),
+        )
+    )
+    held = {m.change_identity(two.repo, two.pick_new), m.change_identity(two.repo, two.revert)}
+    mined = {o.task.labels[m.LABEL_CHANGE_ID] for o in outcomes if o.task is not None}
+    assert mined and mined.isdisjoint(held)
+    assert {o.sha for o in outcomes}.isdisjoint({two.pick_old, two.original})
+
+
 def test_the_mine_records_one_task_per_change_with_its_identity(
     two: dc.DistinctRepo, tmp_path: Path
 ) -> None:
@@ -132,6 +182,52 @@ def test_the_mine_records_one_task_per_change_with_its_identity(
     for sha, task in tasks.items():
         assert task.labels[m.LABEL_CHANGE_ID] == m.change_identity(two.repo, sha)
     assert {o.sha for o in outcomes}.isdisjoint({two.pick_new, two.revert})
+
+
+def _gold_spec(
+    pyrepo: pr.PyRepo, runner: PytestRunner, executor: LocalExecutor, tmp_path: Path
+) -> RunSpec:
+    return RunSpec(
+        run_id="run-change",
+        config=pyrepo.config,
+        runner=runner,
+        executor=executor,
+        scratch=tmp_path / "scratch",
+        ledger=JsonlLedger(tmp_path / "ledger.jsonl"),
+        evidence_dir=tmp_path / "evidence",
+        ladder=("r1",),
+        context_for=witnessed_context_for(
+            pyrepo.repo, pyrepo.config, runner=runner, executor=executor, scratch=tmp_path / "s"
+        ),
+    )
+
+
+def _apply_gold(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+    pr.apply_gold(ws)
+    return BuildAttempt(BuilderRef(name="fixture", model="m", provider="p", mode="sighted"))
+
+
+def test_a_replay_row_below_2_4_carries_no_change_identity(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The identity is a 2.4 label: a replay at 2.3 writes the row a 2.3 replay always
+    wrote, whether or not its task was mined with one (DL-106 (2))."""
+    monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.3")
+    for task in (feat_task, feat_task.with_(labels={lg.LABEL_CHANGE_ID: "e" * 40})):
+        outcome = run_task(
+            _gold_spec(pyrepo, runner, executor, tmp_path / task.labels.get("change_id", "x")),
+            pyrepo.repo,
+            task,
+            _apply_gold,
+        )
+        (row,) = outcome.rows
+        assert row.apparatus_version == "2.3" and row.clean
+        assert lg.LABEL_CHANGE_ID not in row.labels
 
 
 def test_a_replay_of_a_task_mined_before_the_rule_names_its_change_on_the_row(

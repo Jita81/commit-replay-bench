@@ -33,7 +33,9 @@ pass (2026-09-14, finding 1) graded three such worktrees ``clean``. So:
 * :meth:`Workspace.enforce_integrity` is the grader's pre-flight: ``HEAD`` must
   still be the parent, the worktree must still belong to the harness's clone, no
   index entry may carry a skip-worktree or assume-unchanged bit, the shared
-  ``info/exclude`` must hold only what it held at create time, and the worktree's OWN
+  ``info/exclude`` must hold only what it held when the harness first used the clone (a
+  baseline captured once per clone, so a line one trial leaves is reported in every later
+  one), and the worktree's OWN
   excludes file must hold only the harness's patterns and still be the one its
   ``core.excludesFile`` names — anything else is reported as tamper. A violation is a
   disqualification, never a verdict.
@@ -169,6 +171,8 @@ _GITLINK_MODE = "160000"
 
 #: The worktree-relative name the exclude file is reported under in tamper evidence.
 EXCLUDE_TAMPER_PATH = ".git/info/exclude"
+#: The clone's shared ``info/exclude`` as the harness first found it, beside that file.
+CLONE_EXCLUDE_BASELINE_NAME = "crb-exclude-baseline"
 #: The worktree's own excludes file, in its private git dir (never in the tree).
 OWN_EXCLUDE_NAME = "crb-exclude"
 #: … and the name it is reported under in tamper evidence.
@@ -221,7 +225,8 @@ class IntegrityViolation:
     ``kind`` is one of ``head_moved`` (``HEAD`` is not the parent), ``foreign_gitdir``
     (the worktree no longer belongs to the harness's clone), ``index_bits``
     (skip-worktree / assume-unchanged entries), ``exclude_edited`` (lines in the
-    shared ``info/exclude`` that were not there at create time — left in place — or in
+    shared ``info/exclude`` that were not there when the harness first used the clone —
+    left in place — or in
     the worktree's own excludes file that the harness did not write — removed), and
     ``excludes_file_moved`` (the worktree's ``core.excludesFile`` no longer names its own
     file). ``files`` are the paths to report as tamper evidence.
@@ -308,7 +313,7 @@ class Workspace:
         repo.worktree_add(dest, parent)
         ws = cls(repo, dest, sha=sha, parent=parent)
         ws._own_excludes()
-        ws.exclude_baseline = ws._exclude_lines()
+        ws.exclude_baseline = ws._clone_exclude_baseline()
         if post_create and config is not None:
             ws._post_create(config)
         return ws
@@ -337,7 +342,7 @@ class Workspace:
         repo.worktree_add(dest, head)
         ws = cls(repo, dest, sha=head, parent=head)
         ws._own_excludes()
-        ws.exclude_baseline = ws._exclude_lines()
+        ws.exclude_baseline = ws._clone_exclude_baseline()
         if post_create and config is not None:
             ws._post_create(config)
         return ws
@@ -385,6 +390,28 @@ class Workspace:
         except OSError:
             return []
 
+    def _clone_exclude_baseline(self) -> list[str]:
+        """The clone's shared ``info/exclude`` as the harness FIRST found it — captured once
+        per clone (``info/crb-exclude-baseline``, beside the file it describes) and read by
+        every later worktree, never re-captured. The shared file is never rewritten
+        (P-056), so a line a builder appends stays in it; judged against a per-worktree
+        snapshot it would become part of the next trial's baseline and hide that trial's
+        file unreported. Against the clone's baseline it is reported in every trial it
+        could affect until an operator removes it (P-125). Written through a temporary name
+        and linked into place, so two first worktrees of one clone never read half a
+        file."""
+        base = self._exclude_path().with_name(CLONE_EXCLUDE_BASELINE_NAME)
+        if not base.exists():
+            base.parent.mkdir(parents=True, exist_ok=True)
+            tmp = base.with_name(f"{base.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+            try:
+                tmp.write_text("".join(f"{ln}\n" for ln in self._exclude_lines()), "utf-8")
+                with contextlib.suppress(FileExistsError):  # another first worktree won
+                    os.link(tmp, base)
+            finally:
+                tmp.unlink(missing_ok=True)
+        return base.read_text(encoding="utf-8").splitlines()
+
     def _own_excludes(self) -> None:
         """Give this worktree its OWN excludes file (module docstring): switch on
         ``extensions.worktreeConfig`` in the clone (once — idempotent, retried while
@@ -431,7 +458,8 @@ class Workspace:
 
     def restore_exclude(self) -> list[str]:
         """The foreign lines in the clone's shared ``info/exclude`` — lines that were not
-        there when this worktree was created (the builder's, ``[]`` when none). The shared
+        there when the harness first used the clone (:meth:`_clone_exclude_baseline`; a
+        builder's, this trial's or an earlier one's, ``[]`` when none). The shared
         file is READ, never rewritten (ADR-0025 item 13): the harness writes nothing to
         it, so a rewrite could only race another worktree of the clone (P-056), and the
         grader never reads it anyway (:meth:`touched_files`). Membership is by stripped
@@ -520,7 +548,9 @@ class Workspace:
                 IntegrityViolation(
                     "exclude_edited",
                     f"info/exclude carried {len(foreign)} line(s) that were not there when the "
-                    f"worktree was created: {foreign[:3]}",
+                    f"harness first used the clone: {foreign[:3]} — the harness never rewrites "
+                    "the shared file, so every trial of the clone reports them until they are "
+                    "removed from it",
                     (EXCLUDE_TAMPER_PATH,),
                 )
             )

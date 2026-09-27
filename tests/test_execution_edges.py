@@ -7,11 +7,16 @@
   exits 125 stopped the run as if the daemon had failed (P-054). Now 125 is a launch failure
   only when the docker CLI said so on stderr, or the run printed nothing; one table of
   docker output serves all three launch paths.
+* The worker read an empty executor setting as ``local`` on its own path
+  (``… or "local"``) before ``make_executor`` could refuse it (P-126). Now the worker's
+  settings refuse any kind but ``local`` and ``docker`` at start-up, and ``Worker._executor``
+  has no default of its own.
 
 Navigation
 ----------
-What it is:   The tests of ``make_executor``'s refusal of an empty kind and of the one rule that
-              tells docker's exit 125 from a container's.
+What it is:   The tests of ``make_executor``'s refusal of an empty kind (and the worker's, on its
+              own path into it) and of the one rule that tells docker's exit 125 from a
+              container's.
 What it does: Pins the rule against docker CLI output — the three 29.6.1 lines captured on this
               host on 2026-09-27 (a missing image, an unknown flag, an invalid reference) and the
               daemon's documented shapes of docker 24 to 28 — and runs every case through the
@@ -22,8 +27,10 @@ How:          ``docker_launch_failed`` directly; ``DockerExecutor.run`` with a s
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md; ADR-0025 item 13 (stream G; the draft
               stream R commits)
-Works with:   src/crb/core/execution.py (under test), tests/test_execution.py (the executor's
-              own suite), docs/PREVENTION.md (P-053 and P-054, the rows these tests close)
+Works with:   src/crb/core/execution.py (under test), src/crb/server/worker.py and
+              src/crb/server/worker_main.py (the worker's path into ``make_executor``),
+              tests/test_execution.py (the executor's own suite), docs/PREVENTION.md (P-053,
+              P-054 and P-126, the rows these tests close)
 Tested by:    tests/test_execution_edges.py
 Touch when:   a docker release words its launch failures differently (add the captured line).
 """
@@ -171,3 +178,45 @@ def test_make_executor_accepts_local_or_docker_only(kind: str) -> None:
 def test_make_executor_local_is_local() -> None:
     assert isinstance(make_executor("local"), ex.LocalExecutor)
     assert isinstance(make_executor(" LOCAL "), ex.LocalExecutor)
+
+
+# --- the worker's path into make_executor (P-126: the fix reached the leaf, not its callers)
+def _worker_args() -> Any:
+    from crb.server import worker_main
+
+    return worker_main.build_parser().parse_args(["--once"])
+
+
+@pytest.mark.parametrize("value", [" ", "none", "host"])
+def test_a_worker_refuses_an_executor_setting_that_is_not_local_or_docker(
+    value: str, tmp_path: Path
+) -> None:
+    """``CRB_SANDBOX__EXECUTOR=' '`` stripped to ``''`` once started a dev worker whose
+    ``_executor`` fell back to ``local``: the setting is refused at start-up instead."""
+    from crb.server import worker_main
+
+    env = {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "dev", "CRB_SANDBOX__EXECUTOR": value}
+    with pytest.raises(ValueError, match="expected 'local' or 'docker'"):
+        worker_main.settings_from_args(_worker_args(), env)
+
+
+def test_worker_settings_refuse_an_empty_executor() -> None:
+    from crb.server.worker import WorkerSettings
+
+    with pytest.raises(ValueError, match="expected 'local' or 'docker'"):
+        WorkerSettings(executor="")
+
+
+def test_the_worker_never_defaults_an_empty_kind_to_the_host(tmp_path: Path) -> None:
+    """Whatever reaches ``Worker._executor`` empty — a setting built around the check — goes
+    to ``make_executor`` as it is and is refused there, never read as ``local``."""
+    from types import SimpleNamespace
+
+    from crb.server.worker import Worker, WorkerSettings
+
+    settings = WorkerSettings(executor="local")
+    object.__setattr__(settings, "executor", "")  # past the constructor's check
+    fake = SimpleNamespace(settings=settings)
+    ctx = SimpleNamespace(_executor=None, params={}, emit=lambda *a, **k: None)
+    with pytest.raises(ValueError, match="expected 'local' or 'docker'"):
+        Worker._executor(fake, ctx)  # type: ignore[arg-type]

@@ -18,10 +18,13 @@ What it is:   The golden table of the failure rule, one hash per apparatus versi
               pinned hash of the frozen 2.3 outage markers.
 What it does: Fails when the live rule or its markers change under an unchanged
               ``APPARATUS_VERSION``; fails when the frozen v1 rule or markers change at all;
-              shows the frozen reading of a row below 2.4 cannot move when the live markers do.
+              shows the frozen reading of a row below 2.4 cannot move when the live markers do;
+              and pins each rule's code as well as its answers, so an edit on a branch the grid
+              never reaches fails too (P-124).
 How:          Evaluates each rule over one grid of inputs that exercises every branch and every
               marker, hashes the canonical JSON of the outputs with the marker list, and compares
-              with ``GOLDEN``.
+              with ``GOLDEN``; hashes each rule's tokens (docstring and comments dropped) with the
+              constants it reads, and compares with ``GOLDEN_SOURCE`` / ``V1_SOURCE_SHA256``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         ADR-0025 item 6 (stream G; the draft stream R commits);
               docs/adr/0020-a-bug-is-closed-by-prevention.md
@@ -30,16 +33,22 @@ Works with:   src/crb/core/ledger.py (``derive_failure_kind``, ``derive_failure_
               (``APPARATUS_VERSION``, the key of the golden table), docs/PREVENTION.md (P-119,
               the row this test closes)
 Tested by:    tests/test_failure_rule_golden.py
-Touch when:   the apparatus moves (add its line to ``GOLDEN``: the hash the test prints) — or the
-              rule changes, which is an apparatus bump (src/crb/core/version.py) first.
+Touch when:   the apparatus moves (add its lines to ``GOLDEN`` and ``GOLDEN_SOURCE``: the hashes
+              the tests print) — or the rule changes, which is an apparatus bump
+              (src/crb/core/version.py) first.
 """
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import inspect
+import io
 import itertools
 import json
-from collections.abc import Callable, Sequence
+import textwrap
+import tokenize
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 import pytest
@@ -55,6 +64,14 @@ GOLDEN: dict[str, str] = {
 }
 #: SHA-256 of the canonical JSON of ``OUTAGE_ERROR_MARKERS_V1`` (frozen at 2.3).
 V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd544364713f"
+#: apparatus version → the hash of the live rule's SOURCE (``_source_digest``): the grid
+#: above pins what the rule answers on its inputs, this pins the rule itself, so an edit on a
+#: branch the grid never reaches still fails (P-124). Written once per version, never edited.
+GOLDEN_SOURCE: dict[str, str] = {
+    "2.3": "f4931817defdcb051a19397bee4a2b32bc1ea73e8b59eb2216edc3063df21e96",
+}
+#: The hash of the frozen 2.3 rule's source (``derive_failure_kind_v1`` and what it calls).
+V1_SOURCE_SHA256 = "1768a6844c74c9e2c789635b33388b72960c656e0f91d9f916d60efdae54d842"
 
 RuleFn = Callable[..., str]
 
@@ -180,3 +197,113 @@ def test_a_2_4_row_reads_its_pinned_kind_verbatim() -> None:
     }
     row = lg.GradeRow(**with_posture_labels(base))
     assert row.failure_kind == lg.FAILURE_HARNESS
+
+
+#: Every value the rule reads besides its arguments: the kinds it returns, the protocol
+#: prefix and the budget stop reasons (the markers are pinned by their own hash).
+_RULE_CONSTANTS = (
+    "FAILURE_CLEAN",
+    "FAILURE_DISQUALIFIED",
+    "FAILURE_PROTOCOL",
+    "FAILURE_OUTAGE",
+    "FAILURE_HARNESS",
+    "FAILURE_BUDGET",
+    "FAILURE_API",
+    "FAILURE_LINT",
+    "FAILURE_BUILDER_RED",
+    "PROTOCOL_VIOLATION_PREFIX",
+    "BUDGET_STOP_REASONS",
+)
+#: The live rule and the frozen one, each with every function it calls.
+LIVE_RULE = (lg.derive_failure_kind, lg.is_outage_error, lg._outage)
+V1_RULE = (lg.derive_failure_kind_v1, lg.is_outage_error_v1, lg._outage)
+_SKIP_TOKENS = {
+    tokenize.COMMENT,
+    tokenize.NL,
+    tokenize.NEWLINE,
+    tokenize.ENCODING,
+    tokenize.ENDMARKER,
+}
+
+
+def _code_tokens(source: str) -> list[str]:
+    """A function's code as tokens — its docstring, comments and blank lines dropped, so
+    only an edit to what it DOES moves the hash; indentation kept as structure."""
+    src = textwrap.dedent(source)
+    body = ast.parse(src).body[0]
+    assert isinstance(body, ast.FunctionDef)
+    doc = body.body[0] if body.body else None
+    doc_lines: set[int] = set()
+    if (
+        isinstance(doc, ast.Expr)
+        and isinstance(doc.value, ast.Constant)
+        and isinstance(doc.value.value, str)
+    ):
+        doc_lines = set(range(doc.lineno, (doc.end_lineno or doc.lineno) + 1))
+    out: list[str] = []
+    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+        if tok.type in _SKIP_TOKENS or tok.start[0] in doc_lines:
+            continue
+        name = tokenize.tok_name[tok.type]
+        out.append(name if tok.type in (tokenize.INDENT, tokenize.DEDENT) else tok.string)
+    return out
+
+
+def _source_digest(sources: Iterable[str]) -> str:
+    body = {
+        "code": [_code_tokens(src) for src in sources],
+        "constants": {name: getattr(lg, name) for name in _RULE_CONSTANTS},
+    }
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+
+
+def _sources(fns: Sequence[Callable[..., Any]]) -> list[str]:
+    return [inspect.getsource(fn) for fn in fns]
+
+
+def test_the_live_failure_rule_source_is_pinned_to_the_apparatus() -> None:
+    """The live rule's code, not only its answers on the grid: an edit on a branch the grid
+    never reaches fails here until the apparatus moves (P-124)."""
+    got = _source_digest(_sources(LIVE_RULE))
+    assert APPARATUS_VERSION in GOLDEN_SOURCE, (
+        f"apparatus {APPARATUS_VERSION} has no line in GOLDEN_SOURCE: add {got!r}"
+    )
+    assert got == GOLDEN_SOURCE[APPARATUS_VERSION], (
+        f"the failure rule's code changed under apparatus {APPARATUS_VERSION} (now {got}); "
+        "a change to the rule is an apparatus bump"
+    )
+
+
+def test_the_frozen_v1_rule_source_never_changes() -> None:
+    assert _source_digest(_sources(V1_RULE)) == V1_SOURCE_SHA256
+
+
+def test_an_edit_the_grid_never_reaches_still_moves_the_source_pin() -> None:
+    """The class P-124 names: an edit that reads a new text as ``outage`` leaves every grid
+    answer as it was — and the source pin fails on it."""
+    src = inspect.getsource(lg.derive_failure_kind)
+    edited = src.replace(
+        "is_outage_error(error) else",
+        '(is_outage_error(error) or "context length" in error) else',
+    )
+    assert edited != src
+    namespace: dict[str, Any] = dict(vars(lg))
+    exec(compile(textwrap.dedent(edited), "<edited rule>", "exec"), namespace)
+    rule = namespace["derive_failure_kind"]
+    assert rule(clean=False, disqualified=False, error="model_error: context length") == (
+        lg.FAILURE_OUTAGE
+    )
+    assert _digest(rule, lg.OUTAGE_ERROR_MARKERS) == _digest(
+        lg.derive_failure_kind, lg.OUTAGE_ERROR_MARKERS
+    )  # the grid is blind to it …
+    live = _sources(LIVE_RULE)
+    assert _source_digest([edited, *live[1:]]) != _source_digest(live)  # … the pin is not
+
+
+def test_a_docstring_or_comment_edit_leaves_the_source_pin_alone() -> None:
+    src = inspect.getsource(lg.derive_failure_kind)
+    edited = src.replace("THE rule that names why a row is not clean.", "The rule.", 1)
+    edited = edited.replace("    if clean:\n", "    # a comment\n    if clean:\n", 1)
+    assert edited != src
+    live = _sources(LIVE_RULE)
+    assert _source_digest([edited, *live[1:]]) == _source_digest(live)

@@ -532,6 +532,40 @@ def test_concurrent_worktrees_of_one_clone_never_share_an_excludes_file(
         assert b.enforce_integrity() == []
 
 
+def test_a_line_one_trial_left_in_the_shared_exclude_is_reported_in_every_later_trial(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-125: the shared ``info/exclude`` is read, never rewritten, so a hiding line a
+    builder appends stays in the file. It is judged against the clone's baseline, captured
+    once by the harness, not against the file as it stood when each worktree was created —
+    so the line is reported in every later trial it could affect, never absorbed."""
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "a") as a:
+        with _exclude_path(a).open("a", encoding="utf-8") as fh:
+            fh.write("conftest.py\n")
+        assert [v.kind for v in a.enforce_integrity()] == ["exclude_edited"]
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "b") as b:
+        (b.root / "conftest.py").write_text("x = 1\n", encoding="utf-8")
+        violations = b.enforce_integrity()
+        assert [(v.kind, v.files) for v in violations] == [
+            ("exclude_edited", (".git/info/exclude",))
+        ]
+        assert "conftest.py" in violations[0].detail
+        assert "conftest.py" in _exclude_path(b).read_text(encoding="utf-8")  # never rewritten
+
+
+def test_the_clone_baseline_is_the_shared_exclude_as_the_harness_first_found_it(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A line the operator had in ``info/exclude`` before the harness first used the clone is
+    part of the baseline: no trial is charged for it."""
+    shared = pyrepo.path / ".git" / "info" / "exclude"
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.write_text("# operator\n*.log\n", encoding="utf-8")
+    for name in ("a", "b"):
+        with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / name) as ws:
+            assert ws.enforce_integrity() == []
+
+
 def test_a_commit_inside_the_worktree_is_an_integrity_violation(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:

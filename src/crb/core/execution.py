@@ -1288,17 +1288,29 @@ def make_executor(
     the host (ADR-0025 item 13; P-053) — nor are ``none`` and ``host``, which once meant
     local. Docker without settings fails closed. ``on_kill_unconfirmed`` reaches the docker
     executor only (a local kill needs no daemon to confirm it)."""
-    k = (kind or "").strip().lower()
-    if k == "local":
+    if executor_kind(kind) == "local":
         return LocalExecutor(cancel=cancel)
-    if k == "docker":
-        if docker is None:
-            raise SandboxUnavailable("executor 'docker' requires DockerSettings (image)")
-        return DockerExecutor(docker, cancel=cancel, on_kill_unconfirmed=on_kill_unconfirmed)
-    raise ValueError(
-        f"unknown executor kind {kind!r} (the executor setting, CRB_SANDBOX__EXECUTOR or a "
-        "run's 'executor'): expected 'local' or 'docker'"
-    )
+    if docker is None:
+        raise SandboxUnavailable("executor 'docker' requires DockerSettings (image)")
+    return DockerExecutor(docker, cancel=cancel, on_kill_unconfirmed=on_kill_unconfirmed)
+
+
+#: The executor kinds, and nothing else (P-053).
+EXECUTOR_KINDS: tuple[str, ...] = ("local", "docker")
+
+
+def executor_kind(kind: str) -> str:
+    """``kind`` normalised to one of :data:`EXECUTOR_KINDS`, or ``ValueError`` naming the
+    setting — the one check :func:`make_executor` and every caller that holds an executor
+    setting (the worker's own settings, P-126) apply, so an empty value is refused where
+    it is read and never reaches a caller's default."""
+    k = (kind or "").strip().lower()
+    if k not in EXECUTOR_KINDS:
+        raise ValueError(
+            f"unknown executor kind {kind!r} (the executor setting, CRB_SANDBOX__EXECUTOR or "
+            "a run's 'executor'): expected 'local' or 'docker'"
+        )
+    return k
 
 
 def sequence_env(*layers: Mapping[str, str] | None) -> dict[str, str]:
@@ -1312,6 +1324,7 @@ def sequence_env(*layers: Mapping[str, str] | None) -> dict[str, str]:
 
 __all__: Sequence[str] = (
     "DOCKER_KILL_TIMEOUT_S",
+    "EXECUTOR_KINDS",
     "KILL_CONFIRM_S",
     "KILL_CONFIRM_STEP_S",
     "SANDBOX_TREES",
@@ -1331,6 +1344,7 @@ __all__: Sequence[str] = (
     "UnconfirmedKill",
     "bundle_mount_args",
     "container_stopped",
+    "executor_kind",
     "make_executor",
     "sequence_env",
     "wait_container_stopped",

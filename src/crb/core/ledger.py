@@ -1127,7 +1127,13 @@ def grade_row_from_result(
         provenance="measured",
         labels={
             "rung": trial,
-            **{k: str(v) for k, v in task.labels.items()},
+            # the change identity is a 2.4 label (DL-106 (2)): a mined task carries it at
+            # any apparatus, but a row below 2.4 is written as a 2.3 row always was
+            **{
+                k: str(v)
+                for k, v in task.labels.items()
+                if k != LABEL_CHANGE_ID or is_v2_apparatus(apparatus)
+            },
             **({"builder_error": builder_error[:300]} if builder_error else {}),
             **dict(labels or {}),
             **written,

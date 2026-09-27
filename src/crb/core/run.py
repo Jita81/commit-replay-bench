@@ -76,6 +76,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from crb.core import version as _version
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
@@ -87,6 +88,7 @@ from crb.core.ledger import (
     JsonlLedger,
     grade_row_from_result,
     is_environment_error,
+    is_v2_apparatus,
 )
 from crb.core.mine import change_identity
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
@@ -312,7 +314,9 @@ def run_task(
     assert spec.context_for is not None  # __post_init__ refuses a RunSpec without one
     ctx = spec.context_for(task)
     task = ctx.spec(task)
-    if not task.labels.get(LABEL_CHANGE_ID):  # mined before the miner stamped it (G-954)
+    if is_v2_apparatus(_version.APPARATUS_VERSION) and not task.labels.get(LABEL_CHANGE_ID):
+        # mined before the miner stamped it (G-954); a 2.4 replay row must carry it, and a
+        # row below 2.4 never does (DL-106 (2)), so it is computed only when it is written
         task = task.with_(
             labels={**task.labels, LABEL_CHANGE_ID: change_identity(repo, task.task_id)}
         )
