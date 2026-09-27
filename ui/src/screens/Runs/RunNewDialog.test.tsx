@@ -22,8 +22,8 @@
  * Works with:   ui/src/screens/Runs/RunNewDialog.tsx (the code under test),
  *               ui/src/lib/jsonObject.ts (the rules the JSON cases pin), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Runs/RunNewDialog.test.tsx
- * Touch when:   a field is added to `POST /runs` (docs/API.md) — assert its presence and
- *               absence in the body.
+ * Touch when:   never for a new repository; a field is added to `POST /runs` (docs/API.md) — assert
+ *               its presence and absence in the body.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

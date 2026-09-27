@@ -52,8 +52,8 @@
  *               (the full grid), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
- * Touch when:   a headline fact is added to the map summary; the wording of what `deliver`
- *               means changes (EVIDENCE-AND-CLAIMS §6 first).
+ * Touch when:   never for a new repository; a headline fact is added to the map summary; the
+ *               wording of what `deliver` means changes (EVIDENCE-AND-CLAIMS §6 first).
  */
 
 import { useMemo, type ReactNode } from 'react'

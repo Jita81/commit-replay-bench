@@ -27,8 +27,9 @@ Works with:   src/crb/provision/__init__.py (``make_deps_provider`` reads it),
               src/crb/provision/fetch.py (the allowlist and the mirror),
               docs/DEPLOYMENT.md#21-environment-reference (the operator's list)
 Tested by:    tests/test_provision_go.py, tests/test_settings_provision.py
-Touch when:   a registry or limit becomes configurable (a field here, in ``ProvisionSettings``,
-              in DEPLOYMENT §2.1 and in the Helm/compose templates).
+Touch when:   never for a new repository (a registry or mirror is a deployment setting, not code); a
+              registry or limit becomes configurable (a field here, in ``ProvisionSettings``, in
+              DEPLOYMENT §2.1 and in the Helm/compose templates).
 """
 
 from __future__ import annotations

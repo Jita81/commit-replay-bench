@@ -37,9 +37,8 @@
  *               ui/src/components/StatTile.tsx (value + n + CI + apparatus, always)
  * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx, ui/e2e/walkthrough/05-replay-fake.spec.ts,
  *               ui/e2e/walkthrough/06-cancel.spec.ts
- * Touch when:   a field is added to GET /runs/{id} or /runs/{id}/tasks (docs/API.md) — update
- *               ui/src/api/types.ts first, then the tile or column here; never for a new
- *               repository.
+ * Touch when:   never for a new repository; a field is added to GET /runs/{id} or /runs/{id}/tasks
+ *               (docs/API.md) — update ui/src/api/types.ts first, then the tile or column here.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'

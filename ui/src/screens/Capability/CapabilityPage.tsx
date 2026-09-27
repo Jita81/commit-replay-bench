@@ -38,10 +38,10 @@
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (a real cell with route `calibrate`),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   the class taxonomy changes (src/crb/core/taxonomy.py — mirror `ALL_CLASSES`
- *               here), a cell field is added to docs/API.md "/capability-map" (type it in
- *               ui/src/screens/Capability/contract.ts first), or the routing policy gains a
- *               threshold worth a tick; never for a new repository.
+ * Touch when:   never for a new repository; the class taxonomy changes (src/crb/core/taxonomy.py —
+ *               mirror `ALL_CLASSES` here), a cell field is added to docs/API.md "/capability-map"
+ *               (type it in ui/src/screens/Capability/contract.ts first), or the routing policy
+ *               gains a threshold worth a tick.
  * Claims:       The map shows measured cells only; coverage is `null` until the repo has a
  *               change profile (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
  */

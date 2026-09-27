@@ -24,8 +24,8 @@
  *               test), ui/src/screens/Capability/contract.ts (`useFailureSplit`'s shape),
  *               ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Runs/RunDetailPage.test.tsx
- * Touch when:   the SSE wire shape or a run-detail tile changes (docs/API.md) — extend the
- *               fake frames or the tile assertions.
+ * Touch when:   never for a new repository; the SSE wire shape or a run-detail tile changes
+ *               (docs/API.md) — extend the fake frames or the tile assertions.
  */
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'

@@ -27,8 +27,9 @@ Works with:   src/crb/builders/claude_code.py (under test), src/crb/builders/bas
               tests/fixtures/builders_repo.py (the parent + task), tests/test_cli_doctor.py (the
               same probe behind ``crb doctor``), docs/SECURITY.md (credentials, §3.3)
 Tested by:    tests/test_builders_claude_code.py
-Touch when:   the CLI's stream-json shape or flags change (a fake-transport case on the new
-              shape); an auth mode or token source is added (precedence and fail-closed cases).
+Touch when:   never for a new repository; the CLI's stream-json shape or flags change (a
+              fake-transport case on the new shape); an auth mode or token source is added
+              (precedence and fail-closed cases).
 """
 
 from __future__ import annotations

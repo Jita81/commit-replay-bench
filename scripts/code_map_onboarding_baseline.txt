@@ -30,14 +30,12 @@ src/crb/intake/jira.py
 src/crb/mcp/__init__.py
 src/crb/mcp/client.py
 src/crb/mcp/server.py
-src/crb/provision/config.py
 src/crb/provision/probe.py
 src/crb/server/claude_login.py
 src/crb/server/claude_login_driver.py
 src/crb/server/factory_state.py
 src/crb/server/github_app.py
 src/crb/server/intake.py
-src/crb/server/posture_gate.py
 src/crb/server/posture_view.py
 src/crb/server/reaper.py
 src/crb/server/routes/__init__.py
@@ -86,7 +84,6 @@ tests/fixtures/remote.py
 tests/fixtures/server_seed.py
 tests/fixtures/signoff_seed.py
 tests/test_builders_adapter.py
-tests/test_builders_claude_code.py
 tests/test_builders_container.py
 tests/test_builders_container_docker.py
 tests/test_builders_editblock.py
@@ -156,7 +153,6 @@ tests/test_provision_fetch.py
 tests/test_provision_go.py
 tests/test_provision_node.py
 tests/test_provision_python.py
-tests/test_provision_store.py
 tests/test_public_docs.py
 tests/test_qualify.py
 tests/test_redact.py
@@ -195,7 +191,6 @@ tests/test_server_secrets.py
 tests/test_server_system.py
 tests/test_settings_home_guard.py
 tests/test_settings_posture.py
-tests/test_settings_provision.py
 tests/test_signoff.py
 tests/test_store_db.py
 tests/test_store_events.py
@@ -205,7 +200,6 @@ tests/test_store_migrate.py
 tests/test_store_qualifications.py
 tests/test_store_reviews.py
 tests/test_version_consistency.py
-tests/test_worker.py
 tests/test_worker_budget_ladder.py
 tests/test_worker_clone.py
 tests/test_worker_fetch.py
@@ -233,7 +227,6 @@ ui/src/App.reachability.test.ts
 ui/src/App.tsx
 ui/src/api/client.test.ts
 ui/src/api/client.ts
-ui/src/api/hooks.ts
 ui/src/api/repoConfig.ts
 ui/src/api/sse.ts
 ui/src/api/types.test.ts
@@ -293,8 +286,6 @@ ui/src/lib/theme.ts
 ui/src/lib/verdict.test.ts
 ui/src/lib/verdict.ts
 ui/src/main.tsx
-ui/src/screens/Capability/CapabilityPage.test.tsx
-ui/src/screens/Capability/CapabilityPage.tsx
 ui/src/screens/Capability/FailureSplit.tsx
 ui/src/screens/Capability/ReasonCode.tsx
 ui/src/screens/Capability/contract.ts
@@ -343,17 +334,11 @@ ui/src/screens/Repos/runnerOpts.test.ts
 ui/src/screens/Repos/runnerOpts.ts
 ui/src/screens/Results/MapTable.test.tsx
 ui/src/screens/Results/MapTable.tsx
-ui/src/screens/Results/ResultsPage.test.tsx
-ui/src/screens/Results/ResultsPage.tsx
 ui/src/screens/Routing/RoutingPage.test.tsx
 ui/src/screens/Routing/RoutingPage.tsx
 ui/src/screens/Runs/EvidenceDrawer.tsx
 ui/src/screens/Runs/ReviewPanel.test.tsx
 ui/src/screens/Runs/ReviewPanel.tsx
-ui/src/screens/Runs/RunDetailPage.test.tsx
-ui/src/screens/Runs/RunDetailPage.tsx
-ui/src/screens/Runs/RunNewDialog.test.tsx
-ui/src/screens/Runs/RunNewDialog.tsx
 ui/src/screens/Runs/RunsPage.test.tsx
 ui/src/screens/Runs/RunsPage.tsx
 ui/src/screens/Runs/TaskDetailPage.test.tsx

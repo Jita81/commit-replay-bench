@@ -30,10 +30,10 @@
  * Tested by:    ui/src/screens/Runs/RunNewDialog.test.tsx, ui/e2e/walkthrough/03-mine.spec.ts
  *               (`startRun`), ui/e2e/walkthrough/09-budget-sweep.spec.ts (the sweep preset
  *               end to end)
- * Touch when:   a builder is registered or a model id changes (src/crb/builders/*) — update
- *               `BUILDER_NAMES` / `CLAUDE_CODE_MODELS` and `BUILDER_CONFIG_HELP`; a budget
- *               field is added (`RunBudget` in ui/src/api/types.ts first); never for a new
- *               repository.
+ * Touch when:   never for a new repository; a builder is registered or a model id changes
+ *               (src/crb/builders/*) — update `BUILDER_NAMES` / `CLAUDE_CODE_MODELS` and
+ *               `BUILDER_CONFIG_HELP`; a budget field is added (`RunBudget` in ui/src/api/types.ts
+ *               first).
  */
 import { useEffect, useState, type FormEvent } from 'react'
 import { useCreateRun, useRepoPosture, useRepos, useSettings } from '../../api/hooks'

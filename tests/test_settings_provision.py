@@ -16,7 +16,7 @@ ADRs:         none
 Works with:   src/crb/server/settings.py (``ProvisionSettings``), src/crb/provision/config.py (the
               worker's side), docs/DEPLOYMENT.md#21-environment-reference (the variables)
 Tested by:    tests/test_settings_provision.py
-Touch when:   a provisioning variable or production rule changes.
+Touch when:   never for a new repository; a provisioning variable or production rule changes.
 """
 
 from __future__ import annotations

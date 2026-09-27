@@ -18,7 +18,8 @@ Works with:   src/crb/provision/store.py (under test), src/crb/core/deps.py (``B
               tests/fixtures/tmptree.py (``permissions_bind``: a refused write is expected only
               where the mode bits bind — P-108)
 Tested by:    tests/test_provision_store.py
-Touch when:   the store's layout, manifest schema or sealing rule changes.
+Touch when:   never for a new repository; the store's layout, manifest schema or sealing rule
+              changes.
 """
 
 from __future__ import annotations

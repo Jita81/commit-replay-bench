@@ -24,8 +24,8 @@
  *               ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`),
  *               ui/src/test/source-ratchets.ts (`queryDataReads`, the `currentData` ratchet)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx
- * Touch when:   a cell field or controls state is added — extend the fixtures and assert its
- *               rendering here.
+ * Touch when:   never for a new repository; a cell field or controls state is added — extend the
+ *               fixtures and assert its rendering here.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'

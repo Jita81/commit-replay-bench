@@ -45,9 +45,9 @@
  *               ui/src/screens/Capability/CapabilityPage.test.tsx (`currentData`, with the
  *               source ratchet that refuses a `<query>.data` read on those pages)
  *               (every screen test exercises its hooks through `mockApi`)
- * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
- *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
- *               never for a new repository.
+ * Touch when:   never for a new repository; an endpoint is added or its path / params change
+ *               (docs/API.md) — add the type in ui/src/api/types.ts, the key in `keys` and the hook
+ *               here, then the screen.
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'

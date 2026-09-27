@@ -43,8 +43,8 @@ Works with:   src/crb/server/worker.py (under test), src/crb/store/jobs.py (the 
               tests/test_worker_clone.py and tests/test_worker_budget_ladder.py (the same
               harness for one kind or seam each; so are the other test_worker_*.py files)
 Tested by:    tests/test_worker.py
-Touch when:   a run kind is added (``stage_for``, a run case here and the queue's
-              ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
+Touch when:   never for a new repository; a run kind is added (``stage_for``, a run case here and
+              the queue's ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
               ``succeeded`` honestly.
 """
 

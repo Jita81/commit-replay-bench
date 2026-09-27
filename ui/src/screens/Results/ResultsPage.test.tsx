@@ -40,7 +40,7 @@
  *               ui/src/help/hints-collector.ts (`unhinted`),
  *               ui/src/test/source-ratchets.ts (`queryDataReads`)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx
- * Touch when:   a headline fact or the deliver wording changes.
+ * Touch when:   never for a new repository; a headline fact or the deliver wording changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
