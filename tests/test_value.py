@@ -92,6 +92,7 @@ def vr(
     gold: bool | None = True,
     detail: str = "",
     row_hash: str = "",
+    known: bool = True,
 ) -> ValueRow:
     return ValueRow(
         row_hash=row_hash or f"{i:064x}",
@@ -104,6 +105,7 @@ def vr(
         clean=kind == FAILURE_CLEAN,
         failure_kind=kind,
         cost_usd=cost,
+        cost_known=known,
         apparatus_version=app,
         gold_clean=gold,
         repo_lint_clean=lint if kind == FAILURE_CLEAN else None,
@@ -313,6 +315,60 @@ def test_the_north_star_is_blind_clean_rate_times_precision_per_pound() -> None:
     assert ns["per_pound_low"] == pytest.approx(lo * 10 / 11.0, abs=1e-4)
     assert ns["pounds_per_working"] == pytest.approx(11.0 / 2.0, abs=0.01)
     assert ns["precision_basis"] == BASIS_REVIEW and "Wilson" in ns["method"]
+
+
+def test_an_unpriced_blind_attempt_is_never_counted_as_zero_and_withholds_the_per_pound() -> None:
+    # the same ten attempts as above, plus one blind attempt whose builder metered tokens but
+    # had no price for its model: its pounds are unknown, so the pounds spent are a floor
+    rows = [
+        vr(i, kind=FAILURE_CLEAN if i < 4 else FAILURE_BUILDER_RED, cost=2.0) for i in range(10)
+    ]
+    rows.append(vr(30, kind=FAILURE_BUILDER_RED, cost=0.0, known=False))
+    vs = [verdict(i, mergeable=i < 3) for i in range(6)]
+    ns = value_report(rows, vs, apparatus="all", usd_per_gbp=2.0).to_dict()["north_star"]
+    assert ns["spend_usd"] == pytest.approx(20.0)
+    assert ns["spend_rows_priced"] == 10 and ns["spend_rows_unpriced"] == 1
+    # the rate is not money, so it stands; the per-pound figures divide by a floor, so they
+    # would overstate — they are withheld, with the reason, never shown as a number
+    assert ns["working_rate"] == pytest.approx(4 / 11 * 0.5, abs=1e-4)
+    for key in ("per_pound", "per_pound_low", "per_pound_high", "pounds_per_working"):
+        assert ns[key] is None, key
+    assert "1 blind attempt" in ns["per_pound_withheld"]
+    # with every row priced the reason is empty and the figure is served
+    priced = value_report(rows[:-1], vs, apparatus="all", usd_per_gbp=2.0).to_dict()
+    assert priced["north_star"]["per_pound_withheld"] == ""
+    assert priced["north_star"]["per_pound"] is not None
+
+
+def test_process_loss_and_the_cells_count_an_unpriced_row_apart() -> None:
+    rows = [
+        vr(1, kind=FAILURE_HARNESS, cost=3.0),
+        vr(2, kind=FAILURE_HARNESS, cost=0.0, known=False),
+    ]
+    d = value_report(rows, [], apparatus="all").to_dict()
+    assert d["process_loss"]["kinds"]["harness"]["rows"] == 2
+    assert d["process_loss"]["kinds"]["harness"]["usd"] == pytest.approx(3.0)
+    assert d["process_loss"]["rows_unpriced"] == 1
+    (cell,) = d["cells"]
+    assert cell["spend_usd"] == pytest.approx(3.0) and cell["spend_rows_unpriced"] == 1
+
+
+def test_the_adapter_carries_the_rows_own_cost_known() -> None:
+    base = {
+        "repo": "alpha",
+        "task_id": "c" * 40,
+        "clean": False,
+        "tests_unmodified": True,
+        "target_green": False,
+        "no_new_failures": None,
+        "source_changed": None,
+        "mode": "blind",
+    }
+    assert value_row_from_grade(posture_row(**base, cost_usd=0.4)).cost_known is True
+    # $0, no tokens and no builder that reported: nobody measured this cost
+    unknown = posture_row(**base, cost_usd=0.0)
+    assert unknown.cost_known is False
+    assert value_row_from_grade(unknown).cost_known is False
 
 
 def test_an_unmeasured_north_star_is_null_never_zero() -> None:

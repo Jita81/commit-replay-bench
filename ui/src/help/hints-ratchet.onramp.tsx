@@ -158,12 +158,44 @@ const SIGNED = {
   attestation: { reviewed_task_id: 'a'.repeat(40), reviewed_row_hash: ROW, statement: 'I read the diff.', at: '2026-09-14T10:00:00+00:00', subject: 'fix: task 4' },
 }
 
+// ── the flow reading every screen shows its own stream's numbers from (G-925)
+const flowStream = (stream: string, name: string, key: string) => ({
+  stream,
+  name,
+  lead_times: [{ key, label: `${name} lead time`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' }],
+  spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
+  spend_label: 'the replay and blind attempts graded for this repository',
+  per_unit: null,
+  per_unit_label: stream === 'manufacture-and-deliver' ? 'per merged pull request' : '',
+  per_unit_spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
+  per_unit_units: 0,
+  per_unit_reason: 'no merged pull request yet to divide by',
+  counts: { graded_rows: 44 },
+  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of the guide’s “real work”', why: 'nothing here times the work a person does outside this product', gap: 'G-556' }] : [],
+})
+const FLOW = {
+  repo: 'alpha',
+  apparatus: '2.2',
+  generated: '2026-09-23T10:00:00+00:00',
+  method: 'derived from the stored runs, graded rows, events, sign-offs and factory chain',
+  spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
+  streams: [
+    flowStream('connect-and-prove', 'Connect & prove', 'registered_to_controls'),
+    flowStream('measure', 'Measure', 'queued_to_graded'),
+    flowStream('decide-and-license', 'Decide & license', 'accepted_to_signed'),
+    flowStream('manufacture-and-deliver', 'Manufacture & deliver', 'registered_to_pr'),
+    flowStream('learn', 'Learn', 'refusal_to_strengthening'),
+    flowStream('run-the-platform', 'Run the platform', 'password_set_to_signed_in'),
+  ],
+}
+
 const ALPHA_WALK = {
   'GET /repos/alpha': { ...REPO, last_run: { id: 'r9', kind: 'replay', status: 'running', finished: null } },
   'GET /oracle/alpha': ORACLE,
   'GET /oracle/alpha/controls': CONTROLS,
   'GET /capability-map': MAP,
   'GET /runs/r9': RUN,
+  'GET /flow': FLOW,
 }
 
 /** The on-ramp routes, keyed by App.tsx pattern. */
@@ -237,6 +269,7 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
       'GET /repos/alpha/pool': { repo: 'alpha', n_tasks: 8, oldest_authored: '2026-08-01T12:00:00+00:00', newest_authored: '2026-08-08T12:00:00+00:00', history_commits: null, history_first_authored: null, window_commits: null, share: null, history_unavailable: 'no_clone_path' },
       'GET /signoffs': { items: [STALE], total: 1, limit: 50, offset: 0 },
       'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /flow': FLOW,
     },
     roles: ['viewer', 'approver'],
   },
@@ -262,6 +295,7 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
       'GET /capability-map': SIGNOFF_MAP,
       'GET /signoffs': { items: [SIGNED], total: 1, limit: 50, offset: 0 },
       'GET /signoffs/preview': PREVIEW,
+      'GET /flow': FLOW,
     },
     roles: ['viewer', 'approver'],
   },

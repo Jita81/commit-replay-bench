@@ -777,6 +777,31 @@ class TestReviews:
             "unanchored": 0,
         }
 
+    def test_a_review_takes_the_reviewers_minutes_and_the_chain_still_verifies(
+        self, env: Env, tmp_path: Path
+    ) -> None:
+        r = Retained(env, tmp_path)
+        login(env.client, "operator")
+        timed = env.post("/reviews", json=r.review_body(mergeable=True, minutes=14))
+        assert timed.status_code == 201, timed.text
+        assert timed.json()["minutes"] == 14
+        # not stated is null, never a guessed or zero figure
+        plain = env.post("/reviews", json=r.review_body(mergeable=True))
+        assert plain.status_code == 201 and plain.json()["minutes"] is None
+        assert env.get(f"/reviews/{timed.json()['review_id']}").json()["minutes"] == 14
+        with env.factory() as s:
+            payloads = [
+                e.payload_json
+                for e in s.execute(select(Event).where(Event.action == "review.created")).scalars()
+            ]
+        assert [p["minutes"] for p in payloads] == [14, None]
+        # the hashed field is recomputed from the stored column: both records verify
+        v = env.get("/reviews/verify").json()
+        assert v["ok"] is True and v["chain_ok"] is True and v["rows"] == 2
+        for bad in (0, -5, 481, "10", True, 2.5):
+            res = env.post("/reviews", json=r.review_body(minutes=bad))
+            assert res.status_code == 422, (bad, res.text)
+
     def test_client_verdict_must_agree(self, env: Env, tmp_path: Path) -> None:
         r = Retained(env, tmp_path)
         login(env.client, "operator")

@@ -1,0 +1,368 @@
+"""The flow fold — how long each value stream takes, what it spent, and what nobody measured.
+
+Every value stream in ``docs/dod/streams/`` carries a MEASURE criterion: *the product shows
+this stream's own numbers*. This module is the arithmetic that answers it, and nothing else.
+It derives; it never stores. The server hands it pairs of timestamps that are already in the
+store (events, runs, graded rows, sign-offs, the factory's evidence chain) and pairs of
+``(cost_usd, cost_known)``, and it reduces them to:
+
+* a **lead time** per named milestone pair — n, median, minimum, maximum, and how many pairs
+  were dropped because a stamp was unreadable or the end preceded the start;
+* the **spend** — the sum of the rows whose cost is a measurement. An unknown cost is never
+  counted as zero (``GradeRow.cost_known``): the sum is over priced rows only and the reading
+  says how many rows were unpriced, so a reader can see how much of the money is missing.
+  :func:`spend_of_rows` is THE spend rule of the product — the value scorecard
+  (``crb.core.value``) sums with it too, so the two readers of money never disagree (DL-066);
+* the **figures nobody measured** — named, with why, and with the gap id that would close
+  them. A number the product does not capture is stated as absent, never derived from a
+  neighbouring number that happens to exist.
+
+Two rules hold everywhere: **an unmeasured figure is ``None``, never 0**, and **n travels with
+every figure**. A median of no durations is not zero seconds, and a spend of no priced rows is
+not $0.00.
+
+Navigation
+----------
+What it is:   The pure fold behind ``GET /flow``: ``LeadTime``, ``Spend``, ``NotCaptured``,
+              ``StreamFlow``, ``FlowReading``, the reductions that build them, and the one
+              spend rule (``spend_of_rows``) every reader of graded rows' money calls.
+What it does: Reduces (start, end) timestamp pairs to a lead time with n / median / min / max,
+              reduces ``(cost_usd, cost_known)`` pairs to a spend that honours an unknown cost,
+              divides a known spend per unit (and says why when it will not: nothing priced,
+              no unit, or a floor), and names the figures the product does not
+              capture so a screen can say so instead of inventing them.
+How:          ``datetime.fromisoformat`` (``Z`` accepted, a naive stamp read as UTC) → seconds
+              → ``statistics.median``; dataclasses with ``to_dict`` for the API; stdlib only,
+              so ``crb.core`` stays dependency-free.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+Works with:   src/crb/server/flow.py (gathers the pairs this module reduces, one per stream),
+              src/crb/server/routes/flow.py (serves the reading at ``GET /flow``),
+              src/crb/core/ledger.py (``GradeRow.cost_known`` — the flag the spend honours),
+              src/crb/core/value.py (the scorecard — sums its money with ``spend_of_rows``),
+              ui/src/components/FlowPanel.tsx (renders one stream's figures on its own screen)
+Tested by:    tests/test_flow.py, tests/test_server_routes_flow.py
+Touch when:   a value stream is added (one entry in ``STREAM_NAMES``); never for a new
+              repository, and never to make an unmeasured figure read as zero.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import statistics
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+#: The value streams, in the order a reader meets them, with the name each screen shows.
+STREAM_NAMES: dict[str, str] = {
+    "connect-and-prove": "Connect & prove",
+    "measure": "Measure",
+    "decide-and-license": "Decide & license",
+    "manufacture-and-deliver": "Manufacture & deliver",
+    "learn": "Learn",
+    "run-the-platform": "Run the platform",
+}
+
+
+def parse_ts(value: str) -> _dt.datetime | None:
+    """One stored timestamp as an aware UTC ``datetime``, or ``None`` when it cannot be read.
+
+    The store writes second-precision ISO-8601 UTC and the event stream writes milliseconds;
+    both parse. A ``Z`` suffix is accepted, and a stamp with no offset is read as UTC — every
+    writer in this product stamps UTC. An unreadable stamp is ``None``, never "now" and never
+    the epoch: a lead time built on a guessed stamp would be a fabricated number.
+    """
+    s = (value or "").strip()
+    if not s:
+        return None
+    if s.endswith(("Z", "z")):
+        s = f"{s[:-1]}+00:00"
+    try:
+        dt = _dt.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=_dt.UTC) if dt.tzinfo is None else dt.astimezone(_dt.UTC)
+
+
+def median(values: Sequence[float]) -> float | None:
+    """The median of ``values``, or ``None`` when there are none (never 0.0)."""
+    return statistics.median(values) if values else None
+
+
+@dataclass(frozen=True)
+class LeadTime:
+    """How long one named milestone pair took, with its n.
+
+    ``median_s`` / ``min_s`` / ``max_s`` are ``None`` when ``n`` is 0 — an unmeasured
+    duration, not a zero one. ``dropped`` counts pairs this fold refused: a stamp it could
+    not read, or an end before its start (a clock or an ordering defect the reader should
+    see rather than a negative duration folded into a median). ``reason`` says why nothing
+    was measured, and is empty once anything was.
+    """
+
+    key: str
+    label: str
+    n: int = 0
+    median_s: float | None = None
+    min_s: float | None = None
+    max_s: float | None = None
+    dropped: int = 0
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "n": self.n,
+            "median_s": self.median_s,
+            "min_s": self.min_s,
+            "max_s": self.max_s,
+            "dropped": self.dropped,
+            "reason": self.reason,
+        }
+
+
+def lead_time(
+    key: str,
+    label: str,
+    pairs: Iterable[tuple[str, str]],
+    *,
+    reason: str = "",
+) -> LeadTime:
+    """Reduce ``(start, end)`` stamps to one :class:`LeadTime`.
+
+    ``reason`` is carried only while ``n`` is 0: once a duration is measured, the honest
+    empty sentence is no longer true and is dropped.
+    """
+    seconds: list[float] = []
+    dropped = 0
+    for start, end in pairs:
+        a, b = parse_ts(start), parse_ts(end)
+        if a is None or b is None or b < a:
+            dropped += 1
+            continue
+        seconds.append((b - a).total_seconds())
+    if not seconds:
+        return LeadTime(key=key, label=label, n=0, dropped=dropped, reason=reason)
+    return LeadTime(
+        key=key,
+        label=label,
+        n=len(seconds),
+        median_s=median(seconds),
+        min_s=min(seconds),
+        max_s=max(seconds),
+        dropped=dropped,
+    )
+
+
+def stated_durations(
+    key: str,
+    label: str,
+    seconds: Iterable[float],
+    *,
+    reason: str = "",
+) -> LeadTime:
+    """Reduce durations a person STATED (not two stamps) to one :class:`LeadTime`.
+
+    The reviewer minutes of a review are such a figure: nobody derives them from
+    timestamps, so they arrive as seconds rather than pairs. A non-positive value is
+    dropped and counted, as a pair out of order is; ``reason`` is kept only while nothing
+    was measured.
+    """
+    kept: list[float] = []
+    dropped = 0
+    for v in seconds:
+        if v > 0:
+            kept.append(float(v))
+        else:
+            dropped += 1
+    if not kept:
+        return LeadTime(key=key, label=label, n=0, dropped=dropped, reason=reason)
+    return LeadTime(
+        key=key,
+        label=label,
+        n=len(kept),
+        median_s=median(kept),
+        min_s=min(kept),
+        max_s=max(kept),
+        dropped=dropped,
+    )
+
+
+@dataclass(frozen=True)
+class Spend:
+    """What a stream spent, with how much of the money is missing.
+
+    ``usd`` sums the rows whose cost is a measurement and is ``None`` when there are none —
+    an unpriced row is never counted as zero. ``rows_unpriced`` is how many rows carried a
+    cost the product cannot vouch for (``GradeRow.cost_known`` is false), so a reader knows
+    the sum is a floor. ``apparatus_versions`` names the apparatus versions of the rows the
+    reading covers (priced or not), so a sum over rows of two versions says so.
+    """
+
+    usd: float | None = None
+    rows_priced: int = 0
+    rows_unpriced: int = 0
+    apparatus_versions: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "usd": self.usd,
+            "rows_priced": self.rows_priced,
+            "rows_unpriced": self.rows_unpriced,
+            "apparatus_versions": list(self.apparatus_versions),
+        }
+
+
+def spend_of(rows: Iterable[tuple[float, bool]]) -> Spend:
+    """Reduce ``(cost_usd, cost_known)`` pairs to a :class:`Spend`."""
+    pairs = list(rows)
+    priced = [cost for cost, known in pairs if known]
+    return Spend(
+        usd=round(sum(priced), 6) if priced else None,
+        rows_priced=len(priced),
+        rows_unpriced=len(pairs) - len(priced),
+    )
+
+
+class PricedRow(Protocol):
+    """What the one spend rule reads from a row: ``GradeRow`` and ``crb.core.value.ValueRow``
+    both answer it, so the flow reading and the value scorecard sum money the same way."""
+
+    @property
+    def cost_usd(self) -> float: ...
+
+    @property
+    def cost_known(self) -> bool: ...
+
+    @property
+    def apparatus_version(self) -> str: ...
+
+
+def spend_of_rows(rows: Iterable[PricedRow]) -> Spend:
+    """THE spend rule over rows: :func:`spend_of` on ``(cost_usd, cost_known)``, plus the
+    apparatus versions the rows span. Every reader of money in this product that sums
+    graded rows — ``GET /flow`` and ``GET /value`` — calls this, so an unpriced row is
+    counted the same way (not at all, and reported) wherever it is read."""
+    rs = list(rows)
+    base = spend_of((r.cost_usd, r.cost_known) for r in rs)
+    return Spend(
+        usd=base.usd,
+        rows_priced=base.rows_priced,
+        rows_unpriced=base.rows_unpriced,
+        apparatus_versions=tuple(sorted({r.apparatus_version for r in rs})),
+    )
+
+
+def per_unit(spend: Spend, units: int) -> float | None:
+    """A known spend divided by ``units`` (the cost of one certified change), or ``None``.
+
+    ``None`` when nothing is priced, when there are no units, or when any row of the spend
+    carried no price: a cost per unit with no unit to divide by is not zero, it is unmeasured,
+    and a cost per unit over a floor would understate it. This is the value scorecard's rule
+    for its per-pound figures too (DL-066): neither reading divides by a floor.
+    """
+    if per_unit_withheld(spend, units):
+        return None
+    assert spend.usd is not None
+    return round(spend.usd / units, 6)
+
+
+def per_unit_withheld(spend: Spend, units: int, *, unit: str = "unit") -> str:
+    """Why :func:`per_unit` served ``None``, in words, or ``""`` when it served a figure."""
+    k = spend.rows_unpriced
+    if k:
+        return (
+            f"{k} row{'s' if k != 1 else ''} counted here reported no price, so the money is a "
+            f"floor and a cost per {unit} over it would understate; it is not served"
+        )
+    if spend.usd is None:
+        return "no row counted here is priced yet"
+    if units <= 0:
+        return f"no {unit} yet to divide by"
+    return ""
+
+
+@dataclass(frozen=True)
+class NotCaptured:
+    """A figure the stream's criterion asks for that the product does not record.
+
+    It is served, not hidden: the screen prints the figure's name, why it is absent and the
+    gap id that would close it, so nobody reads its absence as a zero.
+    """
+
+    figure: str
+    why: str
+    gap: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"figure": self.figure, "why": self.why, "gap": self.gap}
+
+
+@dataclass(frozen=True)
+class StreamFlow:
+    """One value stream's own numbers: its lead times, its spend, its counts, its absences.
+
+    ``spend_label`` says in words WHICH rows the spend covers, because the streams do not all
+    buy the same thing — one measures the £0 stages, one the whole repository's bill, and two
+    buy nothing at all and say so. ``per_unit`` is ``per_unit_spend`` divided by
+    ``per_unit_units``, the things the stream delivers (a merged pull request, a cell that
+    reached the bar), with ``per_unit_label`` naming the unit; it is ``None`` when either side
+    is unmeasured or the spend is a floor, and ``per_unit_reason`` then says which.
+    """
+
+    stream: str
+    name: str
+    lead_times: tuple[LeadTime, ...] = ()
+    spend: Spend = field(default_factory=Spend)
+    spend_label: str = ""
+    per_unit: float | None = None
+    per_unit_label: str = ""
+    #: What ``per_unit`` divided: the spend of the rows it covers and the number of units.
+    per_unit_spend: Spend = field(default_factory=Spend)
+    per_unit_units: int = 0
+    #: Why ``per_unit`` is ``None`` (:func:`per_unit_withheld`); ``""`` once it is served.
+    per_unit_reason: str = ""
+    counts: Mapping[str, int] = field(default_factory=dict)
+    not_captured: tuple[NotCaptured, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stream": self.stream,
+            "name": self.name,
+            "lead_times": [lt.to_dict() for lt in self.lead_times],
+            "spend": self.spend.to_dict(),
+            "spend_label": self.spend_label,
+            "per_unit": self.per_unit,
+            "per_unit_label": self.per_unit_label,
+            "per_unit_spend": self.per_unit_spend.to_dict(),
+            "per_unit_units": self.per_unit_units,
+            "per_unit_reason": self.per_unit_reason,
+            "counts": dict(self.counts),
+            "not_captured": [nc.to_dict() for nc in self.not_captured],
+        }
+
+
+@dataclass(frozen=True)
+class FlowReading:
+    """Every stream's numbers for one repository, with the apparatus that produced them."""
+
+    repo: str
+    apparatus: str
+    generated: str
+    method: str
+    streams: tuple[StreamFlow, ...] = ()
+    #: The repository's cumulative spend: every graded row once. The streams' own spends
+    #: partition it — no row is counted in two streams — so they add up to this, never more.
+    spend: Spend = field(default_factory=Spend)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "repo": self.repo,
+            "apparatus": self.apparatus,
+            "generated": self.generated,
+            "method": self.method,
+            "spend": self.spend.to_dict(),
+            "streams": [s.to_dict() for s in self.streams],
+        }

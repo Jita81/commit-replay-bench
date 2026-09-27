@@ -179,6 +179,8 @@ test.describe('07 settings + accessibility', () => {
     // each wait is for API-backed content, not the heading: the loaded screen is what axe reads
     await page.goto(`/connect/${encodeURIComponent(t.name)}`)
     await expect(page.getByTestId('stage-measure')).toBeVisible()
+    // the connect stream's own flow reading is API-backed content on this screen too
+    await expect(page.locator('#flow-connect-and-prove')).toBeVisible()
     await axeClean(page, `/connect/${t.name}`)
     await page.goto(`/connect/${encodeURIComponent(t.name)}/measure`)
     await expect(page.getByTestId('before-you-start')).toContainText(/attempts/)

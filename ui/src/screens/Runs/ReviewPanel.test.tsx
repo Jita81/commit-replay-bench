@@ -429,6 +429,24 @@ describe('EvidenceDrawer: Review panel', () => {
     expect(posts[0]).toEqual({ grade_row_hash: ROW, statement: 'worktree gone', findings: [], mergeable: null, patch_sha256: '', not_reviewed: true })
   })
 
+  it('takes the minutes the review took, only when stated, and refuses more than a working day', async () => {
+    const { posts } = setup({ [`GET /grades/${ROW}/retained`]: { ...RETAINED, patch_available: false, patch_reason: 'gone' } })
+    const user = userEvent.setup()
+    await user.click(await screen.findByTestId('tab-review'))
+    await user.click(screen.getByTestId('not-reviewed'))
+    await user.type(screen.getByLabelText(/^Statement/), 'worktree gone')
+    const minutes = screen.getByLabelText(/^Minutes this review took/)
+    await user.type(minutes, '481')
+    expect(screen.getByTestId('review-blockers')).toHaveTextContent('Minutes must be a whole number from 1 to 480')
+    expect(screen.getByTestId('review-submit')).toBeDisabled()
+    await user.clear(minutes)
+    await user.type(minutes, '1x2')
+    expect(minutes).toHaveValue('12')
+    await user.click(screen.getByTestId('review-submit'))
+    await screen.findByTestId('review-recorded')
+    expect(posts[0]).toEqual({ grade_row_hash: ROW, statement: 'worktree gone', findings: [], mergeable: null, patch_sha256: '', not_reviewed: true, minutes: 12 })
+  })
+
   it('a viewer sees the panel but cannot record', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },

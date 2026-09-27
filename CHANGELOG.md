@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Each value stream measures its own flow**
+  ([stream M, G-925](https://github.com/Jita81/commit-replay-bench/pulls?q=head%3Afeat%2Fns1-m)).
+  `GET /flow?repo=` derives each stream's lead time, spend and counts from stored records, and
+  each stream's screen shows its own. Money is summed by one rule in `/flow` and `/value`: an
+  unpriced row is never $0, and the per-pound figures are withheld while one is in scope
+  (DL-066). `POST /reviews` takes the reviewer's minutes (DL-067, revision 0012). A cell first
+  routing deliver, the install and the first green `/health` are recorded when they happen,
+  never back-dated (ADR-0028).
+
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile
   score working changes per pound, blind, and VALUE heads the definition of done. A bug class is

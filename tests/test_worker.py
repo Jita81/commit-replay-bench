@@ -1755,6 +1755,48 @@ def test_route_lookup_reads_the_map_as_it_stood_before_the_run(h: Harness) -> No
     assert cells[1]["n"] == 1 and cells[1]["apparatus_versions"] == [rows[-1].apparatus_version]
 
 
+def test_every_finished_run_stamps_the_cells_that_first_route_deliver(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0028: after a run finishes the worker reads the served map and records the moment a
+    cell first routes ``deliver``. The first look marks what was already at deliver (never
+    timed); a cell that reaches deliver after it is stamped with the run that tipped it; a
+    recorder that fails never fails the run."""
+    from types import SimpleNamespace
+
+    from crb.server.flow_record import DELIVER_ROUTED, RECORDER_STARTED
+    from crb.store.models import Event
+
+    first = h.enqueue("replay")
+    assert h.run_one().status == STATUS_SUCCEEDED
+    real_map = h.worker._served_map
+    _cmap, scope = real_map(pr.REPO_NAME)
+    assert scope["apparatus"] and scope["posture_class"] and scope["checks_arm"]
+    deliver = SimpleNamespace(
+        key=SimpleNamespace(capability_class="bug.fix", size="XS"),
+        decision=SimpleNamespace(route="deliver"),
+    )
+    monkeypatch.setattr(
+        h.worker, "_served_map", lambda repo, **kw: (SimpleNamespace(cells=[deliver]), scope)
+    )
+    second = h.enqueue("replay")
+    assert h.run_one().status == STATUS_SUCCEEDED
+    with h.worker.factory() as s:
+        started = s.execute(select(Event).where(Event.action == RECORDER_STARTED)).scalars().all()
+        stamped = s.execute(select(Event).where(Event.action == DELIVER_ROUTED)).scalars().all()
+    assert [e.payload_json["run_id"] for e in started] == [first.id]
+    assert [(e.payload_json["capability_class"], e.payload_json["run_id"]) for e in stamped] == [
+        ("bug.fix", second.id)
+    ]
+
+    def broken(repo: str, **kw: Any) -> Any:
+        raise RuntimeError("map unreadable")
+
+    monkeypatch.setattr(h.worker, "_served_map", broken)
+    h.enqueue("replay")
+    assert h.run_one().status == STATUS_SUCCEEDED
+
+
 def test_github_settings_read_only_their_own_keys_and_refuse_a_malformed_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

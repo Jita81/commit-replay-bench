@@ -126,6 +126,22 @@ export function fmtAge(seconds: number): string {
   return `${h} h ${m - h * 60} min`
 }
 
+/**
+ * Seconds as a lead time a person reads at a glance: "45 s" / "12 min" / "2 h 5 min" /
+ * "3 days 4 h". Absent is the dash — a duration nobody measured is never "0 s".
+ */
+export function fmtDuration(v: number | null | undefined): string {
+  if (!finite(v) || v < 0) return DASH
+  const s = Math.round(v)
+  if (s < 60) return `${s} s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60)
+  if (h < 48) return `${h} h ${m - h * 60} min`
+  const d = Math.floor(h / 24)
+  return `${d} days ${h - d * 24} h`
+}
+
 /** An ISO timestamp as an age against `nowMs`: "6 s ago", "12 min ago", "2 h 5 min ago"; `null` when absent or unreadable. */
 export function fmtAgo(iso: string | null | undefined, nowMs: number): string | null {
   if (!iso) return null

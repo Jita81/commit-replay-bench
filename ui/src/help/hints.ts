@@ -111,6 +111,47 @@ export const HINTS = {
   'nav.journey_position':
     'Where this screen sits on the four-step journey: connect a repository, earn its baseline, decide what waits on a person, run the factory. The number is a position, not progress.',
 
+  'flow.reading':
+    'The figures in this card are folded out of records the product already keeps — events, runs, graded rows, sign-offs and the factory chain. Nothing here is a live probe and nothing is stored: refresh the screen and it is derived again.',
+  'flow.lead_time':
+    'How long this stream takes between two named moments: the median of every pair on record, with the number of pairs behind it. A dash means no pair has completed yet, and the line underneath says why.',
+  'flow.registered_to_controls':
+    'From registering the repository to the first negative-controls report that passed the gate — the point from which anything measured here is evidence. A report that let a deliberate cheat through does not count as passed.',
+  'flow.queued_to_graded':
+    'From queueing a replay or blind run to its last row being graded: how long buying attempts takes in practice. Runs whose rows arrived by import are not timed, because no queue moment was recorded for them.',
+  'flow.first_row_to_bar':
+    'From a class and size’s first graded row to its tenth — the number of rows the routing rule needs before it will route on a cell at all. It says how long earning a routable cell takes, not how good the cell is.',
+  'flow.routed_deliver_to_signed':
+    'From the moment a cell first routed deliver to an approver signing it: how long a trusted cell waits on a person. The moment is recorded when a run ends and the map first routes the cell; cells already at deliver before recording began are counted below and never timed.',
+  'flow.review_minutes':
+    'How long a review took, in the minutes the reviewer stated when recording it: the median with the number of reviews that stated them. A review that left the minutes empty is not in it and is not counted as zero.',
+  'flow.accepted_to_signed':
+    'From the moment the row an approver said they read was graded clean to the moment they signed the cell. It is the decision’s own wait, measured on the row named in the attestation rather than averaged over rows nobody chose.',
+  'flow.registered_to_pr':
+    'From registering a backlog item to the factory opening a pull request for it on the customer’s repository. Items still waiting on readiness, a refusal or a person are not in it.',
+  'flow.pr_to_merged':
+    'From the pull request opening to a person merging it, taking the merge time the host itself reported. A pull request nobody has merged is not counted, so this is the wait of the ones that landed.',
+  'flow.registered_to_merged':
+    'The whole of manufacture: from the item being registered to its pull request being merged. This is the number a delivery team feels, and it includes every wait on a person inside it.',
+  'flow.refusal_to_strengthening':
+    'From a refusal being raised to a strengthening item being registered that supersedes what was refused. It says how quickly a stop becomes work, and a refusal nobody has answered is not counted.',
+  'flow.installed_to_healthy':
+    'From this deployment’s install to the first time /health read green. The install is dated only when the server was first started on an empty database; a deployment upgraded to this release shows a dash with the reason rather than a guessed date.',
+  'flow.password_set_to_signed_in':
+    'From an admin setting someone else’s password to that person signing in again: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted. Only an admin sees it, as only an admin sees the accounts.',
+  'flow.spend':
+    'What this stream spent, summing only the rows whose cost is a measurement. A row that reported no price is never counted as zero, so the figure is a floor and the line underneath says how many rows are missing from it.',
+  'flow.spend_total':
+    'Everything this repository has spent, every graded row counted once: measuring, the factory and any stream that buys attempts. Each stream’s own spend is a part of this figure, so the parts never add up to more than it.',
+  'flow.per_unit':
+    'The price of the rows this figure covers divided by what the stream delivered (n), so a reader can price one unit — a merged pull request, or a cell that reached the bar over its first ten rows. It is a dash whenever either side is unmeasured, or when a row it covers reported no price: a cost over a floor would understate.',
+  'flow.refused':
+    'The product refused to fold these figures, and the message says why — most often a graded row that fails its own belts, which the ledger will not load. Nothing is shown rather than a number built on rows the product does not trust.',
+  'flow.counts':
+    'The plain counts behind the durations above: what entered this stream, what came out and what stopped. They are counts, not rates — no interval belongs on them.',
+  'flow.not_captured':
+    'Figures this stream’s definition of done asks for that nothing in the product records. They are named here with the gap that would close them, so their absence is never read as a zero.',
+
   // ── Shell — every screen (components/Layout.tsx)
   'pill.shell.health':
     'The overall health of the instrument from its probes: sandbox, worker, ledger, toolchains. Anything but OK is explained probe by probe on Settings and Deployment.',
@@ -1116,6 +1157,8 @@ export const HINTS = {
     'Would a maintainer merge this as it stands? Recorded with the review; it never changes a route.',
   'field.review.statement':
     'What you concluded and why. This is the governance record, append-only.',
+  'field.review.minutes':
+    'How long this review took you, in whole minutes, as you judge it. Optional; leave it empty rather than guess. The Sign-off page adds the stated minutes up as the time decisions cost, and a review without them is left out, never counted as zero.',
   'field.review.not_reviewed':
     'Record that you looked but could not review this row: no findings, no anchor hash.',
   'tile.review.anchor':
@@ -1617,6 +1660,26 @@ export const SHARED_IDS: readonly HintId[] = [
   'oracle.gate',
   'review.verdict',
   'nav.journey_position',
+  'flow.reading',
+  'flow.lead_time',
+  'flow.registered_to_controls',
+  'flow.queued_to_graded',
+  'flow.first_row_to_bar',
+  'flow.accepted_to_signed',
+  'flow.review_minutes',
+  'flow.routed_deliver_to_signed',
+  'flow.registered_to_pr',
+  'flow.pr_to_merged',
+  'flow.registered_to_merged',
+  'flow.refusal_to_strengthening',
+  'flow.password_set_to_signed_in',
+  'flow.installed_to_healthy',
+  'flow.spend',
+  'flow.spend_total',
+  'flow.per_unit',
+  'flow.refused',
+  'flow.counts',
+  'flow.not_captured',
 ]
 
 /**

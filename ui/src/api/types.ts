@@ -1820,8 +1820,14 @@ export interface ValueNorthStar {
   clean_rate: ValueRate
   precision_basis: 'review' | 'review_pooled' | 'proxy' | 'none'
   precision: ValueRate
-  spend_usd: number
-  spend_gbp: number
+  /** The priced blind spend; `null` when no blind attempt is priced — unmeasured, never $0. */
+  spend_usd: number | null
+  spend_gbp: number | null
+  /** Blind attempts whose cost is a measurement, and those with no price (never summed as zero). */
+  spend_rows_priced?: number
+  spend_rows_unpriced?: number
+  /** Why the per-pound figures are null although the rate is measured ('' when they are served). */
+  per_pound_withheld?: string
   usd_per_gbp: number
   method: string
 }
@@ -1839,4 +1845,78 @@ export interface ValueReport {
   usd_per_gbp: number
   north_star: ValueNorthStar
   learning_curve: { source: string; attempts: number; register: { source: string; n_classes: number; closed: number; closed_share: number | null } }
+}
+
+// ---------------------------------------------------------------------------
+// Flow (docs/API.md "Flow (how long each stream takes, and what it spent)")
+// ---------------------------------------------------------------------------
+
+/**
+ * One milestone pair's duration. `median_s` / `min_s` / `max_s` are `null` when `n` is 0 —
+ * unmeasured, not zero — and `reason` then says why in one sentence. `dropped` counts the pairs
+ * the server refused (an unreadable stamp, or an end before its start).
+ */
+export interface LeadTime {
+  key: string
+  label: string
+  n: number
+  median_s: number | null
+  min_s: number | null
+  max_s: number | null
+  dropped: number
+  reason: string
+}
+
+/**
+ * What a stream spent. `usd` sums only the rows whose cost is a measurement and is `null` when
+ * there are none; `rows_unpriced` is how many rows the sum leaves out, so the total is read as
+ * a floor and never as the whole bill.
+ */
+export interface Spend {
+  usd: number | null
+  rows_priced: number
+  rows_unpriced: number
+  /** The apparatus versions of the rows the reading covers, priced or not. */
+  apparatus_versions: string[]
+}
+
+/** A figure a stream's definition of done asks for that nothing in the product records. */
+export interface NotCaptured {
+  figure: string
+  why: string
+  gap: string
+}
+
+/** One value stream's own numbers. */
+export interface StreamFlow {
+  stream: string
+  name: string
+  lead_times: LeadTime[]
+  spend: Spend
+  /** Which rows the spend covers, in words — the streams do not all buy the same thing. */
+  spend_label: string
+  /**
+   * `per_unit_spend` divided by `per_unit_units` (the things the stream delivers), or `null` when
+   * either side is unmeasured or the spend is a floor; `per_unit_reason` then says which.
+   */
+  per_unit: number | null
+  per_unit_label: string
+  /** What `per_unit` divided: the spend of the rows it covers. */
+  per_unit_spend: Spend
+  per_unit_units: number
+  per_unit_reason: string
+  counts: Record<string, number>
+  not_captured: NotCaptured[]
+}
+
+/** `GET /flow?repo=` — every stream's lead time, spend and counts, derived from stored records. */
+export interface Flow {
+  repo: string
+  apparatus: string
+  generated: string
+  /** How the figures were produced — a fold over stored records, not a live probe. */
+  method: string
+  /** The repository's cumulative spend — every graded row once; the streams' spends partition it. */
+  spend: Spend
+  streams: StreamFlow[]
 }
