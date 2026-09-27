@@ -1512,6 +1512,14 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     assert s_off.metrics_port == 0 and s_off.metrics_enabled is False
     with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
         worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "70000"})
+    # pilot D5 (P-206): `auto` asks the operating system for a free port, so a second stack
+    # on one machine never fights over 9464; the flag reads the same words
+    s_auto = worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "auto"})
+    assert s_auto.metrics_port == "auto"
+    flag_auto = parser.parse_args(["--once", "--metrics-port", "auto"])
+    assert worker_main.settings_from_args(flag_auto, env).metrics_port == "auto"
+    with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
+        worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "nine"})
     s_all = worker_main.settings_from_args(args, {**env, "CRB_METRICS_HOST": "0.0.0.0"})
     assert s_all.metrics_host == "0.0.0.0"
     flag = parser.parse_args(["--once", "--metrics-host", "10.0.0.5"])
@@ -2294,3 +2302,28 @@ def test_repository_checks_and_run_overrides_reach_the_row_and_belt_six(
     assert done.apparatus_json["extra"]["checks"]["sources"]["api_stable"] == "repo"
     belts = [e for e in harness.events(run.id) if e.action == "grade.belt"]
     assert [e.payload["belt"] for e in belts][-1] == "api_stable"
+
+
+def test_a_worker_whose_metrics_port_is_taken_keeps_running_and_records_why(
+    tmp_path: Path, pyrepo: pr.PyRepo
+) -> None:
+    """Pilot D5 (P-206): the worker's metrics listener could not bind 9464 because another
+    stack held it. Starting it must never stop the worker, and what happened is written
+    where ``/health`` reads it — ``degraded`` with the reason — not only to the log."""
+    import dataclasses
+    import socket
+
+    from crb.observability.metrics import EXPOSITION_DEGRADED
+    from crb.server.worker_metrics import exposition_by_worker
+
+    h = Harness(tmp_path, pyrepo)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        port = held.getsockname()[1]
+        settings = dataclasses.replace(h.worker.settings, metrics_port=port)
+        got = worker_main.start_metrics(h.worker, settings)
+    assert got.state == EXPOSITION_DEGRADED
+    recorded = exposition_by_worker(h.factory, [h.worker.worker_id])
+    assert recorded[h.worker.worker_id]["state"] == "degraded"
+    assert f"127.0.0.1:{port}" in recorded[h.worker.worker_id]["reason"]

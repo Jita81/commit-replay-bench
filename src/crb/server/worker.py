@@ -261,6 +261,7 @@ from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
 from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
+from crb.observability.metrics import parse_metrics_port
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
@@ -507,11 +508,13 @@ class WorkerSettings:
     #: is recorded in THIS process, so the API's ``/metrics`` never carries them. Served by
     #: ``prometheus_client.start_http_server`` on ``metrics_host:metrics_port``
     #: (``CRB_METRICS_HOST``, default loopback like the API's bind — a container sets
-    #: ``0.0.0.0``; ``CRB_METRICS_PORT``, default 9464; ``0`` = off) when ``metrics_enabled``
-    #: (``CRB_METRICS_ENABLED``, the same switch the API reads) and the client is installed.
+    #: ``0.0.0.0``; ``CRB_METRICS_PORT``, default 9464; ``0`` = off; ``auto`` = a free port
+    #: the operating system picks, reported on ``/health`` — pilot D5) when
+    #: ``metrics_enabled`` (``CRB_METRICS_ENABLED``, the same switch the API reads) and the
+    #: client is installed.
     metrics_enabled: bool = True
     metrics_host: str = "127.0.0.1"
-    metrics_port: int = 9464
+    metrics_port: int | str = 9464
     #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
     #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
     github: GitHubAppSettings = field(default_factory=GitHubAppSettings)
@@ -552,8 +555,7 @@ class WorkerSettings:
         object.__setattr__(self, "kinds", tuple(self.kinds))
         if self.poll_s <= 0 or self.heartbeat_s <= 0 or self.stale_after_s <= 0:
             raise ValueError("poll_s, heartbeat_s and stale_after_s must be positive")
-        if not 0 <= int(self.metrics_port) <= 65535:
-            raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
+        object.__setattr__(self, "metrics_port", parse_metrics_port(self.metrics_port))
         if not str(self.metrics_host).strip():
             raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
         executor_kind(self.executor)  # P-126: an empty or unknown kind never starts a worker

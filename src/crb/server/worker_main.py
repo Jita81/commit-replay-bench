@@ -50,7 +50,8 @@ What it does: Turns flags and ``CRB_*`` fallbacks into ``WorkerSettings``, refus
 How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for the builders'
               secrets lookup; reads ``CRB_GITHUB__*`` / ``CRB_METRICS_*`` through a
               pydantic-settings view of the same environment the API reads) → ``Worker`` →
-              ``metrics.start_worker_exposition`` → ``run_once`` | ``run_forever(stop)``.
+              ``start_metrics`` (the listener, recorded for ``/health`` — pilot D5) →
+              ``run_once`` | ``run_forever(stop)``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md
@@ -88,6 +89,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from crb.core.execution import SANDBOX_TREES, TREE_COPY, DockerSettings, SandboxUnavailable
 from crb.observability import metrics
 from crb.observability.logging import configure_logging
+from crb.observability.metrics import parse_metrics_port
 from crb.provision.config import ProvisionConfig
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
@@ -101,6 +103,7 @@ from crb.server.settings import (
     unsealed_prod_refusal,
 )
 from crb.server.worker import Worker, WorkerSettings
+from crb.server.worker_metrics import record_exposition
 from crb.store.jobs import RUN_KINDS
 
 EXIT_OK = 0
@@ -181,10 +184,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--metrics-port",
-        type=int,
         default=None,
         help=f"serve this worker's Prometheus /metrics on this port (default: ${METRICS_PORT_ENV} "
-        f"or {DEFAULT_METRICS_PORT}; 0 = off)",
+        f"or {DEFAULT_METRICS_PORT}; 0 = off; auto = a free port, shown on /health and in the log)",
     )
     p.add_argument("--once", action="store_true", help="process at most one run, then exit")
     p.add_argument("--keep-worktrees", action="store_true", help="do not remove trial worktrees")
@@ -246,9 +248,9 @@ def settings_from_args(
     unknown = [k for k in kinds if k not in RUN_KINDS]
     if unknown:
         raise ValueError(f"unknown run kind(s) {unknown!r}; expected {RUN_KINDS}")
-    port = args.metrics_port if args.metrics_port is not None else shared.metrics_port
-    if not 0 <= int(port) <= 65535:
-        raise ValueError(f"{METRICS_PORT_ENV} must be 0 (off) or a port 1-65535, got {port}")
+    port = parse_metrics_port(
+        args.metrics_port if args.metrics_port is not None else shared.metrics_port
+    )
     host = (args.metrics_host or shared.metrics_host).strip()
     if not host:
         raise ValueError(f"{METRICS_HOST_ENV} must name an address to bind (127.0.0.1, 0.0.0.0)")
@@ -273,7 +275,7 @@ def settings_from_args(
         public_url=shared.public_url,
         metrics_enabled=shared.metrics_enabled,
         metrics_host=host,
-        metrics_port=int(port),
+        metrics_port=port,
         builder_executor=builder,
         refuse_unsealed=shared.env == "prod" and not shared.allow_unsealed_prod,
         unsealed_override=override,
@@ -314,7 +316,8 @@ class _SharedWithApi(BaseSettings):
     #: ``CRB_BIND_HOST``; a container sets ``0.0.0.0``) and port (the API keeps ``/metrics``
     #: on its HTTP port).
     metrics_host: str = DEFAULT_METRICS_HOST
-    metrics_port: int = DEFAULT_METRICS_PORT
+    #: A port, ``0`` (off) or ``auto`` (a free port — two stacks on one machine, pilot D5).
+    metrics_port: int | str = DEFAULT_METRICS_PORT
     #: ``CRB_RETENTION__*`` — the worker reads ``patches`` (keep every graded attempt's
     #: patch; crb.core.patches), the same block the API's settings carry.
     retention: RetentionSettings = RetentionSettings()
@@ -367,6 +370,17 @@ def _run_summary(run: Any) -> dict[str, Any]:
     }
 
 
+def start_metrics(worker: Worker, settings: WorkerSettings) -> metrics.Exposition:
+    """Start the worker's metrics listener and record what it did where ``/health`` reads it
+    (pilot D5, P-206). A port that cannot be bound never stops the worker: the listener is
+    ``degraded``, the reason is logged AND recorded, and the ``worker`` probe names it."""
+    got = metrics.start_worker_exposition(
+        settings.metrics_port, enabled=settings.metrics_enabled, addr=settings.metrics_host
+    )
+    record_exposition(worker.factory, worker.worker_id, got)
+    return got
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Process entry point; see the module docstring for the exit codes."""
     parser = build_parser()
@@ -401,14 +415,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(ValueError, OSError):  # not the main thread / unsupported
             signal.signal(sig, _stop)
-    metrics.start_worker_exposition(
-        settings.metrics_port, enabled=settings.metrics_enabled, addr=settings.metrics_host
-    )
+    start_metrics(worker, settings)
     worker.run_forever(stop)
     return EXIT_OK
 
 
-__all__ = ["EXIT_ERROR", "EXIT_IDLE", "EXIT_OK", "build_parser", "main", "settings_from_args"]
+__all__ = [
+    "EXIT_ERROR",
+    "EXIT_IDLE",
+    "EXIT_OK",
+    "build_parser",
+    "main",
+    "settings_from_args",
+    "start_metrics",
+]
 
 
 if __name__ == "__main__":  # pragma: no cover
