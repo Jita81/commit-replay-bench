@@ -42,7 +42,7 @@ retired (closed or merged). An id is retired only when the artefacts' git histor
 branch's committed gap analysis, shows it was a gap, so editing the generated file cannot
 admit one. A wave that closes a gap never breaks this plan; a typo does. Every gap among the
 order of work's first 25 rows must also sit in some wave. The check reads ids, not meaning, so
-a reviewer still reads each row against the lines its ids carry.
+a reviewer still reads each row against the lines its ids carry **[measured — n = 25 rows; method: the order-of-work length the checker holds the plan and the gap analysis to, TOP in scripts/dod_check.py, read at this commit; apparatus n/a]**.
 
 **How every wave works.** One pull request per stream, merged onto one branch, attacked by
 adversarial verifiers, then merged to `main` by the operator. Each pull request flips the
@@ -75,7 +75,7 @@ keeps a closed gap nameable only while the history vouches for it (DL-063, DL-06
 Outside the waves, and not DoD work: carrying the four commits that exist only on the
 integration tree (`770adbb`, `79f4597`, `27f2171`, `8d15f12`) to `main` in one pull request
 after #57 lands. Their criterion is on the record already: `sign-off-a-cell.truth.22`, met
-(a sign-off lifts only a cell read in the posture class its evidence was graded in).
+(a sign-off lifts only a cell read in the posture class its evidence was graded in) **[hypothesis — true when the plan was written; not re-checked since]**.
 
 **Done when:** `dod_check.py --check` passes with its new refusals; `GAP-ANALYSIS.md` shows
 `product.evidence.6` partial on G-930 alone (the operator's token), criteria 202 to 205
