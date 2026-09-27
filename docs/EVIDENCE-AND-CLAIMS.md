@@ -39,7 +39,15 @@ are — `rows: data/<campaign>/`, a directory the repository carries with a chec
 number such a claim states, and its apparatus, from those rows with the product's own code.
 Elsewhere the gate checks the *shape* of the evidence, never whether a figure is sound, and it
 reads only the pages on the allowlist; the script's docstring states both limits and the
-gap analysis names the pages still ungated. The same job holds a review to its own actions:
+gap analysis names the pages still ungated. The allowlist holds four entries: README, every
+guide directly under `docs/`, every review under `docs/reviews/` and every
+definition-of-done page under `docs/dod/`, each folder read as a glob so a page added later
+is gated the day it lands **[measured — n = 4 entries on `ALLOWLIST`; method: by inspection
+of `scripts/claims_check.py`, which prints the same count in its own report; apparatus n/a —
+a count, not a rate, so no interval]**. The decision records and CHANGELOG are not on it yet
+(G-945), and the generated code map and gap analysis are held by their own generators'
+checks. A gap register line (`**G-nnn** — what is missing · what closes it`) is a `[gap]`
+statement by its form, so it needs no separate tag. The same job holds a review to its own actions:
 every numbered row of a review's *Actions* table needs a line in the
 [decision log](DECISION-LOG.md) that names the review, the action and its state (`closed`,
 `open`, `declined` or `[gap]`), and every such record needs its action still in the table,

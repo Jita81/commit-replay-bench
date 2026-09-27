@@ -172,6 +172,7 @@ re-derivation test pass in CI (claims.201 met); posture.23 and go-live.18 read m
 | LIB · the context library · new, after S | G-673, G-677, G-675, G-676 | the entry record and its two-person sign-off ledger; the miner registry and its miners over a pinned commit; entry sets registered as arms and kept or retired by the look rule and the harm clause, the brief switch off by default; `/library/:repo` with one page per work type |
 | CLS · the organisation's classes · new, after S | G-672 | class-set versions per organisation with the global classes as parents; the derivation and confirmation split by commit; one rule over ticket-time fields at replay and at intake, with the linked-ticket reader; the validity report with its size-agreement clause; the two-person sign-off; the class set as a DL-044 seam |
 | FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `S2` stamp; the registered `S2` reading that alone promotes an `S3` ceiling |
+| CL · claims on the decision records · new | G-945 | `docs/adr/*.md` and `CHANGELOG.md` read by the claims gate, each page tagged or corrected in its own change, so every public page the repository carries is gated |
 
 **Done when:** an invited approver can accept, sign in and sign a cell on the walkthrough stack;
 the factory refuses an unsigned cell by default; `/posture` shows each go-live line's state;

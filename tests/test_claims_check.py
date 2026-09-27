@@ -6,8 +6,9 @@ What it is:   Unit tests for the claims gate (every public claim carries a permi
 What it does: Pins that a tagged claim passes and an untagged one fails; that a ``[measured]``
               tag without an ``n``, without an apparatus version or without a method fails;
               that a list item is covered by the paragraph that introduces the list; that the
-              allowlist is honoured (a file off it is never read) and that the shipped
-              allowlist is the real repository's, and is the count the definition of done
+              allowlist is honoured (a file off it is never read), that a glob on it reads
+              every page it matches, and that the shipped allowlist reads README, every
+              guide, review and definition-of-done page and is the count the claims policy
               states (G-929); that the documented exemptions — headings,
               table rows, fenced code, a lead-in ending in a colon, a confidence level, a
               year, a leading-zero identifier — are not claims; that a count written without
@@ -33,7 +34,7 @@ Works with:   scripts/claims_check.py (the code under test), markdown-it-py (the
               reference the fence reader is compared with), docs/EVIDENCE-AND-CLAIMS.md
               (the claim-tag rule these tests enforce a shape for), .github/workflows/ci.yml
               (the claims job that runs --check), docs/CONTRIBUTING.md (the DL-053 rules),
-              docs/dod/product.md (G-929 states the gated-page count)
+              docs/EVIDENCE-AND-CLAIMS.md §1 (states the gated-entry count)
 Tested by:    (this is a test file)
 Touch when:   a tag is added to the policy, the heuristic changes, or a file joins the
               allowlist (add the case here in the same change).
@@ -619,16 +620,30 @@ def test_two_reviews_with_one_stem_are_a_finding(tree: Path) -> None:
 
 
 def test_the_measured_count_of_gated_pages_is_the_allowlist() -> None:
-    """The definition of done states how many pages the gate reads as a [measured] count
-    (G-929). Adding a page to ALLOWLIST without updating that count made the record wrong the
-    moment it merged (found 2026-09-25 while gating the value baseline); the count is now
-    held to the list."""
-    text = (ROOT / "docs" / "dod" / "product.md").read_text(encoding="utf-8")
+    """The claims policy states how many entries the gate reads as a [measured] count.
+    Adding a page to ALLOWLIST without updating that count made the record wrong the moment it
+    merged (found 2026-09-25 while gating the value baseline); the count is held to the list.
+    The count lived in G-929's line until the gate read every guide, review and
+    definition-of-done page and G-929 closed; it lives in EVIDENCE-AND-CLAIMS §1 now."""
+    text = (ROOT / "docs" / "EVIDENCE-AND-CLAIMS.md").read_text(encoding="utf-8")
     m = re.search(r"n = (\d+) entries on `ALLOWLIST`", text)
-    assert m, "docs/dod/product.md no longer states the gated-page count (G-929)"
+    assert m, "EVIDENCE-AND-CLAIMS no longer states the gated-entry count"
     assert int(m.group(1)) == len(cc.ALLOWLIST)
-    for rel in cc.ALLOWLIST:
-        assert f"`{rel}`" in text, f"G-929 does not name {rel}"
+
+
+def test_every_guide_review_and_dod_page_is_on_the_gate() -> None:
+    """product.claims.21 (G-929): README, every guide directly under docs/, every review and
+    every definition-of-done page are read — only the generated pages are left to their own
+    generators. Dropping a folder from ALLOWLIST, or a page appearing that no entry reads,
+    fails here."""
+    pages, empty = cc.expand(ROOT, cc.ALLOWLIST)
+    assert empty == []
+    public = {"README.md"}
+    for pattern in ("docs/*.md", "docs/reviews/**/*.md", "docs/dod/**/*.md"):
+        public |= {p.relative_to(ROOT).as_posix() for p in ROOT.glob(pattern) if p.is_file()}
+    public -= set(cc.UNGATED)
+    assert public - set(pages) == set(), "public pages the claims gate does not read"
+    assert set(cc.UNGATED) == {"docs/CODE-MAP.md", "docs/dod/GAP-ANALYSIS.md"}
 
 
 PROMISE_ROW = "| product.claims.210 | CLAIMS | the quality table | `absent` | {STATE} | G-674 |\n"
@@ -886,7 +901,9 @@ def test_a_gap_register_line_is_its_own_gap_tag(tree: Path) -> None:
     _write(tree, "README.md", "# t\n\n- The walkthrough asserts two of the 24 rows (G-214).\n")
     assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
     # a [measured] figure inside a gap line still owes its evidence
-    _write(tree, "README.md", "# t\n\n- **G-9** — covers five pages **[measured]** · add more · docs\n")
+    _write(
+        tree, "README.md", "# t\n\n- **G-9** — covers five pages **[measured]** · add more · docs\n"
+    )
     assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == [
         "[measured] without n",
         "[measured] without a method",

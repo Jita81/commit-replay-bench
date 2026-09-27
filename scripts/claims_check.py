@@ -42,8 +42,9 @@ thereby tagged the sentence around it.
 - whether the tag is the *right* one, and whether a ``[measured]`` figure is true: it checks
   that ``n``, a method and an apparatus version are *present*, never that they are sound.
   Only a person reading the ledger can do that;
-- any file not on ``ALLOWLIST``: everything else in ``docs/``, the reviews and the book are
-  ungated, and the gap analysis says so.
+- any file not on ``ALLOWLIST``: the decision records under ``docs/adr/`` and CHANGELOG are
+  ungated (G-945), and the generated CODE-MAP and GAP-ANALYSIS are left to their generators'
+  own ``--check`` (``UNGATED``).
 
 **A review's actions are records, not prose.** A review under ``docs/reviews/`` that ends in
 an *Actions* table (a heading containing "Actions", then rows whose first cell is a number)
@@ -89,8 +90,8 @@ does one that denies, forbids or refuses the claim, or sits in a section headed 
 (EVIDENCE-AND-CLAIMS §7 lists the sentence in order to forbid it). It reads words, not
 meaning: "our pipeline is ISO-aligned" passes, and a reader still has to read.
 
-**How a file opts in.** Add its repository-relative path to ``ALLOWLIST`` below and make it
-pass in the same change. The list only grows: a page that has been cleaned never leaves it,
+**How a file opts in.** Add its repository-relative path, or a glob for its folder, to
+``ALLOWLIST`` below and make it pass in the same change. The list only grows: a page that has been cleaned never leaves it,
 because leaving is how a gate quietly stops gating.
 
 Navigation
@@ -126,9 +127,8 @@ Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the sh
               name), ui/src/help/docs.ts (the bundled guides), src/crb/factory/delivery.py
               (the pull-request body template), data/ (the vendored rows a README
               ``[measured]`` tag names), tests/test_measured_claims.py (re-derives them),
-              README.md (the first page on ``ALLOWLIST``; docs/RELEASING.md,
-              docs/CONTRIBUTING.md, docs/SUMMARY.md and
-              docs/reviews/2026-09-25-value-baseline.md are the others),
+              README.md, docs/*.md, docs/reviews/ and docs/dod/ (the pages on
+              ``ALLOWLIST``),
               docs/DECISION-LOG.md (where a review action's record lives),
               docs/dod/ (a promise's criterion and its state),
               docs/reviews/2026-09-13-critical-friend.md (the review whose actions it holds),
@@ -154,30 +154,14 @@ from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parent.parent
 
-#: The pages this gate reads. It only grows (see the module docstring).
+#: The pages this gate reads: README, every guide under docs/, every review and every
+#: definition-of-done page (a glob reads a page added later the day it lands). It only grows
+#: (see the module docstring). The decision records and CHANGELOG are not on it yet (G-945).
 ALLOWLIST: tuple[str, ...] = (
     "README.md",
     "docs/*.md",
     "docs/reviews/**/*.md",
-    "docs/dod/PLAN.md",
-    "docs/dod/STANDARD.md",
-    "docs/dod/journeys/deploy-and-go-live.md",
-    "docs/dod/journeys/learn-and-strengthen.md",
-    "docs/dod/journeys/orient.md",
-    "docs/dod/journeys/prove-the-instrument.md",
-    "docs/dod/journeys/read-the-map-and-decide.md",
-    "docs/dod/journeys/sign-off-a-cell.md",
-    "docs/dod/pages/connect-name-measure.md",
-    "docs/dod/pages/connect-name.md",
-    "docs/dod/pages/factory-intake.md",
-    "docs/dod/pages/home.md",
-    "docs/dod/pages/learn.md",
-    "docs/dod/pages/oracle.md",
-    "docs/dod/pages/repos-name.md",
-    "docs/dod/pages/results.md",
-    "docs/dod/pages/routing.md",
-    "docs/dod/pages/runs.md",
-    "docs/dod/streams/learn.md",
+    "docs/dod/**/*.md",
 )
 
 #: Generated pages a glob on ``ALLOWLIST`` would take in, and why they are not read: a
