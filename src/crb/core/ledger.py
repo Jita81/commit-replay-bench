@@ -114,6 +114,18 @@ from typing import Any
 
 from crb.core import version as _version
 from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, arm_from_label
+from crb.core.context_arm import (
+    BASE_S1,
+    BASE_S2,
+    LABEL_CONTEXT_ARM,
+    TEST_AUTHORED,
+    TEST_PERSON,
+    ContextArmsPooled,
+    context_arm_for,
+    is_arm,
+    loop_on,
+    parse_arm,
+)
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
 from crb.core.grade import (
     BELT_API_STABLE,
@@ -126,9 +138,16 @@ from crb.core.grade import (
     GradeResult,
     MisattributionViolation,
 )
-from crb.core.lint import LINT_NOT_REQUESTED, lint_status_violation
+from crb.core.lint import LINT_DISABLED_BY_CONFIG, LINT_NOT_REQUESTED, lint_status_violation
 from crb.core.spec import TaskSpec
+from crb.core.spend import is_escalated_trial
 from crb.core.stats import Interval, mean, wilson_interval
+from crb.core.taxonomy import (
+    GLOBAL_CLASS_SET,
+    LABEL_TAXONOMY,
+    ClassSetsPooled,
+    is_class_set_version,
+)
 from crb.core.version import APPARATUS_VERSION
 
 GRADE_SCHEMA = "crb.grade.v2"
@@ -349,6 +368,12 @@ LABEL_CHANGE_ID = "change_id"
 #: The labels only apparatus 2.4 defines (DL-106 (2)): a row below 2.4 never carries one,
 #: whichever writer built it — refused by the row itself, at write and on read (P-127).
 V2_ONLY_LABELS: tuple[str, ...] = (LABEL_LINT_REASON, LABEL_CHANGE_ID)
+#: Where the builder ran (``docker`` = the sealed container of ADR-0012, ``host``) — written
+#: by the builder adapter on every attempt, kept on a row from 2.4: with the posture class it
+#: says whether the row was graded in the SEALED posture a reading counts (ADR-0026 item 2).
+LABEL_BUILDER_EXECUTOR = "builder_executor"
+#: The builder's sealed container (``crb.builders.container.EXECUTOR_DOCKER``).
+BUILDER_EXECUTOR_SEALED = "docker"
 #: Belt 6 (ADR-0024) is recorded as this hashed label — ``true`` / ``false`` / ``none``
 #: (switched on, not evaluated) — and is absent when the belt was switched off.
 LABEL_API_STABLE = BELT_API_STABLE
@@ -364,6 +389,11 @@ class ChecksArmsPooled(ValueError):
     """Rows graded under two ``checks`` arms reached one cell (ADR-0024): a row graded with
     the format step or belt 6 on answers a different question from one graded without, so
     a reader must choose one arm (:func:`rows_for_checks`) before it reduces a cell."""
+
+
+class ApparatusPooled(ValueError):
+    """Rows of two apparatus versions reached one cell (ADR-0025 item 1): evidence expires
+    with the apparatus, so a reader chooses one version before it reduces a cell."""
 
 
 @dataclass(frozen=True)
@@ -533,6 +563,10 @@ def row_labels_at_write(
     stop_reason: str = "",
     change_id: str = "",
     pin_kind_below_v2: bool = True,
+    process_step: str = PROCESS_REPLAY,
+    loop: bool = False,
+    context_arm: str = "",
+    taxonomy: str = GLOBAL_CLASS_SET,
 ) -> dict[str, str]:
     """THE row-labelling helper: the classification a new row carries from write, for a
     replay row (:func:`grade_row_from_result`) and a factory row
@@ -540,9 +574,13 @@ def row_labels_at_write(
 
     From :data:`V2_APPARATUS` every row pins ``failure_kind`` — ``""`` on a clean row —
     and ``lint_reason`` (the grade's ``lint_status``), and a row that observed a mined
-    commit pins its ``change_id``. Below it each writer keeps exactly what it always wrote,
-    so a row of 2.3 hashes as it did: a replay row pins a non-empty kind
-    (``pin_kind_below_v2``), a factory row pins none.
+    commit pins its ``change_id``. It also pins the **context arm** its brief carried
+    (``context_arm``: the composer's statement, else ``crb.core.context_arm.context_arm_for``
+    over the step, the grade's mode and whether the loop reached the brief — ADR-0026 item 1)
+    and the **class-set version** its class was read under (``taxonomy``, the global
+    vocabulary unless an organisation's set is named — item 9). Below it each writer keeps
+    exactly what it always wrote, so a row of 2.3 hashes as it did: a replay row pins a
+    non-empty kind (``pin_kind_below_v2``), a factory row pins none.
     """
     kind = derive_failure_kind(
         clean=result.clean,
@@ -560,7 +598,43 @@ def row_labels_at_write(
     out = {LABEL_FAILURE_KIND: kind, LABEL_LINT_REASON: result.lint_status}
     if change_id:
         out[LABEL_CHANGE_ID] = change_id
+    out[LABEL_CONTEXT_ARM] = context_arm or context_arm_for(
+        process_step=process_step, mode=result.mode, loop=loop
+    )
+    out[LABEL_TAXONOMY] = taxonomy
     return out
+
+
+def context_arm_of_factory_author(test_author: str, canonical: str = "") -> str:
+    """The ``test_source`` / ``test_author`` pair a factory row's arm is decided from:
+    ``operator:<name>`` is a person's failing test (``S2``); a rung label ``name:model`` is an
+    authored one, named by ``canonical`` (the caller's ``canonical_model`` of the model).
+    Returns the arm id (ADR-0026 item 1) with no loop modifier — the caller adds ``+L``."""
+    author = (test_author or "").strip()
+    if author.startswith("operator:"):
+        return context_arm_for(
+            process_step=PROCESS_FACTORY, mode="sighted", test_source=TEST_PERSON
+        )
+    model = canonical or (author.split(":", 1)[1] if ":" in author else author)
+    return context_arm_for(
+        process_step=PROCESS_FACTORY,
+        mode="sighted",
+        test_source=TEST_AUTHORED,
+        test_author=model,
+    )
+
+
+def is_sealed_class(posture_class: str) -> bool:
+    """A posture class whose tests run in the docker sandbox's sealed mode (ADR-0019 §8,
+    ADR-0023): ``docker/<tree>/sealed``."""
+    return posture_class.startswith("docker/") and posture_class.endswith("/sealed")
+
+
+#: The labels a row keeps only from :data:`V2_APPARATUS` (a caller may pass them at any
+#: apparatus; a row below it is written as a 2.3 row always was).
+V2_ONLY_LABELS: frozenset[str] = frozenset(
+    {LABEL_CHANGE_ID, LABEL_BUILDER_EXECUTOR, LABEL_CONTEXT_ARM, LABEL_TAXONOMY}
+)
 
 
 def is_environment_error(error: str) -> bool:
@@ -832,6 +906,26 @@ class GradeRow:
         why = lint_status_violation(reason, self.repo_lint_clean, clean=self.clean)
         if why:
             raise LedgerIntegrityError(f"{where}: {why}")
+        arm = self.labels.get(LABEL_CONTEXT_ARM, "")
+        if not is_arm(arm):
+            raise LedgerIntegrityError(
+                f"{where}: context_arm {arm!r} is missing or outside the grammar (ADR-0026 "
+                "item 1; stamped at write through context_arm_for)"
+            )
+        base = parse_arm(arm).base
+        if (self.process_step == PROCESS_REPLAY and base == BASE_S2) or (
+            self.process_step == PROCESS_FACTORY and base not in (BASE_S1, BASE_S2)
+        ):
+            raise LedgerIntegrityError(
+                f"{where}: context arm {arm!r} on a {self.process_step} row — S2 is a factory "
+                "arm only, and a factory row's arm is S1@<author> or S2"
+            )
+        taxonomy = self.labels.get(LABEL_TAXONOMY, "")
+        if not is_class_set_version(taxonomy):
+            raise LedgerIntegrityError(
+                f"{where}: taxonomy {taxonomy!r} is missing or not a class-set version "
+                f"(ADR-0026 item 9; the global vocabulary is {GLOBAL_CLASS_SET!r})"
+            )
         if self.process_step == PROCESS_REPLAY:
             if self.gold_clean is not True:
                 raise LedgerIntegrityError(
@@ -901,6 +995,34 @@ class GradeRow:
         measured replay row of apparatus 2.4 or later; ``""`` when the row does not carry
         it. A reader that counts distinct commits counts distinct values of this."""
         return self.labels.get(LABEL_CHANGE_ID, "")
+
+    @property
+    def context_arm(self) -> str:
+        """The context arm the row's brief carried (``labels.context_arm``, ADR-0026 item 1) —
+        pinned on every measured row of apparatus 2.4 or later; ``""`` on an older row, which
+        is never re-derived."""
+        return self.labels.get(LABEL_CONTEXT_ARM, "")
+
+    @property
+    def taxonomy(self) -> str:
+        """The class-set version the row's class was read under (``labels.taxonomy``,
+        ADR-0026 item 9); ``""`` on a row from before 2.4."""
+        return self.labels.get(LABEL_TAXONOMY, "")
+
+    @property
+    def builder_executor(self) -> str:
+        """Where the builder ran (``docker`` = its sealed container), when the row kept it."""
+        return self.labels.get(LABEL_BUILDER_EXECUTOR, "")
+
+    @property
+    def sealed(self) -> bool:
+        """Graded in the SEALED posture (ADR-0026 item 2; ADR-0025 as amended): the tests in
+        the docker sandbox's sealed mode (a ``docker/<tree>/sealed`` posture class, ADR-0019)
+        and the builder in its sealed container (ADR-0012). A row that does not record where
+        its builder ran is not sealed — fail closed."""
+        return is_sealed_class(self.posture_class) and (
+            self.builder_executor == BUILDER_EXECUTOR_SEALED
+        )
 
     @property
     def failure_kind(self) -> str:
@@ -1048,6 +1170,7 @@ def grade_row_from_result(
     labels: Mapping[str, str] | None = None,
     builder_error: str = "",
     apparatus_version: str = "",
+    context_arm: str = "",
 ) -> GradeRow:
     """Reduce a :class:`GradeResult` + its evidence-pack hash to the ledger row.
 
@@ -1069,8 +1192,11 @@ def grade_row_from_result(
     so the hash chain commits to them. The builder's stop reason travels as
     ``labels['stop_reason']`` so the ``budget`` kind stays re-derivable. From apparatus 2.4
     the labels come from :func:`row_labels_at_write` (the kind on every row, belt 5's
-    reason and the task's ``change_id``); ``apparatus_version`` is the stamp, read from
-    ``crb.core.version`` at call time when not given.
+    reason and the task's ``change_id``, the context arm and the class-set version);
+    ``apparatus_version`` is the stamp, read from ``crb.core.version`` at call time when not
+    given. ``context_arm`` is the brief composer's statement of the arm it built (a
+    ``context_arm`` label among ``labels`` says the same); without either the arm is decided
+    from the mode and whether the run's loop reached the brief (the ``learn`` label).
     """
     b = builder or BuilderRef(mode=result.mode)
     apparatus = apparatus_version or _version.APPARATUS_VERSION
@@ -1078,6 +1204,7 @@ def grade_row_from_result(
     # only on a non-clean row (on a clean row it is a label — the belts judged the tree)
     error = result.error or ("" if result.clean else builder_error)
     stop_reason = builder_stop_reason(builder)
+    given = dict(labels or {})
     written = row_labels_at_write(
         result,
         apparatus_version=apparatus,
@@ -1085,6 +1212,9 @@ def grade_row_from_result(
         builder_error=builder_error,
         stop_reason=stop_reason,
         change_id=str(task.labels.get(LABEL_CHANGE_ID, "")),
+        process_step=process_step,
+        loop=loop_on(given),
+        context_arm=context_arm or str(given.get(LABEL_CONTEXT_ARM, "")),
     )
     cost_known = derive_cost_known(
         cost_usd=b.cost_usd,
@@ -1140,14 +1270,19 @@ def grade_row_from_result(
         labels={
             "rung": trial,
             # the change identity is a 2.4 label (DL-106 (2)): a mined task carries it at
-            # any apparatus, but a row below 2.4 is written as a 2.3 row always was
+            # any apparatus, but a row below 2.4 is written as a 2.3 row always was — as
+            # are the builder executor, the context arm and the class-set version
             **{
                 k: str(v)
                 for k, v in task.labels.items()
-                if k != LABEL_CHANGE_ID or is_v2_apparatus(apparatus)
+                if k not in V2_ONLY_LABELS or is_v2_apparatus(apparatus)
             },
             **({"builder_error": builder_error[:300]} if builder_error else {}),
-            **dict(labels or {}),
+            **{
+                k: v
+                for k, v in given.items()
+                if k not in V2_ONLY_LABELS or is_v2_apparatus(apparatus)
+            },
             **written,
             **(
                 {LABEL_COST_KNOWN: _bool_label(cost_known)}
@@ -1491,6 +1626,30 @@ class CellStats:
     #: ``cost_usd_mean``. ``0`` means the mean is unknown, never ``$0``: a reader decides
     #: known-ness from this count, never by comparing the mean with zero (P-064).
     n_cost_known: int = 0
+    # --- routing.v2 (ADR-0025 items 1 and 2 as ADR-0026 amends them) -------------------
+    #: The one apparatus, context arm and class-set version every row of the cell carries
+    #: (``""`` for a row from before the stamp) — a cell never pools two of any.
+    apparatus_version: str = ""
+    context_arm: str = ""
+    taxonomy: str = ""
+    #: Distinct tasks among the eligible rows (the pre-2.4 meaning of ``n_tasks``).
+    n_tasks_eligible: int = 0
+    #: The ROUTING tasks: distinct changes, each counted once by its first observed attempt
+    #: (:func:`first_attempts`), gold-checked and graded with belt 5 not switched off.
+    task_clean: int = 0
+    task_ci: Interval = field(default_factory=lambda: Interval(0.0, 1.0))
+    n_tasks_gold_unchecked: int = 0
+    n_tasks_lint_disabled: int = 0
+    #: Routing tasks whose first observed attempt was graded in the sealed posture.
+    n_tasks_sealed: int = 0
+    #: Eligible rows NOT graded in the sealed posture (``GradeRow.sealed``): a replayed arm's
+    #: cell holding any routes ``calibrate`` (``posture_unsealed``) — ADR-0025 as amended.
+    n_unsealed: int = 0
+
+    @property
+    def task_point(self) -> float:
+        """``task_clean / n_tasks`` — ``0.0`` for no routing task."""
+        return self.task_clean / self.n_tasks if self.n_tasks else 0.0
 
     @property
     def n_disqualified(self) -> int:
@@ -1534,7 +1693,105 @@ class CellStats:
             "model_ci_low": round(self.model_ci.low, 4),
             "model_ci_high": round(self.model_ci.high, 4),
             "checks_arm": self.checks_arm,
+            "apparatus_version": self.apparatus_version,
+            "context_arm": self.context_arm,
+            "taxonomy": self.taxonomy,
+            "n_tasks_eligible": self.n_tasks_eligible,
+            "task_clean": self.task_clean,
+            "task_point": round(self.task_point, 4),
+            "task_ci_low": round(self.task_ci.low, 4),
+            "task_ci_high": round(self.task_ci.high, 4),
+            "n_tasks_gold_unchecked": self.n_tasks_gold_unchecked,
+            "n_tasks_lint_disabled": self.n_tasks_lint_disabled,
+            "n_tasks_sealed": self.n_tasks_sealed,
+            "n_unsealed": self.n_unsealed,
         }
+
+
+#: The hashed label a factory row carries when its first attempt was graded on held-out
+#: acceptance tests the builder never saw (ADR-0026 item 8) — the only factory row that routes,
+#: and only for arm ``S2`` (ADR-0026 item 6, amending ADR-0025 item 2).
+LABEL_HELD_OUT = "held_out_acceptance"
+
+
+@dataclass(frozen=True)
+class FirstAttempt:
+    """One distinct change of a cell, read by its first observed attempt (ADR-0025 item 2)."""
+
+    change: str
+    row: GradeRow
+    #: ``False`` when every non-escalated eligible row of the change was ``harness``: the
+    #: first of them stands, as a failed task, until an attempt observes the builder.
+    observed: bool = True
+
+    @property
+    def task_id(self) -> str:
+        return self.row.task_id
+
+    @property
+    def clean(self) -> bool:
+        return self.observed and self.row.clean
+
+    @property
+    def gold_checked(self) -> bool:
+        """A replay row whose gold was checked clean, or a factory ``S2`` row graded on
+        held-out acceptance tests. Every other factory row is graded on a test a model
+        wrote: the factory never licenses itself."""
+        if self.row.process_step == PROCESS_FACTORY:
+            return (
+                is_arm(self.row.context_arm)
+                and parse_arm(self.row.context_arm).base == BASE_S2
+                and self.row.labels.get(LABEL_HELD_OUT) == "true"
+            )
+        return self.row.gold_clean is True
+
+    @property
+    def lint_disabled(self) -> bool:
+        return self.row.lint_reason == LINT_DISABLED_BY_CONFIG
+
+    @property
+    def routes(self) -> bool:
+        """Counts toward the bar: gold-checked and graded with belt 5 not switched off."""
+        return self.gold_checked and not self.lint_disabled
+
+
+def change_of(row: GradeRow) -> str:
+    """The distinct unit a row observed: its ``change_id`` (two cherry-picks of one change,
+    or a revert and its original, share one), else its task id."""
+    return row.change_id or row.task_id
+
+
+def first_attempts(rows: Iterable[GradeRow]) -> list[FirstAttempt]:
+    """Each distinct change's first observed attempt, in LEDGER order (ADR-0025 item 2): the
+    first row that is eligible, is not an escalation rung (:func:`is_escalated_trial`) and
+    observed the builder (its failure kind is not ``harness``). A change whose every such row
+    is ``harness`` counts, by its first, as not clean. Distinct means distinct change
+    (:func:`change_of`), never distinct commit id. Order: first seen."""
+    observed: dict[str, FirstAttempt] = {}
+    harness: dict[str, GradeRow] = {}
+    order: dict[str, None] = {}
+    for r in rows:
+        if not r.eligible or is_escalated_trial(r.trial):
+            continue
+        ch = change_of(r)
+        if ch in observed:
+            continue
+        order.setdefault(ch, None)
+        if r.failure_kind == FAILURE_HARNESS:
+            harness.setdefault(ch, r)
+            continue
+        observed[ch] = FirstAttempt(ch, r)
+    return [observed.get(ch) or FirstAttempt(ch, harness[ch], observed=False) for ch in order]
+
+
+def _one(rows: Sequence[GradeRow], attr: str, what: str, exc: type[ValueError]) -> str:
+    values = sorted({getattr(r, attr) for r in rows})
+    if len(values) > 1:
+        raise exc(
+            f"one cell holds rows of {len(values)} {what}s ({', '.join(v or '-' for v in values)}): "
+            f"a reading has one {what} — choose one before reducing a cell"
+        )
+    return str(values[0])
 
 
 def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
@@ -1551,8 +1808,16 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
             "with the format step or belt 6 on is a different measurement from one graded "
             "without (ADR-0024) — choose one arm with rows_for_checks before reducing a cell"
         )
+    # ADR-0025 item 1 and ADR-0026 items 1 and 9: one apparatus, one context arm and one
+    # class-set version per reading, refused like two checks arms (ADR-0024)
+    apparatus = _one(rs, "apparatus_version", "apparatus version", ApparatusPooled)
+    arm = _one(rs, "context_arm", "context arm", ContextArmsPooled)
+    taxonomy = _one(rs, "taxonomy", "class-set version", ClassSetsPooled)
     cell = rs[0].cell
     eligible = [r for r in rs if r.eligible]
+    firsts = first_attempts(rs)
+    routing = [a for a in firsts if a.routes]
+    task_clean = sum(1 for a in routing if a.clean)
     n = len(eligible)
     clean = sum(1 for r in eligible if r.clean)
     # re-checked at read time over ALL rows, not just eligible ones: the write-time
@@ -1585,7 +1850,17 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_protocol=split.protocol,
         n_harness=split.harness,
         n_outage=split.outage,
-        n_tasks=len({r.task_id for r in eligible if r.task_id}),
+        n_tasks=len(routing),
+        n_tasks_eligible=len({r.task_id for r in eligible if r.task_id}),
+        task_clean=task_clean,
+        task_ci=wilson_interval(task_clean, len(routing)),
+        n_tasks_gold_unchecked=sum(1 for a in firsts if not a.gold_checked),
+        n_tasks_lint_disabled=sum(1 for a in firsts if a.gold_checked and a.lint_disabled),
+        n_tasks_sealed=sum(1 for a in routing if a.row.sealed),
+        n_unsealed=sum(1 for r in eligible if not r.sealed),
+        apparatus_version=apparatus,
+        context_arm=arm,
+        taxonomy=taxonomy,
         model_n=split.model_n,
         model_point=split.model_point,
         model_ci=split.model_ci,
@@ -1606,6 +1881,33 @@ def rows_for_checks(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
     return [r for r in rows if r.checks_arm == arm]
 
 
+#: The arm a reader that names none reads (``S3``: the arm every sighted replay row of 2.4
+#: carries — the commit's own tests). The capability map reads each cell's own standard.
+DEFAULT_READ_ARM = "S3"
+
+
+def rows_for_reading(
+    rows: Iterable[GradeRow],
+    *,
+    apparatus: str,
+    arm: str = DEFAULT_READ_ARM,
+    taxonomy: str = GLOBAL_CLASS_SET,
+) -> list[GradeRow]:
+    """The rows ONE reading may reduce (ADR-0025 item 1, ADR-0026 items 1 and 9): one
+    apparatus; from 2.4 also one context arm and one class-set version. A row below 2.4
+    carries neither stamp and is kept at its own apparatus (the reader splits it by mode, as
+    it always did). Use before ``cell_stats`` / ``build_capability_map`` over mixed rows."""
+    out: list[GradeRow] = []
+    for r in rows:
+        if r.apparatus_version != apparatus:
+            continue
+        stamped = bool(r.context_arm or r.taxonomy)
+        if stamped and (r.context_arm != arm or r.taxonomy != taxonomy):
+            continue
+        out.append(r)
+    return out
+
+
 def group_by_cell(
     rows: Iterable[GradeRow], *, key_fields: Sequence[str] = CELL_FIELDS
 ) -> dict[tuple[str, ...], list[GradeRow]]:
@@ -1618,11 +1920,23 @@ def group_by_cell(
     return groups
 
 
+def reading_key(row: GradeRow) -> tuple[str, str, str, str]:
+    """What one reading of a cell never pools: the checks arm (ADR-0024), the apparatus
+    (ADR-0025), the context arm and the class-set version (ADR-0026)."""
+    return (row.checks_arm, row.apparatus_version, row.context_arm, row.taxonomy)
+
+
 def all_cell_stats(rows: Iterable[GradeRow]) -> list[CellStats]:
-    """One :class:`CellStats` per full cell key and ``checks`` arm present in ``rows`` — two
-    arms of one key are two cells, never one (ADR-0024)."""
+    """One :class:`CellStats` per full cell key, ``checks`` arm, apparatus, context arm and
+    class-set version present in ``rows`` — two of any of those are two cells, never one."""
     rs = list(rows)
-    return [cell_stats(g) for arm in ARMS for g in group_by_cell(rows_for_checks(rs, arm)).values()]
+    out: list[CellStats] = []
+    for arm in ARMS:
+        groups: dict[tuple[str, ...], list[GradeRow]] = {}
+        for r in rows_for_checks(rs, arm):
+            groups.setdefault((*reading_key(r), *r.cell.to_tuple()), []).append(r)
+        out.extend(cell_stats(g) for g in groups.values())
+    return out
 
 
 def false_q1_total(rows: Iterable[GradeRow]) -> int:

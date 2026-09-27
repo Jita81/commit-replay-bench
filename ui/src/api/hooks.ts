@@ -152,7 +152,7 @@ export const keys = {
   grades: (p?: GradeListParams) => ['grades', p ?? {}] as const,
   grade: (rowId: string) => ['grades', rowId] as const,
   evidence: (hash: string) => ['evidence', hash] as const,
-  capability: (repo: string, by: string) => ['capability', repo, by] as const,
+  capability: (repo: string, by: string, arm = '') => ['capability', repo, by, arm] as const,
   routes: (repo: string) => ['routes', repo] as const,
   forecastBuild: (repo: string, mix: string) => ['forecast', 'build', repo, mix] as const,
   forecastReadiness: (repo: string) => ['forecast', 'readiness', repo] as const,
@@ -617,11 +617,13 @@ export function useEvidence(hash: string): UseQueryResult<EvidenceResponse, ApiE
 // ---------------------------------------------------------------------------
 
 /** `GET /capability-map?repo=&by=` — the cells for one projection; 30 s stale. */
-export function useCapabilityMap(repo: string, by: CellField[]): UseQueryResult<CapabilityMap, ApiError> {
+export function useCapabilityMap(repo: string, by: CellField[], arm = ''): UseQueryResult<CapabilityMap, ApiError> {
   const byStr = by.join(',')
   return useQuery({
-    queryKey: keys.capability(repo, byStr),
-    queryFn: () => api<CapabilityMap>(`/capability-map${qs({ repo, by: byStr })}`),
+    queryKey: keys.capability(repo, byStr, arm),
+    // `arm` (ADR-0026 item 1): one context arm per reading; '' = the server's default,
+    // each cell on its own proven standard arm
+    queryFn: () => api<CapabilityMap>(`/capability-map${qs({ repo, by: byStr, arm: arm || undefined })}`),
     enabled: repo.length > 0,
     retry: false,
     staleTime: 30_000,

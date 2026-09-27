@@ -96,12 +96,28 @@ default**.
   suite. `clean` is a mechanical result. See [EVIDENCE-AND-CLAIMS](docs/EVIDENCE-AND-CLAIMS.md)
   for what may and may not be said on that basis.
 - **Not a licence to deploy.** `deliver` is a route for a *class* of change in one
-  repository: its measured cell clears the published bar (n ≥ 10, point ≥ 0.90, Wilson-low
-  ≥ 0.80, false-Q1 = 0, oracle ≥ 0.80, controls passed), so the factory may open a branch
-  and a pull request for such changes under human review — and only for such changes: the
-  map gates the factory ([ADR-0003](docs/adr/0003-one-routing-rule.md), amendment
-  2026-09-16). It never means a change is safe to merge or deploy unattended; a human
-  merges, and the measurement says nothing about security, operations or business fit.
+  repository: its cell clears the published bar, so the factory may open a branch and a pull
+  request for such changes under human review — and only for such changes: the map gates
+  the factory ([ADR-0025](docs/adr/0025-routing-v2.md), as
+  [ADR-0026](docs/adr/0026-the-context-standard.md) amends it). It never means a change is
+  safe to merge or deploy unattended; a human merges, and the measurement says nothing about
+  security, operations or business fit. The bar, generated from the code
+  (`RoutingPolicy.describe()`, and checked against it byte for byte):
+
+  <!-- routing-bar:begin -->
+  A cell routes `deliver` (routing.v2) only for its standard context arm, when a reading
+  registered before its first attempt, over a frozen pool read in its seeded order, counts
+  each distinct change once by its first observed attempt at rung r1 in the sealed posture
+  and finds 20 of the first 20, 29 of the first 30 or 38 of the first 40 clean (the look
+  rule look.v1, read only at those looks); the reading's hierarchy is read richest arm first
+  and stops at the first arm that does not deliver, `S3` alone is a ceiling that licenses
+  nothing, only `S1@<author>` and `S2` certify, and `A0` is descriptive; every reading on a
+  cell spends its rule's chance of delivering at a true rate of 0.80 (0.0210 for look.v1)
+  from one error budget of 0.05 per cell; and the cell also needs false-Q1 = 0, an oracle
+  strength of at least 0.80 under `mutation.v2` measured on at least half of the commits the
+  reading counted, and a complete negative-controls report at the same apparatus that
+  passed, exercised at least half its controls and let no measurement control escape.
+  <!-- routing-bar:end -->
 - **Not a standards authority.** It does not decide an organisation's standards — it proposes,
   measures and records the ones that organisation's people sign — and it never certifies that
   code conforms to ISO/IEC 25010, ISO/IEC 5055 or any other standard. Its checks evidence

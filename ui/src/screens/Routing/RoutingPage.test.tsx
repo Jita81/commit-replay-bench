@@ -24,6 +24,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { helpFor } from '../../help/help'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import type { ControlsVerdict, RouteDecisionWithControls, RoutesWithControls } from '../Capability/contract'
 import { RoutingPage } from './RoutingPage'
@@ -68,7 +69,7 @@ const decision = (over: Partial<RouteDecisionWithControls>): RouteDecisionWithCo
 
 const ROUTES_BODY: RoutesWithControls = {
   repo: 'alpha',
-  policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1', min_controls_share: 0.5, max_controls_escapes: 0, controls_version: 'controls-gate.v1' },
+  policy: { rule: 'look.v1', looks: { '20': 0, '30': 1, '40': 2 }, p_deliver_at_0_80: 0.021, cell_error_budget: 0.05, min_oracle_strength: 0.8, min_oracle_share: 0.5, granularize_sizes: ['XL'], version: 'routing.v2', description: 'A cell routes deliver (routing.v2) only for its standard context arm.', min_controls_share: 0.5, max_controls_escapes: 0, controls_version: 'controls-gate.v1' },
   controls: VERDICT,
   decisions: [
     decision({}),
@@ -101,13 +102,15 @@ describe('RoutingPage — reason codes, the controls verdict and the split (A2)'
     renderApp(<RoutingPage />, { route: '/routing?repo=alpha' })
     await waitFor(() => expect(screen.getByTestId('policy-rule')).toBeInTheDocument())
 
-    // the policy card names both clause sets and the controls bars
+    // the policy card reads the published bar word for word from the served policy
+    // (RoutingPolicy.describe — README carries the same sentence) and names both clause sets
     const rule = screen.getByTestId('policy-rule')
-    expect(rule.textContent).toContain('negative controls passed')
-    expect(rule.textContent).toContain('≥ 50% of control rows constructible')
-    expect(rule.textContent).toContain('escapes ≤ 0')
-    expect(rule.textContent).toContain('never instead of it')
-    expect(screen.getByText('routing.v1 + controls-gate.v1')).toBeInTheDocument()
+    expect(rule.textContent).toBe(ROUTES_BODY.policy.description)
+    expect(screen.getByText('routing.v2 + controls-gate.v1')).toBeInTheDocument()
+    expect(screen.getByText('20/20 · 29/30 · 38/40')).toBeInTheDocument()
+    // the About block's numbers sentence names no threshold of its own: the card's are the ones
+    // in force, so a tightened policy can never disagree with the copy (G-255)
+    expect(helpFor('/routing')?.numbers).not.toMatch(/[≥≤]\s*\d/)
 
     // the repo's verdict as a pill: passed but escaped
     const pill = screen.getByTestId('controls-escaped')

@@ -39,9 +39,9 @@ export const HINTS = {
 
   // ── Shared vocabulary (derived by shared components)
   'route.deliver':
-    'This cell clears every bar of the published routing rule, so the factory may open a branch and a pull request for this class of change under human review. It never means a change is safe to merge.',
+    'This cell’s standard context arm cleared every clause of the published routing rule in a registered reading, so the factory may open a branch and a pull request for this class of change under human review. It never means a change is safe to merge.',
   'route.calibrate':
-    'Not enough evidence yet, or the rate is under the bar. More attempts, or running the negative controls, can change this route.',
+    'Something the rule needs is not measured yet: no registered reading, a look still pending, an unmeasured oracle or controls, rows outside the sealed posture, or an arm that is not the cell’s standard. The cell names what to measure next.',
   'route.granularize':
     'Changes of this size are split into smaller ones before they are attempted, so this cell is never measured as it stands.',
   'route.human':
@@ -1289,16 +1289,34 @@ export const HINTS = {
     'Close the open cell and return to the grid alone.',
   'button.capability.start_replay':
     'Open the run form on a sighted replay for this repository; each graded trial is one observation in its cell.',
+  'field.capability.arm':
+    'The context arm the map reads: what the builder was given. Each cell’s standard reads every cell on the arm its registered reading proved; any other arm shows that arm alone. Two arms are never pooled.',
+  'stat.capability.standard':
+    'The least context proven to pass in this cell: the arm whose registered reading delivered. No proven standard means nothing here can deliver yet; a ceiling means only the commit’s own tests delivered.',
+  'stat.capability.counted':
+    'Distinct commits the reading has read on this arm, each by its first attempt in the sealed posture, in the seeded order, with the Wilson 95% interval and the commits still needed to the next look.',
+  'tile.capability.readings':
+    'Every arm of the reading registered on this cell: its state under the look rule, clean over distinct commits read, the interval, and the commits still needed.',
+  'tile.capability.shortfalls':
+    'Every clause this cell fails, in the rule’s order, with the next measurement and how many; replays and calibration builds cost model money.',
+  'tile.capability.provenance':
+    'What the builders’ briefs carried beyond their arm, such as the loop’s playbook digest. Shown and filterable, never a reason to split the cell.',
+  'banner.capability.apparatus':
+    'The apparatus in force and what it changed: earlier rows stay readable as history and license nothing, and the steps that earn deliver back for a cell.',
+  'tile.capability.route_bar':
+    'The published routing bar, word for word as the code renders it and the README prints it.',
 
   // ── /routing — Routes (screens/Routing/RoutingPage.tsx)
-  'policy.routing.min_n':
-    'The fewest attempts a cell needs before it can route deliver.',
-  'policy.routing.min_point':
-    'The lowest clean rate a cell may have and still route deliver.',
-  'policy.routing.min_ci_low':
-    'The lowest the 95 % Wilson lower bound may be for deliver. It rises toward the point as n grows.',
+  'policy.routing.rule':
+    'The look rule a registered reading is read under. A reading is read only at its looks, never whenever rows arrive, so re-reading cannot make a cell pass.',
+  'policy.routing.looks':
+    'How many of the first distinct commits, in the reading’s seeded order, must be clean on their first attempt at each look for the arm to deliver.',
+  'policy.routing.budget':
+    'The error budget one cell has across every reading and phase: each reading spends its rule’s chance of certifying a cell whose true rate is 0.80.',
   'policy.routing.min_oracle':
-    'The lowest mean mutation strength a cell’s tasks may have for deliver, when measured.',
+    'The lowest mean mutation strength the counted commits may have for deliver. Unmeasured never passes.',
+  'policy.routing.min_oracle_share':
+    'The share of the commits a reading counted that must carry an oracle score for the strength to speak for the cell.',
   'policy.routing.granularize':
     'The size tiers that are split before they are attempted.',
   'policy.routing.min_controls_share':
@@ -1306,7 +1324,7 @@ export const HINTS = {
   'policy.routing.max_escapes':
     'How many controls may escape before deliver is withheld. Zero in the published policy.',
   'tile.routing.rule':
-    'The one rule in words: every clause a cell must clear for deliver and which failures send it to do not ship, granularize, human or calibrate.',
+    'The published bar in words, exactly as the code renders it and the README prints it: every clause a cell must clear for deliver.',
   'stat.routing.route_count':
     'How many cells route this way, out of every measured cell (n). Counts of cells, not attempts.',
   'col.routing.cell':
@@ -1430,7 +1448,7 @@ export const HINTS = {
   'stat.learn.stale_rows':
     'Rows older than the current apparatus out of every row for this repository. Stale evidence is kept as history and licenses nothing.',
   'stat.learn.needed':
-    'Attempts still needed on the current apparatus to bring every stale cell back to the rule’s minimum n, over the cells that are stale.',
+    'Commits still needed on the current apparatus to bring every stale cell to the look rule’s first look (routing.v2), over the cells that are stale. A reading is read only at its looks.',
   'stat.learn.remeasure_cost':
     'Each stale cell’s own mean row cost times the rows it still needs, summed over the cells with a known cost. A dash means no cost is known.',
   'col.learn_remeasure.cell':
@@ -1838,7 +1856,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/runs': 13,
   '/runs/:id': 24,
   '/tasks/:repo/:taskId': 16,
-  '/capability': 29,
+  '/capability': 30,
   '/routing': 20,
   '/oracle': 22,
   '/learn': 44,

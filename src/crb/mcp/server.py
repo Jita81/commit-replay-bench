@@ -322,7 +322,7 @@ def build_server(api: CrbApi) -> MCPServer[Any]:
     # --- the map, the routes, the oracle ---------------------------------------------------
     @s.tool(
         annotations=READ,
-        description="The capability map (GET /capability-map): cells with n, n_tasks, point, Wilson interval, false-Q1, oracle strength, controls, route + reason. by = class,size (default) or a comma list of cell fields; apparatus = current (default) or all.",
+        description="The capability map (GET /capability-map): cells with n, n_tasks, point, Wilson interval, false-Q1, oracle strength, controls, route + reason. by = class,size (default) or a comma list of cell fields; apparatus = current (default) or one version, read as history (all is refused: a reading has one apparatus, ADR-0025).",
     )
     def crb_capability_map(repo: str, by: str | None = None, apparatus: str = "current") -> Any:
         return _safe(lambda: api.get("/capability-map", repo=repo, by=by, apparatus=apparatus))

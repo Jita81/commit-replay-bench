@@ -218,7 +218,10 @@ def test_a_replay_row_below_2_4_carries_no_change_identity(
     """The identity is a 2.4 label: a replay at 2.3 writes the row a 2.3 replay always
     wrote, whether or not its task was mined with one (DL-106 (2))."""
     monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.3")
-    for task in (feat_task, feat_task.with_(labels={lg.LABEL_CHANGE_ID: "e" * 40})):
+    for task in (
+        feat_task.with_(labels={}),
+        feat_task.with_(labels={lg.LABEL_CHANGE_ID: "e" * 40}),
+    ):
         outcome = run_task(
             _gold_spec(pyrepo, runner, executor, tmp_path / task.labels.get("change_id", "x")),
             pyrepo.repo,
@@ -238,10 +241,11 @@ def test_a_replay_of_a_task_mined_before_the_rule_names_its_change_on_the_row(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``feat_task`` carries no ``change_id`` (it was built as an old task was stored): the
-    replay path measures it, and a 2.4 row — which the ledger refuses without it — carries
-    it. The apparatus is set to 2.4 here as stream R's bump will set it."""
-    assert lg.LABEL_CHANGE_ID not in feat_task.labels
+    """A task stored before the rule carries no ``change_id``: the replay path measures it,
+    and a 2.4 row — which the ledger refuses without it — carries it. The apparatus is pinned
+    to 2.4 here, as stream R's bump sets it."""
+    old_task = feat_task.with_(labels={})
+    assert lg.LABEL_CHANGE_ID not in old_task.labels
     monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.4")
 
     def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
@@ -261,7 +265,7 @@ def test_a_replay_of_a_task_mined_before_the_rule_names_its_change_on_the_row(
             pyrepo.repo, pyrepo.config, runner=runner, executor=executor, scratch=tmp_path / "s"
         ),
     )
-    outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+    outcome = run_task(spec, pyrepo.repo, old_task, build_fn)
     (row,) = outcome.rows
     assert row.apparatus_version == "2.4" and row.clean
     assert row.labels[lg.LABEL_CHANGE_ID] == m.change_identity(pyrepo.repo, pyrepo.feat_sha)

@@ -43,6 +43,12 @@ enforced by :func:`check_signable` (the first failing clause, as
 * ``oracle_weak``                    — the cell's measured oracle strength is below
   ``min_oracle_strength``.
 * ``route_not_deliver:<reason_code>`` — the ONE routing rule does not say ``deliver``.
+* ``look_pending`` / ``not_standard`` — ``signoff-policy.v4`` (ADR-0025 item 9 as ADR-0026
+  item 6 amends it): a sign-off may be written only for the cell's STANDARD context arm, and
+  only when that arm's registered reading reads ``deliver``. ``look_pending`` is the
+  standard arm's reading still waiting for a look (what routing.v1's thin cell became);
+  ``not_standard`` is any other arm — a ceiling, a leaner standard, an unregistered or
+  descriptive arm, an ``insufficient`` or ``undecided`` reading. Never overridable.
 * ``attestation_missing``            — the approver has not named the accepted row
   they read. Never overridable: an approver must have read at least one accepted
   diff in the cell (review §7 item 6).
@@ -215,10 +221,12 @@ from crb.core.version import APPARATUS_VERSION
 SIGNOFF_SCHEMA_V1 = "crb.signoff.v1"
 SIGNOFF_SCHEMA_V2 = "crb.signoff.v2"
 SIGNOFF_SCHEMA_V3 = "crb.signoff.v3"
-SIGNOFF_SCHEMA = "crb.signoff.v4"
+SIGNOFF_SCHEMA_V4 = "crb.signoff.v4"
+SIGNOFF_SCHEMA = "crb.signoff.v5"
 SIGNOFF_POLICY_VERSION_V1 = "signoff-policy.v1"
 SIGNOFF_POLICY_VERSION_V2 = "signoff-policy.v2"
-SIGNOFF_POLICY_VERSION = "signoff-policy.v3"
+SIGNOFF_POLICY_VERSION_V3 = "signoff-policy.v3"
+SIGNOFF_POLICY_VERSION = "signoff-policy.v4"
 
 #: Earned-tier precedence when several active attestations match one cell.
 _TIER_RANK: dict[str, int] = {TIER_HUMAN_VERIFIED: 1, TIER_AB_CONFIRMED: 2}
@@ -266,6 +274,9 @@ _V2_BODY_FIELDS: tuple[str, ...] = (
 #: The v3 hashed body: v2 plus ``verifier_kind`` (F34) — FROZEN, so a ``crb.signoff.v3``
 #: chain keeps verifying after v4 added ``checks_arm``.
 _V3_BODY_FIELDS: tuple[str, ...] = (*_V2_BODY_FIELDS, "verifier_kind")
+#: The v4 hashed body: v3 plus ``checks_arm`` and ``posture_class`` — FROZEN, so a
+#: ``crb.signoff.v4`` chain keeps verifying after v5 added the reading's stamps.
+_V4_BODY_FIELDS: tuple[str, ...] = (*_V3_BODY_FIELDS, "checks_arm", "posture_class")
 
 # --- who signed: the account kind (F34) ---------------------------------------------------
 VERIFIER_KIND_OIDC = "oidc"
@@ -313,6 +324,11 @@ REFUSAL_ORACLE_WEAK = "oracle_weak"
 REFUSAL_ROUTE_NOT_DELIVER = "route_not_deliver"  # emitted as ``route_not_deliver:<reason_code>``
 REFUSAL_ATTESTATION_MISSING = "attestation_missing"
 REFUSAL_SAME_ACTOR = "same_actor"
+#: signoff-policy.v4 (ADR-0026 item 6): the standard arm's reading waits for a look.
+REFUSAL_LOOK_PENDING = "look_pending"
+#: signoff-policy.v4: the cell's arm is not its proven standard (emitted as
+#: ``not_standard:<state>``, the state the arm's reading reads).
+REFUSAL_NOT_STANDARD = "not_standard"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_FALSE_Q1,
     REFUSAL_SCOPE_MISMATCH,
@@ -324,16 +340,20 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_ORACLE_UNMEASURED,
     REFUSAL_ORACLE_WEAK,
     REFUSAL_ROUTE_NOT_DELIVER,
+    REFUSAL_LOOK_PENDING,
+    REFUSAL_NOT_STANDARD,
     REFUSAL_ATTESTATION_MISSING,
     REFUSAL_SAME_ACTOR,
 )
 #: Clauses no deployment setting can switch off (``signoff-policy.v2`` added the oracle one,
-#: ``signoff-policy.v3`` the two-person rule).
+#: ``signoff-policy.v3`` the two-person rule, ``signoff-policy.v4`` the standard-arm pair).
 NON_OVERRIDABLE_REFUSALS: tuple[str, ...] = (
     REFUSAL_FALSE_Q1,
     REFUSAL_ORACLE_UNMEASURED,
     REFUSAL_ATTESTATION_MISSING,
     REFUSAL_SAME_ACTOR,
+    REFUSAL_LOOK_PENDING,
+    REFUSAL_NOT_STANDARD,
 )
 
 
@@ -628,6 +648,19 @@ class SignoffRecord:
     # v4 (ADR-0019) — the posture class(es) the evidence was graded in, ``,``-joined as
     # stamped from the cell; ``""`` when its rows carried none (before apparatus 2.3).
     posture_class: str = ""
+    # v5 (ADR-0025 item 9, ADR-0026 item 6) — the evidence per distinct change, the oracle's
+    # coverage, the controls report's apparatus, and the arm, class-set version and reading
+    # the sign-off is bound to: the overlay lifts only a cell read on all three.
+    n_tasks_at_signoff: int = 0
+    task_clean_at_signoff: int = 0
+    task_ci_low_at_signoff: float = 0.0
+    task_ci_high_at_signoff: float = 1.0
+    oracle_scored_tasks: int = 0
+    oracle_share: float = 0.0
+    controls_apparatus: str = ""
+    context_arm: str = ""
+    taxonomy: str = ""
+    reading_id: str = ""
     schema: str = SIGNOFF_SCHEMA
     record_id: str = ""
     prev_hash: str = ""
@@ -726,11 +759,29 @@ class SignoffRecord:
             return True
         return ",".join(cell.stats.posture_classes) == self.posture_class
 
+    def covers_reading(self, cell: CapabilityCell) -> bool:
+        """True when the attestation was made on the context arm, the class-set version and
+        the reading the cell is read on (ADR-0026 item 6): a sign-off of one arm, one version
+        or one reading lifts no other — as a checks arm's sign-off lifts no other arm. A
+        record from before v5 (no stamps; stale by its apparatus already) or a cell with no
+        rows is not judged here."""
+        if cell.stats is None or not (self.context_arm or self.taxonomy or self.reading_id):
+            return True
+        read = cell.decision.reading_id if cell.decision is not None else ""
+        return (
+            self.context_arm == cell.stats.context_arm
+            and self.taxonomy == cell.stats.taxonomy
+            and self.reading_id == read
+        )
+
     def is_stale(self, cell: CapabilityCell) -> bool:
-        """The inbox's word for :meth:`covers_apparatus`, :meth:`covers_arm` or
-        :meth:`covers_posture` being false."""
+        """The inbox's word for :meth:`covers_apparatus`, :meth:`covers_arm`,
+        :meth:`covers_posture` or :meth:`covers_reading` being false."""
         return not (
-            self.covers_apparatus(cell) and self.covers_arm(cell) and self.covers_posture(cell)
+            self.covers_apparatus(cell)
+            and self.covers_arm(cell)
+            and self.covers_posture(cell)
+            and self.covers_reading(cell)
         )
 
     # --- hashing ------------------------------------------------------------------
@@ -744,6 +795,8 @@ class SignoffRecord:
             names = _V2_BODY_FIELDS
         elif self.schema == SIGNOFF_SCHEMA_V3:
             names = _V3_BODY_FIELDS
+        elif self.schema == SIGNOFF_SCHEMA_V4:
+            names = _V4_BODY_FIELDS
         else:
             names = tuple(k for k in self.__dataclass_fields__ if k != "row_hash")
         out: dict[str, Any] = {}
@@ -777,8 +830,8 @@ class SignoffRecord:
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> SignoffRecord:
         """Tolerates a v1 record (no policy / attestation fields → their defaults), a v2
-        one (no ``verifier_kind`` → ``""``), a v3 one (no ``checks_arm`` → ``""``) and a v4
-        one; unknown keys are ignored."""
+        one (no ``verifier_kind`` → ``""``), a v3 one (no ``checks_arm`` → ``""``), a v4 one
+        (no reading stamps → their defaults) and a v5 one; unknown keys are ignored."""
         kw = {k: d[k] for k in cls.__dataclass_fields__ if k in d}
         att = kw.get("attestation")
         kw["attestation"] = Attestation.from_dict(att) if isinstance(att, Mapping) else None
@@ -793,20 +846,18 @@ def resolve_oracle_strength(
     decision: RouteDecision | None = None,
     oracle_strength: float | None = None,
 ) -> float | None:
-    """The ONE resolution of a cell's oracle strength for the sign-off policy.
-
-    ``oracle_strength`` is the caller's measurement (the server: the mean of the
-    latest task-level mutation scores of the cell's tasks, from the oracle events —
-    ``None`` = it found none); else the route decision's (``decision`` defaults to
-    the cell's own); else the rows' own mean (census-imported rows carry one).
-    ``None`` all the way down means *unmeasured* — never 0.0, never a pass.
+    """The ONE resolution of a cell's oracle strength for the sign-off policy: the
+    ``OracleEvidence`` the route read (ADR-0025 item 9) — the caller's ``oracle_strength``
+    when it measured one, else the route decision's (``decision`` defaults to the cell's own).
+    The rows' own ``oracle_strength`` column is never read. ``None`` means *unmeasured* —
+    never 0.0, never a pass.
     """
     if oracle_strength is not None:
         return oracle_strength
     d = decision if decision is not None else cell.decision
     if d is not None and d.oracle_strength is not None:
         return d.oracle_strength
-    return cell.stats.oracle_strength_mean if cell.stats is not None else None
+    return None
 
 
 def stamp_evidence(
@@ -831,8 +882,19 @@ def stamp_evidence(
     d = decision if decision is not None else cell.decision
     c = controls if controls is not None else (d.controls if d is not None else None)
     strength = resolve_oracle_strength(cell, decision=d, oracle_strength=oracle_strength)
+    verdict = cell.verdict
     return replace(
         record,
+        n_tasks_at_signoff=cell.stats.n_tasks,
+        task_clean_at_signoff=cell.stats.task_clean,
+        task_ci_low_at_signoff=cell.stats.task_ci.low,
+        task_ci_high_at_signoff=cell.stats.task_ci.high,
+        oracle_scored_tasks=d.oracle_scored_tasks if d is not None else 0,
+        oracle_share=d.oracle_share if d is not None else 0.0,
+        controls_apparatus=c.apparatus_version if c is not None else "",
+        context_arm=cell.stats.context_arm,
+        taxonomy=cell.stats.taxonomy,
+        reading_id=verdict.reading_id if verdict is not None else "",
         n_at_signoff=cell.stats.n,
         point_at_signoff=cell.stats.point,
         ci_low_at_signoff=cell.stats.ci.low,
@@ -1077,6 +1139,34 @@ def evaluate_signoff(
                 )
             )
 
+    # signoff-policy.v4 (ADR-0026 item 6): only the cell's standard arm, only when its
+    # reading delivers — never overridable, whatever the route switch says
+    verdict = cell.verdict
+    state = verdict.state if verdict is not None else "reading_unregistered"
+    arm = cell.stats.context_arm if cell.stats is not None else ""
+    if state == "look_pending":
+        out.append(
+            SignoffRefusal(
+                REFUSAL_LOOK_PENDING,
+                f"the reading of {arm} waits for its look at {verdict.next_look if verdict else '-'}"
+                f" ({verdict.needed if verdict else 0} commit(s) still needed) — a sign-off is "
+                "written only when the standard arm's reading delivers",
+                threshold="deliver",
+                observed=state,
+            )
+        )
+    elif state != "deliver":
+        out.append(
+            SignoffRefusal(
+                f"{REFUSAL_NOT_STANDARD}:{state}",
+                f"{arm or 'this arm'} is not the cell's proven standard (its reading reads "
+                f"{state!r}) — a sign-off is written only for the standard arm, when its "
+                "registered reading delivers",
+                threshold="standard arm, reading deliver",
+                observed=state,
+            )
+        )
+
     if policy.require_attestation and record.attestation is None:
         out.append(
             SignoffRefusal(
@@ -1283,7 +1373,8 @@ def apply_signoffs(
     expires when the apparatus changes) — **and on the ``checks`` arm the cell is read on**
     (ADR-0024: a sign-off of the rows graded with belt 6 off never lifts the belt-6 cell)
     **and in the posture class the cell is read in** (ADR-0019 §8: posture is a filter,
-    never a blend, for a sign-off as for a rate).
+    never a blend, for a sign-off as for a rate) **and on the context arm, class-set version
+    and reading the record stamps** (ADR-0026 item 6).
     The highest matching earned tier wins.
     Everything else passes through unchanged.
     """
@@ -1302,6 +1393,7 @@ def apply_signoffs(
             and r.covers_apparatus(cell)
             and r.covers_arm(cell)
             and r.covers_posture(cell)
+            and r.covers_reading(cell)
         ]
         if not tiers:
             out.append(cell)

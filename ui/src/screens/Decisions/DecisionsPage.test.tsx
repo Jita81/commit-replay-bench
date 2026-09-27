@@ -32,7 +32,7 @@ import { DecisionsPage } from './DecisionsPage'
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
 const HUMAN = { ...CELL, size: 'S', route: 'human', reason: 'oracle strength 0.76 < 0.80 — green cannot license auto-delivery', reason_code: 'oracle_weak' }
 function map(repo: string, cells: unknown[]) {
-  return { repo, by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells, summary: { trusted_autonomy_coverage: 0, total_cells: 2, measured_cells: 2, deliver_cells: 1, n_total: 44, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } }
+  return { repo, by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells, summary: { trusted_autonomy_coverage: 0, total_cells: 2, measured_cells: 2, deliver_cells: 1, n_total: 44, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { rule: 'look.v1', looks: { '20': 0, '30': 1, '40': 2 }, p_deliver_at_0_80: 0.021, cell_error_budget: 0.05, min_oracle_strength: 0.8, min_oracle_share: 0.5, granularize_sizes: ['XL'], version: 'routing.v2', description: 'A cell routes deliver (routing.v2) only for its standard context arm.' } }
 }
 const REPOS = { items: [{ name: 'alpha' }, { name: 'beta' }], total: 2, limit: 500, offset: 0 }
 
@@ -60,7 +60,7 @@ describe('DecisionsPage', () => {
     const due = screen.getByText('bug.fix × XS clears the bar — attest it or decline').closest('li')!
     expect(due).toHaveTextContent('n=22 on 9 tasks · 100% [85%, 100%]')
     expect(within(due).getByRole('button', { name: 'deliver' })).toHaveAttribute('aria-expanded', 'false')
-    expect(due).toHaveTextContent('every bar cleared')
+    expect(due).toHaveTextContent("the cell's standard arm: every clause holds")
     const human = screen.getByText(/bug.fix × S routed to a human/).closest('li')!
     expect(within(human).getByRole('button', { name: 'oracle_weak' })).toBeInTheDocument()
     expect(human).toHaveTextContent('oracle too weak to license auto-delivery')

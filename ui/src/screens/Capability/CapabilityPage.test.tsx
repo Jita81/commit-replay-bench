@@ -72,7 +72,7 @@ const MAP: CapabilityMap = {
     // bug.fix × XS and test.add × S are absent → NOT_YET_MEASURED
   ],
   summary: { trusted_autonomy_coverage: 0.42, total_cells: 4, measured_cells: 2, deliver_cells: 1, n_total: 52, false_q1_total: 1, apparatus_versions: ['2.0'] },
-  policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' },
+  policy: { rule: 'look.v1', looks: { '20': 0, '30': 1, '40': 2 }, p_deliver_at_0_80: 0.021, cell_error_budget: 0.05, min_oracle_strength: 0.8, min_oracle_share: 0.5, granularize_sizes: ['XL'], version: 'routing.v2', description: 'A cell routes deliver (routing.v2) only for its standard context arm.' },
 }
 
 describe('CapabilityPage', () => {
@@ -93,7 +93,7 @@ describe('CapabilityPage', () => {
     expect(cov.textContent).toContain('42.0%')
     expect(cov.textContent).toContain('n =')
     expect(cov.textContent).toContain('52')
-    expect(cov.textContent).toContain('routing.v1')
+    expect(cov.textContent).toContain('routing.v2')
 
     // Two measured cells, two honest-empty cells in a 2×2 grid.
     expect(screen.getAllByTestId('cell-not-measured')).toHaveLength(2)
@@ -412,6 +412,80 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
     await waitFor(() => expect(screen.getByTestId('error-state')).toBeInTheDocument())
     expect(calls).toBe(2)
     expect(screen.queryAllByTestId('controls-failed')).toEqual([])
+  })
+
+  it('reads one context arm at a time and names the standard of the cell, or no proven standard (ADR-0026)', async () => {
+    const S1 = 'S1@claude-opus-5'
+    const reading = {
+      reading_id: 'rdg_0123456789abcdef01234567',
+      rule: 'look.v1',
+      hierarchy: ['S3', S1],
+      state: 'standard',
+      standard: S1,
+      ceiling: false,
+      chain: ['S3', S1],
+      stopped_at: null,
+      needed: 0,
+      spend: 0.021,
+      registered_at: '2026-09-27T10:00:00+00:00',
+      pool: 40,
+      pool_sha256: 'a'.repeat(64),
+      arms: [
+        { arm: 'S3', state: 'deliver', descriptive: false, stopped_by: '', counted: 20, clean: 20, misses: 0, ci_low: 0.839, ci_high: 1, next_look: null, needed: 0 },
+        { arm: S1, state: 'deliver', descriptive: false, stopped_by: '', counted: 20, clean: 20, misses: 0, ci_low: 0.839, ci_high: 1, next_look: null, needed: 0 },
+      ],
+    }
+    const standardCell = cell({
+      n: 20,
+      clean: 20,
+      point: 1,
+      ci_low: 0.839,
+      ci_high: 1,
+      context_arm: S1,
+      look_state: 'deliver',
+      counted: 20,
+      counted_clean: 20,
+      counted_ci_low: 0.839,
+      counted_ci_high: 1,
+      reading,
+      standard: { standard: S1, ceiling: false, label: `standard ${S1}`, next: '', next_count: 0, budget: 0.05, spent: 0.021 },
+      shortfalls: [],
+    })
+    const s3Cell = cell({
+      route: 'calibrate',
+      reason: 'no registered reading reads the arm S3',
+      reason_code: 'reading_unregistered',
+      context_arm: 'S3',
+      look_state: 'reading_unregistered',
+      reading: null,
+      standard: { standard: null, ceiling: false, label: 'no proven standard', next: 'register', next_count: 0, budget: 0.05, spent: 0 },
+      shortfalls: [{ code: 'reading_unregistered', route: 'calibrate', observed: null, threshold: 'registered', next: 'register', count: 0, model_money: false }],
+    })
+    const urls: string[] = []
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': (url: string) => {
+        urls.push(url)
+        const s3 = url.includes('arm=S3')
+        return json({ ...MAP, cells: [s3 ? s3Cell : standardCell], arm: s3 ? 'S3' : 'standard', arms: ['S3', S1] })
+      },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    await waitFor(() => expect(screen.getByTestId('cell-measured')).toBeInTheDocument())
+    expect(screen.getByTestId('cell-arm').textContent).toContain(S1)
+    fireEvent.click(screen.getByTestId('cell-measured'))
+    expect(screen.getByTestId('tile-standard').textContent).toContain(S1)
+    expect(screen.getAllByTestId('cell-reading-arm')).toHaveLength(2)
+    expect(screen.getByTestId('route-bar').textContent).toContain(MAP.policy.description)
+    // choose one arm: the map is read on it alone, and it names no proven standard
+    fireEvent.change(screen.getByTestId('arm-select'), { target: { value: 'S3' } })
+    await waitFor(() => expect(urls.some((u) => u.includes('arm=S3'))).toBe(true))
+    await waitFor(() => expect(screen.getByTestId('cell-arm').textContent).toContain('S3'))
+    fireEvent.click(screen.getByTestId('cell-measured'))
+    expect(screen.getByTestId('tile-standard').textContent).toContain('no proven standard')
+    expect(screen.getByTestId('cell-shortfalls').textContent).toContain('register')
+    expect(screen.getByTestId('cell-readings').textContent).toContain('No reading is registered')
   })
 
   it('the page reads every query only through currentData', () => {

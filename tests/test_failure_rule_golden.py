@@ -61,6 +61,8 @@ from fixtures.posture import with_posture_labels
 #: A version's line is written once, when that version ships, and never edited.
 GOLDEN: dict[str, str] = {
     "2.3": "5f7e319ccde777ac118b0bac6b5e182b4356c419e7e6989679b7d9ec55fa473a",
+    # 2.4 (ADR-0025): the rule did not move at the bump; from here a row pins its own kind
+    "2.4": "5f7e319ccde777ac118b0bac6b5e182b4356c419e7e6989679b7d9ec55fa473a",
 }
 #: SHA-256 of the canonical JSON of ``OUTAGE_ERROR_MARKERS_V1`` (frozen at 2.3).
 V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd544364713f"
@@ -69,6 +71,7 @@ V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd54436
 #: branch the grid never reaches still fails (P-124). Written once per version, never edited.
 GOLDEN_SOURCE: dict[str, str] = {
     "2.3": "f4931817defdcb051a19397bee4a2b32bc1ea73e8b59eb2216edc3063df21e96",
+    "2.4": "f4931817defdcb051a19397bee4a2b32bc1ea73e8b59eb2216edc3063df21e96",
 }
 #: The hash of the frozen 2.3 rule's source (``derive_failure_kind_v1`` and what it calls).
 V1_SOURCE_SHA256 = "1768a6844c74c9e2c789635b33388b72960c656e0f91d9f916d60efdae54d842"

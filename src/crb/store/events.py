@@ -29,7 +29,8 @@ What it does: Writes every ``StepEvent`` as one ``events`` row and never raises 
 How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one transaction
               with a per-row fallback; ``read_events`` = ``seq > after`` ordered by
               ``(seq, id)`` with a clamped limit; ``append_event`` = lock → ``max(seq)+1`` →
-              insert.
+              insert; ``append_event_checked`` = lock → decide the payload → insert, raising
+              instead of dropping (the registered readings of ADR-0026 item 2).
 Layer:        store — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/observability/events.py (``StepEvent`` / ``Emitter`` — the envelope
@@ -47,7 +48,7 @@ Touch when:   never for a new repository; when ``StepEvent`` gains a field (a mi
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -309,11 +310,54 @@ def append_event(
         return None
 
 
+def append_event_checked(
+    factory: sessionmaker[Session],
+    *,
+    trace_id: str,
+    stage: str,
+    action: str,
+    build: Callable[[Session], dict[str, Any]],
+    actor: str = "",
+    repo: str = "",
+) -> StepEvent:
+    """Write one event whose payload is decided UNDER the write lock: ``build(session)``
+    reads what it must (and may raise to refuse) and returns the payload; the event is
+    inserted with the next ``seq`` in the same transaction. Unlike :func:`append_event`
+    nothing is swallowed — a record that decides something (a registered reading, whose
+    budget two concurrent writers must not both spend) is written or the caller hears why."""
+    with factory() as s:
+        _lock(s)
+        payload = build(s)
+        nxt = (
+            int(
+                s.execute(
+                    select(func.max(Event.seq)).where(Event.trace_id == trace_id)
+                ).scalar_one_or_none()
+                or 0
+            )
+            + 1
+        )
+        ev = StepEvent(
+            trace_id=trace_id,
+            stage=stage,
+            action=action,
+            status=StepStatus.OK,
+            actor=actor,
+            repo=repo,
+            payload=dict(payload),
+            seq=nxt,
+        )
+        s.add(_to_model(ev))
+        s.commit()
+        return ev
+
+
 __all__ = [
     "DEFAULT_READ_LIMIT",
     "MAX_READ_LIMIT",
     "DbEventSink",
     "append_event",
+    "append_event_checked",
     "count_events",
     "last_seq",
     "read_events",

@@ -51,6 +51,8 @@ from fixtures.posture import (
 
 SHA = "b7c6251293a287542ac8568cad7505b710fa3532"
 PACK = "c" * 64
+#: The apparatus a `row()` is stamped at when a test names none (see `row`).
+LEDGER_MECHANICS_APPARATUS = "2.3"
 
 
 def row(**kw: Any) -> lg.GradeRow:
@@ -81,6 +83,11 @@ def row(**kw: Any) -> lg.GradeRow:
         elif base.get("belt_set") == lg.BELT_SET_V3_LEGACY:
             base["apparatus_version"] = "1.0-census"
             base.setdefault("provenance", "imported:census")
+        else:
+            # the ledger's mechanics as a 2.3 row meets them; what a 2.4 row must carry
+            # besides (its own classification, arm and class-set version) is pinned in
+            # tests/test_ledger_classification.py and tests/test_context_arm.py
+            base["apparatus_version"] = LEDGER_MECHANICS_APPARATUS
     return lg.GradeRow(**with_posture_labels(base))
 
 
@@ -93,7 +100,10 @@ def test_clean_row_with_full_evidence_is_accepted() -> None:
     r = row()
     assert r.clean and r.eligible and r.belts_all_true()
     assert r.row_id and len(r.row_id) == 32
-    assert r.created and r.schema == lg.GRADE_SCHEMA and r.apparatus_version == APPARATUS_VERSION
+    assert r.created and r.schema == lg.GRADE_SCHEMA
+    assert r.apparatus_version == LEDGER_MECHANICS_APPARATUS
+    # a row that names no apparatus is stamped with the current one
+    assert lg.GradeRow.__dataclass_fields__["apparatus_version"].default == APPARATUS_VERSION
     assert r.belt_set == lg.BELT_SET_V5 and r.provenance == "measured"
     assert r.recorded_belts() == (
         "tests_unmodified",
@@ -279,6 +289,8 @@ def test_grade_row_from_result_stamps_the_current_apparatus_as_v5() -> None:
         src_files=("src/a.py",),
         target_tests=("tests/test_a.py",),
         belt_scope=("tests/",),
+        gold_clean=True,
+        labels={lg.LABEL_CHANGE_ID: "change-a"},
     )
     res = posture_result(
         task_id=SHA, repo="r", mode="sighted", clean=True, belts=Belts(True, True, True, True)
@@ -536,29 +548,33 @@ def _cell_rows() -> list[lg.GradeRow]:
         row(clean=False, disqualified=True, dq_reason="tamper", tests_unmodified=False),
         row(clean=False, error="sandbox", target_green=None),
         row(clean=True, gold_clean=False),  # judged on a weak oracle: excluded from n
-        row(apparatus_version="2.1", belt_set=lg.BELT_SET_V4),  # an older-apparatus row
     ]
 
 
 def test_cell_stats_numbers() -> None:
     s = lg.cell_stats(_cell_rows())
-    # 14 rows: DQ (1) and gold_clean=False (1) are excluded → n=12; clean = 8 + 1 (v2.1) = 9
-    assert s.n == 12
-    assert s.clean == 9
+    # 13 rows: DQ (1) and gold_clean=False (1) are excluded → n=11; clean = 8
+    assert s.n == 11
+    assert s.clean == 8
     assert s.disqualified == 1
     assert s.errors == 1
     assert s.false_q1 == 0
-    assert s.point == pytest.approx(9 / 12)
-    assert s.ci == wilson_interval(9, 12)
+    assert s.point == pytest.approx(8 / 11)
+    assert s.ci == wilson_interval(8, 11)
+    # ADR-0025 item 1: an older-apparatus row never pools into the cell
+    older = row(apparatus_version="2.1", belt_set=lg.BELT_SET_V4)
+    with pytest.raises(lg.ApparatusPooled, match="apparatus version"):
+        lg.cell_stats([*_cell_rows(), older])
     # cost is a row fact (F35): every eligible row here names a builder that reported
     # through the ledger, so a $0 is a KNOWN $0 and counts; latency 0 s is "not recorded"
     assert all(r.cost_known for r in _cell_rows())
-    assert s.cost_usd_mean == pytest.approx((0.02 * 8 + 0.04) / 12)
+    assert s.cost_usd_mean == pytest.approx((0.02 * 8 + 0.04) / 11)
     assert s.latency_s_mean == pytest.approx((10.0 * 8 + 20.0) / 9)
     assert s.oracle_strength_mean == pytest.approx((0.9 * 8 + 0.7) / 9)
-    assert s.apparatus_versions == ("2.1", APPARATUS_VERSION)
+    assert s.apparatus_versions == (LEDGER_MECHANICS_APPARATUS,)
+    assert s.apparatus_version == LEDGER_MECHANICS_APPARATUS
     d = s.to_dict()
-    assert d["process_step"] == "replay" and d["n"] == 12 and d["point"] == round(9 / 12, 4)
+    assert d["process_step"] == "replay" and d["n"] == 11 and d["point"] == round(8 / 11, 4)
     assert d["ci_low"] == round(s.ci.low, 4) and d["oracle_strength_mean"] == round(
         s.oracle_strength_mean, 4
     )
@@ -842,6 +858,8 @@ def _task() -> Any:
 
 
 def _from_result(result: Any, builder: Any = None, **kw: Any) -> lg.GradeRow:
+    """A row as a 2.3 grade wrote it (a 2.4 one pins more — tests/test_ledger_classification.py)."""
+    kw.setdefault("apparatus_version", LEDGER_MECHANICS_APPARATUS)
     return lg.grade_row_from_result(result, _task(), pack_hash=PACK, builder=builder, **kw)
 
 
@@ -1023,8 +1041,9 @@ def test_failure_split_names_lint_and_counts_belt_five_coverage() -> None:
     assert s.lint_evaluated == 4  # True, True, False(lint), False(harness) — not the Nones
     assert s.model_n == 6 and s.model_point == pytest.approx(4 / 6)
     assert s.to_dict()["lint"] == 1 and s.to_dict()["lint_evaluated"] == 4
-    c = lg.cell_stats(rows)
-    assert c.n_lint == 1 and c.n_lint_evaluated == 4 and c.model_n == 6
+    # one apparatus per cell (ADR-0025 item 1): the v4 row of 2.1 is its own cell
+    c = lg.cell_stats([r for r in rows if r.belt_set == lg.BELT_SET_V5])
+    assert c.n_lint == 1 and c.n_lint_evaluated == 4 and c.model_n == 5
     assert c.to_dict()["n_lint"] == 1 and c.to_dict()["n_lint_evaluated"] == 4
     with pytest.raises(ValueError, match="sum of its eligible kinds"):
         lg.FailureSplit(
@@ -1141,6 +1160,7 @@ def test_a_model_failure_row_without_its_witness_is_refused(tmp_path: Path) -> N
         "source_changed": None,
         "evidence_pack_hash": PACK,
         "gold_clean": True,
+        "apparatus_version": LEDGER_MECHANICS_APPARATUS,
     }
     # at construction: a builder_red row with no witness …
     with pytest.raises(MisattributionViolation, match="without a witness"):

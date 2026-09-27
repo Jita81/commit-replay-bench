@@ -83,6 +83,7 @@ from crb.core.learn import (
     dumps,
     load_decisions,
     load_oracle_scores,
+    oracle_by_task_of,
     remeasure_plan,
     render_refusals,
     render_remeasure,
@@ -90,7 +91,7 @@ from crb.core.learn import (
     strengthening_backlog,
     triage_refusals,
 )
-from crb.core.ledger import JsonlLedger, rows_for_checks
+from crb.core.ledger import JsonlLedger, rows_for_checks, rows_for_reading
 from crb.core.prevention import JsonlPreventionStore, Register, build_register, tick
 from crb.core.review import JsonlReviewLedger
 from crb.core.routing import ControlsVerdict
@@ -437,10 +438,16 @@ def cmd_strengthen(args: argparse.Namespace) -> int:
         if args.controls
         else None
     )
-    cmap = build_capability_map(
-        rows, projection=PROJECTIONS[args.by], policy=policy, controls=controls
-    )
     scores = load_oracle_export(_read_json(args.oracle, what="--oracle")) if args.oracle else []
+    # one reading (ADR-0025 item 1, ADR-0026): the current apparatus and the default arm,
+    # routed on the per-task oracle of the export — as the server routes it
+    cmap = build_capability_map(
+        rows_for_reading(rows, apparatus=APPARATUS_VERSION),
+        projection=PROJECTIONS[args.by],
+        policy=policy,
+        controls=controls,
+        oracle_by_task=oracle_by_task_of(scores),
+    )
     backlog = strengthening_backlog(
         cmap,
         scores,

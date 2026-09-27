@@ -98,6 +98,13 @@ def _from_model(m: Grade) -> GradeRow:
     return GradeRow(**d)
 
 
+def rows_in(session: Session, repo: str) -> list[GradeRow]:
+    """A repository's rows in chain (``seq``) order, read in the caller's session — what a
+    reader that already holds one (the capability map's reading book) evaluates readings over."""
+    q = select(Grade).where(Grade.repo == repo).order_by(Grade.seq)
+    return [_from_model(m) for m in session.execute(q).scalars()]
+
+
 class DbLedger:
     """The ``grades`` table as a hash-chained ledger of :class:`GradeRow`, plus the
     content-addressed ``evidence`` packs the rows point at."""

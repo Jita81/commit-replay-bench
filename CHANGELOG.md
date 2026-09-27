@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Routing reads one reading: apparatus 2.4, routing.v2 and the context standard**
+  (north-star Wave 2, stream R; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-r);
+  ADR-0025 as ADR-0026 amends it; DL-107, DL-108). Rows of 2.3 keep their meaning and
+  license nothing at 2.4. Every 2.4 row stamps its context arm and class-set version, never
+  pooled. A cell delivers only on its standard arm, when a reading
+  registered before its first attempt (`POST /readings`, `crb reading register`) reaches a
+  look of the look rule in the sealed posture, with a measured oracle and controls. README's
+  bar is generated from the code. A `crb.signoff.v5` sign-off lifts only its own arm, class-set
+  version and reading. The Capability screen reads one arm at a time.
+
 - **The grade says why, and a distinct commit is a distinct change**
   (north-star Wave 2, stream G; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-g);
   ADR-0025 items 5, 6, 7 and 13; DL-105, DL-106). Belt 5 records why it holds what it holds.

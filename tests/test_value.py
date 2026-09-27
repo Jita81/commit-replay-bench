@@ -49,7 +49,7 @@ from crb.core.ledger import (
     FAILURE_PROTOCOL,
 )
 from crb.core.review import ReviewRecord
-from crb.core.routing import ROUTE_CALIBRATE, ROUTE_DELIVER
+from crb.core.routing import ROUTE_CALIBRATE, ROUTE_DELIVER, ROUTE_HUMAN
 from crb.core.stats import wilson_interval
 from crb.core.value import (
     BASIS_PROXY,
@@ -512,18 +512,22 @@ def test_the_default_register_is_the_prevention_loops_and_closes_nothing_without
 
 
 def test_a_deliver_decision_is_made_from_prior_rows_only() -> None:
-    # 16 clean rows lift the Wilson lower bound over 0.80 (16/16 → 0.806); the rows after
-    # that are let in under deliver, and a failure among them is scored against it
+    # 20 clean first attempts clear look.v1's first look (20/20); the rows after that are let
+    # in under deliver, and a failure among them is scored against it
     rows = [vr(i, mode="sighted", kind=FAILURE_CLEAN) for i in range(30)]
     rows.append(vr(30, mode="sighted", kind=FAILURE_BUILDER_RED))
     rows.append(vr(31, mode="sighted", kind=FAILURE_CLEAN))
     rp = prospective_routing(rows).to_dict()
     assert rp["rows_scored"] == 32
-    assert rp["decisions"][ROUTE_CALIBRATE] == 16 and rp["decisions"][ROUTE_DELIVER] == 16
-    assert (rp["deliver"]["k"], rp["deliver"]["n"]) == (15, 16)
+    assert rp["decisions"][ROUTE_CALIBRATE] == 20 and rp["decisions"][ROUTE_DELIVER] == 12
+    assert (rp["deliver"]["k"], rp["deliver"]["n"]) == (11, 12)
     # a later row cannot change an earlier decision
     head = prospective_routing(rows[:31]).to_dict()
-    assert (head["deliver"]["k"], head["deliver"]["n"]) == (14, 15)
+    assert (head["deliver"]["k"], head["deliver"]["n"]) == (10, 11)
+    # a miss that puts the last look out of reach reads human, never deliver
+    misses = [vr(i, mode="sighted", kind=FAILURE_BUILDER_RED) for i in range(4)]
+    after = prospective_routing(misses).to_dict()["decisions"]
+    assert after[ROUTE_HUMAN] == 1 and after[ROUTE_DELIVER] == 0
     assert rp["controls"] == "not evaluated"
 
 

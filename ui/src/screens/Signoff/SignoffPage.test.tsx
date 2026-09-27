@@ -107,7 +107,7 @@ const MAP: CapabilityMapWithControls = {
     },
   ],
   summary: { trusted_autonomy_coverage: 0, total_cells: 1, measured_cells: 1, deliver_cells: 0, n_total: 40, false_q1_total: 0, apparatus_versions: ['2.1'] },
-  policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1', min_controls_share: 0.5, max_controls_escapes: 0, controls_version: 'controls-gate.v1' },
+  policy: { rule: 'look.v1', looks: { '20': 0, '30': 1, '40': 2 }, p_deliver_at_0_80: 0.021, cell_error_budget: 0.05, min_oracle_strength: 0.8, min_oracle_share: 0.5, granularize_sizes: ['XL'], version: 'routing.v2', description: 'A cell routes deliver (routing.v2) only for its standard context arm.', min_controls_share: 0.5, max_controls_escapes: 0, controls_version: 'controls-gate.v1' },
   controls: ESCAPED,
 }
 

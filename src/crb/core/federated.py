@@ -57,7 +57,8 @@ How:          the ``off`` checks arm → ``all_cell_stats`` → ``to_abstract_ce
               key → cohort check → pooled counts, n-weighted means, Wilson interval
               recomputed → optional DP → ``SharedCell``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0007-abstract-cell-export-only.md
+ADRs:         docs/adr/0007-abstract-cell-export-only.md,
+              docs/adr/0026-the-context-standard.md (item 12: S3 rows at global/classes@v1)
 Works with:   src/crb/core/ledger.py (CellStats and the cell key — the abstraction
               boundary), src/crb/core/redact.py (defence in depth on key strings),
               src/crb/core/stats.py (the recomputed interval),
@@ -84,9 +85,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from crb.core.checks import ARM_OFF
-from crb.core.ledger import CellKey, CellStats, GradeRow, all_cell_stats, rows_for_checks
+from crb.core.ledger import (
+    CellKey,
+    CellStats,
+    GradeRow,
+    all_cell_stats,
+    is_v2_apparatus,
+    rows_for_checks,
+)
 from crb.core.redact import redact
 from crb.core.stats import wilson_interval
+from crb.core.taxonomy import GLOBAL_CLASS_SET
 
 #: The ONLY fields that may leave an organisation's boundary. Cell key fields plus
 #: aggregate counts and means. NO repo, NO task ids, NO timestamps, NO free text.
@@ -210,13 +219,28 @@ def to_abstract_cell(stats: CellStats) -> AbstractCell:
     )
 
 
+#: The one context arm whose rows the abstract export carries (ADR-0026 item 12).
+EXPORT_ARM = "S3"
+
+
 def export_abstract(rows: Iterable[GradeRow]) -> list[dict[str, Any]]:
     """``crb ledger export --abstract``: every full-key cell, allowlisted, key-sorted.
 
     Only rows graded under the default instrument (the ``checks`` arm ``off``) leave the
     tenant: a switched-on arm is a local experiment until a paired A/B makes it the default,
-    and an abstract cell carries no field that could keep two arms apart (ADR-0024)."""
-    cells = [to_abstract_cell(s) for s in all_cell_stats(rows_for_checks(rows, ARM_OFF))]
+    and an abstract cell carries no field that could keep two arms apart (ADR-0024). For the
+    same reason only context arm ``S3`` rows leave, stamped at apparatus 2.4 or later under
+    the global vocabulary (``global/classes@v1``): blind rows, other arms, organisation class
+    sets and unstamped rows from before 2.4 stay in the tenant (ADR-0026 item 12 — it narrows
+    which rows leave and adds no field, so ADR-0007's allowlist does not move)."""
+    exported = [
+        r
+        for r in rows_for_checks(rows, ARM_OFF)
+        if r.context_arm == EXPORT_ARM
+        and r.taxonomy == GLOBAL_CLASS_SET
+        and is_v2_apparatus(r.apparatus_version)
+    ]
+    cells = [to_abstract_cell(s) for s in all_cell_stats(exported)]
     cells.sort(key=lambda c: c.key)
     return [c.to_dict() for c in cells]
 

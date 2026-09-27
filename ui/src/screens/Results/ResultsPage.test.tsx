@@ -9,7 +9,8 @@
  *               "95% CI —" with the reason, and the apparatus from the data; that the route
  *               tiles count measured cells with their n and carry a term definition; that
  *               the paragraph says what `deliver` means and does not mean, with the policy's
- *               numbers; that the "waiting on a person" panel offers the act only to the role
+ *               published bar (`policy.description`); that the "waiting on a person" panel
+ *               offers the act only to the role
  *               that can take it; that a replay in flight is announced with its progress; that
  *               the page defaults to the most recently updated repository; that a loading map
  *               says so; that a controls/oracle 404 renders "not run" / "not scored",
@@ -60,7 +61,7 @@ import testSource from './ResultsPage.test.tsx?raw'
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
 const HUMAN = { ...CELL, size: 'S', n: 13, n_tasks: 11, clean: 11, point: 0.846, ci_low: 0.578, ci_high: 0.957, route: 'human', reason: 'oracle strength 0.76 < 0.80', reason_code: 'oracle_weak' }
-const MAP = { repo: 'alpha', by: ['capability_class', 'size'], classes: ['bug.fix'], sizes: ['XS', 'S'], languages: [], models: [], cells: [CELL, HUMAN], summary: { trusted_autonomy_coverage: 0.5, total_cells: 2, measured_cells: 2, deliver_cells: 1, n_total: 35, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } }
+const MAP = { repo: 'alpha', by: ['capability_class', 'size'], classes: ['bug.fix'], sizes: ['XS', 'S'], languages: [], models: [], cells: [CELL, HUMAN], summary: { trusted_autonomy_coverage: 0.5, total_cells: 2, measured_cells: 2, deliver_cells: 1, n_total: 35, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { rule: 'look.v1', looks: { '20': 0, '30': 1, '40': 2 }, p_deliver_at_0_80: 0.021, cell_error_budget: 0.05, min_oracle_strength: 0.8, min_oracle_share: 0.5, granularize_sizes: ['XL'], version: 'routing.v2', description: 'clean on 20 of the first 20 distinct commits (look.v1)' } }
 const CONTROLS = { schema: 'x', apparatus: { apparatus_version: '2.2', controls_version: 'controls.v3' }, n_tasks: 32, n_rows: 224, violations: 0, escapes: 0, not_constructible: 43, skipped: 0, passed: true, escape_rows: [], rows: [], verdict: { measured: true, passed: true, complete: true, constructible: 181, total: 224, share: 0.81, escapes: 0, run_id: 'r', created: 'x', state: 'passed' } }
 const ORACLE = { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }, { task_id: 't2', strength: 0.7 }], cells: [], apparatus_versions: ['2.2'] }
 const REPO = { name: 'alpha', language: 'python', runner: 'pytest', url: '', last_run: null, created: '2026-09-01T00:00:00Z', updated: '2026-09-02T00:00:00Z', config: {} }
@@ -88,7 +89,7 @@ describe('ResultsPage', () => {
     expect(screen.getByText('80%')).toBeInTheDocument() // oracle mean of 0.9 and 0.7
     // the routes with n: one deliver cell, one human cell, and the sentence with the policy's numbers
     expect(screen.getAllByText('1 of 2 measured cells', { exact: false })).toHaveLength(2) // deliver and human, one cell each
-    expect(screen.getByText(/means the cell clears the published bar/)).toHaveTextContent('n ≥ 10')
+    expect(screen.getByText(/means the cell's standard context arm clears the published bar/)).toHaveTextContent('clean on 20 of the first 20 distinct commits (look.v1)')
     expect(screen.getByText(/It never means a change is safe to merge or deploy/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open the full map' })).toHaveAttribute('href', '/capability?repo=alpha')
     // waiting on a person: the unsigned deliver cell — the approver gets the act

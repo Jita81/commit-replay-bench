@@ -50,7 +50,7 @@
  *               change profile (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { NOT_YET_MEASURED, type CapabilityMap, type CellField } from '../../api/types'
 import { AnchorButton, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -151,7 +151,7 @@ function CellLegend({ 'data-testid': testId }: { 'data-testid'?: string }) {
   )
 }
 
-function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefined; policy: CapabilityMap['policy'] | undefined; onOpen: () => void; dim?: string }) {
+function CellBox({ cell, onOpen, dim }: { cell: CapabilityCell | undefined; policy?: CapabilityMap['policy'] | undefined; onOpen: () => void; dim?: string }) {
   if (!isMeasured(cell)) {
     return (
       <Hint
@@ -193,7 +193,8 @@ function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefin
         </span>
         <span className="text-[10px] text-on-surface-muted">clean {fmtInt(cell.clean)}/{fmtInt(cell.n)}</span>
       </div>
-      <CiBar point={cell.point} low={cell.ci_low} high={cell.ci_high} n={cell.n} minPoint={policy?.min_point} minCiLow={policy?.min_ci_low} width={110} provenance={provenance(cell)} />
+      <CiBar point={cell.point} low={cell.ci_low} high={cell.ci_high} n={cell.n} width={110} provenance={provenance(cell)} />
+      {cell.context_arm && <span className="truncate font-mono text-[10px] text-on-surface-muted" data-testid="cell-arm">arm {cell.context_arm}{cell.look_state ? ` · ${cell.look_state}` : ''}</span>}
       {cell.failure_split && (
         <div className="flex flex-wrap items-center gap-x-2">
           <ModelPointLine modelPoint={cell.model_point ?? null} modelN={cell.model_n ?? 0} clean={cell.clean} ciLow={cell.model_ci_low ?? null} ciHigh={cell.model_ci_high ?? null} apparatus={cell.apparatus_versions} />
@@ -275,6 +276,7 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
           <StatTile label="Latency / trial" hint="stat.capability.latency" {...economicsTile(cell.economics, 'latency_per_attempt')} data-testid="tile-latency" />
           <StatTile label="Oracle strength" hint="stat.capability.oracle" value={fmtRatio(cell.oracle_strength_mean)} n={cell.n} apparatus="mean mutation kill-rate of the tasks' oracles" />
         </div>
+        <CellStandardBlock cell={cell} />
         <CellLegend data-testid="cell-legend-line" />
         {(Math.abs(ci.low - cell.ci_low) > 0.01 || Math.abs(ci.high - cell.ci_high) > 0.01) && (
           <Hint as="p" id="banner.capability.ci_drift" className="text-xs text-status-amber" role="status">
@@ -291,6 +293,121 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
         </div>
       </div>
     </Card>
+  )
+}
+
+/** One arm's state in words (crb.core.reading ARM_STATES). */
+const ARM_STATE_TEXT: Record<string, string> = {
+  deliver: 'delivers',
+  insufficient: 'insufficient — never read again',
+  undecided: 'undecided — the pool ended before a look',
+  look_pending: 'waiting for its next look',
+  descriptive: 'descriptive — never a licence',
+  stopped: 'not read — a richer arm did not deliver',
+}
+
+/**
+ * The cell's proven context (ADR-0026): the standard arm or "no proven standard", every arm of
+ * the reading that speaks for the cell with its distinct commits, clean count, interval and
+ * look state, every shortfall with its next act, and the provenance its briefs carried.
+ */
+function CellStandardBlock({ cell }: { cell: CapabilityCell }) {
+  const std = cell.standard
+  const reading = cell.reading
+  const shortfalls = cell.shortfalls ?? []
+  const provenance = Object.entries(cell.provenance ?? {})
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-3">
+        <StatTile
+          label="Standard"
+          hint="stat.capability.standard"
+          value={std?.standard ?? 'no proven standard'}
+          n={cell.counted ?? 0}
+          apparatus={`${std?.label ?? 'no proven standard'} · arm read ${cell.context_arm ?? '—'} · budget spent ${fmtRatio(std?.spent ?? 0)} of ${fmtRatio(std?.budget ?? 0)}`}
+          tone={std?.standard && !std.ceiling ? 'green' : 'amber'}
+          data-testid="tile-standard"
+        />
+        <StatTile
+          label="Distinct commits read"
+          hint="stat.capability.counted"
+          value={`${fmtInt(cell.counted_clean ?? 0)} / ${fmtInt(cell.counted ?? 0)}`}
+          n={cell.counted ?? 0}
+          ci={cell.counted ? { low: cell.counted_ci_low ?? 0, high: cell.counted_ci_high ?? 1 } : null}
+          apparatus={`first observed attempts in the seeded order · look ${cell.look_state ?? '—'}${cell.needed ? ` · ${fmtInt(cell.needed)} commits still needed to the look at ${cell.next_look ?? '—'}` : ''}`}
+          data-testid="tile-counted"
+        />
+      </div>
+      {reading ? (
+        <Hint as="div" id="tile.capability.readings" className="overflow-auto" data-testid="cell-readings">
+          <table className="w-full text-xs">
+            <caption className="label text-left">
+              Reading {reading.reading_id.slice(0, 12)} · {reading.rule} · hierarchy {reading.hierarchy.join(' > ')}
+            </caption>
+            <thead>
+              <tr className="text-left text-on-surface-muted">
+                <th scope="col">arm</th>
+                <th scope="col">state</th>
+                <th scope="col">clean / commits</th>
+                <th scope="col">Wilson 95 %</th>
+                <th scope="col">still needed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reading.arms.map((a) => (
+                <tr key={a.arm} data-testid="cell-reading-arm">
+                  <td className="font-mono">{a.arm}</td>
+                  <td>{ARM_STATE_TEXT[a.state] ?? a.state}</td>
+                  <td className="num">
+                    {fmtInt(a.clean)} / {fmtInt(a.counted)}
+                  </td>
+                  <td className="num">{a.counted ? `${fmtPct(a.ci_low)}–${fmtPct(a.ci_high)}` : '—'}</td>
+                  <td className="num">{a.state === 'look_pending' ? `${fmtInt(a.needed)} to ${a.next_look ?? '—'}` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Hint>
+      ) : (
+        <Hint as="p" id="tile.capability.readings" className="text-xs text-on-surface-muted" data-testid="cell-readings">
+          No reading is registered on this cell: nothing here can deliver until one is registered before its first attempt.
+        </Hint>
+      )}
+      {shortfalls.length > 0 && (
+        <Hint as="div" id="tile.capability.shortfalls" className="text-xs" data-testid="cell-shortfalls">
+          <span className="label">What to measure next</span>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-5">
+            {shortfalls.map((sf) => (
+              <li key={sf.code}>
+                <ReasonCode code={sf.code} /> → {sf.next}
+                {sf.count ? ` × ${fmtInt(sf.count)}` : ''}
+                {sf.model_money ? ' (costs model money)' : ''}
+              </li>
+            ))}
+          </ol>
+        </Hint>
+      )}
+      {provenance.length > 0 && (
+        <Hint as="p" id="tile.capability.provenance" className="text-[11px] text-on-surface-muted" data-testid="cell-provenance">
+          Provenance (never a split): {provenance.map(([k, v]) => `${k} ${v.join(', ')}`).join(' · ')}
+        </Hint>
+      )}
+    </div>
+  )
+}
+
+/** ADR-0025's message to the operator: what apparatus 2.4 changed and how a cell earns `deliver` back. */
+function ApparatusBanner({ apparatus }: { apparatus: NonNullable<CapabilityMap['apparatus']> }) {
+  return (
+    <Hint as="div" id="banner.capability.apparatus" role="note" className="rounded-[var(--radius-card)] border border-border bg-surface-container px-5 py-3 text-sm" data-testid="apparatus-banner">
+      <p className="m-0 font-semibold">
+        Apparatus {apparatus.current} is in force (routing.v2, <Link to="/help/docs/ADR-0025">ADR-0025</Link>).
+      </p>
+      <p className="m-0 mt-1 text-on-surface-muted">
+        The bar in the code is the bar in the README, and it counts distinct commits in a registered reading, not attempts. Nothing was deleted, edited or re-graded:
+        {apparatus.superseded_rows > 0 ? ` ${fmtInt(apparatus.superseded_rows)} rows of ${apparatus.superseded_versions.join(', ')} stay readable as history and license nothing.` : ' rows of an earlier apparatus stay readable as history and license nothing.'} To earn deliver for a cell: qualify the repository, run an oracle run and a controls run, register a reading, replay its pool in the sealed posture, then ask a second person to sign the cell's standard arm.
+      </p>
+    </Hint>
   )
 }
 
@@ -324,6 +441,15 @@ function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefine
 /** The screen. `?repo=` from the URL; projection toggles (by language / by model) are local state. */
 export function CapabilityPage() {
   const [repo, setRepo] = useRepoParam()
+  const [params, setParams] = useSearchParams()
+  // ?arm= — one context arm per reading (ADR-0026); '' = each cell on its own standard arm
+  const arm = params.get('arm') ?? ''
+  const setArm = (next: string) => {
+    const p = new URLSearchParams(params)
+    if (next) p.set('arm', next)
+    else p.delete('arm')
+    setParams(p, { replace: true })
+  }
   const { can } = useAuth()
   const [byLanguage, setByLanguage] = useState(false)
   const [byModel, setByModel] = useState(false)
@@ -343,9 +469,9 @@ export function CapabilityPage() {
 
   useEffect(() => {
     setSelectedKey(null)
-  }, [repo, byLanguage, byModel, language, model])
+  }, [repo, byLanguage, byModel, language, model, arm])
 
-  const map = useCapabilityMapWithControls(repo, projection)
+  const map = useCapabilityMapWithControls(repo, projection, arm)
   // the header pill sits outside QueryBoundary: after a failed refetch it must not show the
   // earlier verdict beside the error (PR #54 review)
   const mapData = currentData(map)
@@ -420,6 +546,8 @@ export function CapabilityPage() {
                 />
               </div>
 
+              {m.apparatus && <ApparatusBanner apparatus={m.apparatus} />}
+
               {((s.false_q1_total ?? 0) > 0 || badCells > 0) && (
                 <Hint as="div" id="banner.capability.false_q1" role="alert" className="rounded-[var(--radius-card)] border-2 border-status-red bg-status-red-soft px-5 py-3 text-sm text-status-red" data-testid="false-q1-alert">
                   <strong>✗ false-Q1 &gt; 0.</strong> {badCells} cell{badCells === 1 ? ' contains' : 's contain'} a clean row whose belts did not all hold. The write-time invariant should have made this impossible; treat every number on this page as untrusted until the ledger is audited (<Link to="/ledger">verify chain</Link>).
@@ -431,6 +559,15 @@ export function CapabilityPage() {
                 eyebrow={`class × size${byLanguage ? ' × language' : ''}${byModel ? ' × model' : ''}`}
                 actions={
                   <>
+                    <InlineSelect label="Context arm" hint="field.capability.arm" value={arm} onChange={(e) => setArm(e.target.value)} data-testid="arm-select">
+                      <option value="">each cell's standard</option>
+                      {(m.arms ?? []).map((a) => (
+                        <option key={a} value={a}>
+                          {a}
+                        </option>
+                      ))}
+                      {arm && !(m.arms ?? []).includes(arm) && <option value={arm}>{arm}</option>}
+                    </InlineSelect>
                     <Hint as="label" id="field.capability.by_language" className="inline-flex items-center gap-1.5 text-xs text-on-surface-muted">
                       <input type="checkbox" checked={byLanguage} onChange={(e) => setByLanguage(e.target.checked)} /> by language
                     </Hint>
@@ -517,8 +654,11 @@ export function CapabilityPage() {
                       {CELL_LEGEND_TEXT}
                     </p>
                     <p className="m-0 text-[11px] text-on-surface-muted">
-                      The interval bar's ticks are the policy's (point ≥ {fmtPct(m.policy?.min_point, 0)}, lower ≥ {fmtPct(m.policy?.min_ci_low, 0)}); the model rate is clean / (clean + red) on fair attempts, and the split is red · budget · protocol · harness · DQ. Every cell is routed under the repo's controls verdict shown above.
+                      The interval bar shows every attempt; the route reads each distinct commit once, in its registered reading. The model rate is clean / (clean + red) on fair attempts, and the split is red · budget · protocol · harness · DQ. Every cell is routed under the repo's controls verdict shown above.
                     </p>
+                    <Hint as="p" id="tile.capability.route_bar" className="m-0 text-[11px] text-on-surface-muted" data-testid="route-bar">
+                      The published bar: {m.policy?.description ?? '—'}
+                    </Hint>
                   </div>
                 )}
               </Card>

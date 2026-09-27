@@ -348,12 +348,14 @@ def seconds_between(start: str, end: str) -> float:
 
 def add_factory_row(env: Env, *, cost: float) -> None:
     """One graded row the factory built — a copy of a seeded row with ``process_step``
-    ``factory`` — appended through the ledger, so it chains like any other."""
+    ``factory`` and a factory arm (a build on an authored test, ADR-0026 item 1) — appended
+    through the ledger, so it chains like any other."""
     base = env.info.succeeded_rows[0]
     row = dataclasses.replace(
         base,
         row_id="f" * 32,
         process_step="factory",
+        labels={**base.labels, "context_arm": "S1@claude-opus-5"},
         run_id="factory-run-1",
         cost_usd=cost,
         created="2026-09-02T12:00:00+00:00",

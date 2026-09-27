@@ -70,8 +70,10 @@ def row(*, clean: bool = True, cost: float = 0.0, latency: float = 0.0, **kw: An
 
 
 def unknown_cost(**kw: Any) -> GradeRow:
-    """A row whose cost nobody measured: imported, it names a builder but never reported."""
-    return row(provenance="imported:census", **kw)
+    """A row whose cost nobody measured: its builder metered no price (``cost_known`` pinned
+    ``false``). A measured row of the current apparatus, so it shares its cell's context arm
+    and class-set version with the others (ADR-0026: a cell never pools two)."""
+    return row(labels={"cost_known": "false"}, **kw)
 
 
 def test_a_known_zero_is_zero_and_enters_the_mean() -> None:

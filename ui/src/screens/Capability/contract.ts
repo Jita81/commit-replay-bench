@@ -54,19 +54,30 @@ import type { Tone } from '../../lib/verdict'
 /** `crb.core.ledger.GradeRow.failure_kind` — `''` is clean; `lint` = belts 1–4 held, belt 5 rejected (ADR-0011); `api` = belts 1–4 held, belt 6 rejected (ADR-0024, opt-in). */
 export type FailureKind = '' | 'builder_red' | 'lint' | 'api' | 'budget' | 'protocol' | 'harness' | 'outage' | 'disqualified'
 
-/** `crb.core.routing.REASON_CODES`, in evaluation order. */
+/** `crb.core.routing.REASON_CODES` — routing.v2's, in evaluation order, then routing.v1's retired ones (a stored v1 decision still names them). */
 export type ReasonCode =
   | 'false_q1'
   | 'granularize'
   | 'controls_failed'
-  | 'n_below_min'
+  | 'posture_unsealed'
+  | 'lint_disabled'
+  | 'reading_unregistered'
+  | 'descriptive'
+  | 'look_pending'
+  | 'oracle_unmeasured'
+  | 'oracle_thin'
   | 'oracle_weak'
   | 'controls_escapes'
-  | 'point_below_bar'
-  | 'ci_low_below_bar'
+  | 'insufficient'
+  | 'undecided'
+  | 'ceiling'
+  | 'leaner_standard'
   | 'controls_unmeasured'
   | 'controls_thin'
   | 'deliver'
+  | 'n_below_min'
+  | 'point_below_bar'
+  | 'ci_low_below_bar'
 
 /** `crb.core.routing.CONTROLS_STATES` — the pill word. */
 export type ControlsState = 'passed' | 'failed' | 'thin' | 'escaped' | 'unmeasured'
@@ -181,8 +192,8 @@ export interface FailureSplitReport extends FailureSplit {
 // ---------------------------------------------------------------------------
 
 /** `GET /capability-map` re-typed to the A2 shape (cells carry the split, the map carries `controls`). */
-export function useCapabilityMapWithControls(repo: string, by: CellField[]): UseQueryResult<CapabilityMapWithControls, ApiError> {
-  return useCapabilityMap(repo, by) as unknown as UseQueryResult<CapabilityMapWithControls, ApiError>
+export function useCapabilityMapWithControls(repo: string, by: CellField[], arm = ''): UseQueryResult<CapabilityMapWithControls, ApiError> {
+  return useCapabilityMap(repo, by, arm) as unknown as UseQueryResult<CapabilityMapWithControls, ApiError>
 }
 
 /** `GET /routes` re-typed to the A2 shape (decisions carry `reason_code` and the controls verdict). */
@@ -261,12 +272,23 @@ export const REASON_DISPLAY: Record<ReasonCode, string> = {
   false_q1: 'false-Q1 in cell — evidence untrusted',
   granularize: 'XL is split before it is attempted',
   controls_failed: 'negative-controls gate FAILED on this repo',
-  n_below_min: 'not enough evidence (n below the bar)',
+  posture_unsealed: 'rows graded outside the sealed posture — only sealed rows can license',
+  lint_disabled: 'first attempts graded with belt 5 switched off — switch it back on',
+  reading_unregistered: 'no reading registered for this arm — register one before its first attempt',
+  descriptive: 'a descriptive arm (the ticket only) — read, never a licence',
+  look_pending: 'the reading waits for its next look — commits still needed',
+  oracle_unmeasured: 'no counted commit has a mutation.v2 score',
+  oracle_thin: 'fewer than half the counted commits have an oracle score',
   oracle_weak: 'oracle too weak to license auto-delivery',
   controls_escapes: 'a measurement control escaped the oracle',
-  point_below_bar: 'point estimate below the bar',
-  ci_low_below_bar: 'Wilson lower bound below the bar',
-  controls_unmeasured: 'negative controls never run',
+  insufficient: 'the reading read insufficient — never read again',
+  undecided: 'the pool ended before a look decided — mine further back',
+  ceiling: "the commit's own tests delivered — a ceiling, never a licence",
+  leaner_standard: "delivered, but the cell's standard is a leaner arm",
+  controls_unmeasured: 'negative controls never run at this apparatus',
   controls_thin: 'fewer than half the controls were constructible',
-  deliver: 'every bar cleared',
+  deliver: "the cell's standard arm: every clause holds",
+  n_below_min: 'routing.v1: not enough evidence (n below the bar)',
+  point_below_bar: 'routing.v1: point estimate below the bar',
+  ci_low_below_bar: 'routing.v1: Wilson lower bound below the bar',
 }

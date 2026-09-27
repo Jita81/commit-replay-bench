@@ -48,6 +48,7 @@ from typing import Any
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.core.context_arm import LABEL_CONTEXT_ARM
 from crb.core.flow import LeadTime
 from crb.core.ledger import LABEL_COST_KNOWN, PROCESS_FACTORY, GradeRow
 from crb.core.review import ReviewRecord
@@ -124,6 +125,8 @@ def graded(
     process_step: str | None = None,
 ) -> GradeRow:
     labels = {**base.labels, LABEL_COST_KNOWN: "false" if cost is None else "true"}
+    if process_step == PROCESS_FACTORY:  # a factory row's context arm is its test author's
+        labels[LABEL_CONTEXT_ARM] = "S1@fixture-author"
     return dataclasses.replace(
         base,
         run_id=run_id,

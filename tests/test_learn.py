@@ -44,7 +44,12 @@ from typing import Any
 import pytest
 
 from crb.core import learn
-from crb.core.capability import PROJECTION_CELL, PROJECTION_CLASS_SIZE, build_capability_map
+from crb.core.capability import (
+    PROJECTION_CELL,
+    PROJECTION_CLASS_SIZE,
+    CapabilityMap,
+    build_capability_map,
+)
 from crb.core.ledger import (
     FAILURE_PROTOCOL,
     LABEL_FAILURE_KIND,
@@ -52,16 +57,18 @@ from crb.core.ledger import (
     JsonlLedger,
     expected_belt_sets,
 )
+from crb.core.reading import RULE_LOOK_V1_LATE
 from crb.core.routing import (
     REASON_CONTROLS_ESCAPES,
-    REASON_N_BELOW_MIN,
     REASON_ORACLE_WEAK,
+    REASON_UNDECIDED,
     ControlsVerdict,
     RoutingPolicy,
 )
 from crb.factory.backlog import Backlog, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
 from fixtures.posture import posture_row
+from fixtures.readings import LIVE_PASSED, book_for, live_labels
 
 PACK = "b" * 64
 
@@ -625,11 +632,35 @@ TASK_B = "b" * 40
 TASK_C = "c" * 40
 
 
+def _live(task: str, **kw: Any) -> GradeRow:
+    """A clean row of apparatus 2.4 a reading counts (sealed, ``r1``, graded after the
+    registration ``fixtures.readings.book_for`` makes)."""
+    return _clean(task_id=task, apparatus_version="2.4", **live_labels(task), **kw)
+
+
+def _map(
+    rows: list[GradeRow],
+    projection: tuple[str, ...] = PROJECTION_CLASS_SIZE,
+    *,
+    controls: ControlsVerdict | None = None,
+) -> CapabilityMap:
+    """routing.v2's map of ``rows``: a reading per full cell, each task's oracle strength
+    read from the row that carries it, controls passing at 2.4 unless given."""
+    oracle = {r.task_id: r.oracle_strength for r in rows if r.oracle_strength is not None}
+    return build_capability_map(
+        rows,
+        projection=projection,
+        readings=book_for(rows),
+        oracle_by_task=oracle,
+        controls=controls or LIVE_PASSED,
+    )
+
+
 def _weak_cell_rows() -> list[GradeRow]:
-    """n=10, all clean, oracle strength 0.5 → route human / oracle_weak."""
+    """n=10, all clean, oracle strength 0.5 on both tasks → route human / oracle_weak."""
     return [
-        _clean(
-            task_id=(TASK_A if i % 2 == 0 else TASK_B),
+        _live(
+            TASK_A if i % 2 == 0 else TASK_B,
             repo="click",
             language="python",
             size="S",
@@ -701,7 +732,7 @@ class TestStrengthen:
 
     def test_oracle_weak_cell_becomes_test_add_items(self) -> None:
         rows = _weak_cell_rows()
-        cmap = build_capability_map(rows, projection=PROJECTION_CLASS_SIZE)
+        cmap = _map(rows)
         cell = cmap.get(capability_class="bug.fix", size="S")
         assert cell.reason_code == REASON_ORACLE_WEAK
         scores = learn.load_oracle_scores({"tasks": [_score(TASK_A), _score(TASK_B)]})
@@ -732,7 +763,7 @@ class TestStrengthen:
     def test_items_pass_the_factory_dor_gate_as_build(self) -> None:
         """The review's play-01 finding: only STRUCTURAL slots, never a value from the
         answer — so the factory's gate says ``build`` without any human sign-off."""
-        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
+        cmap = _map(_weak_cell_rows())
         bl = learn.strengthening_backlog(
             cmap, [_score(TASK_A)], generated_at="2026-09-14T00:00:00+00:00"
         )
@@ -746,7 +777,7 @@ class TestStrengthen:
         assert backlog.verify()
 
     def test_escaped_count_only_when_mutants_not_recorded(self) -> None:
-        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
+        cmap = _map(_weak_cell_rows())
         s = _score(TASK_A, escaped=[])  # the run recorded the count but kept no diffs
         bl = learn.strengthening_backlog(cmap, [s], generated_at="x")
         (item,) = bl.items
@@ -756,7 +787,7 @@ class TestStrengthen:
         assert "re-run the oracle" in item.structural_facts[1]
 
     def test_report_shape_with_escaped_mutants_list(self) -> None:
-        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
+        cmap = _map(_weak_cell_rows())
         s = _score(
             TASK_A,
             escaped=[
@@ -773,7 +804,7 @@ class TestStrengthen:
         assert "src/click/core.py:7 drop not" in bl.items[0].description
 
     def test_flagged_cell_without_scores_gets_a_cell_item(self) -> None:
-        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
+        cmap = _map(_weak_cell_rows())
         bl = learn.strengthening_backlog(cmap, [], generated_at="x")
         assert bl.cells_without_scores == ("bug.fix|S",)
         (item,) = bl.items
@@ -782,18 +813,21 @@ class TestStrengthen:
         assert assess(BacklogItem.from_dict(item.to_dict())).route_hint == ROUTE_BUILD
 
     def test_only_oracle_reasons_are_flagged(self) -> None:
-        thin = [_clean(task_id=TASK_A, size="M")] * 3  # n=3 → calibrate / n_below_min
-        cmap = build_capability_map([*_weak_cell_rows(), *thin], projection=PROJECTION_CLASS_SIZE)
-        assert cmap.get(capability_class="bug.fix", size="M").reason_code == REASON_N_BELOW_MIN
+        # a strong oracle on a pool too small for the first look → calibrate / undecided
+        thin = [_live(TASK_C, size="M", oracle_strength=0.9)] * 3
+        cmap = _map([*_weak_cell_rows(), *thin])
+        assert cmap.get(capability_class="bug.fix", size="M").reason_code == REASON_UNDECIDED
         bl = learn.strengthening_backlog(cmap, [_score(TASK_A)], generated_at="x")
         assert bl.cells_flagged == ("bug.fix|S",)
 
     def test_controls_escapes_flags_the_cell(self) -> None:
         strong = [
-            _clean(task_id=TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")
+            _live(TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")
         ] * 10
-        controls = ControlsVerdict(passed=True, constructible=7, total=7, escapes=3)
-        cmap = build_capability_map(strong, projection=PROJECTION_CLASS_SIZE, controls=controls)
+        controls = ControlsVerdict(
+            passed=True, constructible=7, total=7, escapes=3, apparatus_version="2.4"
+        )
+        cmap = _map(strong, controls=controls)
         assert cmap.cells[0].reason_code == REASON_CONTROLS_ESCAPES
         bl = learn.strengthening_backlog(cmap, [_score(TASK_A)], generated_at="x")
         assert len(bl.items) == 1 and bl.items[0].labels["reason_code"] == REASON_CONTROLS_ESCAPES
@@ -804,10 +838,12 @@ class TestStrengthen:
         silently — the report counted the cell and offered nothing to register (G-984, found
         by the Learn walkthrough on a fresh stack: controls 1 escape, oracle 4 of 4 killed)."""
         strong = [
-            _clean(task_id=TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")
+            _live(TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")
         ] * 10
-        controls = ControlsVerdict(passed=True, constructible=6, total=7, escapes=1)
-        cmap = build_capability_map(strong, projection=PROJECTION_CLASS_SIZE, controls=controls)
+        controls = ControlsVerdict(
+            passed=True, constructible=6, total=7, escapes=1, apparatus_version="2.4"
+        )
+        cmap = _map(strong, controls=controls)
         assert cmap.cells[0].reason_code == REASON_CONTROLS_ESCAPES
         score = _score(TASK_A, oracle_strength=0.95, killed=3, escaped=[], total=3)
         score["escaped"] = 0
@@ -823,7 +859,7 @@ class TestStrengthen:
         assert again.id == item.id
 
     def test_strong_scored_task_in_a_held_cell_is_not_work(self) -> None:
-        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
+        cmap = _map(_weak_cell_rows())
         strong = _score(TASK_A, oracle_strength=0.95, killed=3, escaped=[], total=3)
         strong["escaped"] = 0
         bl = learn.strengthening_backlog(cmap, [strong, _score(TASK_B)], generated_at="x")
@@ -831,8 +867,11 @@ class TestStrengthen:
 
     def test_since_filter(self) -> None:
         old = _weak_cell_rows()
-        stale = [GradeRow.from_dict({**r.to_dict(), "apparatus_version": "2.0"}) for r in old]
-        cmap = build_capability_map(stale, projection=PROJECTION_CLASS_SIZE)
+        stale = [
+            GradeRow.from_dict({**r.to_dict(), "apparatus_version": "2.0", "belt_set": "v4"})
+            for r in old
+        ]
+        cmap = _map(stale)
         assert (
             learn.strengthening_backlog(cmap, [_score(TASK_A)], since="2.1", generated_at="x").items
             == ()
@@ -846,13 +885,13 @@ class TestStrengthen:
             == 1
         )
         # a score stamped with an older apparatus is dropped too
-        fresh = build_capability_map(old, projection=PROJECTION_CLASS_SIZE)
+        fresh = _map(old)
         s_old = _score(TASK_A, provenance={"apparatus_version": "2.0"})
         bl = learn.strengthening_backlog(fresh, [s_old], since="2.1", generated_at="x")
         assert bl.cells_without_scores == ("bug.fix|S",)
 
     def test_deterministic_ids_and_bytes(self) -> None:
-        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
+        cmap = _map(_weak_cell_rows())
         scores = [_score(TASK_B), _score(TASK_A)]
         a = learn.dumps(
             learn.strengthening_backlog(
@@ -872,7 +911,7 @@ class TestStrengthen:
         assert [i.id for i in c.items] == ids
 
     def test_full_cell_projection_matches_on_class_and_size_only(self) -> None:
-        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CELL)
+        cmap = _map(_weak_cell_rows(), PROJECTION_CELL)
         bl = learn.strengthening_backlog(cmap, [_score(TASK_A)], generated_at="x")
         assert len(bl.items) == 1 and bl.items[0].labels["cell"].startswith(
             "replay|bug.fix|S|python|"
@@ -895,7 +934,7 @@ class TestStrengthen:
         assert s.strength is None and s.capability_class == "bug.fix" and s.size == "M"
 
     def test_render(self) -> None:
-        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
+        cmap = _map(_weak_cell_rows())
         text = learn.render_strengthen(
             learn.strengthening_backlog(cmap, [_score(TASK_A)], generated_at="x")
         )
@@ -938,14 +977,14 @@ def _stale_ledger(tmp_path: Path) -> list[GradeRow]:
             )
             for i in range(30, 38)
         ],
-        # cell C (koa): 3 stale + 16 current at 100 % → up to date (16 clears the Wilson bar)
+        # cell C (koa): 3 stale + 20 current → up to date (20 reaches the first look)
         *[
             _clean(task_id=f"{i:040x}", repo="koa", language="javascript", apparatus_version="2.0")
             for i in range(40, 43)
         ],
         *[
             _clean(task_id=f"{i:040x}", repo="koa", language="javascript", apparatus_version="2.1")
-            for i in range(50, 66)
+            for i in range(50, 70)
         ],
         # cell D: only current rows → not in the plan at all
         _clean(task_id="e" * 40, repo="cobra", size="M", apparatus_version="2.1"),
@@ -962,7 +1001,7 @@ class TestRemeasure:
         """One entry per (cell, MODE) — sighted and blind never pool (a blended rate hid
         koa's sighted cell, 2026-09-15); a blind request is priced at the ladder's rungs."""
         plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
-        assert plan.rows_stale == 16 and plan.min_n == 10
+        assert plan.rows_stale == 16 and plan.min_n == 20  # look.v1's first look
         by = {(c.cell.label, c.mode): c for c in plan.cells}
         go = "replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic"
         py = "replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic"
@@ -971,32 +1010,32 @@ class TestRemeasure:
             "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic|sighted",
         )
         a = by[(go, "sighted")]
-        assert (a.n_stale, a.n_current, a.n_needed) == (7, 0, 16)  # unmeasured: Wilson min at 1.0
+        assert (a.n_stale, a.n_current, a.n_needed) == (7, 0, 20)  # the first look
         assert a.stale_versions == ("2.0",) and a.repos == ("cobra",)
         assert (a.tasks_stale, a.tasks_current, a.relabelled) == (7, 0, ())
         assert a.cost_usd_mean == pytest.approx(0.24) and a.cost_known
-        assert a.est_cost_usd == pytest.approx(0.24 * 16)  # sighted: one attempt per row
-        assert a.est_minutes == pytest.approx(62 * 16 / 60)
+        assert a.est_cost_usd == pytest.approx(0.24 * 20)  # sighted: one attempt per row
+        assert a.est_minutes == pytest.approx(62 * 20 / 60)
         (req, rest) = a.requests
         assert req.kind == "replay" and req.mode == "sighted" and len(req.task_ids) == 7
-        assert req.limit == 7 and rest.limit == 9 and rest.task_ids == ()  # 16 − 7 named
+        assert req.limit == 7 and rest.limit == 13 and rest.task_ids == ()  # 20 − 7 named
         bl = by[(go, "blind")]
-        assert (bl.n_stale, bl.n_needed, bl.tasks_stale) == (1, 16, 1)
+        assert (bl.n_stale, bl.n_needed, bl.tasks_stale) == (1, 20, 1)
         assert bl.cost_usd_mean == pytest.approx(0.39)
-        assert bl.est_cost_usd == pytest.approx(0.39 * 16 * 3)  # blind: up to 3 rungs per row
+        assert bl.est_cost_usd == pytest.approx(0.39 * 20 * 3)  # blind: up to 3 rungs per row
         (breq, brest) = bl.requests
         assert breq.kind == "blind" and breq.task_ids == ("9" * 40,) and breq.limit == 1
-        assert brest.limit == 15 and "remainder" in brest.note
+        assert brest.limit == 19 and "remainder" in brest.note
         for c in (a, bl):
             for r in c.requests:
                 assert r.repo == "cobra" and r.builder == "claude_code"
                 assert r.model == "claude-sonnet-5" and r.provider == "anthropic"
         b = by[(py, "sighted")]
-        assert (b.n_stale, b.n_current, b.n_needed) == (5, 8, 8)  # 8/8 clean: 16 clears the bar
+        assert (b.n_stale, b.n_current, b.n_needed) == (5, 8, 12)  # 8 current: 12 to the look
         assert (b.tasks_stale, b.tasks_current) == (5, 8)
-        req, rest = b.requests  # 5 named stale tasks + a limit-only remainder of 3
+        req, rest = b.requests  # 5 named stale tasks + a limit-only remainder of 7
         assert req.limit == 5 and len(req.task_ids) == 5 and req.kind == "replay"
-        assert rest.limit == 3 and rest.task_ids == ()
+        assert rest.limit == 7 and rest.task_ids == ()
 
     def test_relabelled_stale_tasks_are_left_out_and_named(self, tmp_path: Path) -> None:
         """A stale task whose CURRENT label moved (an intent relabel) would put its new
@@ -1011,7 +1050,7 @@ class TestRemeasure:
         go = next(c for c in plan.cells if c.cell.language == "go" and c.mode == "sighted")
         assert go.relabelled == (moved,)
         req = go.requests[0]
-        assert moved not in req.task_ids and len(req.task_ids) == 6 and go.requests[1].limit == 10
+        assert moved not in req.task_ids and len(req.task_ids) == 6 and go.requests[1].limit == 14
 
     def test_requests_are_valid_post_runs_bodies(self, tmp_path: Path) -> None:
         pydantic = pytest.importorskip("pydantic")
@@ -1044,7 +1083,7 @@ class TestRemeasure:
         assert not rows[0].cost_known
         plan = learn.remeasure_plan(rows, current_apparatus="2.1")
         (c,) = plan.cells
-        assert not c.cost_known and c.est_cost_usd == 0.0 and c.n_needed == 16
+        assert not c.cost_known and c.est_cost_usd == 0.0 and c.n_needed == 20
         assert plan.to_dict()["summary"]["cost_known_cells"] == 0
         assert "?" in learn.render_remeasure(plan)
 
@@ -1065,14 +1104,16 @@ class TestRemeasure:
         plan = learn.remeasure_plan([r], current_apparatus="2.1")
         assert plan.cells[0].stale_versions == ("1.0-census",)
 
-    def test_policy_min_n(self, tmp_path: Path) -> None:
+    def test_policy_rule_sets_the_first_look(self, tmp_path: Path) -> None:
         plan = learn.remeasure_plan(
-            _stale_ledger(tmp_path), current_apparatus="2.1", policy=RoutingPolicy(min_n=20)
+            _stale_ledger(tmp_path),
+            current_apparatus="2.1",
+            policy=RoutingPolicy(rule=RULE_LOOK_V1_LATE),
         )
         by = {(c.cell.label, c.mode): c for c in plan.cells}
-        # koa has 16 current rows; min_n 20 outranks the Wilson minimum (16) → 4 more
+        # koa has 20 current rows; look.v1-late's first look is 30 → 10 more
         koa = "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic"
-        assert by[(koa, "sighted")].n_needed == 4
+        assert by[(koa, "sighted")].n_needed == 10 and plan.min_n == 30
 
     def test_deterministic(self, tmp_path: Path) -> None:
         rows = _stale_ledger(tmp_path)
@@ -1098,15 +1139,14 @@ def test_version_key_orders_versions_and_tolerates_legacy() -> None:
     assert learn._version_key("2.10") > learn._version_key("2.9")
 
 
-def test_rows_to_clear_bar_is_the_wilson_minimum_not_min_n() -> None:
-    """Three 10–11/10–11 cells read `calibrate: ci_low_below_bar` on 2.2 (2026-09-15):
-    the plan must target the rows that clear the lower bound at the observed rate."""
+def test_rows_to_clear_bar_is_the_rules_first_look() -> None:
+    """routing.v2 reads a reading only at its looks (ADR-0026 item 3): a re-measurement must
+    reach the first look whatever the observed rate — the Wilson minimum (16 at 100 %) is the
+    retired routing.v1 bar and would plan a measurement that can never be read."""
     from crb.core.learn import rows_to_clear_bar
     from crb.core.routing import DEFAULT_POLICY
-    from crb.core.stats import wilson_interval
 
-    assert rows_to_clear_bar(11, 11, DEFAULT_POLICY) == 16
-    assert wilson_interval(16, 16).low >= 0.80 and wilson_interval(15, 15).low < 0.80
-    assert rows_to_clear_bar(0, 0, DEFAULT_POLICY) == 16  # unmeasured: the optimistic minimum
-    assert rows_to_clear_bar(5, 8, DEFAULT_POLICY) == DEFAULT_POLICY.min_n  # rate below the bar
-    assert rows_to_clear_bar(11, 12, DEFAULT_POLICY) > 16
+    assert rows_to_clear_bar(11, 11, DEFAULT_POLICY) == 20
+    assert rows_to_clear_bar(0, 0, DEFAULT_POLICY) == 20
+    assert rows_to_clear_bar(5, 8, DEFAULT_POLICY) == 20
+    assert rows_to_clear_bar(11, 11, RoutingPolicy(rule=RULE_LOOK_V1_LATE)) == 30

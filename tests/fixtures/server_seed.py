@@ -70,7 +70,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack, canonical_json, sha256_text
 from crb.core.grade import Belts, GradeResult
 from crb.core.ledger import BELT_SET_V3_LEGACY, GradeRow, grade_row_from_result
+from crb.core.oracle.mutation import mutation_version
 from crb.core.spec import TaskSpec
+from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.app import API_PREFIX, create_app
 from crb.server.auth import hash_password
@@ -156,6 +158,8 @@ def _task(i: int, cls: str, size: str) -> TaskSpec:
         baseline_failing=(f"tests/test_t{i}.py::test_x",),
         red_checked=True,
         gold_clean=None if i == 8 else True,
+        # the change a replay row observed (apparatus 2.4 stamps it; ADR-0025 item 6)
+        labels={"change_id": f"change-{i:02d}"},
     )
 
 
@@ -712,7 +716,12 @@ def _events(tasks: list[TaskSpec]) -> list[Event]:
                     "note": ""
                     if total
                     else "no mutants generated for the changed region — not scoreable",
-                    "provenance": {"apparatus_version": "2.0", "mutator": "python-ast"},
+                    # scored at the seed rows' apparatus under its rule (mutation.v2 from 2.4)
+                    "provenance": {
+                        "apparatus_version": APPARATUS_VERSION,
+                        "mutator": "python-ast",
+                        "mutation_version": mutation_version(APPARATUS_VERSION),
+                    },
                 },
             )
         )
@@ -725,7 +734,9 @@ def _events(tasks: list[TaskSpec]) -> list[Event]:
             "controls.report",
             payload={
                 "schema": "crb.negative_controls.v1",
-                "apparatus": {"apparatus_version": "2.0"},
+                # the controls report of the seed rows' apparatus (controls-gate.v2 reads a
+                # report of its own apparatus only), complete — its one escape is load-bearing
+                "apparatus": {"apparatus_version": APPARATUS_VERSION, "complete": True},
                 "n_tasks": 2,
                 "n_rows": 14,
                 "violations": 0,

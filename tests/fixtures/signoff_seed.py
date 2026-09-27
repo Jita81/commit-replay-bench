@@ -45,13 +45,20 @@ Touch when:   the sign-off policy gains a clause (add the helper that clears it 
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 from typing import Any
 
+from sqlalchemy import select
+
 from crb.core.ledger import CELL_FIELDS, GradeRow
+from crb.core.oracle.mutation import mutation_version
+from crb.core.spec import TaskSpec
+from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepEvent, StepStatus
-from crb.store.models import Event
-from fixtures.server_seed import ALPHA, DELIVER_CELL, Env
+from crb.store.models import Event, Task
+from fixtures.proven import S1, add_rows, add_tasks, write_reading
+from fixtures.server_seed import ALPHA, DELIVER_CELL, RUN_IDS, Env
 
 #: The clean controls run a signable test appends (distinct from the seed's ``0`` * 32).
 CLEAN_CONTROLS_RUN = "5" * 32
@@ -83,7 +90,7 @@ def pass_controls(
         actor="worker-1",
         payload={
             "schema": "crb.negative_controls.v1",
-            "apparatus": {"apparatus_version": "2.1"},
+            "apparatus": {"apparatus_version": APPARATUS_VERSION, "complete": True},
             "n_tasks": 2,
             "n_rows": n_rows,
             "violations": 0 if passed else 1,
@@ -153,7 +160,11 @@ def score_oracle(
                     "errors": 0,
                     "oracle_strength": strength,
                     "note": "" if mutants else "no mutants generated — not scoreable",
-                    "provenance": {"apparatus_version": "2.2", "mutator": "python-ast"},
+                    "provenance": {
+                        "apparatus_version": APPARATUS_VERSION,
+                        "mutator": "python-ast",
+                        "mutation_version": mutation_version(APPARATUS_VERSION),
+                    },
                 },
                 seq=i,
             )
@@ -164,10 +175,56 @@ def score_oracle(
     return ids
 
 
+#: The tasks :func:`prove_deliver_cell` adds to the seed's deliver cell (one reading's pool).
+PROVEN_TASKS = 20
+
+
+def prove_deliver_cell(env: Env, *, n: int = PROVEN_TASKS) -> list[GradeRow]:
+    """Prove the seed's deliver cell under routing.v2 (ADR-0025, ADR-0026) the honest way:
+    the deployment grades in the sealed posture (``sandbox.executor`` docker, so the seed's
+    host rows are another posture class and never read), ``n`` new qualified tasks of the cell
+    each their own change, a reading of ``S1@<author>`` registered over them before any
+    attempt, and one clean sealed first attempt per task graded by the worker — five from the
+    ``succeeded`` run, the rest from historical runs, as the seed's own rows are — so the
+    reading delivers at its first look. The rows join ``env.info.rows``
+    (the attestation helpers pick the newest). Returns the chained rows."""
+    env.settings.sandbox.executor = "docker"
+    ids = add_tasks(env.factory, n, prefix="signable", cell=DELIVER_CELL)
+    write_reading(
+        env.factory, ids, cell=DELIVER_CELL, changes={c: f"change-signable-{c}" for c in ids}
+    )
+    # the seed's shape: the first five from the ``succeeded`` run (queued by ``op1``), the
+    # rest from historical runs the store has no row for (nobody's), four rows a run
+    rows: list[GradeRow] = []
+    for k, c in enumerate(ids):
+        run = RUN_IDS["succeeded"] if k < 5 else hashlib.md5(f"hist-{(k - 5) // 4}".encode())
+        run_id = run if isinstance(run, str) else run.hexdigest()
+        rows += add_rows(
+            env.factory, [c], arm=S1, cell=DELIVER_CELL, run_id=run_id, actor="worker-1"
+        )
+    env.info.rows.extend(rows)
+    with env.factory() as s:
+        for t in s.execute(select(Task).where(Task.task_id.in_(ids))).scalars():
+            env.info.tasks.append(TaskSpec.from_dict(dict(t.spec_json)))
+    return rows
+
+
+def add_red_row(env: Env) -> GradeRow:
+    """One more qualified task of the deliver cell with a RED sealed first attempt on the
+    standard arm — outside the reading's pool, so the reading is unchanged — for the tests
+    that name a row the instrument did not accept. The row joins ``env.info.rows``."""
+    (tid,) = add_tasks(env.factory, 1, prefix="red", cell=DELIVER_CELL)
+    (row,) = add_rows(env.factory, [tid], arm=S1, cell=DELIVER_CELL, clean=False, actor="worker-1")
+    env.info.rows.append(row)
+    return row
+
+
 def clear_policy(env: Env, *, repo: str = ALPHA) -> None:
-    """Make the seed's deliver cell signable under ``signoff-policy.v3``: a clean
-    controls gate AND a measured, strong oracle on every task of the cell (the
+    """Make the seed's deliver cell signable under ``signoff-policy.v4``: proven by a
+    registered reading in the sealed posture (:func:`prove_deliver_cell`), a clean controls
+    gate at this apparatus AND a measured, strong oracle on every task of the cell (the
     two-person rule holds in the seed as shipped — see the module docstring)."""
+    prove_deliver_cell(env)
     pass_controls(env, repo=repo)
     score_oracle(env, repo=repo)
 
@@ -220,10 +277,12 @@ __all__ = [
     "STRONG_ORACLE",
     "STRONG_ORACLE_RUN",
     "accepted_row",
+    "add_red_row",
     "attestation_for",
     "attested_body",
     "cell_task_ids",
     "clear_policy",
     "pass_controls",
+    "prove_deliver_cell",
     "score_oracle",
 ]

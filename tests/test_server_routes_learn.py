@@ -208,14 +208,16 @@ def test_strengthen_uses_the_controls_verdict_and_the_oracle_scores(env: Env) ->
     items = [i for i in d["items"] if i["labels"]["cell"] == "bug.fix|S"]
     assert items, d
     assert all(i["capability_class"] == "test.add" for i in items)
-    assert all(i["labels"]["reason_code"] == "controls_escapes" for i in items)
+    # routing.v2 holds the host cell first on its posture; the item names the clause a test
+    # can fix — the seed's weak oracle (0.58), listed among the cell's shortfalls
+    assert all(i["labels"]["reason_code"] == "oracle_weak" for i in items)
     weak = [
         i for i in items if i["labels"].get("oracle_strength") in ("0.50", "0.33", "unscoreable")
     ]
     assert weak, [i["labels"] for i in items]
-    # the seed scores are stamped 2.0: asking since the live apparatus drops them
+    # the seed scores are stamped at the live apparatus: asking since it keeps them
     d2 = env.get(f"/learn/strengthen?repo={ALPHA}&since={APPARATUS_VERSION}").json()
-    assert "bug.fix|S" in d2["cells_without_scores"]
+    assert "bug.fix|S" in d2["cells_flagged"] and "bug.fix|S" not in d2["cells_without_scores"]
     r = env.get(f"/learn/strengthen?repo={ALPHA}&by=nope")
     assert r.status_code == 422
 
@@ -236,7 +238,7 @@ def test_strengthen_reads_per_task_scores_from_the_store_events(env: Env) -> Non
         }
     assert items and {i["labels"]["task_id"] for i in items} <= set(scored)
     assert all(i["labels"]["repo"] == ALPHA for i in items)
-    assert all(i["labels"]["reason_code"] == "controls_escapes" for i in items)
+    assert all(i["labels"]["reason_code"] == "oracle_weak" for i in items)
     for i in items:
         payload = scored[i["labels"]["task_id"]]
         assert i["labels"]["mutants"] == str(payload["total"])
@@ -285,7 +287,10 @@ def test_cli_over_the_exports_derives_the_route_items(
     bare = cli("--oracle", str(oracle))
     with_controls = cli("--oracle", str(oracle), "--controls", str(controls))
     from_events = cli("--oracle", str(events), "--controls", str(controls))
-    assert bare["cells_flagged"] == [] and bare["items"] == [] and bare["controls"] is None
+    # the oracle export alone holds the weak-oracle cell (routing.v2 reads the per-task
+    # scores); the thin cell is held by the controls escape, which only that export carries
+    assert bare["cells_flagged"] == ["bug.fix|S"] and bare["controls"] is None
+    assert {i["labels"]["cell"] for i in bare["items"]} == {"bug.fix|S"}
     for d in (with_controls, from_events):
         got = sorted(
             (i["id"], i["labels"]["task_id"], i["labels"]["oracle_strength"]) for i in d["items"]

@@ -48,8 +48,10 @@ from crb.core.ledger import (
     expected_belt_sets,
 )
 from crb.core.spec import TaskSpec
+from crb.core.version import APPARATUS_VERSION
 from crb.factory.backlog import Backlog
 from fixtures.posture import posture_row
+from fixtures.readings import live_labels
 
 Run = Callable[[Sequence[str]], tuple[int, str, str]]
 
@@ -86,9 +88,13 @@ def _row(**kw: Any) -> GradeRow:
         "cost_usd": 0.4,
         "latency_s": 90.0,
         "oracle_strength": 0.5,
-        "apparatus_version": "2.1",
+        "apparatus_version": APPARATUS_VERSION,
     }
     base.update(kw)
+    if base["apparatus_version"] == APPARATUS_VERSION:  # a row a reading could count
+        live = live_labels(str(base["task_id"]), arm="S3")
+        base["labels"] = {**live.pop("labels"), **dict(base.get("labels") or {})}
+        base = {**live, **base}
     # the belt set is what the stamped apparatus recorded (ledger invariant, review finding 4)
     base.setdefault("belt_set", expected_belt_sets(base["apparatus_version"], "measured")[0])
     return posture_row(**base)
@@ -117,9 +123,10 @@ def workdir(tmp_path_factory: pytest.TempPathFactory) -> Path:
         *[_row(task_id=TASK_A if i % 2 else TASK_B) for i in range(10)],
         # stale evidence in another cell
         *[_row(task_id=f"{i:040x}", size="M", apparatus_version="2.0") for i in range(1, 4)],
-        # refusals
-        _protocol(ERR_QUOTED, task_id="d" * 40, repo="cobra", language="go"),
-        _protocol(ERR_CURL, task_id="e" * 40, repo="nhs-api"),
+        # refusals — in their own cell (size L), so the oracle-weak cell's counted commits
+        # are the two tasks the oracle export scores (routing.v2 reads the oracle's share)
+        _protocol(ERR_QUOTED, task_id="d" * 40, repo="cobra", language="go", size="L"),
+        _protocol(ERR_CURL, task_id="e" * 40, repo="nhs-api", size="L"),
     ]
     ledger.append_many(rows)
     # task subjects for --repo click
@@ -337,23 +344,49 @@ def test_strengthen_text_json_and_out(run: Run, tmp_path: Path) -> None:
     assert frozen.verify() and frozen.items[0].id == item["id"]
 
 
-def test_strengthen_without_oracle_emits_cell_item(run: Run) -> None:
-    _, d = _json(run, ["learn", "strengthen"])
-    assert d["cells_without_scores"] == ["bug.fix|S"]
-    assert d["items"][0]["title"] == "strengthen the target tests for cell bug.fix|S"
+def test_strengthen_without_oracle_emits_cell_item(run: Run, tmp_path: Path) -> None:
+    # no per-task scores: the oracle is unmeasured (not strengthening work, an oracle run), and
+    # a controls escape holds the cell — one cell-level item, since no task is named
+    controls = tmp_path / "controls.json"
+    controls.write_text(
+        json.dumps(
+            {
+                "n_rows": 14,
+                "escapes": 1,
+                "not_constructible": 0,
+                "passed": True,
+                "apparatus_version": APPARATUS_VERSION,  # read at the rows' apparatus only
+            }
+        ),
+        encoding="utf-8",
+    )
+    _, d = _json(run, ["learn", "strengthen", "--controls", str(controls)])
+    # the escape holds every measured cell of the reading (the refusals' L cell too)
+    assert d["cells_without_scores"] == ["bug.fix|L", "bug.fix|S"]
+    item = next(i for i in d["items"] if i["labels"]["cell"] == "bug.fix|S")
+    assert item["title"] == "strengthen the target tests for cell bug.fix|S"
+    assert item["labels"]["reason_code"] == "controls_escapes"
+    # without any hold, nothing is flagged: an unmeasured oracle is not test work
+    assert _json(run, ["learn", "strengthen"])[1]["cells_flagged"] == []
 
 
 def test_strengthen_since_and_policy(run: Run, tmp_path: Path) -> None:
-    _, d = _json(run, ["learn", "strengthen", "--since", "3.0"])
+    oracle = str(_oracle_report(tmp_path))
+    _, d = _json(run, ["learn", "strengthen", "--oracle", oracle, "--since", "3.0"])
     assert d["items"] == [] and d["since"] == "3.0"
-    # a policy with a lower oracle floor: nothing is oracle-held any more
+    assert _json(run, ["learn", "strengthen", "--oracle", oracle])[1]["cells_flagged"] == [
+        "bug.fix|S"
+    ]
+    # a policy with a lower oracle floor (under its own version): nothing is oracle-held
     _, d2 = _json(
         run,
         [
             "learn",
             "strengthen",
+            "--oracle",
+            oracle,
             "--policy-json",
-            '{"min_oracle_strength": 0.4, "version": "routing.v1-weak"}',
+            '{"min_oracle_strength": 0.4, "version": "routing.v2-weak"}',
         ],
     )
     assert d2["cells_flagged"] == [] and d2["threshold"] == 0.4
@@ -501,18 +534,28 @@ def test_load_controls_export_reads_the_report_or_a_run_body() -> None:
 def test_strengthen_controls_flag_routes_the_cells_as_the_server_does(
     run: Run, tmp_path: Path
 ) -> None:
-    """The fixture's stale M cell (n=3) is below min_n and the S cell is oracle-weak;
-    a controls verdict with an escape holds EVERY measured cell — the S cell keeps
+    """The fixture's S cell is oracle-weak (the export's 0.5) and its stale M cell is history
+    at another apparatus; a controls verdict with an escape holds the cell too — it keeps
     its oracle_weak reason (it fires first), and the report is echoed back."""
     controls = tmp_path / "controls.json"
     controls.write_text(
-        json.dumps({"n_rows": 14, "escapes": 1, "not_constructible": 0, "passed": True}),
+        json.dumps(
+            {
+                "n_rows": 14,
+                "escapes": 1,
+                "not_constructible": 0,
+                "passed": True,
+                "apparatus_version": APPARATUS_VERSION,  # read at the rows' apparatus only
+            }
+        ),
         encoding="utf-8",
     )
-    _, d = _json(run, ["learn", "strengthen", "--controls", str(controls)])
+    oracle = str(_oracle_report(tmp_path))
+    _, d = _json(run, ["learn", "strengthen", "--controls", str(controls), "--oracle", oracle])
     assert d["controls"]["measured"] is True and d["controls"]["escapes"] == 1
-    assert d["cells_flagged"] == ["bug.fix|S"]
-    assert d["items"][0]["labels"]["reason_code"] == "oracle_weak"
+    assert d["cells_flagged"] == ["bug.fix|L", "bug.fix|S"]  # the escape holds every cell
+    s_items = [i for i in d["items"] if i["labels"]["cell"] == "bug.fix|S"]
+    assert s_items and all(i["labels"]["reason_code"] == "oracle_weak" for i in s_items)
     # without the flag the report is honestly absent from the output
     _, d2 = _json(run, ["learn", "strengthen"])
     assert d2["controls"] is None
@@ -564,23 +607,22 @@ def test_strengthen_oracle_accepts_a_run_events_log_page(run: Run, tmp_path: Pat
 
 
 def test_remeasure_text_json_and_out(run: Run, tmp_path: Path) -> None:
-    code, out, err = run(["learn", "remeasure", "--apparatus", "2.1"])
+    code, out, err = run(["learn", "remeasure", "--apparatus", APPARATUS_VERSION])
     assert code == 0, err
-    assert "apparatus 2.1" in out and "cells to renew: 1" in out and "nothing was sent" in out
+    assert f"apparatus {APPARATUS_VERSION}" in out and "cells to renew: 1" in out
+    assert "nothing was sent" in out
     plan = tmp_path / "plan.json"
-    _, d = _json(run, ["learn", "remeasure", "--apparatus", "2.1", "--out", str(plan)])
+    _, d = _json(run, ["learn", "remeasure", "--apparatus", APPARATUS_VERSION, "--out", str(plan)])
     assert d["schema"] == "crb.learn.remeasure.v1" and d["rows_stale"] == 3
     (cell,) = d["cells"]
     assert cell["label"] == "replay|bug.fix|M|python|claude_code|claude-sonnet-5|anthropic"
-    assert (
-        cell["n_needed"] == 16 and cell["cost_known"]
-    )  # the Wilson minimum at rate 1.0, not min_n
-    assert cell["est_cost_usd"] == pytest.approx(0.4 * 16)
+    assert cell["n_needed"] == 20 and cell["cost_known"]  # look.v1's first look
+    assert cell["est_cost_usd"] == pytest.approx(0.4 * 20)
     req = cell["requests"][0]
     assert req["repo"] == "click" and req["kind"] == "replay" and req["mode"] == "sighted"
     assert req["builder"] == "claude_code" and len(req["task_ids"]) == 3 and req["limit"] == 3
-    assert cell["requests"][1]["limit"] == 13  # 16 needed − 3 named stale tasks
-    assert json.loads(plan.read_text(encoding="utf-8"))["cells"][0]["n_needed"] == 16
+    assert cell["requests"][1]["limit"] == 17  # 20 needed − 3 named stale tasks
+    assert json.loads(plan.read_text(encoding="utf-8"))["cells"][0]["n_needed"] == 20
 
 
 def test_remeasure_default_apparatus_is_the_instrument(run: Run) -> None:
@@ -591,21 +633,19 @@ def test_remeasure_default_apparatus_is_the_instrument(run: Run) -> None:
 
 
 def test_remeasure_policy_override(run: Run) -> None:
-    # min_n alone no longer sets the target: an unmeasured cell plans for the rows that
-    # clear the Wilson bar at rate 1.0 (16 at ci_low 0.80). Relax that bar too and the
-    # override shows through.
+    # the target is the policy's look rule's first look: look.v1-late reads first at 30
     _, d = _json(
         run,
         [
             "learn",
             "remeasure",
             "--apparatus",
-            "2.1",
+            APPARATUS_VERSION,
             "--policy-json",
-            '{"min_n": 3, "min_ci_low": 0.0, "version": "routing.v1-small"}',
+            '{"rule": "look.v1-late"}',
         ],
     )
-    assert d["cells"][0]["n_needed"] == 3
+    assert d["cells"][0]["n_needed"] == 30
 
 
 # ---------------------------------------------------------------------------

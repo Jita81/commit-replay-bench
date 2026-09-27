@@ -168,7 +168,7 @@ def test_config_show(run: Run, workdir: Path) -> None:
     assert d["workdir_source"] == "--workdir"
     assert d["executor"]["default"] == "local" and d["executor"]["docker"]["network"] == "none"
     assert d["apparatus_version"] and d["crb_version"]
-    assert d["routing_policy"]["version"] == "routing.v1"
+    assert d["routing_policy"]["version"] == "routing.v2"
 
 
 def test_workdir_resolution_env_and_default(
@@ -733,32 +733,29 @@ def test_route_decisions(mined: CliRepo, run: Run, tmp_path: Path) -> None:
     assert code == 0
     decisions = d["decisions"]
     assert decisions and all(x["route"] in ROUTES for x in decisions)  # type: ignore[index,union-attr]
-    assert all(x["policy_version"] == "routing.v1" for x in decisions)  # type: ignore[index,union-attr]
-    assert d["policy"]["min_n"] == 10  # type: ignore[index]
+    assert all(x["policy_version"] == "routing.v2" for x in decisions)  # type: ignore[index,union-attr]
+    assert d["policy"]["rule"] == "look.v1"  # type: ignore[index]
     code, out, _ = run(["route"])
-    assert code == 0 and "calibrate" in out and "policy routing.v1" in out
+    assert code == 0 and "calibrate" in out and "policy routing.v2" in out
 
     # a policy looser than the published rule must name itself — under the published
     # version string it is refused (every decision names the bar it cleared)
-    code, _, err = run(["route", "--policy-json", '{"min_n": 1, "min_ci_low": 0.0}'])
-    assert code == 2 and "cannot use version 'routing.v1'" in err and "min_n" in err
+    code, _, err = run(["route", "--policy-json", '{"min_oracle_strength": 0.5}'])
+    assert code == 2 and "cannot use version 'routing.v2'" in err
+    assert "min_oracle_strength" in err
     code, d = run_json(
         run,
         [
             "route",
             "--policy-json",
-            '{"min_n": 1, "min_ci_low": 0.0, "version": "routing.v1-calibration"}',
+            '{"min_oracle_strength": 0.5, "version": "routing.v2-calibration"}',
         ],
     )
     assert code == 0
-    routes = {(x["cell"]["model"], x["route"]) for x in d["decisions"]}  # type: ignore[index,union-attr]
-    assert ("gold", "deliver") in routes
+    # no knob licenses a cell: with no registered reading nothing delivers, loose or not
+    assert {x["route"] for x in d["decisions"]} <= {"calibrate", "human", "granularize"}  # type: ignore[index,union-attr]
     policy_file = tmp_path / "policy.json"
-    policy_file.write_text(
-        json.dumps(
-            {"min_n": 1, "min_ci_low": 0.0, "granularize_sizes": ["XS"], "version": "routing.v1-xs"}
-        )
-    )
+    policy_file.write_text(json.dumps({"granularize_sizes": ["XS"], "version": "routing.v2-xs"}))
     code, d = run_json(run, ["route", "--policy-json", str(policy_file)])
     assert code == 0
     assert {x["route"] for x in d["decisions"] if x["cell"]["model"] == "gold"} == {"granularize"}  # type: ignore[index,union-attr]

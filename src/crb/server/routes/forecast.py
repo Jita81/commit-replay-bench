@@ -37,7 +37,10 @@ Touch when:   never for a new repository; when a readiness threshold changes (th
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Query
+from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.capability import RepoChangeProfile
 from crb.core.forecast import (
@@ -51,6 +54,8 @@ from crb.core.routing import DEFAULT_POLICY
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.routes.capability import CHECKS_CURRENT, rows_for_arm
+from crb.server.routes.oracle import latest_controls_verdict, oracle_by_task
+from crb.server.routes.readings import reading_book
 from crb.server.routes.repos import cached_profile, get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
 from crb.server.schemas import (
@@ -116,6 +121,17 @@ def _mix_items(mix: dict[ComponentKey, int]) -> list[ForecastMixItem]:
     return out
 
 
+def routing_world(db: Session, factory: sessionmaker[Session], repo: str) -> dict[str, Any]:
+    """What routing.v2 routes a cell on besides its rows (ADR-0025 items 3 and 4, ADR-0026):
+    the repository's registered readings, the per-task oracle scores and the controls verdict
+    at the current apparatus — the same the map reads, so a forecast never disagrees with it."""
+    return {
+        "readings": reading_book(db, repo, DbLedger(factory).rows(repo=repo)),
+        "oracle_by_task": oracle_by_task(db, repo),
+        "controls": latest_controls_verdict(db, repo),
+    }
+
+
 @router.get(
     "/forecast/build",
     response_model=ForecastBuildOut,
@@ -137,7 +153,12 @@ def forecast_build_route(
     # because a cell never pools two (ADR-0024).
     rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
     f = forecast_build(
-        parsed, rows, policy=DEFAULT_POLICY, signoffs=load_signoff_records(db, repo), repo=repo
+        parsed,
+        rows,
+        policy=DEFAULT_POLICY,
+        signoffs=load_signoff_records(db, repo),
+        repo=repo,
+        **routing_world(db, factory, repo),
     )
     d = f.to_dict()
     return ForecastBuildOut(
@@ -204,6 +225,7 @@ def forecast_readiness_route(
         policy=DEFAULT_POLICY,
         signoffs=load_signoff_records(db, repo),
         repo=repo,
+        **routing_world(db, factory, repo),
     )
     d = r.to_dict()
     return ForecastReadinessOut(

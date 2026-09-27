@@ -203,8 +203,8 @@ function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: Sign
 }
 
 /** "What you would be signing": the tiles, the controls verdict, the route and the split — the snapshot the record will carry. */
-/** `bars` are the routing policy the capability map serves (`min_point`, `min_ci_low`) — read from the API, never a UI constant (CodeRabbit on PR #6). */
-function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { min_point: number; min_ci_low: number } }) {
+/** `bars` is the routing policy the capability map serves — its look rule, read from the API, never a UI constant (CodeRabbit on PR #6; routing.v2 has no point or Wilson bar). */
+function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { rule: string } }) {
   const ev = preview.evidence
   const c = preview.controls
   const apparatus = `apparatus ${ev.apparatus_versions.join('/') || '—'} · belt set ${ev.belt_sets.join('/') || '—'} · Wilson 95%`
@@ -212,7 +212,7 @@ function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { mi
     <Card title="What you would be signing" id="signoff-evidence">
       <div className="flex flex-wrap gap-3" data-testid="signoff-evidence">
         <StatTile label="Pass rate" value={fmtPct(ev.point)} n={ev.n} ci={ev.ci_low === null || ev.ci_high === null ? null : { low: ev.ci_low, high: ev.ci_high }} apparatus={`${fmtInt(ev.clean)} clean of ${fmtInt(ev.n)} eligible · ${apparatus}`} hint="stat.signoff.point" data-testid="signoff-tile-point" />
-        <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`the bound the routing rule reads · ${bars ? `≥ ${fmtPct(bars.min_ci_low, 0)} for deliver` : 'bar: see the policy in force'}`} hint="stat.signoff.ci_low" data-testid="signoff-tile-ci-low" />
+        <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`over every attempt · the route reads the standard arm's registered reading${bars ? ` under ${bars.rule}` : ''}`} hint="stat.signoff.ci_low" data-testid="signoff-tile-ci-low" />
         <StatTile label="false-Q1" value={ev.measured ? String(ev.false_q1) : '—'} n={ev.n} apparatus="clean rows with a failed belt — must be 0" tone={ev.false_q1 > 0 ? 'red' : 'green'} hint="stat.signoff.false_q1" data-testid="signoff-tile-false-q1" />
         <StatTile label="Oracle strength" value={fmtRatio(ev.oracle_strength)} n={ev.oracle?.scored ?? ev.n} apparatus={`mean mutation kill-rate of the cell's tasks' oracles${ev.oracle ? ` · ${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''} · unmeasured is a refusal, never a pass`} hint="stat.signoff.oracle" data-testid="signoff-tile-oracle" />
       </div>
@@ -243,7 +243,7 @@ function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { mi
         <Hint as="div" id="tile.signoff.failure_split" className="space-y-1 sm:col-span-2">
           <div className="label">Failure split</div>
           <div className="flex flex-wrap items-center gap-3">
-            {ev.point !== null && ev.ci_low !== null && ev.ci_high !== null && <CiBar point={ev.point} low={ev.ci_low} high={ev.ci_high} n={ev.n} minPoint={bars?.min_point} minCiLow={bars?.min_ci_low} width={140} provenance={apparatus} />}
+            {ev.point !== null && ev.ci_low !== null && ev.ci_high !== null && <CiBar point={ev.point} low={ev.ci_low} high={ev.ci_high} n={ev.n} width={140} provenance={apparatus} />}
             <ModelPointLine modelPoint={ev.model_point} modelN={ev.model_n} clean={ev.clean} ciLow={ev.model_ci_low ?? null} ciHigh={ev.model_ci_high ?? null} apparatus={ev.apparatus_versions} size="sm" />
             <FailureSplitPills split={ev.failure_split} size="sm" data-testid="signoff-split" />
           </div>
@@ -518,7 +518,7 @@ export function SignoffPage() {
             </div>
           )}
 
-          {previewData && <EvidencePanel preview={previewData} bars={map.data?.policy ? { min_point: map.data.policy.min_point, min_ci_low: map.data.policy.min_ci_low } : undefined} />}
+          {previewData && <EvidencePanel preview={previewData} bars={map.data?.policy ? { rule: map.data.policy.rule } : undefined} />}
 
           {/* a reader who cannot sign is shown no form: who acts, and a cell to read (the preview changes nothing on the server) */}
           {!approver && (

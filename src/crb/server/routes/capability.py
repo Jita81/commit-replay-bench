@@ -64,6 +64,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import APIRouter, Query
 from sqlalchemy.orm import Session, sessionmaker
@@ -78,11 +79,14 @@ from crb.core.capability import (
     trusted_autonomy_coverage,
 )
 from crb.core.checks import ARMS
+from crb.core.context_arm import arms_present, is_arm
 from crb.core.economics import Economics, fold_economics
 from crb.core.ledger import CELL_FIELDS, GradeRow, failure_split, rows_for_checks
+from crb.core.reading import Reading, budget_spent, cell_error_budget
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DELIVER, ControlsVerdict
 from crb.core.signoff import apply_signoffs_to_map
 from crb.core.spec import SIZE_TIER_NAMES
+from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
 from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
@@ -90,6 +94,12 @@ from crb.server.factory_state import DeliveryCounts, FactoryHome, delivery_count
 from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import current_checks_arm
 from crb.server.routes.oracle import latest_controls_verdict, oracle_by_task, verdict_dict
+from crb.server.routes.readings import (
+    ARM_STANDARD,
+    load_readings,
+    reading_book,
+    rows_on_standard_arms,
+)
 from crb.server.routes.repos import cached_profile, get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
 from crb.server.schemas import CapabilitySummary
@@ -105,7 +115,7 @@ from crb.server.schemas_capability import (
     RoutingPolicyWithControlsOut,
 )
 from crb.store import qualifications as store_qualifications
-from crb.store.ledger import DbLedger
+from crb.store.ledger import DbLedger, rows_in
 from crb.store.models import Repo, Run
 
 router = APIRouter(tags=["capability"])
@@ -127,17 +137,79 @@ BY_ALIASES: dict[str, str] = {
 DEFAULT_BY = "class,size"
 
 
+def resolve_apparatus(apparatus: str) -> str:
+    """``current`` (or empty) → :data:`APPARATUS_VERSION`; a named version as given."""
+    return APPARATUS_VERSION if apparatus in ("", "current") else apparatus
+
+
 def rows_for_apparatus(rows: Iterable[GradeRow], apparatus: str) -> list[GradeRow]:
-    """``EVIDENCE-AND-CLAIMS`` §5: no claim blends apparatus versions. The map defaults
-    to the CURRENT apparatus (``crb.core.version.APPARATUS_VERSION``); an explicit
-    version selects that one; ``all`` pools them for a reader who asks (the cell still
-    lists ``apparatus_versions``). Rows measured under an older belt set (no belt 5,
-    the pre-2.1 belt 1) must not lift a current cell toward ``deliver``."""
+    """ADR-0025 item 1 (superseding ADR-0015 §3): a reading has one apparatus. The map reads
+    the CURRENT apparatus (``crb.core.version.APPARATUS_VERSION``) by default, or a named
+    version as history; ``all`` is refused with 422 ``apparatus_pooling_refused`` naming the
+    versions present — evidence expires with the apparatus and two are never pooled."""
     rs = list(rows)
     if apparatus == "all":
-        return rs
-    want = APPARATUS_VERSION if apparatus in ("", "current") else apparatus
+        raise ApiError(
+            422,
+            "apparatus_pooling_refused",
+            "a reading has one apparatus (ADR-0025 item 1): read the current one, or name a "
+            "version to read it as history",
+            detail={"versions": sorted({r.apparatus_version for r in rs})},
+        )
+    want = resolve_apparatus(apparatus)
     return [r for r in rs if r.apparatus_version == want]
+
+
+#: ``?arm=standard`` (the default): each cell is read on ITS proven standard arm (see
+#: :func:`crb.server.routes.readings.rows_on_standard_arms`). Any arm id selects that arm for
+#: every cell; ``all`` is refused (ADR-0026 item 1).
+DEFAULT_ARM = ARM_STANDARD
+
+
+def _pooled(what: str, adr: str, values: Iterable[str]) -> ApiError:
+    return ApiError(
+        422,
+        f"{what}_pooling_refused",
+        f"a reading has one {what.replace('_', ' ')} ({adr}): name one",
+        detail={"present": sorted({v for v in values if v})},
+    )
+
+
+def rows_for_arm_param(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
+    """ADR-0026 item 1: one context arm per reading. ``all`` → 422; an arm outside the
+    grammar → 422. A row from before 2.4 carries no arm and is kept (it is read only at its
+    own apparatus, as history, where mode still splits it)."""
+    rs = list(rows)
+    if arm == "all":
+        raise _pooled("context_arm", "ADR-0026 item 1", (r.context_arm for r in rs))
+    if arm == ARM_STANDARD:
+        return rs  # resolved per cell by :func:`rows_on_standard_arms`
+    if not is_arm(arm):
+        raise ApiError(422, "validation_error", f"arm {arm!r} is outside the context-arm grammar")
+    return [r for r in rs if r.context_arm == arm or (not r.context_arm and not r.taxonomy)]
+
+
+def rows_for_taxonomy_param(rows: Iterable[GradeRow], taxonomy: str) -> list[GradeRow]:
+    """ADR-0026 item 9: one class-set version per reading; ``all`` → 422. Rows from before
+    2.4 carry none and are kept, as history."""
+    rs = list(rows)
+    if taxonomy == "all":
+        raise _pooled("class_set", "ADR-0026 item 9", (r.taxonomy for r in rs))
+    if not is_class_set_version(taxonomy):
+        raise ApiError(422, "validation_error", f"taxonomy {taxonomy!r} is not a class-set version")
+    return [r for r in rs if r.taxonomy == taxonomy or not r.taxonomy]
+
+
+def apparatus_block(rows: Sequence[GradeRow], apparatus: str) -> dict[str, Any]:
+    """What the map reads and what it holds as history (ADR-0025 item 1)."""
+    read = resolve_apparatus(apparatus)
+    others = [r for r in rows if r.apparatus_version != read]
+    return {
+        "current": APPARATUS_VERSION,
+        "read": read,
+        "superseded_rows": len(others),
+        "superseded_versions": sorted({r.apparatus_version for r in others}),
+    }
 
 
 #: ``?posture=`` values beside a posture class: the deployment's own class (the default)
@@ -324,17 +396,30 @@ def signed_map(
     repo: str,
     *,
     controls: ControlsVerdict | None = None,
+    arm: str = DEFAULT_ARM,
+    taxonomy: str = GLOBAL_CLASS_SET,
 ) -> tuple[CapabilityMap, int]:
-    """The projection's map with the repo's active sign-offs overlaid; returns the number
-    of sign-off records considered. ``controls`` is the verdict every cell is routed
-    under (``None`` = not evaluated — the forecast/sign-off callers' contract today)."""
+    """The projection's map of ONE context arm and class-set version (``arm`` /
+    ``taxonomy``; the rows are filtered again here, so a caller that passes several never
+    pools them), routed on the repo's registered readings — evaluated over ALL the repo's rows,
+    since a hierarchy reads its arms together — with the per-task oracle scores at the rows'
+    apparatus and the active sign-offs overlaid; returns the number of sign-off records
+    considered. ``controls`` is the verdict every cell is routed under (``None`` =
+    unmeasured)."""
     records = load_signoff_records(session, repo)
+    book = reading_book(session, repo, rows_in(session, repo))
+    rs = rows_for_taxonomy_param(rows_for_arm_param(rows, arm), taxonomy)
+    if arm == ARM_STANDARD:
+        rs = rows_on_standard_arms(rs, projection, book)
+    versions = sorted({r.apparatus_version for r in rs})
+    apparatus = versions[0] if len(versions) == 1 else APPARATUS_VERSION
     cmap = build_capability_map(
-        rows,
+        rs,
         projection=projection,
         policy=DEFAULT_POLICY,
         controls=controls,
-        oracle_by_task=oracle_by_task(session, repo),
+        oracle_by_task=oracle_by_task(session, repo, apparatus=apparatus),
+        readings=book,
     )
     return apply_signoffs_to_map(cmap, records, repo=repo), len(records)
 
@@ -365,7 +450,9 @@ def economics_out(e: Economics) -> EconomicsOut:
 
 
 def cell_out(
-    c: CapabilityCell, deliveries: Mapping[tuple[str, str], DeliveryCounts] | None = None
+    c: CapabilityCell,
+    deliveries: Mapping[tuple[str, str], DeliveryCounts] | None = None,
+    readings: Sequence[Reading] = (),
 ) -> CapabilityCellSplitOut:
     """A MEASURED cell as the API serves it: key, stats, decision, split, tier, apparatus —
     and, from the factory evidence chain, how many pull requests were delivered from the
@@ -376,10 +463,11 @@ def cell_out(
     n_delivered, n_merged = delivery_counts_matching(
         deliveries or {}, c.key.capability_class, c.key.size
     )
+    key: dict[str, Any] = {**c.key.to_dict(), **v2_cell_fields(c, readings)}
     return CapabilityCellSplitOut(
         n_delivered=n_delivered,
         n_merged=n_merged,
-        **c.key.to_dict(),
+        **key,
         label=c.label,
         n=s.n,
         clean=s.clean,
@@ -429,6 +517,64 @@ def cell_out(
     )
 
 
+def v2_cell_fields(c: CapabilityCell, readings: Sequence[Reading] = ()) -> dict[str, Any]:
+    """routing.v2's fields of a measured cell: its arm, class-set version and apparatus, the
+    distinct-change counts, what its reading says about the arm, every shortfall, every arm
+    of the reading, and the cell's standard ("no proven standard" is ``standard: null``)."""
+    assert c.stats is not None and c.decision is not None
+    s, d = c.stats, c.decision
+    v = c.verdict
+    first = d.shortfalls[0] if d.shortfalls else None
+    reading = c.reading
+    spent = (
+        budget_spent(readings or [reading.reading], reading.reading.budget_key)
+        if reading is not None
+        else 0.0
+    )
+    standard = reading.standard if reading is not None and reading.standard else None
+    ceiling = reading is not None and reading.ceiling
+    chain_top = reading.chain[-1] if reading is not None and reading.chain else None
+    label = (
+        f"standard {standard}"
+        if standard
+        else f"ceiling {chain_top}, forward-unvalidated"
+        if ceiling and chain_top
+        else "no proven standard"
+    )
+    return {
+        "context_arm": s.context_arm,
+        "taxonomy": s.taxonomy,
+        "apparatus_version": s.apparatus_version,
+        "n_tasks_eligible": s.n_tasks_eligible,
+        "task_clean": s.task_clean,
+        "task_ci_low": round(s.task_ci.low, 4),
+        "task_ci_high": round(s.task_ci.high, 4),
+        "n_unsealed": s.n_unsealed,
+        "look_state": d.look_state,
+        "reading_id": d.reading_id,
+        "counted": d.counted,
+        "counted_clean": d.counted_clean,
+        "counted_ci_low": round(v.ci.low, 4) if v is not None else 0.0,
+        "counted_ci_high": round(v.ci.high, 4) if v is not None else 1.0,
+        "needed": d.needed,
+        "next_look": d.next_look,
+        "oracle_scored_tasks": d.oracle_scored_tasks,
+        "oracle_share": round(d.oracle_share, 4),
+        "shortfalls": [x.to_dict() for x in d.shortfalls],
+        "reading": None if reading is None else reading.to_dict(),
+        "provenance": {k: list(v) for k, v in (c.provenance or {}).items()},
+        "standard": {
+            "standard": standard or (chain_top if ceiling else None),
+            "ceiling": bool(ceiling and not standard),
+            "label": label,
+            "next": first.next if first is not None else "",
+            "next_count": first.count if first is not None else 0,
+            "budget": reading.reading.budget if reading is not None else cell_error_budget(),
+            "spent": round(spent, 6),
+        },
+    }
+
+
 def _distinct(rows: Sequence[GradeRow], field: str) -> list[str]:
     """The distinct values of a cell field over ``rows`` (sizes in tier order)."""
     values = {getattr(r, field) for r in rows}
@@ -467,25 +613,22 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     apparatus: str = Query(default="current", max_length=32),
     posture: str = Query(default=POSTURE_DEPLOYMENT, max_length=64),
     checks: str = Query(default=CHECKS_CURRENT, pattern=CHECKS_PATTERN),
+    arm: str = Query(default=DEFAULT_ARM, max_length=128),
+    taxonomy: str = Query(default=GLOBAL_CLASS_SET, max_length=64),
 ) -> CapabilityMapWithControlsOut:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by)
-    pf = filter_posture(
-        db,
-        repo,
-        rows_for_arm(
-            factory,
-            repo,
-            rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus),
-            checks,
-        ),
-        posture,
-        settings,
-    )
+    every = list(DbLedger(factory).rows(repo=repo))
+    by_mode = rows_for_apparatus(rows_for_mode(every, mode), apparatus)
+    stamped = rows_for_taxonomy_param(rows_for_arm_param(by_mode, arm), taxonomy)
+    pf = filter_posture(db, repo, rows_for_arm(factory, repo, stamped, checks), posture, settings)
     rows = pf.rows
-    controls = latest_controls_verdict(db, repo)
-    cmap, n_signoffs = signed_map(rows, projection, db, repo, controls=controls)
+    controls = latest_controls_verdict(db, repo, apparatus=resolve_apparatus(apparatus))
+    cmap, n_signoffs = signed_map(
+        rows, projection, db, repo, controls=controls, arm=arm, taxonomy=taxonomy
+    )
+    readings = load_readings(db, repo)
     cells = [c for c in cmap.cells if c.measured]
     deliveries = FactoryHome(settings.home, repo).delivery_counts()
     by_route = {route: len(cs) for route, cs in cmap.by_route().items()}
@@ -502,7 +645,7 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
         sizes=_distinct(rows, "size"),
         languages=_distinct(rows, "language"),
         models=_distinct(rows, "model"),
-        cells=[cell_out(c, deliveries) for c in cells],
+        cells=[cell_out(c, deliveries, readings) for c in cells],
         summary=CapabilitySummary(
             trusted_autonomy_coverage=tac,
             earned_coverage=earned,
@@ -523,6 +666,11 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
         policy=RoutingPolicyWithControlsOut(**cmap.policy.to_dict()),
         controls=controls_out(controls),
         economics=economics_out(fold_economics(rows)),
+        arm=arm,
+        arms=[a for a in arms_present(by_mode) if a],
+        taxonomy=taxonomy,
+        taxonomies=sorted({r.taxonomy for r in by_mode if r.taxonomy}),
+        apparatus=apparatus_block(every, apparatus),
     )
 
 
@@ -543,24 +691,19 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
     apparatus: str = Query(default="current", max_length=32),
     posture: str = Query(default=POSTURE_DEPLOYMENT, max_length=64),
     checks: str = Query(default=CHECKS_CURRENT, pattern=CHECKS_PATTERN),
+    arm: str = Query(default=DEFAULT_ARM, max_length=128),
+    taxonomy: str = Query(default=GLOBAL_CLASS_SET, max_length=64),
 ) -> RoutesWithControlsResponse:
     del viewer
     get_repo_or_404(db, repo)
     projection = parse_by(by) if by else PROJECTION_CELL
+    by_mode = rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus)
+    stamped = rows_for_taxonomy_param(rows_for_arm_param(by_mode, arm), taxonomy)
     rows = filter_posture(
-        db,
-        repo,
-        rows_for_arm(
-            factory,
-            repo,
-            rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), mode), apparatus),
-            checks,
-        ),
-        posture,
-        settings,
+        db, repo, rows_for_arm(factory, repo, stamped, checks), posture, settings
     ).rows
-    controls = latest_controls_verdict(db, repo)
-    cmap, _ = signed_map(rows, projection, db, repo, controls=controls)
+    controls = latest_controls_verdict(db, repo, apparatus=resolve_apparatus(apparatus))
+    cmap, _ = signed_map(rows, projection, db, repo, controls=controls, arm=arm, taxonomy=taxonomy)
     decisions: list[RouteDecisionWithControlsOut] = []
     for c in cmap.cells:
         if c.decision is None or c.stats is None:
@@ -589,6 +732,9 @@ def routes(  # noqa: PLR0917 — FastAPI dependencies + query params
         policy=RoutingPolicyWithControlsOut(**cmap.policy.to_dict()),
         decisions=decisions,
         controls=controls_out(controls),
+        arm=arm,
+        arms=[a for a in arms_present(by_mode) if a],
+        taxonomy=taxonomy,
     )
 
 

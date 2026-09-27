@@ -53,4 +53,11 @@ __version__ = "2.0.0a1"
 #: its posture labels; in a provisioned posture belt 1b covers the dependency closure).
 #: Rows stamped 2.2 keep their meaning and are never re-derived; a 2.2 row graded by the
 #: docker executor is excluded from rates and counted ``unqualified_posture``.
-APPARATUS_VERSION = "2.3"
+#: 2.3 → 2.4 (2026-09-27, ADR-0025 as ADR-0026 amends it: routing.v2 — a route reads one
+#: apparatus, one context arm and one class-set version; each distinct change counts once, by
+#: its first observed attempt; a cell delivers only on its standard arm, read by a registered
+#: reading under the look rule in the sealed posture, with a measured oracle and controls at
+#: that apparatus; every measured row stamps ``failure_kind``, ``lint_reason``,
+#: ``change_id``, ``context_arm`` and ``taxonomy``; ``mutation.v2`` scores). Rows stamped 2.3
+#: keep their meaning, are never re-graded and license nothing at 2.4.
+APPARATUS_VERSION = "2.4"

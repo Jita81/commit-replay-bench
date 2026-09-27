@@ -176,8 +176,11 @@ def test_qualify_produces_a_gold_clean_task(
     # (G-954: one task per distinct change), and nothing else
     assert set(task.labels) == {"posture_id", "posture_class", m.LABEL_CHANGE_ID}
     assert task.labels[m.LABEL_CHANGE_ID] == m.change_identity(pyrepo.repo, pyrepo.feat_sha)
-    # the hand-built task the grade tests use is exactly what the miner measures
-    assert task.with_(labels={}) == pyrepo.feat_task()
+    # the hand-built task the grade tests use is exactly what the miner measures, its change
+    # identity included (a 2.4 row names it)
+    assert task.with_(labels={m.LABEL_CHANGE_ID: task.labels[m.LABEL_CHANGE_ID]}) == (
+        pyrepo.feat_task()
+    )
     # the mining worktree is gone
     assert not (scratch / f"mine-{pr.REPO_NAME}-{pyrepo.feat_sha[:10]}").exists()
     kinds = [k for k, _ in events]

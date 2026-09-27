@@ -79,6 +79,7 @@ from crb.core.ledger import (
     GradeRow,
     JsonlLedger,
     builder_stop_reason,
+    context_arm_of_factory_author,
     posture_labels,
     row_labels_at_write,
 )
@@ -96,6 +97,7 @@ from crb.factory.testfirst import (
     AuthoredTest,
     RedProof,
     assert_distinct_identity,
+    canonical_model,
     worktree_at,
     write_authored,
 )
@@ -327,6 +329,24 @@ class BuildResult:
         }
 
 
+def factory_row_arm(test_author: str) -> str:
+    """A factory row's context arm (ADR-0026 item 1): a person's failing test
+    (``operator:<name>``) is ``S2``; an authored one is ``S1@<canonical model>`` — the author's
+    model through :func:`~crb.factory.testfirst.canonical_model`, so a provider label or a
+    dated id never makes one model two authors. No ``+L``: a factory brief does not carry the
+    loop's overlay today (stream F's composer adds it only when the standard arm does)."""
+    author = (test_author or "").strip()
+    if author.startswith("operator:") or ":" not in author:
+        return context_arm_of_factory_author(author or "operator:unknown")
+    return context_arm_of_factory_author(author, canonical_model(author.split(":", 1)[1]))
+
+
+def factory_context_arm(labels: Mapping[str, str]) -> str:
+    """The arm of a factory row from the labels it carries (``test_author``, or an explicit
+    ``context_arm`` the brief composer stamped)."""
+    return str(labels.get("context_arm") or "") or factory_row_arm(labels.get("test_author", ""))
+
+
 def factory_row(
     task: TaskSpec,
     result: GradeResult,
@@ -356,6 +376,8 @@ def factory_row(
         builder_error=error,
         stop_reason=builder_stop_reason(builder),
         pin_kind_below_v2=False,
+        process_step=PROCESS_FACTORY,
+        context_arm=factory_context_arm(dict(labels)),
     )
     return GradeRow(
         repo=task.repo,

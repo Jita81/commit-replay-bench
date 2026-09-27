@@ -215,6 +215,7 @@ def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> No
         LABEL_FAILURE_KIND,
         LABEL_LINT_REASON,
         PROCESS_REPLAY,
+        api_only_failure,
         derive_failure_kind,
         lint_only_failure,
     )
@@ -230,6 +231,7 @@ def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> No
             builder_error=labels.get("builder_error", ""),
             stop_reason=labels.get("stop_reason", ""),
             lint_only=lint_only_failure(fields),
+            api_only=api_only_failure({**fields, "api_stable": labels.get("api_stable")}),
         ),
     )
     reason = (
@@ -238,6 +240,31 @@ def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> No
     labels.setdefault(LABEL_LINT_REASON, reason)
     if str(fields.get("process_step") or PROCESS_REPLAY) == PROCESS_REPLAY:
         labels.setdefault(LABEL_CHANGE_ID, f"change-{fields.get('task_id', '')}")
+        # a measured replay row of 2.4 was qualified in its posture (ADR-0019 §4)
+        fields.setdefault("gold_clean", True)
+    _context_labels(fields, labels)
+
+
+def _context_labels(fields: dict[str, Any], labels: dict[str, str]) -> None:
+    """ADR-0026 items 1 and 9 (stream R): a row of 2.4 carries the context arm its brief
+    carried and the class-set version its class was read under — decided here as the writer
+    decides them (``context_arm_for`` over the step, the mode and the loop's ``learn`` label;
+    a factory row from its ``test_author``), where the test did not name them."""
+    from crb.core.context_arm import LABEL_CONTEXT_ARM, context_arm_for, loop_on
+    from crb.core.ledger import PROCESS_FACTORY, context_arm_of_factory_author
+    from crb.core.taxonomy import GLOBAL_CLASS_SET, LABEL_TAXONOMY
+
+    if LABEL_CONTEXT_ARM not in labels:
+        if str(fields.get("process_step") or "") == PROCESS_FACTORY:
+            arm = context_arm_of_factory_author(labels.get("test_author", "fixture:author"))
+            labels[LABEL_CONTEXT_ARM] = arm + ("+L" if loop_on(labels) else "")
+        else:
+            labels[LABEL_CONTEXT_ARM] = context_arm_for(
+                process_step="replay",
+                mode=str(fields.get("mode") or "sighted"),
+                loop=loop_on(labels),
+            )
+    labels.setdefault(LABEL_TAXONOMY, GLOBAL_CLASS_SET)
 
 
 def posture_result(*args: Any, **kw: Any) -> GradeResult:

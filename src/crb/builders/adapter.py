@@ -134,7 +134,12 @@ from crb.core.finish_gate import (
 )
 from crb.core.formatting import FormatRun, formatters_for, run_formatters
 from crb.core.grade import MODE_SIGHTED
-from crb.core.ledger import GradeRow, JsonlLedger
+from crb.core.ledger import (
+    BUILDER_EXECUTOR_SEALED,
+    LABEL_BUILDER_EXECUTOR,
+    GradeRow,
+    JsonlLedger,
+)
 from crb.core.lint import LintPlan, fix_commands, run_plan
 from crb.core.prevention import LearningSnapshot
 from crb.core.redact import redact_and_cap_head
@@ -781,7 +786,11 @@ def build_fn_for(
                 brief = replace(brief, playbook=tuple(texts))
             learn_labels = learning.task_labels(ids, dropped, texts)
         rung_budget = budget_for_rung(rung, budget)
-        spend_labels: dict[str, str] = {}
+        # where the builder ran: with the posture class it says whether the row was graded in
+        # the SEALED posture a registered reading counts (ADR-0026 item 2); kept from 2.4
+        spend_labels: dict[str, str] = {
+            LABEL_BUILDER_EXECUTOR: BUILDER_EXECUTOR_SEALED if sealed else "host"
+        }
         if budget_for_task is not None:
             rung_budget, calibrated = budget_for_task(task, mode, rung, rung_budget)
             spend_labels = dict(calibrated)

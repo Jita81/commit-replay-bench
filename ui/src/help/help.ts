@@ -245,9 +245,9 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Every route decision for one repository with its reason and the policy version that produced it. The rule is published and the same for every cell; a deployment may tighten it, never loosen it under the same name.',
     next: {
       viewer: 'Read the reason code beside each cell; the policy card shows the thresholds in force.',
-      operator: 'A calibrate reason names what is missing (n, point, lower bound, controls). A human reason will not change with more attempts: strengthen the tests or run the controls.',
+      operator: 'A calibrate reason names what is missing: a reading to register, commits still needed to the next look, the oracle, the controls or the sealed posture. A human reason will not change with more attempts: strengthen the tests, run the controls or register a richer arm.',
     },
-    numbers: 'Route counts are cells, not attempts. Thresholds are the policy’s: n ≥ 10, point ≥ 0.90, Wilson lower ≥ 0.80, oracle ≥ 0.80, controls passed with 0 escapes and a majority constructed.',
+    numbers: 'Route counts are cells, not attempts. The thresholds are the ones on the policy card, read from the served policy with its sentence: the look rule, the error budget per cell, the oracle clauses and the controls gate.',
     terms: ['cell', 'route_gate', 'reason_code', 'deliver', 'calibrate', 'human', 'granularize', 'wilson', 'oracle_strength', 'controls_escape', 'belt'],
     readMore: [
       { to: 'EVIDENCE-AND-CLAIMS#6-permitted-claim-shapes-by-maturity', label: 'What a route licenses' },

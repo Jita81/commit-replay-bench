@@ -213,6 +213,7 @@ class TestFactory:
             "ledger",
             "oracle",
             "prevention",
+            "readings",
             "repos",
             "reviews",
             "runs",

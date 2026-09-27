@@ -107,6 +107,7 @@ from crb.core.learn import (
     triage_refusals,
 )
 from crb.core.routing import DEFAULT_POLICY
+from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.backlog import Backlog, BacklogError, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
@@ -115,7 +116,8 @@ from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, S
 from crb.server.factory_state import FactoryHome
 from crb.server.routes.capability import CHECKS_CURRENT, rows_for_arm
 from crb.server.routes.factory import _next_item_id, _refuse_if_run_active
-from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict
+from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict, oracle_by_task
+from crb.server.routes.readings import reading_book, rows_on_standard_arms
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.runs import (
     append_system_event,
@@ -242,12 +244,27 @@ def derive_strengthen(
             detail={"allowed": sorted(PROJECTIONS)},
         )
     # the repository's own checks arm: a cell never pools two arms (ADR-0024)
-    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
+    every = list(DbLedger(factory).rows(repo=repo))
+    rows = rows_for_arm(factory, repo, every, CHECKS_CURRENT)
+    # one reading: the current apparatus and global class set, each cell on its standard arm
+    # (ADR-0025 item 1, ADR-0026) — never two pooled
+    book = reading_book(db, repo, every)
+    rows = rows_on_standard_arms(
+        [
+            r
+            for r in rows
+            if r.apparatus_version == APPARATUS_VERSION and r.taxonomy in ("", GLOBAL_CLASS_SET)
+        ],
+        PROJECTIONS[by],
+        book,
+    )
     cmap = build_capability_map(
         rows,
         projection=PROJECTIONS[by],
         policy=DEFAULT_POLICY,
         controls=latest_controls_verdict(db, repo),
+        oracle_by_task=oracle_by_task(db, repo),
+        readings=book,
     )
     return strengthening_backlog(
         cmap,
