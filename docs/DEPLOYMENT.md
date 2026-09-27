@@ -365,12 +365,13 @@ is not measured yet **[hypothesis — about 1 to 3 minutes per cobra task with a
 build cache, extrapolated from run `0c44ff24…`'s attempt latencies; the first live qualify
 run replaces this with a measured figure]**.
 
-The `sandbox-images` job is meant to block a merge to `main` exactly as `container` does —
-it has no `continue-on-error` and fails on any skipped smoke test — but a job blocks only
-when its context is in the branch's required status checks, which is a repository setting,
-not a workflow file **[measured — `GET /repos/Jita81/commit-replay-bench/branches/main/protection`,
-2026-09-22: the context is absent; a red `sandbox-images` would not block a merge]**. The
-repository administrator adds it once:
+The `sandbox-images` job blocks a merge to `main` exactly as `container` does — it has no
+`continue-on-error` and fails on any skipped smoke test — because its context is in the
+branch's required status checks, which is a repository setting, not a workflow file
+**[measured — `GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
+2026-09-27: 16 contexts, `sandbox-images`, `ui-unit`, `ui-smoke`, `dod`, `claims` and `sbom`
+among them; n = 1 reading; apparatus n/a, a repository setting, not a graded number]**. A
+repository administrator restores or re-creates the list with one call:
 
 ```bash
 gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
@@ -384,9 +385,17 @@ gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/requir
  "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
  "dod (every route, journey and stream has its definition of done; evidence resolves)",
  "claims (every quantified sentence on a covered page carries its tag)",
- "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
+ "sandbox-images (build + hadolint + smoke each reference sandbox image)",
+ "sbom (CycloneDX)"]}
 JSON
 ```
+
+`test (py3.12)`, `test (py3.13)` and `walkthrough (browser, live stack, tier 1)` are
+aggregators: the work runs in parallel parts (`test shard (py3.12, 1 of 6)` …, the walkthrough
+story and its screens shards) and the aggregator passes only when every part passed, the
+suite's parts together ran every test exactly once, and the union's coverage is at least 70 %
+(P-051, P-053). Never add a part to the list — its name changes whenever the job is split
+differently, and the aggregator's does not.
 
 A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
 characters — a `name:` longer than that can never satisfy the context it is required under

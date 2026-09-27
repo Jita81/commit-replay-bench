@@ -11,16 +11,22 @@
 #   (commit-subjects lives in commit-subjects.yml: it must re-run when a pull request's
 #             title is edited, and an edit should not re-run this whole workflow)
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
-#   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
+#   test-shard     the hermetic suite (pytest -m "not sandbox_images") split six ways per Python
+#                  version (3.12, 3.13) by scripts/ci_test_shards.py — whole test files,
+#                  longest-first over the measured seconds in scripts/ci_test_weights.json, so
+#                  every shard computes the same partition and the six are balanced. Each shard
+#                  uploads its report (every id it collected, the ids it ran) and its coverage
+#                  data. The shards are not required contexts
+#   test           the required contexts "test (py3.12)" and "test (py3.13)": an aggregator per
+#                  version that passes only when every shard passed, the six reports prove every
+#                  collected test ran in exactly one non-empty shard (`ci_test_shards.py verify`),
+#                  and the shards' combined coverage is >= 70 — the single job's gate, on the
+#                  same data. It ran as one job per version until py3.13 took 58 of its 60
+#                  minutes on PR #57 (docs/PREVENTION.md P-053)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
-#             waiting for someone to run the gates by hand before a release. Both UI jobs run
-#             on every pull request, and a red one must be fixed like any other gate — but
-#             neither context is on main's required-checks list yet, so its failure does not
-#             by itself stop a merge. Only a repository administrator can add them; both
-#             contexts belong on that list alongside `container` (docs/DEPLOYMENT.md §3.4
-#             names the branch-protection call, README.md "Status" records the current list)
+#             waiting for someone to run the gates by hand before a release
 #   ui-smoke  the mocked Playwright smoke spec (ui/e2e/smoke.spec.ts) over the built bundle:
 #             the axe sweep of /login, the index redirect signed in and signed out, and the
 #             end-to-end 404. No server and no model — `page.route` answers every API call
@@ -38,13 +44,9 @@
 #                  the sandbox + sealed-builder suites on the python one, and the dependency
 #                  provisioning suites (ADR-0019: a real fetch from an offline mirror into a
 #                  sealed set, then each fixture offline on its image); a skip in the
-#                  smoke fails the job. Always runs, and is not on main's required-checks list
-#                  yet, so its failure does not by itself stop a merge: the context
-#                  "sandbox-images (build + hadolint + smoke each reference sandbox image)"
-#                  belongs on that list alongside `container`
-#                  (docs/DEPLOYMENT.md §3.4 names the branch-protection call). The `test` job
-#                  deselects the `sandbox_images` marker: these tests build images, and this
-#                  job builds each exactly once with the GHA layer cache
+#                  smoke fails the job. Always runs, and blocks a merge like `container`. The
+#                  `test-shard` jobs deselect the `sandbox_images` marker: these tests build
+#                  images, and this job builds each exactly once with the GHA layer cache
 #   walkthrough    the required context "walkthrough (browser, live stack, tier 1)": an aggregator
 #                  that passes only when `walkthrough-story` and every `walkthrough-screens`
 #                  shard passed (a failed, cancelled or skipped part fails it), so the whole
@@ -57,12 +59,20 @@
 #   walkthrough-screens  11-screens (every route x persona x width) split four ways by persona
 #                  (CRB_E2E_SCREENS_SHARD=k/4), each shard on a stack of its own that the
 #                  spec seeds through the API; the four run in parallel beside the story
-#   job budget     `test`, `walkthrough-story` and `walkthrough-screens` start a clock in their first
-#                  step and end with scripts/ci_job_budget.py: past 80 % of the job's own
-#                  timeout-minutes it writes an alarm into the job summary, and the walkthrough
-#                  jobs fail — a job that creeps to its timeout blocks every merge, so it is
-#                  split before it gets there (docs/PREVENTION.md P-051). The test job only
-#                  warns: its py3.13 leg already runs past 80 % until the suite is split (G-708)
+#   job budget     `test-shard`, `test`, `walkthrough-story` and `walkthrough-screens` start a
+#                  clock in their first step and end with scripts/ci_job_budget.py: past 80 % of
+#                  the job's own timeout-minutes it writes an alarm into the job summary and the
+#                  job fails — a job that creeps to its timeout blocks every merge, so it is
+#                  split before it gets there (docs/PREVENTION.md P-051, P-053). No guard only
+#                  warns: tests/test_ci_job_budget.py fails the build if one does
+#
+# Required contexts: every job in this file except `test-shard`, `walkthrough-story` and
+# `walkthrough-screens` (the parts behind the `test` and `walkthrough` aggregators) is on main's
+# required-checks list — lint, types, code-map, dod, claims, layers, test (py3.12), test (py3.13),
+# ui-unit, ui-smoke, security, sbom, test-postgres, container, sandbox-images and walkthrough:
+# 16 contexts, read from the repository setting on 2026-09-27. The list is a repository setting
+# only an administrator can change (docs/DEPLOYMENT.md §3.4 names the call); a part of a split
+# job is never added to it — its name changes with the split, the aggregator's does not.
 #
 # Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
 # mypy and ruff are pinned exactly in the dev extra and moved by the same Dependabot; the
@@ -223,17 +233,25 @@ jobs:
       - name: lint-imports (crb.core stdlib-only; layers downward only)
         run: .venv/bin/lint-imports
 
-  test:
-    name: test (py${{ matrix.python }})
+  test-shard:
+    # The hermetic suite, split six ways per Python version. It ran as one job per version
+    # until py3.13 took 58 of its 60 minutes on PR #57 (P-053). Each shard runs the SAME
+    # command the single job ran — `-m "not sandbox_images"` and nothing else deselected —
+    # plus the shard plugin, which keeps only this shard's test files: longest-first over the
+    # measured per-file seconds in scripts/ci_test_weights.json, so the six are balanced and
+    # every shard computes the same partition. ~9 min of tests + ~2 min setup per shard,
+    # estimated from PR #57's two test-job logs: under half of this budget. No shard enforces
+    # coverage (a sixth of the suite covers less than the whole): `test (py…)` combines the
+    # six shards' coverage data and fails under 70 % on the union, exactly as the single job
+    # did. The shards are not required contexts — the `test` aggregators are.
+    name: test shard (py${{ matrix.python }}, ${{ matrix.shard }} of 6)
     runs-on: ubuntu-latest
-    # the hermetic suite takes 23–29 min on the hosted runner (py3.13 is the slower); 30 tipped
-    # over twice on 2026-09-17 at 98 % — headroom until the suite is split and parallelised
-    # a job-time budget, not a quality gate: py3.13 hit 45 min at 98% (run 36212115018); no test is skipped or weakened
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       # A toolchain warm-up (npm install, Maven resolution, docker build) that fails here
       # is a repository defect, not missing infrastructure: fail, never skip.
@@ -266,13 +284,97 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: v3.16.4
-      - name: pytest (coverage >= 70)
+      - name: pytest (this shard's test files; coverage data for the union)
         # `sandbox_images` builds the reference sandbox images; the sandbox-images job builds
         # each once (cached) and runs exactly those tests on it — nothing is skipped in CI.
+        # --cov-fail-under=0 only because the threshold is the union's, enforced in `test`.
+        # The shard options take `=`: pytest reads its config file before it loads the
+        # plugin, so a value after a space would be taken for a test path (the plugin refuses).
+        env:
+          PYTHONPATH: scripts
         run: >-
           .venv/bin/pytest -q -m "not sandbox_images"
-          --cov=crb --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
-          --cov-fail-under=70
+          -p ci_test_shards --shard=${{ matrix.shard }}/6
+          --shard-report=shard-report/shard-${{ matrix.shard }}.json
+          --cov=crb --cov-branch --cov-report= --cov-fail-under=0
+      - name: Keep this shard's report and coverage data for `test (py${{ matrix.python }})`
+        if: always()
+        run: |
+          mkdir -p shard-report
+          if [ -f .coverage ]; then mv .coverage "shard-report/shard-${{ matrix.shard }}.coverage"; fi
+          ls -la shard-report
+      # not continue-on-error: without every shard's report and coverage data the aggregator
+      # can prove neither the partition nor the 70 %, and it fails
+      - name: Upload the shard report + coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-shard-py${{ matrix.python }}-${{ matrix.shard }}
+          path: shard-report
+          if-no-files-found: error
+          retention-days: 1
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 30 --mode fail
+
+  test:
+    # The required contexts "test (py3.12)" and "test (py3.13)": branch protection matches the
+    # name character for character, so the split shards report under names of their own and
+    # this job carries the required one. It passes only when (1) every shard succeeded — a
+    # failed, cancelled or skipped shard fails it; `needs` on a matrix job waits for every
+    # leg of BOTH versions, so a red py3.13 shard also fails `test (py3.12)`: stricter, never
+    # looser; (2) this version's six reports prove the shards are one exact partition of the
+    # collected suite — every test in exactly one shard, none empty, all six collecting the
+    # same suite (scripts/ci_test_shards.py verify); (3) the six shards' coverage data,
+    # combined, is at least 70 % — the single job's gate, on the same data. `if: always()`
+    # so it runs, and fails, when a shard failed or was cancelled: a skipped required check
+    # does not block a merge. tests/test_ci_test_shards.py holds all of this in place.
+    name: test (py${{ matrix.python }})
+    needs: [test-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Every shard passed (both Python versions)
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'to_entries | length > 0 and all(.value.result == "success")'
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (dev extras — the coverage the shards measured with)
+        run: |
+          uv venv -q .venv --python ${{ matrix.python }}
+          uv pip install -q -e '.[dev]' --python .venv/bin/python
+      - name: Download every shard's report + coverage data (this Python version)
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-shard-py${{ matrix.python }}-*
+          path: shards
+          merge-multiple: true
+      - name: Every test ran in exactly one shard (the partition proof)
+        run: >-
+          python3 scripts/ci_test_shards.py verify --shards 6 --python ${{ matrix.python }}
+          shards/shard-1.json shards/shard-2.json shards/shard-3.json
+          shards/shard-4.json shards/shard-5.json shards/shard-6.json
+      - name: coverage >= 70 on the union of the shards
+        run: |
+          .venv/bin/coverage combine --keep shards/shard-*.coverage
+          .venv/bin/coverage report --fail-under=70
+          .venv/bin/coverage xml -o coverage.xml
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -282,11 +384,9 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
           retention-days: 7
-      # warn, not fail: py3.13 ran 58 of its 60 minutes on PR #57, so failing past 80 % would
-      # block every merge until the suite is split and parallelised (G-708, docs/PREVENTION.md)
-      - name: Job budget (warns in the summary past 80 % of timeout-minutes)
+      - name: Job budget (fails past 80 % of timeout-minutes)
         if: always()
-        run: python3 scripts/ci_job_budget.py --timeout-minutes 60 --mode warn
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 10 --mode fail
 
   ui-unit:
     name: ui-unit (tsc -b + vitest, the hint ratchet included)

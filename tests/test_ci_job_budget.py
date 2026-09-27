@@ -13,10 +13,11 @@ What it is:   Tests of the job-budget guard and of the CI configuration that run
 What it does: Pins the guard's arithmetic, its summary and annotation, its exit codes (fail
               mode exits 1 past the threshold, warn mode 0, a missing, unreadable, ``nan`` or
               ``inf`` start stamp 2 in either mode), and that ``ci.yml`` starts the clock as
-              the first step of the ``test``, ``walkthrough-story`` and
+              the first step of the ``test-shard``, ``test``, ``walkthrough-story`` and
               ``walkthrough-screens`` jobs and runs the guard last, ``if: always()``, with the
               job's OWN ``timeout-minutes`` (so a raised timeout cannot leave the guard
-              measuring the old one) — failing for the walkthroughs. For the split:
+              measuring the old one) — failing, in every job that runs it (P-053: none
+              warns). For the split:
               ``walkthrough-story`` runs every spec except 11-screens, ``walkthrough-screens``
               runs only 11-screens with a shard per matrix value ``k/N`` for k = 1..N, and N
               is at most the spec's persona count, so no shard is empty and together they are
@@ -31,7 +32,8 @@ Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/ci_job_budget.py (the guard), .github/workflows/ci.yml (the jobs),
               ui/e2e/walkthrough/11-screens.spec.ts (the shard selection it reads),
-              docs/PREVENTION.md (P-051)
+              docs/PREVENTION.md (P-051, P-053), tests/test_ci_test_shards.py (the Python
+              suite's split, held the same way)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it reads this repository's own CI); a long CI job
               is added (start its clock and add it to ``GUARDED``); the walkthrough is split
@@ -56,9 +58,15 @@ CI = ROOT / ".github" / "workflows" / "ci.yml"
 SCREENS_SPEC = ROOT / "ui" / "e2e" / "walkthrough" / "11-screens.spec.ts"
 WALKTHROUGH_DIR = ROOT / "ui" / "e2e" / "walkthrough"
 
-#: job id → the mode its guard must run in. The walkthroughs fail; the test job warns until
-#: the suite is split (G-708) — it already runs past the threshold.
-GUARDED = {"test": "warn", "walkthrough-story": "fail", "walkthrough-screens": "fail"}
+#: job id → the mode its guard must run in. Every guarded job fails past the threshold: the
+#: suite's shards, their ``test`` aggregators and the walkthroughs. The test job only warned
+#: until the suite was split (P-053) — no guard warns now, and none may go back to warning.
+GUARDED = {
+    "test-shard": "fail",
+    "test": "fail",
+    "walkthrough-story": "fail",
+    "walkthrough-screens": "fail",
+}
 #: The required context's exact name: branch protection matches it character for character.
 #: It is the ``walkthrough`` job, an aggregator over every part of the split, so the whole
 #: walkthrough stays under the one context main already requires — no advisory window.
@@ -224,6 +232,16 @@ def test_each_guarded_job_starts_the_clock_first_and_ends_with_the_guard_on_its_
         )
         assert f"--mode {mode}" in last, f"{job}: the guard must run in {mode} mode"
         assert sum("ci_job_budget.py" in s for s in steps) == 1
+
+
+def test_every_job_that_runs_the_guard_is_guarded_and_none_only_warns() -> None:
+    """A job that creeps to its timeout must fail before it gets there (P-053): a guard in
+    warn mode is how the test job reached 58 of its 60 minutes with every run still green."""
+    jobs = _jobs(CI.read_text("utf-8"))
+    running = {j for j, b in jobs.items() if "scripts/ci_job_budget.py" in "\n".join(b)}
+    assert running == set(GUARDED), f"guarded in ci.yml {sorted(running)}, here {sorted(GUARDED)}"
+    assert set(GUARDED.values()) == {"fail"}
+    assert "--mode warn" not in CI.read_text("utf-8")
 
 
 def test_the_story_job_runs_every_spec_but_11_screens() -> None:

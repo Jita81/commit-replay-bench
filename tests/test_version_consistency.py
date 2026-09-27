@@ -40,7 +40,8 @@ Works with:   src/crb/core/version.py (the source of truth), deploy/helm/crb/Cha
               gate tools), docs/CONTRIBUTING.md and .github/workflows/ci.yml (the documented
               gate commands and the ones CI runs)
 Tested by:    tests/test_version_consistency.py
-Touch when:   releasing (bump all four and the CHANGELOG together — this suite is the
+Touch when:   never for a new repository (it reads this repository's own versions and CI);
+              releasing (bump all four and the CHANGELOG together — this suite is the
               checklist); never tie ``APPARATUS_VERSION`` to the package version.
 """
 
@@ -242,8 +243,50 @@ def _working_directory(lines: list[str], at: int, indent: int) -> str:
 
 
 def _ci_commands() -> list[list[str]]:
-    """Every command a ``run:`` step of ci.yml runs, as shell words (see ``_ci_steps``)."""
-    return [words for _, words in _ci_steps()]
+    """Every command a ``run:`` step of ci.yml runs, as shell words (see ``_ci_steps``), and
+    the one command the sharded suite's verdict is (see ``_sharded_suite_as_one_command``)."""
+    commands = [words for _, words in _ci_steps()]
+    return commands + _sharded_suite_as_one_command(commands)
+
+
+#: The shard plugin's options (``--opt=value``): they choose which files a shard runs, and
+#: the ``test`` aggregator proves the shards together ran every test exactly once.
+_SHARD_OPTIONS = ("--shard", "--shard-report", "--shard-weights")
+
+
+def _sharded_suite_as_one_command(commands: list[list[str]]) -> list[list[str]]:
+    """The hermetic suite runs in N ``test-shard`` jobs (P-053), each the single command the
+    ``test`` job ran before the split plus the shard plugin, with coverage enforced not per
+    shard (``--cov-fail-under=0``) but on the union, by the aggregator's ``coverage report
+    --fail-under=N``. The command whose verdict CI gives is therefore the shard command with
+    the plugin's options removed and the aggregator's threshold in place of the shard's 0 —
+    nothing else is changed, so a drift in either step still fails this suite."""
+    sharded = [c for c in commands if c[:1] == [".venv/bin/pytest"] and "ci_test_shards" in c]
+    thresholds = [
+        w.split("=", 1)[1]
+        for c in commands
+        if c[:2] == [".venv/bin/coverage", "report"]
+        for w in c
+        if w.startswith("--fail-under=")
+    ]
+    if not sharded:
+        return []
+    assert len(sharded) == 1, "one shard command, run by every shard"
+    assert len(set(thresholds)) == 1, "the aggregator enforces one coverage threshold"
+    # a GitHub expression (``${{ matrix.shard }}``) is one value, though shlex split it
+    words: list[str] = []
+    for w in sharded[0]:
+        if words and "${{" in words[-1] and "}}" not in words[-1].rsplit("${{", 1)[1]:
+            words[-1] += " " + w
+        else:
+            words.append(w)
+    i = words.index("-p")
+    assert words[i + 1] == "ci_test_shards"
+    del words[i : i + 2]
+    words = [w for w in words if w.split("=", 1)[0] not in _SHARD_OPTIONS]
+    assert words.count("--cov-fail-under=0") == 1, "a shard leaves the threshold to the union"
+    words[words.index("--cov-fail-under=0")] = f"--cov-fail-under={thresholds[0]}"
+    return [words]
 
 
 def _documented_gates() -> list[list[str]]:

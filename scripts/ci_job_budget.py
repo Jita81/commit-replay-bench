@@ -16,8 +16,10 @@ timeout again (docs/PREVENTION.md P-051).
 
 It always writes the job's elapsed time and its share of the timeout to the job summary. Past
 the threshold (``--threshold``, default 0.8) it adds an unmissable block to the summary and an
-annotation: ``--mode fail`` exits 1 (the walkthrough jobs), ``--mode warn`` exits 0 with a
-``::warning`` (the test job, which is already past it until the suite is split — G-708). A
+annotation: ``--mode fail`` exits 1 (every job that runs it: the suite's shards and their
+``test`` aggregators since the split, P-053, and the walkthrough jobs); ``--mode warn`` exits 0
+with a ``::warning`` — kept for a job being brought under budget, never left there
+(tests/test_ci_job_budget.py fails the build while any job only warns). A
 missing or unreadable start stamp (``nan`` and ``inf`` included) exits 2 in either mode: a
 guard that cannot measure must not read as a pass.
 
@@ -34,10 +36,10 @@ How:          ``assess(elapsed_s, timeout_minutes, threshold)`` → ``Budget``;
               them with no global state, so the tests drive it with a fake clock.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
-Works with:   .github/workflows/ci.yml (the ``test``, ``walkthrough-story`` and
-              ``walkthrough-screens`` jobs start the clock and run this last),
-              docs/PREVENTION.md (P-051 — the class it closes), scripts/walkthrough.sh (the
-              job the class first bit)
+Works with:   .github/workflows/ci.yml (the ``test-shard``, ``test``, ``walkthrough-story``
+              and ``walkthrough-screens`` jobs start the clock and run this last),
+              docs/PREVENTION.md (P-051 and P-053 — the class it closes), scripts/walkthrough.sh
+              (the job the class first bit), scripts/ci_test_shards.py (the suite's split)
 Tested by:    tests/test_ci_job_budget.py
 Touch when:   never for a new repository (it measures this repository's own CI jobs); a CI
               job is added whose runtime grows with the product (start its clock and run this

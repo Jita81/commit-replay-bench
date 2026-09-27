@@ -162,7 +162,6 @@ tests/test_store_ledger.py
 tests/test_store_migrate.py
 tests/test_store_qualifications.py
 tests/test_store_reviews.py
-tests/test_version_consistency.py
 tests/test_worker_budget_ladder.py
 tests/test_worker_fetch.py
 tests/test_worker_label.py
