@@ -22,7 +22,8 @@ What it does: Pins, on the fixture's lopsided oracle, that the strong ``is_admin
               boundedness (``max_mutants`` truncates a stable prefix); that mutants never touch
               test files and the source is restored byte-exact even when the harness raises; that
               a RED baseline, a harness error or no mutants is ``unscoreable`` never a number; a
-              timeout counts as a kill; the seven-operator set and its hash; the provenance
+              timeout is never a kill (``mutation.v2``; tests/test_oracle_mutation_v2.py holds
+              the rest of v2); the seven-operator set and its hash; the provenance
               stamp; the ``.pyc`` mtime regression on sequential scores; and that the number is
               exactly what routing consumes.
 How:          A GOLD-state workspace on ``fixtures.oracle_repo`` → ``score_task`` with a real
@@ -377,7 +378,9 @@ def test_all_mutants_erroring_is_not_scoreable(gold_ws, task, harness):
     assert "harness error" in score.note
 
 
-def test_timeout_counts_as_a_kill_and_is_recorded(gold_ws, task, harness):
+def test_a_timeout_is_never_a_kill_and_all_timeouts_are_not_scoreable(gold_ws, task, harness):
+    """``mutation.v2`` (ADR-0025 item 7): a mutant whose run hit its wall clock is a
+    ``timeout``, counted apart — v1 counted it as a kill (external assessment A6)."""
     n = len(ms.generate_mutants(MUT_SRC, MUT_IS_ADMIN_LINES))
     hung = Run(124, frozenset(), "TIMEOUT", True)
     runner = _StubRunner([GREEN, *[hung] * n])
@@ -389,8 +392,9 @@ def test_timeout_counts_as_a_kill_and_is_recorded(gold_ws, task, harness):
         executor=harness["executor"],
         changed_lines={SRC_PATH: set(MUT_IS_ADMIN_LINES)},
     )
-    assert score.killed == score.total == n
-    assert all(o.timed_out for o in score.outcomes)  # recomputable without them
+    assert score.killed == score.total == 0 and score.timeouts == n
+    assert score.oracle_strength is None and "timeouts=" in score.note
+    assert all(o.status == ms.OUTCOME_TIMEOUT for o in score.outcomes)
 
 
 def test_score_invariant_no_strength_without_mutants():
@@ -470,7 +474,7 @@ def test_oracle_strength_stamp(weak):
 def test_provenance_stamps_apparatus_and_operator_set(strong):
     p = strong.provenance
     assert p.apparatus_version == APPARATUS_VERSION
-    assert p.mutation_version == "mutation.v1"
+    assert p.mutation_version == "mutation.v2" and p.sampler == ms.SAMPLER_HASH_RR
     assert p.language == "python" and p.mutator == "PythonAstMutator"
     assert p.operator_set_hash == ms.operator_set_hash(ms.PythonAstMutator())
     assert len(p.operator_set_hash) == 64

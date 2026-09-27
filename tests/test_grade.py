@@ -843,8 +843,10 @@ def test_poison_hidden_in_info_exclude_is_disqualified(
     executor: LocalExecutor,
 ) -> None:
     """Finding 1(a): ``echo conftest.py >> $(git rev-parse --git-path info/exclude)``
-    graded CLEAN on 842875b. The pre-flight removes the line and disqualifies; and
-    the poison is a touched file whatever the exclude file says."""
+    graded CLEAN on 842875b. The pre-flight reports the line and disqualifies; and
+    the poison is a touched file whatever the exclude file says. The clone's shared file
+    is left as found (ADR-0025 item 13: rewriting it raced every other worktree, P-056),
+    so a second grade is disqualified by the same line — never a pass."""
     (trial.root / "conftest.py").write_text(_POISON, encoding="utf-8")
     _identity_edit(trial)
     exclude = pyrepo.path / ".git" / "info" / "exclude"
@@ -855,14 +857,14 @@ def test_poison_hidden_in_info_exclude_is_disqualified(
     res = _grade(trial, feat_task, pyrepo, runner, executor, on_event=on_event)
     _assert_worktree_dq(res, ".git/info/exclude")
     assert "info/exclude" in res.dq_reason
-    assert "conftest.py" not in exclude.read_text(encoding="utf-8")  # restored
+    assert "conftest.py" in exclude.read_text(encoding="utf-8")  # read, never rewritten
     tamper = [p for a, p in events if a == "grade.tamper"]
     assert tamper[0]["kind"] == "worktree" and tamper[0]["files"] == [".git/info/exclude"]
     assert tamper[0]["violations"][0]["kind"] == "exclude_edited"
-    # a second grade of the same worktree: the exclude file is clean now, so the
-    # poison itself is what disqualifies (belt 1b) — never a pass
+    # a second grade of the same worktree: the line is still there, so it disqualifies
+    # again — never a pass
     res2 = _grade(trial, feat_task, pyrepo, runner, executor)
-    _assert_infra_dq(res2, "conftest.py")
+    _assert_worktree_dq(res2, ".git/info/exclude")
 
 
 def test_poison_hidden_in_info_exclude_is_disqualified_on_a_bound_worktree(

@@ -32,10 +32,17 @@ pass (2026-09-14, finding 1) graded three such worktrees ``clean``. So:
   hides nothing.
 * :meth:`Workspace.enforce_integrity` is the grader's pre-flight: ``HEAD`` must
   still be the parent, the worktree must still belong to the harness's clone, no
-  index entry may carry a skip-worktree or assume-unchanged bit, and the shared
-  ``info/exclude`` must hold only what the harness recorded at create time — any
-  other line is removed (the file is rewritten) and reported as tamper. A
-  violation is a disqualification, never a verdict.
+  index entry may carry a skip-worktree or assume-unchanged bit, the shared
+  ``info/exclude`` must hold only what it held at create time, and the worktree's OWN
+  excludes file must hold only the harness's patterns and still be the one its
+  ``core.excludesFile`` names — anything else is reported as tamper. A violation is a
+  disqualification, never a verdict.
+* **The harness never writes the clone's shared ``info/exclude``** (ADR-0025 item 13;
+  P-056). Its patterns (the ``node_modules`` link) go in a per-worktree excludes file
+  (``<worktree gitdir>/crb-exclude``, named by ``core.excludesFile`` in the worktree's
+  own ``config.worktree`` under ``extensions.worktreeConfig``, git 2.20 or later), so
+  concurrent worktrees of one clone never race on one file. The shared file is read by
+  the tamper check and never rewritten; the worktree's own file is restored.
 
 :meth:`Workspace.touched_files` keeps the three invariants the belts rely on:
 
@@ -73,14 +80,17 @@ What it does: Names a worktree by an opaque per-worktree token (``opaque_dest``,
               to git's own views (index bits, a moved HEAD, an exclude rule) can hide a file;
               proves the target tests are byte-identical to the commit's; reports every
               git-view violation as tamper evidence rather than a verdict.
-How:          ``create`` → ``git worktree add`` at the parent + per-language fixups recorded
+How:          ``create`` → ``git worktree add`` at the parent + the worktree's own excludes
+              file (``core.excludesFile`` per worktree) + per-language fixups recorded
               in ``harness_files`` → the builder edits → ``enforce_integrity`` (HEAD, gitdir,
-              index bits, ``info/exclude``) → ``touched_files`` walks the tree hashing every
+              index bits, the shared ``info/exclude`` read and the own excludes file restored)
+              → ``touched_files`` walks the tree hashing every
               file as a git blob and honours only ignore rules tracked at the parent →
               ``tests_byte_identical`` / ``diff_stats`` → ``remove``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
-              docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+              docs/adr/0006-zero-raw-retention-and-evidence-packs.md; ADR-0025 item 13 (the
+              per-worktree excludes file, stream G)
 Works with:   src/crb/core/grade.py (the belts that read every view here), src/crb/core/git.py
               (the argv-only git wrapper), src/crb/core/mine.py (RED / baseline / gold on a
               workspace), src/crb/core/run.py (creates one per attempt), src/crb/core/spec.py
@@ -107,6 +117,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -158,6 +169,13 @@ _GITLINK_MODE = "160000"
 
 #: The worktree-relative name the exclude file is reported under in tamper evidence.
 EXCLUDE_TAMPER_PATH = ".git/info/exclude"
+#: The worktree's own excludes file, in its private git dir (never in the tree).
+OWN_EXCLUDE_NAME = "crb-exclude"
+#: … and the name it is reported under in tamper evidence.
+OWN_EXCLUDE_TAMPER_PATH = f".git/{OWN_EXCLUDE_NAME}"
+#: How many times enabling ``extensions.worktreeConfig`` retries a locked clone config
+#: (another worktree of the clone enabling it at the same moment).
+_CONFIG_LOCK_RETRIES = 5
 
 #: ``git ls-files -v`` tags that mean "git has been told not to look at this file".
 #: ``S`` is skip-worktree; a lowercase tag is assume-unchanged. Either hides an edit
@@ -203,8 +221,10 @@ class IntegrityViolation:
     ``kind`` is one of ``head_moved`` (``HEAD`` is not the parent), ``foreign_gitdir``
     (the worktree no longer belongs to the harness's clone), ``index_bits``
     (skip-worktree / assume-unchanged entries), ``exclude_edited`` (lines in the
-    shared ``info/exclude`` the harness did not write — now removed). ``files``
-    are the paths to report as tamper evidence.
+    shared ``info/exclude`` that were not there at create time — left in place — or in
+    the worktree's own excludes file that the harness did not write — removed), and
+    ``excludes_file_moved`` (the worktree's ``core.excludesFile`` no longer names its own
+    file). ``files`` are the paths to report as tamper evidence.
     """
 
     kind: str
@@ -264,6 +284,8 @@ class Workspace:
         self.exclude_baseline: list[str] | None = None
         #: Patterns :meth:`_exclude_from_git` wrote for this worktree.
         self.exclude_patterns: list[str] = []
+        #: The worktree's own excludes file (``None`` on a bound workspace).
+        self.own_exclude: Path | None = None
 
     # --- lifecycle ---------------------------------------------------------------
     @classmethod
@@ -285,6 +307,7 @@ class Workspace:
         parent = repo.parent(sha)
         repo.worktree_add(dest, parent)
         ws = cls(repo, dest, sha=sha, parent=parent)
+        ws._own_excludes()
         ws.exclude_baseline = ws._exclude_lines()
         if post_create and config is not None:
             ws._post_create(config)
@@ -313,6 +336,7 @@ class Workspace:
         head = repo.rev_parse(ref)
         repo.worktree_add(dest, head)
         ws = cls(repo, dest, sha=head, parent=head)
+        ws._own_excludes()
         ws.exclude_baseline = ws._exclude_lines()
         if post_create and config is not None:
             ws._post_create(config)
@@ -361,6 +385,29 @@ class Workspace:
         except OSError:
             return []
 
+    def _own_excludes(self) -> None:
+        """Give this worktree its OWN excludes file (module docstring): switch on
+        ``extensions.worktreeConfig`` in the clone (once — idempotent, retried while
+        another worktree holds the config lock) and point this worktree's
+        ``core.excludesFile`` at an empty file in its private git dir."""
+        run = self.repo.run
+        for _ in range(_CONFIG_LOCK_RETRIES):
+            if (
+                run("config", "--bool", "--get", "extensions.worktreeConfig").stdout.strip()
+                == "true"
+            ):
+                break
+            if run("config", "extensions.worktreeConfig", "true").ok:
+                break
+            time.sleep(0.05)
+        else:
+            run("config", "extensions.worktreeConfig", "true", check=True)
+        gitdir = run("rev-parse", "--absolute-git-dir", cwd=self.root, check=True).stdout.strip()
+        own = Path(gitdir) / OWN_EXCLUDE_NAME
+        own.write_text("", encoding="utf-8")
+        run("config", "--worktree", "core.excludesFile", str(own), cwd=self.root, check=True)
+        self.own_exclude = own
+
     def _exclude_from_git(self, pattern: str) -> None:
         """Ignore a harness fixup from git's porcelain views (``info/exclude``) and
         RECORD it: the grader restores the file to exactly the recorded content.
@@ -373,46 +420,61 @@ class Workspace:
         committed and (since 2026-09-14) never read by :meth:`touched_files`; the
         harness symlink stays out of the builder's changes through
         :attr:`harness_files`. The exclude line keeps the builder's own ``git status``
-        quiet about it.
+        quiet about it. It goes in this worktree's OWN excludes file, never the clone's
+        shared ``info/exclude`` (P-056).
         """
-        path = self._exclude_path()
+        path = self.own_exclude or self._exclude_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(f"{pattern}\n")
         self.exclude_patterns.append(pattern)
 
     def restore_exclude(self) -> list[str]:
-        """Rewrite ``info/exclude`` to the content the harness recorded; return the
-        foreign lines that were removed (the builder's — ``[]`` when none).
-
-        Membership is by stripped line, not by byte position: a concurrent trial of
-        the same repository appends the same harness pattern to the shared file, and
-        that is not tamper. A line the harness never wrote and that was not there at
-        create time can only have come from the builder (or from an operator editing
-        the main clone mid-trial, which is the same thing to the grader). A workspace
-        without a baseline (bound, not created) leaves the file alone.
-        """
+        """The foreign lines in the clone's shared ``info/exclude`` — lines that were not
+        there when this worktree was created (the builder's, ``[]`` when none). The shared
+        file is READ, never rewritten (ADR-0025 item 13): the harness writes nothing to
+        it, so a rewrite could only race another worktree of the clone (P-056), and the
+        grader never reads it anyway (:meth:`touched_files`). Membership is by stripped
+        line, not byte position. A workspace without a baseline (bound, not created)
+        leaves it alone."""
         if self.exclude_baseline is None:
             return []
-        allowed = {ln.strip() for ln in self.exclude_baseline} | {
-            p.strip() for p in self.exclude_patterns
-        }
-        allowed.add("")
-        current = self._exclude_lines()
-        foreign = [ln for ln in current if ln.strip() not in allowed]
-        if not foreign:
+        allowed = {ln.strip() for ln in self.exclude_baseline} | {""}
+        return [ln for ln in self._exclude_lines() if ln.strip() not in allowed]
+
+    def restore_own_exclude(self) -> list[str]:
+        """Rewrite this worktree's OWN excludes file to the harness's patterns; return the
+        foreign lines removed. Only this worktree reads or writes the file, so the rewrite
+        races nothing. ``[]`` on a bound workspace."""
+        own = self.own_exclude
+        if own is None:
             return []
-        path = self._exclude_path()
-        kept = [ln for ln in current if ln.strip() in allowed]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("".join(f"{ln}\n" for ln in kept), encoding="utf-8")
+        try:
+            current = own.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            current = []
+        allowed = {p.strip() for p in self.exclude_patterns} | {""}
+        foreign = [ln for ln in current if ln.strip() not in allowed]
+        if foreign or not own.exists():
+            own.write_text("".join(f"{p}\n" for p in self.exclude_patterns), encoding="utf-8")
         return foreign
+
+    def _excludes_file_moved(self) -> str:
+        """What this worktree's ``core.excludesFile`` names instead of its own file, or
+        ``""`` while it still names it (always ``""`` on a bound workspace)."""
+        if self.own_exclude is None:
+            return ""
+        got = self.repo.run(
+            "config", "--worktree", "--get", "core.excludesFile", cwd=self.root
+        ).stdout.strip()
+        return "" if got == str(self.own_exclude) else (got or "(unset)")
 
     # --- integrity -----------------------------------------------------------------
     def enforce_integrity(self) -> list[IntegrityViolation]:
         """The grader's pre-flight (see the module docstring). Returns every
         violation found — an empty list means the worktree's git view is still the
-        harness's. Restores the shared ``info/exclude`` as a side effect. Never raises
+        harness's. Restores the worktree's OWN excludes file as a side effect (the
+        shared ``info/exclude`` is read, never rewritten). Never raises
         for a builder-caused state: a ``.git`` the harness cannot read is reported as
         ``foreign_gitdir``, not thrown."""
         out: list[IntegrityViolation] = []
@@ -432,7 +494,8 @@ class Workspace:
                     (".git/HEAD",),
                 )
             )
-        if not self._belongs_to_clone():
+        belongs = self._belongs_to_clone()
+        if not belongs:
             out.append(
                 IntegrityViolation(
                     "foreign_gitdir",
@@ -456,9 +519,28 @@ class Workspace:
             out.append(
                 IntegrityViolation(
                     "exclude_edited",
-                    f"info/exclude carried {len(foreign)} line(s) the harness did not write "
-                    f"(removed): {foreign[:3]}",
+                    f"info/exclude carried {len(foreign)} line(s) that were not there when the "
+                    f"worktree was created: {foreign[:3]}",
                     (EXCLUDE_TAMPER_PATH,),
+                )
+            )
+        own = self.restore_own_exclude()
+        if own:
+            out.append(
+                IntegrityViolation(
+                    "exclude_edited",
+                    f"the worktree's own excludes file carried {len(own)} line(s) the harness "
+                    f"did not write (removed): {own[:3]}",
+                    (OWN_EXCLUDE_TAMPER_PATH,),
+                )
+            )
+        moved = self._excludes_file_moved() if belongs else ""  # another repo's config
+        if moved:
+            out.append(
+                IntegrityViolation(
+                    "excludes_file_moved",
+                    f"core.excludesFile names {moved[:200]}, not the worktree's own file",
+                    (OWN_EXCLUDE_TAMPER_PATH,),
                 )
             )
         return out

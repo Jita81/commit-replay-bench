@@ -201,7 +201,43 @@ def with_posture_labels(fields: dict[str, Any]) -> dict[str, Any]:
             for b in ("tests_unmodified", "target_green", "no_new_failures", "source_changed")
         )
         labels.setdefault("blame_control", "api_diff" if api_only else "gold_green")
+    if parsed >= (2, 4):
+        _classification_labels(fields, labels)
     return {**fields, "labels": labels}
+
+
+def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> None:
+    """ADR-0025 items 5 and 6 (stream G): a measured row of 2.4 or later carries its own
+    ``failure_kind``, ``lint_reason`` and, on a replay row, ``change_id`` — filled in here,
+    as the writer would, where the test did not name them."""
+    from crb.core.ledger import (
+        LABEL_CHANGE_ID,
+        LABEL_FAILURE_KIND,
+        LABEL_LINT_REASON,
+        PROCESS_REPLAY,
+        derive_failure_kind,
+        lint_only_failure,
+    )
+
+    error = str(fields.get("error") or "")
+    lint = fields.get("repo_lint_clean")
+    labels.setdefault(
+        LABEL_FAILURE_KIND,
+        derive_failure_kind(
+            clean=bool(fields.get("clean")),
+            disqualified=bool(fields.get("disqualified")),
+            error=error,
+            builder_error=labels.get("builder_error", ""),
+            stop_reason=labels.get("stop_reason", ""),
+            lint_only=lint_only_failure(fields),
+        ),
+    )
+    reason = (
+        "none_detected" if lint is None else "error" if error.startswith("lint:") else "evaluated"
+    )
+    labels.setdefault(LABEL_LINT_REASON, reason)
+    if str(fields.get("process_step") or PROCESS_REPLAY) == PROCESS_REPLAY:
+        labels.setdefault(LABEL_CHANGE_ID, f"change-{fields.get('task_id', '')}")
 
 
 def posture_result(*args: Any, **kw: Any) -> GradeResult:
@@ -214,6 +250,16 @@ def posture_result(*args: Any, **kw: Any) -> GradeResult:
     kw.setdefault("posture_class", TEST_POSTURE_CLASS)
     kw.setdefault("qualification_id", TEST_QUALIFICATION_ID)
     belts = kw.get("belts")
+    if belts is not None:  # belt 5's reason, as grade() writes it (ADR-0025 item 5)
+        lint = belts.repo_lint_clean
+        kw.setdefault(
+            "lint_status",
+            "none_detected"
+            if lint is None
+            else "error"
+            if str(kw.get("error") or "").startswith("lint:")
+            else "evaluated",
+        )
     blamed = (
         belts is not None
         and not kw.get("clean")

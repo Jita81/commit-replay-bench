@@ -65,15 +65,19 @@ What it does: Constructs rows that cannot be clean with a failed belt, without a
               Wilson interval, failure split and false-Q1 count (which must read 0); refuses
               to reduce rows of two ``checks`` arms to one cell and keeps one arm on request.
 How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to a row and
-              pins its failure kind and cost-known labels → ``GradeRow.__post_init__``
-              asserts the invariants → ``JsonlLedger.append`` chains on the last row's hash
-              and fsyncs the line → ``verify_chain`` re-hashes every row in order →
+              pins its failure kind and cost-known labels (from apparatus 2.4 through
+              ``row_labels_at_write``, the one helper the factory's row uses too: the kind on
+              every row, ``lint_reason`` and ``change_id``) → ``GradeRow.__post_init__``
+              asserts the invariants (a 2.4 row without its own classification is refused;
+              a row below 2.4 is read by the rule frozen at 2.3) → ``JsonlLedger.append``
+              chains on the last row's hash and fsyncs the line → ``verify_chain`` re-hashes
+              every row in order →
               ``failure_split`` / ``cell_stats`` group eligible rows by ``CellKey``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
               docs/adr/0019-qualification-is-posture-relative.md,
-              docs/adr/0024-working-by-construction.md
+              docs/adr/0024-working-by-construction.md; ADR-0025 items 5 and 6 (stream G)
 Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
               src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
               src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
@@ -82,7 +86,8 @@ Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
               map built from the rows), src/crb/core/legacy.py (census import — the only
               writer of v3-legacy rows), src/crb/core/stats.py (the Wilson interval)
 Tested by:    tests/test_ledger.py, tests/test_store_ledger.py, tests/test_census_gate.py,
-              tests/test_run.py, tests/test_grade_api_belt.py, tests/test_checks_pooling.py
+              tests/test_run.py, tests/test_grade_api_belt.py, tests/test_checks_pooling.py,
+              tests/test_ledger_classification.py, tests/test_failure_rule_golden.py
 Touch when:   never for a new repository; adding a belt, a failure kind, a cell-key field or a
               hashed label changes what the chain commits to — needs an ADR, an apparatus bump
               (src/crb/core/version.py), a store migration (as
@@ -107,6 +112,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core import version as _version
 from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, arm_from_label
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
 from crb.core.grade import (
@@ -120,6 +126,7 @@ from crb.core.grade import (
     GradeResult,
     MisattributionViolation,
 )
+from crb.core.lint import LINT_NOT_REQUESTED, lint_status_violation
 from crb.core.spec import TaskSpec
 from crb.core.stats import Interval, mean, wilson_interval
 from crb.core.version import APPARATUS_VERSION
@@ -247,10 +254,41 @@ def is_outage_error(error: str) -> bool:
     """``True`` when ``error`` is the provider refusing the call (see
     :data:`OUTAGE_ERROR_MARKERS`) — only for ``model_error:`` texts, so a grader
     timeout that happens to say "429" in a test log is not an outage."""
+    return _outage(error, OUTAGE_ERROR_MARKERS)
+
+
+def _outage(error: str, markers: Sequence[str]) -> bool:
     e = error.lower()
     if not e.startswith("model_error"):
         return False
-    return any(m in e for m in OUTAGE_ERROR_MARKERS)
+    return any(m in e for m in markers)
+
+
+#: The outage markers as they stood at apparatus 2.3, FROZEN: the rows of 2.3 and earlier
+#: are read by them and by nothing else (ADR-0025 item 6), so an edit to the live list above
+#: can no longer move an old row's classification or a denominator built from it.
+#: ``tests/test_failure_rule_golden.py`` pins this tuple's SHA-256.
+OUTAGE_ERROR_MARKERS_V1: tuple[str, ...] = (
+    "hit your limit",
+    "usage limit",
+    "rate_limit",
+    "rate limit",
+    "429",
+    "overloaded",
+    "quota",
+    "insufficient credit",
+    "credit balance",
+    "authentication failed",
+    "oauth access token is invalid",
+    "402",
+    "503",
+    "529",
+)
+
+
+def is_outage_error_v1(error: str) -> bool:
+    """:func:`is_outage_error` against the frozen :data:`OUTAGE_ERROR_MARKERS_V1`."""
+    return _outage(error, OUTAGE_ERROR_MARKERS_V1)
 
 
 #: The kinds where the model finished and was judged on its own terms (the
@@ -296,6 +334,18 @@ LABEL_BLAME_CONTROL = "blame_control"
 LABEL_ENV_CODE = "env_code"
 #: The first apparatus whose measured rows must carry their posture and witness.
 POSTURE_APPARATUS: tuple[int, int] = (2, 3)
+#: The first apparatus whose measured rows carry their own classification from write
+#: (ADR-0025 items 5 and 6): ``failure_kind`` (``""`` on a clean row), ``lint_reason`` and,
+#: on a replay row, ``change_id``. Rows below it are read by the rule frozen at 2.3. Nothing
+#: here moves when the constant is read: the row's own stamp decides, and
+#: ``crb.core.version.APPARATUS_VERSION`` decides the stamp a new row gets.
+V2_APPARATUS: tuple[int, int] = (2, 4)
+#: Why belt 5 holds what it holds (``crb.core.lint.LINT_STATUSES``) — hashed, from 2.4.
+LABEL_LINT_REASON = "lint_reason"
+#: The change a replay row observed (``crb.core.mine.change_identity``: the commit's
+#: ``git patch-id --stable``, a revert's that of its original) — hashed, from 2.4, so a
+#: reader counts distinct CHANGES, never two commits of one change.
+LABEL_CHANGE_ID = "change_id"
 #: Belt 6 (ADR-0024) is recorded as this hashed label — ``true`` / ``false`` / ``none``
 #: (switched on, not evaluated) — and is absent when the belt was switched off.
 LABEL_API_STABLE = BELT_API_STABLE
@@ -428,6 +478,86 @@ def derive_failure_kind(
     if lint_only:
         return FAILURE_LINT
     return FAILURE_BUILDER_RED
+
+
+def derive_failure_kind_v1(
+    *,
+    clean: bool,
+    disqualified: bool,
+    error: str = "",
+    builder_error: str = "",
+    stop_reason: str = "",
+    lint_only: bool = False,
+    api_only: bool = False,
+) -> str:
+    """The failure rule as it stood at apparatus 2.3, FROZEN (ADR-0025 item 6): the rule a
+    row below :data:`V2_APPARATUS` without a pinned label is read by, over the frozen
+    :data:`OUTAGE_ERROR_MARKERS_V1`. Never edited: a change to the rule goes in
+    :func:`derive_failure_kind` with an apparatus bump, and the golden table in
+    ``tests/test_failure_rule_golden.py`` holds this one to the 2.3 outputs."""
+    if clean:
+        return FAILURE_CLEAN
+    if disqualified:
+        return FAILURE_DISQUALIFIED
+    if error.startswith(PROTOCOL_VIOLATION_PREFIX) or builder_error.startswith(
+        PROTOCOL_VIOLATION_PREFIX
+    ):
+        return FAILURE_PROTOCOL
+    if error:
+        return FAILURE_OUTAGE if is_outage_error_v1(error) else FAILURE_HARNESS
+    if stop_reason in BUDGET_STOP_REASONS:
+        return FAILURE_BUDGET
+    if api_only:
+        return FAILURE_API
+    if lint_only:
+        return FAILURE_LINT
+    return FAILURE_BUILDER_RED
+
+
+def is_v2_apparatus(apparatus_version: str) -> bool:
+    """``True`` for a stamp of :data:`V2_APPARATUS` or later — a row that carries its own
+    classification from write."""
+    parsed = parse_apparatus_version(apparatus_version)
+    return parsed is not None and parsed >= V2_APPARATUS
+
+
+def row_labels_at_write(
+    result: GradeResult,
+    *,
+    apparatus_version: str,
+    error: str,
+    builder_error: str = "",
+    stop_reason: str = "",
+    change_id: str = "",
+    pin_kind_below_v2: bool = True,
+) -> dict[str, str]:
+    """THE row-labelling helper: the classification a new row carries from write, for a
+    replay row (:func:`grade_row_from_result`) and a factory row
+    (``crb.factory.build.factory_row``) alike (ADR-0025 items 5 and 6).
+
+    From :data:`V2_APPARATUS` every row pins ``failure_kind`` — ``""`` on a clean row —
+    and ``lint_reason`` (the grade's ``lint_status``), and a row that observed a mined
+    commit pins its ``change_id``. Below it each writer keeps exactly what it always wrote,
+    so a row of 2.3 hashes as it did: a replay row pins a non-empty kind
+    (``pin_kind_below_v2``), a factory row pins none.
+    """
+    kind = derive_failure_kind(
+        clean=result.clean,
+        disqualified=result.disqualified,
+        error=error,
+        builder_error=builder_error,
+        stop_reason=stop_reason,
+        lint_only=lint_only_failure(result.belts.to_dict()),
+        api_only=api_only_failure(
+            {**result.belts.to_dict(), BELT_API_STABLE: result.belts.api_stable}
+        ),
+    )
+    if not is_v2_apparatus(apparatus_version):
+        return {LABEL_FAILURE_KIND: kind} if kind and pin_kind_below_v2 else {}
+    out = {LABEL_FAILURE_KIND: kind, LABEL_LINT_REASON: result.lint_status}
+    if change_id:
+        out[LABEL_CHANGE_ID] = change_id
+    return out
 
 
 def is_environment_error(error: str) -> bool:
@@ -634,6 +764,7 @@ class GradeRow:
             raise ValueError(f"cost_known label must be 'true' or 'false', got {ck!r}")
         self.assert_belt_set_matches_apparatus()
         self.assert_posture_and_witness()
+        self.assert_own_classification()
 
     @property
     def carries_posture(self) -> bool:
@@ -661,6 +792,43 @@ class GradeRow:
                     f"ledger refuses row {self.task_id[:10]} ({self.repo}): failure_kind="
                     f"{self.failure_kind!r} blames the model without a witness from its posture "
                     f"(blame_control={witness or '-'!r}; expected one of {BLAME_CONTROLS})"
+                )
+
+    @property
+    def carries_classification(self) -> bool:
+        """``True`` for a measured row of :data:`V2_APPARATUS` or later — the rows that
+        carry their own classification from write (ADR-0025 items 5 and 6)."""
+        return self.provenance == "measured" and is_v2_apparatus(self.apparatus_version)
+
+    def assert_own_classification(self) -> None:
+        """ADR-0025 items 5 and 6, at write and at read alike: a measured row of 2.4 or later
+        pins its ``failure_kind`` and a ``lint_reason`` that agrees with belt 5, and a
+        replay row names the change it observed and was gold-checked clean. Rows below 2.4
+        are never re-interpreted."""
+        if not self.carries_classification:
+            return
+        where = f"ledger refuses row {self.task_id[:10]} ({self.repo}) of {self.apparatus_version}"
+        if LABEL_FAILURE_KIND not in self.labels:
+            raise LedgerIntegrityError(f"{where}: no failure_kind label (stamped at write)")
+        reason = self.labels.get(LABEL_LINT_REASON)
+        if reason is None:
+            raise LedgerIntegrityError(f"{where}: no lint_reason label (stamped at write)")
+        if reason == LINT_NOT_REQUESTED:
+            raise LedgerIntegrityError(
+                f"{where}: lint_reason 'not_requested' — a grade that skipped belt 5 writes no row"
+            )
+        why = lint_status_violation(reason, self.repo_lint_clean, clean=self.clean)
+        if why:
+            raise LedgerIntegrityError(f"{where}: {why}")
+        if self.process_step == PROCESS_REPLAY:
+            if self.gold_clean is not True:
+                raise LedgerIntegrityError(
+                    f"{where}: a replay row must be gold-checked clean (gold_clean="
+                    f"{self.gold_clean!r}); qualify the task in this posture first"
+                )
+            if not self.labels.get(LABEL_CHANGE_ID):
+                raise LedgerIntegrityError(
+                    f"{where}: a replay row names the change it observed (change_id)"
                 )
 
     @property
@@ -708,22 +876,42 @@ class GradeRow:
         return self.labels.get(LABEL_STOP_REASON, "")
 
     @property
+    def lint_reason(self) -> str:
+        """Why belt 5 holds what it holds (``crb.core.lint.LINT_STATUSES``) — pinned on every
+        measured row of apparatus 2.4 or later; ``""`` on an older row (never re-derived).
+        What routing.v2 reads to leave a row graded with belt 5 switched off out of a cell's
+        count (``disabled_by_config``)."""
+        return self.labels.get(LABEL_LINT_REASON, "")
+
+    @property
+    def change_id(self) -> str:
+        """The change this row observed (``crb.core.mine.change_identity``) — pinned on every
+        measured replay row of apparatus 2.4 or later; ``""`` when the row does not carry
+        it. A reader that counts distinct commits counts distinct values of this."""
+        return self.labels.get(LABEL_CHANGE_ID, "")
+
+    @property
     def failure_kind(self) -> str:
         """Why the row is not clean (``""`` when it is) — see :func:`derive_failure_kind`.
 
-        The label pinned at write time is the record; a row without one (written
-        before the label existed) derives the kind from its own hashed fields.
-        Such a row can never read ``budget`` — its stop reason was not recorded —
-        and says ``builder_red`` for it, which is what the old rule said too.
+        From apparatus 2.4 the label pinned at write IS the kind, read verbatim (a measured
+        row cannot exist without it; an imported one without it derives by the live rule).
+        Below 2.4 the rule frozen at 2.3 reads the row (:func:`derive_failure_kind_v1`):
+        the pinned label, re-read as ``outage`` only against the frozen
+        :data:`OUTAGE_ERROR_MARKERS_V1`; a row without one derives its kind from its own
+        hashed fields, can never read ``budget`` (its stop reason was not recorded) and
+        says ``builder_red`` for it, which is what the old rule said too.
         """
         pinned = self.labels.get(LABEL_FAILURE_KIND)
+        v2 = is_v2_apparatus(self.apparatus_version)
         if pinned is not None:
-            # a row pinned ``harness`` before ``outage`` existed reads as the outage it
-            # was — the error text is hashed into the row, so the re-reading is honest
-            if pinned == FAILURE_HARNESS and is_outage_error(self.error):
+            # below 2.4, a row pinned ``harness`` before ``outage`` existed reads as the
+            # outage it was — the error text is hashed into the row and the markers frozen
+            if not v2 and pinned == FAILURE_HARNESS and is_outage_error_v1(self.error):
                 return FAILURE_OUTAGE
             return pinned
-        return derive_failure_kind(
+        rule = derive_failure_kind if v2 else derive_failure_kind_v1
+        return rule(
             clean=self.clean,
             disqualified=self.disqualified,
             error=self.error,
@@ -847,6 +1035,7 @@ def grade_row_from_result(
     language: str = "",
     labels: Mapping[str, str] | None = None,
     builder_error: str = "",
+    apparatus_version: str = "",
 ) -> GradeRow:
     """Reduce a :class:`GradeResult` + its evidence-pack hash to the ledger row.
 
@@ -866,23 +1055,24 @@ def grade_row_from_result(
     (:func:`derive_cost_known` over the :class:`BuilderRef`) are pinned into
     ``labels`` here — the ONE place the classification is decided at write time —
     so the hash chain commits to them. The builder's stop reason travels as
-    ``labels['stop_reason']`` so the ``budget`` kind stays re-derivable.
+    ``labels['stop_reason']`` so the ``budget`` kind stays re-derivable. From apparatus 2.4
+    the labels come from :func:`row_labels_at_write` (the kind on every row, belt 5's
+    reason and the task's ``change_id``); ``apparatus_version`` is the stamp, read from
+    ``crb.core.version`` at call time when not given.
     """
     b = builder or BuilderRef(mode=result.mode)
+    apparatus = apparatus_version or _version.APPARATUS_VERSION
     # the grader's own error always wins; the builder's trouble surfaces as `error`
     # only on a non-clean row (on a clean row it is a label — the belts judged the tree)
     error = result.error or ("" if result.clean else builder_error)
     stop_reason = builder_stop_reason(builder)
-    kind = derive_failure_kind(
-        clean=result.clean,
-        disqualified=result.disqualified,
+    written = row_labels_at_write(
+        result,
+        apparatus_version=apparatus,
         error=error,
         builder_error=builder_error,
         stop_reason=stop_reason,
-        lint_only=lint_only_failure(result.belts.to_dict()),
-        api_only=api_only_failure(
-            {**result.belts.to_dict(), BELT_API_STABLE: result.belts.api_stable}
-        ),
+        change_id=str(task.labels.get(LABEL_CHANGE_ID, "")),
     )
     cost_known = derive_cost_known(
         cost_usd=b.cost_usd,
@@ -932,6 +1122,7 @@ def grade_row_from_result(
         latency_s=b.latency_s,
         gold_clean=task.gold_clean,
         evidence_pack_hash=pack_hash,
+        apparatus_version=apparatus,
         belt_set=BELT_SET_V5,
         provenance="measured",
         labels={
@@ -939,7 +1130,7 @@ def grade_row_from_result(
             **{k: str(v) for k, v in task.labels.items()},
             **({"builder_error": builder_error[:300]} if builder_error else {}),
             **dict(labels or {}),
-            **({LABEL_FAILURE_KIND: kind} if kind else {}),
+            **written,
             **(
                 {LABEL_COST_KNOWN: _bool_label(cost_known)}
                 if cost_known != cost_known_default

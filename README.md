@@ -148,7 +148,9 @@ In **neither** mode does the builder see the regression belt or the grader. See
    source and test files within the caps (the standard pool: 1–3 source files and at most six
    language files in all, more on the JVM), and stop once 25 tasks are found or 1,000
    candidates have been examined (`mining` in the repository's configuration moves the
-   window, the task target and the candidate cap; the file caps are fixed per pool). So the pool
+   window, the task target and the candidate cap; the file caps are fixed per pool). It keeps a
+   single commit per change: of two commits with the same patch (a cherry-pick) the older, and
+   never a revert, whose change is the commit it reverts (DL-105). So the pool
    leaves out merge and root commits, anything older than that window, changes made without a
    test, and changes larger than the caps: a rate from it describes recent, tested, small work
    in that repository, not its history as a whole **[hypothesis — that this recency and

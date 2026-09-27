@@ -420,14 +420,16 @@ def _others(ws: Workspace) -> list[str]:
     return ws.repo.run("ls-files", "--others", "--exclude-standard", cwd=ws.root).lines
 
 
-def test_touched_files_ignores_info_exclude_and_the_grader_restores_it(
+def test_touched_files_ignores_info_exclude_and_the_grader_reports_it(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
     """Sign-off finding 1(a): appending ``conftest.py`` to the worktree's
     ``info/exclude`` hid the poison from ``ls-files --exclude-standard``. The exclude
     file of a linked worktree is the MAIN CLONE's, so the line also hid it from every
     other worktree of the repo. The tree walk never reads the file; the pre-flight
-    removes the builder's line and reports it."""
+    reports the builder's line on every grade — and, since ADR-0025 item 13, leaves the
+    shared file as it found it: rewriting it raced every other worktree of the clone
+    (P-056)."""
     with Workspace.create(
         pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=pyrepo.config
     ) as ws:
@@ -445,21 +447,30 @@ def test_touched_files_ignores_info_exclude_and_the_grader_restores_it(
         assert violations[0].files == (".git/info/exclude",)
         assert "conftest.py" in violations[0].detail
         assert violations[0].to_dict()["kind"] == "exclude_edited"
-        assert exclude.read_text(encoding="utf-8").splitlines() == baseline
-        assert ws.enforce_integrity() == []  # restored: nothing left to report
+        assert exclude.read_text(encoding="utf-8").splitlines() == [*baseline, "conftest.py"]
+        # never rewritten, so reported again: a second grade is never a pass either
+        assert [v.kind for v in ws.enforce_integrity()] == ["exclude_edited"]
         assert ws.touched_files() == ["conftest.py"]
 
 
 def test_touched_files_ignores_core_excludesfile(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
-    """``core.excludesFile`` is git config the builder can reach; the walk never asks."""
+    """``core.excludesFile`` is git config the builder can reach; the walk never asks. The
+    worktree's own setting names the harness's file (ADR-0025 item 13): a builder that
+    re-points it is reported, and one that sets the clone's shared value changes nothing
+    here, because the worktree's own setting wins."""
     with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
         global_ignore = tmp_path / "global-ignore"
         global_ignore.write_text("conftest.py\n", encoding="utf-8")
-        pr.git(pyrepo.path, "config", "core.excludesFile", str(global_ignore))
         (ws.root / "conftest.py").write_text("# poison\n")
+        pr.git(pyrepo.path, "config", "core.excludesFile", str(global_ignore))
+        assert "conftest.py" in _others(ws)  # the worktree's own setting wins
+        assert ws.enforce_integrity() == []
+        pr.git(ws.root, "config", "--worktree", "core.excludesFile", str(global_ignore))
         assert "conftest.py" not in _others(ws)
         assert ws.touched_files() == ["conftest.py"]
-        assert ws.enforce_integrity() == []
+        violations = ws.enforce_integrity()
+        assert [v.kind for v in violations] == ["excludes_file_moved"]
+        assert str(global_ignore) in violations[0].detail
 
 
 def test_a_bound_workspace_leaves_the_exclude_file_alone_but_still_sees_the_file(
@@ -483,12 +494,13 @@ def test_a_bound_workspace_leaves_the_exclude_file_alone_but_still_sees_the_file
         created.remove()
 
 
-def test_restore_exclude_tolerates_a_concurrent_trials_harness_line(
+def test_concurrent_worktrees_of_one_clone_never_share_an_excludes_file(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
-    """Two JS trials of one repo both append ``/node_modules`` to the shared file; the
-    second's line is not the first's builder's doing. Membership is by line, not
-    byte position."""
+    """P-056 (ADR-0025 item 13): two JS trials of one repo each write ``/node_modules`` to
+    their OWN excludes file (``core.excludesFile`` per worktree); the clone's shared
+    ``info/exclude`` is never written, so nothing is read-modified-written under another
+    worktree, and a line the builder puts in its own file is removed and reported."""
     (pyrepo.path / "node_modules" / ".bin").mkdir(parents=True)
     js_cfg = RepoConfig(
         name="jsfixture", language=Language.JAVASCRIPT, runner="mocha", test_prefix="tests/"
@@ -498,9 +510,26 @@ def test_restore_exclude_tolerates_a_concurrent_trials_harness_line(
         Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "b", config=js_cfg) as b,
     ):
         assert a.exclude_patterns == ["/node_modules"] and b.exclude_patterns == ["/node_modules"]
-        assert _exclude_path(a).read_text(encoding="utf-8").count("/node_modules") == 2
+        shared = _exclude_path(a)
+        assert not shared.exists() or "/node_modules" not in shared.read_text(encoding="utf-8")
+        assert a.own_exclude is not None and b.own_exclude is not None
+        assert a.own_exclude != b.own_exclude
+        for ws in (a, b):
+            assert ws.own_exclude is not None
+            assert ws.own_exclude.read_text(encoding="utf-8") == "/node_modules\n"
+            assert ws.root not in ws.own_exclude.parents  # in the private git dir, not the tree
+            assert "node_modules" not in _others(ws)  # git's own view honours it
         assert a.enforce_integrity() == [] and b.enforce_integrity() == []
         assert a.touched_files() == [] and b.touched_files() == []
+        assert a.own_exclude is not None
+        with a.own_exclude.open("a", encoding="utf-8") as fh:
+            fh.write("conftest.py\n")
+        violations = a.enforce_integrity()
+        assert [(v.kind, v.files) for v in violations] == [
+            ("exclude_edited", (".git/crb-exclude",))
+        ]
+        assert a.own_exclude.read_text(encoding="utf-8") == "/node_modules\n"  # its own: restored
+        assert b.enforce_integrity() == []
 
 
 def test_a_commit_inside_the_worktree_is_an_integrity_violation(

@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The grade says why, and a distinct commit is a distinct change**
+  (north-star Wave 2, stream G; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-g);
+  ADR-0025 items 5, 6, 7 and 13; DL-105, DL-106). Belt 5 records why it holds what it holds.
+  From apparatus 2.4 every row carries its failure kind, belt 5's reason and its change from
+  write, and the ledger refuses one without them; older rows keep the frozen 2.3 rule. The
+  oracle scorer is `mutation.v2`: every changed file sampled, timeouts counted apart. The miner
+  keeps one commit per change. The executor refuses an empty kind, tells docker's exit 125
+  from a suite's, and gives each pack and worktree its own files.
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

@@ -301,6 +301,7 @@ export const ACTION_HELP: Record<string, string> = {
   'oracle.mutation.mutant': 'A fault was planted on the changed lines.',
   'oracle.mutation.scored': 'The planted fault was scored: killed if the tests noticed it.',
   'oracle.mutation.uncompilable': 'The planted fault did not compile, so it is excluded, never counted as killed.',
+  'oracle.mutation.excluded': 'The tests ran out of time or gave output that could not be read, so the planted fault is excluded: it counts as neither killed nor missed.',
   'oracle.mutation.unscoreable': 'No fault could be planted on this task, so it carries no strength.',
   'oracle.mutation.error': 'Mutation scoring failed for this task.',
   'oracle.score': 'The task’s oracle strength was recorded: mutants killed over mutants planted.',

@@ -42,7 +42,8 @@ ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
 Works with:   src/crb/core/grade.py (the grader, unchanged), src/crb/core/workspace.py (the
               trial tree), src/crb/factory/testfirst.py (``RedProof`` / identity check),
               src/crb/builders/base.py (``Builder``, ``BuildBrief``, ``Rung``),
-              src/crb/core/ledger.py (``GradeRow`` with ``PROCESS_FACTORY``),
+              src/crb/core/ledger.py (``GradeRow`` with ``PROCESS_FACTORY``; its labels from
+              ``row_labels_at_write``, the helper replay rows use too),
               src/crb/factory/delivery.py (commits the kept workspace),
               src/crb/factory/review.py (replays the edits it recorded)
 Tested by:    tests/test_factory_build.py, tests/test_factory_loop.py
@@ -66,12 +67,21 @@ from pathlib import Path
 from typing import Any
 
 from crb.builders.base import Budget, BuildBrief, Builder, BuildOutcome, Rung
+from crb.core import version as _version
 from crb.core.deps import NullDepsProvider, TaskDeps
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack, utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, GradeContext, GradeResult, grade
-from crb.core.ledger import BELT_SET_V5, PROCESS_FACTORY, GradeRow, JsonlLedger, posture_labels
+from crb.core.ledger import (
+    BELT_SET_V5,
+    PROCESS_FACTORY,
+    GradeRow,
+    JsonlLedger,
+    builder_stop_reason,
+    posture_labels,
+    row_labels_at_write,
+)
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
 from crb.core.patches import PatchStore, keep_patch
 from crb.core.posture import Posture, resolve_posture
@@ -328,9 +338,25 @@ def factory_row(
     trial: str,
     actor: str,
     labels: Mapping[str, str],
+    apparatus_version: str = "",
 ) -> GradeRow:
     """The ledger row for a factory grade — the same fields as a replay row with
-    ``process_step=factory`` and the belt-5 set; ``GradeRow`` enforces false-Q1 = 0."""
+    ``process_step=factory`` and the belt-5 set; ``GradeRow`` enforces false-Q1 = 0.
+
+    Its classification comes from the core's ONE row-labelling helper
+    (``crb.core.ledger.row_labels_at_write``, ADR-0025 item 6): from apparatus 2.4 the row
+    pins ``failure_kind`` and ``lint_reason`` as a replay row does; below it the row is
+    written as it always was. ``apparatus_version`` is read from ``crb.core.version`` at
+    call time when not given."""
+    apparatus = apparatus_version or _version.APPARATUS_VERSION
+    written = row_labels_at_write(
+        result,
+        apparatus_version=apparatus,
+        error=result.error or error,
+        builder_error=error,
+        stop_reason=builder_stop_reason(builder),
+        pin_kind_below_v2=False,
+    )
     return GradeRow(
         repo=task.repo,
         task_id=task.task_id,
@@ -363,9 +389,10 @@ def factory_row(
         latency_s=builder.latency_s,
         gold_clean=None,
         evidence_pack_hash=pack.pack_hash,
+        apparatus_version=apparatus,
         belt_set=BELT_SET_V5,
         provenance="measured",
-        labels={"rung": trial, **dict(labels), **posture_labels(result)},
+        labels={"rung": trial, **dict(labels), **posture_labels(result), **written},
     )
 
 
