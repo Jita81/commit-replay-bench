@@ -13,7 +13,8 @@ How:          A snapshot of ``os.environ`` filtered by prefix, restored in ``fin
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/conftest.py (the autouse fixture), src/crb/server/worker_main.py (a writer
-              of ``CRB_HOME`` into the process environment)
+              of ``CRB_HOME`` into the process environment), tests/test_lint.py (asserts the
+              suite never runs against a real home — the test the leak failed)
 Tested by:    tests/test_env_guard.py
 Touch when:   the product reads configuration from a variable outside ``CRB_*``.
 """
