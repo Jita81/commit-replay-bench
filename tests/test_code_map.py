@@ -178,7 +178,7 @@ def test_the_onboarding_baseline_only_shrinks(repo: Path, capsys) -> None:
 #: The size of ``scripts/code_map_onboarding_baseline.txt`` when the check was added (PR #61).
 #: Lower it as files leave the list; raising it is adding a file to the baseline, which the
 #: baseline exists to stop.
-BASELINE_CEILING = 372
+BASELINE_CEILING = 357
 
 
 def test_the_real_onboarding_baseline_never_grows() -> None:
@@ -190,3 +190,47 @@ def test_the_real_onboarding_baseline_never_grows() -> None:
         f"{len(entries)} files in the onboarding baseline, above {BASELINE_CEILING}: a new "
         "file's Touch when must address onboarding a client repository first"
     )
+
+
+def test_a_change_may_not_edit_a_baseline_file_or_add_to_the_baseline() -> None:
+    """Under ``--changed-since``, a file in the baseline that the change edits must leave it
+    (its ``Touch when`` fixed first), and no path may join the baseline — removals only."""
+    baseline = frozenset({"src/a.py", "src/b.py", "src/new.py"})
+    before = frozenset({"src/a.py", "src/b.py", "src/c.py"})
+    found = cm.baseline_violations(baseline, {"src/a.py", "docs/x.md"}, before)
+    assert any(f.startswith("src/a.py:") and "edited" in f for f in found), found
+    assert any(f.startswith("src/new.py:") and "added" in f for f in found), found
+    assert not any(f.startswith("src/b.py") for f in found), found
+    assert cm.baseline_violations(baseline, set(), None) == []  # the baseline's first change
+
+
+def _git(repo: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_check_with_changed_since_refuses_an_edited_baseline_file(repo: Path, capsys) -> None:
+    old = BLOCK.replace("never for a new repository.", "a key is added to the standard.")
+    (repo / "scripts").mkdir()
+    (repo / cm.ONBOARDING_BASELINE).write_text("src/crb/core/old.py\n", encoding="utf-8")
+    _py(repo, "src/crb/core/old.py", old)
+    (repo / "src/crb/core/other.py").write_text(f'"""Other.\n\n{BLOCK}"""\n', encoding="utf-8")
+    (repo / "tests/test_thing.py").write_text(f'"""T.\n\n{BLOCK}"""\n', encoding="utf-8")
+    assert cm.main([]) == 0
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    assert cm.main(["--check", "--changed-since", "main"]) == 0  # nothing edited
+    _py(repo, "src/crb/core/old.py", old, prose="Summary line.\n\nEdited prose.\n\n")
+    assert cm.main([]) == 0
+    _git(repo, "commit", "-q", "-am", "edit")
+    assert cm.main(["--check"]) == 0  # without the base the edit is not seen
+    assert cm.main(["--check", "--changed-since", "main~1"]) == 1
+    assert "src/crb/core/old.py" in capsys.readouterr().err
+    assert cm.main(["--check", "--changed-since", "no-such-ref"]) == 1  # fails closed

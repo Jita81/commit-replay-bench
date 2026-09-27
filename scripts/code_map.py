@@ -10,13 +10,16 @@ with every path rendered as a link.
 
     python scripts/code_map.py            # rewrite docs/CODE-MAP.md
     python scripts/code_map.py --check    # CI: every file has a valid block AND the map is current
+    python scripts/code_map.py --check --changed-since origin/main   # CI on a pull request
 
 ``--check`` fails on: a file with no block; a missing required key; a key out of order; a path
 in ``Layer``/``ADRs``/``Works with``/``Tested by``/``Touch when``/``Claims`` that does not exist
 in the repository (anchors are stripped before the check); a ``Tested by`` that is blank;
 a ``Touch when`` whose first clause does not address onboarding a client repository (files
 older than that rule are listed in ``scripts/code_map_onboarding_baseline.txt``, which only
-shrinks); a ``docs/CODE-MAP.md`` that differs from what the headers generate. Files listed in
+shrinks — with ``--changed-since REF``, as CI runs it on a pull request, a listed file the
+change edits and a path the change adds to the list are refused too); a ``docs/CODE-MAP.md``
+that differs from what the headers generate. Files listed in
 ``EXEMPT`` (an explicit path → reason map; today only Vite's generated ambient types) are
 skipped and listed at the end of the map so the exemption is visible. There is no size- or
 name-based exemption: a thin ``__init__.py`` needs a block like every other file.
@@ -44,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -184,6 +188,46 @@ def onboarding_baseline() -> frozenset[str]:
     return frozenset(ln for ln in lines if ln and not ln.startswith("#"))
 
 
+def baseline_violations(
+    baseline: frozenset[str], changed: set[str], before: frozenset[str] | None
+) -> list[str]:
+    """What a change owes the onboarding baseline: every baseline file it edits must leave
+    the list (its ``Touch when`` fixed first), and no path may join it. ``before`` is the
+    baseline at the change's base, ``None`` when the base had none (the list's first change)."""
+    found = [
+        f"{rel}: edited in this change but still in {ONBOARDING_BASELINE}: put onboarding a "
+        "client repository first in its Touch when and delete its line"
+        for rel in sorted(baseline & changed)
+    ]
+    if before is not None:
+        found += [
+            f"{rel}: added to {ONBOARDING_BASELINE}, which only shrinks: put onboarding first "
+            "in its Touch when instead"
+            for rel in sorted(baseline - before)
+        ]
+    return found
+
+
+def _git(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def changed_since(ref: str) -> tuple[set[str], frozenset[str] | None]:
+    """The paths added, modified or renamed since the merge base with ``ref`` (the working
+    tree included), and the baseline at that base (``None`` when it had none). Raises
+    ``subprocess.CalledProcessError`` when ``ref`` cannot be resolved: the caller fails."""
+    base = _git("merge-base", ref, "HEAD").strip()
+    changed = set(_git("diff", "--name-only", "--diff-filter=AMR", base).split())
+    try:
+        text = _git("show", f"{base}:{ONBOARDING_BASELINE}")
+    except subprocess.CalledProcessError:
+        return changed, None
+    lines = (ln.strip() for ln in text.splitlines())
+    return changed, frozenset(ln for ln in lines if ln and not ln.startswith("#"))
+
+
 def _onboarding_problems(rel: str, fields: dict[str, str], baseline: frozenset[str]) -> list[str]:
     touch = fields.get("Touch when", "")
     if not touch:
@@ -315,6 +359,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--check", action="store_true", help="validate and compare; write nothing")
     ap.add_argument("--list-missing", action="store_true", help="print files without a valid block")
+    ap.add_argument(
+        "--changed-since",
+        metavar="REF",
+        help="with --check: refuse a baseline file this change edits, and any path it adds "
+        "to the baseline (CI passes the pull request's base branch)",
+    )
     args = ap.parse_args(argv)
     headers: list[Header] = []
     exempt: dict[str, str] = {}
@@ -337,11 +387,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{h.path}: {'; '.join(h.problems)}", file=sys.stderr)
         for rel in gone:
             print(f"{ONBOARDING_BASELINE}: {rel} is not a source file: remove it", file=sys.stderr)
+        owed: list[str] = []
+        if args.changed_since:
+            try:
+                changed, before = changed_since(args.changed_since)
+            except (subprocess.CalledProcessError, OSError) as exc:
+                owed = [f"--changed-since {args.changed_since}: git could not diff it ({exc})"]
+            else:
+                owed = baseline_violations(onboarding_baseline(), changed, before)
+        for line in owed:
+            print(line, file=sys.stderr)
         current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
         stale = current != rendered
         if stale:
             print(f"{OUT.relative_to(ROOT)} is stale: run scripts/code_map.py", file=sys.stderr)
-        return 1 if (bad or stale or gone) else 0
+        return 1 if (bad or stale or gone or owed) else 0
     OUT.write_text(rendered, encoding="utf-8")
     print(
         f"wrote {OUT.relative_to(ROOT)}: {len(headers) - len(bad)} files; {len(bad)} without a valid block"

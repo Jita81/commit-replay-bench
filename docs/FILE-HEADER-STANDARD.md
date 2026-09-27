@@ -48,7 +48,9 @@ Rules:
   first clause (up to the first `;`, full stop, dash or bracket) names neither a repository
   nor onboarding. Files older than that check are listed in
   `scripts/code_map_onboarding_baseline.txt`; the list only shrinks, so when you edit one of
-  them, fix its `Touch when` and delete its line.
+  them, fix its `Touch when` and delete its line. On a pull request CI runs the check with
+  `--changed-since` the base branch, which refuses a listed file the change edits and any path
+  the change adds to the list.
 - Prose above the block: keep it. Do not restate the block. Do not pad. A reader should be able
   to read the summary line, the block, and know whether to open the file.
 - Wrap at 100 columns. British English. No marketing.
