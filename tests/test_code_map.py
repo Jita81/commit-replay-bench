@@ -141,13 +141,26 @@ def test_check_fails_on_a_stale_map_and_passes_after_a_write(repo: Path, capsys)
         ("a model is re-priced; never for a new repository.", True),
         ("a model is re-priced. Never for a new repository.", True),
         ("a model is re-priced — never for a new repository.", True),
+        ("a Go repository needs cgo or a pinned ``go`` binary; a key is added.", False),
+        ("THIS is the verb a new repository starts with; a key is added.", False),
+        ("a stage is added to onboarding; a key is added.", False),
+        # A repository named only as a thing the file handles is not onboarding one (P-116).
+        ("`GET /repos/{name}` gains a field a reader needs; a key is added.", True),
+        ("``GET /repos`` gains a column; a key is added.", True),
+        ("the image repository, issuer or signing identity changes.", True),
+        ("the repository layer gains a table.", True),
+        ("a key is added to src/crb/server/routes/repos.py.", True),
+        ("an `OptKind` is added to ui/src/screens/Repos/runnerOpts.ts.", True),
+        ("a column is added to the list or the role rule for Add repo changes.", True),
     ],
 )
 def test_touch_when_addresses_onboarding_a_client_repository_first(
     repo: Path, touch: str, refused: bool
 ) -> None:
-    """The first clause of ``Touch when`` names a repository or onboarding, so the developer
-    onboarding a client repository reads first whether the file concerns them (P-114)."""
+    """The first clause of ``Touch when`` speaks about onboarding a client repository — a new,
+    client or language-named repository, or onboarding itself — so that developer reads first
+    whether the file concerns them. A repository in a code span, a path or a phrase such as
+    "the image repository" does not count (P-114, P-116)."""
     block = BLOCK.replace("Touch when:   never for a new repository.", f"Touch when:   {touch}")
     h = cm.read_header(_py(repo, "src/crb/core/thing.py", block))
     assert any("onboarding" in p for p in h.problems) is refused, h.problems

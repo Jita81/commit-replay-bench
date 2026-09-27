@@ -25,8 +25,8 @@
  * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx (round-trip, parse error blocks
  *               save), ui/src/screens/Repos/RepoNewDialog.test.tsx,
  *               ui/e2e/walkthrough/repo-config.spec.ts
- * Touch when:   an `OptKind` is added to ui/src/screens/Repos/runnerOpts.ts — add its control
- *               in `OptControl`; never for a new repository.
+ * Touch when:   never for a new repository; an `OptKind` is added to
+ *               ui/src/screens/Repos/runnerOpts.ts — add its control in `OptControl`.
  */
 import { useEffect, useRef, useState } from 'react'
 import type { Runner } from '../../api/types'

@@ -79,9 +79,24 @@ _PATH_RE = re.compile(r"(?<![\w/.-])((?:src|tests|ui|docs|deploy|scripts|\.githu
 _KEY_RE = re.compile(r"^(" + "|".join(re.escape(k) for k in KEYS) + r"):\s*(.*)$")
 #: ``Touch when`` speaks first to the developer onboarding a client repository
 #: (docs/FILE-HEADER-STANDARD.md): its first clause — up to the first ``;``, sentence end,
-#: dash or bracket — names a repository or onboarding ("never for a new repository; …").
+#: dash or bracket — speaks about onboarding one ("never for a new repository; …").
 _FIRST_CLAUSE_RE = re.compile(r";|\.\s|\s(?:—|\u2013|-)\s|\(")
-_ONBOARDING_RE = re.compile(r"\brepo(?:s|sitory|sitories|sitory's)?\b|\bonboard", re.I)
+#: Code spans and paths are removed before the match: ``GET /repos/{name}`` or
+#: ``ui/src/screens/Repos/…`` names a route or a folder, not a repository being onboarded.
+_NOT_PROSE_RE = re.compile(r"``.*?``|`[^`]*`|\S*/\S*")
+#: The ecosystems a runner or recipe serves, as a first clause names them ("a Go repository
+#: needs cgo"). A repository with no such word before it — "the image repository", "the
+#: repository layer", "Add repo" — is not one being onboarded (P-116).
+ONBOARDING_ECOSYSTEMS: tuple[str, ...] = (
+    "Python", "Go", "Rust", "Cargo", "JavaScript", "TypeScript", "Node", "Maven", "Gradle",
+    "JVM", "Java", "Kotlin",
+)  # fmt: skip
+_ONBOARDING_RE = re.compile(
+    r"\bonboard"
+    r"|\b(?:new|client|" + "|".join(map(re.escape, ONBOARDING_ECOSYSTEMS)) + r")\s+"
+    r"repo(?:s|sitory|sitories)?\b",
+    re.IGNORECASE,
+)
 #: Files whose ``Touch when`` is older than the onboarding check. The list only shrinks:
 #: a file that now addresses onboarding first must leave it, and an entry for a file that is
 #: gone fails ``--check`` (P-114).
@@ -176,8 +191,11 @@ def parse_block(comment: str) -> tuple[str, dict[str, str], list[str]]:
 
 
 def addresses_onboarding(touch_when: str) -> bool:
-    """True when the first clause of ``Touch when`` names a repository or onboarding."""
-    return bool(_ONBOARDING_RE.search(_FIRST_CLAUSE_RE.split(touch_when, maxsplit=1)[0]))
+    """True when the first clause of ``Touch when``, its code spans and paths removed, speaks
+    about onboarding a client repository: onboarding itself, or a new, client or
+    ecosystem-named repository (``ONBOARDING_ECOSYSTEMS``)."""
+    first = _FIRST_CLAUSE_RE.split(touch_when, maxsplit=1)[0]
+    return bool(_ONBOARDING_RE.search(_NOT_PROSE_RE.sub(" ", first)))
 
 
 def onboarding_baseline() -> frozenset[str]:
@@ -242,8 +260,9 @@ def _onboarding_problems(rel: str, fields: dict[str, str], baseline: frozenset[s
         return []
     return [
         "Touch when: its first clause does not address onboarding a client repository "
-        "(write 'never for a new repository; …' when nothing here changes for one — "
-        "docs/FILE-HEADER-STANDARD.md)"
+        "(name onboarding, a new or client repository, or an ecosystem in "
+        "ONBOARDING_ECOSYSTEMS; write 'never for a new repository; …' when nothing here "
+        "changes for one — docs/FILE-HEADER-STANDARD.md)"
     ]
 
 
