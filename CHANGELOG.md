@@ -15,14 +15,11 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **Audit you can prove: the audit trail is hash-chained, and the unsealed override names who set it**
   (north-star Wave 2, stream I; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-i)).
   Every `events` row is chained as it is written, and revision 0031 chains the rows already
-  there (ADR-0041, DL-103); `GET /ledger/verify` and `crb ledger verify --store` walk it and
-  serve both chains' heads, which every worker start also logs. In production the override
-  needs `CRB_ALLOW_UNSEALED_PROD_BY` (an active admin) and `_REASON`, and every start writes
-  an event naming that admin (DL-102). The append-only probe proves every table (DL-104), and
-  `crb_signoffs_total{outcome}` counts sign-offs. The Ledger and Posture pages report a broken
-  audit trail as the audit trail's, naming the event, and send the reader to verify the store;
-  two processes starting under the override at once both record it; and every operator
-  document that sets the override names the admin and the reason (P-118 to P-122).
+  there (ADR-0041, DL-103); `GET /ledger/verify` and `crb ledger verify --store` walk it, and
+  every worker start logs both chains' heads. In production the override needs
+  `CRB_ALLOW_UNSEALED_PROD_BY` (an active admin) and `_REASON`, and each start records that
+  admin (DL-102). The append-only probe proves every table (DL-104), `crb_signoffs_total`
+  counts sign-offs, and the Ledger and Posture pages name a broken audit event (P-118 to P-122).
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
