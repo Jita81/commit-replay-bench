@@ -169,6 +169,17 @@ class FakeBuilder:
                 errors=("model_error: You've hit your limit · resets 3pm",),
                 budget=budget,
             )
+        if self.behaviour == "login_refused":  # the pilot's canary (D1): the login answered 401
+            return BuildOutcome(
+                **base,
+                done=False,
+                stop_reason=STOP_MODEL_ERROR,
+                errors=(
+                    "model_error: authentication failed (HTTP 401) — run `claude login` as "
+                    "the worker's user",
+                ),
+                budget=budget,
+            )
         return BuildOutcome(**base, done=False, stop_reason=STOP_MAX_TURNS, turns=1, budget=budget)
 
 
@@ -393,6 +404,42 @@ def test_replay_stops_after_consecutive_provider_outages(h: Harness) -> None:
     h.enqueue("replay", ladder_json=["fake:m0"], params_json={"outage_stop": 0})
     again = h.run_one()
     assert again.status == STATUS_FAILED and again.error.startswith("all 1 attempt(s) errored")
+
+
+def test_a_build_that_meets_a_refused_login_records_the_login_invalid(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pilot D1 (P-205): the canary met a login that answered HTTP 401. The worker now
+    records that login ``invalid`` the moment a build meets the refusal — a
+    ``builder.login.verified`` event (``trigger: build``) — so the next submit on it is refused
+    at once, without spending a verify; a provider's usage limit records nothing."""
+    from crb.builders.claude_code import LoginCheck, default_auth
+    from crb.server import builder_login as bl
+
+    monkeypatch.setitem(
+        bl.LOGIN_VERIFIERS,
+        "fake",
+        bl.LoginVerifier(lambda a, b: LoginCheck("ok"), lambda a: ("keychain", ""), default_auth),
+    )
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="outage", **cfg)
+    h.enqueue("replay", ladder_json=["fake:m0"], params_json={"outage_stop": 0})
+    h.run_one()
+    with h.factory() as s:
+        assert bl.latest_verification(s, "fake", "cli") is None  # the provider's limit: not a login
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="login_refused", **cfg)
+    h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    h.run_one()
+    with h.factory() as s:
+        last = bl.latest_verification(s, "fake", "cli")
+        assert last is not None
+        assert last["status"] == "invalid" and last["trigger"] == bl.TRIGGER_BUILD
+        assert "authentication failed (HTTP 401)" in last["detail"]
+        state = bl.login_state(s, "fake", "cli", ttl_s=600)
+    assert state.state == bl.STATE_INVALID
 
 
 def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:

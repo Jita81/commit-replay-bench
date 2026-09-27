@@ -23,6 +23,8 @@ What lives here
   422 ``builder_login_invalid`` before anything is queued or spent, naming the builder, the auth
   mode and the token source label; an ``unverified`` login is verified ONCE first (one no-tool
   Haiku turn), recorded, then judged. Each refusal is a ``builder.login.refused`` event.
+* **The worker's own evidence** (:func:`record_refused_login`): a build that meets a refused
+  login records it ``invalid`` at once, so the next submit is refused without a verify.
 * **The registry** (:data:`LOGIN_VERIFIERS`): which builders expose a verify, and
   :data:`LOGIN_VERIFY_EXEMPT` says why each other one does not — a test holds every registered
   builder to one or the other, so a new builder cannot skip the gate silently.
@@ -50,7 +52,8 @@ Works with:   src/crb/builders/claude_code.py (``verify_login`` / ``login_resolu
               (``submit_refusals`` calls ``login_refusal``), src/crb/server/routes/builders.py
               (``GET /builders/logins``, ``POST /builders/{builder}/login/verify``),
               src/crb/server/routes/system.py (the ``builders`` probe), src/crb/server/routes/admin.py
-              (the stored-token verify records here), src/crb/store/events.py (``append_event``),
+              (the stored-token verify records here), src/crb/server/worker.py (a build that
+              meets a refused login records it), src/crb/store/events.py (``append_event``),
               src/crb/server/settings.py (``BuilderSettings.login_ttl_s``)
 Tested by:    tests/test_builder_login.py
 Touch when:   never for a new repository; a builder gains a verify (add it to
@@ -73,6 +76,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.builders.claude_code import (
+    VERIFY_INVALID,
     VERIFY_OK,
     LoginCheck,
     credential_missing,
@@ -80,6 +84,8 @@ from crb.builders.claude_code import (
     login_resolution,
     verify_login,
 )
+from crb.core.ledger import FAILURE_OUTAGE, OUTAGE_CAUSE_AUTH, derive_outage_cause
+from crb.core.redact import redact_and_cap
 from crb.observability.events import StepStatus
 from crb.server.deps import ApiError
 from crb.store.events import append_event
@@ -101,6 +107,8 @@ LOGIN_STATES: tuple[str, ...] = (STATE_VERIFIED, STATE_UNVERIFIED, STATE_INVALID
 TRIGGER_SUBMIT = "submit"
 TRIGGER_SETTINGS = "settings"
 TRIGGER_STORED_TOKEN = "stored_token"  # noqa: S105 — a trigger NAME, not a secret
+#: A build met the refusal itself (the worker records it; no verify was spent).
+TRIGGER_BUILD = "build"
 #: Where the person fixes a login — the refusal and the probe name it.
 FIX_WHERE = "Settings → Claude Code login"
 #: The run kinds that call a builder (``crb.server.schemas.BUILD_KINDS`` — a replay, a measure
@@ -353,6 +361,32 @@ def run_verification(
     )
 
 
+def record_refused_login(
+    factory: sessionmaker[Session], builder: str, auth: str, error: str, *, actor: str = ""
+) -> bool:
+    """A build met a refused login — its error reads ``outage`` with cause ``auth`` by the
+    ledger's own rule — so the login is recorded ``invalid`` at once (``trigger: build``): the
+    next submit on it is refused without spending a verify (pilot D1). A provider's refusal
+    (a usage limit, a 429) records nothing: the login may be fine. ``builder`` may carry an
+    arm suffix (``claude_code+preflight``). ``True`` when a record was written."""
+    name = builder.split("+", 1)[0]
+    verifier = LOGIN_VERIFIERS.get(name)
+    if verifier is None or derive_outage_cause(FAILURE_OUTAGE, error) != OUTAGE_CAUSE_AUTH:
+        return False
+    mode = auth.strip() or verifier.default_auth()
+    detail = redact_and_cap(error.removeprefix("model_error:").strip(), max_chars=600)
+    record_verification(
+        factory,
+        name,
+        mode,
+        LoginCheck(VERIFY_INVALID, detail),
+        trigger=TRIGGER_BUILD,
+        actor=actor,
+        resolution=resolution_of(name, mode),
+    )
+    return True
+
+
 _LOCKS: dict[tuple[str, str], threading.Lock] = {}
 _LOCKS_GUARD = threading.Lock()
 
@@ -450,6 +484,7 @@ __all__ = [
     "STATE_INVALID",
     "STATE_UNVERIFIED",
     "STATE_VERIFIED",
+    "TRIGGER_BUILD",
     "TRIGGER_SETTINGS",
     "TRIGGER_STORED_TOKEN",
     "TRIGGER_SUBMIT",
@@ -461,6 +496,7 @@ __all__ = [
     "login_refusal",
     "login_state",
     "login_trace",
+    "record_refused_login",
     "record_verification",
     "resolution_of",
     "run_logins",

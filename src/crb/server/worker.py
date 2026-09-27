@@ -264,6 +264,7 @@ from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink
 from crb.observability.metrics import parse_metrics_port
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
+from crb.server.builder_login import record_refused_login
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
 from crb.server.github_app import GitHubApp, GitHubAppError
@@ -2277,6 +2278,15 @@ class Worker:
             if is_outage_error(attempt.error):
                 streak["n"] += 1
                 streak["last"] = attempt.error
+                # pilot D1: a refused LOGIN is recorded invalid at once, so the next submit on
+                # it is refused before it is queued (src/crb/server/builder_login.py)
+                record_refused_login(
+                    self.factory,
+                    attempt.builder.name,
+                    str((p.get("builder_config") or {}).get("auth", "") or ""),
+                    attempt.error,
+                    actor=self.worker_id,
+                )
             else:
                 streak["n"] = 0
             return attempt
