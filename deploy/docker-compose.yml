@@ -21,6 +21,11 @@ x-crb-image: &crb-image
   build:
     context: ..
     dockerfile: deploy/Dockerfile
+    # the served-commit stamp (src/crb/observability/build_stamp.py): the build context has no
+    # .git, so the commit comes from the shell — `CRB_SOURCE_COMMIT=$(git rev-parse HEAD)
+    # docker compose … up -d --build`. Unset, the image's /health `build` probe reads degraded.
+    args:
+      CRB_SOURCE_COMMIT: ${CRB_SOURCE_COMMIT:-}
 
 x-crb-common: &crb-common
   <<: *crb-image

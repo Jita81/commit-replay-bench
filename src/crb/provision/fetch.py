@@ -28,11 +28,12 @@ How:          ``FetchPlan`` (recipe, image, argv, env, hosts, inputs, mirror) �
               ``Popen`` → poll size and clock → ``docker kill`` on a breach → refusal or the
               filled stage.
 Layer:        provision — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md, docs/adr/0012-builder-in-a-sealed-container.md
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0012-builder-in-a-sealed-container.md
 Works with:   src/crb/builders/sidecar.py (the internal network and the proxy),
-              src/crb/provision/store.py (the stage it fills), src/crb/provision/go.py,
-              src/crb/provision/python.py and src/crb/provision/node.py (the recipes that
-              build plans), src/crb/core/deps.py (the refusals)
+              src/crb/provision/store.py (the stage it fills), src/crb/provision/go.py (a recipe
+              that builds plans; src/crb/provision/python.py and src/crb/provision/node.py are
+              the others), src/crb/core/deps.py (the refusals)
 Tested by:    tests/test_provision_fetch.py, tests/test_provision_go.py
 Touch when:   never for a new repository; a flag on the fetch's ``docker run`` is a security
               decision (docs/SECURITY.md §3.1.1 and ADR-0005's amendment change with it).

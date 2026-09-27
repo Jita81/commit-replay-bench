@@ -44,7 +44,8 @@ How:          Frozen dataclasses and a ``Protocol``; the closure selector reads 
               re-checks a mount's path, key and seal at use.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
-              docs/adr/0005-fail-closed-docker-sandbox.md, docs/adr/0012-builder-in-a-sealed-container.md
+              docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0012-builder-in-a-sealed-container.md
 Works with:   src/crb/core/provision.py (the lockfile readers, keys and closure parsers the
               selector uses), src/crb/provision/__init__.py (``make_deps_provider``: the
               providers behind the protocol), src/crb/provision/store.py (the only maker of a
@@ -56,7 +57,8 @@ Works with:   src/crb/core/provision.py (the lockfile readers, keys and closure 
 Tested by:    tests/test_deps_seam.py, tests/test_provision.py, tests/test_provision_store.py,
               tests/test_execution.py, tests/test_qualify.py
 Touch when:   never for a new repository; a new ``PROVISION_*`` code is added to ``REFUSALS``
-              with its scope and fix and to the table in docs/DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately
+              with its scope and fix and to the table in
+              docs/DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately
               and ADR-0019; a new language recipe adds its scheme here and in
               src/crb/core/provision.py.
 """

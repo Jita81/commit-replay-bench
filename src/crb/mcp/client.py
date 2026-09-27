@@ -14,7 +14,8 @@ How:          ``httpx.Client`` (or any subclass — the tests inject FastAPI's `
               which is one) with ``base_url`` = ``CRB_API_URL``; ``login()`` POSTs
               ``/auth/login``, then every unsafe request adds ``X-CSRF-Token`` from the
               ``crb_csrf`` cookie (``__Host-crb_csrf`` on a TLS deployment) the way the
-              browser does (src/crb/server/app.py's CSRF middleware). Credentials come from the environment (``CRB_MCP_USERNAME`` /
+              browser does (src/crb/server/app.py's CSRF middleware). Credentials come from the
+              environment (``CRB_MCP_USERNAME`` /
               ``CRB_MCP_PASSWORD``) and are never logged or echoed.
 Layer:        mcp — docs/ARCHITECTURE.md#44-outer-layers (a client of the server layer, never
               an importer of it)
@@ -23,8 +24,8 @@ Works with:   src/crb/mcp/server.py (the tools), src/crb/server/routes/auth.py (
               route and cookies), src/crb/server/deps.py (the error envelope this decodes),
               docs/MCP.md (how an operator configures it)
 Tested by:    tests/test_mcp_server.py (over the real app via ``TestClient``)
-Touch when:   the API grows an auth scheme (a bearer token for service accounts — the seam
-              is ``login``/``_headers``); never for a new repository.
+Touch when:   never for a new repository; the API grows an auth scheme (a bearer token for service
+              accounts — the seam is ``login``/``_headers``).
 Claims:       none — a transport; every number it returns is the API's, with the API's
               method fields intact.
 """

@@ -61,7 +61,13 @@ from crb.builders.base import (
     emit,
 )
 from crb.builders.budget import BudgetTracker, CostMeter, price_for
-from crb.builders.openai_client import ChatFn, ChatReply, EndpointConfig, make_chat
+from crb.builders.openai_client import (
+    ChatFn,
+    ChatReply,
+    EndpointConfig,
+    make_chat,
+    resolved_endpoint,
+)
 from crb.core.redact import redact_and_cap
 from crb.core.spec import RepoConfig
 from crb.core.workspace import Workspace
@@ -347,7 +353,9 @@ class EditBlockBuilder:
     ) -> None:
         self.model = model
         self.endpoint = endpoint
-        self.provider = provider or (endpoint.provider if endpoint else "cerebras")
+        # the endpoint the build will call (resolved_endpoint: explicit, else the
+        # deployment's CRB_OPENAI_* / CRB_AZURE_*), so the provider column names it
+        self.provider = provider or resolved_endpoint(endpoint).provider
         self._chat_fn = chat_fn
         self.max_files = max_files
         self.max_file_chars = max_file_chars

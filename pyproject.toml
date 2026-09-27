@@ -56,6 +56,8 @@ dev = [
   # the CommonMark parser scripts/claims_check.py reads fence spans with (CI's claims
   # job installs the same package)
   "markdown-it-py>=3.0",
+  # the chart and compose suites parse rendered YAML (tests/test_deploy_secrets_store.py)
+  "pyyaml>=6.0",
 ]
 all = ["commit-replay-bench[openai,claude,server,postgres,mcp,dev]"]
 

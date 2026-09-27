@@ -72,8 +72,9 @@ Works with:   src/crb/server/factory_state.py (the state), src/crb/factory/backl
               ui/src/screens/Factory/IntakePage.tsx (the intake screen)
 Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py,
               tests/test_server_routes_intake.py
-Touch when:   a factory record gains a field the UI needs (extend TaskView + FactoryTask in
-              ui/src/api/types.ts together); a new write path (keep it append-only, role-gated).
+Touch when:   never for a new repository; a factory record gains a field the UI needs (extend
+              TaskView + FactoryTask in ui/src/api/types.ts together); a new write path (keep it
+              append-only, role-gated).
 """
 
 from __future__ import annotations
@@ -135,9 +136,11 @@ from crb.server.intake import (
     register_approved,
 )
 from crb.server.routes.capability import (
+    CHECKS_CURRENT,
     POSTURE_DEPLOYMENT,
     filter_posture,
     rows_for_apparatus,
+    rows_for_arm,
     rows_for_mode,
     signed_map,
 )
@@ -983,9 +986,13 @@ def _cell_routes(
 ) -> dict[str, CellRouteOut]:
     """``class|size`` → the map's decision, from exactly the reading the worker's delivery
     gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows on the current
-    apparatus, the repo's latest controls verdict, sign-offs overlaid."""
-    rows = rows_for_apparatus(
-        rows_for_mode(DbLedger(factory).rows(repo=repo), "sighted"), "current"
+    apparatus in the repository's own ``checks`` arm (ADR-0024), the repo's latest controls
+    verdict, sign-offs overlaid."""
+    rows = rows_for_arm(
+        factory,
+        repo,
+        rows_for_apparatus(rows_for_mode(DbLedger(factory).rows(repo=repo), "sighted"), "current"),
+        CHECKS_CURRENT,
     )
     # ADR-0019 §8: the same posture filter the worker's delivery gate applies
     rows = filter_posture(db, repo, rows, POSTURE_DEPLOYMENT, settings).rows

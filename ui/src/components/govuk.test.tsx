@@ -4,7 +4,8 @@
  * Navigation
  * ----------
  * What it is:   Tests for the GOV.UK / NHS pattern components and the Posture page.
- * What it does: Pins the task list's "completed n of m" and row links; the summary list's
+ * What it does: Pins the task list's "completed n of m" and row links, and that its status tag
+ *               may wrap (a long one scrolled Home sideways at 375 px); the summary list's
  *               key / value / change cells and that a hinted row opens from its value with
  *               the key as its About label; the banner's landmark and title; the
  *               confirmation panel's reference; the details pattern (a native `<details>`
@@ -18,7 +19,8 @@
  *               ui/src/components/Hint.tsx (a summary row's trigger), ui/src/components/Help.tsx
  *               (`collectHints` — the About label a row gets), ui/src/help/hints.ts (the copy)
  * Tested by:    ui/src/components/govuk.test.tsx
- * Touch when:   a pattern is added.
+ * Touch when:   never for a new repository (the patterns are the product's own); a pattern
+ *               is added.
  */
 
 import { render, screen, waitFor } from '@testing-library/react'
@@ -29,7 +31,7 @@ import { HINTS } from '../help/hints'
 import { PosturePage } from '../screens/Posture/PosturePage'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../test/utils'
 import { collectHints } from './Help'
-import { ConfirmationPanel, Details, NotificationBanner, SummaryList, TaskList } from './govuk'
+import { ConfirmationPanel, Details, NotificationBanner, SummaryList, Tag, TaskList } from './govuk'
 
 describe('govuk patterns', () => {
   it('task list, summary list, banner and confirmation panel', () => {
@@ -70,6 +72,19 @@ describe('govuk patterns', () => {
     await waitFor(() => expect(tip).toHaveAttribute('data-open', 'true'))
     expect(tip).toHaveTextContent(HINTS['summary.posture.roles'])
     expect(collectHints(document)[0]).toMatchObject({ id: 'summary.posture.roles', label: 'Roles' })
+  })
+
+  it('a task-list status tag may wrap, so a long status never widens its row past a phone; a plain tag stays on one line', () => {
+    render(
+      <MemoryRouter>
+        <TaskList completed={0} tasks={[{ num: 7, name: 'Run the factory', status: 'No cell routes deliver yet', tone: 'grey', to: '/factory' }]} />
+        <Tag tone="blue">Ready</Tag>
+      </MemoryRouter>,
+    )
+    const long = screen.getByText('No cell routes deliver yet')
+    expect(long.className).toContain('whitespace-normal')
+    expect(long.className).not.toContain('whitespace-nowrap')
+    expect(screen.getByText('Ready').className).toContain('whitespace-nowrap')
   })
 
   it('details is a native <details> with the summary as its one visible line, closed by default', () => {

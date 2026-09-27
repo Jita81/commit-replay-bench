@@ -23,8 +23,8 @@ Works with:   src/crb/server/routes/repos.py (under test), src/crb/core/spec.py
               tests/fixtures/server_seed.py, docs/API.md (repos), docs/OPERATOR.md (configuring
               a repository from the UI, §2.0)
 Tested by:    tests/test_server_routes_repos.py
-Touch when:   a ``RepoConfig`` field is added (a validation case and the redacted-diff case; the
-              UI form in ui/src/api/types.ts); a repo-level route is added.
+Touch when:   never for a new repository; a ``RepoConfig`` field is added (a validation case and the
+              redacted-diff case; the UI form in ui/src/api/types.ts); a repo-level route is added.
 """
 
 from __future__ import annotations
@@ -276,6 +276,16 @@ class TestUpdate:
                 e.seq for e in s.execute(select(Event).where(Event.trace_id == trace)).scalars()
             ]
         assert seqs == [1, 2]
+
+    def test_update_sets_the_spend_surface_and_refuses_an_unknown_value(self, env: Env) -> None:
+        """``spend`` is the per-repository switch the prevention loop writes (stream K)."""
+        r = env.put(f"/repos/{ALPHA}", json={"spend": {"escalation": "always"}})
+        assert r.status_code == 200, r.text
+        assert r.json()["config"]["spend"] == {"escalation": "always"}
+        r = env.put(f"/repos/{ALPHA}", json={"spend": {"budget_profile": "generous"}})
+        assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
+        r = env.put(f"/repos/{ALPHA}", json={"spend": {"max_turns": "50"}})
+        assert r.status_code == 422
 
     def test_update_invalid_422(self, env: Env) -> None:
         r = env.put(f"/repos/{ALPHA}", json={"runner": "cargo", "language": "python"})

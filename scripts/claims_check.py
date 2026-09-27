@@ -78,15 +78,17 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
-              README.md, docs/RELEASING.md, docs/CONTRIBUTING.md and docs/SUMMARY.md (the pages
-              on the allowlist),
+              README.md (the first page on ``ALLOWLIST``; docs/RELEASING.md,
+              docs/CONTRIBUTING.md, docs/SUMMARY.md and
+              docs/reviews/2026-09-25-value-baseline.md are the others),
               docs/DECISION-LOG.md (where a review action's record lives),
               docs/reviews/2026-09-13-critical-friend.md (the review whose actions it holds),
               .github/workflows/ci.yml (the claims job that runs --check),
               scripts/code_map.py (the same gate idiom: parse, validate, --check)
 Tested by:    tests/test_claims_check.py
-Touch when:   a tag is added to the policy (update TAGS and EVIDENCE-AND-CLAIMS §1 together);
-              a page joins the allowlist (add it and make it pass in the same change).
+Touch when:   never for a new repository; a tag is added to the policy (update TAGS and
+              EVIDENCE-AND-CLAIMS §1 together); a page joins the allowlist (add it and make it pass
+              in the same change).
 """
 
 from __future__ import annotations
@@ -108,6 +110,7 @@ ALLOWLIST: tuple[str, ...] = (
     "docs/RELEASING.md",
     "docs/CONTRIBUTING.md",
     "docs/SUMMARY.md",
+    "docs/reviews/2026-09-25-value-baseline.md",
 )
 
 #: Where reviews live, and where a review action's record must be.

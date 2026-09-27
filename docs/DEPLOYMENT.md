@@ -225,6 +225,11 @@ worker:
   sandbox: { mode: dind }
   nodeSelector: { crb.dev/pool: worker }
   tolerations: [{ key: crb.dev/worker, operator: Exists, effect: NoSchedule }]
+# the default secretsStore claim (ReadWriteOnce) puts the api on the worker's node, so the api
+# needs the same placement; the chart refuses a difference (§3.2)
+api:
+  nodeSelector: { crb.dev/pool: worker }
+  tolerations: [{ key: crb.dev/worker, operator: Exists, effect: NoSchedule }]
 networkPolicy:
   postgres: { cidrs: ["10.10.1.4/32"] }        # Flexible Server private endpoint
   modelEndpoint: { cidrs: ["10.10.2.4/32"] }   # Azure OpenAI private endpoint
@@ -253,7 +258,30 @@ seccomp, no service-account token mount, default-deny NetworkPolicy for every cr
 explicit allowlists (DNS; ingress-controller → api; api/worker/migrate → PostgreSQL;
 worker → model endpoint; api → OIDC), resource requests/limits on every container, a
 `Recreate` strategy for the worker (it owns its RWO work volume), and a PVC with
-`helm.sh/resource-policy: keep` so worktrees survive an uninstall.
+`helm.sh/resource-policy: keep` so worktrees survive an uninstall. The stored credentials
+(Settings → Claude Code login, the tracker token) live in `secretsStore`: one claim that the
+API, which writes them and checks them when a run is submitted, and the worker, which reads
+them at build time, both mount at `CRB_SECRETS_DIR` (`/srv/crb-secrets/store`). The default
+ReadWriteOnce claim pins both pods to one node; name a ReadWriteMany claim of your own
+(`secretsStore.existingClaim`, `secretsStore.accessMode: ReadWriteMany`) to lift the pin.
+Because of the pin, the api must be able to run wherever the worker runs: with a
+ReadWriteOnce claim the chart refuses to render unless `api.nodeSelector`,
+`api.tolerations` and `api.affinity` are the same as `worker.nodeSelector`,
+`worker.tolerations` and `worker.affinity`. Affinity counts as placement: a worker kept on
+its pool by required node affinity (rather than a node selector) would otherwise follow an
+api scheduled on a general node that its own rule forbids, and stay pending; pod affinity
+and pod anti-affinity can forbid a node in the same way. The chart compares your values
+before it adds its own pin. Matching values are not enough on their own: a required pod
+anti-affinity that selects the api or the worker (a chart label such as
+`app.kubernetes.io/component` or `crb.dev/secrets-store`, or one of your `podLabels`) forbids
+the node the pin puts both pods on, whatever its topology key, so the chart refuses it too.
+Make such a rule preferred, or use a ReadWriteMany claim. A worker on the dedicated, tainted pool of §4.4 therefore takes
+the api with it (the example in §3.1), or the store moves to a ReadWriteMany claim on a file system that keeps POSIX
+permissions (the store refuses a directory that its group can read).
+The claim has no `keep` policy, so a stored credential does not outlive the release.
+The chart also refuses an `api.podLabels`, `worker.podLabels`, `api.podAnnotations` or
+`worker.podAnnotations` key that it sets itself (the pin's `crb.dev/secrets-store` label,
+the selector labels, `checksum/config`): the pod would carry the key twice.
 
 ### 3.3 PostgreSQL
 
@@ -338,12 +366,13 @@ is not measured yet **[hypothesis — about 1 to 3 minutes per cobra task with a
 build cache, extrapolated from run `0c44ff24…`'s attempt latencies; the first live qualify
 run replaces this with a measured figure]**.
 
-The `sandbox-images` job is meant to block a merge to `main` exactly as `container` does —
-it has no `continue-on-error` and fails on any skipped smoke test — but a job blocks only
-when its context is in the branch's required status checks, which is a repository setting,
-not a workflow file **[measured — `GET /repos/Jita81/commit-replay-bench/branches/main/protection`,
-2026-09-22: the context is absent; a red `sandbox-images` would not block a merge]**. The
-repository administrator adds it once:
+The `sandbox-images` job blocks a merge to `main` exactly as `container` does — it has no
+`continue-on-error` and fails on any skipped smoke test — because its context is in the
+branch's required status checks, which is a repository setting, not a workflow file
+**[measured — `GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
+2026-09-27: 16 contexts, `sandbox-images`, `ui-unit`, `ui-smoke`, `dod`, `claims` and `sbom`
+among them; n = 1 reading; apparatus n/a, a repository setting, not a graded number]**. A
+repository administrator restores or re-creates the list with one call:
 
 ```bash
 gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
@@ -357,9 +386,17 @@ gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/requir
  "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
  "dod (every route, journey and stream has its definition of done; evidence resolves)",
  "claims (every quantified sentence on a covered page carries its tag)",
- "sandbox-images (build + hadolint + smoke each reference sandbox image)"]}
+ "sandbox-images (build + hadolint + smoke each reference sandbox image)",
+ "sbom (CycloneDX)"]}
 JSON
 ```
+
+`test (py3.12)`, `test (py3.13)` and `walkthrough (browser, live stack, tier 1)` are
+aggregators: the work runs in parallel parts (`test shard (py3.12, 1 of 6)` …, the walkthrough
+story and its screens shards) and the aggregator passes only when every part passed, the
+suite's parts together ran every test exactly once, and the union's coverage is at least 70 %
+(P-051, P-053). Never add a part to the list — its name changes whenever the job is split
+differently, and the aggregator's does not.
 
 A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
 characters — a `name:` longer than that can never satisfy the context it is required under
@@ -374,7 +411,12 @@ verdict is visible on every pull request but advisory. The same holds for the tw
 on every pull request, and they block a merge only once their contexts are in this set. The
 same holds for `dod` and `claims`, also added to the list above: the definition-of-done record
 and the claim-tag rule are gates in the workflow and advisory on a branch until an
-administrator sends this call.
+administrator sends this call. The walkthrough needs no new context: when it outgrew its
+40-minute budget on PR #57 it was split into `walkthrough-story` and four parallel
+`walkthrough-screens` shards, and the required context "walkthrough (browser, live stack,
+tier 1)" moved onto an aggregator job that passes only when all five parts passed (a failed,
+cancelled or skipped part fails it) — so every spec, `11-screens` included, blocks a merge
+under the name already on the list. The parts' own contexts need not be added.
 
 ## 4. Azure
 
@@ -441,8 +483,19 @@ bound (2 CPU / 2 GB per sandbox by default): size the pool for the concurrency y
 ## 5. Backup and restore
 
 State: the database (everything that matters, including the append-only `grades` /
-`events` / `signoffs` / `evidence` tables) and the worker's work volume (reproducible from
-the repositories; convenient to keep).
+`events` / `signoffs` / `evidence` tables), the worker's work volume (`worker.workDir`;
+reproducible from the repositories, convenient to keep) and the secrets store
+(`secretsStore`: the stored Claude Code login and the tracker token, §3.2).
+
+* **Secrets store**: choose one of two, and write the choice down.
+  * Back the claim up with a volume snapshot (or a copy of `/srv/crb-secrets/store`) held
+    with the same protection as the Kubernetes Secret — it holds live credentials — and
+    restore it before the api and the worker start.
+  * Or do not back it up, and after a restore supply the credentials again before the
+    worker starts: Settings → Claude Code login, and the tracker token. The api refuses a
+    new run whose builder has no credential when it is submitted, but that is the only
+    check. The worker claims a run that was queued or running when the backup was taken as
+    soon as it starts, and without the credential that run's attempts fail.
 
 * **Managed PostgreSQL**: PITR is the primary backup; take a logical `pg_dump -Fc` before
   every upgrade and monthly for off-platform retention.
@@ -456,9 +509,19 @@ the repositories; convenient to keep).
   `crb ledger verify` walks the core JSONL ledger at `$CRB_HOME/ledger.jsonl`, not the
   database — it cannot prove a database copy.
 
-Restore order: database (on an *empty* target) → work volume → `migrate` (no-op at head; it
-re-asserts the triggers) → api/worker → ledger verify → the `migrations` and `append_only`
-probes on `/api/v1/health`.
+There is one restore order for each choice. In both, ledger verify and the health probes
+come after the pods start.
+
+Restore order when the secrets store is restored: database (on an *empty* target) → work
+volume → secrets store → `migrate` (no-op at head; it re-asserts the triggers) → start the
+api and the worker → ledger verify → the `migrations` and `append_only` probes on
+`/api/v1/health`.
+
+Restore order when the credentials are supplied again: database (on an *empty* target) →
+work volume → `migrate` (no-op at head; it re-asserts the triggers) → start the api alone
+(`worker.replicaCount: 0`) → supply the credentials again through Settings → start the
+worker (`worker.replicaCount` back to its value) → ledger verify → the `migrations` and
+`append_only` probes on `/api/v1/health`.
 
 ### 5.1 Backup and restore (SQLite)
 

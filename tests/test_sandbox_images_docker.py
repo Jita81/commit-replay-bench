@@ -38,7 +38,8 @@ What it is:   The suite for the shipped reference sandbox images (deploy/sandbox
 What it does: Pins, per image, that the default and the executor's user are uid 65534, that
               the root filesystem and the worktree (``/src``) are read-only from inside while
               the throwaway ``/work`` copy and ``/tmp`` are writable and the host tree stays
-              byte-identical, that ``sh`` and GNU ``tar`` are present, that no setuid/setgid file is in the image, that ``/tmp`` is
+              byte-identical, that ``sh`` and GNU ``tar`` are present, that no setuid/setgid file is
+              in the image, that ``/tmp`` is
               ``noexec`` except for the Go runner's command, that a network probe FAILS
               through the language's runner, that an absent image is ``SandboxUnavailable``
               rather than a pull, that the language
@@ -59,10 +60,11 @@ Works with:   deploy/sandbox/Dockerfile.python, deploy/sandbox/Dockerfile.node,
               same walls on the inline test image, plus the kill path),
               .github/workflows/ci.yml (the ``sandbox-images`` job that builds and runs this)
 Tested by:    tests/test_sandbox_images_docker.py
-Touch when:   a reference image is added under deploy/sandbox (add its language to
-              ``conftest_langs.SHIPPED_SANDBOX_LANGS``, its fixture, its net probe and its
-              expected gold change here, and a build + smoke leg in ci.yml); a Dockerfile
-              changes what it carries (the fixture must still need nothing but the toolchain).
+Touch when:   never for a new repository in a shipped language; a reference image is added under
+              deploy/sandbox (add its language to ``conftest_langs.SHIPPED_SANDBOX_LANGS``, its
+              fixture, its net probe and its expected gold change here, and a build + smoke leg in
+              ci.yml); a Dockerfile changes what it carries (the fixture must still need nothing but
+              the toolchain).
 """
 
 from __future__ import annotations

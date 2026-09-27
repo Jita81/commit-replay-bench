@@ -236,6 +236,9 @@ class FactorySpec:
     #: provider's bindings for the executor.
     posture: Posture | None = None
     deps: TaskDeps | None = None
+    #: Keep every graded attempt's patch under ``<evidence_dir>/patches`` (crb.core.patches);
+    #: ``False`` when the deployment keeps no code (``retention.patches`` off).
+    keep_patches: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ladder", tuple(self.ladder))
@@ -489,6 +492,7 @@ class FactoryLoop:
             on_event=self._cb(item.id),
             posture=s.posture,
             deps=s.deps,
+            keep_patches=s.keep_patches,
         )
         for res in results:
             s.evidence.record_build(
