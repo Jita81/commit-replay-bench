@@ -1,12 +1,12 @@
 """A configured builder endpoint is the endpoint the builder calls: every OpenAI-compatible
-builder (tool loop, edit block, labeller) is pointed by ``CRB_OPENAI_BASE_URL`` at a fake
+builder (tool loop, edit block, labeller) and the factory's test author are pointed by ``CRB_OPENAI_BASE_URL`` at a fake
 OpenAI-compatible server on localhost — no real model — and the request must land there,
 the row must carry that host as its provider, and the timeout and retry settings must be
 the ones the operator set.
 
 Navigation
 ----------
-What it is:   The endpoint-resolution test suite (product.truth.26, G-610) — a small
+What it is:   The endpoint-resolution test suite (product.truth.26, .27) — a small
               threaded HTTP server that answers ``POST /v1/chat/completions`` like an
               OpenAI-compatible model, and the builders run against it through the real
               ``openai`` client.
@@ -16,8 +16,11 @@ What it does: Pins that ``EndpointConfig.from_env`` reads ``CRB_OPENAI_TIMEOUT_S
               labeller send their request to the configured base URL and stamp its host as
               the provider (never a silent ``cerebras``); that a rung naming a different
               provider is refused before anything is built; that a response slower than the
-              configured timeout fails and one inside it succeeds; and that the retry count
-              is the configured one.
+              configured timeout fails and one inside it succeeds; that the retry count
+              is the configured one; and that the factory's test author calls the same
+              endpoint, stamps its provider on what authoring returns and on each
+              ``author.attempt``, is refused a rung naming another provider, and never lets
+              a provider pass the builder's model as another (ADR-0021).
 How:          ``FakeModel`` (``http.server`` on 127.0.0.1:0) records each request's path and
               JSON body and replies after an optional delay; ``_point_at`` sets the
               ``CRB_OPENAI_*`` variables (and a throwaway key under a test-only name) with
@@ -29,7 +32,8 @@ Works with:   src/crb/builders/openai_client.py (``resolve_endpoint``, ``from_en
               src/crb/builders/editblock.py (the builders that must call the configured
               endpoint), src/crb/builders/labeller.py (the labeller id's provider),
               src/crb/builders/__init__.py (``builder_for_rung`` — where a mismatch is
-              refused), tests/fixtures/builders_repo.py (the workspace)
+              refused), src/crb/factory/author.py (the test author's provider stamp),
+              tests/fixtures/builders_repo.py and tests/fixtures/pyrepo.py (the workspaces)
 Tested by:    tests/test_builders_endpoint.py
 Touch when:   a new ``CRB_OPENAI_*`` variable is read (a default case and a refusal case);
               a new OpenAI-compatible builder is registered (a "lands on the fake" case).
@@ -54,6 +58,15 @@ from crb.builders.editblock import EditBlockBuilder
 from crb.builders.labeller import OpenAILabeller
 from crb.builders.openai_agent import OpenAIAgentBuilder
 from crb.core.classify import PathStat
+from crb.factory.author import RungTestAuthor, author_from_label
+from crb.factory.backlog import BacklogItem
+from crb.factory.testfirst import (
+    SameIdentityError,
+    assert_distinct_identity,
+    author_label,
+    author_test,
+)
+from fixtures import pyrepo as pr
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 if str(_FIXTURES) not in sys.path:
@@ -323,3 +336,117 @@ def test_the_configured_retry_count_is_honoured(monkeypatch: pytest.MonkeyPatch)
         assert len(slow.requests) == 2
     finally:
         slow.close()
+
+
+# ---------------------------------------------------------------------------
+# The factory's test author: the same endpoint, the same provider rule (G-611)
+# ---------------------------------------------------------------------------
+
+_ITEM = BacklogItem(
+    id="I-9",
+    title="divide two numbers",
+    kind="code",
+    description="calc.divide(a, b) returns a / b and raises ZeroDivisionError for b == 0.",
+    acceptance_criteria=("divide(6, 3) == 2",),
+    capability_class="pure_function",
+)
+
+_AUTHORED = """FILE: tests/test_divide.py
+```python
+from calc import divide
+
+
+def test_divide() -> None:
+    assert divide(6, 3) == 2
+```
+"""
+
+
+def test_the_test_author_calls_the_configured_endpoint_and_stamps_its_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pyrepo: pr.PyRepo
+) -> None:
+    fake = FakeModel(reply=_AUTHORED)
+    try:
+        _point_at(monkeypatch, fake)
+        author = author_from_label("editblock:qwen-local")
+        assert author is not None
+        assert author.provider == fake.host
+        assert author.describe()["provider"] == fake.host
+        assert author.describe()["endpoint"]["base_url"] == fake.base_url
+        events: list[tuple[str, dict[str, Any]]] = []
+        res = author_test(
+            pyrepo.repo,
+            _ITEM,
+            author,
+            facts={},
+            config=pyrepo.config,
+            scratch=tmp_path / "scratch",
+            on_event=lambda action, payload: events.append((action, dict(payload))),
+        )
+    finally:
+        fake.close()
+    assert [r["path"] for r in fake.requests] == ["/v1/chat/completions"]
+    assert fake.requests[0]["body"]["model"] == "qwen-local"
+    assert res.authored.path == "tests/test_divide.py"
+    # the provider of the endpoint that wrote the test is on what authoring returns and on
+    # every attempt it records — never a silent `cerebras`
+    assert res.described["provider"] == fake.host
+    attempts = [p for a, p in events if a == "author.attempt"]
+    assert attempts and all(p["provider"] == fake.host for p in attempts)
+    # the identity the refusal compares stays builder:model — a provider is not identity
+    assert res.authored.author == "editblock:qwen-local"
+
+
+def test_a_test_author_rung_naming_another_provider_is_refused_before_any_call(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeModel
+) -> None:
+    _point_at(monkeypatch, fake)
+    with pytest.raises(oc.ProviderMismatch, match=r"names provider 'cerebras'"):
+        author_from_label("editblock:gpt-oss-120b:cerebras")
+    with pytest.raises(oc.ProviderMismatch):
+        author_from_label("editblock:gpt-oss-120b", default_provider="cerebras")
+    with pytest.raises(oc.ProviderMismatch):
+        RungTestAuthor(
+            name="editblock",
+            model="m",
+            provider="cerebras",
+            endpoint=oc.EndpointConfig(base_url=fake.base_url),
+        )
+    # naming the host it calls is accepted
+    named = author_from_label(f"editblock:qwen-local@{fake.host}")
+    assert named is not None and named.provider == fake.host
+    assert not fake.requests  # construction calls nothing
+
+
+def test_a_provider_never_lets_the_authors_model_pass_as_another(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeModel
+) -> None:
+    """ADR-0021 (#55): the author's model differs from the builder's. The provider is
+    stamped, never compared as identity — the same model behind two providers is refused."""
+    _point_at(monkeypatch, fake)
+    author = author_from_label(f"editblock:gpt-oss-120b@{fake.host}")
+    assert author is not None
+    for rung in (
+        base.Rung("openai_agent", "gpt-oss-120b", "cerebras"),
+        base.Rung("editblock", "gpt-oss-120b", "azure"),
+    ):
+        with pytest.raises(SameIdentityError):
+            assert_distinct_identity(author_label(author), rung.label, role="build rung 1")
+
+
+def test_no_caller_stamps_a_named_provider_over_the_endpoints() -> None:
+    """P-967, ratcheted: ``provider or resolved_endpoint(endpoint).provider`` (and the older
+    ``provider or (endpoint.provider if endpoint else …)``) stamps whatever a rung names even
+    when the endpoint called is another — the test author did so until G-611 closed. Every
+    OpenAI-compatible caller takes its provider from ``resolve_endpoint``, which refuses a
+    mismatch."""
+    import re
+
+    pattern = re.compile(r"provider\s+or\s+(?:\(\s*endpoint\b|resolved_endpoint\()")
+    root = Path(oc.__file__).resolve().parents[1]  # src/crb
+    offenders = sorted(
+        str(p.relative_to(root))
+        for p in root.rglob("*.py")
+        if pattern.search(p.read_text(encoding="utf-8"))
+    )
+    assert offenders == []

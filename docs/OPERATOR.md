@@ -640,8 +640,8 @@ schedule — the token is long-lived):
 
 #### 3.0.2 Pointing the OpenAI-compatible builders at your own endpoint
 
-`editblock`, `openai_agent` and the intent labeller all call one endpoint: the one the
-**worker's** environment names. With nothing set it is Cerebras (`CEREBRAS_API_KEY`). To use
+`editblock`, `openai_agent`, the intent labeller and the factory's test author all call one
+endpoint: the one the **worker's** environment names. With nothing set it is Cerebras (`CEREBRAS_API_KEY`). To use
 a self-hosted model (vLLM, llama-server) or another OpenAI-compatible provider:
 
 ```bash
@@ -666,10 +666,11 @@ export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
   a stated rate, not measured on a model]**. Keep retries low — a timed-out call is retried
   from the start, so four retries can cost five full generations.
 - **Proof.** The request lands on the configured URL, the row carries its host, a mismatched
-  rung is refused and the timeout and retry count are the ones set **[measured — n = 17 test
+  rung is refused and the timeout and retry count are the ones set **[measured — n = 20 test
   cases in `tests/test_builders_endpoint.py` against a fake OpenAI-compatible server on
   127.0.0.1, no model called; each fix reverted in turn made them fail; apparatus 2.3]**.
-  The factory's test author (§10) does not yet stamp the endpoint's provider **[gap — G-611]**.
+  The factory's test author (§10) follows the same rule: it calls this endpoint, stamps its
+  provider, and a test-author rung naming another provider is refused before any call.
 
 What you will see (the run's live log on `/runs/<id>`, and `crb` on the terminal):
 `mine.candidate` → `mine.red` / `mine.skip` → `mine.gold` → `build.*` → `grade.belt` (five
@@ -1069,6 +1070,17 @@ to the longest model in the pricing table (`CRB_PRICING_JSON` extends it), so
 `haiku` count as every model of that family. If the run fails this way, the message names
 the rung by its place on the ladder (`build rung 2`) and the model — change that rung's
 model, or give the test author a different one.
+
+**The author calls the endpoint the builders call.** Whatever builder name its rung spells,
+the test author asks the OpenAI-compatible endpoint the worker's environment names (§3.0.2):
+`CRB_OPENAI_BASE_URL`, or Azure when `CRB_AZURE_ENDPOINT` is set, or Cerebras when neither is.
+What authoring returns and each `author.attempt` it records carry that endpoint's provider —
+`cerebras`, `azure` or the URL's host. An author rung that names a different provider
+(`editblock:qwen3:cerebras` while the URL is your own server), or inherits one from the run's
+provider, is refused with `ProviderMismatch` before anything is built or paid for; name the
+host the endpoint is (`editblock:qwen3@gpu-box.internal:8080`) or leave the provider empty.
+The provider is recorded, never compared as identity: the same model behind two providers is
+still one model, and the refusal above still stops it.
 
 Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
 the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at

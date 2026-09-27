@@ -36,6 +36,8 @@ Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/builders/openai_agent.py and src/crb/builders/editblock.py (the
               builders on this client), src/crb/builders/labeller.py (the labeller on it),
+              src/crb/factory/author.py (the factory's test author on it),
+              src/crb/server/routes/runs.py (``credential_missing`` — the submit-time check),
               src/crb/builders/budget.py (``CostMeter``/``price_for`` — the meter here is
               per client), src/crb/server/settings.py (the ``CRB_OPENAI_*``/``CRB_AZURE_*``
               variables ``EndpointConfig.from_env`` reads)

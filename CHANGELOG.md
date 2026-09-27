@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A configured builder endpoint is the one called** (north-star Wave 2, stream X; [the branch](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-x)).
+  `editblock`, `openai_agent`, the intent labeller and the factory's test author call the
+  endpoint `CRB_OPENAI_BASE_URL` (or Azure) names and stamp its provider — `cerebras`, `azure`
+  or the URL's host. A rung naming another provider is refused with `ProviderMismatch` before
+  any call. `CRB_OPENAI_TIMEOUT_S`, `CRB_OPENAI_MAX_TOKENS` and `CRB_OPENAI_MAX_RETRIES` set
+  the timeout, reply length and retries, each validated with a stated default. The provider is
+  never identity: the test author's model must still differ from every build rung's (ADR-0021).
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

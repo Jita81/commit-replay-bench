@@ -9,12 +9,14 @@ What it does: Pins that a deployment with no ``CRB_FACTORY__TEST_AUTHOR`` has no
               state in which an item without an operator-authored test stops ``no_oracle``);
               that the setting produces an author whose identity is that rung label; that a
               run's ``params.test_author`` wins over the setting and that ``none`` in either
-              place declines one; that an unregistered builder name is refused with the run's
+              place declines one; that the run's provider is the author's default and is
+              refused when it is not the configured endpoint's (G-611); that an unregistered builder name is refused with the run's
               ladder named; and that the environment reaches ``WorkerSettings`` the way every
               other shared key does.
 How:          ``Worker.__new__`` with only ``settings`` set (the resolution reads nothing
               else) and a ``RunContext`` over the ``pyrepo`` fixture; ``settings_from_args``
-              for the environment path. No model call, no credential, no network.
+              for the environment path; ``monkeypatch`` for the endpoint variables. No model
+              call, no credential, no network.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/server/worker.py (``Worker._test_author``, ``_run_factory``),
@@ -103,12 +105,25 @@ def test_a_rung_that_is_not_a_registered_builder_is_refused_with_the_ladder_name
     assert "editblock:gpt-oss-120b" in str(exc.value)
 
 
-def test_the_run_provider_is_the_authors_default_provider(pyrepo: pr.PyRepo) -> None:
+def test_the_run_provider_is_the_authors_default_provider(
+    pyrepo: pr.PyRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("CRB_OPENAI_BASE_URL", "CRB_OPENAI_KEY_ENV", "CRB_AZURE_ENDPOINT"):
+        monkeypatch.delenv(name, raising=False)
     sink = MemorySink()
     ctx = _ctx(pyrepo, sink)
     ctx.run.provider = "azure"
+    # the author calls the configured endpoint, so the run's provider must BE that endpoint's
+    # (G-611): with Azure configured it is accepted and stamped …
+    monkeypatch.setenv("CRB_AZURE_ENDPOINT", "https://tenant.openai.azure.com")
+    monkeypatch.setenv("CRB_AZURE_DEPLOYMENT", "d1")
     author = _worker("editblock:m1")._test_author(ctx, LADDER)
     assert author is not None and author.provider == "azure"
+    # … and with no Azure endpoint configured the same run is refused before any call,
+    # naming the ladder, rather than stamping a provider the author does not call
+    monkeypatch.delenv("CRB_AZURE_ENDPOINT")
+    with pytest.raises(ValueError, match=r"names provider 'azure'.*this run's ladder"):
+        _worker("editblock:m1")._test_author(ctx, LADDER)
 
 
 # --- the environment ------------------------------------------------------------------
