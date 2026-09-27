@@ -8,7 +8,8 @@ What it does: Reads each register row and fails when its bug and first-seen cell
               permitted tag (``[measured]``, ``[hypothesis]``, ``[aspiration]``, ``[gap]``),
               or carry a ``[measured]`` tag without its n, its method and its apparatus
               version.
-How:          The register's ``| P-nnn |`` rows split into cells; the tag check is
+How:          The register's ``P-nnn`` table rows, read by the claims gate's own CommonMark
+              parser so a row is read however it is indented or spaced; the tag check is
               ``scripts/claims_check.py``'s own ``tag_defects``, loaded from the script, so
               the two can never disagree on what a complete tag is.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -16,12 +17,15 @@ ADRs:         none
 Works with:   docs/PREVENTION.md (the register it reads), scripts/claims_check.py
               (``tag_defects``), docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule)
 Tested by:    tests/test_prevention_register.py
-Touch when:   the register gains a column, or the claims gate's tag rule changes.
+Touch when:   never for a new repository (the register records the product's own bugs,
+              not a client's); the register gains a column, or the claims gate's tag rule
+              changes.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -29,6 +33,7 @@ from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTER = ROOT / "docs" / "PREVENTION.md"
+_ID_RE = re.compile(r"P-\d+")
 
 
 def _claims_check() -> ModuleType:
@@ -44,10 +49,26 @@ def _claims_check() -> ModuleType:
     return mod
 
 
+def register_rows(text: str) -> list[list[str]]:
+    """The cells of every table row whose first cell is a ``P-nnn`` id, read by the claims
+    gate's own CommonMark parser (tables on, as GitHub renders them): a row is a row however
+    it is indented or spaced, and an example inside a fence is not one (P-113)."""
+    rows: list[list[str]] = []
+    cells: list[str] | None = None
+    for token in _claims_check()._MARKDOWN.parse(text):
+        if token.type == "tr_open":
+            cells = []
+        elif token.type == "inline" and cells is not None:
+            cells.append(token.content.strip())
+        elif token.type == "tr_close" and cells is not None:
+            if cells and _ID_RE.fullmatch(cells[0]):
+                rows.append(cells)
+            cells = None
+    return rows
+
+
 def _rows() -> list[list[str]]:
-    lines = REGISTER.read_text(encoding="utf-8").splitlines()
-    rows = [line for line in lines if line.startswith("| P-")]
-    return [[c.strip() for c in r.strip().strip("|").split("|")] for r in rows]
+    return register_rows(REGISTER.read_text(encoding="utf-8"))
 
 
 def row_defects(cells: list[str], tag_defects: Callable[[str], list[str] | None]) -> list[str]:
@@ -84,3 +105,23 @@ def test_the_row_check_refuses_an_untagged_and_an_incomplete_measured_row() -> N
     assert row_defects(untagged, tag_defects) != []
     assert row_defects(thin, tag_defects) != []
     assert row_defects(whole, tag_defects) == []
+
+
+def test_the_row_reader_sees_every_row_markdown_renders() -> None:
+    """PR #61 review: the reader took only rows at column zero written ``| P-``, so a row
+    Markdown still renders as a register row — indented, or with no space or no leading
+    pipe — was never read and its missing tag never seen."""
+    page = (
+        "| id | bug | class | first seen |\n"
+        "|---|---|---|---|\n"
+        "| P-900 | a bug | a-class | 2026-09-27 [hypothesis] |\n"
+        "  | P-901 | a bug | a-class | a review, 2026-09-27 |\n"
+        "|P-902| a bug | a-class | a review, 2026-09-27 |\n"
+        "P-903 | a bug | a-class | a review, 2026-09-27 |\n"
+        "\n"
+        "```\n| P-904 | an example in a fence is not a row | x | y |\n```\n"
+    )
+    assert [r[0] for r in register_rows(page)] == ["P-900", "P-901", "P-902", "P-903"]
+    tag_defects = _claims_check().tag_defects
+    owed = [d for cells in register_rows(page) for d in row_defects(cells, tag_defects)]
+    assert [d.split(":", 1)[0] for d in owed] == ["P-901", "P-902", "P-903"]
