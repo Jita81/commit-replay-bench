@@ -6,8 +6,8 @@
  * ----------
  * What it is:   `INSTRUMENT_SCREENS`: the `SCREENS` entries (route, path, element, api, roles)
  *               for /factory, /posture, /repos, /repos/:name, /runs, /runs/:id,
- *               /tasks/:repo/:taskId, /capability, /routing, /oracle, /learn, /ledger and
- *               /settings, spread into the ratchet's table.
+ *               /tasks/:repo/:taskId, /library/:repo, /capability, /routing, /oracle, /learn,
+ *               /ledger and /settings, spread into the ratchet's table.
  * What it does: Keeps each screen's fixtures beside the others of its stream rather than in
  *               the ratchet file, so the ratchet stays the mechanism and this file the data.
  *               Every fixture is a populated state (rows, cells, tiles), never an empty or
@@ -37,6 +37,8 @@ import { CapabilityPage } from '../screens/Capability/CapabilityPage'
 import { FactoryPage } from '../screens/Factory/FactoryPage'
 import { IntakePage } from '../screens/Factory/IntakePage'
 import { LearnPage } from '../screens/Learn/LearnPage'
+import { LibraryPage } from '../screens/Library/LibraryPage'
+import { LIBRARY_API } from '../screens/Library/library.fixture'
 import { REGISTER } from '../screens/Learn/register.fixture'
 import { LedgerPage } from '../screens/Ledger/LedgerPage'
 import { OraclePage } from '../screens/Oracle/OraclePage'
@@ -611,6 +613,14 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     element: <SettingsPage />,
     api: { 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'ok', detail: 'worker-1 alive', data: {} }] }, 'GET /version': VERSION, 'GET /settings': SETTINGS, 'GET /users': USERS, 'GET /settings/secrets': SECRETS, 'GET /github/app': GITHUB_APP },
     roles: ['viewer', 'operator', 'admin'],
+  },
+  '/library/:repo': {
+    route: '/library/alpha',
+    path: '/library/:repo',
+    element: <LibraryPage />,
+    api: LIBRARY_API,
+    // a viewer reads; an operator also sees Sponsor and the proposal form; an approver Sign and the withdraw form
+    roles: ['viewer', 'operator', 'approver'],
   },
   '/tasks/:repo/:taskId': {
     route: `/tasks/alpha/${'c'.repeat(40)}`,
