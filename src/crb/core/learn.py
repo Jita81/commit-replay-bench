@@ -1346,7 +1346,7 @@ def remeasure_plan(
             fresh.append(f"{cell.label}|{mode_name}")
             continue
         n_needed = target - n_current
-        # a known $0 is a $0 price, never "?" (P-051); an unknown cost is left out
+        # a known $0 is a $0 price, never "?" (P-064); an unknown cost is left out
         costs = [r.cost_usd for r in group if r.cost_known]
         lats = [r.latency_s for r in group if r.latency_s > 0]
         cost_mean = mean(costs)

@@ -11,7 +11,7 @@
  *               the classes named, that the posture class stands beside the apparatus, that
  *               the denominators are the known counts, and that a response with no economics
  *               block says so; and that the spend estimates' measured cost per attempt is
- *               the map fold's own value over its known count (a known $0 is $0, P-051).
+ *               the map fold's own value over its known count (a known $0 is $0, P-064).
  * How:          Hand-built `Economics` objects; no rendering.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -114,7 +114,7 @@ describe('economicsTile', () => {
   })
 })
 
-describe('measuredCostPerAttempt — the spend estimates read the map fold, never the flat means (P-051)', () => {
+describe('measuredCostPerAttempt — the spend estimates read the map fold, never the flat means (P-064)', () => {
   it('is the fold value with its KNOWN count as n and the apparatus; a known $0 is $0, never dropped', () => {
     expect(measuredCostPerAttempt(econ({}))).toEqual({ mean: 0.12, n: 36, apparatus: '2.3' })
     // every attempt cost a known $0 (a fixture, a metered subscription): a measured $0 over n = 4

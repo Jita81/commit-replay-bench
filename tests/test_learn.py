@@ -958,7 +958,7 @@ class TestRemeasure:
     def test_unknown_cost_is_honest(self, tmp_path: Path) -> None:
         rows = _chained(
             # an unknown cost is one nobody reported (an imported row), not a builder's
-            # $0, which is a known $0 and prices at $0 (P-051: test_economics.py pins it)
+            # $0, which is a known $0 and prices at $0 (P-064: test_economics.py pins it)
             [
                 _clean(
                     task_id="1" * 40,

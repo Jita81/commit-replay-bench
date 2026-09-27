@@ -17,7 +17,7 @@
  *               interval shows "95% CI —" and says why; a response with no economics block
  *               says the server did not send one. The spend estimates read the map's fold
  *               (its value over the KNOWN count), never the cells' flat means filtered by
- *               `> 0`, which dropped a known $0 and weighted by every attempt (P-051).
+ *               `> 0`, which dropped a known $0 and weighted by every attempt (P-064).
  * How:          A lookup of the figure's estimate and its counts; `fmtUsd` / `fmtSeconds`
  *               format the value and both ends of the interval.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers

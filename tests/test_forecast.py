@@ -210,7 +210,7 @@ def test_forecast_class_only_key_uses_class_projection() -> None:
 
 def test_forecast_uncosted_cells_are_reported_not_priced() -> None:
     # uncosted = no cost was ever reported (an imported row), not a builder-reported $0,
-    # which is a known $0 and prices at $0 (P-051: test_economics.py pins that side)
+    # which is a known $0 and prices at $0 (P-064: test_economics.py pins that side)
     rows = _cell_rows("bug.fix", "S", cost=0.0, latency=0.0, provenance="imported:census")
     assert not any(r.cost_known for r in rows)
     f = fc.forecast_build({"bug.fix/S": 2}, rows)
