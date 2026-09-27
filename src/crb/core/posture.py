@@ -205,11 +205,21 @@ def expected_posture_class(executor: str, *, tree: str, provisioning: bool) -> s
     return f"local/inplace/{'sealed' if provisioning else 'host-env'}"
 
 
+def is_sealed_class(posture_class: str) -> bool:
+    """Whether ``posture_class`` is the sealed posture ONBOARDING Step 6 asks evidence to be
+    graded in before anyone signs it: the docker executor with sealed dependencies (any tree
+    presentation). A host-executor class — even with a sealed dependency set — is a
+    development reading (G-480). Advisory: the sign-off policy refuses nothing on it."""
+    parts = (posture_class or "").strip().lower().split("/")
+    return len(parts) == 3 and parts[0] == "docker" and parts[2] == "sealed"
+
+
 __all__ = [
     "LEGACY_POSTURE_ID",
     "Posture",
     "PostureMismatch",
     "expected_posture_class",
+    "is_sealed_class",
     "normalised_env_hash",
     "probe_toolchain",
     "resolve_posture",

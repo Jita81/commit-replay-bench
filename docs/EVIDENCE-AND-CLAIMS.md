@@ -180,10 +180,7 @@ published bar"**; until prospective and audited evidence exists it does not mean
 "autonomous delivery is safe". `calibrate` and `human` routes are product successes
 (refusals), reported with the same rigour as passes.
 
-### 6a. What a signed cell may be claimed to mean (`signoff-policy.v2`)
-
-(The heading keeps its `v2` anchor — nine files and the in-app help link to it; the bar in
-force is `signoff-policy.v3`, below.)
+### 6a. What a signed cell may be claimed to mean (`signoff-policy.v3`)
 
 A human sign-off lifts a cell's **verification tier** (`automated-pass` →
 `human-verified` / `ab-confirmed`); it never lifts its route, its point or its interval.

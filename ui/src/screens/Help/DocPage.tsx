@@ -3,7 +3,7 @@
  *
  * Navigation
  * ----------
- * What it is:   The `/help/docs/:name` screen — the eight guides (`OPERATOR`, …) and the
+ * What it is:   The `/help/docs/:name` screen — the nine guides (`OPERATOR`, …) and the
  *               decision records (`ADR-0015`, …) share it.
  * What it does: Loads the named guide or record (a lazy chunk bundled at build time — the
  *               repository is private and deployments may have no egress) and renders it
@@ -30,7 +30,7 @@
  *               ui/src/components/ErrorState.tsx (the failed load, with Retry), ui/src/App.tsx
  *               (the route), ui/src/help/help.ts (the About block's `/help/docs/:name` entry)
  * Tested by:    ui/src/screens/Help/HelpPage.test.tsx, ui/e2e/walkthrough/13-orient.spec.ts
- *               (all eight guides and a record opened on the live stack)
+ *               (all nine guides and a record opened on the live stack)
  * Touch when:   the guides gain a construct the renderer lacks (fix the renderer, not this page).
  */
 import { useEffect, useState, type ReactNode } from 'react'

@@ -38,11 +38,14 @@ export function requireBundledDocs({
       const text = readFileSync(registry, 'utf8')
       const names = Array.from(/DOC_NAMES = \[([^\]]*)\]/.exec(text)?.[1]?.matchAll(/'([^']+)'/g) ?? [], (m) => m[1]!)
       if (names.length === 0) this.error('requireBundledDocs: could not read DOC_NAMES from ui/src/help/docs.ts')
-      const missing = names.filter((n) => !existsSync(new URL(`${n}.md`, docs)))
+      // a guide kept below docs/ is mapped in `NESTED` (`'HUMAN-REVIEW-GUIDE': 'reviews/human-review-guide'`, G-481)
+      const nested = new Map(Array.from(/NESTED[^=]*=\s*\{([^}]*)\}/.exec(text)?.[1]?.matchAll(/'([^']+)':\s*'([^']+)'/g) ?? [], (m) => [m[1]!, m[2]!] as const))
+      const pathOf = (n: string) => nested.get(n) ?? n
+      const missing = names.filter((n) => !existsSync(new URL(`${pathOf(n)}.md`, docs)))
       const adrDir = new URL('adr/', docs)
       const adrs = existsSync(adrDir) ? readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f)) : []
       if (missing.length > 0 || adrs.length === 0) {
-        this.error(`the UI bundles repository docs, and the build cannot see them: missing ${[...missing.map((n) => `docs/${n}.md`), ...(adrs.length === 0 ? ['docs/adr/*.md'] : [])].join(', ')} — is docs/ in the build context? (deploy/Dockerfile.dockerignore, docs/PREVENTION.md P-106)`)
+        this.error(`the UI bundles repository docs, and the build cannot see them: missing ${[...missing.map((n) => `docs/${pathOf(n)}.md`), ...(adrs.length === 0 ? ['docs/adr/*.md'] : [])].join(', ')} — is docs/ in the build context? (deploy/Dockerfile.dockerignore, docs/PREVENTION.md P-106)`)
       }
     },
   }

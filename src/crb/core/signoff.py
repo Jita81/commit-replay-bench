@@ -178,11 +178,11 @@ Touch when:   never for a new repository (run ``controls`` and ``oracle`` runs s
               edit here; adding a clause or a snapshot field bumps ``SIGNOFF_POLICY_VERSION``
               / ``SIGNOFF_SCHEMA``, freezes the previous body's field tuple so the old body
               hashes byte-identical, and updates
-              docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2;
+              docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3;
               a new non-person actor vocabulary (a new CLI / service prefix) is ONE edit to
               ``NON_PERSON_ACTOR_PREFIXES``.
 Claims:       A signed cell licenses exactly the claim shape in
-              docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2
+              docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3
               — a tier, never a route, a point or an interval.
 """
 

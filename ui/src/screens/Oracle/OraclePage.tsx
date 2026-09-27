@@ -34,7 +34,7 @@
  *               repository.
  * Claims:       A green on a weak or unscored oracle licenses nothing; the gate column is what
  *               a clean grade may be claimed to mean
- *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
+ *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3).
  */
 import { useMemo } from 'react'
 import { Link } from 'react-router'

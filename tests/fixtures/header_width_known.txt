@@ -8,8 +8,8 @@ src/crb/core/oracle/controls_go.py#a6e087f27369
 src/crb/core/oracle/controls_js.py#a6e087f27369
 src/crb/core/review.py#ba419ee3fc30
 src/crb/core/services.py#5d3a38c0bbf5
-src/crb/core/signoff.py#d33c03240981
-src/crb/core/signoff.py#e443bc8c91f6
+src/crb/core/signoff.py#77a9426def4b
+src/crb/core/signoff.py#ca64cc39c702
 src/crb/core/stats.py#53b12bf6898a
 src/crb/core/test_infra.py#7601199ecd05
 src/crb/server/factory_state.py#01edb2138954
@@ -35,7 +35,7 @@ ui/src/components/Button.tsx#085435ca3016
 ui/src/components/Button.tsx#b58bd24bc387
 ui/src/components/Button.tsx#b5cb995e4ac3
 ui/src/components/CiBar.tsx#af8df9bd0116
-ui/src/components/GateBanner.tsx#569371a3da89
+ui/src/components/GateBanner.tsx#a6feb8110606
 ui/src/components/LiveLog.tsx#930dd80f8eb7
 ui/src/components/PageHeader.tsx#df1c1f65365c
 ui/src/components/Provenance.tsx#af4d1ef7db7e
@@ -44,7 +44,6 @@ ui/src/components/StatTile.tsx#0a3c1208275b
 ui/src/components/govuk.tsx#891d152b5683
 ui/src/components/govuk.tsx#f8a29e71040e
 ui/src/components/govuk.tsx#ff322f0271d6
-ui/src/help/docs.ts#52ac12404558
 ui/src/help/glossary.ts#92220ff49bdd
 ui/src/help/hints-ratchet.instrument.tsx#3cc554f3d71f
 ui/src/help/hints-ratchet.test.tsx#8434159bb318
@@ -61,7 +60,7 @@ ui/src/screens/Factory/FactoryPage.test.tsx#b659d879333a
 ui/src/screens/Factory/FactoryPage.test.tsx#ba00bd3059ff
 ui/src/screens/Factory/FactoryPage.tsx#13c71871cb7c
 ui/src/screens/Factory/FactoryPage.tsx#a9f57cf478b2
-ui/src/screens/Oracle/OraclePage.tsx#569371a3da89
+ui/src/screens/Oracle/OraclePage.tsx#a6feb8110606
 ui/src/screens/Posture/PosturePage.tsx#b2944462cbeb
 ui/src/screens/Repos/ListEditors.tsx#7249ed9e8cad
 ui/src/screens/Repos/RepoConfigTab.tsx#fe74f8641e28
@@ -81,5 +80,5 @@ ui/src/screens/Runs/telemetry.ts#b1056a3f5425
 ui/src/screens/Settings/GitHubAppCard.test.tsx#cbb445f85a50
 ui/src/screens/Settings/GitHubAppCard.tsx#ae2dc528ca4f
 ui/src/screens/Settings/SettingsPage.test.tsx#bb4c380ff276
-ui/src/screens/Signoff/SignoffPage.tsx#569371a3da89
-ui/src/screens/Signoff/contract.ts#569371a3da89
+ui/src/screens/Signoff/SignoffPage.tsx#a6feb8110606
+ui/src/screens/Signoff/contract.ts#a6feb8110606

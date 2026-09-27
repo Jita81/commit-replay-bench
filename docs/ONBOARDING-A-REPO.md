@@ -136,6 +136,14 @@ you cannot change it per repository, only read it.
 
 ## Step 7 — Sign off (approver)
 
+**Time and cost.** About half an hour of the approver's own reading, most of it one accepted
+diff [hypothesis — the [human-review guide](reviews/human-review-guide.md) budgets about 30
+minutes for its sign-off step; no approver's time has been measured]. **£0**: a sign-off
+reads rows the ledger already holds and calls no model. A **re-sign after an apparatus
+change** is £0 as well, but it can only follow a re-measurement on the new apparatus
+(Step 4, the money step), because a sign-off never carries evidence across an apparatus
+move (ADR-0015).
+
 Sign-off is a **policy decision refused at write** (signoff-policy v3,
 [EVIDENCE-AND-CLAIMS §6a](EVIDENCE-AND-CLAIMS.md)): the cell must have `n ≥ 10`, the rule
 must say `deliver`, the controls must have passed with 0 escapes, the oracle must be

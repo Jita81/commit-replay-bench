@@ -1,5 +1,5 @@
 /**
- * The eight user-facing guides, bundled into the UI at build time and served at /help/docs.
+ * The nine user-facing guides, bundled into the UI at build time and served at /help/docs.
  *
  * Why bundle rather than link to GitHub: the repository is private, enterprise deployments
  * run without egress (docs/SECURITY.md §2), and a bundled copy is pinned to the exact commit
@@ -8,7 +8,9 @@
  *
  * Navigation
  * ----------
- * What it is:   `DOC_NAMES` / `DocName` / `DocAnchor`, `loadDoc`, `docHref`, `isDocName`, `slugify`.
+ * What it is:   `DOC_NAMES` / `DocName` / `DocAnchor`, `loadDoc`, `docHref`, `isDocName`,
+ *               `slugify`, `docPath` / `docByPath` (a guide kept below docs/, such as the
+ *               Step 6 human-review guide in docs/reviews/, G-481).
  * What it does: Declares which guides the UI carries (`import.meta.glob` with `?raw`, lazy),
  *               loads one by name, builds the in-app route for a `<name>#<slug>` anchor, and
  *               slugifies a heading the way GitHub does so the docs' own anchors resolve.
@@ -27,7 +29,7 @@
  */
 
 /** The guides the UI bundles, in the order /help lists them. */
-export const DOC_NAMES = ['ONBOARDING-A-REPO', 'OPERATOR', 'EVIDENCE-AND-CLAIMS', 'GITHUB-APP', 'SECURITY', 'DATA-RETENTION', 'LEARNING-LOOP', 'DEPLOYMENT'] as const
+export const DOC_NAMES = ['ONBOARDING-A-REPO', 'OPERATOR', 'EVIDENCE-AND-CLAIMS', 'GITHUB-APP', 'SECURITY', 'DATA-RETENTION', 'LEARNING-LOOP', 'DEPLOYMENT', 'HUMAN-REVIEW-GUIDE'] as const
 
 export type DocName = (typeof DOC_NAMES)[number]
 
@@ -44,9 +46,23 @@ export const DOC_TITLES: Record<DocName, { title: string; blurb: string }> = {
   'DATA-RETENTION': { title: 'Data retention and privacy', blurb: 'Zero raw retention by default, redaction, access, cross-organisation sharing and deletion.' },
   'LEARNING-LOOP': { title: 'The learning loop', blurb: 'What loops mechanically, what the product derives, and what a person still does.' },
   DEPLOYMENT: { title: 'Deployment guide', blurb: 'Deployment shapes, the image, Kubernetes, Azure, backup, upgrade and the go-live checklist.' },
+  'HUMAN-REVIEW-GUIDE': { title: 'Human review guide', blurb: 'ONBOARDING Step 6: how a person reads the load-bearing code and an accepted change before anyone signs.' },
 }
 
-const DOCS = import.meta.glob('../../../docs/{ONBOARDING-A-REPO,OPERATOR,EVIDENCE-AND-CLAIMS,GITHUB-APP,SECURITY,DATA-RETENTION,LEARNING-LOOP,DEPLOYMENT}.md', { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>>
+/** Where a guide lives under docs/ when it is not `<name>.md` at the top (G-481). */
+const NESTED: Partial<Record<DocName, string>> = { 'HUMAN-REVIEW-GUIDE': 'reviews/human-review-guide' }
+
+/** The guide's path under docs/, without `.md`: `OPERATOR`, or `reviews/human-review-guide`. */
+export function docPath(name: DocName): string {
+  return NESTED[name] ?? name
+}
+
+/** The bundled guide at a docs/-relative path (`reviews/human-review-guide`), or undefined. */
+export function docByPath(path: string): DocName | undefined {
+  return DOC_NAMES.find((n) => docPath(n) === path)
+}
+
+const DOCS = import.meta.glob(['../../../docs/{ONBOARDING-A-REPO,OPERATOR,EVIDENCE-AND-CLAIMS,GITHUB-APP,SECURITY,DATA-RETENTION,LEARNING-LOOP,DEPLOYMENT}.md', '../../../docs/reviews/human-review-guide.md'], { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>>
 
 export function isDocName(name: string): name is DocName {
   return (DOC_NAMES as readonly string[]).includes(name)
@@ -54,7 +70,7 @@ export function isDocName(name: string): name is DocName {
 
 /** The guide's markdown, as a lazy chunk; rejects for a name that is not bundled. */
 export async function loadDoc(name: DocName): Promise<string> {
-  const loader = DOCS[`../../../docs/${name}.md`]
+  const loader = isDocName(name) ? DOCS[`../../../docs/${docPath(name)}.md`] : undefined
   if (!loader || !isDocName(name)) throw new Error(`No guide with that name: ${name}`)
   return loader()
 }

@@ -1,6 +1,6 @@
 /**
  * The architecture decision records, bundled into the UI at build time and served at
- * /help/docs/ADR-nnnn beside the eight guides.
+ * /help/docs/ADR-nnnn beside the nine guides.
  *
  * Why bundle rather than link to the repository: a screen cites an ADR (ADR-0015 on the
  * sign-off, ADR-0016 on the two-person rule) and a reviewer following it must be able to read

@@ -144,14 +144,15 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Record that a named approver reviewed a cell’s evidence and read one accepted change. The server refuses a sign-off that does not meet the published policy; a refusal is the gate working, not an error.',
     next: {
       viewer: 'Only an approver can sign. The attestations table shows every sign-off and revocation for this repository.',
-      approver: 'Choose the cell, choose the accepted row you read, read the diff shown, tick the affirmation, write what you read and why it is acceptable, then Sign off. The green panel gives you a reference.',
+      approver: 'Choose the cell, choose the accepted row you read, read the diff shown, tick the affirmation, write what you read and why it is acceptable, then Sign off. The green panel gives you a reference. Your review of the diff itself is recorded on the run’s Review panel: the diff block links the run.',
     },
     numbers: 'Each gate row shows the observed value against the policy threshold (n, point, Wilson lower bound, oracle strength, controls constructed and escaped). The policy version and apparatus are stamped on the record and served back verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['signoff', 'cell', 'wilson', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'controls_escape', 'apparatus', 'belt'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-7--sign-off-approver', label: 'Sign off' },
-      { to: 'EVIDENCE-AND-CLAIMS#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2', label: 'What a signed cell may be claimed to mean' },
+      { to: 'EVIDENCE-AND-CLAIMS#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3', label: 'What a signed cell may be claimed to mean' },
       { to: 'OPERATOR#5-sign-off', label: 'Sign-off in the operator guide' },
+      { to: 'HUMAN-REVIEW-GUIDE', label: 'The human-review guide (Step 6: read before anyone signs)' },
     ],
   },
   {
@@ -159,10 +160,10 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Deliver new work under the same rules as replay: a frozen backlog, a failing test proved before any build, a build inside the sandbox, and a branch and pull request only where the map routes deliver. Every step is on the evidence chain.',
     next: {
       viewer: 'Read each item’s chain: readiness, RED proof, build, delivery, review, outcome. A PR link opens the pull request in the repository.',
-      operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a deliver cell today; the rest are built and withheld.',
-      approver: 'Items blocked on a structural gap wait for your signature. Overriding the route gate is recorded on the chain under your name.',
+      operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a cell this deployment would deliver from today. An item in a cell nobody has signed off is not built at all; one in a cell that routes elsewhere is built and withheld.',
+      approver: 'Items blocked on a structural gap wait for your signature. Overriding the sign-off clause for one run is recorded on the chain under your name; it never lifts the route gate.',
     },
-    numbers: '“k of m items sit in a cell that routes deliver” is read from the map at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
+    numbers: '“k of m items sit in a cell this deployment would deliver from” is read from the map and the sign-offs at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['red_proof', 'route_gate', 'cell', 'deliver', 'evidence_pack', 'apparatus', 'belt', 'wilson'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted', label: 'Forward mode' },

@@ -454,7 +454,7 @@ export const HINTS = {
 
   // ── /signoff (screens/Signoff/SignoffPage.tsx)
   'details.signoff.why_refused':
-    'The six clauses the server checks before it records a sign-off. Two of them (false-Q1 and the attestation) cannot be relaxed by any deployment setting.',
+    'Every clause the server checks before it records a sign-off — seven of them. Three (false-Q1, the attestation and the two-person rule) cannot be relaxed by any deployment setting.',
   'gate.signoff.banner':
     'Every clause of the sign-off policy with its observed value against the threshold, evaluated before you try. Open only when every row holds; a refusal after pressing Sign off is the gate working.',
   'gate.signoff.measured':
@@ -471,6 +471,10 @@ export const HINTS = {
     'The published rule routes this cell deliver. A sign-off never changes a route, so a cell routed elsewhere cannot be signed.',
   'gate.signoff.attestation':
     'You have named one accepted row and affirmed you read its diff. This clause cannot be relaxed: the attestation is hash-chained with the sign-off.',
+  'gate.signoff.posture':
+    'Whether the evidence was graded in the sealed posture ONBOARDING Step 6 asks for: the docker executor with sealed dependencies. Advisory — the server does not refuse a sign-off on it — but evidence graded on the host is a development reading.',
+  'link.signoff.refusal_next':
+    'The screen where the number that failed can change: more attempts on Measure, the controls again on the walk, stronger tests on Learn, or the rule’s reason on Routing.',
   'gate.signoff.second_person':
     'The two-person rule: the server refuses your sign-off if you queued the run that produced the attested row, or if you are the only person behind the cell. No setting can relax it; the refusal code is same_actor.',
   'button.signoff.sign':

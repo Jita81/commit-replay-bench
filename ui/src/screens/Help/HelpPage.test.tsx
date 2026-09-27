@@ -6,7 +6,7 @@
  * ----------
  * What it is:   Tests for the two help screens.
  * What it does: Pins that /help renders the 22 terms as a definition list with `id` per term
- *               and a link to its guide, the eight guides as links to /help/docs/<name>, and
+ *               and a link to its guide, the nine guides as links to /help/docs/<name>, and
  *               every decision record as a link to /help/docs/ADR-nnnn (G-156); that
  *               /help/docs/OPERATOR renders the guide's h1 with slug ids, links back to /help
  *               and states its non-goals under the header (G-150); that a record renders the
@@ -58,7 +58,7 @@ describe('HelpPage', () => {
     for (const id of TERM_IDS) expect(terms.querySelector(`#${id}`), id).not.toBeNull()
     expect(within(terms).getAllByRole('link', { name: 'Read more' }).length).toBe(TERM_IDS.length)
     const guides = screen.getByRole('region', { name: 'Guides' })
-    expect(within(guides).getAllByRole('link')).toHaveLength(8)
+    expect(within(guides).getAllByRole('link')).toHaveLength(9) // the eight guides and the Step 6 human-review guide (G-481)
     expect(within(guides).getByRole('link', { name: 'Operator guide' })).toHaveAttribute('href', '/help/docs/OPERATOR')
     const decisions = screen.getByRole('region', { name: 'Decisions (ADRs)' })
     expect(decisions).toHaveTextContent('ADR-0003')

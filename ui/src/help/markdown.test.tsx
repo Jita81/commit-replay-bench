@@ -91,7 +91,7 @@ describe('renderMarkdown', () => {
   })
 
   it('links: a bundled doc or decision record becomes /help/docs/…, an in-page anchor stays, external gets rel, other relatives become text', () => {
-    const { container } = mount('[map](OPERATOR.md#4-read-the-capability-map) [same](#1-install) [ext](https://example.org/x) [adr](adr/0003-one-routing-rule.md) [sibling](0015-signoffs-expire-with-the-apparatus.md) [up](../SECURITY.md) [gone](adr/9999-no-such-record.md) [src](../src/crb/core/grade.py)')
+    const { container } = mount('[map](OPERATOR.md#4-read-the-capability-map) [same](#1-install) [ext](https://example.org/x) [adr](adr/0003-one-routing-rule.md) [sibling](0015-signoffs-expire-with-the-apparatus.md) [up](../SECURITY.md) [review](reviews/human-review-guide.md) [other review](reviews/2026-09-13-critical-friend.md) [gone](adr/9999-no-such-record.md) [src](../src/crb/core/grade.py)')
     expect(screen.getByRole('link', { name: 'map' })).toHaveAttribute('href', '/help/docs/OPERATOR#4-read-the-capability-map')
     expect(screen.getByRole('link', { name: 'same' })).toHaveAttribute('href', '#1-install')
     const ext = screen.getByRole('link', { name: 'ext' })
@@ -101,6 +101,9 @@ describe('renderMarkdown', () => {
     expect(screen.getByRole('link', { name: 'adr' })).toHaveAttribute('href', '/help/docs/ADR-0003')
     expect(screen.getByRole('link', { name: 'sibling' })).toHaveAttribute('href', '/help/docs/ADR-0015')
     expect(screen.getByRole('link', { name: 'up' })).toHaveAttribute('href', '/help/docs/SECURITY')
+    // a bundled guide kept below docs/ (G-481): ONBOARDING Step 6's link opens it here
+    expect(screen.getByRole('link', { name: 'review' })).toHaveAttribute('href', '/help/docs/HUMAN-REVIEW-GUIDE')
+    expect(screen.queryByRole('link', { name: 'other review' })).toBeNull()
     // a record the build does not carry, and a source file, have no target: text, not a dead link
     expect(screen.queryByRole('link', { name: 'gone' })).toBeNull()
     expect(container.textContent).toContain(' gone ')

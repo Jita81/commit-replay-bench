@@ -21,7 +21,7 @@
  *               About block, and leads back to Home; Sign out ends the session. Every screen
  *               on the way carries "About this screen" (G-926). The pass is timed and the
  *               time is printed and attached to the report — the figure the onboarding guide
- *               quotes (G-414). (2) Opens all eight bundled guides on the served bundle and
+ *               quotes (G-414). (2) Opens all nine bundled guides on the served bundle and
  *               asserts each renders its own first heading, the file's, and never an error or
  *               "No guide with that name"; then opens a decision record from /help (G-149,
  *               G-156) — each page holding one h1, its header (P-109). Home's task tags on
@@ -47,12 +47,15 @@ import { env, field } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
-/** The eight guides the UI bundles, in /help's order (ui/src/help/docs.ts `DOC_NAMES`). */
-const GUIDES = ['ONBOARDING-A-REPO', 'OPERATOR', 'EVIDENCE-AND-CLAIMS', 'GITHUB-APP', 'SECURITY', 'DATA-RETENTION', 'LEARNING-LOOP', 'DEPLOYMENT'] as const
+/** The nine guides the UI bundles, in /help's order (ui/src/help/docs.ts `DOC_NAMES`). */
+const GUIDES = ['ONBOARDING-A-REPO', 'OPERATOR', 'EVIDENCE-AND-CLAIMS', 'GITHUB-APP', 'SECURITY', 'DATA-RETENTION', 'LEARNING-LOOP', 'DEPLOYMENT', 'HUMAN-REVIEW-GUIDE'] as const
+
+/** A guide kept below docs/ (ui/src/help/docs.ts `NESTED`, G-481). */
+const NESTED: Record<string, string> = { 'HUMAN-REVIEW-GUIDE': 'reviews/human-review-guide' }
 
 /** The first heading of `docs/<name>.md`, as the file says it — what the page must render. */
 function firstHeading(name: string): string {
-  const text = readFileSync(new URL(`../../../docs/${name}.md`, import.meta.url), 'utf8')
+  const text = readFileSync(new URL(`../../../docs/${NESTED[name] ?? name}.md`, import.meta.url), 'utf8')
   const line = text.split('\n').find((l) => l.startsWith('# '))
   expect(line, `docs/${name}.md has no first heading`).toBeTruthy()
   return line!.slice(2).trim()
@@ -139,7 +142,7 @@ test.describe('13 orient — sign in and find your way', () => {
     console.log(`[13-orient] one scripted pass of the six steps: ${seconds} s, £0 (no model call)`)
   })
 
-  test('all eight bundled guides and a decision record open on the served bundle, each with its own text', async ({ page }) => {
+  test('all nine bundled guides and a decision record open on the served bundle, each with its own text', async ({ page }) => {
     await page.goto('/login')
     await field(page, 'Username').fill(env.user)
     await field(page, 'Password').fill(env.pass)
