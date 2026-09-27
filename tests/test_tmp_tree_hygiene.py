@@ -7,17 +7,22 @@ What it is:   The guard against a test leaving a read-only directory under pytes
 What it does: Runs the sealing tests in a child pytest with its own base directory and
               proves ``shutil.rmtree`` removes what they leave; pins that
               ``restore_removable`` gives a sealed tree its owner's permissions back
-              without following a symbolic link out of the tree.
+              without following a symbolic link out of the tree, read from the mode bits so
+              the test holds as uid 0 too; and refuses any test that expects the operating
+              system to refuse on the mode bits without asking ``permissions_bind`` (P-108).
 How:          A child ``python -m pytest --basetemp`` under ``tmp_path``; a hand-made tree of
-              ``0o555`` / ``0o000`` directories and a link to a read-only directory outside.
+              ``0o555`` / ``0o000`` directories and a link to a read-only directory outside;
+              a ``shutil.rmtree`` that ignores the mode bits stands in for uid 0; an ``ast``
+              walk over every file under ``tests/`` for the ratchet.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   tests/fixtures/tmptree.py (``restore_removable``, the helper under test),
               tests/conftest.py (the session finaliser that calls it),
               src/crb/provision/store.py (``seal`` makes the read-only sets the tests leave),
-              docs/PREVENTION.md (row P-101)
+              docs/PREVENTION.md (rows P-101 and P-108)
 Tested by:    tests/test_tmp_tree_hygiene.py
-Touch when:   a new test makes a directory read-only under a temporary path.
+Touch when:   a new test makes a directory read-only under a temporary path, or expects a
+              refusal the mode bits make.
 """
 
 from __future__ import annotations
@@ -25,12 +30,14 @@ from __future__ import annotations
 import ast
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from fixtures.tmptree import restore_removable
+
+from fixtures.tmptree import permissions_bind, restore_removable
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,6 +50,10 @@ SEALING_TESTS = (
     "tests/test_execution.py::test_a_bundle_mount_outside_the_store_is_refused",
     "tests/test_builders_container.py::test_builder_cell_mounts_the_parent_set_never_the_gold",
 )
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.lstat().st_mode)
 
 
 def _can_remove(path: Path) -> str:
@@ -102,12 +113,18 @@ def test_restore_removable_opens_a_sealed_tree_and_never_follows_a_link(tmp_path
     locked.mkdir(parents=True)
     for d in (sealed, sealed.parent, locked):
         d.chmod(0o555)
+        assert _mode(d) == 0o555  # the seal, read from the mode bits whoever runs the suite
     locked.parent.chmod(0o000)
+    assert _mode(locked.parent) == 0o000
     try:
-        assert _can_remove(tree) != ""  # the leak, reproduced
+        if permissions_bind():  # uid 0 with CAP_DAC_OVERRIDE removes it anyway (PR #61)
+            assert _can_remove(tree) != ""  # the leak, reproduced
         restore_removable(tree)
+        opened = [Path(p) for p, _dirs, _files in os.walk(tree)]
+        assert {tree, sealed, sealed.parent, locked, locked.parent} <= set(opened)
+        assert all(_mode(d) & stat.S_IRWXU == stat.S_IRWXU for d in opened), opened
         assert _can_remove(tree) == ""
-        assert (outside.stat().st_mode & 0o777) == 0o555  # the link's target is not ours
+        assert _mode(outside) == 0o555  # the link's target is not ours
     finally:
         outside.chmod(0o755)
 

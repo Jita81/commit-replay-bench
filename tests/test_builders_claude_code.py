@@ -475,7 +475,7 @@ def test_insecure_secrets_file_fails_closed_as_permission_error(secrets_home: Pa
     with pytest.raises(PermissionError, match="secrets file refused") as ei:
         cc.ClaudeCodeBuilder.env("cli")
     assert STORED not in str(ei.value)
-    with pytest.raises(PermissionError):
+    with pytest.raises(PermissionError, match="secrets file refused"):
         cc.token_source()
 
 

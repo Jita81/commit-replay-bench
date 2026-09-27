@@ -7,23 +7,31 @@ What it is:   The one helper that makes a temporary tree removable again after a
 What it does: ``restore_removable(root)`` adds the owner's read, write and search bits to
               ``root`` and every directory under it, top down, so ``shutil.rmtree`` and
               pytest's own clean-up can delete it. It never follows a symbolic link: what a
-              link points at is not the test's to change.
+              link points at is not the test's to change. ``permissions_bind()`` says whether
+              the mode bits refuse this process at all — uid 0 with ``CAP_DAC_OVERRIDE`` is
+              not refused — so a test expects a refusal only where one can happen (P-108).
 How:          ``os.walk`` top down, chmod each directory before descending into it; a link is
-              skipped by ``lstat``; errors are ignored (a best-effort finaliser).
+              skipped by ``lstat``; errors are ignored (a best-effort finaliser). The probe
+              seals a directory with a file in it and asks ``shutil.rmtree`` to remove it.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   tests/conftest.py (the session finaliser over the base temporary directory),
               tests/test_tmp_tree_hygiene.py (the guard), src/crb/provision/store.py
-              (``_make_read_only``, which makes the trees this undoes)
+              (``_make_read_only``, which makes the trees this undoes),
+              tests/test_provision_store.py (asks ``permissions_bind`` before expecting a
+              write into a sealed set to be refused)
 Tested by:    tests/test_tmp_tree_hygiene.py
-Touch when:   a test makes something other than a directory stop its own deletion.
+Touch when:   a test makes something other than a directory stop its own deletion, or
+              expects the operating system to refuse something on the mode bits.
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import stat
+import tempfile
 from pathlib import Path
 
 
@@ -45,4 +53,22 @@ def restore_removable(root: Path) -> None:
             _open_dir(os.path.join(dirpath, name))
 
 
-__all__ = ["restore_removable"]
+def permissions_bind() -> bool:
+    """True when the mode bits refuse this process: ``shutil.rmtree`` cannot remove a
+    directory whose own mode is ``0o555``. False for uid 0 with ``CAP_DAC_OVERRIDE``, whom
+    the kernel lets through — a test must not REQUIRE a refusal there (P-108)."""
+    with tempfile.TemporaryDirectory(prefix="crb-perm-probe-") as d:
+        sealed = Path(d) / "sealed"
+        sealed.mkdir()
+        (sealed / "f").write_text("x", encoding="utf-8")
+        sealed.chmod(0o555)
+        try:
+            shutil.rmtree(sealed)
+        except OSError:
+            return True
+        finally:
+            restore_removable(Path(d))
+    return False
+
+
+__all__ = ["permissions_bind", "restore_removable"]
