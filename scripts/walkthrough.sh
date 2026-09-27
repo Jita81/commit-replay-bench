@@ -63,8 +63,9 @@
 #               src/crb/cli/main.py (``migrate`` / ``serve`` / ``worker``), .github/workflows/ci.yml
 #               (the ``walkthrough`` job)
 # Tested by:    tests/test_walkthrough_script.py (the preflight: which checkout the stack
-#               imports), ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
-#               (the suite it drives; CI runs it end to end)
+#               imports), tests/test_walkthrough_serves_this_tree.py (a foreign crb on the
+#               path is never served), ui/e2e/walkthrough/01-login.spec.ts,
+#               ui/e2e/walkthrough/05-replay-fake.spec.ts (the suite it drives; CI runs it end to end)
 # Touch when:   a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in
 #               the README); the server or worker CLI flags change; never to inherit an existing
 #               home, database or port.
@@ -141,7 +142,10 @@ then
 fi
 echo "walkthrough: crb imports from $ROOT/src" >&2
 if [[ "${CRB_E2E_PREFLIGHT_ONLY:-0}" == "1" ]]; then
-  exit 0   # tests/test_walkthrough_script.py: the preflight, and nothing created
+  # tests/test_walkthrough_script.py and tests/test_walkthrough_serves_this_tree.py: the
+  # preflight, and nothing created
+  echo "walkthrough: preflight passed — serving $(cd "$ROOT/src/crb" && pwd -P)"
+  exit 0
 fi
 command -v git >/dev/null || { echo "walkthrough: git is required" >&2; exit 2; }
 command -v npx >/dev/null || { echo "walkthrough: node/npx is required" >&2; exit 2; }

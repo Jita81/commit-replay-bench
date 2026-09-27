@@ -31,13 +31,17 @@ export const WCAG_21_AA = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 
 type Violations = Awaited<ReturnType<AxeBuilder['analyze']>>['violations']
 
-/** Wait for the page's running CSS transitions to finish; a cancelled one counts as settled. */
+/**
+ * Wait for the page's running CSS transitions and its finite animations to finish; a
+ * cancelled one counts as settled. An infinite animation (a spinner) never finishes and is
+ * not waited on (stream U's `settled`, P-085, folded in here so there is one wait).
+ */
 export async function settleTransitions(page: Page): Promise<void> {
   await page.evaluate(() =>
     Promise.all(
       document
         .getAnimations()
-        .filter((a) => a instanceof CSSTransition)
+        .filter((a) => a instanceof CSSTransition || a.effect?.getComputedTiming().iterations !== Infinity)
         .map((a) => a.finished.then(() => undefined, () => undefined)),
     ),
   )

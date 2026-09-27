@@ -1,57 +1,53 @@
 /**
- * Settings — instrument health, the Claude Code login, non-secret configuration and users
- * (/settings).
+ * Settings — instrument health, the Claude Code login, non-secret configuration, the
+ * reader's own password and, for admins, accounts (/settings).
  *
  * Navigation
  * ----------
  * What it is:   The screen at /settings: `HealthCard` (every probe with its verdict and the
- *               versions), the Claude Code login card, and for admins the redacted
- *               configuration (`GET /settings`) and `UsersCard` (list, role change, create a
- *               local account).
+ *               versions), the Claude Code login card, the GitHub App card, "Change my
+ *               password" for the account the reader is signed in as, and for admins the
+ *               redacted configuration (`GET /settings`) and the Users card (the account
+ *               lifecycle: role, active, password, audit trail, create).
  * What it does: Describes the instrument honestly and never leaks a secret: a builder is
  *               reported as configured or not, the retention settings are shown as returned,
  *               sandbox mode / ledger backend / apparatus / policy are named. Non-admins see
- *               health and the login status and an "admin only" note for the rest — the
- *               admin queries are not even issued for them.
- * How:          `useHealth` / `useVersion`; `useSettings(admin)` and `useUsers(admin)` gated
- *               by `can('admin')`; role changes and user creation through their mutations.
+ *               health, the login status, their own password card and an "admin only" note
+ *               for the rest — the admin queries are not even issued for them.
+ * How:          `useHealth` / `useVersion`; `useSettings(admin)` gated by `can(\'admin\')`; the
+ *               two account cards are their own files, so this one stays the page's layout.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useSettings`, `useUsers`,
- *               `useCreateUser`, `useSetUserRole`), ui/src/api/types.ts (`Settings`, `User`,
- *               `Probe`), ui/src/screens/Settings/ClaudeCodeLoginCard.tsx,
- *               ui/src/screens/Settings/GitHubAppCard.tsx, ui/src/components/Help.tsx
- *               (`DocLink` — the roles guide), src/crb/server/routes/admin.py (settings and users),
- *               src/crb/observability/probes.py
- *               (the probes the health card lists)
+ * Works with:   ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useSettings`),
+ *               ui/src/api/types.ts (`Settings`, `Probe`),
+ *               ui/src/screens/Settings/ClaudeCodeLoginCard.tsx,
+ *               ui/src/screens/Settings/GitHubAppCard.tsx,
+ *               ui/src/screens/Settings/UsersCard.tsx (the admin\'s account lifecycle),
+ *               ui/src/screens/Settings/ChangeMyPasswordCard.tsx (the self-service door),
+ *               src/crb/server/routes/admin.py (settings and users),
+ *               src/crb/observability/probes.py (the probes the health card lists)
  * Tested by:    ui/src/screens/Settings/SettingsPage.test.tsx (the roles guide link, the
  *               eyebrow), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (builders as
- *               configured yes / no, sandbox mode, versions; axe),
+ *               configured yes / no, sandbox mode, versions; axe; the recovery acts),
  *               ui/e2e/walkthrough/01-login.spec.ts (the health probes it relies on)
  * Touch when:   `GET /settings` gains a non-secret field (src/crb/server/routes/admin.py
  *               `get_settings_view`, docs/API.md "Admin") — type it in ui/src/api/types.ts
  *               and add its `<dt>`; never for a new repository.
  */
-import { useMemo, useState, type FormEvent } from 'react'
-import { useCreateUser, useHealth, useSetUserRole, useSettings, useUsers, useVersion } from '../../api/hooks'
-import { ROLE_ORDER, type Role, type User } from '../../api/types'
-import { Button } from '../../components/Button'
+import { useHealth, useSettings, useVersion } from '../../api/hooks'
 import { Card } from '../../components/Card'
-import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
-import { ErrorState } from '../../components/ErrorState'
-import { SelectField, TextField } from '../../components/Field'
-import { DocLink } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { JsonView } from '../../components/JsonView'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { useAuth } from '../../lib/auth'
-import { fmtDate } from '../../lib/format'
 import { probeDisplay } from '../../lib/verdict'
+import { ChangeMyPasswordCard } from './ChangeMyPasswordCard'
 import { ClaudeCodeLoginCard } from './ClaudeCodeLoginCard'
 import { GitHubAppCard } from './GitHubAppCard'
+import { UsersCard } from './UsersCard'
 
 /** Every probe from `GET /health` with its verdict, plus the versions. */
 function HealthCard() {
@@ -98,104 +94,6 @@ function HealthCard() {
   )
 }
 
-/** Admin: the user table with an inline role select, and the create-local-user form (the password field is never echoed). */
-function UsersCard() {
-  const users = useUsers(true)
-  const create = useCreateUser()
-  const setRole = useSetUserRole()
-  const [username, setUsername] = useState('')
-  const [display, setDisplay] = useState('')
-  const [email, setEmail] = useState('')
-  const [role, setRoleNew] = useState<Role>('viewer')
-  const [password, setPassword] = useState('')
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    create.mutate(
-      { username, display_name: display, email, role, password },
-      {
-        onSuccess: () => {
-          setUsername('')
-          setDisplay('')
-          setEmail('')
-          setPassword('')
-          setRoleNew('viewer')
-        },
-      },
-    )
-  }
-
-  const columns = useMemo<Column<User>[]>(
-    () => [
-      { key: 'username', header: 'Username', hint: 'col.settings.users', mono: true, sortValue: (u) => u.username, cell: (u) => u.username },
-      { key: 'display', header: 'Name', hint: 'col.settings.users', sortValue: (u) => u.display_name, cell: (u) => u.display_name },
-      { key: 'email', header: 'Email', hint: 'col.settings.users', sortValue: (u) => u.email, cell: (u) => u.email, hideBelowMd: true },
-      { key: 'issuer', header: 'Issuer', hint: 'col.settings.users', sortValue: (u) => u.issuer, cell: (u) => <span className="font-mono text-xs">{u.issuer || 'local'}</span>, hideBelowMd: true },
-      {
-        key: 'role',
-        header: 'Role',
-        hint: 'col.settings.role',
-        sortValue: (u) => ROLE_ORDER.indexOf(u.role),
-        cell: (u) => (
-          <Hint
-            as="select"
-            id="field.settings.user_role"
-            aria-label={`Role for ${u.username}`}
-            value={u.role}
-            onChange={(e: { target: { value: string } }) => setRole.mutate({ id: u.id, role: e.target.value as Role })}
-            className="h-8 rounded-[var(--radius-control)] border border-border bg-surface-container px-2 text-xs"
-          >
-            {ROLE_ORDER.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </Hint>
-        ),
-      },
-      { key: 'created', header: 'Created', hint: 'col.settings.users', sortValue: (u) => u.created, cell: (u) => <span className="text-xs text-on-surface-muted">{fmtDate(u.created)}</span>, hideBelowMd: true },
-    ],
-    [setRole],
-  )
-
-  return (
-    <Card title="Users" eyebrow="admin">
-      <div className="space-y-4">
-        <p className="m-0 text-sm text-on-surface-muted">
-          Roles are a ladder: viewer, operator, approver, admin. An approver account is what sign-off needs; local accounts are for bootstrap and air-gapped installs. Guide: <DocLink to="SECURITY#34-authentication-and-authorisation--crbserverauth">How sign-in and roles work</DocLink>.
-        </p>
-        <QueryBoundary query={users} loading="Loading users…">
-          {(page) => <DataTable rows={page.items} columns={columns} rowKey={(u) => u.id} caption="Users" dense empty={<EmptyState compact title="No users" reason="Create the first local account below." />} />}
-        </QueryBoundary>
-        {setRole.isError && <ErrorState compact error={setRole.error} />}
-        <form onSubmit={submit} className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
-          <TextField label="Username" hint="field.settings.new_username" required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
-          <TextField label="Display name" hint="field.settings.new_display" required value={display} onChange={(e) => setDisplay(e.target.value)} />
-          <TextField label="Email" hint="field.settings.new_email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-          <SelectField label="Role" hint="field.settings.new_role" value={role} onChange={(e) => setRoleNew(e.target.value as Role)}>
-            {ROLE_ORDER.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </SelectField>
-          <TextField label="Initial password" hint="field.settings.new_password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-          <div className="flex items-end">
-            <Button type="submit" variant="filled" disabled={create.isPending} hint="button.settings.create_user">
-              {create.isPending ? 'Creating…' : 'Create local user'}
-            </Button>
-          </div>
-          {create.isError && (
-            <div className="sm:col-span-3">
-              <ErrorState compact error={create.error} />
-            </div>
-          )}
-        </form>
-      </div>
-    </Card>
-  )
-}
-
 /** The screen; admin-only queries are gated by the role, not merely hidden. */
 export function SettingsPage() {
   const { can } = useAuth()
@@ -204,8 +102,9 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Instrument · Settings" title="Settings" purpose="Non-secret configuration and the instrument's health. Secrets are never returned by the API and never shown here; a builder is reported as configured or not, nothing more — the Claude Code login card reports at most the last four characters of a stored token." />
+      <PageHeader eyebrow="Instrument · Settings" title="Settings" purpose="Non-secret configuration, the instrument's health, your own password and — for admins — accounts. Secrets are never returned by the API and never shown here; a builder is reported as configured or not, nothing more — the Claude Code login card reports at most the last four characters of a stored token, and a password is sent once and never shown back." />
       <HealthCard />
+      <ChangeMyPasswordCard />
       <ClaudeCodeLoginCard />
       <GitHubAppCard />
       {admin ? (

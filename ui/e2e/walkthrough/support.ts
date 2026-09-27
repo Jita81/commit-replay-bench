@@ -23,7 +23,7 @@
  * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
  *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
  *               `signIn`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
- *               `expectLogAction`, `stackHealth`.
+ *               `expectLogAction`, `stackHealth` (an axe sweep runs through ui/e2e/axe.ts).
  * What it does: Makes every spec drive a REAL stack through the UI only — sign-in through the
  *               form (never cookie injection), runs queued through the dialog, completion
  *               awaited by watching the status pill the page itself polls (never a fixed

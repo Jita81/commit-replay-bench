@@ -337,8 +337,10 @@ def set_password(user: User, password: str) -> None:
     409 ``not_local`` for an OIDC account (its credential is the provider's, and a hash on
     it could never be used — ``find_local_user`` looks only under the local issuer);
     422 ``validation_error`` below ``MIN_PASSWORD_LENGTH``. The clear text is never stored,
-    logged or returned; the new hash re-salts, so :func:`credential_version` moves and the
-    account's existing sessions end (see :func:`current_user`).
+    logged or returned. The account's session nonce rotates with it (#52's revocation, the
+    same one logout and "sign out everywhere" use), so :func:`credential_version` moves and
+    every existing session ends on its next request (see :func:`current_user`) — by
+    construction, not because argon2 happens to re-salt the hash.
     """
     if not is_local_account(user):
         raise ApiError(
@@ -351,6 +353,7 @@ def set_password(user: User, password: str) -> None:
         user.password_hash = hash_password(password)
     except ValueError as exc:
         raise ApiError(422, "validation_error", str(exc), detail={"field": "password"}) from exc
+    rotate_session_nonce(user)
 
 
 def set_user_active(db: Session, user: User, active: bool) -> bool:

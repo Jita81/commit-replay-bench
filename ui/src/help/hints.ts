@@ -1563,7 +1563,11 @@ export const HINTS = {
   'button.settings.verify_login':
     'Try the stored token once, through the builder’s own environment, and report whether it was accepted; allowed once every 10 seconds.',
   'button.settings.remove_token':
-    'Delete the stored token from the server; builders in cli mode stop working until a new one is stored.',
+    'Delete the stored token from the server; builders in cli mode stop working until a new one is stored. You are asked to confirm first.',
+  'button.settings.remove_token_confirm':
+    'Delete the stored token now. Runs in cli mode fail until a new one is stored.',
+  'button.settings.remove_token_keep':
+    'Keep the stored token and close the question. Nothing is deleted.',
   'pill.settings.signin_state':
     'Where the sign-in flow is: waiting for the code, exchanging it, done or failed.',
   'pill.settings.github_configured':
@@ -1599,9 +1603,53 @@ export const HINTS = {
   'field.settings.new_role':
     'The role the new account starts with. An approver is what task 7 on Home asks for.',
   'field.settings.new_password':
-    'A first password for the local account. It is never echoed back.',
+    'A first password for the local account: at least 12 characters. It is never echoed back, and the person can change it themselves once they are signed in.',
   'button.settings.create_user':
     'Create the local account with the role chosen.',
+  'col.settings.account_kind':
+    'Where the account is issued: local means this deployment holds its password; oidc means the organisation’s identity provider does.',
+  'pill.settings.account_kind':
+    'A local account signs in with a password held here, so an admin can set it. An oidc account’s password belongs to your identity provider. Turning it off here refuses it on this deployment; disabling it at the provider stops it everywhere.',
+  'col.settings.active':
+    'Whether the account can sign in. A deactivated account is refused on its very next request.',
+  'toggle.settings.user_active':
+    'Turn an account off when the person leaves, and back on when they return. Deactivating refuses the account on its very next request; reactivating within the session lifetime (8 hours by default) restores the sessions it already held, so set a password as well to end them for good. The last active admin cannot be deactivated — activate or create a second admin first.',
+  'col.settings.last_login':
+    'How long ago the account last signed in successfully. "Never" means it has not been used since it was created.',
+  'stat.settings.last_login':
+    'The last successful sign-in for this account, as an age. An account that has never signed in reads "Never".',
+  'col.settings.account_actions':
+    'Set this account’s password, sign it out on every device, or read its audit trail: every change made to it and every sign-in.',
+  'button.settings.sign_out_everywhere':
+    'End every session this account holds, on every device, on its next request — for a lost laptop or a leaver. It works for an identity-provider account too. The person can sign in again at once; turn the account off as well to keep them out.',
+  'button.settings.set_password':
+    'Set a new password for this account. Only an admin may set another account’s password — you change your own in the “Change my password” card above. It ends every session the account holds, so the person signs in again with the new one, and only a local account has a password to set at all.',
+  'button.settings.account_history':
+    'Show the account’s audit trail — created, role set, password set, deactivated, reactivated, signed out everywhere, and each sign-in and failed sign-in — with who did it (by username) and when.',
+  'field.settings.set_password':
+    'The new password for this account: at least 12 characters. It is never shown back and never recorded in the audit trail.',
+  'field.settings.set_password_confirm':
+    'Type the same new password again, so a typo cannot lock the person out.',
+  'button.settings.set_password_submit':
+    'Set the password now. Every session the account holds ends on its next request.',
+  'tile.settings.account_history':
+    'The account’s own audit trail: one row per recorded change, newest first, each with the actor who made it. A change made on the API host reads cli followed by the operating-system user.',
+  'pill.settings.account_event':
+    'What happened to the account: created, role set, password set, deactivated, reactivated, signed out everywhere, signed in (user.login) or a refused sign-in (user.login_failed, by anonymous).',
+  'link.settings.created_home':
+    'Go back to Home: the task list shows the account you just created, and the next task.',
+  'link.settings.created_connect':
+    'Go on to Connection to connect a repository, the next step once the people who approve are set up.',
+  'tile.settings.my_password':
+    'Change the password of the account you are signed in as. This browser stays signed in; every other session of the account ends.',
+  'field.settings.my_current_password':
+    'Your current password, which proves the session is yours and not a borrowed one. Five wrong attempts in a minute, for this account from this address, stop further tries — the refusal says how many seconds to wait.',
+  'field.settings.my_new_password':
+    'Your new password: at least 12 characters. It is never shown back.',
+  'field.settings.my_new_password_confirm':
+    'Type your new password again, so a typo cannot lock you out.',
+  'button.settings.change_my_password':
+    'Change your password now. This browser stays signed in; every other session of your account ends.',
 
   // ── /help, /help/docs/:name, 404
   'link.help.read_more':
@@ -1709,8 +1757,10 @@ export const MIN_HINTS: Record<string, number> = {
   '/oracle': 22,
   '/learn': 44,
   '/ledger': 26,
-  // a viewer's Settings (health, the login card read-only, the GitHub App); the admin's configuration and users are held by the ratchet's variants
-  '/settings': 11,
+  // a viewer's Settings: health, the login card read-only, the GitHub App, and their own
+  // "Change my password" card; the admin's configuration and Users card (and the deeper
+  // set-password dialog and account history) are held by the ratchet's variants
+  '/settings': 16,
   // the four shell screens: signed out, the help pages and an unknown address. They carry few
   // elements, so the floor is small — but it is a floor, and the ratchet no longer skips them
   // by name (G-909): both login fields, both sign-in buttons; a Read more and a guide link;
