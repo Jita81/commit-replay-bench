@@ -157,24 +157,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ALLOWLIST: tuple[str, ...] = (
     "README.md",
     "docs/*.md",
-    "docs/reviews/2026-09-25-value-baseline.md",
-    "docs/reviews/2026-09-13-critical-friend.md",
-    "docs/reviews/2026-09-14-nhs-patch-reviews.md",
-    "docs/reviews/2026-09-14-nhs-public-repos.md",
-    "docs/reviews/2026-09-16-dogfood.md",
-    "docs/reviews/2026-09-16-external-assessment.md",
-    "docs/reviews/2026-09-17-claude-design-prototype.md",
-    "docs/reviews/2026-09-17-enterprise-front-end.md",
-    "docs/reviews/2026-09-17-external-documents-assessment.md",
-    "docs/reviews/2026-09-17-persona-walkthrough.md",
-    "docs/reviews/2026-09-19-b1b-first-factory-pull-request.md",
-    "docs/reviews/2026-09-21-oracle-2154-v2/proof-notes.md",
-    "docs/reviews/2026-09-21-oracle-adequacy-2154.md",
-    "docs/reviews/2026-09-25-external-assessment.md",
-    "docs/reviews/2026-09-25-runner-commands-audit.md",
-    "docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md",
-    "docs/reviews/human-review-guide.md",
-    "docs/reviews/signoffs/2026-09-14-fable-ai-pass.md",
+    "docs/reviews/**/*.md",
 )
 
 #: Generated pages a glob on ``ALLOWLIST`` would take in, and why they are not read: a
