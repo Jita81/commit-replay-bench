@@ -380,10 +380,6 @@ gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/requir
  "test (py3.12)", "test (py3.13)", "test-postgres (store suite on PostgreSQL 16)",
  "security (gitleaks + pip-audit)", "container (docker build + smoke + helm lint)",
  "walkthrough (browser, live stack, tier 1)",
- "walkthrough screens (browser, live stack, tier 1, shard 1 of 4)",
- "walkthrough screens (browser, live stack, tier 1, shard 2 of 4)",
- "walkthrough screens (browser, live stack, tier 1, shard 3 of 4)",
- "walkthrough screens (browser, live stack, tier 1, shard 4 of 4)",
  "ui-unit (tsc -b + vitest, the hint ratchet included)",
  "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
  "dod (every route, journey and stream has its definition of done; evidence resolves)",
@@ -405,11 +401,12 @@ verdict is visible on every pull request but advisory. The same holds for the tw
 on every pull request, and they block a merge only once their contexts are in this set. The
 same holds for `dod` and `claims`, also added to the list above: the definition-of-done record
 and the claim-tag rule are gates in the workflow and advisory on a branch until an
-administrator sends this call. And for the four `walkthrough screens … shard k of 4` contexts:
-the tier-1 walkthrough outgrew its 40-minute budget on PR #57, so `11-screens` (every route for
-every role at two widths) moved out of the required `walkthrough` job, whose name is unchanged,
-into four parallel shards of its own — until they are on the list, a screen that stops
-rendering for one role no longer blocks a merge by itself.
+administrator sends this call. The walkthrough needs no new context: when it outgrew its
+40-minute budget on PR #57 it was split into `walkthrough-story` and four parallel
+`walkthrough-screens` shards, and the required context "walkthrough (browser, live stack,
+tier 1)" moved onto an aggregator job that passes only when all five parts passed (a failed,
+cancelled or skipped part fails it) — so every spec, `11-screens` included, blocks a merge
+under the name already on the list. The parts' own contexts need not be added.
 
 ## 4. Azure
 

@@ -45,17 +45,19 @@
 #                  (docs/DEPLOYMENT.md §3.4 names the branch-protection call). The `test` job
 #                  deselects the `sandbox_images` marker: these tests build images, and this
 #                  job builds each exactly once with the GHA layer cache
-#   walkthrough    the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack that
-#                  scripts/walkthrough.sh boots in a temp dir — tier 1: hermetic, no network,
-#                  no model (fixture repo over file://, test-only fixture_gold builder); the
-#                  Playwright report + traces are uploaded on failure. This job runs the
+#   walkthrough    the required context "walkthrough (browser, live stack, tier 1)": an aggregator
+#                  that passes only when `walkthrough-story` and every `walkthrough-screens`
+#                  shard passed (a failed, cancelled or skipped part fails it), so the whole
+#                  walkthrough stays under the one context main already requires
+#   walkthrough-story  the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack
+#                  that scripts/walkthrough.sh boots in a temp dir — tier 1: hermetic, no
+#                  network, no model (fixture repo over file://, test-only fixture_gold
+#                  builder); the Playwright report + traces are uploaded on failure. It runs the
 #                  stateful story — every spec except 11-screens, in order
 #   walkthrough-screens  11-screens (every route x persona x width) split four ways by persona
 #                  (CRB_E2E_SCREENS_SHARD=k/4), each shard on a stack of its own that the
-#                  spec seeds through the API; the four run in parallel beside `walkthrough`.
-#                  Not on main's required-checks list until an administrator adds the four
-#                  contexts (docs/DEPLOYMENT.md §3.4)
-#   job budget     `test`, `walkthrough` and `walkthrough-screens` start a clock in their first
+#                  spec seeds through the API; the four run in parallel beside the story
+#   job budget     `test`, `walkthrough-story` and `walkthrough-screens` start a clock in their first
 #                  step and end with scripts/ci_job_budget.py: past 80 % of the job's own
 #                  timeout-minutes it writes an alarm into the job summary, and the walkthrough
 #                  jobs fail — a job that creeps to its timeout blocks every merge, so it is
@@ -675,15 +677,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  walkthrough:
-    name: walkthrough (browser, live stack, tier 1)
+  walkthrough-story:
+    name: walkthrough story (browser, live stack, tier 1)
     runs-on: ubuntu-latest
     # The tier-1 walk grew past its budget twice: 25 minutes (run 35741391422, cancelled at
     # 25m18s) and then 40 (PR #57, cancelled twice at 40 minutes with every spec so far
     # passing) — 11-screens alone was ~34 of them (8 persona x width passes at ~4.3 min each).
     # So the job was split, not raised: this one runs the stateful story (every spec but
     # 11-screens, ~9-12 min on a hosted runner) and `walkthrough-screens` runs 11-screens as
-    # four parallel shards. The guard at the end fails the job past 80 % of this budget; if
+    # four parallel shards; `walkthrough` below keeps the required context and passes only
+    # when all of them did. The guard at the end fails the job past 80 % of this budget; if
     # a future wave needs more, split again — a gate nobody can finish is not a gate.
     timeout-minutes: 40
     steps:
@@ -748,7 +751,7 @@ jobs:
     # persona from the k-th, so the four shards are every persona by construction). Each shard
     # boots its own stack and the spec's first test seeds the primary repository through the
     # API (onboard, probe, mine, oracle, controls, a two-task fixture_gold replay) — it never
-    # assumes state the `walkthrough` job made. ~8.5 min of passes + ~1.5 min seed + ~1 min
+    # assumes state the `walkthrough-story` job made. ~8.5 min of passes + ~1.5 min seed + ~1 min
     # setup on a hosted runner, estimated from PR #57's log: under half of this budget.
     name: walkthrough screens (browser, live stack, tier 1, shard ${{ matrix.shard }} of 4)
     runs-on: ubuntu-latest
@@ -811,3 +814,24 @@ jobs:
       - name: Job budget (fails past 80 % of timeout-minutes)
         if: always()
         run: python3 scripts/ci_job_budget.py --timeout-minutes 25 --mode fail
+
+  walkthrough:
+    # The required context. Main's branch protection lists "walkthrough (browser, live stack,
+    # tier 1)" and nothing else for the walkthrough, so the split parts report under names of
+    # their own and this job carries the required one: it passes only when every part passed.
+    # `if: always()` so it runs — and fails — when a part failed or was cancelled: a skipped
+    # job would leave the required context skipped, and a skipped required check does not
+    # block a merge. tests/test_ci_job_budget.py holds `needs` equal to every job that runs
+    # scripts/walkthrough.sh, so a part added later cannot run outside the required check.
+    name: walkthrough (browser, live stack, tier 1)
+    needs: [walkthrough-story, walkthrough-screens]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every part of the walkthrough passed (story + every screens shard)
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'to_entries | length > 0 and all(.value.result == "success")'

@@ -18,8 +18,8 @@ It always writes the job's elapsed time and its share of the timeout to the job 
 the threshold (``--threshold``, default 0.8) it adds an unmissable block to the summary and an
 annotation: ``--mode fail`` exits 1 (the walkthrough jobs), ``--mode warn`` exits 0 with a
 ``::warning`` (the test job, which is already past it until the suite is split — G-708). A
-missing or unreadable start stamp exits 2 in either mode: a guard that cannot measure must not
-read as a pass.
+missing or unreadable start stamp (``nan`` and ``inf`` included) exits 2 in either mode: a
+guard that cannot measure must not read as a pass.
 
 Navigation
 ----------
@@ -34,7 +34,7 @@ How:          ``assess(elapsed_s, timeout_minutes, threshold)`` → ``Budget``;
               them with no global state, so the tests drive it with a fake clock.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
-Works with:   .github/workflows/ci.yml (the ``test``, ``walkthrough`` and
+Works with:   .github/workflows/ci.yml (the ``test``, ``walkthrough-story`` and
               ``walkthrough-screens`` jobs start the clock and run this last),
               docs/PREVENTION.md (P-051 — the class it closes), scripts/walkthrough.sh (the
               job the class first bit)
@@ -47,6 +47,7 @@ Touch when:   never for a new repository (it measures this repository's own CI j
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -144,6 +145,8 @@ def main(
     try:
         started = float(raw)
     except ValueError:
+        started = math.nan
+    if not math.isfinite(started):  # float() accepts "nan" and "inf": neither is a time
         print(
             f"::error title=job budget::{START_VAR} is not set to epoch seconds ({raw!r}): the "
             "job's first step must start the clock — the budget cannot be measured",

@@ -153,19 +153,24 @@ the tier-1 variables above, then `cd ui && npm run walkthrough`.
 
 **CI:** tier 1 runs on every push / PR as five parallel jobs in `.github/workflows/ci.yml`,
 each on a fresh stack of its own (Chromium with its system deps; the report pointed at
-`ui/playwright-report-walkthrough` and uploaded with the traces on failure):
+`ui/playwright-report-walkthrough` and uploaded with the traces on failure), and a sixth that
+carries the required context:
 
 | Job | Runs | Exactly as |
 |---|---|---|
-| `walkthrough` — *walkthrough (browser, live stack, tier 1)*, the required context | the stateful story: every spec except 11-screens, in order | `scripts/walkthrough.sh --grep-invert '11-screens\.spec\.ts'` |
+| `walkthrough-story` — *walkthrough story (browser, live stack, tier 1)* | the stateful story: every spec except 11-screens, in order | `scripts/walkthrough.sh --grep-invert '11-screens\.spec\.ts'` |
 | `walkthrough-screens` — *walkthrough screens (browser, live stack, tier 1, shard k of 4)*, k = 1…4 | 11-screens for one persona, both widths, on a stack the spec seeds | `CRB_E2E_SCREENS_SHARD=k/4 scripts/walkthrough.sh e2e/walkthrough/11-screens.spec.ts` |
+| `walkthrough` — *walkthrough (browser, live stack, tier 1)*, the required context | nothing of its own: passes only when the story and all four shards passed (a failed, cancelled or skipped part fails it) | `needs: [walkthrough-story, walkthrough-screens]`, `if: always()` |
 
 The walk used to be one job; 11-screens grew it past two budgets (25 and then 40 minutes — PR
-#57), so it was split instead of raised again. `--grep-invert` matches the file name, so a spec
-added later runs in the required job with no list to update, and the shard rule covers every
-persona by construction (`tests/test_ci_job_budget.py` holds both). Every one of these jobs ends
-with `scripts/ci_job_budget.py`, which fails the job past 80 % of its own `timeout-minutes` —
-split again before that, never raise the budget (docs/PREVENTION.md P-051). To reproduce one
+#57), so it was split instead of raised again. The required context kept its name on the
+aggregator, so every spec still blocks a merge under the one check branch protection already
+lists. `--grep-invert` matches the file name, so a spec added later runs in the story with no
+list to update, and the shard rule covers every persona by construction
+(`tests/test_ci_job_budget.py` holds both, and holds the aggregator's `needs` equal to every job
+that runs `scripts/walkthrough.sh`). Every job that runs the walk ends with
+`scripts/ci_job_budget.py`, which fails the job past 80 % of its own `timeout-minutes` — split
+again before that, never raise the budget (docs/PREVENTION.md P-051). To reproduce one
 job locally, run its command above; `--trace off` keeps the disk use down.
 
 ## Selectors

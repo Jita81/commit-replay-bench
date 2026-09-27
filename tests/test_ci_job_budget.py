@@ -11,17 +11,22 @@ Navigation
 What it is:   Tests of the job-budget guard and of the CI configuration that runs it and the
               split tier-1 walkthrough.
 What it does: Pins the guard's arithmetic, its summary and annotation, its exit codes (fail
-              mode exits 1 past the threshold, warn mode 0, a missing start stamp 2 in either
-              mode), and that ``ci.yml`` starts the clock as the first step of the ``test``,
-              ``walkthrough`` and ``walkthrough-screens`` jobs and runs the guard last,
-              ``if: always()``, with the job's OWN ``timeout-minutes`` (so a raised timeout
-              cannot leave the guard measuring the old one) — failing for the walkthroughs.
-              For the split: the required ``walkthrough`` job keeps its exact name and runs
-              every spec except 11-screens, ``walkthrough-screens`` runs only 11-screens with a
-              shard per matrix value ``k/N`` for k = 1..N, and N is at most the spec's persona
-              count, so no shard is empty and together they are every persona.
+              mode exits 1 past the threshold, warn mode 0, a missing, unreadable, ``nan`` or
+              ``inf`` start stamp 2 in either mode), and that ``ci.yml`` starts the clock as
+              the first step of the ``test``, ``walkthrough-story`` and
+              ``walkthrough-screens`` jobs and runs the guard last, ``if: always()``, with the
+              job's OWN ``timeout-minutes`` (so a raised timeout cannot leave the guard
+              measuring the old one) — failing for the walkthroughs. For the split:
+              ``walkthrough-story`` runs every spec except 11-screens, ``walkthrough-screens``
+              runs only 11-screens with a shard per matrix value ``k/N`` for k = 1..N, and N
+              is at most the spec's persona count, so no shard is empty and together they are
+              every persona; the required ``walkthrough`` job keeps its exact name as an
+              aggregator that ``needs`` every job running ``scripts/walkthrough.sh``, runs
+              ``if: always()`` and passes only when every part succeeded (its jq program is
+              run against success, failure, cancelled, skipped and empty ``needs``).
 How:          Calls ``main`` with a fake clock and environment; reads ``ci.yml`` as text,
-              job by job (no YAML dependency), and the spec's ``PERSONAS`` list.
+              job by job (no YAML dependency), and the spec's ``PERSONAS`` list; runs ``jq``
+              (on every hosted runner) over sample ``needs`` objects.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/ci_job_budget.py (the guard), .github/workflows/ci.yml (the jobs),
@@ -36,7 +41,10 @@ Touch when:   never for a new repository (it reads this repository's own CI); a 
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -50,9 +58,14 @@ WALKTHROUGH_DIR = ROOT / "ui" / "e2e" / "walkthrough"
 
 #: job id → the mode its guard must run in. The walkthroughs fail; the test job warns until
 #: the suite is split (G-708) — it already runs past the threshold.
-GUARDED = {"test": "warn", "walkthrough": "fail", "walkthrough-screens": "fail"}
+GUARDED = {"test": "warn", "walkthrough-story": "fail", "walkthrough-screens": "fail"}
 #: The required context's exact name: branch protection matches it character for character.
+#: It is the ``walkthrough`` job, an aggregator over every part of the split, so the whole
+#: walkthrough stays under the one context main already requires — no advisory window.
 REQUIRED_WALKTHROUGH_NAME = "walkthrough (browser, live stack, tier 1)"
+#: The jq program the aggregator runs over ``toJSON(needs)``: every part succeeded, and there
+#: is at least one part (an empty ``needs`` must not read as a pass).
+ALL_PASSED_JQ = 'to_entries | length > 0 and all(.value.result == "success")'
 
 
 def _guard() -> ModuleType:
@@ -117,7 +130,7 @@ def test_exactly_at_the_threshold_is_over_budget() -> None:
     assert budget.over
 
 
-@pytest.mark.parametrize("stamp", ["", "not-a-number", None])
+@pytest.mark.parametrize("stamp", ["", "not-a-number", None, "nan", "inf", "-inf"])
 @pytest.mark.parametrize("mode", ["fail", "warn"])
 def test_a_guard_that_cannot_measure_never_reads_as_a_pass(
     stamp: str | None, mode: str, capsys: pytest.CaptureFixture[str]
@@ -213,16 +226,65 @@ def test_each_guarded_job_starts_the_clock_first_and_ends_with_the_guard_on_its_
         assert sum("ci_job_budget.py" in s for s in steps) == 1
 
 
-def test_the_required_walkthrough_keeps_its_name_and_runs_every_spec_but_11_screens() -> None:
+def test_the_story_job_runs_every_spec_but_11_screens() -> None:
     jobs = _jobs(CI.read_text("utf-8"))
-    body = "\n".join(jobs["walkthrough"])
-    assert f"    name: {REQUIRED_WALKTHROUGH_NAME}\n" in body + "\n"
-    runs = [s for s in _steps(jobs["walkthrough"]) if "scripts/walkthrough.sh" in s]
+    runs = [s for s in _steps(jobs["walkthrough-story"]) if "scripts/walkthrough.sh" in s]
     assert len(runs) == 1
-    # the only filter is the one exclusion: a spec added later runs in the required job
+    # the only filter is the one exclusion: a spec added later runs in the story by default
     assert re.search(
         r"run: scripts/walkthrough\.sh --grep-invert '11-screens\\\.spec\\\.ts'\s*$", runs[0], re.M
     )
+
+
+def _needs(body: list[str]) -> list[str]:
+    line = next(ln for ln in body if re.match(r"^    needs:", ln))
+    m = re.match(r"^    needs:\s*\[(.*)\]\s*$", line)
+    assert m is not None, "needs: must be one flow list"
+    return [v.strip() for v in m.group(1).split(",") if v.strip()]
+
+
+def test_the_required_context_is_an_aggregator_over_every_walkthrough_job() -> None:
+    """The split must not lower the gate: main requires one walkthrough context, so that
+    context passes only when every part of the walkthrough passed (a failed, cancelled or
+    skipped part fails it), and every job that runs scripts/walkthrough.sh is one of its
+    parts — a shard added later cannot run outside the required check."""
+    jobs = _jobs(CI.read_text("utf-8"))
+    body = jobs["walkthrough"]
+    text = "\n".join(body) + "\n"
+    assert f"    name: {REQUIRED_WALKTHROUGH_NAME}\n" in text
+    runners = {
+        j for j, b in jobs.items() if re.search(r"run: scripts/walkthrough\.sh", "\n".join(b))
+    }
+    assert runners == {"walkthrough-story", "walkthrough-screens"}
+    assert set(_needs(body)) == runners
+    # it runs even when a part failed or was cancelled — otherwise it would be SKIPPED, and a
+    # skipped required check reads as passing
+    assert re.search(r"^    if: always\(\)\s*$", text, re.M)
+    assert "continue-on-error" not in text
+    steps = _steps(body)
+    assert len(steps) == 1
+    assert "NEEDS: ${{ toJSON(needs) }}" in steps[0]
+    assert f"jq -e '{ALL_PASSED_JQ}'" in steps[0]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is on every hosted runner")
+@pytest.mark.parametrize(
+    ("needs", "passes"),
+    [
+        ({"a": {"result": "success"}, "b": {"result": "success"}}, True),
+        ({"a": {"result": "success"}, "b": {"result": "failure"}}, False),
+        ({"a": {"result": "success"}, "b": {"result": "cancelled"}}, False),
+        ({"a": {"result": "skipped"}, "b": {"result": "success"}}, False),
+        ({}, False),
+    ],
+)
+def test_the_aggregator_passes_only_when_every_part_succeeded(
+    needs: dict[str, dict[str, str]], passes: bool
+) -> None:
+    done = subprocess.run(
+        ["jq", "-e", ALL_PASSED_JQ], input=json.dumps(needs), capture_output=True, text=True
+    )
+    assert (done.returncode == 0) is passes, done.stdout + done.stderr
 
 
 def test_the_screens_jobs_run_only_11_screens_one_shard_each_and_together_every_persona() -> None:

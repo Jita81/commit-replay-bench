@@ -72,7 +72,8 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts (`env`, `signIn`, `primary`, the seeding helpers),
- *               .github/workflows/ci.yml (the `walkthrough-screens` jobs, one per shard),
+ *               .github/workflows/ci.yml (the `walkthrough-screens` jobs, one per shard,
+ *               under the required `walkthrough` aggregator),
  *               ui/src/components/Help.tsx (the About block this asserts),
  *               ui/src/components/Hint.tsx (the `data-hint` triggers and `role="tooltip"`
  *               bubbles this opens), ui/src/components/Layout.tsx (mounts the About block
