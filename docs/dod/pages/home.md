@@ -23,7 +23,7 @@ of the eight task links (Connect GitHub → `/connect`, Choose a repository → 
 shape → `/repos/:name`, Prove the instrument → `/connect/:name`, Measure → `/connect/:name/measure`,
 Read the baseline → `/results?repo=`, Invite an approver → `/settings` for an admin or `/posture` for
 anyone else, Deliver → `/factory?repo=`), by Continue (the first task the operator can act on now;
-a viewer's or an approver's Continue goes to the baseline or Decisions), or by the sandbox banner's link to `/posture`.
+a viewer's or an approver's Continue goes to the baseline or Decisions), or by the sandbox banner's link to `/posture` **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** The page starts no run, writes nothing and keeps no status locally: every tag is
 derived from the API on each visit. It is not a quality figure ("n of 8" is progress); the numbers
