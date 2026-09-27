@@ -80,6 +80,10 @@ import type {
   GradeListParams,
   GradeRow,
   Health,
+  Invitation,
+  InvitationAccepted,
+  InvitationCreated,
+  InviteRequest,
   LedgerVerify,
   LoginRequest,
   OracleReport,
@@ -105,6 +109,7 @@ import type {
   StepEvent,
   TaskDetail,
   TaskSpec,
+  TwoPersonReadiness,
   User,
   UserCreateRequest,
   ValueReport,
@@ -168,6 +173,9 @@ export const keys = {
   flow: (repo: string) => ['flow', repo] as const,
   users: ['users'] as const,
   userEvents: (id: string, p?: PageParams) => ['users', id, 'events', p ?? {}] as const,
+  invitations: ['invitations'] as const,
+  decisionAges: ['decisions', 'ages'] as const,
+  twoPerson: ['two-person-readiness'] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
   value: (repo: string) => ['value', repo] as const,
@@ -934,6 +942,52 @@ export function useUserEvents(id: string, p: PageParams = {}): UseQueryResult<Pa
     enabled: id.length > 0,
     retry: false,
   })
+}
+
+// --- invitations and two-person readiness (G-518) -----------------------------------------
+
+/** `GET /invitations` — admin only, so the caller passes `enabled` from the role check. */
+export function useInvitations(enabled: boolean): UseQueryResult<Page<Invitation>, ApiError> {
+  return useQuery({ queryKey: keys.invitations, queryFn: () => api<Page<Invitation>>('/invitations'), enabled, retry: false })
+}
+
+/**
+ * `POST /invitations` (admin) — the ONE response that carries the link. It is not cached:
+ * the token is in the mutation's result and nowhere else, so a screen that loses it invites
+ * again rather than recovering it.
+ */
+export function useInvite(): UseMutationResult<InvitationCreated, ApiError, InviteRequest> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => api<InvitationCreated>('/invitations', { method: 'POST', body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.invitations })
+      void qc.invalidateQueries({ queryKey: keys.users })
+      void qc.invalidateQueries({ queryKey: keys.twoPerson })
+    },
+  })
+}
+
+/** `POST /invitations/{id}/revoke` (admin) — withdraw an unused link; the reason is recorded. */
+export function useRevokeInvitation(): UseMutationResult<Invitation, ApiError, { id: string; reason: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, reason }) => api<Invitation>(`/invitations/${enc(id)}/revoke`, { method: 'POST', body: { reason } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.invitations })
+      void qc.invalidateQueries({ queryKey: keys.twoPerson })
+    },
+  })
+}
+
+/** `POST /invitations/accept` — the link's own page; no session, so no cache to invalidate. */
+export function useAcceptInvitation(): UseMutationResult<InvitationAccepted, ApiError, { token: string; password: string }> {
+  return useMutation({ mutationFn: (body) => api<InvitationAccepted>('/invitations/accept', { method: 'POST', body }) })
+}
+
+/** `GET /two-person-readiness` — every signed-in role reads it (Home's task 7). */
+export function useTwoPersonReadiness(): UseQueryResult<TwoPersonReadiness, ApiError> {
+  return useQuery({ queryKey: keys.twoPerson, queryFn: () => api<TwoPersonReadiness>('/two-person-readiness'), retry: false })
 }
 
 /** `GET /settings` — non-secret settings; admin only, `enabled` from the role check. */

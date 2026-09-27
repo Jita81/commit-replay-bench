@@ -32,7 +32,9 @@
  *               repository),
  *               ui/src/screens/Signoff/SignoffPage.tsx (`?cell=` preselects the cell),
  *               ui/src/screens/Factory/FactoryPage.tsx (`?item=` scrolls to the item),
- *               src/crb/factory/loop.py (the route gate whose withholding shows here)
+ *               src/crb/factory/loop.py (the route gate whose withholding shows here),
+ *               src/crb/server/decisions.py (the same rows derived on the server, which keeps
+ *               the clock: `kind` + `key` is the identity the ages join on)
  * Tested by:    ui/src/screens/Decisions/decisions.test.ts
  * Touch when:   a new human act is added to the product (a row kind here, its surface there).
  */
@@ -52,6 +54,12 @@ export type DecisionKind =
 export interface Decision {
   kind: DecisionKind
   repo: string
+  /**
+   * What the act is about — the cell (`<class>|<size>`) or the item id. With `kind` it is the
+   * row's identity, and the SAME identity the server's own derivation computes
+   * (`src/crb/server/decisions.py`), which is how `GET /decisions` ages join onto these rows.
+   */
+  key: string
   /** What is being decided, as the person would say it. */
   title: string
   /** The evidence line: n, interval, reason code, gaps. */
@@ -64,6 +72,10 @@ export interface Decision {
   href: string
   /** The role that can perform the act. */
   role: 'approver' | 'operator' | 'viewer'
+  /** When this row FIRST became due (ISO-8601), from `GET /decisions`; absent until it answers. */
+  dueSince?: string
+  /** How long it has been due, in whole seconds — the server's own clock, never the browser's. */
+  ageS?: number
 }
 
 const ORDER: Record<DecisionKind, number> = {
@@ -96,6 +108,23 @@ function pct(x: number): string {
   return `${(x * 100).toFixed(0)}%`
 }
 
+/**
+ * How long a decision has been waiting, in the units a person thinks in (G-516). Days once it
+ * is past a day, because a wait measured in days is the thing worth seeing; `null` when the
+ * server has not answered yet, which renders as nothing rather than as "0 s".
+ */
+export function waitedFor(ageS: number | undefined): string | null {
+  if (ageS === undefined || !Number.isFinite(ageS) || ageS < 0) return null
+  if (ageS < 60) return 'just now'
+  if (ageS < 3600) return `${Math.floor(ageS / 60)} min`
+  if (ageS < 86400) {
+    const h = Math.floor(ageS / 3600)
+    return `${h} hour${h === 1 ? '' : 's'}`
+  }
+  const d = Math.floor(ageS / 86400)
+  return `${d} day${d === 1 ? '' : 's'}`
+}
+
 /** The evidence line without its trailing reason code — the screen renders the code as a term. */
 export function evidenceStats(d: Pick<Decision, 'evidence' | 'reasonCode'>): string {
   const tail = d.reasonCode ? ` · ${d.reasonCode}` : ''
@@ -106,6 +135,9 @@ export function evidenceStats(d: Pick<Decision, 'evidence' | 'reasonCode'>): str
  * The prevention loop's rows (ADR-0020 §9): a filed item nobody has registered ("a prevention
  * needs an owner" — an operator's act), a class that reopened after it closed, and a change the
  * loop retired for harm (both for anyone to read). Each links to the class on the Learn page.
+ * The key is the class signature with what is due — `<signature>|owner|<item id>`,
+ * `<signature>|reopened`, `<signature>|harm` — the identity `src/crb/server/decisions.py`
+ * keeps the clock under.
  */
 export function preventionDecisions(repo: string, register: PreventionRegister | null | undefined): Decision[] {
   if (!register) return []
@@ -115,13 +147,13 @@ export function preventionDecisions(repo: string, register: PreventionRegister |
     const ev = `${e.stratum.k} of ${e.stratum.n} ${e.stratum.mode} first attempts on ${e.tasks} tasks · ${e.status}`
     for (const p of e.proposals) {
       if (p.registered || p.scope === 'product') continue
-      out.push({ kind: 'prevention', repo, title: `A prevention needs an owner — ${e.signature}: ${p.title}`, evidence: `${ev} · ${p.level}`, act: 'Register', href: at(e.signature), role: 'operator' })
+      out.push({ kind: 'prevention', repo, key: `${e.signature}|owner|${p.item_id}`, title: `A prevention needs an owner — ${e.signature}: ${p.title}`, evidence: `${ev} · ${p.level}`, act: 'Register', href: at(e.signature), role: 'operator' })
     }
     if (e.qualifiers.includes('reopened')) {
-      out.push({ kind: 'prevention', repo, title: `${e.signature} reopened after it was closed`, evidence: ev, act: 'Read why', href: at(e.signature), role: 'viewer' })
+      out.push({ kind: 'prevention', repo, key: `${e.signature}|reopened`, title: `${e.signature} reopened after it was closed`, evidence: ev, act: 'Read why', href: at(e.signature), role: 'viewer' })
     }
     if (e.history.some((h) => h.kind === 'decided' && h.summary === 'harm')) {
-      out.push({ kind: 'prevention', repo, title: `A change for ${e.signature} was retired for harm`, evidence: ev, act: 'Read why', href: at(e.signature), role: 'viewer' })
+      out.push({ kind: 'prevention', repo, key: `${e.signature}|harm`, title: `A change for ${e.signature} was retired for harm`, evidence: ev, act: 'Read why', href: at(e.signature), role: 'viewer' })
     }
   }
   return out
@@ -141,11 +173,11 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
     const cellQ = `${q}&cell=${encodeURIComponent(cellKeyOf(c))}`
     const code = c.reason_code ? { reasonCode: c.reason_code } : {}
     if (c.route === 'do_not_ship') {
-      out.push({ kind: 'do_not_ship', repo, title: `${label} must not ship — false-Q1 in the cell`, evidence: ev, ...code, act: 'Investigate', href: `/ledger?${q}`, role: 'viewer' })
+      out.push({ kind: 'do_not_ship', repo, key: cellKeyOf(c), title: `${label} must not ship — false-Q1 in the cell`, evidence: ev, ...code, act: 'Investigate', href: `/ledger?${q}`, role: 'viewer' })
     } else if (c.route === 'deliver' && !signed.has(cellKeyOf(c))) {
-      out.push({ kind: 'signoff_due', repo, title: `${label} clears the bar — attest it or decline`, evidence: ev, ...code, act: 'Attest', href: `/signoff?${cellQ}`, role: 'approver' })
+      out.push({ kind: 'signoff_due', repo, key: cellKeyOf(c), title: `${label} clears the bar — attest it or decline`, evidence: ev, ...code, act: 'Attest', href: `/signoff?${cellQ}`, role: 'approver' })
     } else if (c.route === 'human') {
-      out.push({ kind: 'routed_human', repo, title: `${label} routed to a human — ${c.reason}`, evidence: ev, ...code, act: 'Read why', href: `/routing?${q}`, role: 'viewer' })
+      out.push({ kind: 'routed_human', repo, key: cellKeyOf(c), title: `${label} routed to a human — ${c.reason}`, evidence: ev, ...code, act: 'Read why', href: `/routing?${q}`, role: 'viewer' })
     }
   }
 
@@ -156,6 +188,7 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
       out.push({
         kind: 'gap_unsigned',
         repo,
+        key: t.id,
         title: `${label} is blocked on ${t.dor_gaps.length} structural gap${t.dor_gaps.length === 1 ? '' : 's'}`,
         evidence: t.dor_gaps.join(', '),
         act: 'Sign a gap',
@@ -163,13 +196,13 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
         role: 'approver',
       })
     } else if (t.route_hint === 'human' && t.status !== 'accepted') {
-      out.push({ kind: 'item_human', repo, title: `${label} routed to a human`, evidence: `${t.capability_class} × ${t.size} · ${t.status}`, act: 'Decide', href: `/factory?${itemQ}`, role: 'operator' })
+      out.push({ kind: 'item_human', repo, key: t.id, title: `${label} routed to a human`, evidence: `${t.capability_class} × ${t.size} · ${t.status}`, act: 'Decide', href: `/factory?${itemQ}`, role: 'operator' })
     }
     if (t.review_verdict === 'accept_with_edit' || t.review_verdict === 'reject') {
-      out.push({ kind: 'rework', repo, title: `${label} — the review said ${t.review_verdict.replace(/_/g, ' ')}`, evidence: `build ${t.build_status} · ${t.status}`, act: 'Review', href: `/factory?${itemQ}`, role: 'operator' })
+      out.push({ kind: 'rework', repo, key: t.id, title: `${label} — the review said ${t.review_verdict.replace(/_/g, ' ')}`, evidence: `build ${t.build_status} · ${t.status}`, act: 'Review', href: `/factory?${itemQ}`, role: 'operator' })
     }
     if (t.build_status === 'clean' && !t.pr_url && (t.status === 'accepted' || t.status === 'rejected') && t.last_event === 'delivery.refused') {
-      out.push({ kind: 'delivery_withheld', repo, title: `${label} built clean — delivery withheld by the route`, evidence: `${t.capability_class} × ${t.size}`, act: 'See the route', href: `/factory?${itemQ}`, role: 'approver' })
+      out.push({ kind: 'delivery_withheld', repo, key: t.id, title: `${label} built clean — delivery withheld by the route`, evidence: `${t.capability_class} × ${t.size}`, act: 'See the route', href: `/factory?${itemQ}`, role: 'approver' })
     }
   }
 

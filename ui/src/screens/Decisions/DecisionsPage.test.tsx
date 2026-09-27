@@ -66,6 +66,39 @@ describe('DecisionsPage', () => {
     expect(human).toHaveTextContent('oracle too weak to license auto-delivery')
   })
 
+  it('a row says how long it has been waiting, from the server’s clock (G-516)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': map('alpha', [CELL]),
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /decisions': {
+        items: [{ repo: 'alpha', kind: 'signoff_due', key: 'bug.fix|XS', title: 'x', role: 'approver', due_since: '2026-09-12T09:00:00+00:00', age_s: 950400 }],
+        total: 1,
+        as_of: '2026-09-23T09:00:00+00:00',
+        repos: ['alpha'],
+      },
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    const age = await screen.findByTestId('decision-age-signoff_due-bug.fix|XS')
+    expect(age).toHaveTextContent('Waiting 11 days — since 2026-09-12')
+  })
+
+  it('a decision the server has not stamped yet says nothing rather than "just now"', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': map('alpha', [CELL]),
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /decisions': () => envelope(503, 'unavailable', 'no clock today'),
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    await waitFor(() => expect(screen.getByText('bug.fix × XS clears the bar — attest it or decline')).toBeInTheDocument())
+    expect(screen.queryByTestId('decision-age-signoff_due-bug.fix|XS')).not.toBeInTheDocument()
+  })
+
   it('the kicker names the apparatus as a term', async () => {
     mockApi({
       'GET /auth/me': PRINCIPAL,

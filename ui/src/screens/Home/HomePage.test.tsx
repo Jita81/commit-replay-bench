@@ -63,6 +63,8 @@ const REPO = {
   updated: '2026-09-17T00:00:00Z',
   config: {},
 }
+/** `GET /two-person-readiness` when the deployment can license something (G-518). */
+const READY = { ready: true, reason_code: 'ready', reason: 'an account that can sign has signed in, and at least one other account has too, so a sign-off the two-person rule accepts is possible. The product can see accounts, not people', approvers_active: 2, approvers_signed_in: 2, other_active_accounts: 1, accounts_signed_in: 3, invitations_pending: 0 }
 const FACTORY_TASK = { id: 'T-1', title: 'x', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'pending', outcome_reason: '', dor_gaps: [], route_hint: '', red_proof: null, build_status: 'not_built', pr_url: null, review_verdict: null, last_event: '', cell_route: { route: '', reason_code: '', reason: '', n: 0, point: 0, ci_low: 0, ci_high: 0, apparatus_versions: [], deliverable: false } }
 const EMPTY_MAP = { repo: 'alpha', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [], summary: { trusted_autonomy_coverage: 0, total_cells: 0, measured_cells: 0, deliver_cells: 0, n_total: 0, false_q1_total: 0, apparatus_versions: [] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } }
 
@@ -94,7 +96,7 @@ describe('HomePage', () => {
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': EMPTY_MAP,
       'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: 'docker not reachable', data: {} }] },
-      'GET /users': { items: [{ id: 'u2', username: 'ada', display_name: 'Ada', email: '', role: 'approver', issuer: 'local', created: '' }], total: 1, limit: 50, offset: 0 },
+      'GET /two-person-readiness': READY,
       'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
       'GET /factory/alpha/tasks': [],
       'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
@@ -139,6 +141,7 @@ describe('HomePage', () => {
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 6 } },
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /two-person-readiness': { ...READY, ready: false, reason_code: 'approver_never_signed_in', reason: 'the only account that can sign has never signed in, so it can sign nothing yet — the invitation has not been used', approvers_signed_in: 0, invitations_pending: 1 },
       'GET /factory/alpha/backlog': { repo: 'alpha', hash: 'b'.repeat(64), frozen_at: '2026-09-17T10:00:00Z', items: [] },
       'GET /factory/alpha/tasks': [FACTORY_TASK],
       'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
@@ -155,10 +158,13 @@ describe('HomePage', () => {
     expect(within(rows[4]!).getByRole('link')).toHaveAttribute('href', '/connect/alpha')
     expect(rows[5]).toHaveTextContent('Read the baseline')
     expect(rows[5]).toHaveTextContent('Incomplete')
-    // a non-admin is not sent to a settings page that refuses them, and is told whom to ask
-    expect(rows[6]).toHaveTextContent('Not known yet')
+    // G-518 — task 7 reads the deployment's real readiness, not the presence of an admin: an
+    // invitation that was sent and not used is "In progress", and the note is the server's
+    // own reason plus who can act. A non-admin is not sent to a page that refuses them.
+    expect(rows[6]).toHaveTextContent('In progress')
     expect(within(rows[6]!).getByRole('link')).toHaveAttribute('href', '/posture')
-    expect(screen.getByText(/Only an admin can add users/)).toBeInTheDocument()
+    expect(screen.getByTestId('home-task-7-note')).toHaveTextContent('has never signed in')
+    expect(screen.getByText(/Only an admin can invite somebody/)).toBeInTheDocument()
     // a frozen backlog with no factory run behind it is ready to run, not "in progress"
     expect(rows[7]).toHaveTextContent('Backlog frozen — run the factory')
     // the viewer's Continue keeps its rule — the baseline once any row exists — and names
@@ -177,7 +183,7 @@ describe('HomePage', () => {
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 30, deliver_cells: 1 } },
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
-      'GET /users': () => envelope(403, 'forbidden', 'x'),
+      'GET /two-person-readiness': { ...READY, ready: false, reason_code: 'single_person', reason: 'only one account has ever signed in: whoever runs the measurements would be signing their own evidence, which the API refuses (same_actor)', approvers_signed_in: 1, other_active_accounts: 0, accounts_signed_in: 1 },
       'GET /factory/alpha/backlog': { repo: 'alpha', hash: 'b'.repeat(64), frozen_at: '2026-09-17T10:00:00Z', items: [] },
       'GET /factory/alpha/tasks': [FACTORY_TASK],
       'GET /signoffs': { items: [{ id: 'sgn_1', repo: 'alpha', revoked: false, active: true, stale: false }], total: 1, limit: 50, offset: 0 },
@@ -188,7 +194,7 @@ describe('HomePage', () => {
     const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
     expect(rows[5]).toHaveTextContent('Read the baseline')
     expect(rows[5]).toHaveTextContent('Completed')
-    expect(rows[6]).toHaveTextContent('Not known yet')
+    expect(rows[6]).toHaveTextContent('Incomplete')
     await waitFor(() => expect(rows[7]).toHaveTextContent('In progress — item 2 of 5'))
     expect(screen.getByRole('link', { name: 'Continue to task 8: Deliver your first change' })).toHaveAttribute('href', '/factory?repo=alpha')
   })
@@ -203,7 +209,7 @@ describe('HomePage', () => {
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 30, deliver_cells: 1 } },
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
-      'GET /users': () => envelope(403, 'forbidden', 'x'),
+      'GET /two-person-readiness': { ...READY, ready: false, reason_code: 'single_person', reason: 'only one account has ever signed in: whoever runs the measurements would be signing their own evidence, which the API refuses (same_actor)', approvers_signed_in: 1, other_active_accounts: 0, accounts_signed_in: 1 },
       'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
       'GET /factory/alpha/tasks': [],
       // the API's own verdict on the row: kept, not revoked, but stale — it lifts nothing
@@ -228,7 +234,7 @@ describe('HomePage', () => {
       'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
       'GET /capability-map': EMPTY_MAP,
       'GET /health': { status: 'ok', probes: [] },
-      'GET /users': () => envelope(403, 'forbidden', 'x'),
+      'GET /two-person-readiness': { ...READY, ready: false, reason_code: 'single_person', reason: 'only one account has ever signed in: whoever runs the measurements would be signing their own evidence, which the API refuses (same_actor)', approvers_signed_in: 1, other_active_accounts: 0, accounts_signed_in: 1 },
       'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
       'GET /factory/alpha/tasks': [],
     })
@@ -244,7 +250,7 @@ describe('HomePage', () => {
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
       'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
-      'GET /users': () => envelope(403, 'forbidden', 'x'),
+      'GET /two-person-readiness': { ...READY, ready: false, reason_code: 'single_person', reason: 'only one account has ever signed in: whoever runs the measurements would be signing their own evidence, which the API refuses (same_actor)', approvers_signed_in: 1, other_active_accounts: 0, accounts_signed_in: 1 },
     })
     renderApp(<HomePage />, { route: '/home' })
     await waitFor(() => expect(screen.getByText('You have completed 0 of 8 tasks.')).toBeInTheDocument())
@@ -367,14 +373,14 @@ describe('HomePage', () => {
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
       'GET /repos': () => envelope(500, 'internal', 'database unavailable'),
       'GET /health': () => envelope(503, 'unavailable', 'health unreadable'),
-      'GET /users': () => envelope(500, 'internal', 'users unreadable'),
+      'GET /two-person-readiness': () => envelope(500, 'internal', 'readiness unreadable'),
     })
     renderApp(<HomePage />, { route: '/home' })
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Part of this deployment’s state could not be read')
     expect(alert).toHaveTextContent('the repositories')
     expect(alert).toHaveTextContent('the deployment’s health')
-    await waitFor(() => expect(alert).toHaveTextContent('the user accounts'))
+    await waitFor(() => expect(alert).toHaveTextContent('the deployment’s two-person readiness'))
     expect(document.body).not.toHaveTextContent('no repository yet')
     expect(screen.getByText('repositories unavailable')).toBeInTheDocument()
     const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
@@ -384,7 +390,7 @@ describe('HomePage', () => {
     const before = calls.filter((c) => c.path === '/repos').length
     await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
     await waitFor(() => expect(calls.filter((c) => c.path === '/repos').length).toBeGreaterThan(before))
-    expect(calls.some((c) => c.path === '/users' && c.method === 'GET')).toBe(true)
+    expect(calls.some((c) => c.path === '/two-person-readiness' && c.method === 'GET')).toBe(true)
   })
 
   it('a failed capability map or sign-off read makes the tasks that read it "Unavailable", never "Cannot start yet" or "Incomplete"', async () => {
@@ -470,7 +476,7 @@ describe('HomePage', () => {
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 30, deliver_cells: 1 } },
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
-      'GET /users': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /two-person-readiness': READY,
       'GET /factory/alpha/backlog': { repo: 'alpha', hash: 'b'.repeat(64), frozen_at: '2026-09-17T10:00:00Z', items: [] },
       'GET /factory/alpha/tasks': [FACTORY_TASK],
       'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },

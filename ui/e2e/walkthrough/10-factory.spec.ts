@@ -102,8 +102,9 @@ test.describe('10 factory (fixture_gold)', () => {
       if ((await prov.count()) > 0) await expect(prov).toHaveText(/^n = \d+ · \d+ % \[\d+ %, \d+ %\] · apparatus /)
       else await expect(page.getByTestId(`cell-route-${id}`)).toContainText('not measured')
     }
-    // tier 1 cannot sign the fixture, so no cell routes deliver (README: the escape)
-    await expect(page.getByTestId('factory-deliverable-count')).toContainText('0 of 2 items sit in a cell that routes deliver today')
+    // tier 1 cannot sign the fixture, so nothing is deliverable: no cell routes deliver, and
+    // under ADR-0018 a signed cell is needed as well (README: the escape)
+    await expect(page.getByTestId('factory-deliverable-count')).toContainText('0 of 2 items sit in a cell this deployment would deliver from today')
 
     // J-FAC-2/3 — what the run will spend and where it would deliver, before the button
     const box = page.getByTestId('before-you-start')

@@ -1753,6 +1753,13 @@ def test_route_lookup_reads_the_map_as_it_stood_before_the_run(h: Harness) -> No
     assert cells[0] is None and len(cells) == 2
     assert cells[1] == {k: before_second[k] for k in cells[1]}  # the evidence-facing slice
     assert cells[1]["n"] == 1 and cells[1]["apparatus_versions"] == [rows[-1].apparatus_version]
+    # ADR-0018 — every decision carries the cell's verification tier, so the delivery gate's
+    # second clause reads the same pre-run reading: nobody has signed this cell, and the
+    # chain says so rather than leaving the licence unrecorded
+    assert everything["verification_tier"] == "automated-pass"
+    assert cells[1]["verification_tier"] == "automated-pass"
+    # and the whole gate's answer, so the intake pass labels a ticket what a run would do
+    assert everything["signed"] is False and everything["deliverable"] is False
 
 
 def test_every_finished_run_stamps_the_cells_that_first_route_deliver(
@@ -2294,3 +2301,50 @@ def test_repository_checks_and_run_overrides_reach_the_row_and_belt_six(
     assert done.apparatus_json["extra"]["checks"]["sources"]["api_stable"] == "repo"
     belts = [e for e in harness.events(run.id) if e.action == "grade.belt"]
     assert [e.payload["belt"] for e in belts][-1] == "api_stable"
+
+
+def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: Harness) -> None:
+    """G-516: the decisions inbox is derived, so before the clock a decision existed only
+    while somebody had the page open. The worker's idle pass re-derives every repository's
+    inbox and stamps ``decisions_due`` — with no browser anywhere near it — and it is
+    throttled by its own timer so a fast idle loop does not reduce the whole ledger every
+    50 ms."""
+    from crb.factory.backlog import BacklogItem
+    from crb.server.decisions import due_records
+    from crb.server.worker import DECISIONS_REFRESH_S
+
+    home, item, _ = _multiply_backlog(h)
+    # nothing has been assessed yet: nothing is due, and the pass records nothing rather
+    # than inventing a row
+    assert h.worker.refresh_decisions(now=1000.0) == 1
+    with h.factory() as db:
+        assert due_records(db) == []
+    # not due again until the interval has passed (the idle loop calls it every poll)
+    assert h.worker.refresh_decisions(now=1000.0 + DECISIONS_REFRESH_S / 2) == 0
+    # a second item with no structural facts: the run refuses it at readiness, which is a
+    # decision waiting on an approver
+    gapped = BacklogItem(
+        id="I-2",
+        title="Add divide to calc",
+        kind=item.kind,
+        description="calc needs divide(a, b).",
+        acceptance_criteria=("divide(8, 4) == 2",),
+        capability_class="bug.fix",
+        size_estimate="XS",
+        structural_facts=(),
+    )
+    home.register_backlog([item, gapped], actor="tester")
+    h.enqueue("factory", ladder_json=["fake:m0"])
+    assert h.run_one().status == STATUS_SUCCEEDED
+    assert h.worker.refresh_decisions(now=1000.0 + DECISIONS_REFRESH_S) == 1
+    with h.factory() as db:
+        rows = {(r.kind, r.key): r for r in due_records(db)}
+    assert ("gap_unsigned", "I-2") in rows, rows
+    rec = rows[("gap_unsigned", "I-2")]
+    assert rec.repo == pr.REPO_NAME and rec.first_due and rec.resolved == ""
+    assert rec.role == "approver" and "structural gap" in rec.title
+    # the stamp is the decision's, not the reader's: a later pass does not move it
+    assert h.worker.refresh_decisions(now=1000.0 + 3 * DECISIONS_REFRESH_S) == 1
+    with h.factory() as db:
+        again = {(r.kind, r.key): r for r in due_records(db)}[("gap_unsigned", "I-2")]
+    assert again.first_due == rec.first_due and again.last_seen >= rec.last_seen

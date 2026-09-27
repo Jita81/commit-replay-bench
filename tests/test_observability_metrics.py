@@ -143,6 +143,9 @@ def test_record_event_meters_deliveries_by_outcome_and_nothing_else(registry: An
     em = Emitter(MemorySink(), trace_id="t" * 32, actor="op", repo="demo")
     em.emit("factory", "delivery.opened", task_id="i1", branch="crb/i1", pr="…/pull/7")
     em.emit("factory", "delivery.withheld", task_id="i2", status=StepStatus.SKIPPED)
+    # ADR-0018 — the signed-cell clause withholds too: same outcome for a counter, the clause
+    # itself is on the event
+    em.emit("factory", "delivery.unsigned", task_id="i2b", status=StepStatus.SKIPPED)
     em.emit("factory", "delivery.error", task_id="i3", status=StepStatus.ERROR, error="push")
     em.emit("factory", "delivery.skipped", task_id="i4", status=StepStatus.SKIPPED)  # opt-in off
     em.emit("factory", "delivery.override", task_id="i5", override_by="appr")
@@ -151,12 +154,13 @@ def test_record_event_meters_deliveries_by_outcome_and_nothing_else(registry: An
         metrics.record_event(ev)
     d = "crb_deliveries_total"
     assert sample(registry, d, repo="demo", outcome="opened") == 1
-    assert sample(registry, d, repo="demo", outcome="withheld") == 1
+    assert sample(registry, d, repo="demo", outcome="withheld") == 2  # route gate + unsigned cell
     assert sample(registry, d, repo="demo", outcome="failed") == 1
     assert all(sample(registry, d, repo="demo", outcome=o) is None for o in ("skipped", "override"))
     assert metrics.DELIVERY_OUTCOMES == {
         "delivery.opened": "opened",
         "delivery.withheld": "withheld",
+        "delivery.unsigned": "withheld",
         "delivery.error": "failed",
     }
     metrics.record_event(object())  # not an event at all: ignored, never raises

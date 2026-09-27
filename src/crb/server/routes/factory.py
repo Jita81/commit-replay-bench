@@ -308,7 +308,15 @@ class CellRouteOut(BaseModel):
     ci_low: float = 0.0
     ci_high: float = 0.0
     apparatus_versions: list[str] = []
-    #: True only when the gate would let a clean build of this item open a pull request.
+    #: The cell's verification tier with the repo's sign-offs overlaid — ``human-verified``
+    #: or ``ab-confirmed`` means a person has attested it (the delivery gate's second
+    #: clause, ADR-0018); ``automated-pass`` means the ledger alone, ``""`` unmeasured.
+    verification_tier: str = ""
+    #: Has a human attested this cell (an active sign-off on the current apparatus)?
+    signed: bool = False
+    #: True only when the gate would let a clean build of this item open a pull request —
+    #: BOTH clauses under this deployment's posture: the route says ``deliver`` and, while
+    #: ``CRB_FACTORY__REQUIRE_SIGNED_CELL`` is on (the default), the cell is signed.
     deliverable: bool = False
 
 
@@ -981,12 +989,18 @@ def list_tasks(
 
 
 def _cell_routes(
-    db: DbDep, factory: SessionFactoryDep, repo: str, settings: object
+    db: DbDep, factory: SessionFactoryDep, repo: str, settings: Settings
 ) -> dict[str, CellRouteOut]:
     """``class|size`` → the map's decision, from exactly the reading the worker's delivery
     gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows on the current
     apparatus in the repository's own ``checks`` arm (ADR-0024), the repo's latest controls
-    verdict, sign-offs overlaid."""
+    verdict, sign-offs overlaid.
+
+    ``settings.factory.require_signed_cell`` is the deployment's posture
+    (``CRB_FACTORY__REQUIRE_SIGNED_CELL``, ADR-0018): ``deliverable`` is computed under the
+    SAME two clauses the loop enforces, so what the screen predicts before a run spends
+    anything and what the gate does cannot disagree."""
+    require_signed_cell = settings.factory.require_signed_cell
     rows = rows_for_arm(
         factory,
         repo,
@@ -1013,7 +1027,9 @@ def _cell_routes(
             ci_low=st.ci.low if st is not None else 0.0,
             ci_high=st.ci.high if st is not None else 0.0,
             apparatus_versions=list(st.apparatus_versions) if st is not None else [],
-            deliverable=d.route == ROUTE_DELIVER,
+            verification_tier=c.verification_tier or "",
+            signed=c.earned,
+            deliverable=d.route == ROUTE_DELIVER and (c.earned or not require_signed_cell),
         )
     return out
 

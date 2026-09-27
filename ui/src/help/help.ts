@@ -105,6 +105,7 @@ export const HELP: ScreenHelp[] = [
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-3--prove-the-instrument-on-this-repository-operator-0', label: 'Prove the instrument for £0' },
       { to: 'OPERATOR#7-when-the-sandbox-is-unavailable', label: 'When the sandbox is unavailable' },
+      { to: 'OPERATOR#9-users', label: 'Users, roles and inviting an approver' },
     ],
   },
   {
@@ -343,10 +344,10 @@ export const HELP: ScreenHelp[] = [
     purpose: 'The instrument’s health, the builder sign-in, the GitHub App, your own password and, for admins, the non-secret configuration and user accounts. Secrets are never returned by the API and never shown here.',
     next: {
       viewer: 'Read the health probes and change your own password; ask an admin for anything else.',
-      admin: 'Register the GitHub App, store the builder token, create an approver account. In the Users card you can also set an account’s password, turn it off when someone leaves and read its history. A probe that is not ok explains itself in its detail line.',
+      admin: 'Register the GitHub App, store the builder token, invite the approver who will sign cells off. In the Users card you can also set an account’s password, turn it off when someone leaves and read its history. A probe that is not ok explains itself in its detail line.',
     },
-    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). A password is at least 12 characters; setting one ends that account’s other sessions, and reactivating a deactivated account within the session lifetime (8 hours by default) restores the sessions it held.',
-    terms: ['apparatus', 'negative_controls'],
+    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). A password is at least 12 characters; setting one ends that account’s other sessions, and reactivating a deactivated account within the session lifetime (8 hours by default) restores the sessions it held. The two-person reading counts accounts that can sign and accounts that have signed in — accounts, not people.',
+    terms: ['apparatus', 'negative_controls', 'cell', 'signoff'],
     readMore: [
       { to: 'GITHUB-APP#2-register-the-app-once-per-deployment', label: 'Register the GitHub App' },
       { to: 'SECURITY#33-credentials', label: 'How credentials are held' },
@@ -365,6 +366,17 @@ export const HELP: ScreenHelp[] = [
     },
     readMore: [
       { to: 'OPERATOR#9-users', label: 'Accounts, roles and password resets' },
+      { to: 'SECURITY', label: 'How sign-in and sessions are secured' },
+    ],
+  },
+  {
+    route: '/invite',
+    purpose: 'This is where an invited person joins. An admin created your account switched off and gave you a one-time link; choosing your own password here switches it on.',
+    next: {
+      viewer: 'Choose a password of at least 12 characters, then sign in with your username and that password. If the link is refused it was used, withdrawn or out of date: ask the admin who invited you for a new one.',
+    },
+    readMore: [
+      { to: 'OPERATOR#9-users', label: 'Accounts, roles and invitations' },
       { to: 'SECURITY', label: 'How sign-in and sessions are secured' },
     ],
   },

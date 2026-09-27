@@ -137,11 +137,13 @@ def test_the_environment_reaches_worker_settings_like_every_other_shared_key() -
 
 
 def test_the_settings_view_shows_an_absent_author_as_none() -> None:
-    assert FactorySettings().redacted() == {"test_author": "none"}
+    # the view also carries the delivery-licence posture (ADR-0018), default on
+    assert FactorySettings().redacted() == {"test_author": "none", "require_signed_cell": True}
     assert FactorySettings(test_author=" editblock:m1 ").redacted() == {
-        "test_author": "editblock:m1"
+        "test_author": "editblock:m1",
+        "require_signed_cell": True,
     }
     # and it reaches what `GET /settings` serves as `raw` — an operator can read which rung
     # will write the test without opening the worker's environment
     view = Settings(env="dev", factory=FactorySettings(test_author="editblock:m1")).redacted_dict()
-    assert view["factory"] == {"test_author": "editblock:m1"}
+    assert view["factory"] == {"test_author": "editblock:m1", "require_signed_cell": True}

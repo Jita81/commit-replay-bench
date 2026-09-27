@@ -78,10 +78,13 @@ _LOG = logging.getLogger(__name__)
 #: ``factory``-stage event action → ``crb_deliveries_total`` outcome (J-TEL-13). The
 #: vocabulary is the run's own event log (docs/API.md#event-vocabulary): ``delivery.opened``
 #: = a branch was pushed and a pull request opened; ``delivery.withheld`` = the route gate
-#: refused; ``delivery.error`` = the push or the PR call failed.
+#: refused; ``delivery.unsigned`` = the signed-cell clause refused (ADR-0018) — the same
+#: ``withheld`` outcome, because from a counter's point of view the pull request did not open
+#: and the clause is on the event itself; ``delivery.error`` = the push or the PR call failed.
 DELIVERY_OUTCOMES: Mapping[str, str] = {
     "delivery.opened": "opened",
     "delivery.withheld": "withheld",
+    "delivery.unsigned": "withheld",
     "delivery.error": "failed",
 }
 

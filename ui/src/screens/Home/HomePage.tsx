@@ -18,7 +18,7 @@
  *               repository's stages (`stagesFor`), the server's record that a person read the
  *               baseline (`baseline_read`) or a sign-off the API flags `active` and not
  *               `stale` (task 6 — a stale one lifts nothing, so completes nothing; DL-074),
- *               the users list (task 7) and the active factory run (task 8: "Backlog frozen —
+ *               the two-person readiness (task 7) and the active factory run (task 8: "Backlog frozen —
  *               run the factory" until a run exists, then "In progress — item k of n") decide
  *               them. A read that fails is never read as absence (G-164): one error envelope
  *               names every read that failed, with Retry, and each task that stands on one
@@ -41,8 +41,10 @@
  *               tap away and listed in the About block.
  * How:          `useGitHubApp`, `useAllRepos`, the chosen repository (`?repo=` or the most
  *               recently updated) → `useRepo` + `useOracle` + `useOracleControls` +
- *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6; `useUsers`
- *               (admin) or the principal's role for task 7; `useFactoryBacklog` +
+ *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6;
+ *               `useTwoPersonReadiness` for task 7 (the deployment's real readiness to
+ *               produce a signature the two-person rule accepts, read by every role — not the
+ *               presence of an admin; a waiting invitation reads "In progress"); `useFactoryBacklog` +
  *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`; every
  *               query's error state (the App's and the runs' included) feeds the one
  *               `ErrorState`.
@@ -66,7 +68,7 @@
 
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useSignoffs, useUsers } from '../../api/hooks'
+import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useSignoffs, useTwoPersonReadiness } from '../../api/hooks'
 import { isApiError } from '../../api/client'
 import { ErrorState } from '../../components/ErrorState'
 import { Hint } from '../../components/Hint'
@@ -168,7 +170,10 @@ export function HomePage() {
   const gh = useGitHubApp()
   const repos = useAllRepos()
   const health = useHealth()
-  const users = useUsers(can('admin'))
+  // G-518 — task 7 reads the deployment's real two-person readiness, not the presence of an
+  // admin: an account that can sign but has never signed in, or a deployment where the only
+  // signer is the only operator, cannot license anything. Readable by every role.
+  const twoPerson = useTwoPersonReadiness()
   const chosen = useMemo(() => {
     const items = repos.data?.items ?? []
     const wanted = params.get('repo')
@@ -224,7 +229,10 @@ export function HomePage() {
   // approver outranks an operator (ROLE_ORDER) but works none of the eight tasks, so they read
   // the progress report their About block describes (G-911, DL-074)
   const operator = can('operator') && me?.role !== 'approver'
-  const approverKnown = users.data ? users.data.items.some((u) => u.role === 'approver' || u.role === 'admin') : me?.role === 'approver' || me?.role === 'admin' ? true : undefined
+  const ready = twoPerson.data
+  const approverKnown = ready ? ready.ready : undefined
+  // a link that was sent and not used is progress a nag would hide
+  const inviteWaiting = (ready?.invitations_pending ?? 0) > 0
 
   const q = chosen ? `?repo=${encodeURIComponent(chosen)}` : ''
   const walk = chosen ? `/connect/${encodeURIComponent(chosen)}` : '/connect'
@@ -248,7 +256,7 @@ export function HomePage() {
     { label: 'the negative controls', q: controls, failed: failedRead(controls) },
     { label: 'the capability map', q: map, failed: map.isError },
     { label: 'the sign-offs', q: signoffs, failed: signoffs.isError },
-    { label: 'the user accounts', q: users, failed: users.isError },
+    { label: 'the deployment’s two-person readiness', q: twoPerson, failed: twoPerson.isError },
     { label: 'the factory backlog', q: backlog, failed: failedRead(backlog) },
     { label: 'the factory items', q: factoryTasks, failed: factoryTasks.isError },
     { label: 'the deployment’s health', q: health, failed: health.isError },
@@ -271,15 +279,17 @@ export function HomePage() {
     { num: 6, name: 'Read the baseline', ...(baselineActed ? { status: 'Completed', tone: 'pale' as TagTone } : mapUnread || signoffs.isError ? UNAVAILABLE : { status: anyRows ? 'Incomplete' : 'Cannot start yet', tone: anyRows ? 'blue' : 'grey' }), to: `/results${q}`, hint: 'task.home.read_baseline' },
     // only an admin can invite; everyone else reads a state (not an instruction), is not sent
     // to a page that refuses them, and gets the note under the list
-    { num: 7, name: 'Invite an approver', ...(users.isError ? UNAVAILABLE : { status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey' }), to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
+    { num: 7, name: 'Invite an approver', ...(twoPerson.isError ? UNAVAILABLE : { status: approverKnown === true ? 'Completed' : approverKnown === false ? (inviteWaiting ? 'In progress' : 'Incomplete') : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey' }), to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
     // the destination (DL-044): the factory delivers a change under the baseline the walk earned;
     // the runs read decides only "frozen" against "running", so it leaves only a frozen backlog unknown
     { num: 8, name: 'Deliver your first change', ...(factoryStatus !== 'delivered' && (reposUnread || map.isError || failedRead(backlog) || factoryTasks.isError || (factoryRun.isError && factoryStatus === 'frozen')) ? UNAVAILABLE : { status: FACTORY_LABEL[factoryStatus], label: factoryDetail, tone: FACTORY_TONE[factoryStatus] }), to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory', hint: 'task.home.deliver' },
   ]
   const completed = tasks.filter((t) => t.status === 'Completed').length
   // the operator's next press: the first task they can act on now, or one that could not be
-  // read (never skipped as if done); only when every task is settled → the factory
-  const nextTask = tasks.find((t) => CONTINUE_STOPS[t.status])
+  // read (never skipped as if done); only when every task is settled → the factory. And only
+  // a task THIS role can act on: task 7 needs an admin, so an operator's Continue never lands
+  // on a screen that would refuse them (it is still shown, as a state, above)
+  const nextTask = tasks.find((t) => CONTINUE_STOPS[t.status] && (t.num !== 7 || can('admin')))
   const listed: TaskItem[] = tasks.map(({ label, ...t }) => ({ ...t, status: label ?? t.status }))
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
 
@@ -318,9 +328,9 @@ export function HomePage() {
       </div>
       <div className="max-w-[44em]">
         <TaskList tasks={listed} completed={completed} summary={<Hint id="stat.home.completed">{operator ? `You have completed ${completed} of ${tasks.length} tasks.` : `The operators have completed ${completed} of ${tasks.length} tasks.`}</Hint>} />
-        {approverKnown !== true && !can('admin') && (
-          <p className="m-0 mt-2 text-[16px] text-on-surface-muted">
-            <strong>Task 7.</strong> Only an admin can add users. Ask your admin to add someone with the approver role in Settings.
+        {approverKnown !== true && ready && (
+          <p className="m-0 mt-2 text-[16px] text-on-surface-muted" data-testid="home-task-7-note">
+            <strong>Task 7.</strong> {ready.reason}. {can('admin') ? 'Invite them on the Settings screen: the account is created inactive and you pass on a one-time link.' : 'Only an admin can invite somebody. Ask your admin to invite an approver in Settings.'}
           </p>
         )}
       </div>

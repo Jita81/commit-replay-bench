@@ -48,6 +48,7 @@ import { ChangeMyPasswordCard } from './ChangeMyPasswordCard'
 import { ClaudeCodeLoginCard } from './ClaudeCodeLoginCard'
 import { GitHubAppCard } from './GitHubAppCard'
 import { UsersCard } from './UsersCard'
+import { InviteApproverCard } from './InviteApproverCard'
 
 /** Every probe from `GET /health` with its verdict, plus the versions. */
 function HealthCard() {
@@ -180,6 +181,7 @@ export function SettingsPage() {
             </QueryBoundary>
           </Card>
           <UsersCard />
+          <InviteApproverCard />
         </>
       ) : (
         <Card title="Configuration">

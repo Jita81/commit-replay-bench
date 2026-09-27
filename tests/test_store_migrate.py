@@ -361,7 +361,7 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
 
     migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0012"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0041"
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -450,10 +450,10 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0001")
-    # the refusal rolls the whole downgrade back — 0008's column, 0007's and 0005's tables, 0006's
-    # column, 0004's index swap and 0003's drop of the (empty) reviews table included — so the database stays
-    # exactly where it was
-    assert migrate.current(backend.url) == "0012"
+    # the refusal rolls the whole downgrade back — 0041's and 0040's tables, 0008's column,
+    # 0007's and 0005's tables, 0006's column, 0004's index swap and 0003's drop of the
+    # (empty) reviews table included — so the database stays exactly where it was
+    assert migrate.current(backend.url) == "0041"
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -468,7 +468,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -609,7 +609,7 @@ def test_0004_refuses_a_database_holding_duplicate_trace_seq_pairs(backend: Back
     fresh = _reset(backend)
     migrate.upgrade(backend.url, revision="0003")
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(fresh) == []
     assert "uq_events_trace_seq" in {ix["name"] for ix in inspect(fresh).get_indexes("events")}
 
 
@@ -632,7 +632,7 @@ def test_0006_backfills_the_github_identity_and_refuses_duplicate_legacy_links(
         c.execute(text(row), {"name": "calc", "cfg": linked})
         c.execute(text(row), {"name": "by-url", "cfg": '{"language": "go"}'})
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == "0041"
     with backend.engine.connect() as c:
         got = dict(c.execute(text("SELECT name, github_full_name FROM repos")).all())
     assert got == {"calc": "acme/calc", "by-url": None}
@@ -685,7 +685,7 @@ def test_0007_adds_the_workers_table_and_adoption_tolerates_its_absence(backend:
         c.execute(text("DROP TABLE workers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(fresh) == []
     assert "workers" in set(inspect(fresh).get_table_names())
 
 
@@ -707,7 +707,7 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
             )
         )
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == "0041"
     cols = {c["name"] for c in inspect(backend.engine).get_columns("workers")}
     assert "unconfirmed_containers" in cols
     with backend.engine.connect() as c:
@@ -731,7 +731,7 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
         c.execute(text("ALTER TABLE workers DROP COLUMN unconfirmed_containers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(fresh) == []
 
 
 def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
@@ -754,7 +754,7 @@ def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
             {"active": True},
         )
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0012"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0041"
     with backend.engine.connect() as c:
         got = c.execute(text("SELECT session_nonce FROM users")).scalar_one()
     assert got == ""
@@ -772,7 +772,7 @@ def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
         c.execute(text("ALTER TABLE users DROP COLUMN session_nonce"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(fresh) == []
 
 
 def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
@@ -809,7 +809,7 @@ def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
             s.add(Task(repo="calc", task_id=t.task_id, spec_json=t.to_dict(), authored=t.authored))
         s.commit()
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0012"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0041"
     with backend.engine.connect() as c:
         n = c.execute(text("SELECT COUNT(*) FROM task_qualifications")).scalar_one()
         states = {r[0] for r in c.execute(text("SELECT state FROM task_qualifications"))}
@@ -834,7 +834,7 @@ def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
     assert migrate.current(backend.url) == "0008"
     assert "task_qualifications" not in set(inspect(backend.engine).get_table_names())
     migrate.upgrade(backend.url)  # and back up at head, equal to init_db
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(backend.engine) == []
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(backend.engine) == []
 
 
 def test_0011_downgrade_refuses_while_a_measured_qualification_exists(backend: Backend) -> None:
@@ -868,7 +868,7 @@ def test_0011_downgrade_refuses_while_a_measured_qualification_exists(backend: B
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0008")
     assert "task_qualifications" in set(inspect(backend.engine).get_table_names())
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == "0041"
 
 
 def test_no_released_revision_imports_the_application_runtime() -> None:
@@ -952,7 +952,7 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     with backend.engine.begin() as c:
         _insert_review(c, n=1)
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0012"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0041"
     with backend.engine.connect() as c:
         assert c.execute(text("SELECT minutes FROM reviews")).scalar_one() is None
     assert {"reviews_no_update", "reviews_no_delete"} <= backend.trigger_names()
@@ -967,7 +967,7 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0011")
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == "0041"
     # with no minutes stated the column is empty and may go
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -987,4 +987,88 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
         c.execute(text("ALTER TABLE reviews DROP COLUMN minutes"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(fresh) == []
+
+
+def test_0040_adds_the_invitations_table_and_adoption_tolerates_its_absence(
+    backend: Backend,
+) -> None:
+    """Revision 0040 adds ``invitations`` — the one-time invitation that brings the second
+    person in (G-518). Mutable state, no append-only triggers: the audit trail is the
+    account's ``user.*`` events. An ``init_db`` schema from the release before it (every
+    table but ``invitations``) is a complete schema for that release: adoption stamps it at
+    0012 and 0040 creates the table."""
+    migrate.upgrade(backend.url, revision="0012")
+    assert "invitations" not in set(inspect(backend.engine).get_table_names())
+    migrate.upgrade(backend.url, revision="0040")
+    assert migrate.current(backend.url) == "0040"
+    cols = {c["name"] for c in inspect(backend.engine).get_columns("invitations")}
+    assert cols == {
+        "id",
+        "user_id",
+        "token_hash",
+        "role",
+        "created",
+        "expires",
+        "accepted",
+        "revoked",
+        "created_by",
+        "revoked_reason",
+    }
+    assert not {t for t in backend.trigger_names() if t.startswith("invitations_")}
+    # the token hash is unique — a redeemable token can never be shared by two invitations
+    uniques = inspect(backend.engine).get_unique_constraints("invitations")
+    assert {u["name"]: tuple(u["column_names"]) for u in uniques} == {
+        "uq_invitations_token_hash": ("token_hash",)
+    }
+    assert {i["name"] for i in inspect(backend.engine).get_indexes("invitations")} >= {
+        "ix_invitations_user"
+    }
+    # a pre-0040 create_all database (no alembic_version, no invitations table) adopts at 0012
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("DROP TABLE invitations"))
+    assert migrate.current(backend.url) is None
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(fresh) == []
+    assert "invitations" in set(inspect(fresh).get_table_names())
+
+
+def test_0041_adds_the_decisions_due_table_and_adoption_tolerates_its_absence(
+    backend: Backend,
+) -> None:
+    """Revision 0041 adds ``decisions_due`` — when each derived decisions-inbox row first
+    became due and when it was last seen (G-516), unique on ``(repo, kind, key)``. A clock
+    over a derivation, not evidence: no append-only triggers, and a downgrade drops it. An
+    ``init_db`` schema from the release before it adopts at 0040 and 0041 creates it."""
+    migrate.upgrade(backend.url, revision="0040")
+    assert "decisions_due" not in set(inspect(backend.engine).get_table_names())
+    migrate.upgrade(backend.url, revision="0041")
+    assert migrate.current(backend.url) == "0041"
+    cols = {c["name"] for c in inspect(backend.engine).get_columns("decisions_due")}
+    assert cols == {
+        "id",
+        "repo",
+        "kind",
+        "key",
+        "title",
+        "role",
+        "first_due",
+        "last_seen",
+        "resolved",
+    }
+    assert not {t for t in backend.trigger_names() if t.startswith("decisions_due")}
+    uniques = inspect(backend.engine).get_unique_constraints("decisions_due")
+    assert {u["name"]: tuple(u["column_names"]) for u in uniques} == {
+        "uq_decisions_due_row": ("repo", "kind", "key")
+    }
+    # a pre-0041 create_all database (no alembic_version, no table) adopts at 0040
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("DROP TABLE decisions_due"))
+    assert migrate.current(backend.url) is None
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == "0041" and _autogen_diff(fresh) == []
+    assert "decisions_due" in set(inspect(fresh).get_table_names())

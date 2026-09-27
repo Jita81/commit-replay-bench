@@ -4,7 +4,7 @@ level: journey
 name: Sign in and find your way
 scope: orient
 parent: dod.stream.run-the-platform
-children: [dod.page.login, dod.page.root, dod.page.home, dod.page.help, dod.page.help-docs-name, dod.page.not-found]
+children: [dod.page.login, dod.page.invite, dod.page.root, dod.page.home, dod.page.help, dod.page.help-docs-name, dod.page.not-found]
 persons: [anonymous, viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
