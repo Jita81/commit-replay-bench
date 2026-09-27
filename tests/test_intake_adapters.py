@@ -61,6 +61,7 @@ def _a_real_feedback_comment() -> str:
     idempotency.
     """
     from crb.factory.readiness import assess
+    from crb.factory.standard import bind, gate_for
     from crb.intake.draft import draft_from
     from crb.intake.feedback import render_feedback
 
@@ -75,7 +76,9 @@ def _a_real_feedback_comment() -> str:
         url=f"{SITE}/browse/WID-12",
     )
     draft = draft_from(ticket, tracker="jira")
-    return render_feedback(draft, assess(draft.item, []), cell_route=None).text
+    readiness = assess(draft.item, [])
+    entry = gate_for(draft.item, readiness, bind("alpha"))
+    return render_feedback(draft, readiness, entry=entry, cell_route=None).text
 
 
 def _client(handler: Any) -> httpx.Client:

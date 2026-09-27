@@ -57,6 +57,23 @@ def _register(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeBuilder.hook = None
 
 
+@pytest.fixture(autouse=True)
+def _teachers_are_older(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fixture lines were taught by ``TAUGHT`` — ids no fixture commit carries. ADR-0026
+    item 7 lets a learned line reach commit T only when every commit that taught it is OLDER
+    than T by commit date, so those teachers are dated before any fixture commit here."""
+    from crb.builders import adapter
+
+    real = adapter.git_commit_dates
+
+    def dated(repo: Any, shas: Any) -> dict[str, str]:
+        out = real(repo, [x for x in shas if x not in TAUGHT])
+        out.update({x: "000000000001" for x in shas if x in TAUGHT})
+        return out
+
+    monkeypatch.setattr(adapter, "git_commit_dates", dated)
+
+
 @pytest.fixture
 def h(tmp_path: Path, pyrepo: pr.PyRepo) -> Harness:
     harness = Harness(tmp_path, pyrepo)

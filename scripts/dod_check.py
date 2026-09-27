@@ -59,16 +59,16 @@ How:          Walk docs/dod/{pages,journeys,streams}/*.md + product.md → parse
               child → parent → render.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
-Works with:   docs/dod/STANDARD.md (the format it enforces, and the ``## Operator values``
-              table a Proposed ADR under docs/adr/ carries, as ADR-0026 does),
-              docs/dod/GAP-ANALYSIS.md (its output), docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog
-              a gap may cite), ui/src/App.tsx and ui/src/components/Layout.tsx (the routes
-              and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and
-              hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
-              .github/workflows/ci.yml (the dod job that runs --check, with full history and
-              the pull request's base in DOD_BASE, since the artefacts' git history vouches
-              for each retired id and the base's criteria are what a rewording is read
-              against), docs/dod/PLAN.md (its wave items must be gap ids)
+Works with:   docs/dod/STANDARD.md (the format it enforces, and the ``## Operator values`` table a
+              Proposed ADR under docs/adr/ carries, as ADR-0026 does), docs/dod/GAP-ANALYSIS.md (its
+              output), docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog a gap
+              may cite), ui/src/App.tsx and ui/src/components/Layout.tsx (the routes and
+              JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and hints-ratchet*.tsx
+              (hint: references), docs/API.md (route: references), .github/workflows/ci.yml (the dod
+              job that runs --check, with full history and the pull request's base in DOD_BASE,
+              since the artefacts' git history vouches for each retired id and the base's criteria
+              are what a rewording is read against), docs/dod/PLAN.md (its wave items must be gap
+              ids)
 Tested by:    tests/test_dod_check.py
 Touch when:   a level or category is added to the standard (update CATEGORIES / LEVELS and the
               standard together); a new evidence prefix is needed (add a resolver and a row to

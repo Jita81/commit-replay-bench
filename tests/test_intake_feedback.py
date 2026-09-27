@@ -30,6 +30,7 @@ from __future__ import annotations
 from typing import Any
 
 from crb.factory import readiness as rd
+from crb.factory.standard import ArmReading, CellRef, Readers, Standard, gate_for
 from crb.intake import client as c
 from crb.intake import draft as d
 from crb.intake import feedback as fb
@@ -48,6 +49,7 @@ def _ready_ticket() -> c.Ticket:
             "error_contract: 503 when a dependency is down",
         ),
         revision="1",
+        points=2.0,
     )
 
 
@@ -66,9 +68,25 @@ def _deliver_route(**kw: Any) -> dict[str, Any]:
     return base
 
 
-def _render(ticket: c.Ticket, route: dict[str, Any] | None = None) -> fb.Feedback:
+def _proven(cell: CellRef) -> Standard | None:
+    return Standard("S1@claude-sonnet-5", signed=True)
+
+
+PROVEN = Readers(standard_for=_proven)
+
+
+def _render(
+    ticket: c.Ticket,
+    route: dict[str, Any] | None = None,
+    *,
+    readers: Readers = PROVEN,
+    arms: tuple[ArmReading, ...] = (),
+    require_signed_cell: bool = False,
+) -> fb.Feedback:
     draft = d.draft_from(ticket, tracker="ado")
-    return fb.render_feedback(draft, rd.assess(draft.item), cell_route=route)
+    readiness = rd.assess(draft.item)
+    entry = gate_for(draft.item, readiness, readers, require_signed_cell=require_signed_cell)
+    return fb.render_feedback(draft, readiness, entry=entry, cell_route=route, arms=arms)
 
 
 # --- the label ladder ---------------------------------------------------------------
@@ -90,7 +108,53 @@ def test_a_missing_structural_slot_is_needs_info() -> None:
 def test_a_cell_that_does_not_route_deliver_is_not_deliverable_even_when_ready() -> None:
     f = _render(_ready_ticket(), _deliver_route(route="calibrate", reason_code="n_below_min", n=3))
     assert f.label == c.LABEL_NOT_DELIVERABLE
-    assert f.ready_to_register is True  # it is still built and withheld, never dropped
+    assert f.ready_to_register is True  # it waits on the record, never dropped
+    assert "will not be built" in f.text and "held back" not in f.text
+
+
+def test_a_cell_with_no_proven_standard_is_not_deliverable_naming_each_arm_and_the_way_forward() -> (
+    None
+):
+    """Recovery 23 (ADR-0026 item 8): no proven context standard → `crb:not-deliverable`,
+    NOT BUILT, with each measured arm's state, n and interval and the way forward (measure
+    the cell, or an approver's calibration build that never opens a pull request)."""
+    arms = (
+        ArmReading("S3", "deliver", n=20, clean=20, ci_low=0.84, ci_high=1.0),
+        ArmReading("S1@claude-sonnet-5", "look_pending", n=12, clean=11, ci_low=0.65, ci_high=0.99),
+    )
+    none = Readers(standard_for=lambda cell: None)
+    f = _render(_ready_ticket(), _deliver_route(), readers=none, arms=arms)
+    assert f.label == c.LABEL_NOT_DELIVERABLE and f.ready_to_register is True
+    assert "will not be built" in f.text and "held back" not in f.text
+    assert "`S3`: deliver — 20 of 20 commit(s) clean, 95 % Wilson interval 84 % to 100 %" in f.text
+    assert "`S1@claude-sonnet-5`: look_pending — 11 of 12" in f.text
+    assert "an approver funds one calibration build" in f.text
+    assert fb.GLOSSED["calibration build"] in f.text and fb.GLOSSED["context standard"] in f.text
+    assert f.entry is not None and f.entry["code"] == "no_proven_standard"
+    # with nothing registered yet, it says so — never a zero
+    bare = _render(_ready_ticket(), None, readers=none)
+    assert "No arm of this cell has a registered reading yet" in bare.text
+
+
+def test_a_ticket_lacking_what_its_standard_needs_is_needs_info_naming_it() -> None:
+    s2 = Readers(standard_for=lambda cell: Standard("S2", signed=True))
+    f = _render(_ready_ticket(), _deliver_route(), readers=s2)
+    assert f.label == c.LABEL_NEEDS_INFO and f.ready_to_register is False
+    assert "`a failing test`" in f.text and "Attach it to the ticket" in f.text
+
+
+def test_an_unsigned_cell_names_the_sign_off_and_the_override_that_lifts_only_it() -> None:
+    unsigned = Readers(standard_for=lambda cell: Standard("S1@claude-sonnet-5", signed=False))
+    f = _render(_ready_ticket(), _deliver_route(), readers=unsigned, require_signed_cell=True)
+    assert f.label == c.LABEL_NOT_DELIVERABLE
+    assert "a second person's sign-off" in f.text and "lifts only the sign-off" in f.text
+
+
+def test_a_ticket_without_points_asks_for_them() -> None:
+    t = _ready_ticket()
+    f = _render(c.Ticket(**{**t.to_dict(), "points": None}), _deliver_route())
+    assert f.label == c.LABEL_NEEDS_INFO and f.ready_to_register is False
+    assert "Story points" in f.text and "unsized" in f.text
 
 
 def test_needs_info_beats_not_deliverable_so_the_person_is_asked_first() -> None:

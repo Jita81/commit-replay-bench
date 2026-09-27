@@ -23,7 +23,9 @@
  *               `crb:needs-info` on the board, and nothing is registered. The person edits
  *               the ticket (the board file) and its revision moves; the next read drafts it
  *               and registers nothing (ADR-0022); the operator presses Register, and it is
- *               registered, labelled `crb:queued` and linked. A second read of an unchanged
+ *               registered and linked — labelled `crb:not-deliverable`, because the tier-1
+ *               stack's cell has no proven context standard, so it waits NOT BUILT
+ *               (ADR-0026 item 8). A second read of an unchanged
  *               column writes nothing. The screen shows every step at 375 px and 1280 px, and
  *               the listener goes off again at the end.
  *               The worker's own timed poll is parked by the stack (`CRB_INTAKE__POLL_S`
@@ -191,11 +193,16 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
     // the operator reads the draft and registers it: the act is theirs, and it is recorded
     await row.getByRole('button', { name: 'Register this ticket' }).click()
     await expect(page.getByTestId('intake-success')).toContainText(`Registered ticket ${KEY} as fake-4711`)
-    await expect(row).toContainText('queued')
     await expect(row).toContainText('fake-4711')
-
-    expect(tags()).toContain('crb:queued')
-    expect(commentText()).toContain('queued to be manufactured')
+    // ADR-0026 item 8 — the tier-1 stack has no registered reading, so the cell has no proven
+    // context standard: the item waits on the record, NOT BUILT, and the ticket says so
+    // (never "queued to be manufactured", never "built and withheld")
+    await expect(row.getByTestId(`intake-entry-${KEY}`)).toContainText('not built · no_proven_standard')
+    await expect(row).toContainText('not deliverable')
+    expect(tags()).toContain('crb:not-deliverable')
+    expect(tags()).not.toContain('crb:queued')
+    expect(commentText()).toContain('It will not be built')
+    expect(commentText()).toContain('calibration build')
     expect(readBoard().tickets[KEY]!.links).toBeTruthy()
   })
 

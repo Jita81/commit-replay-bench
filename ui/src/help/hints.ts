@@ -574,9 +574,23 @@ export const HINTS = {
   'field.factory.deliver':
     'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; the rest are built and withheld.',
+    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; an item in any other cell is not built.',
   'field.factory.override':
-    'Let this run open pull requests for items whose cell does not route deliver. The override is recorded on the evidence chain under your name. Approver only.',
+    'Lift a missing sign-off for this run only, under your name: an item whose cell has a proven standard nobody has signed off is built. It never lifts a missing standard, missing context or a calibration build. Approver only.',
+  'item.factory.entry_stop':
+    'Why the factory did not build this item: the entry gate’s stop, by its code, and what the ticket must carry. Nothing was spent on it.',
+  'item.factory.calibration_pending':
+    'An approver has funded one calibration build of this item. The next factory run builds it to measure its cell; it never opens a pull request.',
+  'field.factory.calibration_reason':
+    'Why you fund one calibration build of this item. The reason is recorded on the evidence chain under your name.',
+  'button.factory.fund_calibration':
+    'Fund one calibration build: the next factory run builds the item to measure its cell, and it never opens a pull request. Approver only.',
+  'field.factory.waiver_reason':
+    'Why the strength probe may be skipped for this exact test. The waiver holds only while the test is byte for byte the same.',
+  'button.factory.waive_probe':
+    'Waive the required strength probe for this test’s exact bytes, under your name. The pull request names you and the reason. Approver only.',
+  'note.factory.not_built':
+    'The factory’s limit on what it builds: an item enters only when its cell has a proven context standard and the ticket carries what that standard needs.',
   'details.factory.own_builder':
     'Name a registered builder and model for this run instead of the deployment’s default. Blank keeps the builder above.',
   'field.factory.own_builder':
@@ -594,9 +608,9 @@ export const HINTS = {
   'factory.cell_route.deliverable':
     'The item’s cell routes deliver on the signed map right now, so a clean build may open a pull request. The n, rate with interval and apparatus follow.',
   'factory.cell_route.withheld':
-    'The item’s cell routes something other than deliver (the reason code follows), so a clean build is withheld: built, graded and reviewed, no pull request.',
+    'The item’s cell routes something other than deliver (the reason code follows), so the item is not built: nothing is spent on it and no pull request opens.',
   'factory.cell_route.unmeasured':
-    'Nobody has measured this class and size on this repository, so delivery would be withheld.',
+    'Nobody has measured this class and size on this repository, so an item in it is not built and nothing is spent on it.',
   'item.factory.cell_prov':
     'The cell’s attempts (n), clean rate with its 95 % Wilson interval, and the apparatus that graded them, as the route gate read them.',
   'item.factory.status':
@@ -726,7 +740,9 @@ export const HINTS = {
   'pill.intake.ready':
     'Every question the acceptance test needs is answered and the change can be offered as a pull request once it is built.',
   'pill.intake.not_deliverable':
-    'The change will still be built, but it will be held back rather than offered as a pull request, because the evidence for work of this kind and size does not license delivery.',
+    'This ticket will not be built: its cell has no proven context standard, or the standard is a ceiling or not signed off. The comment names each measured arm and the way forward.',
+  'pill.intake.entry_stop':
+    'Why this ticket will not be built yet, by the entry gate’s code, and what to attach to the ticket. Nothing is spent until it is answered.',
   'pill.intake.queued':
     'This ticket is now a registered item in the frozen backlog and is waiting for a factory run.',
 

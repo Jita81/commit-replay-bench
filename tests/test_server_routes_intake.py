@@ -44,6 +44,7 @@ from typing import Any
 
 import pytest
 
+from crb.factory import standard as fs
 from crb.intake import client as c
 from crb.intake.fake import FAKE_TRACKER_ENV, fake_tracker_path
 from crb.server import intake as sv
@@ -77,6 +78,11 @@ def _board(**over: Any) -> dict[str, Any]:
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Env]:
     monkeypatch.setenv(FAKE_TRACKER_ENV, "1")
+    # the listener's MECHANICS on a cell with a proven standard (stream R's reader, patched
+    # at its seam — ADR-0026 item 8); the entry gate's stops are pinned in their own tests
+    monkeypatch.setattr(
+        fs, "standard_for", lambda repo, cell: fs.Standard("S1@claude-sonnet-5", signed=True)
+    )
     settings = make_settings(
         tmp_path,
         intake={

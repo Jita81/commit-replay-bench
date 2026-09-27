@@ -710,12 +710,17 @@ def create_run(
 ) -> RunOut:
     if db.get(Repo, body.repo) is None:
         raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+    s1 = body.arm is not None
+    if s1 and body.kind != "blind":
+        # ADR-0026 item 1: the S1 arm is graded on the commit's HELD-OUT tests
+        raise ApiError(422, "validation_error", "arm S1 applies to blind runs only")
     factory_only = {
         "backlog_hash": body.backlog_hash,
         "deliver": body.deliver,
         "deliver_override": body.deliver_override,
         "max_rework": body.max_rework,
-        "test_author": body.test_author,
+        # a blind run on the S1 arm names its test author too
+        "test_author": None if s1 else body.test_author,
     }
     if body.kind != KIND_FACTORY and any(v is not None for v in factory_only.values()):
         named = sorted(k for k, v in factory_only.items() if v is not None)
@@ -723,6 +728,12 @@ def create_run(
     api = require_jobs()
     run = new_run(body, actor=operator.id)
     submit_refusals(db, settings, body, run)
+    if s1:
+        run.params_json = {
+            **dict(run.params_json or {}),
+            "arm": body.arm,
+            **({"test_author": body.test_author.strip()} if body.test_author is not None else {}),
+        }
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the
         # evolutions chain, since an evolution registered in the same window changes what

@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A ticket is built only on its cell's proven context standard; one composer writes every brief**
+  (north-star Wave 2, stream F; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-f)).
+  An item stops before any spend when its cell has no proven standard or it lacks what the
+  standard needs; everything it touches says "not built". An approver may fund one
+  calibration build, which never opens a pull request, and `deliver_override` lifts only a
+  missing sign-off. A pull request opens only when the change's own cell licenses it. The
+  strength probe is required, the worker re-checks a key when it claims a run, and replay
+  and the factory share one composer with a leak guard and a replay `S1` arm (DL-110 to
+  DL-112).
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

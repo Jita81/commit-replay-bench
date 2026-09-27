@@ -33,17 +33,18 @@ What it does: Commits ONLY the RED-proven test on a throwaway branch parented at
               ordinary grader so belt 1 is the real belt 1, writes the evidence pack and a
               ``process_step="factory"`` ledger row; ``build_ladder`` climbs the escalation
               rungs until clean or disqualified, refusing any rung that authored the oracle.
-How:          ``stage_oracle_commit`` → ``Workspace.create(repo, oracle_sha)`` +
-              ``overlay_tests`` → baseline → ``factory_brief`` → builder → ``grade`` →
-              ``EvidencePack`` + ``write_pack`` → ``factory_row`` → ``JsonlLedger.append``.
+How:          ``stage_oracle_commit`` → ``Workspace.create(repo, oracle_sha)`` + ``overlay_tests`` →
+              baseline → ``factory_brief`` (THE composer, from the item's context arm; the loop's
+              lines only on a ``+L`` arm) → builder → ``grade`` → ``EvidencePack`` + ``write_pack``
+              → ``factory_row`` → ``JsonlLedger.append``.
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
               docs/adr/0004-builder-registry-sighted-and-blind.md, docs/adr/0011-repo-lint-belt.md
-Works with:   src/crb/core/grade.py (the grader, unchanged), src/crb/core/workspace.py (the
-              trial tree), src/crb/factory/testfirst.py (``RedProof`` / identity check),
-              src/crb/builders/base.py (``Builder``, ``BuildBrief``, ``Rung``),
-              src/crb/core/ledger.py (``GradeRow`` with ``PROCESS_FACTORY``),
-              src/crb/factory/delivery.py (commits the kept workspace),
+Works with:   src/crb/builders/brief.py (the one composer), src/crb/core/grade.py (the grader,
+              unchanged), src/crb/core/workspace.py (the trial tree), src/crb/factory/testfirst.py
+              (``RedProof`` / identity check), src/crb/builders/base.py (``Builder``,
+              ``BuildBrief``, ``Rung``), src/crb/core/ledger.py (``GradeRow`` with
+              ``PROCESS_FACTORY``), src/crb/factory/delivery.py (commits the kept workspace),
               src/crb/factory/review.py (replays the edits it recorded)
 Tested by:    tests/test_factory_build.py, tests/test_factory_loop.py
 Touch when:   never for a new repository; when ``GradeRow`` gains a field (``factory_row``
@@ -65,7 +66,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from crb.builders.base import Budget, BuildBrief, Builder, BuildOutcome, Rung
+from crb.builders.adapter import sighted_test_command
+from crb.builders.base import Budget, Builder, BuildOutcome, GitArchaeologyGuard, Rung
+from crb.builders.brief import (
+    ARM_S1,
+    ARM_S2,
+    Composed,
+    Ticket,
+    arm_carries_loop,
+    compose,
+    context_arm_for,
+)
 from crb.core.deps import NullDepsProvider, TaskDeps
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack, utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
@@ -75,6 +86,7 @@ from crb.core.ledger import BELT_SET_V5, PROCESS_FACTORY, GradeRow, JsonlLedger,
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
 from crb.core.patches import PatchStore, keep_patch
 from crb.core.posture import Posture, resolve_posture
+from crb.core.prevention import AUTO_OFF, LABEL_LEARN, LearningSnapshot
 from crb.core.qualify import STATE_QUALIFIED, EnvProbeWitness, Qualification
 from crb.core.redact import redact_and_cap
 from crb.core.run import write_pack
@@ -83,9 +95,11 @@ from crb.core.spec import RepoConfig, TaskSpec, size_tier
 from crb.core.workspace import Workspace
 from crb.factory.backlog import BacklogItem
 from crb.factory.testfirst import (
+    OPERATOR_AUTHOR_PREFIX,
     AuthoredTest,
     RedProof,
     assert_distinct_identity,
+    canonical_model,
     worktree_at,
     write_authored,
 )
@@ -228,24 +242,44 @@ def factory_brief(
     config: RepoConfig,
     facts: Sequence[str] = (),
     test_command: str = "",
-) -> BuildBrief:
-    """A sighted brief: the item's intent + structural facts + the visible oracle.
-    Never a diff, never a file list."""
+    arm: str = "",
+    harness_command: str = "",
+    learned: Sequence[str] = (),
+    author: str = "",
+    root: str = "",
+) -> Composed:
+    """A sighted brief for one item, from THE composer replay uses too
+    (:func:`crb.builders.brief.compose`, ADR-0026 item 1): the item's intent + structural
+    facts + the visible oracle; the loop's lines only when the arm carries ``+L``. Never a
+    diff, never a file list. The ticket is the item as registered (``ticket@<date>``)."""
     lines = [item.description.strip()] if item.description.strip() else []
     if item.acceptance_criteria:
         lines += ["", "Acceptance criteria:"] + [f"  - {c}" for c in item.acceptance_criteria]
-    return BuildBrief(
-        subject=item.title,
-        message="\n".join(lines) or item.title,
+    return compose(
+        arm or default_arm(proof.author),
+        Ticket(item.title, "\n".join(lines) or item.title, f"ticket@{item.registered[:10]}"),
         repo=config.name,
         language=config.language.value,
         mode=MODE_SIGHTED,
+        config=config,
         test_files=(proof.test_path,),
         target_tests=tuple(proof.target_scope),
         test_command=test_command,
-        spec_facts=tuple(facts) or tuple(item.structural_facts),
-        config=config,
+        harness_command=harness_command,
+        facts=tuple(facts) or tuple(item.structural_facts),
+        learned=learned,
+        author=author,
+        root=root,
     )
+
+
+def default_arm(author: str) -> str:
+    """The arm an oracle names when the caller did not: a person's test is ``S2``; any
+    other author's is ``S1@<its canonical model>`` (ADR-0026 item 1)."""
+    if author.startswith(OPERATOR_AUTHOR_PREFIX):
+        return context_arm_for(base=ARM_S2)
+    model = author.split(":", 1)[-1] if ":" in author else author
+    return context_arm_for(base=ARM_S1, author=canonical_model(model) or model or "unknown")
 
 
 @dataclass(frozen=True)
@@ -393,6 +427,10 @@ def build_item(
     posture: Posture | None = None,
     deps: TaskDeps | None = None,
     keep_patches: bool = True,
+    labels: Mapping[str, str] | None = None,
+    arm: str = "",
+    learning: LearningSnapshot | None = None,
+    author_stamp: str = "",
 ) -> BuildResult:
     """Stage the oracle, build at the parent with it overlaid, grade, pack, ledger.
 
@@ -433,7 +471,34 @@ def build_item(
         if base.parse_error:
             base_labels["baseline_parse_error"] = base.parse_error
 
-        brief = factory_brief(item, proof, config=config, facts=facts)
+        # ADR-0026 items 1 and 8 — the brief is composed from the item's arm, the same way
+        # replay composes one; the loop's lines reach it only when the arm carries +L, and
+        # a loop-off arm is stamped `learn: off` whatever the repository's switch says
+        arm_id = arm or default_arm(authored.author)
+        learned: list[str] = []
+        learn_labels: dict[str, str] = {LABEL_LEARN: AUTO_OFF}
+        if learning is not None and arm_carries_loop(arm_id):
+            texts, ids, dropped = learning.lines_for(
+                item.id,
+                target_tests=scope,
+                test_files=(oracle.test_path,),
+                refuses=GitArchaeologyGuard(ws.root).check_shell,
+            )
+            learned = texts
+            learn_labels = {**learning.run_labels(), **learning.task_labels(ids, dropped, texts)}
+        composed = factory_brief(
+            item,
+            proof,
+            config=config,
+            facts=facts,
+            arm=arm_id,
+            test_command=sighted_test_command(runner, executor, ws.root, scope),
+            harness_command=sighted_test_command(runner, executor, ws.root, ()),
+            learned=learned,
+            author=author_stamp,
+            root=str(ws.root),
+        )
+        brief = composed.brief
         _emit(on_event, "build.start", item=item.id, trial=trial, rung=label, mode=MODE_SIGHTED)
         t0 = time.monotonic()
         outcome: BuildOutcome | None = None
@@ -575,7 +640,16 @@ def build_item(
             },
         )
         pack_path = write_pack(pack, evidence_dir)
-        row_labels = {"item_id": item.id, "test_author": authored.author, **base_labels}
+        # ``labels`` — what the loop knows about the attempt that the build does not: the
+        # context arm the brief carried (ADR-0026 item 1), a calibration build's stamp
+        row_labels = {
+            "item_id": item.id,
+            "test_author": authored.author,
+            **base_labels,
+            **dict(composed.labels),
+            **learn_labels,
+            **dict(labels or {}),
+        }
         row = (
             ledger.append(
                 factory_row(
@@ -653,6 +727,10 @@ def build_ladder(
     posture: Posture | None = None,
     deps: TaskDeps | None = None,
     keep_patches: bool = True,
+    labels: Mapping[str, str] | None = None,
+    arm: str = "",
+    learning: LearningSnapshot | None = None,
+    author_stamp: str = "",
 ) -> list[BuildResult]:
     """Climb the escalation ladder: one graded, ledgered attempt per rung until a
     rung is clean or an attempt is disqualified. Every rung's label is checked
@@ -688,6 +766,10 @@ def build_ladder(
             posture=posture,
             deps=deps,
             keep_patches=keep_patches,
+            labels=labels,
+            arm=arm,
+            learning=learning,
+            author_stamp=author_stamp,
         )
         results.append(res)
         if res.clean or res.disqualified:

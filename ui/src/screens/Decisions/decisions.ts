@@ -7,8 +7,10 @@
  *               from the capability map (routes), the active sign-offs and the factory tasks:
  *               a cell that routes `deliver` and is not yet signed (an attestation is due);
  *               a cell the rule sent to a human and why; a cell that must not ship; a factory
- *               item with an unsigned structural gap; an item routed to a human; a review that
- *               asked for rework; a delivery the route gate withheld.
+ *               item with an unsigned structural gap; an item the entry gate did not build
+ *               (no proven standard, or missing context — ADR-0026 item 8), which waits here
+ *               with its act; an item routed to a human; a review that asked for rework; a
+ *               delivery the route gate withheld.
  * What it does: Makes "the points where human sign-off is surfaced" one list, ordered by
  *               what is blocking what, each row naming the act, the evidence behind it and
  *               where the act happens — so an approver sees what matters when it matters and
@@ -44,6 +46,7 @@ export type DecisionKind =
   | 'routed_human' // the rule sent a cell to a human (oracle weak, controls, escapes)
   | 'do_not_ship' // false-Q1 in the cell — an instrument defect to investigate
   | 'gap_unsigned' // a factory item is blocked on a structural gap
+  | 'not_built' // the entry gate stopped a factory item: no proven standard, or missing context (ADR-0026 item 8)
   | 'item_human' // a factory item was routed to a human
   | 'rework' // a review asked for rework
   | 'delivery_withheld' // the route gate withheld a clean build's PR
@@ -69,12 +72,13 @@ export interface Decision {
 const ORDER: Record<DecisionKind, number> = {
   do_not_ship: 0,
   gap_unsigned: 1,
-  signoff_due: 2,
-  rework: 3,
-  delivery_withheld: 4,
-  prevention: 5,
-  item_human: 6,
-  routed_human: 7,
+  not_built: 2,
+  signoff_due: 3,
+  rework: 4,
+  delivery_withheld: 5,
+  prevention: 6,
+  item_human: 7,
+  routed_human: 8,
 }
 
 function cellKeyOf(c: { capability_class: string; size: string }): string {
@@ -152,7 +156,23 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
   for (const t of input.tasks) {
     const itemQ = `${q}&item=${encodeURIComponent(t.id)}`
     const label = `${t.id} ${t.title}`
-    if (t.dor_gaps.length > 0) {
+    if (t.entry) {
+      // ADR-0026 item 8 — the item waits here, NOT BUILT: an approver may fund one calibration
+      // build (never a pull request), or the ticket gains what its cell's standard needs.
+      // A funded calibration build waits on the next run and asks nobody for anything.
+      if (!t.calibration) {
+        const fund = t.way_forward?.action === 'fund_calibration'
+        out.push({
+          kind: 'not_built',
+          repo,
+          title: `${label} is not built — ${t.entry.code.replace(/_/g, ' ')}`,
+          evidence: `${t.capability_class} × ${t.size}${t.entry.needs.length > 0 ? ` · attach ${t.entry.needs.join(', ')}` : ''}`,
+          act: fund ? 'Fund a calibration build' : 'Decide',
+          href: `/factory?${itemQ}`,
+          role: fund ? 'approver' : 'operator',
+        })
+      }
+    } else if (t.dor_gaps.length > 0) {
       out.push({
         kind: 'gap_unsigned',
         repo,
@@ -183,6 +203,7 @@ export const KIND_LABEL: Record<DecisionKind, string> = {
   routed_human: 'Routed to a human',
   do_not_ship: 'Do not ship',
   gap_unsigned: 'Structural gap',
+  not_built: 'Not built',
   item_human: 'Item needs a decision',
   rework: 'Rework requested',
   delivery_withheld: 'Delivery withheld',

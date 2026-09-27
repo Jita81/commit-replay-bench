@@ -44,6 +44,7 @@ import pytest
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.evidence import (
     EV_BACKLOG_FROZEN,
+    EV_CALIBRATION_FUNDED,
     EV_DELIVERY,
     EV_DELIVERY_UPDATED,
     EV_GAP_SIGNOFF,
@@ -68,6 +69,7 @@ PATHS: list[tuple[str, str, str]] = [
     ("POST", f"/factory/{ALPHA}/backlog/evolutions", "operator"),
     ("POST", f"/factory/{ALPHA}/outcomes/sync", "operator"),
     ("POST", f"/factory/{ALPHA}/items/I-1/probe-waiver", "approver"),
+    ("POST", f"/factory/{ALPHA}/items/I-1/calibration", "approver"),
 ]
 
 #: What the loop writes when it refuses a rebuild against an unchanged oracle (DL-045 rule 3).
@@ -488,6 +490,61 @@ def test_a_probe_waiver_is_an_approvers_act_bound_to_the_red_proofs_bytes(env: E
         ).status_code
         == 404
     )
+
+
+def test_a_calibration_build_is_an_approvers_evented_act_for_an_entry_stop_only(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0026 item 8: an item whose cell has no proven standard is told so before any run
+    (the gate the next run's pre-build check makes) and after one (the chain's stop), with
+    the calibration route as its way forward; an approver funds ONE calibration build (the
+    chain names them); a second grant while one waits is refused, and so is a grant for an
+    item the gate would let in."""
+    from crb.factory import standard as fs
+
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    url = f"/factory/{ALPHA}/items/I-1/calibration"
+    login(env.client, "approver")
+    # a proven cell whose standard the item carries: nothing to calibrate
+    monkeypatch.setattr(fs, "standard_for", lambda repo, cell: fs.Standard("S1@m", signed=True))
+    r = env.post(url, json={"reason": "measure the cell"})
+    assert r.status_code == 409 and envelope(r)["code"] == "calibration_not_answering"
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["entry"] is None and t["way_forward"] is None
+    monkeypatch.undo()
+    # before any run: the gate as the next run will read it (no reading is registered)
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["status"] == "pending" and t["entry"]["code"] == "no_proven_standard"
+    assert t["way_forward"]["action"] == "fund_calibration"
+    # after a run: the chain's stop
+    ev = home.evidence(actor="worker")
+    ev.record_readiness({"item_id": "I-1", "gaps": [], "route_hint": "build"})
+    reason = "no context standard is proven for the bug.fix XS cell: it is not built"
+    ev.record_entry_refused("I-1", "no_proven_standard", reason, reason_code="none", needs=[])
+    ev.record_route("I-1", "human", reason, reason_code="no_proven_standard", needs=[])
+    ev.record_item_outcome("I-1", status="no_proven_standard", builds=0, error=reason)
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["status"] == "no_proven_standard"
+    assert t["entry"] == {
+        "code": "no_proven_standard",
+        "reason": reason,
+        "reason_code": "none",
+        "needs": [],
+    }
+    assert t["refusal"]["step"] == "entry" and t["refusal"]["reason_code"] == "no_proven_standard"
+    assert t["way_forward"]["action"] == "fund_calibration"
+    assert t["way_forward"]["route"] == f"/factory/{ALPHA}/items/I-1/calibration"
+    r = env.post(url, json={"reason": "measure the cell"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["approver"] and body["answers"] == "no_proven_standard"
+    (funded,) = home.evidence().events_for("I-1", EV_CALIBRATION_FUNDED)
+    assert funded.payload["approver"] == body["approver"]
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["calibration"]["approver"] == body["approver"] and t["way_forward"] is None
+    r = env.post(url, json={"reason": "again"})
+    assert r.status_code == 409 and envelope(r)["code"] == "calibration_pending"
 
 
 def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:

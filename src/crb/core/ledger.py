@@ -211,6 +211,14 @@ FAILURE_DISQUALIFIED = "disqualified"
 #: quota ran out mid-campaign (2026-09-14) and read as ``harness`` — a harness that
 #: worked perfectly.
 FAILURE_OUTAGE = "outage"
+#: The ``S1`` arm's test author produced no test that is RED at the parent (ADR-0026 item
+#: 1): the builder never got its oracle. It counts against the ARM — in ``n``, never clean —
+#: and is never the model's (not in :data:`MODEL_FAILURE_KINDS`) nor the harness's. A seam
+#: with stream G: it joins G's golden table of kinds in the 2.4 bump.
+FAILURE_AUTHORING = "authoring"
+#: What an ``S1`` attempt's error starts with when the author failed
+#: (``crb.builders.adapter.AUTHORING_PREFIX``; the core cannot import it — pinned by a test).
+AUTHORING_ERROR_PREFIX = "authoring:"
 FAILURE_KINDS: tuple[str, ...] = (
     FAILURE_CLEAN,
     FAILURE_BUILDER_RED,
@@ -220,6 +228,7 @@ FAILURE_KINDS: tuple[str, ...] = (
     FAILURE_PROTOCOL,
     FAILURE_HARNESS,
     FAILURE_OUTAGE,
+    FAILURE_AUTHORING,
     FAILURE_DISQUALIFIED,
 )
 #: Error texts that identify a provider outage (the builders record the provider's own
@@ -382,6 +391,9 @@ def derive_failure_kind(
     3. ``error`` or ``builder_error`` starts with
        ``protocol violation:``                              → ``protocol``
        (the builder was refused by a guard; the belts then judge an empty patch)
+    3b. ``error`` starts with ``authoring:``                → ``authoring``
+       (the ``S1`` arm's test author produced no RED test: against the arm, never the
+       builder, never the harness — ADR-0026 item 1)
     4. a ``model_error: …`` naming a provider refusal (usage
        limit, 429, quota, dead credential)                   → ``outage``
        (the call never happened: no observation of anything; excluded from ``n``)
@@ -419,6 +431,8 @@ def derive_failure_kind(
         PROTOCOL_VIOLATION_PREFIX
     ):
         return FAILURE_PROTOCOL
+    if error.startswith(AUTHORING_ERROR_PREFIX):
+        return FAILURE_AUTHORING
     if error:
         return FAILURE_OUTAGE if is_outage_error(error) else FAILURE_HARNESS
     if stop_reason in BUDGET_STOP_REASONS:
@@ -1114,7 +1128,7 @@ class FailureSplit:
 
     ``n`` counts ELIGIBLE rows (not disqualified, oracle not known-bad) — the same
     denominator :class:`CellStats` routes on — so ``n == clean + builder_red +
-    lint + budget + protocol + harness``; ``disqualified`` and ``outage`` are counted
+    lint + api + budget + protocol + harness + authoring``; ``disqualified`` and ``outage`` are counted
     over all rows and sit outside ``n``. ``point`` is the all-rows rate (``clean / n``): the
     fail-closed number, where every instrument error counts against autonomy.
     ``model_point`` is ``clean / (clean + builder_red + lint)`` — how often the
@@ -1144,12 +1158,15 @@ class FailureSplit:
     #: Provider outages (usage limit, 429, dead credential): the call never happened.
     #: Counted over all rows, outside ``n`` — like ``disqualified``.
     outage: int = 0
+    #: The ``S1`` arm's test author produced no RED test (ADR-0026 item 1): inside ``n``
+    #: (against the arm), never in ``model_n`` and never an instrument failure.
+    authoring: int = 0
 
     def __post_init__(self) -> None:
         # the split must partition n exactly: a kind that is dropped or double-counted
         # would let a rate be quoted over a denominator nobody can reconstruct
         kinds = self.clean + self.builder_red + self.lint + self.api + self.budget + self.protocol
-        if self.n != kinds + self.harness:
+        if self.n != kinds + self.harness + self.authoring:
             raise ValueError("a FailureSplit's n must equal the sum of its eligible kinds")
 
     @property
@@ -1192,6 +1209,7 @@ class FailureSplit:
             "budget": self.budget,
             "protocol": self.protocol,
             "harness": self.harness,
+            "authoring": self.authoring,
             "disqualified": self.disqualified,
             "outage": self.outage,
             "rows": self.rows,
@@ -1232,6 +1250,7 @@ def failure_split(rows: Iterable[GradeRow]) -> FailureSplit:
         lint_evaluated=sum(1 for r in eligible if r.repo_lint_clean is not None),
         api=kinds[FAILURE_API],
         outage=sum(1 for r in rs if r.failure_kind == FAILURE_OUTAGE),
+        authoring=kinds[FAILURE_AUTHORING],
     )
 
 

@@ -229,6 +229,36 @@ describe('IntakePage', () => {
     expect(row.textContent).toContain('1 question(s) the acceptance test needs answered')
   })
 
+  it('a ticket whose cell has no proven standard says it will not be built, and one missing its standard’s context names what to attach (ADR-0026 item 8)', async () => {
+    const none: Intake['rows'][number] = {
+      ...READY_ROW,
+      key: '4715',
+      label: 'crb:not-deliverable',
+      entry_stop: 'no_proven_standard',
+      entry_reason: 'no context standard is proven for the bug.fix S cell: it is not built. Measure the cell, or an approver may fund one calibration build, which never opens a pull request',
+      entry_needs: [],
+      standard: '',
+    }
+    const needs: Intake['rows'][number] = {
+      ...READY_ROW,
+      key: '4716',
+      label: 'crb:needs-info',
+      registered: false,
+      entry_stop: 'needs_context',
+      entry_reason: 'the bug.fix S cell’s standard is S2, which needs a failing test a person wrote, attached to the ticket before any build',
+      entry_needs: ['a failing test'],
+      standard: 'S2',
+    }
+    setup({ ...ON, rows: [none, needs] })
+    const row = await screen.findByTestId('intake-row-4715')
+    expect(within(row).getByTestId('intake-entry-4715')).toHaveTextContent('not built · no_proven_standard')
+    expect(within(row).getByTestId('intake-entry-4715')).toHaveTextContent('an approver may fund one calibration build, which never opens a pull request')
+    expect(row.textContent).toContain('not deliverable')
+    const row2 = screen.getByTestId('intake-row-4716')
+    expect(within(row2).getByTestId('intake-entry-4716')).toHaveTextContent('not built · needs_context')
+    expect(within(row2).getByTestId('intake-entry-4716')).toHaveTextContent('Attach to the ticket: a failing test.')
+  })
+
   it('an unmeasured cell is named as unmeasured, never shown as a zero rate', async () => {
     setup(ON)
     const row = await screen.findByTestId('intake-row-4712')

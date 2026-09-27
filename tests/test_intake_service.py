@@ -37,6 +37,7 @@ from typing import Any
 import pytest
 
 from crb.factory.backlog import BacklogItem
+from crb.factory.standard import Readers, Standard
 from crb.intake import client as c
 from crb.server import intake as sv
 from crb.server.factory_state import FactoryHome
@@ -58,9 +59,16 @@ def _ticket(**kw: Any) -> c.Ticket:
         "acceptance_criteria": READY_AC,
         "revision": "1",
         "url": "https://tracker.invalid/4711",
+        # sized: a ticket with no points is `unsized` and goes to a person (ADR-0025 item 12)
+        "points": 2.0,
     }
     base.update(kw)
     return c.Ticket(**base)
+
+
+#: Every cell has a proven, signed S1 standard: these tests pin the intake MECHANICS; the
+#: entry gate's own stops are pinned in their own tests (ADR-0026 item 8).
+PROVEN = Readers(standard_for=lambda cell: Standard("S1@claude-sonnet-5", signed=True))
 
 
 def _tracker(ticket: c.Ticket) -> FakeTracker:
@@ -87,6 +95,7 @@ def _poll(
         # evolution) run with operator approval OFF; the approval gate itself — ON by
         # default in the service and the setting (ADR-0022) — is pinned in its own tests
         "approval": sv.ApprovalPolicy(required=False),
+        "gate": PROVEN,
     }
     defaults.update(kw)
     return sv.poll_repository("alpha", **defaults)
@@ -931,6 +940,26 @@ def test_a_ticket_whose_key_cannot_become_an_item_id_skips_only_itself(
 # --- C6 (assessment 2026-09-25): an operator approves the draft; the pass takes a lease ---
 
 
+def test_the_intake_row_names_no_proven_standard_with_what_to_attach(home: FactoryHome) -> None:
+    """ADR-0026 item 8 at intake: with no reading registered (the seam's truth until
+    routing.v2 lands) the ticket is labelled not deliverable, the comment says it will not
+    be built and names the way forward, and the served row carries the stop; a ticket that
+    lacks what an S2 standard needs is asked for it (`crb:needs-info`) and stays unregistered."""
+    tracker = _tracker(_ticket())
+    report = _poll(home, tracker, route=_deliver(), gate=None)
+    (row,) = report.rows
+    assert row.entry_stop == "no_proven_standard" and row.label == c.LABEL_NOT_DELIVERABLE
+    assert "not built" in row.entry_reason
+    assert any("will not be built" in t for t in tracker.comments["4711"].values())
+    s2 = Readers(standard_for=lambda cell: Standard("S2", signed=True))
+    home2 = FactoryHome(home.dir.parent.parent / "two", "alpha")
+    tracker2 = _tracker(_ticket(key="4712"))
+    (row2,) = _poll(home2, tracker2, route=_deliver(), gate=s2).rows
+    assert row2.entry_stop == "needs_context" and row2.entry_needs == ("a failing test",)
+    assert row2.label == c.LABEL_NEEDS_INFO and not row2.registered
+    assert row2.to_dict()["entry_needs"] == ["a failing test"]
+
+
 def test_a_ready_ticket_is_not_registered_until_an_operator_approves_it(
     home: FactoryHome,
 ) -> None:
@@ -948,6 +977,7 @@ def test_a_ready_ticket_is_not_registered_until_an_operator_approves_it(
         home=home,
         route_for=lambda item: _deliver(),
         item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+        gate=PROVEN,
     )
     assert report.ok and report.read == 1 and report.registered == 0 and report.awaiting == 1
     assert home.load_backlog() is None

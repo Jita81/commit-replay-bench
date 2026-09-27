@@ -689,6 +689,7 @@ class TestFailureSplit:
             "protocol",
             "harness",
             "outage",
+            "authoring",
             "disqualified",
         ]
 

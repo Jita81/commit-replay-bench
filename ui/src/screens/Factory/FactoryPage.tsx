@@ -67,7 +67,7 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useRegisterBacklog, useRuns, useSignGap } from '../../api/hooks'
+import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useFundCalibration, useRegisterBacklog, useRuns, useSignGap, useWaiveProbe } from '../../api/hooks'
 import { isRunTerminal, type CapabilityMap, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -132,11 +132,22 @@ const STATUS_LABEL: Record<string, string> = {
   delivery_failed: 'Delivery failed',
   rework_exhausted: 'Rework exhausted',
   oracle_needs_strengthening: 'Test needs strengthening',
+  oracle_not_scoreable: 'Test cannot be scored',
   blocked_on_dependency: 'Waiting on a dependency',
   error: 'Error',
+  // ADR-0026 item 8 — the entry gate's stops: the item was NOT BUILT and nothing was spent
+  no_proven_standard: 'Not built — no proven standard',
+  needs_context: 'Not built — needs context',
+  unsigned_cell: 'Not built — cell not signed off',
+  granularize: 'Not built — split it',
+  not_licensed: 'Not built — no licence for this builder',
+  // ADR-0025 item 12 — built and accepted, but its own measured cell does not license it
+  size_exceeds_licence: 'Larger than its licence',
+  cell_not_licensed: 'Its own cell is not licensed',
+  calibration_build: 'Calibration build — never delivered',
 }
 
-const FAILED_STATUSES = ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean']
+const FAILED_STATUSES = ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean', 'oracle_not_scoreable', 'size_exceeds_licence', 'cell_not_licensed']
 
 /** The way forward every `oracle_needs_strengthening` reason ends with (composed by the loop,
  * `crb.factory.loop._refuse_rework`) — the outcome sentence gives it once, so the quoted
@@ -161,8 +172,15 @@ export function stepsFor(t: FactoryTask): Step[] {
   // `route_hint` is the item's NEWEST route on the chain: after a rule-3 stop that is the
   // `human` the stop routed it to, not the reading readiness made before the build
   const stoppedAfterReview = t.status === 'oracle_needs_strengthening' && t.route_hint === 'human'
-  const readiness: Step =
-    gaps > 0
+  const readiness: Step = t.entry
+    ? // ADR-0026 item 8 — the entry gate stopped the item before any spend: it was not built
+      {
+        id: 'readiness',
+        title: 'Readiness',
+        status: 'failed',
+        detail: `Not built — ${t.entry.reason}.`,
+      }
+    : gaps > 0
       ? {
           id: 'readiness',
           title: 'Readiness',
@@ -348,6 +366,15 @@ export function refusalSentence(t: FactoryTask): string {
   // serves as `way_forward`; freezing a revised backlog (a new hash) is the heavier path
   const evolve = (fix: string) => `To bring it back into the factory, ${fix} and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept); or open the change by hand and mark the item done in the next backlog.`
   if (r?.step === 'dependency') return `${r.reason.replace(/^waiting on /, 'Waiting on ')}, which has not been accepted yet.`
+  if (t.entry) {
+    // ADR-0026 item 8: NOT BUILT, never "built and withheld"; the way forward is the gate's own
+    const e = t.entry
+    const funded = t.calibration ? ` A calibration build is funded by ${t.calibration.approver}: the next factory run builds it, and it never opens a pull request.` : ''
+    if (e.code === 'needs_context') return `Not built: ${e.reason}. Attach ${e.needs.join(', ')} to the ticket, or register an evolution that carries it.${funded}`
+    return `Not built: ${e.reason}.${funded}`
+  }
+  if (t.status === 'oracle_not_scoreable')
+    return `The strength probe could not score the test, so nothing was pushed${t.outcome_reason ? `: ${t.outcome_reason}` : ''}. ${evolve('attach a test that exercises the changed lines')}`
   if (r?.step === 'readiness') return `This item goes to a person: ${r.reason}. ${evolve('add the fact')}`
   if (t.status === 'oracle_needs_strengthening' || r?.step === 'review')
     return `The review found the test too weak to rebuild against${t.outcome_reason || r?.reason ? `: ${findingOf(t.outcome_reason || r?.reason || '')}` : ''}. ${evolve('strengthen the test')}`
@@ -361,6 +388,7 @@ export function refusalSentence(t: FactoryTask): string {
 
 /** How a person reads the item's status line. */
 function statusLabel(t: FactoryTask): string {
+  if (t.entry && STATUS_LABEL[t.status]) return STATUS_LABEL[t.status]!
   if (t.dor_gaps.length > 0) return 'Waiting on a signature'
   return STATUS_LABEL[t.status] ?? t.status.replace(/_/g, ' ')
 }
@@ -680,8 +708,12 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   const list = tasks ?? []
   const total = backlog.items.length
   const gapped = list.filter((t) => t.dor_gaps.length > 0).length
-  const worked = Math.max(total - gapped, 0)
+  const assessed = Math.max(total - gapped, 0)
   const deliverable = deliverableCount(list)
+  // ADR-0026 item 8 — only an item the entry gate lets in is built: its cell's standard is
+  // proven (the map routes deliver) or an approver funded a calibration build of it
+  const funded = list.filter((t) => t.dor_gaps.length === 0 && t.calibration && !t.cell_route?.deliverable).length
+  const worked = list.filter((t) => t.dor_gaps.length === 0 && (t.cell_route?.deliverable || t.calibration)).length
   const lo = measured ? measured.mean * 0.8 * worked : RANGE_LOW * worked
   const hi = measured ? measured.mean * 1.2 * worked : RANGE_HIGH * worked
   const own = ownBuilder.trim()
@@ -691,7 +723,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
       ? choice.label
       : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or name one below'
   const target = canDeliver ? `pushes a branch to ${delivery.full_name} and opens a pull request against ${delivery.default_branch}; nothing is written to ${delivery.default_branch}` : ''
-  const startable = (own.length > 0 || choice !== null) && !run.isPending && worked > 0
+  // a run over items that will not be built still records each stop, at no cost
+  const startable = (own.length > 0 || choice !== null) && !run.isPending && assessed > 0
 
   const startRun = () => {
     const body = own
@@ -722,15 +755,15 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           {
             key: 'Items',
             hint: 'summary.factory.items',
-            value: `${worked} of ${total} will be worked${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell that routes deliver`,
-            note: 'Readiness is assessed again at the run; an item with an unsigned structural gap is refused before any spend.',
+            value: `${worked} of ${total} can be built${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell that routes deliver${funded ? `, ${funded} as a funded calibration build` : ''}; the rest are not built`,
+            note: 'Readiness and the entry gate are assessed again at the run: an item whose cell has no proven context standard, or with an unsigned structural gap, is not built and nothing is spent on it.',
           },
           {
             key: 'Estimated cost',
             hint: 'stat.factory.estimate',
             value:
               worked === 0 ? (
-                'nothing — no item can be worked'
+                'nothing — no item can be built'
               ) : measured ? (
                 `${usd(lo)} to ${usd(hi)} for ${worked} item${worked === 1 ? '' : 's'} at about ${usd(measured.mean)} each (this repository's measured mean over n = ${measured.n} attempts with a known cost at apparatus ${measured.apparatus || '—'}; the band is a ±20 % planning range, not a measured interval)`
               ) : (
@@ -762,7 +795,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             Open pull requests where the map routes <code>deliver</code>
             {tasks && (
               <Hint id="stat.factory.deliverable" className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
-                {deliverable} of {tasks.length} items sit in a cell that routes <code>deliver</code> today; the rest are built and withheld under the current route
+                {deliverable} of {tasks.length} items sit in a cell that routes <code>deliver</code> today; the rest are not built
               </Hint>
             )}
           </span>
@@ -771,8 +804,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           <Hint as="label" id="field.factory.override" className="flex items-start gap-2">
             <input type="checkbox" className="mt-1" checked={override} onChange={(e) => setOverride(e.target.checked)} />
             <span>
-              Override the route gate (approver)
-              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain as your override of the route gate, under your name.</span>
+              Lift a missing sign-off for this run (approver)
+              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain under your name. It lifts only the sign-off — never a missing standard, missing context or a calibration build.</span>
             </span>
           </Hint>
         )}
@@ -788,6 +821,9 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           </Details>
         </Hint>
       </div>
+      <Hint as="p" id="note.factory.not_built" className="mb-0 mt-3 text-sm" data-testid="factory-not-built-limit">
+        An item whose cell has no proven context standard, or that lacks what the standard needs, is not built. An approver’s calibration build is recorded as one and never delivers.
+      </Hint>
       <p className="mb-3 mt-3 text-sm">You can cancel the run at any point. Items already built are still charged.</p>
       <div className="flex flex-wrap items-center gap-3" data-testid="factory-run-controls">
         <WarningButton onClick={startRun} disabled={!startable} hint="button.factory.run">
@@ -897,6 +933,20 @@ function ItemRow({
       ) : (
         <StepGrid t={t} steps={steps} />
       )}
+      {t.entry && (
+        // ADR-0026 item 8 — the gate's stop by its code, and what the ticket must carry
+        <Hint as="p" id="item.factory.entry_stop" className="m-0 mt-2 text-xs" data-testid={`entry-${t.id}`}>
+          Not built · <code>{t.entry.code}</code>
+          {t.entry.needs.length > 0 ? ` — attach: ${t.entry.needs.join(', ')}` : ''}
+        </Hint>
+      )}
+      {t.calibration && (
+        <Hint as="p" id="item.factory.calibration_pending" className="m-0 mt-2 text-xs" data-testid={`calibration-${t.id}`}>
+          Calibration build funded by {t.calibration.approver}: the next factory run builds it, and it never opens a pull request.
+        </Hint>
+      )}
+      {t.way_forward?.action === 'fund_calibration' && canSign && <CalibrationForm repo={repo} task={t} />}
+      {t.status === 'oracle_not_scoreable' && canSign && t.test_sha256 && <WaiverForm repo={repo} task={t} />}
       {t.dor_gaps.length > 0 && canSign && <GapForm repo={repo} task={t} />}
       {t.dor_gaps.length > 0 && !canSign && <p className="m-0 mt-2 text-xs text-on-surface-muted">An approver signs the structural gap(s); a value gap is never signed — it routes test-first.</p>}
     </li>
@@ -965,6 +1015,60 @@ function StepGrid({ t, steps }: { t: FactoryTask; steps: Step[] }) {
   )
 }
 
+/**
+ * ADR-0026 item 8 — an approver funds ONE calibration build of an item the entry gate stops
+ * for a missing standard or missing context: recorded on the chain under their name, built by
+ * the next factory run, and never able to open a pull request.
+ */
+function CalibrationForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
+  const fund = useFundCalibration()
+  const [reason, setReason] = useState('')
+  return (
+    <form
+      className="mt-2 flex flex-wrap items-end gap-2 rounded-[var(--radius-control)] border border-border p-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (reason.trim()) fund.mutate({ repo, itemId: t.id, reason: reason.trim() }, { onSuccess: () => setReason('') })
+      }}
+      aria-label={`Fund a calibration build of ${t.id}`}
+      data-testid={`calibration-form-${t.id}`}
+    >
+      <TextField label="Why fund a calibration build" hint="field.factory.calibration_reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+      <Button type="submit" size="sm" variant="filled" disabled={fund.isPending || !reason.trim()} hint="button.factory.fund_calibration">
+        Fund a calibration build
+      </Button>
+      {fund.isError && <ErrorState compact error={fund.error} />}
+    </form>
+  )
+}
+
+/**
+ * ADR-0025 item 12 — the strength probe is required: an approver may waive it for this item's
+ * test, bound to the test's exact bytes (the SHA-256 its RED proof carries). The pull request
+ * then names the approver and the reason.
+ */
+function WaiverForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
+  const waive = useWaiveProbe()
+  const [reason, setReason] = useState('')
+  return (
+    <form
+      className="mt-2 flex flex-wrap items-end gap-2 rounded-[var(--radius-control)] border border-border p-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (reason.trim()) waive.mutate({ repo, itemId: t.id, reason: reason.trim(), testSha256: t.test_sha256 ?? '' }, { onSuccess: () => setReason('') })
+      }}
+      aria-label={`Waive the strength probe for ${t.id}`}
+      data-testid={`waiver-form-${t.id}`}
+    >
+      <TextField label="Why the probe may be waived for this exact test" hint="field.factory.waiver_reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+      <Button type="submit" size="sm" disabled={waive.isPending || !reason.trim()} hint="button.factory.waive_probe">
+        Waive the probe for this test
+      </Button>
+      {waive.isError && <ErrorState compact error={waive.error} />}
+    </form>
+  )
+}
+
 /** J-FAC-16 — sign one structural gap: the catalogue's question as the label, the signer and time on success. */
 function GapForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
   const sign = useSignGap()
@@ -1023,8 +1127,9 @@ export function deliverableCount(tasks: FactoryTask[]): number {
 
 /**
  * F28 / J-FAC-14 — the item's cell route BEFORE the run, from the same signed map the
- * delivery gate reads: "routes deliver" (green), "routes calibrate · withheld" (amber),
- * or "not measured · withheld" (grey). The pill is short; the n · point [interval] ·
+ * delivery gate reads: "routes deliver" (green), "routes calibrate · not built" (amber),
+ * or "not measured · not built" (grey) — ADR-0026 item 8: an item whose cell has no proven
+ * standard is not built. The pill is short; the n · point [interval] ·
  * apparatus follow in a span that wraps at phone width (the aria-label carries them all).
  * Never a guess: `route: ''` means nobody has measured the cell.
  */
@@ -1032,8 +1137,8 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
   const r = t.cell_route
   if (!r || !r.route) {
     return (
-      <Pill tone="muted" glyph="○" size="xs" label={`Cell ${t.capability_class} × ${t.size} is not measured on this repository: delivery would be withheld`} hint="factory.cell_route.unmeasured" data-testid={`cell-route-${t.id}`}>
-        not measured · withheld
+      <Pill tone="muted" glyph="○" size="xs" label={`Cell ${t.capability_class} × ${t.size} is not measured on this repository: an item in it is not built`} hint="factory.cell_route.unmeasured" data-testid={`cell-route-${t.id}`}>
+        not measured · not built
       </Pill>
     )
   }
@@ -1046,8 +1151,8 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
           routes deliver
         </Pill>
       ) : (
-        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: delivery would be withheld — ${r.reason}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
-          routes {r.route} · withheld
+        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: an item in it is not built — ${r.reason}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
+          routes {r.route} · not built
         </Pill>
       )}
       <Hint id="item.factory.cell_prov" tabStop={false} className="font-mono text-[11px] text-on-surface-muted" aria-hidden data-testid={`cell-route-${t.id}-prov`}>
