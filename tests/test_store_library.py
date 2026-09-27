@@ -15,7 +15,8 @@ Works with:   src/crb/store/library.py (the ledger under test), src/crb/store/mo
               (``LibraryActRow``), src/crb/core/library.py (the rule the ledger applies),
               tests/conftest_store.py (the backends)
 Tested by:    this file
-Touch when:   a new reading of the acts is added to the store module.
+Touch when:   never for a new repository; a new reading of the acts is added to the store
+              module.
 """
 
 from __future__ import annotations

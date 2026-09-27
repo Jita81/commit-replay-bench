@@ -22,7 +22,8 @@ Works with:   src/crb/server/routes/library.py (the routes under test),
               rule they apply), tests/fixtures/server_seed.py (the accounts and the
               repository), docs/API.md#library (the contract the bodies are held to)
 Tested by:    this file
-Touch when:   a route, a field or an act of ``/library`` changes.
+Touch when:   never for a new repository; a route, a field or an act of ``/library``
+              changes.
 """
 
 from __future__ import annotations
