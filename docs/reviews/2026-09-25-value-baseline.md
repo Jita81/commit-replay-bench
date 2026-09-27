@@ -107,6 +107,12 @@ the one disqualified row and the three rows on tasks whose own gold failed. The 
 the reviewers' reasons as style 4, behaviour 4 and public interface 2 — ten reasons for nine
 patches; by each review's headline verdict it is style 3, defect 4 and public interface 2.
 
+**Correction, 2026-09-27.** The "three rows on tasks whose own gold failed" are the export's
+three factory rows: a factory item has no gold commit, and the export writes the absent gold as
+`gold_clean` 0 **[measured — n = 3 rows, the only rows of the export with step `factory` and the
+only ones with `gold_clean` 0, all cobra, sighted and clean; method: the export's `step` and
+`gold_clean` columns; apparatus 2.2]**.
+
 ## Why the value leaks
 
 1. **Clean is not working.** Nine of the thirteen clean patches a person read would not have

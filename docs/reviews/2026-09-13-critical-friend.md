@@ -164,6 +164,14 @@ The pattern: the *mechanical* governance is strong and honest; the *human* gover
 | 9 | Rotate the Claude Code OAuth token; build the UI/`crb doctor` path for supplying it. | security | operator |
 | 10 | Run each repo to n ≥ 10 per cell with the fixed harness before quoting any rate; quote Wilson intervals only. | measurement | operator (credits) |
 
+**Correction, 2026-09-27 (ADR-0026).** Action 7's figures mislabel the arms of the upstream run:
+the message alone was clean on 33 of 48 tasks (68.8 %), and 72.9 % (35 of 48) is the
+message-with-checklist arm, not "bare"; facts written without the diff scored 33 of 48, equal
+to the message alone, in a re-run that gave every task one class's four slots, so per-class
+structural facts written without the diff are unmeasured, not falsified. The action's direction
+— replace the 33→46 row — stands **[measured — n = 48 tasks per arm, one rep; method: the
+upstream T2 ledger tallied on 2026-09-26; apparatus n/a — the upstream harness, not crb]**.
+
 ---
 
 ## 9. What the evidence *does* license today

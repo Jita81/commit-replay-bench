@@ -161,7 +161,9 @@ The product adds, first, **VALUE** (the product produces working software and ge
 the more data goes through it: working changes per pound on blind attempts is served with its
 interval, clean → working precision is served, each bug class's recurrence is served and the
 classes the loop removed are counted, every graded row's output is kept, and every change the
-loop makes is scored and retired by data — the operator's two instructions of 2026-09-25; its
+loop makes is scored and retired by data, and each class × size cell names the least context
+proven to pass it (the operator's thesis of 2026-09-26; ADR-0026, DL-098) — the operator's two
+instructions of 2026-09-25 and the thesis of 2026-09-26; its
 criteria head the product's table and the checker refuses a product artefact where they do
 not), then **IDENTITY** (one sentence, the same in README, Home and the book),
 **GO-LIVE** (every checklist line is proven by the product, not ticked by belief), **CLAIMS**
