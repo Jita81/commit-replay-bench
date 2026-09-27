@@ -12,8 +12,10 @@
  *               error envelope on a wrong password (never a blank form), and returns the user
  *               to the `?next=` path — same-origin paths only, so a crafted link cannot bounce
  *               a session to another host. An already-authenticated visitor is redirected
- *               straight to `next`. Both fields and both sign-in buttons carry a hint
- *               (`field.login.*`, `button.login.*`) so the form explains itself on hover,
+ *               straight to `next`, and while that check is in flight the form is not offered
+ *               (a status line stands in), so nothing typed is lost to the redirect (P-152).
+ *               Both fields and both sign-in buttons carry a hint (`field.login.*`,
+ *               `button.login.*`) so the form explains itself on hover,
  *               focus and tap before a person has any role at all. Every stop names its way
  *               forward where the person meets it: a wrong password's envelope says who sets a
  *               new one (G-460); a 429 is "Too many failed sign-ins" with the wait in seconds
@@ -45,8 +47,8 @@
  *               ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
  *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
  *               the role chip), ui/src/components/Help.test.tsx (the About block mounts here)
- * Touch when:   the OIDC start path or the login body changes (docs/API.md "Auth"); never for
- *               a new repository.
+ * Touch when:   never for a new repository; the OIDC start path or the login body changes
+ *               (docs/API.md "Auth").
  */
 import { useState, type FormEvent } from 'react'
 import { Navigate, useSearchParams } from 'react-router'
@@ -142,31 +144,40 @@ export function LoginPage() {
         )}
 
         <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
-          <form onSubmit={submit} className="space-y-4" aria-label="Local account sign in">
-            <TextField label="Username" hint="field.login.username" name="username" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} />
-            <TextField
-              label="Password"
-              hint="field.login.password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            {login.isError && (
-              <ErrorState compact error={login.error} title={failureTitle(login.error)}>
-                {nextStep(login.error) && (
-                  <p className="m-0 text-sm" data-testid="login-next-step">
-                    {nextStep(login.error)}
-                  </p>
-                )}
-              </ErrorState>
-            )}
-            <Button type="submit" variant="filled" hint="button.login.submit" className="w-full" disabled={login.isPending}>
-              {login.isPending ? 'Signing in…' : 'Sign in'}
-            </Button>
-          </form>
+          {/* While the session check is in flight the form is not offered: a signed-in visitor
+              is about to be redirected, and a form shown for that moment takes typing that the
+              redirect then throws away (P-152). */}
+          {loading ? (
+            <p role="status" data-testid="login-checking-session" className="m-0 text-sm text-on-surface-muted">
+              Checking whether you are already signed in…
+            </p>
+          ) : (
+            <form onSubmit={submit} className="space-y-4" aria-label="Local account sign in">
+              <TextField label="Username" hint="field.login.username" name="username" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} />
+              <TextField
+                label="Password"
+                hint="field.login.password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              {login.isError && (
+                <ErrorState compact error={login.error} title={failureTitle(login.error)}>
+                  {nextStep(login.error) && (
+                    <p className="m-0 text-sm" data-testid="login-next-step">
+                      {nextStep(login.error)}
+                    </p>
+                  )}
+                </ErrorState>
+              )}
+              <Button type="submit" variant="filled" hint="button.login.submit" className="w-full" disabled={login.isPending}>
+                {login.isPending ? 'Signing in…' : 'Sign in'}
+              </Button>
+            </form>
+          )}
 
           {version.isPending && <p className="mt-5 text-center text-[11px] text-on-surface-muted">Checking for an organisation sign-in…</p>}
           {version.isError && (

@@ -22,8 +22,9 @@
  * Works with:   ui/src/screens/Login/LoginPage.tsx, ui/src/help/hints.ts (the copy the
  *               hover test expects), ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Login/LoginPage.test.tsx
- * Touch when:   the strapline or the recovery sentence changes, a field or button is added
- *               to the form, or the callback gains a failure code.
+ * Touch when:   never for a new repository; the strapline or the recovery sentence changes,
+ *               a field or button is added to the form, the callback gains a failure code, or
+ *               what the page shows while the session check is in flight changes (P-152).
  */
 
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
@@ -66,6 +67,7 @@ describe('LoginPage', () => {
       'GET /version': { version: '2.2.0', apparatus_version: '2.2', policy_version: 'routing.v1', oidc_enabled: true },
     })
     const { container } = renderApp(<LoginPage />, { route: '/login' })
+    await screen.findByRole('form', { name: 'Local account sign in' })
     await waitFor(() => expect(screen.getByRole('link', { name: 'Sign in with organisation account' })).toHaveAttribute('data-hint', 'button.login.oidc'))
     expect(unhinted(container)).toEqual([])
     const submit = screen.getByRole('button', { name: 'Sign in' })
@@ -139,8 +141,21 @@ describe('LoginPage — every stop names its way forward', () => {
     // the code is shown as data, never as markup: an unknown code is not echoed at all
     if (code === 'something_else') expect(alert).not.toHaveTextContent('something_else')
     // the way back is right here: the form, and the organisation button keeps `next`
-    expect(screen.getByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('link', { name: 'Sign in with organisation account' }).getAttribute('href')).toContain(encodeURIComponent('/runs')))
+  })
+
+  it('while the session check is in flight no form is offered, so a signed-in visitor types nothing the redirect throws away (P-152)', async () => {
+    let answer: (r: Response) => void = () => {}
+    mockApi({ 'GET /auth/me': () => new Promise<Response>((resolve) => (answer = resolve)), 'GET /version': VERSION })
+    renderApp(<LoginPage />, { route: '/login' })
+    expect(await screen.findByTestId('login-checking-session')).toHaveTextContent('Checking whether you are already signed in…')
+    expect(screen.queryByLabelText(/^Username/)).toBeNull()
+    expect(screen.queryByLabelText(/^Password/)).toBeNull()
+    // the answer is "no session": the form arrives
+    answer(envelope(401, 'unauthenticated', 'no session'))
+    expect(await screen.findByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
+    expect(screen.queryByTestId('login-checking-session')).toBeNull()
   })
 
   it('"Checking for an organisation sign-in…" shows while GET /version is pending (G-191)', async () => {
