@@ -31,7 +31,7 @@
  *               (the copy the hover test expects), ui/src/help/hints-collector.ts
  *               (`unhinted`)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx
- * Touch when:   a task or its evidence source changes.
+ * Touch when:   never for a new repository; a task or its evidence source changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'

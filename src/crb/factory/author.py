@@ -68,9 +68,9 @@ Works with:   src/crb/factory/testfirst.py (the ``TestAuthor`` protocol, ``autho
               label space), src/crb/server/worker.py (the served deployment's setting and
               per-run override)
 Tested by:    tests/test_factory_author.py, tests/test_worker_test_author.py
-Touch when:   another authoring process is added (a second ``TestAuthor`` and a way to name
-              it); the reply format changes (``parse_authored`` and its test move together);
-              never for a new repository — the test layout comes from the repo config.
+Touch when:   never for a new repository — the test layout comes from the repo config; another
+              authoring process is added (a second ``TestAuthor`` and a way to name it); the reply
+              format changes (``parse_authored`` and its test move together).
 Claims:       An authored test is never trusted on the author's say-so; it is proven RED at
               the base and re-checked by belt 1 (docs/EVIDENCE-AND-CLAIMS.md). [measured]
               claims about author quality belong to the ledger, not to this module.

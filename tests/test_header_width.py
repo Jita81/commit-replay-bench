@@ -26,7 +26,8 @@ ADRs:         none
 Works with:   docs/FILE-HEADER-STANDARD.md (the 100-column rule), scripts/code_map.py (the
               header gate this complements), docs/PREVENTION.md (P-012)
 Tested by:    (this is a test file)
-Touch when:   you wrapped long header lines — lower ``BASELINE`` to the new count.
+Touch when:   never for a new repository; you wrapped long header lines — lower ``BASELINE`` to the
+              new count.
 """
 
 from __future__ import annotations

@@ -30,8 +30,9 @@
  *               describe), src/crb/factory/loop.py (the route gate and the override event),
  *               docs/SECURITY.md §2 (the trust boundaries these rows describe), docs/DEPLOYMENT.md
  * Tested by:    ui/src/components/govuk.test.tsx (the page is covered there)
- * Touch when:   a deployment fact is added to `/settings` that a review board would ask for;
- *               delivery grows a new write (add the row here and in docs/GITHUB-APP.md §5).
+ * Touch when:   never for a new repository; a deployment fact is added to `/settings` that a review
+ *               board would ask for; delivery grows a new write (add the row here and in
+ *               docs/GITHUB-APP.md §5).
  */
 
 import type { ReactNode } from 'react'

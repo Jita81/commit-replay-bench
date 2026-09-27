@@ -21,8 +21,9 @@
  *               shapes), ui/src/screens/Factory/FactoryPage.tsx, ui/src/screens/Runs/RunDetailPage.tsx,
  *               ui/src/screens/Capability/CapabilityPage.tsx (the screens rendered)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
- * Touch when:   a screen of these routes gains a state that renders new elements — add the
- *               fixture that shows it; a route is added to the instrument row — add its entry.
+ * Touch when:   never for a new repository; a screen of these routes gains a state that renders new
+ *               elements — add the fixture that shows it; a route is added to the instrument row —
+ *               add its entry.
  */
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

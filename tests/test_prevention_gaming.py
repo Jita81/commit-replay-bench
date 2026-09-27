@@ -17,8 +17,8 @@ ADRs:         docs/adr/0020-a-bug-is-closed-by-prevention.md
 Works with:   src/crb/core/prevention.py (under test), tests/test_prevention_rule.py (the
               ``Loop`` and the ladder), tests/prevention_fixtures.py (the rows)
 Tested by:    tests/test_prevention_gaming.py
-Touch when:   a parameter is added to a public function of the loop (it must not filter), or
-              a key joins ``WRITABLE`` (with an ADR-0020 amendment).
+Touch when:   never for a new repository; a parameter is added to a public function of the loop (it
+              must not filter), or a key joins ``WRITABLE`` (with an ADR-0020 amendment).
 """
 
 from __future__ import annotations

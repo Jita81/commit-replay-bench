@@ -22,7 +22,8 @@ Works with:   src/crb/core/grade.py (belt 6 folded into clean), src/crb/core/api
               tests/fixtures/pyrepo.py (the Python repository), tests/fixtures/langs/noderepo.py
               (the JS repository)
 Tested by:    tests/test_grade_api_belt.py
-Touch when:   the clean rule, the failure-kind order or belt 6's recording changes.
+Touch when:   never for a new repository; the clean rule, the failure-kind order or belt 6's
+              recording changes.
 """
 
 from __future__ import annotations

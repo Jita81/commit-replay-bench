@@ -34,7 +34,8 @@
  *               ui/src/screens/Factory/FactoryPage.tsx (`?item=` scrolls to the item),
  *               src/crb/factory/loop.py (the route gate whose withholding shows here)
  * Tested by:    ui/src/screens/Decisions/decisions.test.ts
- * Touch when:   a new human act is added to the product (a row kind here, its surface there).
+ * Touch when:   never for a new repository; a new human act is added to the product (a row kind
+ *               here, its surface there).
  */
 
 import type { CapabilityCell, FactoryTask, PreventionRegister, Signoff } from '../../api/types'

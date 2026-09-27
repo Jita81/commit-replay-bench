@@ -20,7 +20,7 @@
  *               ui/src/screens/Repos/repoFixtures.ts
  *               (`REPO`), ui/src/test/utils.tsx (`mockApi`, `renderApp`)
  * Tested by:    ui/src/screens/Repos/PosturePanel.test.tsx
- * Touch when:   the panel shows a new fact from the posture route.
+ * Touch when:   never for a new repository; the panel shows a new fact from the posture route.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

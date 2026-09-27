@@ -24,8 +24,8 @@ Works with:   src/crb/mcp/server.py (the tools), src/crb/server/routes/auth.py (
               route and cookies), src/crb/server/deps.py (the error envelope this decodes),
               docs/MCP.md (how an operator configures it)
 Tested by:    tests/test_mcp_server.py (over the real app via ``TestClient``)
-Touch when:   the API grows an auth scheme (a bearer token for service accounts — the seam
-              is ``login``/``_headers``); never for a new repository.
+Touch when:   never for a new repository; the API grows an auth scheme (a bearer token for service
+              accounts — the seam is ``login``/``_headers``).
 Claims:       none — a transport; every number it returns is the API's, with the API's
               method fields intact.
 """

@@ -19,7 +19,8 @@
  *               ui/src/help/hints.ts (the `*.repo.posture*` ids), src/crb/server/posture_view.py
  *               (what the route serves)
  * Tested by:    ui/src/screens/Repos/PosturePanel.test.tsx, ui/src/help/hints-ratchet.test.tsx
- * Touch when:   `GET /repos/{name}/posture` gains a field a reader needs (type it first).
+ * Touch when:   never for a new repository; `GET /repos/{name}/posture` gains a field a reader
+ *               needs (type it first).
  */
 import { Link, useNavigate } from 'react-router'
 import { useQualifyRepo, useRepoPosture } from '../../api/hooks'

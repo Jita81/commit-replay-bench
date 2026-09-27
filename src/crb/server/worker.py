@@ -149,10 +149,10 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py
-Touch when:   a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
-              src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
-              every run must carry is added (``_RunLedger._stamp``); never for a new
-              repository — repository behaviour lives in the runner and the repo config.
+Touch when:   never for a new repository — repository behaviour lives in the runner and the repo
+              config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
+              src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label every
+              run must carry is added (``_RunLedger._stamp``).
 Claims:       Nothing here decides a verdict: the grader does; the worker only sequences,
               stamps and records (docs/EVIDENCE-AND-CLAIMS.md).
 

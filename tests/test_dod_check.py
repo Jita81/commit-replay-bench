@@ -29,8 +29,8 @@ ADRs:         none
 Works with:   scripts/dod_check.py (under test), docs/dod/STANDARD.md (the format),
               docs/dod/TEMPLATE.md (the shape the fixtures copy)
 Tested by:    (this is a test file)
-Touch when:   a category, level or evidence prefix is added to the standard — add the fixture
-              and the assertion here in the same change.
+Touch when:   never for a new repository; a category, level or evidence prefix is added to the
+              standard — add the fixture and the assertion here in the same change.
 """
 
 from __future__ import annotations

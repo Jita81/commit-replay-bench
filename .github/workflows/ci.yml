@@ -136,11 +136,19 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # --changed-since diffs the pull request against its base branch
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Headers present, links resolve, map current
         run: python scripts/code_map.py --check
+      # On a pull request, a file in scripts/code_map_onboarding_baseline.txt that the change
+      # edits must leave it, and no path may join it (P-114); a push has no base to diff.
+      - name: No edited or added onboarding-baseline entry
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/code_map.py --check --changed-since "origin/$BASE_REF"
 
   # GitHub truncates a check-run name at 100 characters, and branch protection matches the
   # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Every

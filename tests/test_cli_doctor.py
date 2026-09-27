@@ -46,8 +46,8 @@ Works with:   src/crb/cli/commands/service.py (under test), src/crb/builders/cla
               with ``/health``), tests/test_builders_claude_code.py (the same sources at the
               builder), docs/OPERATOR.md#11-check-the-installation-crb-doctor
 Tested by:    tests/test_cli_doctor.py
-Touch when:   a token source or auth mode is added (a status case naming it); a doctor line is
-              added (its ok, warn and fail cases with the fix named).
+Touch when:   never for a new repository; a token source or auth mode is added (a status case naming
+              it); a doctor line is added (its ok, warn and fail cases with the fix named).
 """
 
 from __future__ import annotations

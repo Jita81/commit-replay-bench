@@ -25,8 +25,9 @@ Works with:   src/crb/server/routes/runs.py (under test), src/crb/store/jobs.py 
               source), tests/test_worker_budget_ladder.py (the worker's half of the ladder),
               tests/fixtures/server_seed.py, docs/API.md (runs, SSE event shape)
 Tested by:    tests/test_server_routes_runs.py
-Touch when:   a run parameter is added (a create case, a 422 bound and the worker's reading of
-              it); a run kind is added (RUN_KINDS, the create cases and ui/src/api/types.ts).
+Touch when:   never for a new repository; a run parameter is added (a create case, a 422 bound and
+              the worker's reading of it); a run kind is added (RUN_KINDS, the create cases and
+              ui/src/api/types.ts).
 """
 
 from __future__ import annotations

@@ -20,8 +20,8 @@ ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/api_surface.py (under test), tests/fixtures/langs/__init__.py (the
               hermetic git helpers), tests/test_grade_api_belt.py (the belt inside the grader)
 Tested by:    tests/test_api_surface.py
-Touch when:   an extractor learns a new declaration form (add its source here) or a language
-              gains an extractor.
+Touch when:   never for a new repository; an extractor learns a new declaration form (add its source
+              here) or a language gains an extractor.
 """
 
 from __future__ import annotations

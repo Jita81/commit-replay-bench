@@ -52,9 +52,9 @@ Works with:   src/crb/core/workspace.py (``patch_text`` — the procedure the gr
               (``GET /grades/{row_hash}/patch`` serves the kept bytes first),
               src/crb/core/review.py (a review attests to ``sha256`` — the pack's diff anchor)
 Tested by:    tests/test_patches.py, tests/test_run.py, tests/test_server_routes_grades.py
-Touch when:   ``Workspace.diff_stats`` changes what it hashes (``patch_text`` is the shared
-              procedure — change it there, never here); the cap changes (docs/API.md and
-              docs/DATA-RETENTION.md say 1 MiB).
+Touch when:   never for a new repository; ``Workspace.diff_stats`` changes what it hashes
+              (``patch_text`` is the shared procedure — change it there, never here); the cap
+              changes (docs/API.md and docs/DATA-RETENTION.md say 1 MiB).
 Claims:       ``anchored: true`` means the kept text hashes to the grade's diff anchor — not
               that the patch is correct (the belts say that) or mergeable (a review does).
 """

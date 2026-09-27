@@ -17,7 +17,7 @@ Works with:   src/crb/core/qualify.py (``adhoc_context``, ``GoldWitness``, ``Qua
               src/crb/core/grade.py (``GradeContext``), src/crb/core/run.py
               (``RunSpec.context_for``), tests/test_run.py (the main caller)
 Tested by:    tests/test_run.py, tests/test_grade.py
-Touch when:   the grade context changes shape.
+Touch when:   never for a new repository; the grade context changes shape.
 """
 
 from __future__ import annotations

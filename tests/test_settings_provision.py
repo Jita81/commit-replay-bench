@@ -16,18 +16,19 @@ ADRs:         none
 Works with:   src/crb/server/settings.py (``ProvisionSettings``), src/crb/provision/config.py (the
               worker's side), docs/DEPLOYMENT.md#21-environment-reference (the variables)
 Tested by:    tests/test_settings_provision.py
-Touch when:   a provisioning variable or production rule changes.
+Touch when:   never for a new repository; a provisioning variable or production rule changes.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from crb.provision.config import DEFAULT_GO_IMAGE, ProvisionConfig
+from crb.provision.config import DEFAULT_GO_IMAGE, ProvisionConfig, parse_host_list
 from crb.server.settings import Settings
 
 MIRROR = {
@@ -115,3 +116,65 @@ def test_the_worker_reads_the_same_variables() -> None:
     assert cfg.enabled and cfg.store == Path("/srv/crb/deps") and cfg.max_bundle_mb == 512
     assert cfg.mirror_for("go") == Path("/srv/mirror/go") and cfg.hosts_for("go") == ()
     assert "cdn.corp.example:8443" in cfg.hosts_for("python")
+
+
+#: The same raw environment read by both processes. Each case is a value an operator could
+#: write in the compose file or the Helm values: the API and the worker must agree on it.
+_PARITY_CASES: dict[str, dict[str, str]] = {
+    "comma list": {"CRB_PROVISION__EXTRA_ALLOW_HOSTS": "a.corp.example, b.corp.example:8443"},
+    "json list": {"CRB_PROVISION__EXTRA_ALLOW_HOSTS": '["mirror.corp.example:443"]'},
+    "blank": {"CRB_PROVISION__EXTRA_ALLOW_HOSTS": "  "},
+    "builder proxy image only": {"CRB_BUILDER__PROXY_IMAGE": "proxy@sha256:" + "1" * 64},
+    "own proxy image wins": {
+        "CRB_BUILDER__PROXY_IMAGE": "proxy@sha256:" + "1" * 64,
+        "CRB_PROVISION__PROXY_IMAGE": "fetch-proxy@sha256:" + "2" * 64,
+    },
+}
+
+
+@pytest.mark.parametrize("case", sorted(_PARITY_CASES))
+def test_the_api_and_the_worker_read_one_environment_the_same_way(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on PR #56: the API accepted a JSON host list the worker split on commas
+    (the worker then refused to start), and the two fell back to different proxy images.
+    One environment, both parsers, the same configuration — every field."""
+    env = {
+        "CRB_ENV": "dev",
+        "CRB_HOME": str(tmp_path),
+        "CRB_SECRET_KEY": "k" * 40,
+        "CRB_PROVISION__ENABLED": "true",
+        **_PARITY_CASES[case],
+    }
+    for name in list(os.environ):
+        if name.startswith("CRB_"):
+            monkeypatch.delenv(name)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    api = Settings().provision_config  # the API's path: pydantic-settings over os.environ
+    worker = ProvisionConfig.from_env(env, home=tmp_path)  # the worker's path
+    assert api == worker
+
+
+def test_a_json_host_list_reaches_the_worker_as_hosts() -> None:
+    cfg = ProvisionConfig.from_env(
+        {"CRB_PROVISION__EXTRA_ALLOW_HOSTS": '["mirror.corp.example:443", "b.corp.example"]'}
+    )
+    assert cfg.extra_allow_hosts == ("mirror.corp.example:443", "b.corp.example")
+
+
+def test_one_parser_reads_the_host_list_for_both_processes() -> None:
+    """The structural half: the API's validator IS the worker's parser, so a format added
+    to one cannot be missing from the other."""
+    assert parse_host_list('["x.example"]') == ("x.example",)
+    assert parse_host_list(" x.example , y.example:8443 ,") == ("x.example", "y.example:8443")
+    assert parse_host_list("") == ()
+    with pytest.raises(ValueError, match="EXTRA_ALLOW_HOSTS"):
+        parse_host_list('["x.example"')  # a broken JSON list is refused, never split
+    with pytest.raises(ValueError, match="list of host names"):
+        parse_host_list('{"x": 1}')
+    src = Path(__file__).resolve().parents[1] / "src" / "crb"
+    settings_src = (src / "server" / "settings.py").read_text(encoding="utf-8")
+    config_src = (src / "provision" / "config.py").read_text(encoding="utf-8")
+    assert 'get("EXTRA_ALLOW_HOSTS").split(' not in config_src
+    assert "parse_host_list(" in config_src and "parse_host_list(" in settings_src

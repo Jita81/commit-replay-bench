@@ -17,7 +17,7 @@ Works with:   src/crb/core/finish_gate.py (under test), src/crb/core/checks.py
               (``CheckCommand``), src/crb/core/lint.py (the plan), tests/fixtures/langs/gorepo.py
               (the Go repository the checks run in)
 Tested by:    tests/test_finish_gate.py
-Touch when:   the checklist's content or the gating rule changes.
+Touch when:   never for a new repository; the checklist's content or the gating rule changes.
 """
 
 from __future__ import annotations

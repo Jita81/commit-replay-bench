@@ -60,9 +60,9 @@
 #               (the ``walkthrough`` job)
 # Tested by:    ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
 #               (the suite it drives; the script itself has no unit test — CI runs it end to end)
-# Touch when:   a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in
-#               the README); the server or worker CLI flags change; never to inherit an existing
-#               home, database or port.
+# Touch when:   never for a new repository; a spec needs another ``CRB_E2E_*`` variable (export it
+#               in step 4 and document it in the README); the server or worker CLI flags change;
+#               never to inherit an existing home, database or port.
 
 set -euo pipefail
 

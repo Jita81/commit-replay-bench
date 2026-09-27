@@ -18,8 +18,8 @@ Works with:   src/crb/server/worker.py (under test), src/crb/server/prevention_s
               snapshot and the tick), src/crb/builders/adapter.py (the lines reach the brief
               here), tests/test_worker.py (the harness and the fake builder)
 Tested by:    tests/test_worker_learning.py
-Touch when:   a label is added to what a row records about the loop, or the snapshot's
-              inputs change.
+Touch when:   never for a new repository; a label is added to what a row records about the loop, or
+              the snapshot's inputs change.
 """
 
 from __future__ import annotations

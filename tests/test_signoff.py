@@ -35,9 +35,9 @@ Works with:   src/crb/core/signoff.py (under test), src/crb/core/capability.py (
               wraps), tests/test_server_routes_signoffs.py (the same decision as HTTP 409),
               docs/EVIDENCE-AND-CLAIMS.md (what a signed cell may be claimed to mean)
 Tested by:    tests/test_signoff.py
-Touch when:   the policy gains a clause or a version (a refusal case, the defaults case and the
-              older-record tolerance case together; update docs/EVIDENCE-AND-CLAIMS.md and the
-              decision log).
+Touch when:   never for a new repository; the policy gains a clause or a version (a refusal case,
+              the defaults case and the older-record tolerance case together; update
+              docs/EVIDENCE-AND-CLAIMS.md and the decision log).
 """
 
 from __future__ import annotations

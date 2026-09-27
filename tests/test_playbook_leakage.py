@@ -25,7 +25,8 @@ Works with:   src/crb/core/playbook.py (under test), src/crb/core/prevention.py 
               the snapshot that carry the lines), src/crb/builders/base.py (the brief the lines
               are rendered in), tests/fixtures/shell_corpus.txt (the honest corpus)
 Tested by:    tests/test_playbook_leakage.py
-Touch when:   a template or a slot is added (plant a canary in its source here first).
+Touch when:   never for a new repository; a template or a slot is added (plant a canary in its
+              source here first).
 """
 
 from __future__ import annotations

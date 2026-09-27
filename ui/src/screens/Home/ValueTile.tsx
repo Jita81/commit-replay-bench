@@ -21,8 +21,8 @@
  *               (the tile anatomy), ui/src/api/hooks.ts (`useValue`), ui/src/help/hints.ts
  *               (`stat.home.value`), src/crb/server/routes/value.py (the route it reads)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
- * Touch when:   the scorecard's headline changes in src/crb/core/value.py (keep the unit, the
- *               n and the method in step).
+ * Touch when:   never for a new repository; the scorecard's headline changes in
+ *               src/crb/core/value.py (keep the unit, the n and the method in step).
  */
 
 import { useValue } from '../../api/hooks'

@@ -33,9 +33,9 @@
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx (controls verdict + split),
  *               ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/src/screens/Runs/RunDetailPage.test.tsx
- * Touch when:   a failure kind, reason code or controls state is added on the server (an ADR
- *               amendment; docs/API.md "/capability-map") — extend the union and its display
- *               row here; never for a new repository.
+ * Touch when:   never for a new repository; a failure kind, reason code or controls state is added
+ *               on the server (an ADR amendment; docs/API.md "/capability-map") — extend the union
+ *               and its display row here.
  * Claims:       The controls verdict shown is the one every cell was routed under; a pass-rate
  *               is shown with its split, never alone
  *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).

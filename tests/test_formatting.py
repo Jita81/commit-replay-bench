@@ -19,7 +19,8 @@ Works with:   src/crb/core/formatting.py (under test), src/crb/core/lint.py (the
               reuses), tests/fixtures/langs/gorepo.py and tests/fixtures/langs/__init__.py
               (the repositories)
 Tested by:    tests/test_formatting.py
-Touch when:   a formatter is added to ``FORMATTER_WRITE`` or detection changes.
+Touch when:   never for a new repository; a formatter is added to ``FORMATTER_WRITE`` or detection
+              changes.
 """
 
 from __future__ import annotations

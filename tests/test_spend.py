@@ -18,7 +18,8 @@ Works with:   src/crb/core/spend.py (under test), tests/test_worker_spend.py (th
               bound to a run end to end), src/crb/core/ledger.py (the rows and failure kinds
               the rules read), tests/test_spend_from_export.py (the same rules over the export)
 Tested by:    tests/test_spend.py
-Touch when:   a bar, a minimum n, the margin or the ceiling changes; a cap is added to Budget.
+Touch when:   never for a new repository; a bar, a minimum n, the margin or the ceiling changes; a
+              cap is added to Budget.
 """
 
 from __future__ import annotations

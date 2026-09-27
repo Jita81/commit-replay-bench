@@ -19,8 +19,8 @@ Works with:   scripts/value_baseline.py (under test), src/crb/core/value.py (the
               feeds), src/crb/core/ledger.py (``derive_failure_kind`` — the rule it applies),
               docs/reviews/2026-09-25-value-baseline.md (the page it regenerates)
 Tested by:    tests/test_value_baseline_script.py
-Touch when:   the export's columns or error classes change (add the class to ``ERRCLASS`` and a
-              case here), or the review export gains a column.
+Touch when:   never for a new repository; the export's columns or error classes change (add the
+              class to ``ERRCLASS`` and a case here), or the review export gains a column.
 """
 
 from __future__ import annotations

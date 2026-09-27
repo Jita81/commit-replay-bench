@@ -36,10 +36,10 @@ Works with:   src/crb/builders/openai_agent.py and src/crb/builders/editblock.py
               variables ``EndpointConfig.from_env`` reads)
 Tested by:    tests/test_builders_openai_agent.py, tests/test_builders_editblock.py,
               tests/test_builders_labeller.py
-Touch when:   pointing the factory at another OpenAI-compatible provider — set
-              ``CRB_OPENAI_BASE_URL`` / ``CRB_OPENAI_KEY_ENV`` (docs/OPERATOR.md), not the
-              defaults here; a new retryable status joins ``RETRY_STATUSES``; a provider
-              whose usage block differs changes ``_usage_of`` with a fake-response test.
+Touch when:   never for a new repository; pointing the factory at another OpenAI-compatible provider
+              — set ``CRB_OPENAI_BASE_URL`` / ``CRB_OPENAI_KEY_ENV`` (docs/OPERATOR.md), not the
+              defaults here; a new retryable status joins ``RETRY_STATUSES``; a provider whose usage
+              block differs changes ``_usage_of`` with a fake-response test.
 """
 
 from __future__ import annotations

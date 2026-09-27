@@ -40,9 +40,9 @@ Works with:   src/crb/core/deps.py (the seam types and the refusal vocabulary),
               Node lockfile, for the host's eras), src/crb/core/spec.py (``RepoConfig.runner`` and
               ``runner_opts``)
 Tested by:    tests/test_provision.py
-Touch when:   a lock format becomes provisioned (a parser here, a recipe under
-              src/crb/provision/, and a row in docs/DEPLOYMENT.md §3.4); never for a new
-              repository — its lockfiles are read as committed.
+Touch when:   never for a new repository — its lockfiles are read as committed; a lock format
+              becomes provisioned (a parser here, a recipe under src/crb/provision/, and a row in
+              docs/DEPLOYMENT.md §3.4).
 """
 
 from __future__ import annotations

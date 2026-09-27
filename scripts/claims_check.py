@@ -86,8 +86,9 @@ Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the sh
               .github/workflows/ci.yml (the claims job that runs --check),
               scripts/code_map.py (the same gate idiom: parse, validate, --check)
 Tested by:    tests/test_claims_check.py
-Touch when:   a tag is added to the policy (update TAGS and EVIDENCE-AND-CLAIMS §1 together);
-              a page joins the allowlist (add it and make it pass in the same change).
+Touch when:   never for a new repository; a tag is added to the policy (update TAGS and
+              EVIDENCE-AND-CLAIMS §1 together); a page joins the allowlist (add it and make it pass
+              in the same change).
 """
 
 from __future__ import annotations

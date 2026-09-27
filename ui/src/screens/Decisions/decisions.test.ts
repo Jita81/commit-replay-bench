@@ -20,7 +20,7 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Decisions/decisions.ts (under test)
  * Tested by:    ui/src/screens/Decisions/decisions.test.ts
- * Touch when:   a human act is added to the product.
+ * Touch when:   never for a new repository; a human act is added to the product.
  */
 
 import { describe, expect, it } from 'vitest'

@@ -30,8 +30,8 @@
  *               the terms, no write affordance in the three reports, the register card and its
  *               operator controls); the derivations are pinned in
  *               tests/test_learn.py and the routes in tests/test_server_routes_learn.py
- * Touch when:   a report gains a field (src/crb/core/learn.py — mirror the interface here)
- *               or a fourth play is added to docs/LEARNING-LOOP.md; never for a new repository.
+ * Touch when:   never for a new repository; a report gains a field (src/crb/core/learn.py — mirror
+ *               the interface here) or a fourth play is added to docs/LEARNING-LOOP.md.
  */
 import { useMemo } from 'react'
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'

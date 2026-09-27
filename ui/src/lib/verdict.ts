@@ -41,10 +41,10 @@
  *               ui/src/index.css (the tone tokens the classes name)
  * Tested by:    ui/src/lib/verdict.test.ts (the copy, every hint id and every action), ui/src/components/VerdictPill.test.tsx,
  *               ui/src/components/BeltPills.test.tsx
- * Touch when:   a route, run status, belt, band or tier is added on the server (an apparatus or
- *               policy change with its ADR) — add the row here and the type in
- *               ui/src/api/types.ts; an event action is added in src/crb (add its sentence to
- *               `ACTION_HELP`); never for a new repository.
+ * Touch when:   never for a new repository; a route, run status, belt, band or tier is added on the
+ *               server (an apparatus or policy change with its ADR) — add the row here and the type
+ *               in ui/src/api/types.ts; an event action is added in src/crb (add its sentence to
+ *               `ACTION_HELP`).
  */
 
 import type { CellVerdict, OracleBand, OracleGate, ProbeStatus, RunStatus, StepStatus, VerificationTier } from '../api/types'

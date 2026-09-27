@@ -46,8 +46,8 @@
  *               ui/src/screens/Home/ValueTile.tsx (the scorecard tile)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
- * Touch when:   a task is added to the walk (connection.ts first; its `task.home.*` hint in
- *               hints.ts second).
+ * Touch when:   never for a new repository; a task is added to the walk (connection.ts first; its
+ *               `task.home.*` hint in hints.ts second).
  */
 
 import { useMemo } from 'react'

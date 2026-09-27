@@ -20,7 +20,8 @@ Works with:   docs/adr/0015-signoffs-expire-with-the-apparatus.md (the shape it 
               docs/DECISION-LOG.md (the rows the status lines cite), docs/PREVENTION.md (P-036,
               the class it stops), tests/test_header_width.py (the same width rule for code)
 Tested by:    tests/test_adr_shape.py
-Touch when:   an ADR is added (it is picked up by number) or the house shape changes.
+Touch when:   never for a new repository; an ADR is added (it is picked up by number) or the house
+              shape changes.
 """
 
 from __future__ import annotations

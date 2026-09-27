@@ -37,9 +37,9 @@ Works with:   deploy/helm/crb/templates/_helpers.tpl (the ``crb.secretsStore*`` 
               docs/DEPLOYMENT.md (§3.2 and §5, the placement rule and the recovery procedure),
               docs/PREVENTION.md (P-043, P-046 to P-049, the rows this suite closes)
 Tested by:    tests/test_deploy_secrets_store.py
-Touch when:   a pod that reads or writes the secrets store is added to the chart, or the
-              store's resolution changes in src/crb/core/secrets_file.py; never give the API
-              and the worker separate stores.
+Touch when:   never for a new repository; a pod that reads or writes the secrets store is added to
+              the chart, or the store's resolution changes in src/crb/core/secrets_file.py; never
+              give the API and the worker separate stores.
 """
 
 from __future__ import annotations

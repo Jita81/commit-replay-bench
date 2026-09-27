@@ -48,9 +48,9 @@ Works with:   src/crb/server/routes/signoffs.py (under test), src/crb/core/signo
               docs/EVIDENCE-AND-CLAIMS.md (what a signed cell may be claimed to mean, §6a),
               docs/API.md
 Tested by:    tests/test_server_routes_signoffs.py
-Touch when:   the policy gains a clause (a 409 case naming its code, a helper that clears it,
-              the preview case and ui/src/api/types.ts); never to make a clause overridable
-              without the decision log.
+Touch when:   never for a new repository; the policy gains a clause (a 409 case naming its code, a
+              helper that clears it, the preview case and ui/src/api/types.ts); never to make a
+              clause overridable without the decision log.
 """
 
 from __future__ import annotations

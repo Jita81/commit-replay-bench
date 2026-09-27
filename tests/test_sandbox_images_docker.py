@@ -60,10 +60,11 @@ Works with:   deploy/sandbox/Dockerfile.python, deploy/sandbox/Dockerfile.node,
               same walls on the inline test image, plus the kill path),
               .github/workflows/ci.yml (the ``sandbox-images`` job that builds and runs this)
 Tested by:    tests/test_sandbox_images_docker.py
-Touch when:   a reference image is added under deploy/sandbox (add its language to
-              ``conftest_langs.SHIPPED_SANDBOX_LANGS``, its fixture, its net probe and its
-              expected gold change here, and a build + smoke leg in ci.yml); a Dockerfile
-              changes what it carries (the fixture must still need nothing but the toolchain).
+Touch when:   never for a new repository in a shipped language; a reference image is added under
+              deploy/sandbox (add its language to ``conftest_langs.SHIPPED_SANDBOX_LANGS``, its
+              fixture, its net probe and its expected gold change here, and a build + smoke leg in
+              ci.yml); a Dockerfile changes what it carries (the fixture must still need nothing but
+              the toolchain).
 """
 
 from __future__ import annotations

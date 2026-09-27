@@ -24,7 +24,8 @@ Works with:   src/crb/core/provision.py (under test), src/crb/core/deps.py (the 
               vocabulary and the selector), tests/fixtures/goproxy.py (real go.sum lines),
               tests/fixtures/langs/gorepo_deps.py (the D4 shape)
 Tested by:    tests/test_provision.py
-Touch when:   a lock format or a refusal rule changes in src/crb/core/provision.py.
+Touch when:   never for a new repository; a lock format or a refusal rule changes in
+              src/crb/core/provision.py.
 """
 
 from __future__ import annotations

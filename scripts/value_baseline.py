@@ -50,9 +50,9 @@ Works with:   src/crb/core/value.py (the report), src/crb/core/ledger.py (the fa
               docs/reviews/2026-09-25-value-baseline.md (the page it regenerates),
               docs/reviews/2026-09-13-critical-friend.md (the three cobra verdicts)
 Tested by:    tests/test_value_baseline_script.py
-Touch when:   the export gains a column or an error class (add it to ``ERRCLASS``); the
-              baseline page is regenerated after a campaign (run it, paste the output, keep
-              the tags).
+Touch when:   never for a new repository; the export gains a column or an error class (add it to
+              ``ERRCLASS``); the baseline page is regenerated after a campaign (run it, paste the
+              output, keep the tags).
 """
 
 from __future__ import annotations

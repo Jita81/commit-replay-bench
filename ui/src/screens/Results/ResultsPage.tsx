@@ -52,8 +52,8 @@
  *               (the full grid), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
- * Touch when:   a headline fact is added to the map summary; the wording of what `deliver`
- *               means changes (EVIDENCE-AND-CLAIMS §6 first).
+ * Touch when:   never for a new repository; a headline fact is added to the map summary; the
+ *               wording of what `deliver` means changes (EVIDENCE-AND-CLAIMS §6 first).
  */
 
 import { useMemo, type ReactNode } from 'react'
@@ -274,7 +274,9 @@ export function ResultsPage() {
   const controlsNotRun = controls.isError && isApiError(controls.error) && controls.error.status === 404
   const oracleNotRun = oracle.isError && isApiError(oracle.error) && oracle.error.status === 404
   const verdict = controlsData?.verdict
-  const apparatus = mapData ? `apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'} · Wilson 95%` : '—'
+  // Every tile the map feeds names the apparatus its rows were graded under (PR #56 review).
+  const mapApparatus = mapData ? `apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'}` : 'apparatus —'
+  const apparatus = mapData ? `${mapApparatus} · Wilson 95%` : '—'
   const oracleMean = oracleData && oracleData.tasks.length > 0 ? oracleData.tasks.reduce((a, t) => a + (t.strength ?? 0), 0) / oracleData.tasks.length : null
   // the bar is the policy in force, never a constant; the apparatus is the report's own
   const oracleBar = mapData ? mapData.policy.min_oracle_strength : null
@@ -356,9 +358,10 @@ export function ResultsPage() {
                 label="Posture"
                 value={mapData.summary.posture_class || '—'}
                 n={mapData.summary.n_total}
-                apparatus={`every rate here was graded in this posture · ${mapData.summary.unqualified_posture ?? 0} unqualified-posture rows excluded`}
+                ci={null}
+                apparatus={`${mapApparatus} · every rate here was graded in this posture · ${mapData.summary.unqualified_posture ?? 0} unqualified-posture rows excluded`}
                 hint="stat.results.posture"
-                footer={mapData.summary.excluded_posture_divergent ? `${mapData.summary.excluded_posture_divergent} rows left out: their tests differ between postures` : undefined}
+                footer={`no interval: a posture and row counts, not a rate${mapData.summary.excluded_posture_divergent ? ` · ${mapData.summary.excluded_posture_divergent} rows left out: their tests differ between postures` : ''}`}
                 data-testid="tile-posture"
               />
             </div>
@@ -376,7 +379,7 @@ export function ResultsPage() {
                       label={<Term id={r}>{r}</Term>}
                       value={String(byRoute[r]?.cells ?? 0)}
                       n={byRoute[r]?.n ?? 0}
-                      apparatus={`${byRoute[r]?.cells ?? 0} of ${measured.length} measured cells`}
+                      apparatus={`${mapApparatus} · ${byRoute[r]?.cells ?? 0} of ${measured.length} measured cells`}
                       tone={r === 'deliver' ? 'green' : r === 'human' ? 'amber' : 'muted'}
                       hint={ROUTE_TILE_HINT[r]}
                     />
@@ -405,10 +408,10 @@ export function ResultsPage() {
                 )}
                 <h3 className="mb-3 text-[24px] font-bold leading-[1.3]">Economics</h3>
                 <div className="mb-4 grid gap-3 sm:grid-cols-4">
-                  <StatTile label="Cost per attempt" value={economics.perAttempt === null ? '—' : `$${economics.perAttempt.toFixed(2)}`} n={economics.n} apparatus="a mean of builder-reported $ over cells with a known cost, current apparatus — no interval yet: the API serves the mean only" hint="stat.results.cost_per_attempt" />
-                  <StatTile label="Cost per clean attempt" value={economics.perClean === null ? '—' : `$${economics.perClean.toFixed(2)}`} n={economics.clean} apparatus={`${economics.clean} clean of ${economics.n} — the same mean divided by the clean rate; no interval`} hint="stat.results.cost_per_clean" />
-                  <StatTile label="Latency per attempt" value={economics.latency === null ? '—' : `${Math.floor(Math.round(economics.latency) / 60)}m ${Math.round(economics.latency) % 60}s`} n={economics.n} apparatus="a mean over cells with a known latency — no interval yet: the API serves the mean only" hint="stat.results.latency" />
-                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} apparatus="all attempts, all cells — never a routing input" hint="stat.results.clean_rate" />
+                  <StatTile label="Cost per attempt" value={economics.perAttempt === null ? '—' : `$${economics.perAttempt.toFixed(2)}`} n={economics.n} apparatus={`${mapApparatus} · a mean of builder-reported $ over cells with a known cost — no interval yet: the API serves the mean only`} hint="stat.results.cost_per_attempt" />
+                  <StatTile label="Cost per clean attempt" value={economics.perClean === null ? '—' : `$${economics.perClean.toFixed(2)}`} n={economics.clean} apparatus={`${mapApparatus} · ${economics.clean} clean of ${economics.n} — the same mean divided by the clean rate; no interval`} hint="stat.results.cost_per_clean" />
+                  <StatTile label="Latency per attempt" value={economics.latency === null ? '—' : `${Math.floor(Math.round(economics.latency) / 60)}m ${Math.round(economics.latency) % 60}s`} n={economics.n} apparatus={`${mapApparatus} · a mean over cells with a known latency — no interval yet: the API serves the mean only`} hint="stat.results.latency" />
+                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} apparatus={`${mapApparatus} · all attempts, all cells — never a routing input`} hint="stat.results.clean_rate" />
                 </div>
                 <Hint as="div" id="banner.results.no_throughput">
                   <WarningCallout title="No throughput headline">

@@ -29,8 +29,9 @@ Works with:   src/crb/server/routes/system.py (under test), src/crb/observabilit
               these endpoints), docs/API.md (health / metrics), docs/DEPLOYMENT.md (the go-live
               checklist that points at the ``migrations`` probe)
 Tested by:    tests/test_server_system.py
-Touch when:   a probe is added (its role gating and its degraded / down case; the Helm probes in
-              tests/test_deploy_health_probes.py if it changes liveness); a metric series is added.
+Touch when:   never for a new repository; a probe is added (its role gating and its degraded / down
+              case; the Helm probes in tests/test_deploy_health_probes.py if it changes liveness); a
+              metric series is added.
 """
 
 from __future__ import annotations

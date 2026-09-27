@@ -24,7 +24,7 @@
  *               ui/src/screens/Learn/register.fixture.ts (the register), ui/src/test/utils.tsx
  *               (renders the page with a mocked API)
  * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx
- * Touch when:   a fourth report is added.
+ * Touch when:   never for a new repository; a fourth report is added.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

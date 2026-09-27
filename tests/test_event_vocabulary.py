@@ -26,7 +26,8 @@ Works with:   docs/API.md (the table), src/crb/observability/events.py (the enve
               ``timed`` suffixes), src/crb/builders/adapter.py (``BUILDER_EVENT_PREFIX``),
               src/crb/server/worker.py and src/crb/factory/loop.py (the largest emitters)
 Tested by:    tests/test_event_vocabulary.py
-Touch when:   an action is added or renamed — write its row in docs/API.md first.
+Touch when:   never for a new repository; an action is added or renamed — write its row in
+              docs/API.md first.
 """
 
 from __future__ import annotations

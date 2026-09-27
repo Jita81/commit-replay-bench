@@ -36,9 +36,9 @@ Works with:   src/crb/server/settings.py (the rule), src/crb/server/worker_main.
               deploy/helm/crb/values.yaml (the chart's one builder value), docs/API.md (the
               ``posture`` shape), ui/src/api/types.ts (``DeploymentPosture``)
 Tested by:    tests/test_settings_posture.py
-Touch when:   the override changes name, a new executor kind is added (decide whether it is
-              sealed), a posture key is added (write it in docs/API.md and the UI type too), or
-              the deployment templates change the worker's executors.
+Touch when:   never for a new repository; the override changes name, a new executor kind is added
+              (decide whether it is sealed), a posture key is added (write it in docs/API.md and the
+              UI type too), or the deployment templates change the worker's executors.
 """
 
 from __future__ import annotations

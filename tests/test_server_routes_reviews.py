@@ -33,8 +33,8 @@ Works with:   src/crb/server/routes/reviews.py and src/crb/server/routes/grades.
               (``diff_stats`` — the hash the patch must match), src/crb/store/ledger.py
               (``DbReviewLedger``), tests/fixtures/server_seed.py, docs/API.md (reviews)
 Tested by:    tests/test_server_routes_reviews.py
-Touch when:   the diff hashing rule changes in the grader (this suite fails first — that is
-              its job); a retention kind is added.
+Touch when:   never for a new repository; the diff hashing rule changes in the grader (this suite
+              fails first — that is its job); a retention kind is added.
 """
 
 from __future__ import annotations

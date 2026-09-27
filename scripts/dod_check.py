@@ -47,10 +47,10 @@ Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYS
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
               .github/workflows/ci.yml (the dod job that runs --check)
 Tested by:    tests/test_dod_check.py
-Touch when:   a level or category is added to the standard (update CATEGORIES / LEVELS and the
-              standard together); a new evidence prefix is needed (add a resolver and a row to
-              STANDARD.md §3); a route or journey step is added (write its artefact — the
-              check tells you which).
+Touch when:   never for a new repository; a level or category is added to the standard (update
+              CATEGORIES / LEVELS and the standard together); a new evidence prefix is needed (add a
+              resolver and a row to STANDARD.md §3); a route or journey step is added (write its
+              artefact — the check tells you which).
 """
 
 from __future__ import annotations

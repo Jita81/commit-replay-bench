@@ -23,8 +23,8 @@ Works with:   src/crb/server/routes/runs.py and src/crb/server/routes/repos.py (
               half: the clone and ``builder_config`` reaching the builder),
               tests/test_cli_repo_url.py (the CLI's half), docs/API.md
 Tested by:    tests/test_server_routes_w3b.py
-Touch when:   a builder gains a config key (decide here whether it is identity — refused — or
-              config — stored); a retention key is added (ADR-0006).
+Touch when:   never for a new repository; a builder gains a config key (decide here whether it is
+              identity — refused — or config — stored); a retention key is added (ADR-0006).
 """
 
 from __future__ import annotations

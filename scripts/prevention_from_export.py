@@ -42,8 +42,9 @@ Works with:   src/crb/core/prevention.py (the register it builds), src/crb/core/
               failure rule the rows are read by), docs/LEARNING-LOOP.md (§7, what the numbers
               mean), scripts/claims_check.py (the same stdlib-script idiom)
 Tested by:    tests/test_prevention_from_export.py
-Touch when:   the export's columns change (``COLUMNS``), or the product's error classes do
-              (``EXPORT_ERRORS`` must map each to the kind the product's rule gives it).
+Touch when:   never for a new repository; the export's columns change (``COLUMNS``), or the
+              product's error classes do (``EXPORT_ERRORS`` must map each to the kind the product's
+              rule gives it).
 """
 
 from __future__ import annotations

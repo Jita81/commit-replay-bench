@@ -26,8 +26,8 @@ Works with:   src/crb/builders/toolcheck.py (under test), src/crb/builders/adapt
               before the builder), src/crb/core/ledger.py (``derive_failure_kind``),
               src/crb/core/runners/node_runners.py (the jest case), docs/PREVENTION.md (P-004)
 Tested by:    (this is a test file)
-Touch when:   a runner whose command does not start with its tool is added (teach
-              ``runner_tool_missing`` where the tool is).
+Touch when:   never for a new repository; a runner whose command does not start with its tool is
+              added (teach ``runner_tool_missing`` where the tool is).
 """
 
 from __future__ import annotations

@@ -17,8 +17,8 @@ Works with:   src/crb/core/patches.py (under test), src/crb/core/run.py (keeps t
               the pack), src/crb/core/workspace.py (``patch_text`` is ``diff_stats``' text),
               tests/test_server_routes_grades.py (the route that serves the kept bytes)
 Tested by:    tests/test_patches.py
-Touch when:   the patch note or the store layout changes; ``Workspace.diff_stats`` changes what
-              it hashes.
+Touch when:   never for a new repository; the patch note or the store layout changes;
+              ``Workspace.diff_stats`` changes what it hashes.
 """
 
 from __future__ import annotations

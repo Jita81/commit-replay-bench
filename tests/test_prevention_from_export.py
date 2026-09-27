@@ -16,7 +16,8 @@ ADRs:         docs/adr/0020-a-bug-is-closed-by-prevention.md
 Works with:   scripts/prevention_from_export.py (under test), src/crb/core/prevention.py (the
               register it builds), src/crb/core/ledger.py (the failure rule)
 Tested by:    tests/test_prevention_from_export.py
-Touch when:   the export's columns or the product's error classes change.
+Touch when:   never for a new repository; the export's columns or the product's error classes
+              change.
 """
 
 from __future__ import annotations

@@ -20,7 +20,7 @@
  *               ui/src/help/hints.ts (the copy the hover test expects),
  *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx
- * Touch when:   a row kind or its verb changes.
+ * Touch when:   never for a new repository; a row kind or its verb changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
