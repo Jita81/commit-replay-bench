@@ -19,7 +19,9 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   the oracle scorer is `mutation.v2`; below 2.4 rows and scores keep the frozen 2.3 rules.
   The miner counts each change once, even against tasks already mined. The executor and
   worker refuse an empty kind, docker's exit 125 is told from a suite's, and each pack and
-  worktree has its own files. The pack names the files the tests wrote.
+  worktree has its own files. The pack names the files the tests wrote. A row or an oracle
+  score below 2.4 that carries a 2.4 label or rule is refused, and no test leaves a `CRB_*`
+  setting for the next.
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
