@@ -18,7 +18,9 @@
  *               /users/{id}/sessions/revoke` behind "Sign out everywhere" (#52's revocation,
  *               the one way to end an identity-provider account's sessions). Every mutation
  *               has a success sentence that names the account. An account issued by the
- *               organisation's identity provider has no password to set here and says so.
+ *               organisation's identity provider has no password to set here and says so; it
+ *               can still be turned off here. The History names each actor by the account's
+ *               username (`actorName`), not by its id.
  * How:          `useUsers` / `useSetUserRole` / `useSetUserActive` / `useCreateUser` /
  *               `useRevokeUserSessions` / `useUserEvents`; `lastActiveAdmin` derives the
  *               guarded row from the list the screen already holds (the same rule the server
@@ -83,8 +85,19 @@ export function lastActiveAdmin(users: readonly User[]): string {
 /** The sentence the disabled controls carry, the same words as the hint and the API's refusal. */
 const LAST_ADMIN_REASON = 'This is the last active admin. Deactivating or demoting it would leave nobody who can manage accounts — activate or create a second admin first.'
 
+/**
+ * The person behind an event's actor. The record keeps the actor as the account id (the name
+ * can change; the id cannot), so the screen resolves it against the list it already holds:
+ * username, then display name. `anonymous`, `cli:<os user>` and an id no longer listed (a
+ * deleted account) are shown as recorded.
+ */
+export function actorName(actor: string, users: readonly User[]): string {
+  const u = users.find((x) => x.id === actor)
+  return u ? u.username || u.display_name || actor : actor
+}
+
 /** One account's `user.*` events, newest first, as the Configuration tab renders a repo's trace. */
-function AccountHistory({ user }: { user: User }) {
+function AccountHistory({ user, users }: { user: User; users: readonly User[] }) {
   const events = useUserEvents(user.id, { limit: 50 })
   const name = user.username || user.display_name || user.id
   return (
@@ -106,7 +119,7 @@ function AccountHistory({ user }: { user: User }) {
                   <span className="text-xs text-on-surface-muted">{fmtDate(ev.timestamp)}</span>
                   {ev.actor && (
                     <span className="text-xs text-on-surface-muted">
-                      by <span className="font-mono">{ev.actor}</span>
+                      by <span className="font-mono">{actorName(ev.actor, users)}</span>
                     </span>
                   )}
                   {typeof ev.payload.by === 'string' && <span className="text-xs text-on-surface-muted">({ev.payload.by})</span>}
@@ -341,7 +354,7 @@ export function UsersCard() {
           Roles are a ladder: viewer, operator, approver, admin. An approver account is what sign-off needs; local accounts are for bootstrap and air-gapped installs. Guide: <DocLink to="SECURITY#34-authentication-and-authorisation--crbserverauth">How sign-in and roles work</DocLink>.
         </p>
         <p className="m-0 text-sm text-on-surface-muted" data-testid="users-not-here">
-          Not here: there is no email reset, no self-service unlock and no security questions. A person who cannot sign in asks an admin to set a new password; an account issued by your identity provider has its password and its disabling there, not here; and when no admin can sign in at all, the way back is <code className="font-mono">crb users</code> on the API host — <DocLink to="OPERATOR#9-users">Users, and what to do when nobody can sign in</DocLink>.
+          Not here: there is no email reset, no self-service unlock and no security questions. A person who cannot sign in asks an admin to set a new password; an account issued by your identity provider has its password there — turning it off here refuses it on this deployment; disabling it at the provider stops it everywhere; and when no admin can sign in at all, the way back is <code className="font-mono">crb users</code> on the API host — <DocLink to="OPERATOR#9-users">Users, and what to do when nobody can sign in</DocLink>.
         </p>
         <QueryBoundary query={users} loading="Loading users…">
           {(page) => <DataTable rows={page.items} columns={columns} rowKey={(u) => u.id} caption="Users" dense empty={<EmptyState compact title="No users" reason="Create the first local account below." />} />}
@@ -354,7 +367,7 @@ export function UsersCard() {
         {setRole.isError && <ErrorState compact error={setRole.error} />}
         {setActive.isError && <ErrorState compact error={setActive.error} />}
         {revoke.isError && <ErrorState compact error={revoke.error} />}
-        {shown && <AccountHistory user={shown} />}
+        {shown && <AccountHistory user={shown} users={rows} />}
         <form onSubmit={submit} className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
           <TextField label="Username" hint="field.settings.new_username" required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
           <TextField label="Display name" hint="field.settings.new_display" required value={display} onChange={(e) => setDisplay(e.target.value)} />

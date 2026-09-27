@@ -15,9 +15,10 @@
  *               sign-in, the password set and the new sign-in, each with its actor. The time
  *               from the wrong password to the new sign-in is measured and attached to the
  *               test as a `recovery-ms` annotation, and must stay under `RECOVERY_BUDGET_MS`.
- * How:          The `test` fixture's page is the signed-in bootstrap admin; the person uses
- *               two fresh browser contexts; the new password is a fresh per-run value derived
- *               with `personaPassword`, never printed; `performance.now()` brackets the walk.
+ * How:          The `test` fixture's page is the signed-in bootstrap admin (the History must
+ *               name it, not its id); the person uses two fresh browser contexts; the new
+ *               password is a fresh per-run value derived with `personaPassword`, never
+ *               printed; `performance.now()` brackets the walk.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts (`field`, `env`, `personaPassword`, `test`),
@@ -128,7 +129,10 @@ test.describe('13 recover an account', () => {
     const newest = history.getByTestId('account-history-event')
     // newest first: the new sign-in, the password set, the refused sign-in
     await expect(newest.nth(0)).toHaveAttribute('data-action', 'user.login')
+    // the actor is named as a person reads it, not as the account id the record keeps
+    await expect(newest.nth(0)).toContainText(`by ${PERSON}`)
     await expect(newest.nth(1)).toHaveAttribute('data-action', 'user.password_set')
+    await expect(newest.nth(1)).toContainText(`by ${env.user}`)
     await expect(newest.nth(2)).toHaveAttribute('data-action', 'user.login_failed')
     await expect(newest.nth(2)).toContainText('by anonymous')
     expect((await page.locator('main').textContent()) ?? '').not.toContain(fresh)

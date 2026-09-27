@@ -19,8 +19,8 @@ npm run walkthrough                 # (from ui/) against a stack YOU booted — 
 From a **git worktree**, put its `src` first: `PYTHONPATH=$PWD/src scripts/walkthrough.sh`.
 The venv's editable install imports the main checkout's `crb`, so without it the API and
 worker under test are main's while the UI bundle is the worktree's — a spec then fails on
-(or, worse, passes against) a server that does not carry the change. Print
-`crb.server.app.__file__` from `CRB_PYTHON` when in doubt.
+(or, worse, passes against) a server that does not carry the change. The script refuses to
+start when `CRB_PYTHON` imports `crb` from any tree but this one, and names both (P-060).
 
 ## Two tiers
 

@@ -162,6 +162,8 @@ describe('ClaudeCodeLoginCard', () => {
     await user.click(verify)
     const result = await screen.findByTestId('claude-login-verify-result')
     expect(result).toHaveAttribute('data-status', 'ok')
+    // the result is announced: it is a live region, not a line a screen reader never hears
+    expect(result).toHaveAttribute('role', 'status')
     expect(result).toHaveTextContent('ok — the login works')
     expect(result).toHaveTextContent('claude-haiku-4-5 · claude 2.1.132 (Claude Code) · 2.4s')
     await user.click(verify)
@@ -244,6 +246,8 @@ describe('ClaudeCodeLoginCard', () => {
     // polled to done: the result names only the fingerprint and the list now shows the login's token
     await waitFor(() => expect(screen.getByTestId('claude-signin-result')).toHaveAttribute('data-state', 'done'), { timeout: 5000 })
     expect(screen.getByTestId('claude-signin-result')).toHaveTextContent('token stored …GOOD')
+    // the success sentence is a live region (settings.accessibility.12)
+    expect(screen.getByTestId('claude-signin-result')).toHaveAttribute('role', 'status')
     await waitFor(() => expect(screen.getByTestId('claude-login-status')).toHaveAttribute('data-present', 'true'))
     expect(screen.getByTestId('claude-login-provenance')).toHaveTextContent('login:Ada')
     expect(document.body.textContent).not.toContain(TOKEN)
@@ -270,6 +274,8 @@ describe('ClaudeCodeLoginCard', () => {
     await user.click(screen.getByTestId('claude-signin-submit'))
     await waitFor(() => expect(screen.getByTestId('claude-signin-result')).toHaveAttribute('data-state', 'failed'), { timeout: 5000 })
     expect(screen.getByTestId('claude-signin-result')).toHaveTextContent('Invalid authorization code')
+    // a failed sign-in is an error, announced at once (settings.accessibility.12)
+    expect(screen.getByTestId('claude-signin-result')).toHaveAttribute('role', 'alert')
     // and the button is free again for another attempt
     expect(screen.getByTestId('claude-signin-start')).toBeEnabled()
   })

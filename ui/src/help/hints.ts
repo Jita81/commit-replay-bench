@@ -1566,7 +1566,7 @@ export const HINTS = {
   'col.settings.account_kind':
     'Where the account is issued: local means this deployment holds its password; oidc means the organisation’s identity provider does.',
   'pill.settings.account_kind':
-    'A local account signs in with a password held here, so an admin can set it. An oidc account is managed by your identity provider: its password and its disabling are the provider’s.',
+    'A local account signs in with a password held here, so an admin can set it. An oidc account’s password belongs to your identity provider. Turning it off here refuses it on this deployment; disabling it at the provider stops it everywhere.',
   'col.settings.active':
     'Whether the account can sign in. A deactivated account is refused on its very next request.',
   'toggle.settings.user_active':
@@ -1582,7 +1582,7 @@ export const HINTS = {
   'button.settings.set_password':
     'Set a new password for this account. Only an admin may set another account’s password — you change your own in the “Change my password” card above. It ends every session the account holds, so the person signs in again with the new one, and only a local account has a password to set at all.',
   'button.settings.account_history':
-    'Show the account’s audit trail — created, role set, password set, deactivated, reactivated, signed out everywhere, and each sign-in and failed sign-in — with who did it and when.',
+    'Show the account’s audit trail — created, role set, password set, deactivated, reactivated, signed out everywhere, and each sign-in and failed sign-in — with who did it (by username) and when.',
   'field.settings.set_password':
     'The new password for this account: at least 12 characters. It is never shown back and never recorded in the audit trail.',
   'field.settings.set_password_confirm':
@@ -1600,7 +1600,7 @@ export const HINTS = {
   'tile.settings.my_password':
     'Change the password of the account you are signed in as. This browser stays signed in; every other session of the account ends.',
   'field.settings.my_current_password':
-    'Your current password, which proves the session is yours and not a borrowed one. Five wrong attempts in a minute stop further tries — the refusal says how many seconds to wait.',
+    'Your current password, which proves the session is yours and not a borrowed one. Five wrong attempts in a minute, for this account from this address, stop further tries — the refusal says how many seconds to wait.',
   'field.settings.my_new_password':
     'Your new password: at least 12 characters. It is never shown back.',
   'field.settings.my_new_password_confirm':

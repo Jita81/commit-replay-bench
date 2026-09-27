@@ -945,6 +945,30 @@ def _trail(app: Any, username: str) -> list[Any]:
         return rows
 
 
+def _racing_user_login(calls: dict[str, int], *, lose_times: int) -> Any:
+    """A ``record_user_event`` that stages a lost ``seq`` race on the first ``lose_times``
+    ``user.login`` writes: it adds a twin row with the same ``(trace_id, seq)`` to the
+    transaction, so the commit breaks ``uq_events_trace_seq`` exactly as a concurrent
+    sign-in's would."""
+    from crb.server.routes.admin import record_user_event as real_record
+    from crb.store.models import Event
+
+    def racing(db: Any, **kw: Any) -> None:
+        real_record(db, **kw)
+        if kw["action"] != "user.login":
+            return
+        calls["login"] += 1
+        if calls["login"] <= lose_times:
+            (mine,) = [o for o in db.new if isinstance(o, Event) and o.action == "user.login"]
+            twin = Event(
+                **{c.name: getattr(mine, c.name) for c in Event.__table__.columns if c.name != "id"}
+            )
+            twin.event_id = "f" * 32
+            db.add(twin)
+
+    return racing
+
+
 class TestSignInIsAudited:
     """G-190: who signed in, and who tried, is on the account's own trail — the History the
     Users card renders — not only in the server log."""
@@ -1026,6 +1050,73 @@ class TestSignInIsAudited:
         assert calls["n"] == 2
         actions = [e.action for e in _trail(client.app, "root")]
         assert actions.count("user.login") == 1
+
+    def test_an_unknown_username_never_reaches_the_server_log(
+        self, client: TestClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A password typed into the username box must not be stored anywhere we write —
+        not the audit table (above) and not the server log either. A name that is a local
+        account is logged (an operator needs it); any other is logged as unknown."""
+        import logging
+
+        caplog.set_level(logging.DEBUG)
+        typed = "Summer2026-my-real-password"
+        r = client.post(f"{API_PREFIX}/auth/login", json={"username": typed, "password": "x" * 12})
+        assert r.status_code == 401
+        leaked = [rec for rec in caplog.records if typed in repr(vars(rec))]
+        assert not leaked, [(rec.name, rec.getMessage()) for rec in leaked]
+        client.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": "x" * 12})
+        named = [rec for rec in caplog.records if getattr(rec, "username", None) == "root"]
+        assert named, "a failed sign-in to a real account still names the account in the log"
+
+    def test_an_oidc_sign_in_that_loses_the_seq_race_is_retried_not_refused(
+        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DL-071 (3) holds for the organisation door too: the callback's ``user.login`` is
+        written through the retrying commit, so a lost race is written again, not a 500."""
+        import crb.server.routes.auth as routes_auth
+
+        calls = {"login": 0}
+        monkeypatch.setattr(
+            routes_auth, "record_user_event", _racing_user_login(calls, lose_times=1)
+        )
+        app, _ = oidc_app
+        c = _oidc_login(app, make_settings(tmp_path, oidc=OIDC_SETTINGS))
+        try:
+            me = c.get(f"{API_PREFIX}/auth/me").json()
+        finally:
+            c.__exit__(None, None, None)
+        assert calls["login"] == 2
+        evs = _user_events(app, "user.login")
+        assert len(evs) == 1 and evs[0].actor == me["id"]
+
+    def test_an_oidc_sign_in_that_keeps_losing_returns_to_login_not_a_500(
+        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DL-071 (4): every callback failure is a redirect. A race lost on every attempt
+        lands on ``/login?error=oidc_failed`` with no session, never a raw 500."""
+        import crb.server.routes.auth as routes_auth
+
+        calls = {"login": 0}
+        monkeypatch.setattr(
+            routes_auth, "record_user_event", _racing_user_login(calls, lose_times=99)
+        )
+        app, _ = oidc_app
+        settings = make_settings(tmp_path, oidc=OIDC_SETTINGS)
+        with TestClient(app, raise_server_exceptions=False) as c:
+            c.get(f"{API_PREFIX}/auth/oidc/start?next=/runs", follow_redirects=False)
+            pending = read_oidc_cookie(settings, c.cookies[OIDC_COOKIE])
+            r = c.get(
+                f"{API_PREFIX}/auth/oidc/callback",
+                params={"code": "good-code", "state": pending.state},
+                follow_redirects=False,
+            )
+            assert r.status_code == 302, r.text
+            loc = urlparse(r.headers["location"])
+            assert loc.path == "/login"
+            assert parse_qs(loc.query) == {"error": ["oidc_failed"], "next": ["/runs"]}
+            assert SESSION_COOKIE not in c.cookies
+        assert _user_events(app, "user.login") == []
 
     def test_a_rate_limited_attempt_writes_no_event(self, client: TestClient) -> None:
         for _ in range(5):
@@ -1169,3 +1260,77 @@ def test_the_sign_in_page_states_the_session_length_the_server_sets(tmp_path: Pa
         r = c.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
         cookie = next(v for v in r.headers.get_list("set-cookie") if v.startswith(SESSION_COOKIE))
         assert f"Max-Age={default_ttl}" in cookie
+
+
+def _hint(key: str) -> str:
+    """The text of one hint in ui/src/help/hints.ts, as the bubble shows it."""
+    import re
+
+    source = Path("ui/src/help/hints.ts").read_text(encoding="utf-8")
+    m = re.search(rf"'{re.escape(key)}':\s*'((?:[^'\\]|\\.)*)'", source)
+    assert m, f"no hint {key!r}"
+    return m.group(1)
+
+
+def test_the_recovery_hints_state_the_numbers_the_server_enforces() -> None:
+    """recover-an-account.truth.4: the numbers that decide a recovery act are stated in the
+    hint of the field or control they govern, and they are the server's numbers. Change the
+    floor, the limiter or the session length without the hint (or drop the number from the
+    hint) and this fails."""
+    from crb.server.auth import LoginRateLimiter
+    from crb.server.settings import MIN_PASSWORD_LENGTH
+
+    floor = f"at least {MIN_PASSWORD_LENGTH} characters"
+    for key in (
+        "field.settings.set_password",
+        "field.settings.new_password",
+        "field.settings.my_new_password",
+    ):
+        assert floor in _hint(key), key
+
+    limiter = LoginRateLimiter()
+    words = {5: "Five", 3: "Three", 10: "Ten"}
+    assert limiter.window_s == 60.0
+    tries = _hint("field.settings.my_current_password")
+    assert f"{words[limiter.limit]} wrong attempts in a minute" in tries
+    assert "for this account from this address" in tries
+    assert "how many seconds to wait" in tries
+
+    hours = Settings.model_fields["session_ttl"].default // 3600
+    assert f"({hours} hours by default)" in _hint("toggle.settings.user_active")
+
+
+def test_every_sign_in_record_commits_through_the_retry() -> None:
+    """P-056: the retrying commit (DL-071) once covered local sign-in only; the organisation
+    callback wrote ``user.login`` and called ``db.commit()`` itself, so a lost race answered a
+    raw 500. In routes/auth.py a function that writes an audit event (directly, through a
+    nested helper, or through ``_record_failed_login``) never commits by itself: it hands the
+    write to ``_commit_audited``. Only ``_commit_audited`` and event-free functions commit."""
+    import ast
+
+    tree = ast.parse(Path("src/crb/server/routes/auth.py").read_text(encoding="utf-8"))
+    writers = {"record_user_event", "append_system_event", "_record_failed_login"}
+
+    def called(node: ast.AST) -> set[str]:
+        names: set[str] = set()
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                f = sub.func
+                names.add(f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", ""))
+        return names
+
+    offenders = [
+        fn.name
+        for fn in tree.body
+        if isinstance(fn, ast.FunctionDef)
+        and fn.name != "_commit_audited"
+        and "commit" in called(fn)
+        and called(fn) & writers
+    ]
+    assert offenders == [], f"commit an audit event through _commit_audited: {offenders}"
+    commits_audited = [
+        fn.name
+        for fn in tree.body
+        if isinstance(fn, ast.FunctionDef) and "_commit_audited" in called(fn)
+    ]
+    assert {"login", "_complete_oidc"} <= set(commits_audited)

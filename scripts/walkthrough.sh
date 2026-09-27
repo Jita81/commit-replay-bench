@@ -27,6 +27,7 @@
 #
 # Usage:  scripts/walkthrough.sh [extra playwright args…]
 #   CRB_E2E_KEEP=1        keep the temp directory even on success (path is printed)
+#   CRB_E2E_PREFLIGHT_ONLY=1  run the refusals and checks only, then exit (nothing is booted)
 #   CRB_E2E_PORT=NNNN     bind the API to a fixed port (never 8000; default: a free one)
 #   CRB_E2E_PAD=N         padding commits on the fixture history (default 40)
 #   CRB_PYTHON=…          interpreter with crb[server,dev] installed (default .venv/bin/python)
@@ -45,12 +46,12 @@
 #               repositories and a real model. It refuses to run when ``CRB_HOME`` or
 #               ``CRB_DATABASE_URL`` is already set and never binds port 8000, so it cannot touch an
 #               operator's live stack.
-# How:          Refuse-if-configured → build ``ui/dist`` if stale → build and bare-clone the
-#               fixture → export a fresh env (secret, admin, local sandbox, dev switches) →
-#               ``crb migrate`` → ``crb serve`` + ``crb worker`` on a free port → wait for
-#               ``/health`` → export the ``CRB_E2E_*`` contract → ``npx playwright test``; the
-#               trap stops only the two PIDs it started and removes only its own temp dir (kept
-#               on failure or ``CRB_E2E_KEEP=1``).
+# How:          Refuse-if-configured, or if the interpreter's crb is another checkout's → build
+#               ``ui/dist`` if stale → build and bare-clone the fixture → export a fresh env
+#               (secret, admin, local sandbox, dev switches) → ``crb migrate`` → ``crb serve``
+#               + ``crb worker`` on a free port → wait for ``/health`` → export the ``CRB_E2E_*``
+#               contract → ``npx playwright test``; the trap stops only the two PIDs it started
+#               and removes only its own temp dir (kept on failure or ``CRB_E2E_KEEP=1``).
 # Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 # ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 # Works with:   ui/e2e/walkthrough/README.md (the tiers and the spec list),
@@ -59,7 +60,8 @@
 #               src/crb/cli/main.py (``migrate`` / ``serve`` / ``worker``), .github/workflows/ci.yml
 #               (the ``walkthrough`` job)
 # Tested by:    ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
-#               (the suite it drives; the script itself has no unit test — CI runs it end to end)
+#               (the suite it drives — CI runs it end to end), tests/test_walkthrough_serves_this_tree.py
+#               (the refusal to serve another checkout's crb, P-060)
 # Touch when:   a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in
 #               the README); the server or worker CLI flags change; never to inherit an existing
 #               home, database or port.
@@ -98,9 +100,25 @@ if ! "$PY" -c "import crb.server.app" 2>/dev/null; then
   echo "walkthrough: the server layer is not installed in $PY (pip install -e '.[server,dev]')" >&2
   exit 2
 fi
+# The stack must serve THIS checkout's code. A shared editable venv imports crb from whichever
+# tree it was installed from, and the walk would then report another tree's behaviour as this
+# branch's (P-060). PYTHONPATH="$ROOT/src" makes a shared venv serve this tree.
+# (crb itself is a namespace package with no __file__, so the check reads a real module's path)
+SERVED="$("$PY" -c 'import crb.server.app as a, os; print(os.path.realpath(os.path.dirname(os.path.dirname(a.__file__))))')"
+HERE="$(cd "$ROOT/src/crb" && pwd -P)"
+if [[ "$SERVED" != "$HERE" ]]; then
+  echo "walkthrough: $PY imports crb from $SERVED, not from this checkout ($HERE)." >&2
+  echo "  The stack would serve another tree's code. Run with PYTHONPATH=$ROOT/src, or with" >&2
+  echo "  this checkout's own venv." >&2
+  exit 2
+fi
 command -v git >/dev/null || { echo "walkthrough: git is required" >&2; exit 2; }
 command -v npx >/dev/null || { echo "walkthrough: node/npx is required" >&2; exit 2; }
 command -v curl >/dev/null || { echo "walkthrough: curl is required" >&2; exit 2; }
+if [[ "${CRB_E2E_PREFLIGHT_ONLY:-}" == "1" ]]; then
+  echo "walkthrough: preflight passed — serving $SERVED"
+  exit 0
+fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/crb-walkthrough.XXXXXX")"
 case "$WORK" in */crb-walkthrough.*) ;; *) echo "walkthrough: unexpected temp dir $WORK" >&2; exit 2 ;; esac

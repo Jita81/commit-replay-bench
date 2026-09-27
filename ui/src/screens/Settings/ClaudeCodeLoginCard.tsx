@@ -107,7 +107,7 @@ function StatusLine({ status }: { status: SecretListItem | undefined }) {
 function CheckResult({ check }: { check: LoginCheck }) {
   const d = CHECK_DISPLAY[check.status] ?? CHECK_DISPLAY.error
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-login-verify-result" data-status={check.status}>
+    <div role="status" className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-login-verify-result" data-status={check.status}>
       <Pill tone={d.tone} glyph={d.glyph} label={`Verify: ${d.label}`} hint="pill.settings.verify">
         {d.label}
       </Pill>
@@ -232,7 +232,7 @@ function SignInPanel({ onDone }: { onDone: () => void }) {
         </form>
       )}
       {s && LOGIN_TERMINAL.has(s.state) && (
-        <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-signin-result" data-state={s.state}>
+        <div role={s.state === 'failed' ? 'alert' : 'status'} className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-signin-result" data-state={s.state}>
           <Pill tone={s.state === 'done' ? 'green' : s.state === 'failed' ? 'red' : 'muted'} glyph={s.state === 'done' ? '✓' : s.state === 'failed' ? '✕' : '–'} label={`Sign-in ${s.state}`} hint="pill.settings.signin_state">
             {s.state === 'done' ? `signed in · token stored …${s.fingerprint}` : s.state}
           </Pill>

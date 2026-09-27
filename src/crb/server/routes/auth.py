@@ -20,13 +20,15 @@ What it does: Rate-limits local login per ``(username, ip)`` and per ``ip`` and 
               ``user.role_overridden``) and upserts the user; refuses a disabled account and
               any ``next`` that is not a same-origin path. Every sign-in writes
               ``user.login`` and every refused local one ``user.login_failed`` (a name that
-              is no account: recorded without the name, DL-071); every callback failure
-              redirects to ``/login?error=<code>`` from ``OIDC_FAILURE_CODES``.
+              is no account: recorded without the name and logged as unknown, DL-071);
+              every callback failure redirects to ``/login?error=<code>`` from
+              ``OIDC_FAILURE_CODES`` (anything else as ``oidc_failed``).
 How:          Thin handlers over src/crb/server/auth.py — ``authenticate_local`` →
               ``_commit_audited`` (the event with its state change; a lost ``seq`` race is
               retried) → cookies; ``OidcState.fresh`` → provider URL → cookie; callback:
               cookie → ``_complete_oidc`` (``exchange`` → ``map_role`` →
-              ``upsert_oidc_user`` → event) → cookies → redirect, or ``_back_to_login``.
+              ``upsert_oidc_user`` → event, all through ``_commit_audited``) → cookies →
+              redirect, or ``_back_to_login`` (a race lost on every retry: ``oidc_failed``).
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         none
 Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/routes/admin.py
@@ -102,6 +104,9 @@ def _now() -> str:
 
 #: The actor of an attempt made before anyone is signed in.
 ANONYMOUS_ACTOR = "anonymous"
+
+#: What the server log says in place of a typed name that is no account.
+UNKNOWN_ACCOUNT = "(not an account)"
 
 #: The codes an OIDC failure may carry back to ``/login?error=``. Anything else becomes
 #: ``oidc_failed``: the URL never carries the provider's own words or an unknown code.
@@ -210,7 +215,13 @@ def login(
     if user is None:
         # One message for every failure: an attacker must not learn which half was wrong.
         limiter.record_failure(body.username, ip)
-        log.info("login failed", extra={"username": body.username, "client": ip})
+        # The typed name reaches the log only when it is an account: a password typed into
+        # the username box is never stored, in the log or the audit table (DL-071, P-056).
+        known = find_local_user(db, body.username) is not None
+        log.info(
+            "login failed",
+            extra={"username": body.username if known else UNKNOWN_ACCOUNT, "client": ip},
+        )
         _commit_audited(db, lambda: _record_failed_login(db, body.username))
         raise ApiError(401, "invalid_credentials", "username or password is incorrect")
     limiter.reset(body.username, ip)
@@ -444,12 +455,38 @@ def _complete_oidc(
     issuer = str(claims.get("iss") or settings.oidc.issuer)
     role = map_role(claims, settings.oidc)
     source = settings.oidc.role_from_claims
-    before = _stored_role(db, issuer, claims)
-    user = upsert_oidc_user(db, issuer=issuer, claims=claims, role=role, role_from_claims=source)
-    if not user.active:
-        uid = user.id
+    signed_in: list[User] = []
+
+    def _signed_in() -> None:
+        # Re-run whole on a retry: the rollback undid the upsert as well as the events.
+        signed_in.clear()
+        before = _stored_role(db, issuer, claims)
+        user = upsert_oidc_user(
+            db, issuer=issuer, claims=claims, role=role, role_from_claims=source
+        )
+        if not user.active:
+            raise _AccountDisabled(user.id)
+        if before is not None and before != user.role:
+            # only reachable under ROLE_FROM_CLAIMS=always: the provider replaced a role an
+            # admin may have set here, and that is never silent
+            record_user_event(
+                db,
+                action="user.role_overridden",
+                actor=user.id,
+                target=user,
+                from_role=before,
+                by="oidc_claims",
+                issuer=issuer,
+            )
+        user.last_login = _now()
+        record_user_event(db, action="user.login", actor=user.id, target=user, method="oidc")
+        signed_in.append(user)
+
+    try:
+        _commit_audited(db, _signed_in)
+    except _AccountDisabled as off:
         db.rollback()
-        account = db.get(User, uid)
+        account = db.get(User, off.user_id)
         if account is not None:
             _commit_audited(
                 db,
@@ -462,23 +499,22 @@ def _complete_oidc(
                     reason="account_disabled",
                 ),
             )
-        raise ApiError(403, "account_disabled", "this account is disabled")
-    if before is not None and before != user.role:
-        # only reachable under ROLE_FROM_CLAIMS=always: the provider replaced a role an
-        # admin may have set here, and that is never silent
-        record_user_event(
-            db,
-            action="user.role_overridden",
-            actor=user.id,
-            target=user,
-            from_role=before,
-            by="oidc_claims",
-            issuer=issuer,
-        )
-    user.last_login = _now()
-    record_user_event(db, action="user.login", actor=user.id, target=user, method="oidc")
-    db.commit()
-    return user
+        raise ApiError(403, "account_disabled", "this account is disabled") from None
+    except IntegrityError as exc:
+        # every retry lost the race: a redirect with the generic code, never a raw 500
+        db.rollback()
+        log.warning("oidc sign-in could not be written: %s", type(exc).__name__)
+        raise ApiError(503, "oidc_failed", "the sign-in could not be recorded") from exc
+    return signed_in[0]
+
+
+class _AccountDisabled(Exception):
+    """Raised inside the sign-in write when the account is turned off, so the write is
+    rolled back and the refusal is recorded in a transaction of its own."""
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__(user_id)
+        self.user_id = user_id
 
 
 __all__ = ["router"]

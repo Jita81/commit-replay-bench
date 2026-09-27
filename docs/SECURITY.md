@@ -384,8 +384,9 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   [measured] `tests/test_server_auth.py::TestLoginRateLimitPerIp`
 - Every sign-in is an audit event on the account's own trail: `user.login` (local or
   organisation) and `user.login_failed` (actor `anonymous`, with the reason). A refused name
-  that is no local account is recorded without the name, so a password typed into the
-  username box is never stored, and a refusal writes on both paths so its cost does not say
+  that is no local account is recorded without the name and logged as `(not an account)`, so a
+  password typed into the username box is stored in neither the audit table nor the server
+  log, and a refusal writes on both paths so its cost does not say
   whether an account exists (DL-071). A failed organisation sign-in returns to `/login` with
   a code from a closed list; the provider's own words stay in the server log.
   `tests/test_server_auth.py::TestSignInIsAudited`,

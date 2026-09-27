@@ -946,15 +946,18 @@ A password is never a command-line argument (shell history, `ps`): the verbs pro
 read the first line of the file `CRB_USERS_PASSWORD_FILE` names when there is no terminal
 (a deployment script; delete the file afterwards). Passwords are ≥ 12 characters and are
 stored as argon2id hashes only. An account that signs in through the organisation's
-identity provider has no local password; disable it there.
+identity provider has no local password: its password belongs to the provider. Turning it
+off here (the Users card's **Active** toggle, or `crb users deactivate`) refuses it on this
+deployment; disabling it at the provider stops it everywhere.
 
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
 `user.deactivated`, `user.sessions_revoked`, `user.role_overridden`) with the actor (the
-admin's user id, or `cli:<os user>`) and the target; never the password. Each sign-in is one
+admin's user id, or `cli:<os user>`) and the target; never the password. The History names
+an actor by the account's username; an actor whose account has since been deleted keeps its id. Each sign-in is one
 too: `user.login`, and `user.login_failed` with the actor `anonymous` — a refused name that
-is no account here is recorded without the name, so a password typed into the username box
-is never stored (DL-071). `GET /users/{id}/events`
+is no account here is recorded without the name, and the server log writes it as
+`(not an account)`, so a password typed into the username box is stored in neither (DL-071). `GET /users/{id}/events`
 serves that trace, and the Users card's **History** button renders it under the account, so who
 reset or disabled an account is read in the product and not only in the database. Setting a
 password ends the account's sessions on their next request (it rotates the session nonce the
@@ -978,17 +981,15 @@ for good. The last active admin can never be deactivated, by either door.
 **How long a recovery takes, and what it costs.** Neither door calls a model, so a recovery
 spends nothing. By the admin door — a wrong password on `/login`, which names who sets a new
 one; an admin sets it from the Users card; the old session is refused; the person signs in
-again — the machine-walked journey takes under a second (658 ms)
-**[measured — n = 1 walk; method: `ui/e2e/walkthrough/13-recover-an-account.spec.ts`
-times the walk from the wrong password to the new sign-in (its `recovery-ms` annotation) on a
-temporary tier-1 stack on the operator's Mac mini, 2026-09-26; apparatus 2.3]**, and the spec
-fails if it ever takes 60 seconds. By the host door, `crb users set-password` itself takes
-about 2 seconds **[measured — n = 5 runs, median 1.84 s, range 1.48 to 2.37 s; method: the
-verb run against a scratch SQLite deployment with the password read from
-`CRB_USERS_PASSWORD_FILE`, timed around the process, on the same Mac mini, 2026-09-26;
-apparatus 2.3]**. A person adds the time to reach an admin or the API host and to read and
-type **[gap — nobody has timed a person doing it; G-925 records the product's own recovery
-times]**.
+again — the machine-walked journey takes about a second
+**[measured — n = 2 walks, 658 ms and 1.13 s; method: `ui/e2e/walkthrough/13-recover-an-account.spec.ts`
+times the walk from the wrong password to the new sign-in (its `recovery-ms` annotation and
+log line) on a temporary tier-1 stack on the operator's Mac mini, 2026-09-26 and 2026-09-27;
+apparatus 2.3]**, and the spec fails if it ever takes 60 seconds. By the host door,
+`crb users set-password` itself takes about 2 seconds **[hypothesis — five runs by hand on
+2026-09-26 took 1.5 to 2.4 s, but no script in the repository reruns them (G-466)]**. A person
+adds the time to reach an admin or the API host and to read and type **[gap — nobody has
+timed a person doing it; G-466]**.
 
 **Roles from the identity provider.** The provider's claims set an account's role the first
 time it signs in. After that the role is yours to change on the Settings screen, and the

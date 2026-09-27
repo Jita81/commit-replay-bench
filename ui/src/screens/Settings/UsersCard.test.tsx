@@ -36,11 +36,13 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Page, StepEvent, User } from '../../api/types'
 import { unhinted } from '../../help/hints-collector'
+import { HINTS } from '../../help/hints'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { UsersCard } from './UsersCard'
 
 const ADA: User = { id: 'u1', username: 'ada', display_name: 'Ada', email: 'ada@example.org', role: 'admin', issuer: 'local', active: true, created: '2026-09-01T10:00:00+00:00', last_login: '2026-09-15T09:00:00+00:00' }
 const LEAVER: User = { id: 'u2', username: 'cliff', display_name: 'Cliff', email: 'cliff@example.org', role: 'operator', issuer: 'local', active: true, created: '2026-09-02T10:00:00+00:00', last_login: '' }
+const GONE: User = { id: 'u4', username: 'gone', display_name: 'Gone', email: 'gone@example.org', role: 'viewer', issuer: 'local', active: false, created: '2026-09-04T10:00:00+00:00', last_login: '2026-09-10T09:00:00+00:00' }
 const PROVIDED: User = { id: 'u3', username: 'sub-123', display_name: 'Dana', email: 'dana@example.org', role: 'approver', issuer: 'https://login.example/t', active: true, created: '2026-09-03T10:00:00+00:00', last_login: '2026-09-20T09:00:00+00:00' }
 
 const EVENTS: Page<StepEvent> = {
@@ -65,10 +67,12 @@ describe('UsersCard', () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it('every row carries the account state that decides sign-in: active, and the last sign-in as an age', async () => {
-    admin({ 'GET /users': list(ADA, LEAVER) })
+    admin({ 'GET /users': list(ADA, LEAVER, GONE) })
     const { container } = renderApp(<UsersCard />)
     await screen.findByTestId('user-active-ada')
     expect(screen.getByTestId('user-active-cliff')).toBeChecked()
+    // a deactivated leaver is not listed as if they could sign in
+    expect(screen.getByTestId('user-active-gone')).not.toBeChecked()
     // an account that has never signed in says so, rather than showing an empty cell
     expect(screen.getByTestId('user-last-login-cliff')).toHaveTextContent('Never')
     expect(screen.getByTestId('user-last-login-ada')).toHaveTextContent(/ago$/)
@@ -246,9 +250,43 @@ describe('UsersCard', () => {
     expect(history).toHaveTextContent('History for cliff')
     const rows = within(history).getAllByTestId('account-history-event')
     expect(rows.map((r) => r.getAttribute('data-action'))).toEqual(['user.password_set', 'user.created'])
-    expect(rows[0]).toHaveTextContent('by u1')
+    // the actor is the account's id on the record; the screen names the person (ada is u1)
+    expect(rows[0]).toHaveTextContent('by ada')
+    expect(rows[0]).not.toHaveTextContent('by u1')
     // a change made on the API host names the operating-system user who made it
     expect(rows[1]).toHaveTextContent('by cli:paul')
+  })
+
+  it('an actor stored as a 32-hex account id is shown by name; one no longer listed keeps its id', async () => {
+    const hex = 'd2a670bb' + '0'.repeat(24)
+    const other = 'e3b0c442' + '1'.repeat(24)
+    const ADMIN_HEX: User = { ...ADA, id: hex, username: 'admin', display_name: 'The Admin' }
+    const ev = (id: string, seq: number, action: string, actor: string) => ({ ...EVENTS.items[1]!, event_id: id, seq, action, actor })
+    admin({
+      'GET /users': list(ADMIN_HEX, LEAVER),
+      'GET /users/u2/events': { items: [ev('x3', 3, 'user.login_failed', 'anonymous'), ev('x2', 2, 'user.deactivated', other), ev('x1', 1, 'user.password_set', hex)], total: 3, limit: 50, offset: 0 },
+    })
+    renderApp(<UsersCard />)
+    await userEvent.click(await screen.findByTestId('user-history-cliff'))
+    const rows = within(await screen.findByTestId('account-history')).getAllByTestId('account-history-event')
+    expect(rows[2]).toHaveTextContent('by admin')
+    expect(rows[2]).not.toHaveTextContent(hex)
+    // an account that has since been deleted cannot be named: its id is the only truth left
+    expect(rows[1]).toHaveTextContent(`by ${other}`)
+    expect(rows[0]).toHaveTextContent('by anonymous')
+  })
+
+  it('an identity-provider account can be turned off here, and the card says what that does and what stays with the provider', async () => {
+    admin({ 'GET /users': list(ADA, LEAVER, PROVIDED) })
+    renderApp(<UsersCard />)
+    // PUT /users/{id}/active refuses an identity-provider account on this deployment too
+    expect(await screen.findByTestId('user-active-sub-123')).toBeEnabled()
+    const notHere = screen.getByTestId('users-not-here')
+    expect(notHere).toHaveTextContent('an account issued by your identity provider has its password there')
+    expect(notHere).toHaveTextContent('turning it off here refuses it on this deployment; disabling it at the provider stops it everywhere')
+    expect(notHere).not.toHaveTextContent('not here;')
+    expect(HINTS['pill.settings.account_kind']).toMatch(/turning it off here refuses it on this deployment/i)
+    expect(HINTS['pill.settings.account_kind']).not.toMatch(/its disabling are the provider/)
   })
 
   it('the card says what it does not do, and where recovery lives when nobody can sign in', async () => {
