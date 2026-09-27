@@ -12,7 +12,11 @@ What it does: Discovers every endpoint-shaped setting (the ``Settings`` model wa
               rows and ``FLOWS`` are not one to one, when a flow's row does not name the
               settings that point it, or when the table, DEPLOYMENT §1 or DEPLOYMENT §7
               omits a flow; fails when the statement under the table names a different set
-              of writers from the rows whose "What is sent" cell names a write (P-107);
+              of writers from the rows whose "What is sent" cell names a write (P-107),
+              and pins the write-verb list both ways (every usual write word counts, a
+              send-and-read row does not); fails when the delivery paragraph under the
+              table does not name every write seam of ``crb.factory.delivery`` and the
+              re-delivery's re-pointed branch (P-111);
               pins that a setting name is found whatever quote it is written in (P-110);
               pins that the provisioning row says what a fetch sends and what it never
               sends.
@@ -26,11 +30,14 @@ ADRs:         docs/adr/0019-qualification-is-posture-relative.md (the provisioni
 Works with:   docs/SECURITY.md (the boundary table), docs/DEPLOYMENT.md (§1 and §7),
               src/crb/server/settings.py (``Settings``, the walked model),
               src/crb/provision/fetch.py (the fetch the provisioning row describes),
-              docs/PREVENTION.md (rows P-103, P-107 and P-110)
+              src/crb/factory/delivery.py (the write seams the delivery paragraph names),
+              docs/PREVENTION.md (rows P-103, P-107, P-110 and P-111)
 Tested by:    tests/test_egress_inventory.py
 Touch when:   the product gains or loses a flow that leaves the deployment, or a setting
               that points at an address — the discovery test fails until the setting has a
-              flow (and that flow a row in all three statements) or a ``NOT_EGRESS`` reason.
+              flow (and that flow a row in all three statements) or a ``NOT_EGRESS`` reason;
+              or when factory delivery gains a write seam — map it in ``_DELIVERY_WRITES``
+              and say in SECURITY.md what it writes.
 """
 
 from __future__ import annotations
@@ -242,8 +249,16 @@ def test_the_provisioning_row_says_what_a_fetch_sends_and_never_sends() -> None:
 
 
 #: A word in a row's "What is sent" cell that says the flow CHANGES something outside the
-#: deployment (a pushed branch, a comment, a closed pull request, a label, a transition).
-_WRITE_VERB = re.compile(r"\b(?:push|comments?|close|labels?|transition)\b", re.IGNORECASE)
+#: deployment: a pushed or re-pointed branch, a comment or post, an opened, created,
+#: updated, merged, closed or deleted object, a label, a transition, an HTTP write method,
+#: or a write TO something. A bare "writes" is not one: the builder row's "the diff it
+#: writes" is content sent to the model (pinned both ways by the two tests below the
+#: write-statement test).
+_WRITE_VERB = re.compile(
+    r"\b(?:push(?:es)?|re-points?|comments?|posts?|close[sd]?|opens?|creates?|updates?"
+    r"|merges?|deletes?|labels?|transitions?|patch|put|writes?\s+to)\b",
+    re.IGNORECASE,
+)
 
 
 def _write_statement() -> str:
