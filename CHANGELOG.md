@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A run cannot start on a dead login; the worker never fights over its metrics port; the migrations probe tells the truth**
+  (north-star Wave 2, stream Q1; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-q1);
+  pilot D1, D5, D7; DL-141, DL-142; P-205 to P-207). A build run whose builder's login failed
+  its last check is refused `builder_login_invalid` before it is queued or spends anything,
+  and a login not checked recently is checked once first. `/health` says whether a login
+  works, without calling a model; Settings shows it and verifies it. From apparatus 2.4 an
+  outage row names its cause, so process loss says "your login" apart from "the provider".
+  `CRB_METRICS_PORT=auto` picks a free port. A store at head is compared with the models.
+
 - **The grade says why, and a distinct commit is a distinct change**
   (north-star Wave 2, stream G; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-g);
   ADR-0025 items 5, 6, 7 and 13; DL-105, DL-106). Belt 5 records why it holds what it holds.
