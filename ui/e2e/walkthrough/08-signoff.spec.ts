@@ -21,10 +21,14 @@
  *    80 % → route `deliver`. The admin who queued every run is REFUSED by the two-person
  *    rule (`same_actor`, `signoff-policy.v3`: they queued the run that produced the attested
  *    row; no other person is behind the cell) — shown before they try, never overridable.
- *    A second person (`walk-approver`, created through `POST /users`) picks the cell, names
- *    an accepted row, ticks "I have read this accepted diff", writes the statement, signs —
- *    and the record lists the snapshot (n, point, lower, false-Q1, oracle, policy, route,
- *    controls k of N / escapes / run, the attested row, `verifier_kind: local`).
+ *    A second person is INVITED from Settings (`walk-invitee`, G-518): the admin reads the
+ *    one-time link once, the approver opens it in their own browser, chooses a password and
+ *    is active — and the same link is refused a second time. That approver opens Decisions,
+ *    clicks Attest on the cell that clears the bar (the cell arrives preselected), names an
+ *    accepted row, ticks "I have read this accepted diff", writes the statement, signs — and
+ *    the record lists the snapshot (n, point, lower, false-Q1, oracle, policy, route,
+ *    controls k of N / escapes / run, the attested row, `verifier_kind: local`). Then they
+ *    revoke it with a reason (the tier falls back) and sign again (G-478).
  *
  * Navigation
  * ----------
@@ -39,24 +43,31 @@
  *               and served as a bare file:// clone, onboarded, probed, mined, put through
  *               controls, an oracle run and 18 clean `fixture_gold` replays, routes
  *               `deliver` — that the admin who queued those runs is refused `same_actor`
- *               (the two-person rule, before they try) — and that a second person signs it
- *               through the UI, the record carrying the whole snapshot and who signed.
+ *               (the two-person rule, before they try) — that an approver invited from
+ *               Settings accepts the one-time link (which then refuses a second use), reads
+ *               Home task 7 Completed, reaches the cell through Decisions → Attest and signs
+ *               it through the UI, the record carrying the whole snapshot and who signed —
+ *               and that the same approver revokes it with a reason and signs again.
  * How:          Seeding goes through `POST /repos` / `POST /runs` with the CSRF header (the
- *               pytest seed fixture is not touched); the approver persona is created with
- *               `POST /users` (idempotent, the stable `personaPassword`, as 11-screens does);
- *               the sign-off itself is driven through the form (`attest-row`, `attest-read`,
+ *               pytest seed fixture is not touched); the signer is invited through the
+ *               Settings form and accepts in its own browser context (skipped on a rerun that
+ *               finds the account; the stable `personaPassword`), and `walk-approver` is still
+ *               ensured with `POST /users` for 11-screens; the sign-off itself is driven through the form (`attest-row`, `attest-read`,
  *               `attest-statement`, `signoff-recorded`).
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Signoff/SignoffPage.tsx and
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Settings/InviteApproverCard.tsx,
+ *               ui/src/screens/Invite/AcceptInvitePage.tsx, ui/src/screens/Decisions/
+ *               DecisionsPage.tsx, ui/src/screens/Signoff/SignoffPage.tsx and
  *               ui/src/screens/Signoff/contract.ts (the screen under test),
  *               src/crb/core/signoff.py (the clauses asserted), src/crb/server/routes/signoffs.py,
  *               src/crb/builders/fixture_gold.py (the clean rows),
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (whose n = 2 cell this spec relies on)
  * Tested by:    ui/e2e/walkthrough/08-signoff.spec.ts
- * Touch when:   a refusal clause or a policy default changes (src/crb/core/signoff.py) — the
- *               expected clause list and the 18-row seed must follow.
+ * Touch when:   never for a new repository; a refusal clause or a policy default changes
+ *               (src/crb/core/signoff.py) — the expected clause list and the 18-row seed must
+ *               follow; the invitation or the Decisions → Attest path changes.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -70,9 +81,13 @@ test.describe.configure({ mode: 'serial' })
 const SIGNABLE_NAME = 'walk-signable'
 const N_TASKS = 18 // 16 clean rows already clear Wilson lower ≥ 0.80; two spare
 const MIN = 60_000
-/** The second person: the same persona account 11-screens uses, so a rerun reuses it. */
+/** The persona account 07 created and 11-screens uses; it is not the signer here. */
 const APPROVER = 'walk-approver'
 const APPROVER_PASS = personaPassword(APPROVER)
+/** The second person who signs: invited from Settings, arrives through the one-time link (G-518, G-478). */
+const INVITEE = 'walk-invitee'
+const INVITEE_PASS = personaPassword(INVITEE)
+const INVITEE_NAME = 'Walk invitee'
 
 /** Create the approver persona unless an earlier run did (its stable password must then open it). */
 async function ensureApprover(page: Page): Promise<void> {
@@ -282,6 +297,54 @@ test.describe('08 sign-off policy', () => {
     await ensureApprover(page)
   })
 
+  test('an admin invites an approver from Settings; the approver accepts the one-time link, and it works only once', async ({ browser, page }) => {
+    const users = (await apiGet(page.request, '/users')) as { items: Array<{ username: string }> }
+    if (!users.items.some((u) => u.username === INVITEE)) {
+      await page.goto('/settings')
+      const form = page.getByRole('form', { name: 'Invite an approver' })
+      await expect(form).toBeVisible()
+      await field(form, 'Username').fill(INVITEE)
+      await field(form, 'Display name').fill(INVITEE_NAME)
+      await field(form, 'Role').selectOption('approver')
+      await field(form, 'Link expires in (hours)').fill('24')
+      await form.getByRole('button', { name: 'Invite' }).click()
+      const shown = page.getByTestId('invitation-link')
+      await expect(shown).toContainText(`${INVITEE} is invited as approver`)
+      await expect(shown).toContainText('shown once and cannot be recovered')
+      await expect(page.getByTestId(`invitation-state-${INVITEE}`)).toHaveText('Pending')
+      const link = new URL(((await page.getByTestId('invitation-url').textContent()) ?? '').trim(), env.baseUrl)
+      expect(link.pathname).toBe('/invite')
+      expect(link.searchParams.get('token') ?? '').not.toBe('')
+
+      // the approver, in their own browser: the link, a password twice, and the account is active
+      const theirs = await browser.newContext({ baseURL: env.baseUrl })
+      try {
+        const them = await theirs.newPage()
+        await them.goto(`${link.pathname}${link.search}`)
+        await field(them, 'New password').fill(INVITEE_PASS)
+        await field(them, 'New password again').fill(INVITEE_PASS)
+        await them.getByRole('button', { name: 'Set my password' }).click()
+        await expect(them.getByTestId('invite-accepted')).toContainText(`${INVITEE} is now active as approver`)
+        // the same link a second time is refused: it worked once
+        const again = await theirs.newPage()
+        await again.goto(`${link.pathname}${link.search}`)
+        await field(again, 'New password').fill(`${INVITEE_PASS}-2`)
+        await field(again, 'New password again').fill(`${INVITEE_PASS}-2`)
+        await again.getByRole('button', { name: 'Set my password' }).click()
+        await expect(again.getByTestId('error-state')).toContainText('This invitation link cannot be used')
+        // and they sign in with the password they chose, which nobody else has seen
+        await signIn(them, INVITEE, INVITEE_PASS)
+      } finally {
+        await theirs.close()
+      }
+      await page.reload()
+      await expect(page.getByTestId(`invitation-state-${INVITEE}`)).toHaveText('Accepted')
+    }
+    // the API agrees: the invitation is spent, and the account it made is the second person
+    const invitations = (await apiGet(page.request, '/invitations')) as { items: Array<{ username: string; state: string }> }
+    expect(invitations.items.find((i) => i.username === INVITEE)?.state).toBe('accepted')
+  })
+
   test('the admin who queued the runs is refused by the two-person rule (same_actor) before trying', async ({ page }) => {
     await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)
     const gate = page.getByTestId('signoff-gate')
@@ -330,13 +393,20 @@ test.describe('08 sign-off policy', () => {
     await page.goto('/home')
     await page.getByRole('button', { name: 'Sign out', exact: true }).click()
     await expect(page).toHaveURL(/\/login/)
-    await signIn(page, APPROVER, APPROVER_PASS)
-    await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)
+    await signIn(page, INVITEE, INVITEE_PASS)
+    // Home task 7 for this repository reads Completed now a second person has arrived
+    await page.goto(`/home?repo=${SIGNABLE_NAME}`)
+    await expect(page.getByRole('list', { name: 'Tasks' }).getByRole('listitem').nth(6)).toContainText('Completed')
+    // the approver starts where the work waits for them: Decisions, the cell that clears the bar
+    await page.goto('/decisions')
+    const due = page.getByRole('list', { name: `Decisions for ${SIGNABLE_NAME}` }).getByRole('listitem').filter({ hasText: 'clears the bar' })
+    await expect(due).toHaveCount(1)
+    await due.getByRole('link', { name: /Attest/ }).click()
+    await expect(page).toHaveURL(new RegExp(`/signoff\\?repo=${SIGNABLE_NAME}&`))
     const gate = page.getByTestId('signoff-gate')
     await expect(gate).toBeVisible()
-    const select = field(page, 'Cell')
-    await expect.poll(async () => (await select.locator('option').count()) - 1).toBeGreaterThanOrEqual(1)
-    await select.selectOption({ value: `${signableClass}|${signableSize}` })
+    // Attest carried the cell: it is preselected, nothing retyped
+    await expect(field(page, 'Cell')).toHaveValue(`${signableClass}|${signableSize}`)
     await expect(gate).toContainText(`Attest ${signableClass} × ${signableSize}`)
 
     // the bar, before the button: n / point / lower / false-Q1 / controls passed / route deliver
@@ -403,7 +473,7 @@ test.describe('08 sign-off policy', () => {
     expect((rec.policy_thresholds as Record<string, unknown>).require_oracle_measured).toBe(true)
     expect((rec.policy_thresholds as Record<string, unknown>).require_independent_verifier).toBe(true)
     expect(rec.verifier_kind).toBe('local') // the persona is a local account; the admin's id is not the signer's
-    expect(rec.approver_name).toBe('Walk approver')
+    expect(rec.approver_name).toBe(INVITEE_NAME)
     expect(Number((rec.evidence as Record<string, unknown>).oracle_strength)).toBeGreaterThanOrEqual(0.8)
     expect((rec.route as Record<string, unknown>).reason_code).toBe('deliver')
     expect((rec.controls as Record<string, unknown>).escapes).toBe(0)
@@ -414,5 +484,48 @@ test.describe('08 sign-off policy', () => {
     const cell = (map.cells as Array<Record<string, unknown>>).find((c) => c.capability_class === signableClass && c.size === signableSize)!
     expect(cell.verification_tier).toBe('human-verified')
     expect(cell.route).toBe('deliver') // a tier never moves a route
+  })
+
+  test('the approver revokes the sign-off with a reason, the tier falls back, and a fresh attestation restores it', async ({ page }) => {
+    await signIn(page, INVITEE, INVITEE_PASS)
+    await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)
+    const table = page.getByRole('table', { name: `Sign-offs for ${SIGNABLE_NAME}` })
+    await expect(table.getByRole('img', { name: 'Active attestation' })).toBeVisible()
+    await table.getByRole('button', { name: 'Revoke' }).first().click()
+    const dialog = page.getByTestId('revoke-confirm')
+    await expect(dialog).toBeVisible()
+    const confirm = dialog.getByRole('button', { name: 'Revoke sign-off' })
+    // a revocation needs a reason: without one nothing is sent
+    await expect(confirm).toBeDisabled()
+    await dialog.getByLabel(/Why are you revoking it/).fill('walkthrough: evidence re-examined by the approver who signed it')
+    await confirm.click()
+    await expect(dialog).toBeHidden()
+    // the record keeps the row, revoked, with who and why; nothing is active
+    const history = (await apiGet(page.request, `/signoffs?repo=${SIGNABLE_NAME}&include_revoked=true`)).items as Array<Record<string, unknown>>
+    const revoked = history.find((r) => r.revoked === true)
+    expect(revoked, JSON.stringify(history)).toBeTruthy()
+    expect(revoked!.revoked_by_name).toBe(INVITEE_NAME)
+    expect(((await apiGet(page.request, `/signoffs?repo=${SIGNABLE_NAME}`)).items as unknown[]).length).toBe(0)
+    let map = await apiGet(page.request, `/capability-map?repo=${SIGNABLE_NAME}`)
+    let cell = (map.cells as Array<Record<string, unknown>>).find((c) => c.capability_class === signableClass && c.size === signableSize)!
+    expect(cell.verification_tier).not.toBe('human-verified')
+
+    // a fresh attestation — a newer row — restores the tier (11 reads an active one)
+    await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)
+    const gate = page.getByTestId('signoff-gate')
+    const select = field(page, 'Cell')
+    await expect.poll(async () => (await select.locator('option').count()) - 1).toBeGreaterThanOrEqual(1)
+    await select.selectOption({ value: `${signableClass}|${signableSize}` })
+    const picker = field(page, 'Accepted row')
+    await expect.poll(async () => (await picker.locator('option').count()) - 1).toBeGreaterThanOrEqual(16)
+    await picker.selectOption({ index: 2 })
+    await page.getByTestId('attest-read').check()
+    await field(page, 'Attestation statement').fill('walkthrough: re-signed after the revocation — I read this accepted diff too.')
+    await expect(gate).toHaveAttribute('data-state', 'OPEN')
+    await page.getByRole('button', { name: 'Sign off' }).click()
+    await expect(page.getByTestId('signoff-recorded')).toContainText('signoff-policy.v3')
+    map = await apiGet(page.request, `/capability-map?repo=${SIGNABLE_NAME}`)
+    cell = (map.cells as Array<Record<string, unknown>>).find((c) => c.capability_class === signableClass && c.size === signableSize)!
+    expect(cell.verification_tier).toBe('human-verified')
   })
 })

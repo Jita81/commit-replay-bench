@@ -985,9 +985,17 @@ export function useAcceptInvitation(): UseMutationResult<InvitationAccepted, Api
   return useMutation({ mutationFn: (body) => api<InvitationAccepted>('/invitations/accept', { method: 'POST', body }) })
 }
 
-/** `GET /two-person-readiness` — every signed-in role reads it (Home's task 7). */
-export function useTwoPersonReadiness(): UseQueryResult<TwoPersonReadiness, ApiError> {
-  return useQuery({ queryKey: keys.twoPerson, queryFn: () => api<TwoPersonReadiness>('/two-person-readiness'), retry: false })
+/**
+ * `GET /two-person-readiness[?repo=]` — every signed-in role reads it. Home's task 7 asks it of
+ * the repository it is showing (G-477: the account that queued every run of it is not its
+ * second person); the Settings card asks it of the deployment.
+ */
+export function useTwoPersonReadiness(repo = ''): UseQueryResult<TwoPersonReadiness, ApiError> {
+  return useQuery({
+    queryKey: [...keys.twoPerson, repo],
+    queryFn: () => api<TwoPersonReadiness>(repo ? `/two-person-readiness?repo=${encodeURIComponent(repo)}` : '/two-person-readiness'),
+    retry: false,
+  })
 }
 
 /** `GET /settings` — non-secret settings; admin only, `enabled` from the role check. */

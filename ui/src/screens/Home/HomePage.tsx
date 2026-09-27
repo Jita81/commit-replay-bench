@@ -42,9 +42,10 @@
  * How:          `useGitHubApp`, `useAllRepos`, the chosen repository (`?repo=` or the most
  *               recently updated) → `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6;
- *               `useTwoPersonReadiness` for task 7 (the deployment's real readiness to
- *               produce a signature the two-person rule accepts, read by every role — not the
- *               presence of an admin; a waiting invitation reads "In progress");
+ *               `useTwoPersonReadiness(repo)` for task 7 (the real readiness to produce a
+ *               signature the two-person rule accepts for the repository shown, read by every
+ *               role — not the presence of an admin, a viewer, or the admin who queued every
+ *               run (G-477); a waiting invitation reads "In progress");
  *               `useFactoryBacklog` +
  *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`; every
  *               query's error state (the App's and the runs' included) feeds the one
@@ -63,8 +64,8 @@
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id), ui/e2e/walkthrough/13-orient.spec.ts
  *               (task tags against the live stack — G-166)
- * Touch when:   a task is added to the walk (connection.ts first; its `task.home.*` hint in
- *               hints.ts second).
+ * Touch when:   never for a new repository; a task is added to the walk (connection.ts first;
+ *               its `task.home.*` hint in hints.ts second).
  */
 
 import { useMemo } from 'react'
@@ -171,10 +172,6 @@ export function HomePage() {
   const gh = useGitHubApp()
   const repos = useAllRepos()
   const health = useHealth()
-  // G-518 — task 7 reads the deployment's real two-person readiness, not the presence of an
-  // admin: an account that can sign but has never signed in, or a deployment where the only
-  // signer is the only operator, cannot license anything. Readable by every role.
-  const twoPerson = useTwoPersonReadiness()
   const chosen = useMemo(() => {
     const items = repos.data?.items ?? []
     const wanted = params.get('repo')
@@ -189,6 +186,11 @@ export function HomePage() {
   const factoryTasks = useFactoryTasks(chosen)
   const factoryRun = useActiveRun(chosen, 'factory')
   const signoffs = useSignoffs(chosen)
+  // G-518/G-477 — task 7 reads the real two-person readiness for the repository shown, not the
+  // presence of an admin: an account that can sign but has never signed in, a deployment whose
+  // only other account is a viewer, or one where the only signer queued every run of this
+  // repository, cannot license anything. Readable by every role.
+  const twoPerson = useTwoPersonReadiness(chosen)
 
   const stages = repo.data
     ? stagesFor({

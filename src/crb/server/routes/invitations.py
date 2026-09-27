@@ -23,7 +23,10 @@ An invitation instead:
   asks: can this deployment produce a signature the two-person rule will accept? An
   admin's presence is not an answer — an account that can sign and has never signed in
   cannot sign, and a deployment where the only approver is the only operator cannot
-  either. The reading names its reason code so the screen explains rather than nags.
+  either — nor one whose only other account is a viewer, who can neither run nor sign
+  (G-477). ``?repo=`` asks it of one repository: an account that can sign and did not
+  queue every graded run of it. The reading names its reason code so the screen explains
+  rather than nags.
 
 Every write is one transaction with a ``user.*`` event on the account's own trace
 (``user.invited`` / ``user.invite_accepted`` / ``user.invite_revoked``), actor and target
@@ -90,7 +93,7 @@ from crb.server.auth import (
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep, client_ip
 from crb.server.routes.admin import record_user_event
 from crb.server.settings import MIN_PASSWORD_LENGTH, ROLE_RANK
-from crb.store.models import Invitation, User
+from crb.store.models import Invitation, Run, User
 
 router = APIRouter(tags=["invitations"])
 _ERR = {"model": ErrorEnvelope}
@@ -119,6 +122,10 @@ READY = "ready"
 NO_APPROVER = "no_approver"
 APPROVER_NEVER_SIGNED_IN = "approver_never_signed_in"
 SINGLE_PERSON = "single_person"
+RUNNER_IS_THE_ONLY_SIGNER = "runner_is_the_only_signer"
+#: The run kinds whose rows a sign-off attests (graded rows on the ledger) — the runs whose
+#: actor the two-person rule compares with the approver (ADR-0016).
+GRADED_RUN_KINDS: tuple[str, ...] = ("replay", "blind", "factory")
 
 _REASONS: dict[str, str] = {
     READY: (
@@ -136,8 +143,14 @@ _REASONS: dict[str, str] = {
         "the invitation has not been used"
     ),
     SINGLE_PERSON: (
-        "only one account has ever signed in: whoever runs the measurements would be signing "
-        "their own evidence, which the API refuses (same_actor)"
+        "only one account that can run measurements or sign has ever signed in: whoever runs "
+        "the measurements would be signing their own evidence, which the API refuses "
+        "(same_actor) — a viewer is not a second person, because a viewer can do neither"
+    ),
+    RUNNER_IS_THE_ONLY_SIGNER: (
+        "every account that can sign and has signed in queued every run of this repository, "
+        "so it would be signing its own evidence, which the API refuses (same_actor): invite "
+        "an approver who did not run them"
     ),
 }
 
@@ -485,14 +498,21 @@ def accept_invitation(
     )
 
 
-def two_person_readiness(db: Session) -> TwoPersonReadinessOut:
+def two_person_readiness(db: Session, repo: str = "") -> TwoPersonReadinessOut:
     """Whether a sign-off the two-person rule accepts is possible in this deployment.
 
     Three things must hold, and each failing one has its own reason code: an active account
     whose role can sign (``approver`` or above); that account having signed in at least once
     — an invited account that never arrived can sign nothing, and neither can one whose
-    password was set and never used; and a SECOND account that has signed in, because the
-    approver who produced the evidence is refused (``same_actor``, ADR-0016).
+    password was set and never used; and a SECOND account that has signed in and can run
+    the measurements or sign them (``operator`` or above), because the approver who
+    produced the evidence is refused (``same_actor``, ADR-0016). A viewer is not that
+    second account: it can neither queue a run nor sign one (G-477).
+
+    With ``repo``, the question is asked of that repository's evidence: when one account
+    queued every graded run of it (``GRADED_RUN_KINDS``), that account cannot sign it, so a
+    signed-in account that can sign must be somebody else (``runner_is_the_only_signer``).
+    A repository with no graded run yet reads as the deployment does.
 
     It counts accounts, not people, and says so in its reason: two accounts held by one
     person would pass this check and still be wrong. That is a limit of what a deployment
@@ -502,19 +522,31 @@ def two_person_readiness(db: Session) -> TwoPersonReadinessOut:
     approvers = [u for u in users if ROLE_RANK.get(u.role, -1) >= ROLE_RANK["approver"]]
     signed_in = [u for u in approvers if u.last_login]
     arrived = [u for u in users if u.last_login]
+    # who could run the measurements or sign them: a viewer can do neither (G-477)
+    actors = [u for u in arrived if ROLE_RANK.get(u.role, -1) >= ROLE_RANK["operator"]]
     others = len(users) - len(approvers)
     pending = sum(
         1
         for inv in db.execute(select(Invitation)).scalars().all()
         if invitation_state(inv) == STATE_PENDING
     )
+    runners: set[str] = set()
+    if repo:
+        runners = {
+            str(a)
+            for a in db.execute(
+                select(Run.actor).where(Run.repo == repo, Run.kind.in_(GRADED_RUN_KINDS)).distinct()
+            ).scalars()
+        }
     if not approvers:
         code = NO_APPROVER
     elif not signed_in:
         code = APPROVER_NEVER_SIGNED_IN
-    elif len(arrived) < 2:
-        # one account has ever arrived, and it is the one that would have to sign its own work
+    elif len(actors) < 2:
+        # one account that can run or sign has ever arrived: it would sign its own work
         code = SINGLE_PERSON
+    elif len(runners) == 1 and all(u.id in runners for u in signed_in):
+        code = RUNNER_IS_THE_ONLY_SIGNER
     else:
         code = READY
     return TwoPersonReadinessOut(
@@ -535,17 +567,20 @@ def two_person_readiness(db: Session) -> TwoPersonReadinessOut:
     responses={401: _ERR},
     summary="Can this deployment produce a sign-off the two-person rule accepts?",
 )
-def get_two_person_readiness(viewer: ViewerDep, db: DbDep) -> TwoPersonReadinessOut:
+def get_two_person_readiness(viewer: ViewerDep, db: DbDep, repo: str = "") -> TwoPersonReadinessOut:
     """Readable by every signed-in role: a viewer who cannot invite anybody still needs to
     know whether the deployment can license anything (Home task 7 shows the state to
-    everyone and the action only to an admin)."""
+    everyone and the action only to an admin). ``repo`` asks it of one repository's
+    evidence (G-477)."""
     del viewer
-    return two_person_readiness(db)
+    return two_person_readiness(db, repo)
 
 
 __all__ = [
     "DEFAULT_EXPIRY_HOURS",
+    "GRADED_RUN_KINDS",
     "INVITABLE_ROLES",
+    "RUNNER_IS_THE_ONLY_SIGNER",
     "STATE_ACCEPTED",
     "STATE_EXPIRED",
     "STATE_PENDING",

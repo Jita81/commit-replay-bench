@@ -951,8 +951,11 @@ instead. Only the link's SHA-256 hash is stored: a lost link is re-invited, neve
 
 The card and Home's task 7 both read `GET /two-person-readiness`, which answers whether a
 sign-off the two-person rule would accept is possible at all — an account that can sign, that
-has signed in, and a second account that has too. It counts **accounts, not people**: two
-accounts held by one person would pass it and still be wrong, and it says so.
+has signed in, and a second account that has too and can run the measurements or sign them.
+A viewer is not that second account: it can do neither. Home asks it of the repository it shows,
+so task 7 stays Incomplete while the only account that can sign is the one that queued every
+run of that repository — the bootstrap admin alone never completes it. It counts **accounts,
+not people**: two accounts held by one person would pass it and still be wrong, and it says so.
 
 **Forgot the admin password?** On the API host: `crb users set-password admin` (the
 bootstrap username, or whichever `crb users list` shows as an active admin), type the new

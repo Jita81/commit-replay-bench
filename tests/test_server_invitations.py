@@ -14,7 +14,10 @@ What it does: Pins that an invitation creates an INACTIVE account nobody can sig
               write lands as one ``user.*`` event with actor and target and never a token or
               a password, and that two-person readiness answers Home's task 7 honestly: an
               admin alone is not ready, an approver who has never signed in is not ready, and
-              an approver who has signed in with somebody else on the deployment is.
+              an approver who has signed in with somebody else on the deployment is — but a
+              viewer is not that somebody (it can neither run nor sign), and for one
+              repository the account that queued every graded run of it is not its second
+              person (``runner_is_the_only_signer``, G-477).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; the invited
               person's link is redeemed from a SECOND client (no session) as the browser the
               link is opened in would; events read straight from the ``events`` table on the
@@ -28,7 +31,8 @@ Works with:   src/crb/server/routes/invitations.py (under test),
               tests/test_server_admin_users.py (the sibling suite for the lifecycle routes),
               docs/API.md#admin
 Tested by:    tests/test_server_invitations.py
-Touch when:   an invitation state or route is added; the readiness rule changes.
+Touch when:   never for a new repository; an invitation state or route is added; the
+              readiness rule changes.
 """
 
 from __future__ import annotations
@@ -388,3 +392,93 @@ def test_readiness_says_no_approver_and_then_names_the_unused_invitation(
     assert r["ready"] is False and r["reason_code"] == "approver_never_signed_in"
     assert r["approvers_active"] == 1 and r["approvers_signed_in"] == 0
     assert "the invitation has not been used" in r["reason"]
+
+
+# --- G-477: only a real second person completes the reading ---------------------------
+
+
+def _user(client: TestClient, username: str, role: str) -> None:
+    made = client.post(
+        f"{API_PREFIX}/users",
+        json={"username": username, "password": "a-long-enough-password", "role": role},
+    )
+    assert made.status_code == 201, made.text
+
+
+def _arrive(app: Any, username: str) -> None:
+    """The account signs in once, in its own browser (``last_login`` is stamped)."""
+    login(TestClient(app), username, "a-long-enough-password")
+
+
+def test_a_viewer_who_signed_in_is_not_the_second_person(client: TestClient, app: Any) -> None:
+    """G-477: the bootstrap admin plus a viewer is still ONE person who can both run and sign.
+    A viewer can neither queue a run nor sign one, so the admin would be signing evidence
+    only they could have produced — the two-person rule refuses it. Two accounts having
+    signed in is not the test; a second account that can run or sign is."""
+    login(client)
+    _user(client, "reader", "viewer")
+    _arrive(app, "reader")
+    r = client.get(f"{API_PREFIX}/two-person-readiness").json()
+    assert r["accounts_signed_in"] == 2
+    assert r["ready"] is False and r["reason_code"] == "single_person"
+    # an operator who has signed in is somebody else to run the measurements: ready
+    _user(client, "op1", "operator")
+    _arrive(app, "op1")
+    r = client.get(f"{API_PREFIX}/two-person-readiness").json()
+    assert r["ready"] is True and r["reason_code"] == "ready"
+
+
+def _repo_with_runs(app: Any, repo: str, actor: str, *, kinds: tuple[str, ...]) -> None:
+    from crb.store.models import Repo, Run
+
+    with session(app)() as s:
+        if s.get(Repo, repo) is None:
+            s.add(Repo(name=repo, language="python", runner="pytest", config_json={}))
+        for i, kind in enumerate(kinds):
+            s.add(
+                Run(
+                    id=f"{repo[:8]}{actor[:8]}{kind[:4]}{i:04d}".ljust(32, "0")[:32],
+                    repo=repo,
+                    kind=kind,
+                    actor=actor,
+                )
+            )
+        s.commit()
+
+
+def _uid(app: Any, username: str) -> str:
+    with session(app)() as s:
+        return str(
+            s.execute(select(User.id).where(User.subject == f"local:{username}")).scalar_one()
+        )
+
+
+def test_for_a_repository_the_account_that_queued_every_run_is_not_its_second_person(
+    client: TestClient, app: Any
+) -> None:
+    """G-477 (``?repo=``): the second person for a repository is an account that can sign
+    and did NOT queue every run whose rows it would attest. The deployment is ready — an
+    operator could run the measurements — but if the admin queued every replay of this
+    repository and is the only account that can sign, nobody can sign it."""
+    login(client)
+    _user(client, "op1", "operator")
+    _arrive(app, "op1")
+    admin = _uid(app, "root")
+    _repo_with_runs(app, "alpha", admin, kinds=("setup", "replay", "replay"))
+    assert client.get(f"{API_PREFIX}/two-person-readiness").json()["ready"] is True
+    r = client.get(f"{API_PREFIX}/two-person-readiness", params={"repo": "alpha"}).json()
+    assert r["ready"] is False and r["reason_code"] == "runner_is_the_only_signer"
+    assert "queued every run" in r["reason"] and "same_actor" in r["reason"]
+    # runs the operator queued: the admin did not produce that evidence, and may sign it
+    _repo_with_runs(app, "beta", _uid(app, "op1"), kinds=("replay",))
+    r = client.get(f"{API_PREFIX}/two-person-readiness", params={"repo": "beta"}).json()
+    assert r["ready"] is True
+    # an approver who has signed in is a second person for alpha too
+    _user(client, "appr1", "approver")
+    _arrive(app, "appr1")
+    r = client.get(f"{API_PREFIX}/two-person-readiness", params={"repo": "alpha"}).json()
+    assert r["ready"] is True and r["reason_code"] == "ready"
+    # a repository with no graded run yet reads as the deployment does
+    _repo_with_runs(app, "gamma", admin, kinds=("setup", "mine"))
+    r = client.get(f"{API_PREFIX}/two-person-readiness", params={"repo": "gamma"}).json()
+    assert r["ready"] is True

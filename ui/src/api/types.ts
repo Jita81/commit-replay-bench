@@ -1520,7 +1520,7 @@ export interface InvitationAccepted {
  */
 export interface TwoPersonReadiness {
   ready: boolean
-  reason_code: 'ready' | 'no_approver' | 'approver_never_signed_in' | 'single_person'
+  reason_code: 'ready' | 'no_approver' | 'approver_never_signed_in' | 'single_person' | 'runner_is_the_only_signer'
   reason: string
   approvers_active: number
   approvers_signed_in: number

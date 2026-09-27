@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The second person is real** (north-star Wave 4, stream S; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-s)).
+  An admin invites an approver from Settings with a one-time link that expires and is
+  recorded as an event; the approver chooses their own password at `/invite`. A cell that
+  routes deliver with no active sign-off stops before any spend (ADR-0018, re-read against
+  ADR-0026); `deliver_override` lifts only that clause, for one named run. Home task 7 asks
+  the two-person readiness of the repository it shows, so the bootstrap admin alone never
+  completes it. A decision shows how long it has waited. The sign-off gate shows the
+  evidence's posture class and says what to do after each refusal.
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

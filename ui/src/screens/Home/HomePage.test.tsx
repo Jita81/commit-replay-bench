@@ -31,7 +31,9 @@
  *               that failed; that every GET the page makes, failed alone, reaches the
  *               envelope (a read added later cannot be missed); and that a failed read never
  *               offers "Continue to the factory" — Continue stops at the task it could not
- *               read (P-108).
+ *               read (P-108); and that task 7 asks `GET /two-person-readiness?repo=` of the
+ *               repository shown and never reads Completed for the bootstrap admin alone — a
+ *               viewer, or the admin who queued every run, is not a second person (G-477).
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -40,14 +42,14 @@
  *               (the copy the hover test expects), ui/src/help/hints-collector.ts
  *               (`unhinted`)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx
- * Touch when:   a task or its evidence source changes.
+ * Touch when:   never for a new repository; a task or its evidence source changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { HomePage, factoryStatusFor } from './HomePage'
 
 const REPO = {
@@ -197,6 +199,43 @@ describe('HomePage', () => {
     expect(rows[6]).toHaveTextContent('Incomplete')
     await waitFor(() => expect(rows[7]).toHaveTextContent('In progress — item 2 of 5'))
     expect(screen.getByRole('link', { name: 'Continue to task 8: Deliver your first change' })).toHaveAttribute('href', '/factory?repo=alpha')
+  })
+
+  it('task 7 asks the readiness of the repository shown, and the bootstrap admin alone never reads Completed (G-477)', async () => {
+    let readiness: Record<string, unknown> = { ...READY, ready: false, reason_code: 'single_person', reason: 'only one account that can run measurements or sign has ever signed in: whoever runs the measurements would be signing their own evidence, which the API refuses (same_actor) — a viewer is not a second person, because a viewer can do neither', approvers_active: 1, approvers_signed_in: 1, other_active_accounts: 1, accounts_signed_in: 2 }
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'admin' },
+      'GET /github/app': { configured: true, app_slug: 'crb', install_url: 'x', api_url: 'y', installations: [{ id: 1, account_login: 'acme', account_type: 'Organization', repository_selection: 'selected', html_url: '', suspended: false, permissions: {}, can_deliver: false, recorded_by: '', updated: '' }] },
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /two-person-readiness': () => json(readiness),
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    })
+    const first = renderApp(<HomePage />, { route: '/home?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('You have completed 4 of 8 tasks.')).toBeInTheDocument())
+    // the question is asked of the repository on the page, not of the deployment
+    expect(calls.some((c) => c.path === '/two-person-readiness' && c.url.includes('repo=alpha'))).toBe(true)
+    let rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    expect(rows[6]).toHaveTextContent('Invite an approver')
+    expect(rows[6]).toHaveTextContent('Incomplete')
+    expect(rows[6]).not.toHaveTextContent('Completed')
+    expect(screen.getByTestId('home-task-7-note')).toHaveTextContent('a viewer is not a second person')
+    first.unmount()
+    // an operator exists, but the admin queued every run of this repository and is the only signer
+    readiness = { ...readiness, reason_code: 'runner_is_the_only_signer', reason: 'every account that can sign and has signed in queued every run of this repository, so it would be signing its own evidence, which the API refuses (same_actor): invite an approver who did not run them' }
+    renderApp(<HomePage />, { route: '/home?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('You have completed 4 of 8 tasks.')).toBeInTheDocument())
+    rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    expect(rows[6]).toHaveTextContent('Incomplete')
+    expect(screen.getByTestId('home-task-7-note')).toHaveTextContent('queued every run of this repository')
+    expect(screen.getByTestId('home-task-7-note')).toHaveTextContent('Invite them on the Settings screen')
   })
 
   it('a stale sign-off (the apparatus moved on) completes nothing: task 6 stays Incomplete and Continue lands on it', async () => {
