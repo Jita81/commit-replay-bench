@@ -259,8 +259,9 @@ the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
 `$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
 at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
 `--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
-pin Python as `name==version` in `requirements*.txt` (or name the files in
-`runner_opts.deps_lock`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+pin Python as `name==version` in `requirements*.txt` or commit a `uv.lock` (or name the
+files in `runner_opts.deps_lock`, where a list of alternatives lets one repository's history
+move from one lock to another, and the uv groups to read in `runner_opts.deps_groups`); commit a `package-lock.json` (lockfileVersion 2+) and name any
 package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
 version does not provision is refused with its `PROVISION_*` code and the fix
 ([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With

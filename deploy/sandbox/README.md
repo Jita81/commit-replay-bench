@@ -180,13 +180,13 @@ records the finding, defects D1–D5). Instead, with provisioning switched on
 | Language | Lockfile (at the commit) | Set | Mounted at | Test-time environment |
 |---|---|---|---|---|
 | Go | `go.mod` + `go.sum` (a `vendor/` tree needs no fetch) | ONE module cache for the parent's and the gold's modules | `/deps/gomod` | `GOMODCACHE=/deps/gomod GOPROXY=off GOSUMDB=off GOVCS=*:off GOTOOLCHAIN=local` |
-| Python | `requirements*.txt` with `name==version` lines (hashes optional), or `runner_opts.deps_lock` | wheels only, installed with no network; one set per lock | `/deps/site` | `PYTHONPATH=/work:/deps/site`, `PYTHONNOUSERSITE=1` |
+| Python | `requirements*.txt` with `name==version` lines (hashes optional), a `uv.lock` (version 1, the public index only; the project's dependencies plus the groups in `runner_opts.deps_groups`), or `runner_opts.deps_lock` (a list inside it names alternatives, the first a commit carries being read) | wheels only, installed with no network; one set per lock | `/deps/site` | `PYTHONPATH=/work:/deps/site`, `PYTHONNOUSERSITE=1` |
 | Node | `package-lock.json` / `npm-shrinkwrap.json`, lockfileVersion 2+ | `npm ci --ignore-scripts`; the packages named in `runner_opts.deps_build_scripts` rebuilt with no network; one set per lock | `/work/node_modules` | `NODE_PATH=/work/node_modules`, `.bin` on `PATH` |
 
 A trial is graded with the set its own manifests select — the parent's or the gold's; one
 that selects anything outside that closure is disqualified, never graded. Refused, each with
 its code and fix: a URL, VCS, path or foreign-registry source; an unpinned version; `go.work`;
-`yarn`, `pnpm`, `poetry`, `uv` and `pylock` locks; a Python package published only as a
+`yarn`, `pnpm`, `poetry` and `pylock` locks, and a `uv.lock` of another version, a workspace or another index; a Python package published only as a
 source distribution; an install script the repository did not name; JVM and Rust. Those stay
 measurable in the local posture, on a stamp that says so. With provisioning **off**, a
 repository that declares dependencies is refused `PROVISION_DISABLED` under docker before any
