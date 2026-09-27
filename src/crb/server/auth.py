@@ -11,14 +11,13 @@
   change (which re-salts the hash) and a rotated nonce (:func:`rotate_session_nonce`: on
   logout and on "sign out everywhere") each end every session of that account on its next
   request, without a table of sessions. The nonce is per account, so signing out ends the
-  account's sessions on every device. A deactivated account is refused on every request
-  while it is inactive; ``active`` is not part of the version, so re-activating within
-  ``session_ttl`` restores the sessions issued before the deactivation — sign the account
-  out everywhere as well to end them for good.
+  account's sessions on every device. Deactivating an account rotates its nonce too, so
+  its sessions end for good: re-activating it brings none back (AUTH-3).
 * **Lifecycle** — :func:`set_password` and :func:`set_user_active` are the one
   implementation the admin routes and the ``crb users`` break-glass CLI share: a password
-  is hashed here and never logged; the last active admin can never be deactivated
-  (``409 last_admin``); an OIDC account never gains a local password (``409 not_local``).
+  is hashed here and never logged; the last active admin can never be deactivated or
+  demoted, by any path (``409 last_admin``; :func:`would_orphan_admins`, which the OIDC
+  upsert asks too); an OIDC account never gains a local password (``409 not_local``).
 * **CSRF** — a token bound to the session: ``HMAC(secret, uid, cv)``
   (:func:`csrf_token_for`), served in the non-HttpOnly ``crb_csrf`` cookie
   (``__Host-crb_csrf`` when secure) and required as the ``X-CSRF-Token`` header on every
@@ -33,10 +32,14 @@
   the default is ``viewer``. Users are upserted by ``(issuer, subject)``. The claims set
   the role on an account's FIRST sign-in only; afterwards the role is the admin's to
   change, unless ``CRB_OIDC__ROLE_FROM_CLAIMS=always`` makes the provider the source of
-  truth — then each sign-in whose claims move the role records ``user.role_overridden``.
+  truth — then each sign-in whose claims move the role records ``user.role_overridden``,
+  except a demotion of the last active admin, which is refused and recorded
+  (``user.role_override_refused``).
 * **Login rate limit** — 5 failures per minute per ``(username, ip)`` and 20 per minute
-  per ``ip``, in memory. It bounds online guessing on one process; production fronts it
-  with the proxy's limiter (docs/DEPLOYMENT.md), which sees every replica.
+  per ``ip``, in memory, counting every attempt from before its password is checked (a
+  burst sent at once cannot outrun it). It bounds online guessing on one process;
+  production fronts it with the proxy's limiter (docs/DEPLOYMENT.md), which sees every
+  replica.
 
 Navigation
 ----------
@@ -50,12 +53,15 @@ What it does: Verifies passwords in constant time (an unknown user pays for a ve
               from the session (``HMAC(secret, uid, cv)``),
               admits a caller by role rank, maps IdP claims to a role (``admin_groups`` wins,
               default ``viewer``; applied on first sign-in unless ``role_from_claims`` is
-              ``always``), upserts OIDC users by ``(issuer, subject)``, limits failed
-              sign-ins per ``(username, ip)`` and per ``ip``, seeds the
-              bootstrap admin only while the users table is empty, and owns the account
-              lifecycle primitives (``set_password``, ``set_user_active`` with the last-admin
-              guard) the admin routes and the ``crb users`` CLI share. Never logs or returns
-              a password or token.
+              ``always`` — never a demotion of the last active admin), upserts OIDC users by
+              ``(issuer, subject)``, limits sign-in attempts per ``(username, ip)`` and per
+              ``ip`` (``acquire`` reserves the attempt before the password is checked, so a
+              burst cannot outrun it), seeds the bootstrap admin only while the users table
+              is empty, and owns the account lifecycle primitives (``set_password``,
+              ``set_user_active`` — deactivation ends the sessions — and
+              ``would_orphan_admins``, the one last-admin rule) the admin routes, the OIDC
+              callback and the ``crb users`` CLI share. Never logs or returns a password or
+              token.
 How:          argon2id via ``argon2-cffi``; ``itsdangerous`` timed serialisers with a salt
               per cookie kind (``__Host-`` names when secure); ``credential_version`` = a
               SHA-256 prefix of the stored hash and the ``users.session_nonce``;
@@ -84,9 +90,11 @@ Touch when:   never for a new repository; adding a role means extending ``ROLE_L
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import logging
+import math
 import secrets
 import threading
 import time
@@ -304,6 +312,17 @@ def count_active_admins(db: Session) -> int:
     )
 
 
+def would_orphan_admins(db: Session, user: User, *, role: str, active: bool) -> bool:
+    """Whether giving ``user`` ``role`` and ``active`` would leave no active admin — the ONE
+    last-admin rule every path that changes an existing account's role or active flag asks
+    (the role route, :func:`set_user_active`, and :func:`upsert_oidc_user` under
+    ``role_from_claims=always``; AUTH-2 found the third path had none). The caller holds
+    :func:`lock_users_table` and has re-read ``user`` under it, so the count cannot move
+    between this answer and the write."""
+    loses_admin = user.role == "admin" and user.active and (role != "admin" or not active)
+    return loses_admin and count_active_admins(db) <= 1
+
+
 def credential_version(user: User) -> str:
     """The version stamp a session is bound to: a 16-hex prefix of the SHA-256 of the
     stored password hash and the account's ``session_nonce``. argon2 salts every hash, so
@@ -356,6 +375,16 @@ def set_password(user: User, password: str) -> None:
     rotate_session_nonce(user)
 
 
+def set_account_active(user: User, active: bool) -> None:
+    """Write ``user``'s active flag — the ONE place it is written. Turning an account off
+    rotates its session nonce, so every session it holds ends for good and re-activation
+    brings none back (AUTH-3); turning it on ends nothing more. The caller has asked
+    :func:`would_orphan_admins` under the users lock, and commits."""
+    if user.active and not active:
+        rotate_session_nonce(user)
+    user.active = active
+
+
 def set_user_active(db: Session, user: User, active: bool) -> bool:
     """Activate or deactivate ``user``; the caller commits. Returns whether the flag changed.
 
@@ -368,19 +397,25 @@ def set_user_active(db: Session, user: User, active: bool) -> bool:
     before its read; this is the same ordering). Read, count and update are one serialised
     transaction, so two concurrent deactivations cannot both see "2 admins". Idempotent:
     setting the flag it already holds changes nothing and returns ``False``.
+
+    Deactivating also rotates the account's session nonce (:func:`rotate_session_nonce`),
+    so every session it holds ENDS rather than pausing: turning the account on again later
+    brings back no cookie issued before, a stolen one included (AUTH-3, the operator's
+    security review, 2026-09-27 — before it, re-activation within ``session_ttl`` revived
+    them). The API route and ``crb users deactivate`` both come through here.
     """
     lock_users_table(db)
     db.refresh(user)
     if user.active == active:
         return False
-    if not active and user.role == "admin" and count_active_admins(db) <= 1:
+    if would_orphan_admins(db, user, role=user.role, active=active):
         raise ApiError(
             409,
             "last_admin",
             "refusing to deactivate the last active admin",
             detail={"allowed": list(ROLE_LADDER)},
         )
-    user.active = active
+    set_account_active(user, active)
     return True
 
 
@@ -650,12 +685,40 @@ AdminDep = Annotated[Principal, Depends(require_role("admin"))]
 LOGIN_IP_LIMIT = 20
 
 
+class LoginRateLimited(Exception):
+    """Raised by :meth:`LoginRateLimiter.acquire` when a bucket is full: the attempt is
+    refused before any password is checked. ``retry_after_s`` is when a slot frees."""
+
+    def __init__(self, retry_after_s: float) -> None:
+        super().__init__(f"rate limited; a slot frees in {retry_after_s:.1f} s")
+        self.retry_after_s = retry_after_s
+
+
+@dataclass(frozen=True)
+class LoginSlot:
+    """One attempt's reservation in both buckets, taken BEFORE the password is checked. It
+    counts as a failure unless :meth:`LoginRateLimiter.succeed` is given it."""
+
+    username: str
+    ip: str
+    stamp: float
+
+
 class LoginRateLimiter:
     """Sliding-window failure counters: one bucket per ``(username, ip)`` (``limit``) and
-    one per ``ip`` (``ip_limit``); a caller is limited when either is full. A success
-    clears only its own ``(username, ip)`` bucket — the address's bucket drains with the
-    window, so an attacker holding one valid account cannot reset it. Thread-safe, in
-    memory, per process: production fronts it with the proxy's limiter."""
+    one per ``ip`` (``ip_limit``); a caller is limited when either is full. Thread-safe, in
+    memory, per process: production fronts it with the proxy's limiter.
+
+    Check and count are ONE step (AUTH-1, the operator's security review, 2026-09-27):
+    :meth:`acquire` refuses when a bucket is full and otherwise reserves a slot in both
+    buckets under the same lock, before the ~50 ms password verify. Every attempt in flight
+    therefore already counts, so a concurrent burst gets at most ``limit`` evaluations per
+    ``(username, ip)`` and ``ip_limit`` per address, and a correct password behind them is
+    refused like any other. The reservation stands as the failure unless the attempt
+    succeeds: :meth:`succeed` clears the ``(username, ip)`` bucket and releases only its own
+    slot in the address's bucket — so a success is never counted against the address, and
+    an attacker holding one valid account cannot drain it. There is no separate check or
+    record method: a caller cannot write the check-then-verify-then-count race again."""
 
     def __init__(
         self,
@@ -692,29 +755,50 @@ class LoginRateLimiter:
             for key in list(self._failures):
                 self._prune(key, now)
 
-    def retry_after(self, username: str, ip: str) -> float | None:
-        """Seconds until the caller may try again, or ``None`` when not limited."""
+    def acquire(self, username: str, ip: str) -> LoginSlot:
+        """Reserve one attempt for ``(username, ip)`` or raise :class:`LoginRateLimited`.
+        Call it before the password is checked; give the slot to :meth:`succeed` when the
+        password was right, and do nothing when it was wrong."""
         now = self._clock()
+        buckets = (((username, ip), self.limit), (self._ip_key(ip), self.ip_limit))
         with self._lock:
             self._sweep(now)
             waits = []
-            for key, limit in (((username, ip), self.limit), (self._ip_key(ip), self.ip_limit)):
+            for key, limit in buckets:
                 q = self._prune(key, now)
                 if len(q) >= limit:
                     waits.append(max(0.0, self.window_s - (now - q[-limit])))
-            return max(waits) if waits else None
+            if waits:
+                raise LoginRateLimited(max(waits))
+            for key, _ in buckets:
+                self._failures.setdefault(key, deque()).append(now)
+        return LoginSlot(username=username, ip=ip, stamp=now)
 
-    def record_failure(self, username: str, ip: str) -> None:
-        """Count one failed login for the ``(username, ip)`` key and for the address."""
-        now = self._clock()
+    def succeed(self, slot: LoginSlot) -> None:
+        """The attempt's password was right: forget the ``(username, ip)`` bucket and give
+        back this attempt's own slot in the address's bucket (never anyone else's)."""
+        ip_key = self._ip_key(slot.ip)
         with self._lock:
-            self._failures.setdefault((username, ip), deque()).append(now)
-            self._failures.setdefault(self._ip_key(ip), deque()).append(now)
+            self._failures.pop((slot.username, slot.ip), None)
+            q = self._failures.get(ip_key)
+            if q is None:
+                return
+            with contextlib.suppress(ValueError):  # already aged out of the window
+                q.remove(slot.stamp)
+            if not q:
+                self._failures.pop(ip_key, None)
 
-    def reset(self, username: str, ip: str) -> None:
-        """Forget the key's failures (a successful login)."""
-        with self._lock:
-            self._failures.pop((username, ip), None)
+
+def rate_limited_error(exc: LoginRateLimited, message: str) -> ApiError:
+    """The ``429 rate_limited`` envelope (``detail.retry_after_s`` and ``Retry-After``)."""
+    wait = math.ceil(exc.retry_after_s)
+    return ApiError(
+        429,
+        "rate_limited",
+        message,
+        detail={"retry_after_s": wait},
+        headers={"Retry-After": str(wait)},
+    )
 
 
 # --- OIDC ------------------------------------------------------------------------
@@ -897,11 +981,16 @@ def upsert_oidc_user(
 
     ``role`` (the claims' mapping) is set on a NEW account. On an existing one it replaces
     the stored role only when ``role_from_claims == "always"`` — otherwise an admin's
-    change would be silently reverted at the account's next sign-in. The caller records
-    ``user.role_overridden`` when it compares the role before and after."""
+    change would be silently reverted at the account's next sign-in — and never when it
+    would demote the last active admin (:func:`would_orphan_admins`, under the users lock
+    taken here: AUTH-2): the stored role is kept. The caller compares the role before and
+    after with the mapped one and records ``user.role_overridden`` or
+    ``user.role_override_refused``."""
     subject = str(claims.get("sub") or "")
     if not subject:
         raise ApiError(502, "oidc_exchange_failed", "ID token carries no subject")
+    if role_from_claims == "always":
+        lock_users_table(db)  # the count and the demotion are one serialised step
     email = str(claims.get("email") or claims.get("preferred_username") or "")
     display = str(claims.get("name") or claims.get("preferred_username") or email or subject)
     user = db.execute(
@@ -920,7 +1009,9 @@ def upsert_oidc_user(
     else:
         user.email = email or user.email
         user.display_name = display or user.display_name
-        if role_from_claims == "always":
+        if role_from_claims == "always" and not would_orphan_admins(
+            db, user, role=role, active=user.active
+        ):
             user.role = role
     db.flush()
     return user
@@ -1036,7 +1127,9 @@ __all__ = [
     "ApproverDep",
     "AuthlibOidcClient",
     "CurrentUser",
+    "LoginRateLimited",
     "LoginRateLimiter",
+    "LoginSlot",
     "OidcClient",
     "OidcState",
     "OperatorDep",
@@ -1060,6 +1153,7 @@ __all__ = [
     "issue_session",
     "map_role",
     "new_github_setup_nonce",
+    "rate_limited_error",
     "read_oidc_cookie",
     "read_session",
     "read_session_claims",
@@ -1069,6 +1163,7 @@ __all__ = [
     "session_cookie_name",
     "session_signature_valid",
     "session_token_of",
+    "set_account_active",
     "set_csrf_cookie",
     "set_github_setup_cookie",
     "set_oidc_cookie",
@@ -1080,4 +1175,5 @@ __all__ = [
     "validate_username",
     "verify_github_setup_state",
     "verify_password",
+    "would_orphan_admins",
 ]

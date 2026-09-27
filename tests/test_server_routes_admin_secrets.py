@@ -17,7 +17,10 @@ What it does: Pins that every route is 401 anonymous and admin-only, that a view
               the store; and that verify is 404 without a token, runs the fake CLI with the
               stored token in the builder's environment, reports an invalid token fast (not
               after the CLI's retries), handles a missing CLI, is rate-limited to one per ten
-              seconds, and refuses an insecure file.
+              seconds, and refuses an insecure file; that every store and removal of the
+              Claude Code and tracker tokens is one event naming the admin, never the value,
+              and a refused store none (EI-8); and that every admin write records who made it
+              or is named exempt with the reason.
 How:          A fake ``claude`` first on PATH that records what it was run with; a temp
               ``CRB_HOME``; ambient ``CRB_*`` cleared.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
@@ -426,3 +429,111 @@ class TestVerify:
         # and the status list reports it as absent rather than leak anything
         items = client.get(f"{API_PREFIX}/settings/secrets").json()["items"]
         assert items[0]["present"] is False
+
+
+# --- EI-8: a credential change is an event naming who made it -----------------------------
+
+
+def _secret_events(client: TestClient) -> list[Any]:
+    """Every event on the deployment's credentials trace, oldest first."""
+    from sqlalchemy import select
+
+    from crb.server.routes.admin import SECRETS_TRACE
+    from crb.store.models import Event
+
+    with client.app.state.session_factory() as s:
+        rows = list(
+            s.execute(
+                select(Event).where(Event.trace_id == SECRETS_TRACE).order_by(Event.seq)
+            ).scalars()
+        )
+        s.expunge_all()
+        return rows
+
+
+TRACKER_PATH = f"{API_PREFIX}/settings/secrets/tracker-token"
+TRACKER_VALUE = "a-tracker-token-value-WXYZ"
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "name"),
+    [(PATH_, GOOD, NAME), (TRACKER_PATH, TRACKER_VALUE, "tracker_token")],
+)
+def test_each_store_and_removal_is_one_event_naming_the_admin(
+    client: TestClient, path: str, value: str, name: str
+) -> None:
+    """EI-8 (the operator's security review, 2026-09-27): storing or removing a deployment
+    credential wrote no event — removing the tracker token stops every intake listener and
+    removing the Claude token stops every build, and the only provenance, the overwritable
+    ``set_by``, was wiped by the removal. Each act is now one ``system`` event whose actor is
+    the admin, carrying the secret's name and fingerprint, never its value."""
+    login(client)
+    me = client.get(f"{API_PREFIX}/auth/me").json()["id"]
+    assert client.put(path, json={"token": value}).status_code == 200
+    assert client.delete(path).status_code == 200
+    assert client.delete(path).status_code == 200  # idempotent, and still an act
+    events = _secret_events(client)
+    assert [e.action for e in events] == [
+        "settings.secret_set",
+        "settings.secret_deleted",
+        "settings.secret_deleted",
+    ]
+    assert {e.actor for e in events} == {me}
+    assert {e.payload_json["secret"] for e in events} == {name}
+    assert events[0].payload_json["fingerprint"] == value[-4:]
+    assert events[0].payload_json["via"] == "api"
+    assert [e.payload_json["existed"] for e in events[1:]] == [True, False]
+    for e in events:
+        assert value not in json.dumps(e.payload_json) and value[:-4] not in json.dumps(
+            e.payload_json
+        )
+
+
+def test_a_refused_store_writes_no_event(client: TestClient) -> None:
+    login(client)
+    assert client.put(PATH_, json={"token": "sk-ant-oat01-tiny"}).status_code == 422
+    assert _secret_events(client) == []
+
+
+#: Admin writes that change no account and no credential, by name, with the reason.
+_UNRECORDED_WRITES = {
+    "verify_claude_code_token": "a probe of the stored token; it changes nothing",
+    "cancel_claude_login": "stops the sign-in helper before anything is stored",
+}
+#: What records an act on the account trail or the credentials trace.
+_RECORDERS = {
+    "record_user_event",
+    "_stored",
+    "_removed",
+    "_record_login_stored",
+    "_record_secret_change",
+    "append_system_event",
+}
+
+
+def test_every_admin_write_records_who_made_it_or_is_exempt_by_name() -> None:
+    """Prevention (EI-8): the credential routes wrote nothing while the account routes beside
+    them each wrote an event, and nothing compared the two. Every PUT, POST or DELETE handler
+    in routes/admin.py calls a recorder, or is named in ``_UNRECORDED_WRITES`` with why."""
+    import ast
+
+    src = Path(__file__).resolve().parents[1] / "src" / "crb" / "server" / "routes" / "admin.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    handlers: dict[str, set[str]] = {}
+    for fn in tree.body:
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        verbs = {
+            d.func.attr
+            for d in fn.decorator_list
+            if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+        }
+        if verbs & {"put", "post", "delete"}:
+            handlers[fn.name] = {
+                getattr(n.func, "id", getattr(n.func, "attr", ""))
+                for n in ast.walk(fn)
+                if isinstance(n, ast.Call)
+            }
+    assert len(handlers) >= 12, sorted(handlers)  # the walker found the real routes
+    unrecorded = sorted(name for name, calls in handlers.items() if not calls & _RECORDERS)
+    assert unrecorded == sorted(_UNRECORDED_WRITES), unrecorded

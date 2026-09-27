@@ -933,7 +933,7 @@ crb users list                       # username, role, active, issuer, last logi
 crb users create <name> --role admin # password from a prompt or CRB_USERS_PASSWORD_FILE
 crb users set-password <name>        # its sessions end on their next request
 crb users deactivate <name>          # refused for the last active admin (last_admin)
-crb users activate <name>            # restores sessions issued before the deactivation
+crb users activate <name>            # can sign in again; old sessions stay ended
 ```
 
 **Forgot the admin password?** On the API host: `crb users set-password admin` (the
@@ -952,7 +952,8 @@ deployment; disabling it at the provider stops it everywhere.
 
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
-`user.deactivated`, `user.sessions_revoked`, `user.role_overridden`) with the actor (the
+`user.deactivated`, `user.sessions_revoked`, `user.sessions_ended` (a sign-out),
+`user.role_overridden`, `user.role_override_refused`) with the actor (the
 admin's user id, or `cli:<os user>`) and the target; never the password. The History names
 an actor by the account's username; an actor whose account has since been deleted keeps its id. Each sign-in is one
 too: `user.login`, and `user.login_failed` with the actor `anonymous` — a refused name that
@@ -972,11 +973,12 @@ a lost laptop or a leaver; it works for an identity-provider account too, which 
 change. The person can sign in again at once; deactivate the account as well to keep them
 out.
 
-Deactivating refuses every request while the account is inactive, but does not move the
-credential: re-activating within the session lifetime (`CRB_SESSION_TTL`, 8 hours by
-default) restores the sessions issued before. To contain a suspected compromise, deactivate
-**and** sign the account out everywhere (or set a new password); either ends the sessions
-for good. The last active admin can never be deactivated, by either door.
+Deactivating refuses every request while the account is inactive and ends every session it
+held, on every device: it rotates the account's session nonce, as "sign out everywhere"
+does. Re-activating it brings none of them back, a stolen cookie included; the person signs
+in again. So deactivating alone contains a suspected compromise; set a new password as well
+when the password itself may be known. The last active admin can never be deactivated, by
+either door.
 
 **How long a recovery takes, and what it costs.** Neither door calls a model, so a recovery
 spends nothing. By the admin door — a wrong password on `/login`, which names who sets a new
@@ -995,7 +997,9 @@ timed a person doing it; G-466]**.
 time it signs in. After that the role is yours to change on the Settings screen, and the
 next sign-in does not undo it. If your organisation manages roles in the provider instead,
 set `CRB_OIDC__ROLE_FROM_CLAIMS=always`: every sign-in then applies the claims, and each time
-that changes a role the account's trail records `user.role_overridden`
+that changes a role the account's trail records `user.role_overridden`. The claims never
+demote the last active admin: that sign-in keeps the admin role and records
+`user.role_override_refused` — fix the claims at the provider, or add a second admin
 ([DEPLOYMENT §2.1](DEPLOYMENT.md#21-environment-reference)).
 
 ## 10. The factory's test author

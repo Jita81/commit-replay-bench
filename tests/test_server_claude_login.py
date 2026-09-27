@@ -13,7 +13,9 @@ What it does: Pins the whole flow against a fake CLI that prints the sign-in URL
               and nothing stored; a second start while one is pending → 409; cancel; a missing
               CLI → 503; a malformed code → 422; RBAC (admin only); every session file 0600
               under a 0700 directory; a stray token-shaped run in the CLI's output never
-              reaches ``status.json``.
+              reaches ``status.json``; and the stored token is one ``settings.secret_set``
+              event naming the admin who started the sign-in, however often it is polled
+              (EI-8).
 How:          ``FAKE_CLAUDE`` shell script as the binary; ``LoginBroker`` on a temp secrets
               directory with a short TTL; the driver spawned for real (detached) so the
               cross-process file protocol is what is tested; ``TestClient`` for the routes with
@@ -410,6 +412,26 @@ def test_routes_run_the_whole_flow_and_never_return_the_token(
     assert store.get("claude_code_oauth_token") == TOKEN
     r = client.get(f"{LOGIN}/{'0' * 32}")
     assert r.status_code == 404
+    # EI-8: the helper stores the token with no database, so the first read that sees the
+    # session done records it — once, however often the page polls — naming the admin who
+    # started the sign-in, never the value
+    for _ in range(3):
+        assert client.get(f"{LOGIN}/{sid}").json()["state"] == "done"
+    from sqlalchemy import select
+
+    from crb.server.routes.admin import SECRETS_TRACE
+    from crb.store.models import Event
+
+    me = client.get(f"{API_PREFIX}/auth/me").json()["id"]
+    with client.app.state.session_factory() as s:
+        events = list(s.execute(select(Event).where(Event.trace_id == SECRETS_TRACE)).scalars())
+        assert [e.action for e in events] == ["settings.secret_set"]
+        (ev,) = events
+        assert ev.actor == me
+        assert ev.payload_json["via"] == "login" and ev.payload_json["session"] == sid
+        assert ev.payload_json["secret"] == "claude_code_oauth_token"
+        assert ev.payload_json["fingerprint"] == TOKEN[-4:]
+        assert TOKEN not in str(ev.payload_json)
 
 
 def test_login_routes_are_admin_only_and_cancel_works(client: TestClient) -> None:

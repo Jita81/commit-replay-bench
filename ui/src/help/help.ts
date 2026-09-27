@@ -345,7 +345,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Read the health probes and change your own password; ask an admin for anything else.',
       admin: 'Register the GitHub App, store the builder token, create an approver account. In the Users card you can also set an account’s password, turn it off when someone leaves and read its history. A probe that is not ok explains itself in its detail line.',
     },
-    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). A password is at least 12 characters; setting one ends that account’s other sessions, and reactivating a deactivated account within the session lifetime (8 hours by default) restores the sessions it held.',
+    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). A password is at least 12 characters; setting one ends that account’s other sessions, and deactivating an account ends every session it held, so reactivating it brings none of them back.',
     terms: ['apparatus', 'negative_controls'],
     readMore: [
       { to: 'GITHUB-APP#2-register-the-app-once-per-deployment', label: 'Register the GitHub App' },

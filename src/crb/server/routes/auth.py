@@ -3,37 +3,43 @@
 Local login is rate limited per ``(username, client ip)`` and per client ip; a failure
 never says which half was wrong. Every sign-in, and every refused one, is an audit event.
 Logout rotates the account's session nonce, so it ends every session of the account, not
-only this browser's cookie. OIDC state, nonce and the PKCE verifier travel in a signed,
-short-lived, HttpOnly cookie, so the callback can only complete a login this
-browser started. ``next`` is constrained to a same-origin path.
+only this browser's cookie, and records it as ``user.sessions_ended``. OIDC state, nonce
+and the PKCE verifier travel in a signed, short-lived, HttpOnly cookie, so the callback
+can only complete a login this browser started. ``next`` is constrained to a same-origin path.
 
 Navigation
 ----------
 What it is:   The ``/auth/*`` route module — local login / logout / me / csrf and the OIDC
               start + callback pair.
-What it does: Rate-limits local login per ``(username, ip)`` and per ``ip`` and answers
-              one indistinct 401 for any failure; sets the session and the session-bound
-              CSRF cookies on success; logout rotates the account's session nonce (every
-              session ends); drives the authorization-code + PKCE flow with the state kept
-              in a signed short-lived cookie; maps IdP claims to a role on first sign-in
-              (every sign-in under ``role_from_claims=always``, recorded as
-              ``user.role_overridden``) and upserts the user; refuses a disabled account and
-              any ``next`` that is not a same-origin path. Every sign-in writes
-              ``user.login`` and every refused local one ``user.login_failed`` (a name that
-              is no account: recorded without the name and logged as unknown, DL-068);
-              every callback failure redirects to ``/login?error=<code>`` from
-              ``OIDC_FAILURE_CODES`` (anything else as ``oidc_failed``).
-How:          Thin handlers over src/crb/server/auth.py — ``authenticate_local`` →
-              ``_commit_audited`` (the event with its state change; a lost ``seq`` race is
-              retried) → cookies; ``OidcState.fresh`` → provider URL → cookie; callback:
-              cookie → ``_complete_oidc`` (``exchange`` → ``map_role`` →
-              ``upsert_oidc_user`` → event, all through ``_commit_audited``) → cookies →
-              redirect, or ``_back_to_login`` (a race lost on every retry: ``oidc_failed``).
+What it does: Rate-limits local login per ``(username, ip)`` and per ``ip`` — the slot is
+              reserved before the password is checked, so a concurrent burst cannot
+              outrun the limit (AUTH-1) — and answers one indistinct 401 for any
+              failure; sets the session and the session-bound CSRF cookies on success;
+              logout rotates the account's session nonce (every session ends) and records
+              ``user.sessions_ended``; drives the authorization-code + PKCE flow with the
+              state kept in a signed short-lived cookie; maps IdP claims to a role on
+              first sign-in (every sign-in under ``role_from_claims=always``, recorded as
+              ``user.role_overridden`` — never a demotion of the last active admin, which
+              is kept and recorded as ``user.role_override_refused``, AUTH-2) and upserts
+              the user; refuses a disabled account and any ``next`` that is not a
+              same-origin path. Every sign-in writes ``user.login`` and every refused local
+              one ``user.login_failed`` (a name that is no account: recorded without the
+              name and logged as unknown, DL-068); every callback failure redirects to
+              ``/login?error=<code>`` from ``OIDC_FAILURE_CODES`` (anything else as
+              ``oidc_failed``).
+How:          Thin handlers over src/crb/server/auth.py — ``LoginRateLimiter.acquire`` →
+              ``authenticate_local`` → ``commit_audited`` (the event with its state change,
+              under the events lock; a lost ``seq`` race is retried) → cookies;
+              ``OidcState.fresh`` → provider URL → cookie; callback: cookie →
+              ``_complete_oidc`` (``exchange`` → ``map_role`` → ``upsert_oidc_user`` →
+              event, all through ``commit_audited``) → cookies → redirect, or
+              ``_back_to_login`` (a race lost on every retry: ``oidc_failed``).
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         none
 Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/routes/admin.py
               (``record_user_event`` — the account trail), src/crb/server/routes/runs.py
-              (``append_system_event`` for a refusal with no account), src/crb/server/app.py
+              (``append_system_event`` for a refusal with no account; ``commit_audited``, the
+              one locked, retrying commit of an event with its change), src/crb/server/app.py
               (``/auth/login`` is CSRF-exempt; the limiter lives on ``app.state``),
               src/crb/server/settings.py (``OidcSettings``, ``local_auth_enabled``),
               ui/src/api/client.ts (the UI's login and CSRF echo),
@@ -50,8 +56,6 @@ from __future__ import annotations
 import datetime as _dt
 import hmac
 import logging
-import math
-from collections.abc import Callable
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -66,6 +70,7 @@ from crb.core.redact import redact
 from crb.server.auth import (
     OIDC_COOKIE,
     CurrentUser,
+    LoginRateLimited,
     LoginRateLimiter,
     OidcClient,
     OidcState,
@@ -73,7 +78,9 @@ from crb.server.auth import (
     clear_auth_cookies,
     credential_version,
     find_local_user,
+    lock_users_table,
     map_role,
+    rate_limited_error,
     read_oidc_cookie,
     read_session_claims,
     rotate_session_nonce,
@@ -86,7 +93,7 @@ from crb.server.auth import (
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep, client_ip
 from crb.server.routes.admin import record_user_event
-from crb.server.routes.runs import append_system_event, system_trace_id
+from crb.server.routes.runs import append_system_event, commit_audited, system_trace_id
 from crb.server.settings import Settings
 from crb.store.models import User
 
@@ -122,27 +129,6 @@ OIDC_FAILURE_CODES = frozenset(
         "account_disabled",
     }
 )
-
-#: Attempts at one audited commit before a trace-``seq`` conflict is allowed to surface.
-_AUDIT_ATTEMPTS = 3
-
-
-def _commit_audited(db: Session, write: Callable[[], None]) -> None:
-    """Apply ``write`` (a state change and its ``user.*`` event) and commit them together.
-
-    Two sign-ins to one account can read the same last ``seq`` on its trace; the loser's
-    insert then breaks ``uq_events_trace_seq``. That is a lost race, not a refused sign-in,
-    so the transaction is rolled back and ``write`` runs again on fresh rows (DL-068).
-    """
-    for attempt in range(_AUDIT_ATTEMPTS):
-        write()
-        try:
-            db.commit()
-            return
-        except IntegrityError:
-            db.rollback()
-            if attempt == _AUDIT_ATTEMPTS - 1:
-                raise
 
 
 def _record_failed_login(db: Session, username: str) -> None:
@@ -202,19 +188,16 @@ def login(
         raise ApiError(403, "local_auth_disabled", "local login is disabled; use OIDC")
     limiter: LoginRateLimiter = request.app.state.login_limiter
     ip = client_ip(request, settings)
-    retry = limiter.retry_after(body.username, ip)
-    if retry is not None:
-        raise ApiError(
-            429,
-            "rate_limited",
-            "too many failed logins; try again later",
-            detail={"retry_after_s": math.ceil(retry)},
-            headers={"Retry-After": str(math.ceil(retry))},
-        )
+    # The slot is reserved BEFORE the verify, so every attempt in flight already counts
+    # (AUTH-1): a burst cannot outrun the limiter, and a right password behind it is 429.
+    try:
+        slot = limiter.acquire(body.username, ip)
+    except LoginRateLimited as exc:
+        raise rate_limited_error(exc, "too many failed logins; try again later") from None
     user = authenticate_local(db, body.username, body.password)
     if user is None:
         # One message for every failure: an attacker must not learn which half was wrong.
-        limiter.record_failure(body.username, ip)
+        # The reserved slot stands as the failure.
         # The typed name reaches the log only when it is an account: a password typed into
         # the username box is never stored, in the log or the audit table (DL-068, P-086).
         known = find_local_user(db, body.username) is not None
@@ -222,9 +205,9 @@ def login(
             "login failed",
             extra={"username": body.username if known else UNKNOWN_ACCOUNT, "client": ip},
         )
-        _commit_audited(db, lambda: _record_failed_login(db, body.username))
+        commit_audited(db, lambda: _record_failed_login(db, body.username))
         raise ApiError(401, "invalid_credentials", "username or password is incorrect")
-    limiter.reset(body.username, ip)
+    limiter.succeed(slot)
     uid = user.id
 
     def _signed_in() -> None:
@@ -234,7 +217,7 @@ def login(
         account.last_login = _now()
         record_user_event(db, action="user.login", actor=uid, target=account, method="local")
 
-    _commit_audited(db, _signed_in)
+    commit_audited(db, _signed_in)
     user = db.get(User, uid) or user
     request.state.user_id = user.id
     cv = credential_version(user)
@@ -253,7 +236,9 @@ def logout(request: Request, settings: SettingsDep, db: DbDep) -> Response:
     CURRENT session's logout rotates the account's session nonce: every session the account
     holds, here and on any other device, ends on its next request. A stale, forged or
     absent cookie rotates nothing (it cannot be used to sign somebody else out) and still
-    gets the cookies cleared."""
+    gets the cookies cleared. A rotation is an account change, so it is one
+    ``user.sessions_ended`` event (``by: self``) on the account's trail, the account as
+    actor (EI-8 — the admin's "sign out everywhere" wrote one; this did not)."""
     token = session_token_of(request, settings)
     if token:
         try:
@@ -262,8 +247,17 @@ def logout(request: Request, settings: SettingsDep, db: DbDep) -> Response:
             uid, cv = "", ""
         user = db.get(User, uid) if uid else None
         if user is not None and hmac.compare_digest(cv.encode(), credential_version(user).encode()):
-            rotate_session_nonce(user)
-            db.commit()
+
+            def _ended() -> None:
+                account = db.get(User, uid)
+                if account is None:  # deleted between the check and the write
+                    return
+                rotate_session_nonce(account)
+                record_user_event(
+                    db, action="user.sessions_ended", actor=uid, target=account, by="self"
+                )
+
+            commit_audited(db, _ended)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_auth_cookies(response, settings)
     return response
@@ -460,12 +454,32 @@ def _complete_oidc(
     def _signed_in() -> None:
         # Re-run whole on a retry: the rollback undid the upsert as well as the events.
         signed_in.clear()
+        if source == "always":
+            # the role read below, the last-admin count and the write are one serialised step
+            lock_users_table(db)
         before = _stored_role(db, issuer, claims)
         user = upsert_oidc_user(
             db, issuer=issuer, claims=claims, role=role, role_from_claims=source
         )
         if not user.active:
             raise _AccountDisabled(user.id)
+        if source == "always" and before is not None and user.role != role:
+            # the claims would have demoted the last active admin (AUTH-2): the role is kept
+            # and the conflict is on the account's trail, for an admin to resolve at the IdP
+            log.warning(
+                "oidc claims would demote the last active admin; role kept",
+                extra={"user": user.id, "from_claims": role},
+            )
+            record_user_event(
+                db,
+                action="user.role_override_refused",
+                actor=user.id,
+                target=user,
+                from_claims=role,
+                reason="last_admin",
+                by="oidc_claims",
+                issuer=issuer,
+            )
         if before is not None and before != user.role:
             # only reachable under ROLE_FROM_CLAIMS=always: the provider replaced a role an
             # admin may have set here, and that is never silent
@@ -483,12 +497,12 @@ def _complete_oidc(
         signed_in.append(user)
 
     try:
-        _commit_audited(db, _signed_in)
+        commit_audited(db, _signed_in)
     except _AccountDisabled as off:
         db.rollback()
         account = db.get(User, off.user_id)
         if account is not None:
-            _commit_audited(
+            commit_audited(
                 db,
                 lambda: record_user_event(
                     db,

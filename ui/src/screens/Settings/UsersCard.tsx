@@ -289,7 +289,7 @@ export function UsersCard() {
                   onSuccess: (x) =>
                     setSaid(
                       next
-                        ? `${x.username || x.display_name} is active again and can sign in. Sessions it held less than the session lifetime ago work again — sign it out everywhere, or set a password, to end them.`
+                        ? `${x.username || x.display_name} is active again and can sign in. The sessions it held before it was turned off stay ended.`
                         : `${x.username || x.display_name} is deactivated and is refused on its very next request.`,
                     ),
                   // the server is the one that decides: a refusal puts the control back

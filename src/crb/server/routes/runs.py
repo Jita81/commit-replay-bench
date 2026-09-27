@@ -33,7 +33,10 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               presence only) a run whose builder auth has no credential — through
               ``submit_refusals``, the one gate every route that queues a run calls; serves
               run views with counts re-derived from the ledger when the worker wrote none; streams
-              events as SSE with resume-by-seq; cancellation is a flag the worker honours.
+              events as SSE with resume-by-seq; cancellation is a flag the worker honours;
+              and owns the out-of-band ``system`` event writers the other routes share
+              (``append_system_event``, and ``commit_audited``: an event and its change in
+              one commit, the trace's ``seq`` read under the events lock).
 How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQLAlchemy
               queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
@@ -68,6 +71,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
@@ -101,6 +105,7 @@ from crb.server.schemas import (
     StepEventOut,
 )
 from crb.server.secrets import secrets_dir_for
+from crb.store.events import lock_event_seq
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 
@@ -268,6 +273,33 @@ def append_system_event(
     )
     session.add(event_to_model(ev))
     return ev
+
+
+#: Attempts at one audited commit before a trace-``seq`` conflict is allowed to surface.
+AUDIT_ATTEMPTS = 3
+
+
+def commit_audited(db: Session, write: Callable[[], None]) -> None:
+    """Apply ``write`` (a state change and its ``system`` event) and commit them together.
+
+    The ``events`` write lock (:func:`crb.store.events.lock_event_seq`) is taken BEFORE
+    ``write`` reads the trace's last ``seq``, so writers to one trace are serialised on
+    SQLite and PostgreSQL: a burst of refused sign-ins on the shared unknown-account trace
+    once ran out of the retries below and answered 500 (found by AUTH-1's regression
+    test). On another dialect two writers can still read the same ``seq``; the loser's
+    insert breaks ``uq_events_trace_seq``, which is a lost race, not a refusal, so the
+    transaction is rolled back and ``write`` runs again on fresh rows (DL-068).
+    """
+    for attempt in range(AUDIT_ATTEMPTS):
+        lock_event_seq(db)
+        write()
+        try:
+            db.commit()
+            return
+        except IntegrityError:
+            db.rollback()
+            if attempt == AUDIT_ATTEMPTS - 1:
+                raise
 
 
 def _read_events_local(

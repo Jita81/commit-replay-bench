@@ -10,11 +10,12 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               while the new password logs in and the old does not, that a self-change needs
               the current password (five wrong ones trip the login limiter: 429) and keeps
               the changing browser signed in while another session ends, that an OIDC
-              account is refused (409 ``not_local``), that deactivation SUSPENDS sessions
-              (blocked while the account is inactive, never ended: the same cookie works
-              again after reactivation) and the last active admin cannot be deactivated
-              (409 ``last_admin``), that ``GET /users`` rows carry ``active`` and
-              ``last_login``, that every change lands as one event with actor and target
+              account is refused (409 ``not_local``), that deactivation ENDS sessions
+              (the nonce rotates: an old cookie is ``session_revoked`` after
+              re-activation, by the route, the role route and the host door, AUTH-3) and
+              the last active admin cannot be deactivated (409 ``last_admin``), that
+              ``GET /users`` rows carry ``active`` and ``last_login``, that every change
+              lands as one event with actor and target
               and never a password, that those events are ordinary ``events`` rows —
               trigger-protected, not hash-chained (the chain is the ledger's) — and that a
               password set by any door rotates the session nonce, so the old sessions end
@@ -303,7 +304,9 @@ class TestSelfChange:
 
 
 class TestActive:
-    def test_deactivate_ends_sessions_and_reactivate_allows_login(self, client: TestClient) -> None:
+    def test_deactivate_ends_sessions_for_good_and_reactivate_allows_login(
+        self, client: TestClient
+    ) -> None:
         admin, target = client, other_client(client)
         login(admin)
         uid = create(admin, "carol", "approver")
@@ -319,28 +322,62 @@ class TestActive:
         assert r.status_code == 200 and r.json()["active"] is False
         r = admin.put(f"{API_PREFIX}/users/{uid}/active", json={"active": True})
         assert r.status_code == 200 and r.json()["active"] is True
-        # The documented contract (API.md, OPERATOR.md §9): deactivation suspends, it does
-        # not revoke — the cookie issued before it works again once the account is active,
-        # because ``active`` is not part of the credential version. A password set is what
-        # ends it for good. Flip this assertion when a revocation nonce lands.
+        # AUTH-3 (the operator's security review, 2026-09-27): deactivation ENDS the
+        # sessions — it rotates the account's session nonce — so a cookie issued before it
+        # (a stolen one included) never comes back when the account is turned on again.
+        r = target.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+        login(target, "carol", USER_PW)  # the person signs in afresh
         assert target.get(f"{API_PREFIX}/auth/me").status_code == 200
-        r = admin.put(f"{API_PREFIX}/users/{uid}/password", json={"password": NEW_PW})
+
+    def test_the_host_door_ends_the_sessions_too(self, client: TestClient, app: Any) -> None:
+        """``crb users deactivate`` and the route share :func:`set_user_active`, so the
+        rotation lives there, not in the route."""
+        admin, target = client, other_client(client)
+        login(admin)
+        uid = create(admin, "dora", "viewer")
+        login(target, "dora", USER_PW)
+        with app.state.session_factory() as s:
+            user = s.get(User, uid)
+            assert user is not None
+            nonce = user.session_nonce
+            assert set_user_active(s, user, False)
+            assert user.session_nonce != nonce
+            s.commit()
+        with app.state.session_factory() as s:
+            user = s.get(User, uid)
+            assert user is not None
+            nonce = user.session_nonce
+            assert set_user_active(s, user, True)
+            assert user.session_nonce == nonce  # turning it on ends nothing more
+            s.commit()
+        r = target.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+
+    def test_the_role_route_deactivating_ends_the_sessions_too(self, client: TestClient) -> None:
+        """``PUT /users/{id}/role`` can turn an account off as well (``active: false``); it
+        writes the flag through the same primitive, so it ends the sessions the same way."""
+        admin, target = client, other_client(client)
+        login(admin)
+        uid = create(admin, "erin", "operator")
+        login(target, "erin", USER_PW)
+        r = admin.put(f"{API_PREFIX}/users/{uid}/role", json={"role": "viewer", "active": False})
+        assert r.status_code == 200 and r.json()["active"] is False
+        r = admin.put(f"{API_PREFIX}/users/{uid}/active", json={"active": True})
         assert r.status_code == 200
         r = target.get(f"{API_PREFIX}/auth/me")
         assert r.status_code == 401 and err(r)["code"] == "session_revoked"
-        login(target, "carol", NEW_PW)
 
-    def test_api_md_states_that_reactivation_resumes_sessions(self) -> None:
-        """docs/API.md must describe what the route above proves: deactivation suspends
-        (401 ``unauthenticated``) and re-activation within the TTL resumes the session; a
-        password change is what ends it (``session_revoked``). It must not tell a
-        re-activated user to sign in again (CodeRabbit on PR #42)."""
+    def test_api_md_states_that_deactivation_ends_sessions_for_good(self) -> None:
+        """docs/API.md must describe what the route above proves: deactivation ends every
+        session of the account (``session_revoked`` after re-activation); the person signs
+        in again once an admin re-activates the account. It must not say re-activation
+        resumes them (the contract before AUTH-3)."""
         api_md = (Path(__file__).parents[1] / "docs" / "API.md").read_text()
         roles = api_md[api_md.index("- **Roles**") : api_md.index("- **Errors**")]
-        assert "sign in\n  again once an admin re-activates" not in roles
-        assert "sign in again once an admin re-activates" not in roles
-        assert "resume" in roles and "re-activate" in roles
-        assert "password changed" in roles and "session_revoked" in roles
+        assert "resume" not in roles
+        assert "re-activate" in roles and "session_revoked" in roles
+        assert "ends every session" in roles
 
     def test_last_admin_guard_and_second_admin(self, client: TestClient) -> None:
         login(client)
