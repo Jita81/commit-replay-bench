@@ -59,8 +59,10 @@ const TAG: Record<TagTone, string> = {
 }
 
 /** The solid status label — uppercase, bold, one of six tones; `hint` makes it the trigger for what the status means. */
-export function Tag({ tone, children, className = '', hint, ...rest }: { tone: TagTone; children: ReactNode; className?: string; hint?: HintId; 'aria-label'?: string; 'data-testid'?: string }) {
-  const cls = `inline-block rounded-[4px] px-2 py-1 text-[13px] font-bold uppercase leading-tight tracking-[.05em] whitespace-nowrap ${TAG[tone]} ${className}`
+export function Tag({ tone, children, className = '', hint, wrap = false, ...rest }: { tone: TagTone; children: ReactNode; className?: string; hint?: HintId; wrap?: boolean; 'aria-label'?: string; 'data-testid'?: string }) {
+  // `wrap`: a long status (a task list's "Backlog frozen — run the factory") breaks onto a
+  // second line at phone width instead of pushing the page sideways
+  const cls = `inline-block rounded-[4px] px-2 py-1 text-[13px] font-bold uppercase leading-tight tracking-[.05em] ${wrap ? 'whitespace-normal text-right' : 'whitespace-nowrap'} ${TAG[tone]} ${className}`
   if (hint) {
     return (
       <Hint id={hint} className={cls} data-component="pill" {...rest}>
@@ -100,7 +102,7 @@ export function TaskList({ tasks, completed, label = 'Tasks', summary }: { tasks
             <>
               <span className="min-w-[1.6em] text-[19px] leading-[1.47] text-on-surface-muted">{t.num}</span>
               <span className="flex-1 text-[19px] leading-[1.47] text-primary underline">{t.name}</span>
-              <Tag tone={t.tone} hint={t.hint}>
+              <Tag tone={t.tone} hint={t.hint} wrap>
                 {t.status}
               </Tag>
             </>

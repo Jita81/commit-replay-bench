@@ -125,6 +125,7 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
       { label: `Evidence meets ${SIGNOFF_POLICY_VERSION}`, ok: null, hint: 'gate.signoff.thin_cell' },
       { label: 'Negative controls passed', ok: null, hint: 'gate.signoff.controls' },
       { label: 'Route = deliver', ok: null, hint: 'gate.signoff.route' },
+      { label: 'The standard arm’s registered reading delivers', ok: null, hint: 'gate.signoff.reading' },
       { label: 'Accepted row read and affirmed', ok: null, hint: 'gate.signoff.attestation' },
       { label: 'Signed by a second person', ok: null, hint: 'gate.signoff.second_person' },
     ]
@@ -153,6 +154,13 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
       hint: 'gate.signoff.oracle',
     },
     { label: 'Route = deliver', ok: !fam.has('route_not_deliver'), detail: `${preview.route.route}${preview.route.reason_code ? ` (${preview.route.reason_code})` : ''}`, hint: 'gate.signoff.route' },
+    {
+      // the sign-off policy of ADR-0026 item 6: only the cell's standard arm, read by a registered reading that delivers
+      label: 'The standard arm’s registered reading delivers',
+      ok: !fam.has('not_standard') && !fam.has('look_pending'),
+      detail: fam.has('look_pending') ? 'the reading waits for its next look — a sign-off is never written before it' : fam.has('not_standard') ? `the arm reads ${notStandardState(preview.refusals) || 'no proven standard'} — no proven standard to sign` : 'the cell is read on its proven standard arm',
+      hint: 'gate.signoff.reading',
+    },
     { label: 'Accepted row read and affirmed', ok: !fam.has('attestation_missing') && attested, detail: preview.attestation ? `${shortId(preview.attestation.reviewed_row_hash)} · ${preview.attestation.subject || preview.attestation.reviewed_task_id}` : 'pick a row below and tick “I have read this accepted diff”', hint: 'gate.signoff.attestation' },
     {
       label: 'Signed by a second person',
@@ -200,6 +208,12 @@ function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: Sign
       ))}
     </ul>
   )
+}
+
+/** The state a `not_standard:<state>` refusal names (`reading_unregistered`, `insufficient`, …), or ''. */
+function notStandardState(refusals: Array<{ code: string }>): string {
+  const r = refusals.find((x) => x.code.startsWith('not_standard:'))
+  return r ? r.code.slice('not_standard:'.length) : ''
 }
 
 /** "What you would be signing": the tiles, the controls verdict, the route and the split — the snapshot the record will carry. */

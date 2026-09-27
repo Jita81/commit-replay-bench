@@ -169,3 +169,17 @@ def test_the_policy_is_signoff_policy_v4() -> None:
     assert so.SIGNOFF_SCHEMA == "crb.signoff.v5"
     with pytest.raises(ValueError):
         so.SignoffRefusal("not_a_code", "x")
+
+
+def test_the_ui_names_the_signoff_policy_the_server_writes() -> None:
+    """P-130: the Sign-off and Posture screens read the policy version from ONE UI constant
+    (the served ``policy_version`` replaces it once the preview answers), and that constant is
+    the one the server writes — a bump that forgets the UI fails here, not in a walkthrough."""
+    import re
+
+    ui = Path(__file__).resolve().parent.parent / "ui" / "src" / "screens"
+    contract = (ui / "Signoff" / "contract.ts").read_text(encoding="utf-8")
+    m = re.search(r"export const SIGNOFF_POLICY_VERSION = '([^']+)'", contract)
+    assert m and m.group(1) == so.SIGNOFF_POLICY_VERSION
+    for screen in (ui / "Posture" / "PosturePage.tsx", ui / "Signoff" / "SignoffPage.tsx"):
+        assert not re.search(r"signoff-policy\.v\d", screen.read_text(encoding="utf-8")), screen

@@ -329,6 +329,29 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(screen.getByTestId('signoff-gate')).toHaveAttribute('data-state', 'CLOSED')
   })
 
+  it('names a cell with no proven standard in its own gate row (signoff-policy.v4): the standard arm’s reading must deliver', async () => {
+    const NOT_STANDARD: SignoffRefusal = { code: 'not_standard:reading_unregistered', message: 'the arm S3 of this cell has no registered reading that delivers (reading_unregistered) — a sign-off is written only for the standard arm', threshold: 'deliver', observed: 'reading_unregistered', overridable: false }
+    const refused = signablePreview({ refusals: [NOT_STANDARD, ATTESTATION_MISSING] })
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED, cells: [{ ...MAP.cells[0]!, route: 'deliver', reason: 'ok', reason_code: 'deliver' }] },
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /signoffs/preview': refused,
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    await waitFor(() => expect(screen.getByTestId('refusal-not_standard:reading_unregistered')).toBeInTheDocument())
+    const row = gateRow(gate, 'The standard arm’s registered reading delivers')
+    expect(row.textContent).toMatch(/✗\s*not satisfied:/)
+    expect(row.textContent).toContain('the arm reads reading_unregistered — no proven standard to sign')
+    expect(row.querySelector('[data-hint="gate.signoff.reading"]') ?? (row.getAttribute('data-hint') === 'gate.signoff.reading' ? row : null)).not.toBeNull()
+    expect(gate).toHaveAttribute('data-state', 'CLOSED')
+  })
+
   it('shows an unmeasured oracle as a non-overridable refusal (signoff-policy.v2): the gate row, the tile and the clause', async () => {
     const unmeasured = signablePreview({ evidence: { ...preview().evidence, oracle_strength: null, oracle: ORACLE_NONE }, refusals: [ORACLE_UNMEASURED, ATTESTATION_MISSING] })
     mockApi({

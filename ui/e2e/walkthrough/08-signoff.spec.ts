@@ -1,53 +1,47 @@
 /**
- * 08 — a sign-off is a policy decision, refused at write (`signoff-policy.v3`).
+ * 08 — a sign-off is a policy decision, refused at write (`signoff-policy.v4`: ADR-0025 as
+ * ADR-0026 amends it).
  *
  *  - The primary repo's only measured cell (n = 2 from 05) is REFUSED, and the reason is
  *    visible before the approver tries: the Sign-off page's preview lists every failing
  *    clause with *observed vs threshold* — `thin_cell` (2 vs 10), `controls_escapes`
- *    (1 vs 0), `route_not_deliver:n_below_min`, `attestation_missing` — the gate is
- *    CLOSED and the action disabled; nothing is recorded. The escape is a REAL finding
- *    of 04's controls run, not a mock: the tier-1 fixture's tests are literal asserts
- *    (`assert opN(1, 2) == 3 + N`), so the `hardcode_cheat` control grades clean on
- *    them — the oracle cannot tell an implementation from a lookup table.
- *  - A cell that satisfies the policy is SEEDED THROUGH THE API (`server_seed.py` is a
- *    pytest fixture and is not touched): a second fixture repo whose tests are
- *    PARAMETRISED (no literal fact to special-case → the cheat is not constructible →
- *    0 escapes) is built here, served as a bare file:// clone, onboarded, probed, mined,
- *    put through a controls run, an ORACLE run (`signoff-policy.v2`: the cell's oracle
- *    strength must be MEASURED on its tasks — an unscored cell is `oracle_unmeasured`,
- *    a refusal no deployment knob can waive; the parametrised tests kill every
- *    arithmetic/return mutant, so the cell scores ≥ 0.80) and replayed with
- *    `fixture_gold` — 18 clean rows in one cell → point 100 %, Wilson lower 80.6 % ≥
- *    80 % → route `deliver`. The admin who queued every run is REFUSED by the two-person
- *    rule (`same_actor`, `signoff-policy.v3`: they queued the run that produced the attested
- *    row; no other person is behind the cell) — shown before they try, never overridable.
- *    A second person (`walk-approver`, created through `POST /users`) picks the cell, names
- *    an accepted row, ticks "I have read this accepted diff", writes the statement, signs —
- *    and the record lists the snapshot (n, point, lower, false-Q1, oracle, policy, route,
- *    controls k of N / escapes / run, the attested row, `verifier_kind: local`).
+ *    (1 vs 0), `route_not_deliver:posture_unsealed` (the walkthrough grades on the host, so
+ *    its rows license nothing under `routing.v2`), `not_standard:reading_unregistered` (no
+ *    registered reading proves a standard arm), `attestation_missing` — the gate is CLOSED
+ *    and the action disabled; nothing is recorded. The escape is a REAL finding of 04's
+ *    controls run, not a mock: the tier-1 fixture's tests are literal asserts
+ *    (`assert opN(1, 2) == 3 + N`), so the `hardcode_cheat` control grades clean on them.
+ *  - A cell that clears every other clause is SEEDED THROUGH THE API (`server_seed.py` is a
+ *    pytest fixture and is not touched): a second fixture repo whose tests are PARAMETRISED
+ *    (the cheat is not constructible → 0 escapes) is built here, served as a bare file://
+ *    clone, onboarded, probed, mined, put through a controls run, an ORACLE run (the cell's
+ *    oracle strength must be MEASURED) and replayed with `fixture_gold` — 18 clean rows in
+ *    one cell. Under `routing.v2` it still routes `calibrate` `posture_unsealed`: tier 1 has
+ *    no sealed posture and no registered reading, so no cell of a walkthrough delivers
+ *    (G-956). The admin who queued every run is REFUSED by the two-person rule
+ *    (`same_actor`) — shown before they try, never overridable. A second person
+ *    (`walk-approver`, created through `POST /users`) names an accepted row and affirms it,
+ *    and is still refused: the gate names the reading and the sealed posture, the API
+ *    answers 409, nothing is written and the map's tier does not move.
  *
  * Navigation
  * ----------
  * What it is:   Walkthrough spec 08 (sign-off), the only spec that also seeds through the API.
  * What it does: Pins that the primary repo's only measured cell (n = 2 from 05) is REFUSED with
- *               every failing clause visible before the approver tries — `thin_cell` (2 vs
- *               10), the real `controls_escapes` 04 found (the fixture's literal asserts let
- *               the hardcode-cheat control grade clean), `route_not_deliver`,
- *               `attestation_missing` — gate CLOSED, action disabled, nothing recorded; and
- *               that a second fixture repo with PARAMETRISED tests (the cheat is not
- *               constructible → 0 escapes; its oracle scores ≥ 0.80 once measured), built
- *               and served as a bare file:// clone, onboarded, probed, mined, put through
- *               controls, an oracle run and 18 clean `fixture_gold` replays, routes
- *               `deliver` — that the admin who queued those runs is refused `same_actor`
- *               (the two-person rule, before they try) — and that a second person signs it
- *               through the UI, the record carrying the whole snapshot and who signed.
+ *               every failing clause visible before the approver tries — gate CLOSED, action
+ *               disabled, nothing recorded; that a second fixture repo with PARAMETRISED tests
+ *               (0 escapes; its oracle scores ≥ 0.80 once measured), onboarded, probed, mined,
+ *               put through controls, an oracle run and 18 clean `fixture_gold` replays, clears
+ *               every clause but the sealed posture and the reading; that the admin who queued
+ *               those runs is refused `same_actor` before they try; and that a second person is
+ *               refused on the reading and the posture, with nothing written.
  * How:          Seeding goes through `POST /repos` / `POST /runs` with the CSRF header (the
  *               pytest seed fixture is not touched); the approver persona is created with
  *               `POST /users` (idempotent, the stable `personaPassword`, as 11-screens does);
- *               the sign-off itself is driven through the form (`attest-row`, `attest-read`,
- *               `attest-statement`, `signoff-recorded`).
+ *               the attempt is driven through the form (`attest-row`, `attest-read`,
+ *               `attest-statement`) and the API.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0003-one-routing-rule.md
+ * ADRs:         docs/adr/0025-routing-v2.md, docs/adr/0026-the-context-standard.md (item 6)
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Signoff/SignoffPage.tsx and
  *               ui/src/screens/Signoff/contract.ts (the screen under test),
  *               src/crb/core/signoff.py (the clauses asserted), src/crb/server/routes/signoffs.py,
@@ -56,7 +50,8 @@
  *               (whose n = 2 cell this spec relies on)
  * Tested by:    ui/e2e/walkthrough/08-signoff.spec.ts
  * Touch when:   a refusal clause or a policy default changes (src/crb/core/signoff.py) — the
- *               expected clause list and the 18-row seed must follow.
+ *               expected clause list must follow; when the walkthrough can grade in the sealed
+ *               posture and register a reading (G-956), the approver signs again here.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -164,7 +159,7 @@ test.describe('08 sign-off policy', () => {
     await page.goto(`/signoff?repo=${encodeURIComponent(t.name)}`)
     const gate = page.getByTestId('signoff-gate')
     await expect(gate).toBeVisible()
-    await expect(gate).toContainText('policy signoff-policy.v3')
+    await expect(gate).toContainText('policy signoff-policy.v4')
     const select = field(page, 'Cell')
     await expect.poll(async () => (await select.locator('option').count()) - 1).toBeGreaterThanOrEqual(1)
     const value = await select.locator('option').nth(1).getAttribute('value')
@@ -188,7 +183,8 @@ test.describe('08 sign-off policy', () => {
     } else {
       await expect(controls).toContainText('0 escape(s)')
     }
-    await expect(page.getByTestId('signoff-route')).toContainText('n_below_min')
+    // routing.v2: the walkthrough grades on the host, and the sealed posture is read first
+    await expect(page.getByTestId('signoff-route')).toContainText('posture_unsealed')
 
     // every failing clause is listed with the number that failed and the bar it missed
     const refusals = page.getByTestId('signoff-refusals')
@@ -205,7 +201,9 @@ test.describe('08 sign-off policy', () => {
     } else {
       await expect(escape).toHaveCount(0)
     }
-    await expect(refusals.getByTestId('refusal-route_not_deliver:n_below_min')).toContainText('observed calibrate')
+    await expect(refusals.getByTestId('refusal-route_not_deliver:posture_unsealed')).toContainText('observed calibrate')
+    // signoff-policy.v4: only a standard arm a registered reading proved can be signed
+    await expect(refusals.getByTestId('refusal-not_standard:reading_unregistered')).toBeVisible()
     await expect(refusals.getByTestId('refusal-attestation_missing')).toContainText('non-overridable')
     // the two-person rule: the admin signed in here queued 05's replay, so every person
     // behind the cell is the would-be approver — refused before they try, non-overridable
@@ -220,6 +218,7 @@ test.describe('08 sign-off policy', () => {
     await expect(gateRow(gate, 'n ≥ 10')).toContainText(/✗\s*not satisfied:/)
     await expect(gateRow(gate, /Negative controls passed/)).toContainText(escaped ? /✗\s*not satisfied:/ : /✓\s*satisfied:/)
     await expect(gateRow(gate, 'Route = deliver')).toContainText(/✗\s*not satisfied:/)
+    await expect(gateRow(gate, 'The standard arm’s registered reading delivers')).toContainText(/✗\s*not satisfied:/)
     // even a named, affirmed row cannot open it
     await field(page, 'Accepted row').selectOption({ index: 1 })
     await page.getByTestId('attest-read').check()
@@ -230,7 +229,7 @@ test.describe('08 sign-off policy', () => {
     await expect(page.getByRole('table', { name: `Sign-offs for ${t.name}` })).toContainText('No attestations yet')
   })
 
-  test(`seed a policy-satisfying cell through the API: onboard, probe, mine ${N_TASKS}, controls (0 escapes), oracle (≥ 0.80), replay ${N_TASKS} → deliver`, async ({ page }) => {
+  test(`seed a cell through the API: onboard, probe, mine ${N_TASKS}, controls (0 escapes), oracle (≥ 0.80), replay ${N_TASKS} → calibrate on the sealed posture`, async ({ page }) => {
     test.setTimeout(20 * MIN)
     const url = buildSignableRepo()
     const runnerOpts: Record<string, unknown> = { pythonpath_suffix: '/src' }
@@ -272,7 +271,10 @@ test.describe('08 sign-off policy', () => {
     signableN = Number(best.n)
     expect(signableN, JSON.stringify(best)).toBeGreaterThanOrEqual(16)
     expect(best.false_q1).toBe(0)
-    expect(best.route, `route ${best.route}: ${best.reason}`).toBe('deliver')
+    // routing.v2 (ADR-0025 row 3a): host-posture rows never deliver — tier 1 has no sealed
+    // posture and no registered reading (G-956)
+    expect(best.route, `route ${best.route}: ${best.reason}`).toBe('calibrate')
+    expect(best.reason_code).toBe('posture_unsealed')
     expect((map.controls as Record<string, unknown>).state).toBe('passed')
     // … and the oracle of THAT cell, as the sign-off will measure it, clears the bar
     const oracleCell = (oracle.cells as Array<Record<string, unknown>>).find((c) => c.capability_class === signableClass && c.size === signableSize)!
@@ -290,12 +292,15 @@ test.describe('08 sign-off policy', () => {
     await expect.poll(async () => (await select.locator('option').count()) - 1).toBeGreaterThanOrEqual(1)
     await select.selectOption({ value: `${signableClass}|${signableSize}` })
     await expect(gate).toContainText(`Attest ${signableClass} × ${signableSize}`)
-    // every other clause holds (controls passed, oracle measured, route deliver): the only
-    // refusals are the attestation and the person — and naming a row does not lift the person
+    // controls passed and the oracle measured: the refusals are the route and the reading
+    // (routing.v2: no sealed posture, no registered reading), the attestation and the person —
+    // and naming a row does not lift the person
     const refusals = page.getByTestId('signoff-refusals')
     await expect(refusals.getByTestId('refusal-same_actor')).toContainText('non-overridable')
     await expect(refusals.getByTestId('refusal-same_actor')).toContainText('only person behind every accepted row')
-    await expect(refusals.locator('li')).toHaveCount(2)
+    await expect(refusals.getByTestId('refusal-route_not_deliver:posture_unsealed')).toBeVisible()
+    await expect(refusals.getByTestId('refusal-not_standard:reading_unregistered')).toBeVisible()
+    await expect(refusals.locator('li')).toHaveCount(4)
     await expect(gateRow(gate, 'Signed by a second person')).toContainText(/✗\s*not satisfied:/)
     const picker = field(page, 'Accepted row')
     await expect.poll(async () => (await picker.locator('option').count()) - 1).toBeGreaterThanOrEqual(16)
@@ -305,7 +310,7 @@ test.describe('08 sign-off policy', () => {
     const same = refusals.getByTestId('refusal-same_actor')
     await expect(same).toContainText(/queued run [0-9a-f]{8}, which produced the attested row/)
     await expect(same).toContainText('a second approver must sign')
-    await expect(refusals.locator('li')).toHaveCount(1)
+    await expect(refusals.locator('li')).toHaveCount(3)
     await page.getByTestId('attest-read').check()
     await field(page, 'Attestation statement').fill('walkthrough: the admin who queued the replay trying to sign its result')
     await expect(page.getByRole('button', { name: 'Sign off' })).toBeDisabled()
@@ -319,13 +324,13 @@ test.describe('08 sign-off policy', () => {
     expect(res.status(), await res.text()).toBe(409)
     const body = (await res.json()) as { error: { code: string; detail: { code: string; refusals: Array<{ code: string; overridable: boolean }> } } }
     expect(body.error.code).toBe('signoff_refused')
-    expect(body.error.detail.code).toBe('same_actor')
-    expect(body.error.detail.refusals.map((r) => r.code)).toEqual(['same_actor'])
-    expect(body.error.detail.refusals[0]!.overridable).toBe(false)
+    const codes = body.error.detail.refusals.map((r) => r.code)
+    expect(codes).toEqual(['route_not_deliver:posture_unsealed', 'not_standard:reading_unregistered', 'same_actor'])
+    expect(body.error.detail.refusals.find((r) => r.code === 'same_actor')!.overridable).toBe(false)
     expect(((await apiGet(page.request, `/signoffs?repo=${SIGNABLE_NAME}`)).items as unknown[]).length).toBe(0)
   })
 
-  test('a second person (the approver) signs the deliver cell with an attestation; the record shows the snapshot and who signed', async ({ page }) => {
+  test('a second person (the approver) is refused a cell with no proven standard: the gate names the reading and the sealed posture, and nothing is written', async ({ page }) => {
     // the page fixture signed in as the admin who queued the runs: end that session first
     await page.goto('/home')
     await page.getByRole('button', { name: 'Sign out', exact: true }).click()
@@ -339,28 +344,20 @@ test.describe('08 sign-off policy', () => {
     await select.selectOption({ value: `${signableClass}|${signableSize}` })
     await expect(gate).toContainText(`Attest ${signableClass} × ${signableSize}`)
 
-    // the bar, before the button: n / point / lower / false-Q1 / controls passed / route deliver
+    // the evidence clears the other bars: n / point / false-Q1 / controls passed / oracle
     await expect(page.getByTestId('signoff-tile-point')).toContainText('100.0%')
     await expect(page.getByTestId('signoff-tile-point')).toContainText(String(signableN))
     await expect(page.getByTestId('signoff-tile-false-q1')).toContainText('0')
     const controls = page.getByTestId('signoff-controls')
     await expect(controls.getByTestId('controls-passed')).toBeVisible()
     await expect(controls).toContainText('0 escape(s)')
-    await expect(page.getByTestId('signoff-route')).toContainText('deliver')
-    // the oracle is measured on the cell's tasks (never "—" here) and clears the bar
-    const oracleTile = page.getByTestId('signoff-tile-oracle')
-    await expect(oracleTile).toContainText(/^Oracle strength(0\.[89]\d|1\.00)/) // the value, never "—"
-    await expect(oracleTile).toContainText(/\d+ of \d+ task\(s\) scored/)
     await expect(gateRow(gate, /Oracle strength measured and ≥ 0\.80/)).toContainText(/✓\s*satisfied:/)
-    // only the attestation is missing
-    const refusals = page.getByTestId('signoff-refusals')
-    await expect(refusals.getByTestId('refusal-attestation_missing')).toBeVisible()
-    await expect(refusals.locator('li')).toHaveCount(1)
-    await expect(gate).toHaveAttribute('data-state', 'CLOSED')
-    const submit = page.getByRole('button', { name: 'Sign off' })
-    await expect(submit).toBeDisabled()
+    // … but routing.v2 reads the sealed posture and a registered reading first (G-956)
+    await expect(page.getByTestId('signoff-route')).toContainText('posture_unsealed')
+    await expect(gateRow(gate, 'Route = deliver')).toContainText(/✗\s*not satisfied:/)
+    await expect(gateRow(gate, 'The standard arm’s registered reading delivers')).toContainText(/✗\s*not satisfied:/)
 
-    // the picker offers the cell's accepted rows: subject · row hash · date
+    // naming and affirming a row lifts the attestation clause and never the others
     const picker = field(page, 'Accepted row')
     await expect.poll(async () => (await picker.locator('option').count()) - 1).toBeGreaterThanOrEqual(16)
     const first = picker.locator('option').nth(1)
@@ -368,51 +365,30 @@ test.describe('08 sign-off policy', () => {
     const rowHash = await first.getAttribute('value')
     expect(rowHash).toMatch(/^[0-9a-f]{64}$/)
     await picker.selectOption({ value: rowHash! })
-    // the preview re-fetched with the named row: no refusal left, but the affirmation is still needed
-    await expect(page.getByTestId('signoff-refusals')).toHaveCount(0)
-    await expect(submit).toBeDisabled()
+    const refusals = page.getByTestId('signoff-refusals')
+    await expect(refusals.getByTestId('refusal-not_standard:reading_unregistered')).toBeVisible()
+    await expect(refusals.getByTestId('refusal-same_actor')).toHaveCount(0) // a second person
     await page.getByTestId('attest-read').check()
     await field(page, 'Attestation statement').fill('walkthrough: I read the accepted diff — it adds the op module and its parametrised test, nothing else.')
-    await field(page, 'Note').fill('walkthrough: 18 fixture_gold rows, controls passed with 0 escapes')
-    await expect(gate).toHaveAttribute('data-state', 'OPEN')
-    await expect(gateRow(gate, 'Accepted row read and affirmed')).toContainText(/✓\s*satisfied:/)
+    await expect(gate).toHaveAttribute('data-state', 'CLOSED')
     await expect(gateRow(gate, 'Signed by a second person')).toContainText(/✓\s*satisfied:/)
-    await expect(submit).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Sign off' })).toBeDisabled()
+    await expect(page.getByTestId('signoff-recorded')).toHaveCount(0)
 
-    await submit.click()
-    await expect(page.getByTestId('signoff-recorded')).toContainText('signoff-policy.v3')
-    // the record: evidence at signing, policy · route · controls, the attested row
-    const table = page.getByRole('table', { name: `Sign-offs for ${SIGNABLE_NAME}` })
-    await expect(table.getByTestId('signoff-row-evidence')).toContainText(`n=${signableN} · 100.0% · lower `)
-    await expect(table.getByTestId('signoff-row-evidence')).toContainText('fQ1 0')
-    await expect(table.getByTestId('signoff-row-evidence')).toContainText(/oracle (0\.[89]\d|1\.00)/)
-    await expect(table.getByTestId('signoff-row-policy')).toContainText('signoff-policy.v3 · deliver (deliver) · controls passed')
-    await expect(table.getByTestId('signoff-row-policy')).toContainText('esc 0')
-    await expect(table.getByTestId('signoff-row-attestation')).toContainText(rowHash!.slice(0, 10))
-    // F34 in the product, not only the API: the row says what kind of account signed, with the meaning on hover
-    await expect(table.getByTestId('signoff-row-approver')).toContainText('local account')
-    // the pill's sentence is its accessible name (a native title is never the only way — DL-048); its hint explains the kinds
-    await expect(table.getByTestId('verifier-kind')).toHaveAttribute('aria-label', /verifier_kind: local/)
-    await expect(table.getByTestId('verifier-kind')).toHaveAttribute('data-hint', 'pill.signoff.verifier_kind')
-    await expect(table.getByRole('img', { name: 'Active attestation' })).toBeVisible()
-
-    // and the API serves the same snapshot, hash-chained
-    const list = await apiGet(page.request, `/signoffs?repo=${SIGNABLE_NAME}`)
-    const [rec] = list.items as Array<Record<string, unknown>>
-    expect(rec.policy_version).toBe('signoff-policy.v3')
-    expect((rec.policy_thresholds as Record<string, unknown>).require_oracle_measured).toBe(true)
-    expect((rec.policy_thresholds as Record<string, unknown>).require_independent_verifier).toBe(true)
-    expect(rec.verifier_kind).toBe('local') // the persona is a local account; the admin's id is not the signer's
-    expect(rec.approver_name).toBe('Walk approver')
-    expect(Number((rec.evidence as Record<string, unknown>).oracle_strength)).toBeGreaterThanOrEqual(0.8)
-    expect((rec.route as Record<string, unknown>).reason_code).toBe('deliver')
-    expect((rec.controls as Record<string, unknown>).escapes).toBe(0)
-    expect((rec.attestation as Record<string, unknown>).reviewed_row_hash).toBe(rowHash)
-    expect(String(rec.row_hash)).toMatch(/^[0-9a-f]{64}$/)
-    // the Capability page now shows the cell as human-verified
+    // the API says the same, without writing: 409 on the route and the reading
+    const res = await page.request.post(`${env.baseUrl}/api/v1/signoffs`, {
+      headers: await csrf(page),
+      data: { repo: SIGNABLE_NAME, cell: { capability_class: signableClass, size: signableSize }, note: 'walkthrough', attestation: { reviewed_row_hash: rowHash, statement: 'walkthrough: no proven standard' } },
+    })
+    expect(res.status(), await res.text()).toBe(409)
+    const body = (await res.json()) as { error: { code: string; detail: { refusals: Array<{ code: string }> } } }
+    expect(body.error.code).toBe('signoff_refused')
+    expect(body.error.detail.refusals.map((r) => r.code)).toEqual(['route_not_deliver:posture_unsealed', 'not_standard:reading_unregistered'])
+    expect(((await apiGet(page.request, `/signoffs?repo=${SIGNABLE_NAME}`)).items as unknown[]).length).toBe(0)
+    // the Capability page's tier does not move
     const map = await apiGet(page.request, `/capability-map?repo=${SIGNABLE_NAME}`)
     const cell = (map.cells as Array<Record<string, unknown>>).find((c) => c.capability_class === signableClass && c.size === signableSize)!
-    expect(cell.verification_tier).toBe('human-verified')
-    expect(cell.route).toBe('deliver') // a tier never moves a route
+    expect(cell.verification_tier).not.toBe('human-verified')
+    expect(cell.route).toBe('calibrate')
   })
 })

@@ -1,13 +1,16 @@
 /**
  * The B7 additions to the sign-off contract (docs/API.md, review §5 play 06 / §7 item 6):
- * a sign-off is a policy decision refused at write (`signoff-policy.v3`), previewed
+ * a sign-off is a policy decision refused at write (`signoff-policy.v4`), previewed
  * before the approver tries, and recorded with the approver's attestation that they
  * read one specific accepted row of the cell. v2 (2026-09-14) adds the non-relaxable
  * `oracle_unmeasured` clause: the cell's oracle strength must be MEASURED (a task-level
  * mutation score on the cell's tasks), not merely "≥ 0.80 when measured". v3 (2026-09-21,
  * F7b) adds the non-relaxable `same_actor` clause — the two-person rule, enforced by the
  * API at write: the person who queued the run that produced the attested row, or the only
- * person behind every accepted row of the cell, cannot sign it.
+ * person behind every accepted row of the cell, cannot sign it. v4 (2026-09-27, ADR-0025 as
+ * ADR-0026 amends it) signs only the cell's standard context arm when its registered reading
+ * delivers, and the `crb.signoff.v5` record stamps the arm, the class-set version and the
+ * reading.
  *
  * Lives beside the screen (not in `api/types.ts` / `api/hooks.ts`, which another
  * workstream owns in this wave) — fold it in when the wave merges. Every field here is
@@ -69,7 +72,7 @@ export type RefusalCode =
   | 'same_actor'
 
 /** The policy this reading was written against; the server's `policy_version` is what is displayed. */
-export const SIGNOFF_POLICY_VERSION = 'signoff-policy.v3'
+export const SIGNOFF_POLICY_VERSION = 'signoff-policy.v4'
 
 /** `SignoffPolicy.to_dict()` — the bar in force (defaults or the deployment's relaxed values). */
 export interface SignoffPolicy {

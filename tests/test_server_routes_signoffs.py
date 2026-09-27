@@ -348,6 +348,11 @@ class TestCreate:
         assert '"require_independent_verifier": true' in cj["policy_thresholds"]
         assert cj["route_reason_code"] == "deliver" and cj["controls_verdict"] == "passed"
         assert cj["controls_run_id"] == CLEAN_CONTROLS_RUN and cj["controls_escapes"] == "0"
+        # the map lifts the cell to human-verified and its route is unchanged (a tier never
+        # moves a route)
+        cells = env.get(f"/capability-map?repo={ALPHA}").json()["cells"]
+        (cell,) = [c for c in cells if (c["capability_class"], c["size"]) == ("bug.fix", "S")]
+        assert cell["verification_tier"] == "human-verified" and cell["route"] == "deliver"
         assert cj["attestation_reviewed_row_hash"] == row.row_hash
         assert verify_signoff_rows(rows) == 1
         # ... and recorded as a system event on the repo's sign-off trace

@@ -401,10 +401,10 @@ function ApparatusBanner({ apparatus }: { apparatus: NonNullable<CapabilityMap['
   return (
     <Hint as="div" id="banner.capability.apparatus" role="note" className="rounded-[var(--radius-card)] border border-border bg-surface-container px-5 py-3 text-sm" data-testid="apparatus-banner">
       <p className="m-0 font-semibold">
-        Apparatus {apparatus.current} is in force (routing.v2, <Link to="/help/docs/ADR-0025">ADR-0025</Link>).
+        Apparatus {apparatus.current} is in force (routing.v2, <Link to="/help/docs/ADR-0025" className="text-primary underline">ADR-0025</Link>).
       </p>
       <p className="m-0 mt-1 text-on-surface-muted">
-        The bar in the code is the bar in the README, and it counts distinct commits in a registered reading, not attempts. Nothing was deleted, edited or re-graded:
+        The bar in the code is the bar in the README, and it counts distinct changes in a registered reading, not attempts. Nothing was deleted, edited or re-graded:
         {apparatus.superseded_rows > 0 ? ` ${fmtInt(apparatus.superseded_rows)} rows of ${apparatus.superseded_versions.join(', ')} stay readable as history and license nothing.` : ' rows of an earlier apparatus stay readable as history and license nothing.'} To earn deliver for a cell: qualify the repository, run an oracle run and a controls run, register a reading, replay its pool in the sealed posture, then ask a second person to sign the cell's standard arm.
       </p>
     </Hint>

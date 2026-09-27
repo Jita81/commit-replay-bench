@@ -467,6 +467,8 @@ export const HINTS = {
     'The cell’s tasks have a measured mutation strength at or above the bar. Unmeasured is a refusal that cannot be overridden: run an oracle run first.',
   'gate.signoff.route':
     'The published rule routes this cell deliver. A sign-off never changes a route, so a cell routed elsewhere cannot be signed.',
+  'gate.signoff.reading':
+    'A sign-off is written only for the cell’s standard context arm, and only when that arm’s registered reading delivers at a look. A cell with no proven standard, or whose reading waits for its next look, cannot be signed.',
   'gate.signoff.attestation':
     'You have named one accepted row and affirmed you read its diff. This clause cannot be relaxed: the attestation is hash-chained with the sign-off.',
   'gate.signoff.second_person':
