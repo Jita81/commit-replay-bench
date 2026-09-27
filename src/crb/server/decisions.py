@@ -32,7 +32,8 @@ Navigation
 What it is:   ``decision_rows`` (the inbox's rows for one repository) and ``record_due`` /
               ``due_records`` (the clock: when each row first became due).
 What it does: Derives the eight inbox kinds from the capability cells, the factory task
-              views and the prevention register, and keeps one ``decisions_due`` row per derived row so the age of a
+              views and the prevention register, and keeps one ``decisions_due`` row per derived
+              row so the age of a
               decision survives nobody looking at it. Never decides anything and never
               writes to the ledger: a row here is a pointer at an act a person must take.
 How:          Pure ``decision_rows`` over ``CapabilityCell`` and ``TaskView``; ``record_due``

@@ -18,9 +18,9 @@
  *               repository's stages (`stagesFor`), the server's record that a person read the
  *               baseline (`baseline_read`) or a sign-off the API flags `active` and not
  *               `stale` (task 6 — a stale one lifts nothing, so completes nothing; DL-074),
- *               the two-person readiness (task 7) and the active factory run (task 8: "Backlog frozen —
- *               run the factory" until a run exists, then "In progress — item k of n") decide
- *               them. A read that fails is never read as absence (G-164): one error envelope
+ *               the two-person readiness (task 7) and the active factory run (task 8: "Backlog
+ *               frozen — run the factory" until a run exists, then "In progress — item k of n")
+ *               decide them. A read that fails is never read as absence (G-164): one error envelope
  *               names every read that failed, with Retry, and each task that stands on one
  *               reads "Unavailable" rather than "Incomplete" or "Cannot start yet" — the
  *               GitHub App and the factory runs included, so task 8 never claims "Backlog
@@ -44,7 +44,8 @@
  *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6;
  *               `useTwoPersonReadiness` for task 7 (the deployment's real readiness to
  *               produce a signature the two-person rule accepts, read by every role — not the
- *               presence of an admin; a waiting invitation reads "In progress"); `useFactoryBacklog` +
+ *               presence of an admin; a waiting invitation reads "In progress");
+ *               `useFactoryBacklog` +
  *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`; every
  *               query's error state (the App's and the runs' included) feeds the one
  *               `ErrorState`.

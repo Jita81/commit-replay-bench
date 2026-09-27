@@ -11,12 +11,12 @@
  * What it does: Answers "what needs me, now?" for an approver, and "what is waiting on a
  *               person?" for everyone else — and, since G-516, for HOW LONG: each row carries
  *               the moment it first became due, from the server's own clock, so a decision
- *               nobody has looked at for eleven days says eleven days. The rows are facts from the map, the sign-offs
- *               and the factory chain (`decisionsFor`); the screen never decides anything
- *               and never hides a row a viewer may read — it only changes the verb, on the
- *               stale rows too (a viewer reads; "approver acts"). The one line of evidence
- *               is readable without a guide: the reason code is a term with its meaning
- *               beside it, and the kicker names the apparatus as a term. Every element a
+ *               nobody has looked at for eleven days says eleven days. The rows are facts from
+ *               the map, the sign-offs and the factory chain (`decisionsFor`); the screen never
+ *               decides anything and never hides a row a viewer may read — it only changes the
+ *               verb, on the stale rows too (a viewer reads; "approver acts"). The one line of
+ *               evidence is readable without a guide: the reason code is a term with its
+ *               meaning beside it, and the kicker names the apparatus as a term. Every element a
  *               reader meets — the kicker, the count pill, each row's kind tag, evidence
  *               line and act or Read button, and each stale row and its button — is a hint
  *               trigger (`stat.decisions.*`, `pill.decisions.kind`, `button.decisions.*`,
