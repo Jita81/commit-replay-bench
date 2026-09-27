@@ -14,11 +14,11 @@ What it does: Pins that editing a worktree changes neither the inputs nor the ke
               into hashed, marked pins for the named groups (extras, forks and marker paths
               followed; any other index, a wheel-less package every environment needs, a
               workspace or another lock version refused), with the groups in the bundle key;
-              that ``deps_lock`` alternatives provision a lock that moved across a history; that ``.npmrc``, ``pip.conf`` and
-              ``go.env`` are never read; that a trial never makes the selector read outside its
-              tree (an escaping replace or a linked manifest); and that a trial selects the
-              parent's or the gold's set
-              or raises ``ClosureViolation`` naming what was outside.
+              that ``deps_lock`` alternatives provision a lock that moved across a history;
+              that ``.npmrc``, ``pip.conf`` and ``go.env`` are never read; that a trial never
+              makes the selector read outside its tree (an escaping replace or a linked
+              manifest); and that a trial selects the parent's or the gold's set or raises
+              ``ClosureViolation`` naming what was outside.
 How:          ``two_commit_repo`` / ``init_repo`` + ``commit_all`` → ``LockInputs.from_git`` →
               assert;
               a spy ``GitRepo`` records every path asked for.

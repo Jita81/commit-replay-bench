@@ -263,7 +263,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
 - **A writable copy on the host, bind-mounted read-write** (the operator-first design). Rejected as the default. The container would write to the worker's disk with no size cap. Under colima or `dind`, the worker cannot always remove files the container creates as uid 65534. The tmpfs copy dies with the container.
 - **Mount the parent's and the gold's dependencies in the sealed builder** (the correctness-first design). Rejected. The gold's module list is part of the answer.
 
-## Amendment 2026-09-27 — a `uv.lock`, and a lock that moved, are provisioned (DL-114)
+## Amendment 2026-09-27 — a `uv.lock`, and a lock that moved, are provisioned (DL-113)
 
 The refusal list above named `uv` locks. From this amendment a `uv.lock` of version 1 is read
 through git objects into the same hashed pins a requirements lock gives. The pins are the

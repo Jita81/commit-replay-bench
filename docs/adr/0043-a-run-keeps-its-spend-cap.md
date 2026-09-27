@@ -1,6 +1,6 @@
 # ADR-0043 — A run keeps the spend cap it declares, and stops before the work that could pass it
 
-**Status:** Proposed (north-star Wave 2, stream H — F5b)
+**Status:** Proposed (DL-114; north-star Wave 2, stream H — F5b)
 **Date:** 2026-09-27
 **Apparatus impact:** none. No belt, size, class, route or threshold changes meaning. An
 attempt the cap refuses is never started, so it writes no row; the rows a capped run writes

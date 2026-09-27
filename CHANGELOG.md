@@ -14,17 +14,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **Gates from a lock, a run that keeps its spend cap, and click provisioned sealed**
   (north-star Wave 2, stream H; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-h)).
-  Every CI job installs from the new `uv.lock`, and a `fresh-clone` job runs every gate on a
-  clone made by root with the docker daemon stopped; making it a required check is an
-  administrator's step (DL-113). A build run may declare `max_cost_usd`: it stops itself
-  before an attempt, or a factory item, that could take its spend past the cap, and a cap over
-  an unpriced model is refused at submit; the Measure page names the cap and says when a run
-  stopped at it (ADR-0043). The sealed posture reads a `uv.lock`, and `deps_lock` may name
-  alternatives, so one declaration provisions click across its move from
-  `requirements/tests.txt` to `uv.lock` (DL-114). The chart ships the four alert rules as a
-  `PrometheusRule` (off by default) and gives the API and the worker one evidence store; the
-  reaper's budget tests run on a fake clock; every docker-state check after a kill waits
-  through one bounded helper.
+  CI installs from `uv.lock`, and a `fresh-clone` job runs every gate as root with no docker
+  daemon (DL-113). A build run may declare `max_cost_usd` and stops itself before work that
+  could pass it; the Measure page names the cap and the stop (ADR-0043, DL-114). The sealed
+  posture reads a `uv.lock`, and `deps_lock` alternatives provision click across its lock
+  move. The chart ships the alert rules and one evidence store; the reaper and docker-wait
+  tests no longer race the machine.
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

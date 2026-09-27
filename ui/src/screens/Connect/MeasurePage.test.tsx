@@ -4,21 +4,21 @@
  * Navigation
  * ----------
  * What it is:   Tests for the Measure page.
- * What it does: Pins that the estimate uses the repository's measured cost per attempt when
- *               it has one (30 attempts × $0.34 ±20 %), that the button names the band as an
- *               estimate and the spend cap the request carries (F5b), which starts at the top
- *               of the estimate and follows it until the operator types one, that no amount
- *               above $0 disables the button, that a last replay the cap stopped is said
- *               with its reason and its run, that picking 10 attempts and keeping
- *               worktrees changes the summary, that the POST carries `{kind: replay, mode:
- *               sighted, limit, retain, max_cost_usd}`, that a viewer sees no button, that the kicker counts
- *               Home's 8 tasks and the back-link names the walk (J-HEL-7, J-ONR-13), that a
- *               repository with no gold-clean task points at stage 3 of the walk, and that a
- *               replay already queued or running replaces the red button with a banner naming
- *               the run — never a second spend (J-ONR-4); and that every field, row and the
- *               button carry a hint, with the attempts radio opening on hover; and that the
- *               estimate reads the map's economics fold, so a known $0 is quoted as $0.00
- *               over the attempts with a known cost, never dropped for the planning range (P-064).
+ * What it does: Pins that the estimate uses the repository's measured cost per attempt when it has
+ *               one (30 attempts × $0.34 ±20 %), that the button names the band as an estimate and
+ *               the spend cap the request carries (F5b), which starts at the top of the estimate
+ *               and follows it until the operator types one, that no amount above $0 disables the
+ *               button, that a last replay the cap stopped is said with its reason and its run,
+ *               that picking 10 attempts and keeping worktrees changes the summary, that the POST
+ *               carries `{kind: replay, mode: sighted, limit, retain, max_cost_usd}`, that a viewer
+ *               sees no button, that the kicker counts Home's 8 tasks and the back-link names the
+ *               walk (J-HEL-7, J-ONR-13), that a repository with no gold-clean task points at stage
+ *               3 of the walk, and that a replay already queued or running replaces the red button
+ *               with a banner naming the run — never a second spend (J-ONR-4); and that every
+ *               field, row and the button carry a hint, with the attempts radio opening on hover;
+ *               and that the estimate reads the map's economics fold, so a known $0 is quoted as
+ *               $0.00 over the attempts with a known cost, never dropped for the planning range
+ *               (P-064).
  * How:          `mockApi` + `renderApp` with `path` for `useParams`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md

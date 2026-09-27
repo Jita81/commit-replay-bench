@@ -300,7 +300,6 @@ from crb.server.settings import (
 )
 from crb.server.spend import SpendHooks, build_spend_hooks, pack_turns
 from crb.server.spend_cap import (
-    EVENT_SPEND_CAP,
     STOP_SPEND_CAP,
     Halt,
     Spend,
@@ -2774,7 +2773,7 @@ class Worker:
         counts["stopped_code"] = STOP_SPEND_CAP
         ctx.counts.update(counts)
         ctx.emit(
-            "system", EVENT_SPEND_CAP, status=StepStatus.SKIPPED, reason=halt.reason, **halt.payload
+            "system", "run.spend_cap", status=StepStatus.SKIPPED, reason=halt.reason, **halt.payload
         )
         return STATUS_FAILED, counts, halt.reason
 

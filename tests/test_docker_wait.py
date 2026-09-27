@@ -16,7 +16,8 @@ How:          ``monkeypatch.setattr(subprocess, "run", …)`` for the helper; an
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   tests/docker_wait.py (under test), tests/test_sandbox_docker.py (the real leak
-              probe against a daemon)
+              probe against a daemon), docs/PREVENTION.md (P-052, the row this ratchet
+              closes)
 Tested by:    tests/test_docker_wait.py
 Touch when:   a test needs another docker listing: add it to tests/docker_wait.py and teach
               the ratchet its argv shape.

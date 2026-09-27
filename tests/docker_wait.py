@@ -22,10 +22,11 @@ How:          ``subprocess.run([docker, *listing, "--filter", f"name={name}"],
               ``pytest.fail``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
-Works with:   tests/test_sandbox_docker.py, tests/test_builders_container_docker.py and
-              tests/test_provision_fetch.py (the sites that read docker state after a
-              kill, a removal or a teardown), tests/test_docker_wait.py (its tests and the
-              ratchet), docs/PREVENTION.md (P-052)
+Works with:   tests/test_sandbox_docker.py (the kill and leak probes that wait through it),
+              tests/test_builders_container_docker.py (the session teardown's container and
+              network checks), tests/test_provision_fetch.py (the fetch container after a
+              kill), tests/test_docker_wait.py (its tests and the ratchet), docs/PREVENTION.md
+              (P-052, the class it closes)
 Tested by:    tests/test_docker_wait.py
 Touch when:   a test needs to know whether docker still lists a container or a network:
               call :func:`gone` or :func:`network_gone`, never ``docker ps`` directly.

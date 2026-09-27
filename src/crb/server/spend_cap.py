@@ -54,8 +54,6 @@ from crb.core.ledger import GradeRow
 
 #: ``counts.stopped_code`` of a run that stopped itself at its spend cap.
 STOP_SPEND_CAP = "spend_cap"
-#: The event the stop writes (stage ``system``).
-EVENT_SPEND_CAP = "run.spend_cap"
 #: Builders whose price is known without a table: the fixture spends nothing and says so.
 PRICED_WITHOUT_TABLE = frozenset({"fixture_gold"})
 #: Cents are the ledger's precision; a sum of float costs may miss the cap by less.
@@ -184,7 +182,6 @@ def unpriced_rungs(
 
 
 __all__ = [
-    "EVENT_SPEND_CAP",
     "PRICED_WITHOUT_TABLE",
     "STOP_SPEND_CAP",
     "Halt",

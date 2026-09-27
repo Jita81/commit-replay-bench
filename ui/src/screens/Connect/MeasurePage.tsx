@@ -34,8 +34,8 @@
  *               `useCapabilityMap` (its economics fold, read by `measuredCostPerAttempt`),
  *               `useHealth` (sandbox posture and the builder), `builderChoice`
  *               (ui/src/lib/builder.ts) for the builder the deployment can run,
- *               `useCreateRun` with `{kind: replay, mode:
- *               sighted, limit, retain, max_cost_usd}`; on success the walk resumes on the repository with
+ *               `useCreateRun` with `{kind: replay, mode: sighted, limit, retain,
+ *               max_cost_usd}`; on success the walk resumes on the repository with
  *               the run watched. The kicker is `journeyEyebrow(pathname, 'task 5 of 8 · …')`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md

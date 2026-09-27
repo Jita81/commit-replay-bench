@@ -1,4 +1,4 @@
-"""CI installs from ``uv.lock``, and one job runs every gate on a fresh clone, as root, without docker.
+"""CI installs from ``uv.lock``; one job runs every gate on a fresh clone as root, with no docker.
 
 Before the lock, ``mypy`` and ``ruff`` were pinned but every library resolved fresh on every
 install, so the same tree could pass on Monday and fail on Tuesday (SQLAlchemy 2.1.0 turned
