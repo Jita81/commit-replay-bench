@@ -424,11 +424,12 @@ ISO/IEC 5055: not evidenced — none of its measures is computed; one may enter 
 **Named, never claimed.** Passing these checks does not mean the code conforms to ISO/IEC
 25010, to ISO/IEC 5055 or to any other standard, and nothing may say that it does (§7). The
 claims gate (`scripts/claims_check.py`) refuses any sentence that says code conforms to,
-complies with or is certified against an ISO standard in README, the guides the product
-bundles and the factory's pull-request body template. A sentence that only names a standard,
-as this one names ISO/IEC 25010, passes, and so does one that negates the claim within
-its own clause, as the first sentence of this paragraph does; a negation elsewhere in the
-sentence denies nothing. An organisation's own standard with a runnable check
+complies with or is certified against an ISO standard in README, the guides and the
+factory's pull-request body template, wherever it renders: a heading, a table cell or a
+checklist item as well as prose. A sentence that only names a standard, as this one names
+ISO/IEC 25010, passes, and so does one whose own verb denies the claim, as the first sentence
+of this paragraph does ("does not mean the code conforms"); a "no" or a "without" elsewhere
+in the sentence, "not only", or a refusal in another clause denies nothing. An organisation's own standard with a runnable check
 becomes a finish-gate or belt command on its repository; without one it is shown and signed
 but counts as no evidence.
 

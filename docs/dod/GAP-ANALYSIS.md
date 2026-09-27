@@ -268,7 +268,7 @@ One row per gap: the change, and how much of the tree it closes.
 
 ## Our own bugs — the prevention register
 
-**124 registered · 104 closed (construction 16, gate 87, mistake-proofing 1) · 20 pending.** A defect is closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.
+**128 registered · 108 closed (construction 16, gate 91, mistake-proofing 1) · 20 pending.** A defect is closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.
 
 | id | bug | level | gap | what is missing |
 |---|---|---|---|---|

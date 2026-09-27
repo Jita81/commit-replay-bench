@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-626 files with a header · 1 exempt (listed at the end).
+627 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -272,7 +272,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py) | a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (221 files)
+## `tests` (222 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -404,6 +404,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_posture.py`](../tests/test_posture.py) | The tests for ``Posture``, ``posture_id``, ``posture_class`` and ``resolve_posture`` (ADR-0019 §1). | [`tests/test_posture.py`](../tests/test_posture.py) | a fact joins the posture (a field, a line here proving the id moves with it). |
 | [`tests/test_posture_docker.py`](../tests/test_posture_docker.py) | The docker-marked proof of ADR-0019's sealed posture on a real Go repository with a third-party module. | [`tests/test_posture_docker.py`](../tests/test_posture_docker.py) | the sealed posture's contract changes. The per-task module cache (stream D) is proven end to end in [`tests/test_posture_e2e_docker.py`](../tests/test_posture_e2e_docker.py); this suite keeps the "nothing provisioned" and the baked-image shapes. |
 | [`tests/test_posture_e2e_docker.py`](../tests/test_posture_e2e_docker.py) | The docker-marked end-to-end proof of the sealed posture: per-task provisioning (stream D) under posture-relative qualification and the blame witness (stream Q). | [`tests/test_posture_e2e_docker.py`](../tests/test_posture_e2e_docker.py) | the sealed posture's contract changes — provisioning, qualification, the gate or the witness; [`docs/reviews/2026-09-25-sealed-posture.md`](../docs/reviews/2026-09-25-sealed-posture.md) repeats this proof on cobra. |
+| [`tests/test_prevention_ci_evidence.py`](../tests/test_prevention_ci_evidence.py) | The check that a prevention row citing a CI job that runs one repository script, and no pytest, also cites a test of that script — so the job it names runs what the row's other evidence exercises. | (this is a test file) | a CI job starts or stops running a single script; the prevention register's row format changes. |
 | [`tests/test_prevention_from_export.py`](../tests/test_prevention_from_export.py) | The export script's test, over a synthetic PSV (the operator's export is never committed). | [`tests/test_prevention_from_export.py`](../tests/test_prevention_from_export.py) | the export's columns or the product's error classes change. |
 | [`tests/test_prevention_gaming.py`](../tests/test_prevention_gaming.py) | The prevention loop's anti-gaming suite (ADR-0020 §1, §6; "What we must never do"). | [`tests/test_prevention_gaming.py`](../tests/test_prevention_gaming.py) | a parameter is added to a public function of the loop (it must not filter), or a key joins ``WRITABLE`` (with an ADR-0020 amendment). |
 | [`tests/test_prevention_register_seam.py`](../tests/test_prevention_register_seam.py) | The seam test between ``crb.core.prevention.PreventionRegister`` and stream S's ``crb.core.value.BugRegister`` protocol. | [`tests/test_prevention_register_seam.py`](../tests/test_prevention_register_seam.py) | stream S's protocol changes (the merge adds an equality test of the status vocabularies beside these). |

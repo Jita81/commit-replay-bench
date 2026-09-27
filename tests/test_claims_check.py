@@ -24,12 +24,16 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               is refused in the present tense until its criterion is met, on a fixture and
               on the live pages (P-115); that a sentence claiming ISO conformity is refused
               on README, a guide and the factory's pull-request body template while one that
-              only names a standard passes (ADR-0026 item 11), whatever incidental negation
-              or "never" heading surrounds it, and in the constants and helpers the
-              pull-request body uses; that a number after ``§``, ``#`` or an id prefix is an
+              only names a standard passes (ADR-0026 item 11), whatever incidental negation,
+              refusal in another clause or "never" heading surrounds it
+              (``CONFORMITY_EVASIONS``, P-125), in every shape a page renders and on a
+              guide the UI does not bundle, and in the constants, helpers and interpolated
+              values the pull-request body uses (P-126); that a percentage written in words
+              is a claim (P-127); that a number after ``§``, ``#`` or an id prefix is an
               identifier, not a count; that every exemption still refuses the evasions in
               ``EVASIONS`` and the naming nouns are pinned (P-120); and that a ``[measured]``
-              tag whose rows are not in this repository is refused (DL-100, P-121).
+              tag whose rows are not in this repository is refused (DL-100, P-121), and a
+              README one names its rows in any rendered shape (P-126).
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -201,6 +205,10 @@ def test_prose_that_makes_no_claim_is_not_flagged(tree: Path, body: str) -> None
         # exemption used to swallow it because the "interval|level" half was optional
         "There is 65% confidence that the builder can deliver.\n",
         "The reviewer had 80% confidence in the verdict.\n",
+        # a percentage written in words is a percentage (P-127)
+        "Ninety percent of delivered patches are mergeable.\n",
+        "95 percent of delivered patches are mergeable.\n",
+        "95 per cent of delivered patches are mergeable.\n",
     ],
 )
 def test_a_quantified_assertion_in_prose_is_a_claim(tree: Path, body: str) -> None:
@@ -851,6 +859,16 @@ def test_a_readme_measured_tag_must_name_rows_the_repository_carries(tree: Path)
     assert ["do not verify" in r and "extra.jsonl" in r for r in reasons()] == [True]
 
 
+@pytest.mark.parametrize("shape", ["heading", "table row", "checklist item"])
+def test_a_readme_measured_tag_in_any_rendered_shape_needs_rows(tree: Path, shape: str) -> None:
+    """A results table is the natural place for a measured number, so a [measured] tag in
+    a table cell, a heading or a checklist item names its rows like any other (P-126)."""
+    claim = f"bug.fix XS was 99% clean {MEASURED}"
+    _write(tree, "README.md", "# t\n\n" + RENDERED_SHAPES[shape].format(s=claim))
+    assert ["names no rows" in f.reason for f in cc.check_rows(tree)] == [True], shape
+    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 1
+
+
 def test_only_readme_measured_tags_need_a_rows_locator(tree: Path) -> None:
     _write(tree, "docs/PAGE.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
     _write(tree, "README.md", "# t\n\nNothing measured here.\n")
@@ -1046,20 +1064,133 @@ def test_a_measured_tag_whose_rows_are_not_in_the_repository_is_refused(
 # ─── the conformity rule refuses the claim whatever else the sentence says (P-120) ─────────
 
 
-@pytest.mark.parametrize(
-    "sentence",
-    [
-        "The change conforms to ISO/IEC 25010 and needs no further review.",
-        "Every clean row is certified against ISO/IEC 25010, not just tested.",
-        "Every change the factory delivers conforms to ISO/IEC 25010 with no exceptions.",
-        "Delivered code is ISO/IEC 25010 compliant, not merely aligned.",
-        "The factory's code complies with ISO 9001 without any manual review.",
-        "It is not certified by an auditor, but it conforms to ISO/IEC 25010.",
-    ],
+#: Sentences that claim conformity and that the rule must refuse, however its denials grow.
+#: Each got past a denial wider than its case (P-120, P-125). The list only grows: a new
+#: denial is written with its refused cases here first. The ones with a clause break pin the
+#: break: remove it and the negation or refusal before it would deny the claim after it.
+CONFORMITY_EVASIONS: tuple[str, ...] = (
+    "The change conforms to ISO/IEC 25010 and needs no further review.",
+    "Every clean row is certified against ISO/IEC 25010, not just tested.",
+    "Every change the factory delivers conforms to ISO/IEC 25010 with no exceptions.",
+    "Delivered code is ISO/IEC 25010 compliant, not merely aligned.",
+    "The factory's code complies with ISO 9001 without any manual review.",
+    "It is not certified by an auditor, but it conforms to ISO/IEC 25010.",
+    # a negation that governs another word than the conformity verb denies nothing
+    "Without exception the code conforms to ISO/IEC 25010.",
+    "No doubt the code conforms to ISO/IEC 25010.",
+    "No, the code conforms to ISO/IEC 25010.",
+    "The code never fails to conform to ISO/IEC 25010.",
+    "The factory's code not only conforms to ISO/IEC 25010 but is fast.",
+    "The code is not just tested: it conforms to ISO/IEC 25010.",
+    # a refusal refuses only a saying in its own clause
+    "Having refused shortcuts, the factory delivers code that conforms to ISO/IEC 25010.",
+    "We refused to cut corners, so every change conforms to ISO/IEC 25010.",
+    "We refused to cut corners so every change conforms to ISO/IEC 25010.",
+    # the clause break pins: a negated or refused verb before it reaches nothing after it
+    "It is not certified by an auditor, and it conforms to ISO/IEC 25010.",
+    "The gate refused a sentence last week; this one says the code conforms to ISO/IEC 25010.",
+    "Nobody refuses the claim: the code conforms to ISO/IEC 25010.",
+    # the standard however it is written
+    "The code conforms to ISO25010.",
+    "The code is certified against iso/iec 25010.",
 )
+
+
+@pytest.mark.parametrize("sentence", CONFORMITY_EVASIONS)
 def test_an_incidental_negation_does_not_hide_a_conformity_claim(tree: Path, sentence: str) -> None:
     _conformity_tree(tree, readme=sentence, guide="Nothing.", planted="Nothing.")
     assert [f.path for f in cc.check_conformity(tree)] == ["README.md"]
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # a denial reaches every conformity word coordinated with the one it governs
+        "The gate refuses any sentence that says code conforms to, complies with or is "
+        "certified against an ISO standard.",
+        "The code does not conform to, or comply with, ISO/IEC 25010.",
+        "That does not make the code ISO/IEC 25010 compliant.",
+        "The factory's code isn't certified against ISO/IEC 25010.",
+        "A clean row cannot be certified against ISO 9001.",
+    ],
+)
+def test_a_denial_reaches_the_conformity_words_it_governs(tree: Path, sentence: str) -> None:
+    _conformity_tree(tree, readme=sentence, guide=sentence, planted=sentence)
+    assert cc.check_conformity(tree) == []
+
+
+#: Every shape a page renders that a reader reads: the conformity rule reads each, not only
+#: the paragraphs and list items the claim-tag heuristic counts (P-126).
+RENDERED_SHAPES: dict[str, str] = {
+    "paragraph": "{s}\n",
+    "list item": "- {s}\n",
+    "heading": "## {s}\n",
+    "table row": "| row | text |\n|---|---|\n| x | {s} |\n",
+    "checklist item": "- [x] {s}\n",
+    "blockquote": "> {s}\n",
+    "after a comment": "<!-- nav --> {s}\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(RENDERED_SHAPES))
+def test_a_conformity_claim_is_refused_in_every_shape_a_page_renders(
+    tree: Path, shape: str
+) -> None:
+    claim = "Delivered code conforms to ISO/IEC 25010"
+    body = RENDERED_SHAPES[shape].format(s=claim)
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    _write(tree, "README.md", f"# t\n\n{body}")
+    assert [f.path for f in cc.check_conformity(tree)] == ["README.md"], shape
+    assert cc.main(["--check", "--root", str(tree)]) == 1
+
+
+def test_a_guide_the_ui_does_not_bundle_is_read_too(tree: Path) -> None:
+    """The rule reads every page directly under docs/, not only the bundled guides."""
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    _write(tree, "docs/ARCHITECTURE.md", "# A\n\nThe code conforms to ISO/IEC 25010.\n")
+    assert "docs/ARCHITECTURE.md" not in (cc.bundled_guides(tree) or ())
+    assert [f.path for f in cc.check_conformity(tree)] == ["docs/ARCHITECTURE.md"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # a name imported from the product: the standard it holds is read
+        "from crb.core.quality_model import STANDARD\n\n"
+        "def pr_body(item, build):\n"
+        '    return f"This change conforms to {STANDARD}."\n',
+        "import crb.core.quality_model as qm\n\n"
+        "def pr_body(item, build):\n"
+        '    return f"This change conforms to {qm.STANDARD}."\n',
+        # a value the rule cannot resolve is read as a standard beside a conformity word
+        'def pr_body(item, build):\n    return f"This change conforms to {build.standard}."\n',
+        "def pr_body(item, build):\n"
+        '    return "This change conforms to {}.".format(build.standard)\n',
+        'def pr_body(item, build):\n    return "This change conforms to " + build.standard + "."\n',
+    ],
+)
+def test_the_pr_body_rule_reads_what_an_interpolation_puts_in_the_sentence(
+    tree: Path, source: str
+) -> None:
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    (tree / "src/crb/core").mkdir(parents=True)
+    _write(tree, "src/crb/core/quality_model.py", 'STANDARD = "ISO/IEC 25010:2023"\n')
+    _write(tree, "src/crb/factory/delivery.py", source)
+    found = [f.path for f in cc.check_conformity(tree)]
+    assert found == ["src/crb/factory/delivery.py"]
+
+
+def test_an_interpolation_beside_no_conformity_word_passes(tree: Path) -> None:
+    source = (
+        "from crb.core.quality_model import STANDARD\n\n"
+        "def pr_body(item, build):\n"
+        '    return f"Item {item}: the checks evidence parts of {STANDARD}."\n'
+    )
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    (tree / "src/crb/core").mkdir(parents=True)
+    _write(tree, "src/crb/core/quality_model.py", 'STANDARD = "ISO/IEC 25010:2023"\n')
+    _write(tree, "src/crb/factory/delivery.py", source)
+    assert cc.check_conformity(tree) == []
 
 
 def test_a_section_headed_never_is_still_read_unless_it_lists_forbidden_sayings(

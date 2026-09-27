@@ -7,17 +7,22 @@ code, and fails when the claim does not state a figure in its role — "49 of 55
 cell's clean count of its attempts, "point 0.891" its point, "0.78 to 0.95" its interval —
 when it states any other number, anywhere the tag covers, or when it names another
 apparatus. A figure is bound to its role, never to whichever figure it happens to equal:
-"false-Q1 = 1" fails although a point rounds to 1 (P-122). A claim that stops being true
-fails here rather than waiting for a reader.
+"false-Q1 = 1" fails although a point rounds to 1 (P-122). Every number the tag covers is
+read, in digits or in words, bare or in a ratio ("54", "ninety percent", "9-in-10"); only
+dates, apparatus versions, confidence levels and numbers that name rather than count are
+not figures (P-127). A tag in a table cell, a heading or a checklist item is re-derived like
+one in prose (P-126). A claim that stops being true fails here rather than waiting for a
+reader.
 
 Navigation
 ----------
 What it is:   The re-derivation test for every README ``[measured]`` claim that names rows.
-What it does: Finds each README block whose ``[measured]`` tag names ``rows: data/<campaign>/``,
-              with every sentence of the block and every list item it introduces; checks the
-              campaign's manifest; derives its figures and renders the phrases its
-              derivation says a claim states (``DERIVATIONS``); requires each phrase and
-              refuses any number left over; and checks the apparatus. A locator with no
+What it does: Finds each README block, in any rendered shape, whose ``[measured]`` tag names
+              ``rows: data/<campaign>/``, with every sentence of the block and every list or
+              checklist item it introduces; checks the campaign's manifest; derives its
+              figures and renders the phrases its derivation says a claim states
+              (``DERIVATIONS``); requires each phrase and refuses any number left over, in
+              digits or in words; and checks the apparatus. A locator with no
               derivation fails, so a new campaign cannot be cited without one. The
               branch-protection reading is compared with the workflow vendored beside it,
               never with the working tree's ci.yml.
@@ -157,25 +162,43 @@ DERIVATIONS: dict[str, Callable[[Path], Derived]] = {
 _NUM = r"\d[\d,]*(?:\.\d+)?"
 _MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
 _APPARATUS_TEXT = re.compile(r"\bapparatus\s+[0-9][\w.-]*", re.I)
-_DATE = re.compile(rf"\b\d{{4}}-\d{{2}}-\d{{2}}\b|\b\d{{1,2}}\s+(?:{_MONTHS})\b")
+_DATE = re.compile(
+    rf"\b\d{{4}}-\d{{2}}-\d{{2}}\b|\b\d{{1,2}}\s+(?:{_MONTHS})(?:\s+\d{{4}}(?!-))?\b"
+    rf"|\b(?:{_MONTHS})\s+\d{{4}}\b"
+)
+#: A number that names rather than counts: a dotted version ("2.0.0a1"), one touching a
+#: letter ("v5", "P0"), after "§", "#" or a lettered prefix and a hyphen
+#: ("§2", "ADR-0013", "Apache-2.0"), or after an acronym ("PEP 440", "ISO 25010").
+_IDENTIFIER = re.compile(
+    rf"(?:\d+(?:\.\d+){{2,}}|[A-Za-z]{_NUM}|{_NUM}[A-Za-z]|[§#]\s?{_NUM}|[A-Za-z]-{_NUM}|\b[A-Z]{{2,}}\s+{_NUM})"
+    rf"[\w.]*"
+)
+#: A number written in words, unless it names a part of the text ("three files", a
+#: structural noun) or forms a compound adjective ("four-belt"). "one" is absent, as it is
+#: from the gate's own list: "every one of them" counts nothing.
+_WORD_NUMBER = re.compile(
+    rf"\b({cc._NUMBER_WORD}|zero)\b(?!-(?!(?:{'|'.join(cc.NUMBER_WORDS)}|one)\b)[a-z])"
+    r"(?:\s+([a-z]+))?",
+    re.I,
+)
+_FIGURE = re.compile(rf"(?<![\d.,]){_NUM}(?![\d])")
 
 
 def stated_numbers(text: str) -> list[str]:
-    """Every figure the text states: the gate's own claim figures (counts, percentages), a
-    fraction's two sides ("49 of 55", "22/22"), a value after "=" ("n = 55", "false-Q1 = 0")
-    and a proportion written as a decimal ("0.891", "0.78"). Dates, apparatus versions and
-    confidence levels are not figures."""
+    """Every figure the text states, once each, where it stands: every number in digits
+    ("49", "0.891", "1,071", "54", the 9 and the 10 of "9-in-10") and every number written
+    in words ("ninety", "fifty-four"). Dates, apparatus versions, confidence levels and
+    numbers that name rather than count (``_IDENTIFIER``) are not figures (P-127)."""
     text = cc._strip_markup(text)
     text = _APPARATUS_TEXT.sub(" ", text)
     text = _DATE.sub(" ", text)
     text = cc._CONFIDENCE_PERCENT_RE.sub(" ", text)
-    out: list[str] = []
-    for sentence in cc._SENTENCE_SPLIT.split(text):
-        out += cc.claim_numbers(sentence)
-    for m in re.finditer(rf"(?<![\d.])({_NUM})\s*(?:/|\bof\b)\s*({_NUM})(?![\d.])", text):
-        out += [m.group(1), m.group(2)]
-    out += re.findall(rf"=\s*({_NUM})", text)
-    out += re.findall(r"(?<![\d.])0\.\d+(?![\d.])", text)
+    text = _IDENTIFIER.sub(" ", text)
+    text = re.sub(r"\bdata/[\w./-]+", " ", text)  # a rows locator is a path, not a figure
+    out = [m.group(0).rstrip(",.") for m in _FIGURE.finditer(text)]
+    for m in _WORD_NUMBER.finditer(text):
+        if (m.group(2) or "").lower() not in cc.STRUCTURAL:
+            out.append(m.group(1))
     return out
 
 
@@ -197,17 +220,14 @@ def measured_claims(text: str) -> list[Claim]:
     every sentence of its block, whether or not the gate counts it as a claim, and every
     list item the block introduces (the gate lets the intro's tag cover them)."""
     out: list[Claim] = []
-    blocks = cc.blocks_of(text)
+    blocks = cc.blocks_of(text, rendered=True)  # a heading, a table cell, a checklist item
     for i, block in enumerate(blocks):
         prose = cc._CODE_RE.sub(" ", cc._COMMENT_RE.sub(" ", block.text))
         for name, detail in cc._TAG_RE.findall(prose):
             if name.lower() != "measured":
                 continue
             covered = [block.text]
-            for item in blocks[i + 1 :]:
-                if item.cover != f"{block.text} {item.text}":
-                    break
-                covered.append(item.text)
+            covered += [b.text for b in blocks[i + 1 :] if b.cover == f"{block.text} {b.text}"]
             for campaign in cc.rows_locators(detail):
                 out.append(Claim(block.line, campaign, detail, " ".join(covered)))
     return out
@@ -276,11 +296,27 @@ def test_a_number_the_rows_do_not_give_fails() -> None:
 
 
 def test_stated_numbers_skip_dates_versions_and_confidence_levels() -> None:
+    """Each figure once, where it stands; dates, apparatus versions, confidence levels and
+    identifiers are not figures."""
     text = (
         "On 27 September 2026-09-27, 49 of 55 attempts were clean (Wilson 95% interval "
-        "0.78 to 0.95), n = 55; apparatus 1.0-census"
+        "0.78 to 0.95), n = 55; apparatus 1.0-census. In June 2026, v2.0.0a1 of P0-P7 per "
+        "PEP 440 and ADR-0013 §2 ran in four-belt mode on data/census-2026-07-08/."
     )
-    assert sorted(stated_numbers(text)) == sorted(["55", "49", "55", "55", "0.78", "0.95"])
+    assert stated_numbers(text) == ["49", "55", "0.78", "0.95", "55"]
+
+
+def test_a_measured_tag_in_a_table_is_re_derived(tmp_path: Path) -> None:
+    """A [measured] tag in a table cell names its rows (the gate) and is re-derived from
+    them like any other (P-126): a cell that does not state what the rows give fails."""
+    tag = (
+        "[measured — n = 55 attempts; method: the census rows re-imported and read by the "
+        "product's cell statistics; rows: data/census-2026-07-08/; apparatus 1.0-census]"
+    )
+    page = f"# t\n\n| cell | result |\n|---|---|\n| bug.fix XS | 99% clean {tag} |\n"
+    claims = measured_claims(page)
+    assert [c.campaign for c in claims] == ["data/census-2026-07-08"]
+    assert problems(claims[0]) != []
 
 
 #: A stated figure swapped for ANOTHER figure the rows give: each is a number the rows do
@@ -323,6 +359,13 @@ def _census_paragraph() -> str:
         "{p}\n\n- 99% of all 1,071 rows were clean.\n",
         # a sentence of the block with numbers but no count of a plural noun is read too
         "{p} Its Wilson interval is 0.10 to 0.20.\n",
+        # a bare number, a percentage in words and a k-in-n ratio are figures too (P-127)
+        "{p} The cell's clean count was 54.\n",
+        "{p} In all, ninety percent of the cell's attempts were clean.\n",
+        "{p} That is 9-in-10 clean.\n",
+        "{p} Its clean count was fifty-four.\n",
+        # a checklist item the measured paragraph introduces is covered by its tag too
+        "{p}\n\n- [x] 99% of all 1,071 rows were clean.\n",
     ],
 )
 def test_every_number_the_tag_covers_is_re_derived(page: str) -> None:

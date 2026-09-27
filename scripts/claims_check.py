@@ -14,7 +14,7 @@ here is a ``[hypothesis]`` with that reason, DL-100).
     python scripts/claims_check.py --check    # CI: exit non-zero on any finding
 
 **The heuristic, honestly.** A sentence is treated as a claim when, after inline code, links
-and HTML comments are stripped, it contains either a percentage or a cardinal (``12``,
+and HTML comments are stripped, it contains either a percentage (``95%``, ``95 per cent``, ``ninety percent``) or a cardinal (``12``,
 ``1200``, ``eleven``) qualifying a plural noun — "eleven jobs", "22 tasks", "1200 tasks",
 "four public libraries". A tag covers the block it sits in (a paragraph, a list item, a
 blockquote paragraph), and a list item is also covered by the paragraph that introduces the
@@ -81,8 +81,9 @@ checks evidence while the criterion that builds that table was unmet (P-115). It
 the promises registered here; an unregistered capability sentence still needs a reader
 (G-935).
 
-**README's measured claims name their rows.** A ``[measured]`` tag on README (``ROWS_PAGES``)
-must say where its rows are — ``rows: data/<campaign>/``, written plain inside the tag — and
+**README's measured claims name their rows.** A ``[measured]`` tag on README (``ROWS_PAGES``),
+wherever it renders — a paragraph, a list item, a heading, a table cell or a checklist item
+(P-126) — must say where its rows are — ``rows: data/<campaign>/``, written plain inside the tag — and
 that directory must be in the repository with a ``MANIFEST.sha256`` that verifies: every
 listed file present and unchanged, and no file beside it that the manifest does not list
 (its README excepted). The gate holds that shape; ``tests/test_measured_claims.py``
@@ -91,17 +92,25 @@ re-derives the numbers and the apparatus from the rows (G-660).
 **A standard is named, never claimed.** The product names which ISO/IEC 25010
 characteristics its checks evidence part of (``crb.core.quality_model``, EVIDENCE-AND-CLAIMS
 §9) and never that code conforms to one. A sentence that says code conforms to, complies with
-or is certified against an ISO standard is refused on README, on the guides (the ones the UI
-bundles, read from ``DOC_NAMES`` in ``ui/src/help/docs.ts``, and every other page directly
-under ``docs/``) and in the factory's pull-request body template (the string literals of
-``pr_body`` and ``rework_comment``, of the module's functions they call and of the module
-constants they read). A sentence that only names a standard passes, and so does one whose
-conformity word is negated in its own clause ("does not mean the code complies") or
-refused ("the gate refuses a sentence that says code conforms"), or that sits in a section
-listing what must never be said (EVIDENCE-AND-CLAIMS §7 quotes it to forbid it). A negation
-elsewhere in the sentence denies nothing: "conforms to ISO/IEC 25010 and needs no review" is
-refused (P-120). It reads words, not meaning: "our pipeline is ISO-aligned" passes, and a
-reader still has to read.
+or is certified against an ISO standard (``ISO``, in any case, with or without a space before
+its number) is refused on README, on the guides (the ones the UI bundles, read from
+``DOC_NAMES`` in ``ui/src/help/docs.ts``, and every other page directly under ``docs/``) and
+in the factory's pull-request body template (the string literals of ``pr_body`` and
+``rework_comment``, of the module's functions they call and of the module constants they
+read, each f-string or ``+`` join rendered with the constants it interpolates, imported ones
+from ``crb`` included, and a value it cannot resolve read as a standard). It reads every
+shape a page renders — headings, table cells and checklist items as well as prose (P-126). A
+sentence that only names a standard passes, and so does one that denies the claim: a
+negation in front of the conformity verb ("does not conform", "is not ISO/IEC 25010
+compliant"), a negated verb whose complement carries it in the same clause ("does not mean
+the code complies"), a refusal of a saying in the same clause ("the gate refuses a sentence
+that says code conforms"), or a sentence in a section listing what must never be said
+(EVIDENCE-AND-CLAIMS §7 quotes it to forbid it); a conformity word coordinated with a denied
+one shares its denial ("conforms to, complies with or is certified against"). Nothing else
+denies: "no doubt", "without exception", "not only conforms", or a refusal or negation in
+another clause, and ``CONFORMITY_EVASIONS`` in the tests holds the cases (P-120, P-125). It
+reads words, not meaning: "our pipeline is ISO-aligned" passes, and a reader still has to
+read.
 
 **How a file opts in.** Add its repository-relative path, or a glob for its folder, to
 ``ALLOWLIST`` below and make it pass in the same change. The list only grows: a page that
@@ -119,8 +128,9 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               and every record whose review no longer lists the action or is no longer on
               disk; reports a registered promise stated in the present tense before its
               criterion is met (P-115); reports a sentence that claims ISO conformity on
-              README, a guide or the factory's pull-request body template (ADR-0026 item
-              11); reports a README ``[measured]`` tag that names no vendored rows, or rows
+              README, a guide or the factory's pull-request body template, in any shape the
+              page renders (ADR-0026 item 11, P-125, P-126); reports a README
+              ``[measured]`` tag that names no vendored rows, or rows
               whose checksum manifest does not verify (G-660); --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
@@ -131,9 +141,11 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
               docs/DECISION-LOG.md, each under a head that names the review's stem in
               backticks, then ``action #N: <state>``. Then each ``PROMISES`` pattern over the
               sentences of ``PROMISE_PAGES`` ⇄ its criterion's state in docs/dod/. Then
-              each sentence of README, the guides and the pull-request body's literals
-              (``ast``) → an ISO mention and a conformity word with no denial. Then each
-              README ``[measured]`` tag → its ``rows:`` locator → the manifest's hashes.
+              each sentence of README, the guides (every rendered shape) and the
+              pull-request body's literals (``ast``, interpolations resolved) → an ISO
+              mention and a conformity word that no verb in its clause denies. Then each
+              README ``[measured]`` tag, in any rendered shape → its ``rows:`` locator →
+              the manifest's hashes.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         docs/adr/0026-the-context-standard.md (item 11, the conformity rule)
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of; §9,
@@ -363,8 +375,14 @@ FUNCTION_WORDS: frozenset[str] = frozenset(
 _CARDINAL = r"(?:\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d{4,}(?:\.\d+)?|" + "|".join(NUMBER_WORDS) + r")"
 _COUNT_RE = re.compile(rf"\b({_CARDINAL})\s+(?:([a-z][\w'-]*)\s+)?([a-z][\w'-]{{2,}}s)\b", re.I)
 _PLURAL_RE = re.compile(r"[a-z][\w'-]{2,}s", re.I)
-_PERCENT = r"\d[\d,]*(?:\.\d+)?\s?%"
-_PERCENT_RE = re.compile(_PERCENT)
+#: A percentage: "95%", "95 %", and written in words — "95 percent", "95 per cent",
+#: "ninety percent", "ninety-five per cent" (P-127).
+_NUMBER_WORD = r"(?:" + "|".join(NUMBER_WORDS) + r")(?:-(?:one|" + "|".join(NUMBER_WORDS) + r"))?"
+_PERCENT = (
+    r"(?:\d[\d,]*(?:\.\d+)?\s?%"
+    rf"|(?:\d[\d,]*(?:\.\d+)?|\b{_NUMBER_WORD})\s+per\s?cent\b)"
+)
+_PERCENT_RE = re.compile(_PERCENT, re.I)
 #: A percentage that *is* a confidence level, matched by its construction rather than by a
 #: nearby word: "Wilson 95% interval", "95% confidence interval", "95% CI", "at a
 #: confidence of 95%". A result standing beside such an interval ("65% passed (Wilson 95%
@@ -594,11 +612,25 @@ def _contents_prose(text: str) -> str:
     return text
 
 
-def blocks_of(text: str) -> list[Block]:
+_TABLE_RULE_RE = re.compile(r"^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$")
+
+
+def _cells(row: str) -> list[str]:
+    """The non-empty cells of a table row (a ``\\|`` inside a cell is not a divider)."""
+    return [c.strip() for c in re.split(r"(?<!\\)\|", row.strip().strip("|")) if c.strip()]
+
+
+def blocks_of(text: str, *, rendered: bool = False) -> list[Block]:
     """The page's prose blocks, each with the text that may tag it.
 
     Headings, table rows, fenced code and checklist items are not prose and are skipped. A
     list item's cover is its own text plus the paragraph that introduced the list.
+
+    With ``rendered``, every shape a reader reads is a block too: a heading (its own text),
+    each cell of a table row, and a checklist item (read as a list item, so the paragraph
+    that introduces it covers it). The claim-tag heuristic counts only prose; a rule about
+    what a page *says* — the conformity rule, a README ``[measured]`` tag's rows and their
+    re-derivation, a registered promise — reads everything that renders (P-126).
     """
     out: list[Block] = []
     paragraph: list[str] = []
@@ -643,10 +675,18 @@ def blocks_of(text: str) -> list[Block]:
             if _HEADING_RE.match(quoted):
                 intro = ""
                 heading = quoted
+                if rendered:
+                    words = re.sub(r"^#{1,6}\s+|\s+#+\s*$", "", quoted)
+                    out.append(Block(number, words, words, heading))
+            elif rendered and quoted.startswith("|") and not _TABLE_RULE_RE.match(quoted):
+                out += [Block(number, cell, cell, heading) for cell in _cells(quoted)]
             continue
         if _CHECKLIST_RE.match(quoted):
             close_paragraph()
             close_item()
+            if rendered:
+                item = [re.sub(r"^\s*[-*+]\s+\[[ xX]\]\s*", "", quoted)]
+                item_start = number
             continue
         if _ITEM_RE.match(quoted):
             close_paragraph()
@@ -827,7 +867,7 @@ def check_promises(root: Path, pages: tuple[str, ...]) -> list[Finding]:
         path = root / rel
         if not path.is_file():
             continue
-        for block in blocks_of(path.read_text(encoding="utf-8")):
+        for block in blocks_of(path.read_text(encoding="utf-8"), rendered=True):
             for sentence in _SENTENCE_SPLIT.split(_strip_markup(block.text)):
                 for promise in PROMISES:
                     state = states.get(promise.criterion)
@@ -900,7 +940,7 @@ def check_rows(root: Path, pages: tuple[str, ...] = ROWS_PAGES) -> list[Finding]
         path = root / rel
         if not path.is_file():
             continue
-        for block in blocks_of(path.read_text(encoding="utf-8")):
+        for block in blocks_of(path.read_text(encoding="utf-8"), rendered=True):
             prose = _CODE_RE.sub(" ", _COMMENT_RE.sub(" ", block.text))
             for name, detail in _TAG_RE.findall(prose):
                 if name.lower() != "measured":
@@ -954,48 +994,159 @@ _CONFORM_RE = re.compile(
     r"|certif(?:y|ies|ied|ication))\b",
     re.I,
 )
-#: An ISO standard, named: "ISO/IEC 25010", "ISO 9001", "an ISO standard".
-_ISO_RE = re.compile(r"\bISO\b")
-#: A negation denies a conformity word only when it governs it: it stands within
-#: ``NEGATION_REACH`` words before the word, in the same clause ("does not mean the code
-#: complies"). A negation elsewhere in the sentence ("conforms … and needs no review",
-#: "compliant, not merely aligned") denies nothing (P-120).
-_NEGATIONS: frozenset[str] = frozenset({"never", "not", "no", "nor", "cannot", "without"})
-NEGATION_REACH = 5
-#: What ends a clause when looking back from a conformity word for its negation.
-_CLAUSE_BREAKS: frozenset[str] = frozenset(
-    {",", ";", ":", "\u2014", "\u2013", "(", ")", "but", "and", "or", "while", "although", "though"}
+#: An ISO standard, named: "ISO/IEC 25010", "ISO 9001", "an ISO standard", "iso/iec 25010",
+#: "ISO25010" — in any case, and with or without a space before its number (P-125).
+_ISO_RE = re.compile(r"\bISO(?:\b|(?=\d))", re.I)
+#: Words that negate the verb they stand in front of. "no" and "without" are absent on
+#: purpose: they govern a noun ("no doubt", "without exception"), never the conformity verb.
+_NEGATIONS: frozenset[str] = frozenset({"never", "not", "nor", "cannot"})
+#: What may stand between a negation and the verb it negates: an auxiliary, an adverb that
+#: does not turn the negation ("does not formally conform"), an article, and the standard's
+#: own name ("is not ISO/IEC 25010 compliant"). "only", "just", "merely" and "simply" are
+#: absent on purpose: "not only conforms" asserts it (P-125).
+_VERB_GROUP: frozenset[str] = frozenset(
+    {
+        "a",
+        "am",
+        "an",
+        "are",
+        "automatically",
+        "be",
+        "been",
+        "being",
+        "can",
+        "could",
+        "did",
+        "do",
+        "does",
+        "ever",
+        "formally",
+        "fully",
+        "had",
+        "has",
+        "have",
+        "iec",
+        "is",
+        "iso",
+        "itself",
+        "may",
+        "might",
+        "must",
+        "necessarily",
+        "officially",
+        "shall",
+        "should",
+        "thereby",
+        "therefore",
+        "thus",
+        "was",
+        "were",
+        "will",
+        "would",
+        "yet",
+    }
 )
-#: A verb that refuses or forbids the claim, anywhere before it: "the gate refuses a sentence
-#: that says code conforms …".
-_REFUSAL_RE = re.compile(r"^(?:refus|forbid)", re.I)
+#: A verb whose complement may carry the conformity claim: when it is itself negated, the
+#: claim in its complement is denied ("does not mean the code complies", "never certifies
+#: that code conforms", "does not make the code compliant").
+_REPORTING = re.compile(
+    r"^(?:mean|imply|impli|say|said|show|prove|make|guarantee|establish|certif|claim|assert"
+    r"|state|entail|warrant|demonstrat|tell|told)",
+    re.I,
+)
+#: A verb that refuses or forbids a saying ("the gate refuses a sentence that says code
+#: conforms …"), and the saying it must govern, in the same clause, before the claim.
+_REFUSAL_RE = re.compile(r"^(?:refus|forbid|reject|prohibit)", re.I)
+_SAYING_RE = re.compile(
+    r"^(?:sentences?|claims?|claiming|statements?|stating|says?|saying|wording|words?)$", re.I
+)
+#: What ends a clause when looking back from a conformity word for a verb that denies it.
+_CLAUSE_BREAKS: frozenset[str] = frozenset(
+    {
+        ",",
+        ";",
+        ":",
+        "\u2014",
+        "\u2013",
+        "(",
+        ")",
+        "but",
+        "and",
+        "or",
+        "so",
+        "while",
+        "although",
+        "though",
+        "because",
+    }
+)
+#: What may join two conformity words in one coordinated list ("conforms to, complies with
+#: or is certified against"): the second shares the first's denial.
+_COORDINATION: frozenset[str] = frozenset(
+    {",", "to", "with", "against", "by", "or", "and", "nor", "is", "are", "be", "been"}
+)
 _WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?|[,;:\u2014\u2013()]")
 
 
-def _denied(words: list[str], at: int) -> bool:
-    """True when the conformity word at ``words[at]`` is refused earlier in the sentence or
-    negated within its own clause."""
-    if any(_REFUSAL_RE.match(w) for w in words[:at]):
-        return True
-    for w in reversed(words[max(0, at - NEGATION_REACH) : at]):
+def _negated(words: list[str], at: int) -> bool:
+    """True when a negation stands directly in front of ``words[at]``'s verb group: only
+    auxiliaries, adverbs that do not turn it, articles and the standard's name between."""
+    for w in reversed(words[:at]):
         lower = w.lower()
-        if lower in _CLAUSE_BREAKS:
-            return False
         if lower in _NEGATIONS or lower.endswith("n't"):
+            return True
+        if lower not in _VERB_GROUP:
+            return False
+    return False
+
+
+def _clause_before(words: list[str], at: int) -> list[int]:
+    """The indices of the words before ``words[at]`` in its own clause, nearest first."""
+    out: list[int] = []
+    for i in range(at - 1, -1, -1):
+        if words[i].lower() in _CLAUSE_BREAKS:
+            break
+        out.append(i)
+    return out
+
+
+def _denied(words: list[str], at: int, denied: set[int]) -> bool:
+    """True when the conformity word at ``words[at]`` is denied: negated in its own verb
+    group ("does not conform"); in the complement of a negated reporting verb in its own
+    clause ("does not mean the code complies"); in the complement of a refused saying in its
+    own clause ("refuses a sentence that says code conforms"); or coordinated with a denied
+    conformity word ("conforms to, complies with or is certified against"). A negation or a
+    refusal anywhere else in the sentence denies nothing (P-120, P-125)."""
+    if _negated(words, at):
+        return True
+    clause = _clause_before(words, at)
+    for i in clause:
+        if _REPORTING.match(words[i]) and _negated(words, i):
+            return True
+        if _SAYING_RE.match(words[i]) and any(_REFUSAL_RE.match(words[j]) for j in clause if j < i):
+            return True
+    for prev in sorted(denied, reverse=True):
+        if prev < at and all(w.lower() in _COORDINATION for w in words[prev + 1 : at]):
             return True
     return False
 
 
 def conformity_claim(sentence: str) -> bool:
     """True when the sentence says code conforms to, complies with or is certified against
-    an ISO standard: it names one, and some conformity word in it is neither negated in its
-    own clause nor refused. A sentence that only names a standard, or denies the claim, is
-    not one."""
+    an ISO standard: it names one, and some conformity word in it is not denied (``_denied``).
+    A sentence that only names a standard, or denies the claim, is not one."""
     text = _strip_markup(sentence)
     if not _ISO_RE.search(text):
         return False
     words = _WORD_RE.findall(text)
-    return any(_CONFORM_RE.fullmatch(w) and not _denied(words, i) for i, w in enumerate(words))
+    denied: set[int] = set()
+    for i, w in enumerate(words):
+        if not _CONFORM_RE.fullmatch(w):
+            continue
+        if not _denied(words, i, denied):
+            return True
+        denied.add(i)
+    return False
 
 
 def bundled_guides(root: Path) -> tuple[str, ...] | None:
@@ -1011,34 +1162,14 @@ def bundled_guides(root: Path) -> tuple[str, ...] | None:
     return tuple(f"docs/{n}.md" for n in names) or None
 
 
-def _literals(node: ast.AST) -> list[tuple[int, str]]:
-    """``(line, text)`` for every string literal under ``node``; the constant parts of an
-    f-string are joined, so a sentence split by a value still reads."""
-    out: list[tuple[int, str]] = []
-    for sub in ast.walk(node):
-        if isinstance(sub, ast.JoinedStr):
-            parts = [
-                v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else " "
-                for v in sub.values
-            ]
-            out.append((sub.lineno, "".join(parts)))
-        elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
-            out.append((sub.lineno, sub.value))
-    return out
+#: What an interpolated value the rule cannot resolve reads as: a standard. Beside a
+#: conformity word it is refused, because the rule cannot show it is not one (P-126).
+HOLE = "ISO(an interpolated value)"
+_PLACEHOLDER_RE = re.compile(r"\{[^{}]*\}|%[sdr]")
 
 
-def _pr_body_literals(root: Path) -> list[tuple[int, str]] | None:
-    """``(line, text)`` for every string the pull-request body can emit: the literals of the
-    body functions, of every module-level function they call (and those call), and of every
-    module-level constant any of them reads — the body is what ``pr_body`` returns, not
-    only what is written inside it (P-120)."""
-    path = root / PR_BODY_SOURCE
-    if not path.is_file():
-        return None
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    functions = {
-        n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+def _module_constants(tree: ast.Module) -> dict[str, ast.AST]:
+    """Each module-level ``NAME = <value>`` (annotated or not) of a parsed module."""
     constants: dict[str, ast.AST] = {}
     for n in tree.body:
         if isinstance(n, ast.Assign) and n.value is not None:
@@ -1049,6 +1180,128 @@ def _pr_body_literals(root: Path) -> list[tuple[int, str]] | None:
             isinstance(n, ast.AnnAssign) and n.value is not None and isinstance(n.target, ast.Name)
         ):
             constants[n.target.id] = n.value
+    return constants
+
+
+class _Resolver:
+    """Resolves a value a string interpolates to the text it holds: a string literal, a
+    module constant, or a constant imported from another ``crb`` module (``from crb.x import
+    NAME``, ``import crb.x as m`` then ``m.NAME``). ``None`` when it cannot."""
+
+    def __init__(self, root: Path, tree: ast.Module) -> None:
+        self.root = root
+        self.constants = _module_constants(tree)
+        self.names: dict[str, tuple[str, str]] = {}  # local name -> (module, attribute)
+        self.modules: dict[str, str] = {}  # local alias -> module
+        for n in tree.body:
+            if isinstance(n, ast.ImportFrom) and n.module and n.level == 0:
+                for alias in n.names:
+                    self.names[alias.asname or alias.name] = (n.module, alias.name)
+            elif isinstance(n, ast.Import):
+                for alias in n.names:
+                    if alias.asname:
+                        self.modules[alias.asname] = alias.name
+        self._foreign: dict[str, dict[str, ast.AST]] = {}
+
+    def _foreign_constant(self, module: str, name: str) -> str | None:
+        if module not in self._foreign:
+            path = self.root / "src" / Path(*module.split(".")).with_suffix(".py")
+            self._foreign[module] = (
+                _module_constants(ast.parse(path.read_text(encoding="utf-8")))
+                if path.is_file()
+                else {}
+            )
+        value = self._foreign[module].get(name)
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            return value.value
+        return None
+
+    def text(self, node: ast.AST, depth: int = 0) -> str | None:
+        if depth > 8:
+            return None
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id in self.constants:
+                return self.text(self.constants[node.id], depth + 1)
+            if node.id in self.names:
+                return self._foreign_constant(*self.names[node.id])
+            return None
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in self.modules
+        ):
+            return self._foreign_constant(self.modules[node.value.id], node.attr)
+        if isinstance(node, (ast.JoinedStr, ast.BinOp)):
+            return _render(node, self, depth + 1)
+        return None
+
+
+def _add_chain(node: ast.AST) -> list[ast.AST]:
+    """The operands of an ``a + b + c`` chain, left to right."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [*_add_chain(node.left), *_add_chain(node.right)]
+    return [node]
+
+
+def _render(node: ast.AST, resolver: _Resolver, depth: int = 0) -> str | None:
+    """The text an f-string or a ``+`` join of strings emits, each value it interpolates
+    resolved (``_Resolver``) or read as ``HOLE``; ``None`` for anything else."""
+    parts: list[ast.AST]
+    if isinstance(node, ast.JoinedStr):
+        parts = list(node.values)
+    elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        parts = _add_chain(node)
+        if not any(isinstance(p, (ast.Constant, ast.JoinedStr)) for p in parts):
+            return None
+    else:
+        return None
+    out: list[str] = []
+    for part in parts:
+        value = part.value if isinstance(part, ast.FormattedValue) else part
+        text = resolver.text(value, depth)
+        out.append(HOLE if text is None else text)
+    return "".join(out)
+
+
+def _literals(node: ast.AST, resolver: _Resolver) -> list[tuple[int, str]]:
+    """``(line, text)`` for every string under ``node`` as it is emitted: an f-string or a
+    ``+`` join is rendered whole, with each value it interpolates resolved or read as
+    ``HOLE``, and a literal's own ``{}``/``%s`` placeholders (``.format``, ``%``) read as
+    ``HOLE`` — so a sentence split by a value still reads, and a value that may name a
+    standard is not dropped (P-126)."""
+    out: list[tuple[int, str]] = []
+    consumed: set[int] = set()
+    for sub in ast.walk(node):
+        if id(sub) in consumed:
+            continue
+        if isinstance(sub, (ast.JoinedStr, ast.BinOp)):
+            text = _render(sub, resolver)
+            if text is not None:
+                out.append((sub.lineno, text))
+                for inner in ast.walk(sub):
+                    if inner is not sub:
+                        consumed.add(id(inner))
+        elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            out.append((sub.lineno, _PLACEHOLDER_RE.sub(HOLE, sub.value)))
+    return out
+
+
+def _pr_body_literals(root: Path) -> list[tuple[int, str]] | None:
+    """``(line, text)`` for every string the pull-request body can emit: the literals of the
+    body functions, of every module-level function they call (and those call), and of every
+    module-level constant any of them reads — the body is what ``pr_body`` returns, not
+    only what is written inside it (P-120) — each rendered with what it interpolates (P-126)."""
+    path = root / PR_BODY_SOURCE
+    if not path.is_file():
+        return None
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    resolver = _Resolver(root, tree)
+    functions = {
+        n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    constants = resolver.constants
     if not any(name in functions for name in PR_BODY_FUNCTIONS):
         return None
     queue = [name for name in PR_BODY_FUNCTIONS if name in functions]
@@ -1061,14 +1314,14 @@ def _pr_body_literals(root: Path) -> list[tuple[int, str]] | None:
             continue
         seen_fn.add(name)
         fn = functions[name]
-        found.update(_literals(fn))
+        found.update(_literals(fn, resolver))
         for sub in ast.walk(fn):
             if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
                 if sub.id in functions and sub.id not in seen_fn:
                     queue.append(sub.id)
                 elif sub.id in constants and sub.id not in seen_const:
                     seen_const.add(sub.id)
-                    found.update(_literals(constants[sub.id]))
+                    found.update(_literals(constants[sub.id], resolver))
     return sorted(found)
 
 
@@ -1119,13 +1372,13 @@ def check_conformity(root: Path, pages: tuple[str, ...] | None = None) -> list[F
         path = root / rel
         if not path.is_file():
             continue
-        for block in blocks_of(path.read_text(encoding="utf-8")):
+        for block in blocks_of(path.read_text(encoding="utf-8"), rendered=True):
             if _FORBIDDEN_SECTION_RE.search(block.heading):
                 continue  # a section that lists what must never be said quotes it to forbid it
             for sentence in _SENTENCE_SPLIT.split(block.text):
                 if conformity_claim(sentence):
                     findings.append(Finding(rel, block.line, sentence.strip(), reason))
-    for line, text in literals:
+    for line, text in literals or []:
         for sentence in _SENTENCE_SPLIT.split(text):
             if conformity_claim(sentence):
                 findings.append(Finding(PR_BODY_SOURCE, line, sentence.strip(), reason))
