@@ -21,8 +21,9 @@ Works with:   tests/conftest.py (the session finaliser over the base temporary d
               tests/test_provision_store.py (asks ``permissions_bind`` before expecting a
               write into a sealed set to be refused)
 Tested by:    tests/test_tmp_tree_hygiene.py
-Touch when:   a test makes something other than a directory stop its own deletion, or
-              expects the operating system to refuse something on the mode bits.
+Touch when:   never for a new repository (it cleans up after this suite's own tests); a
+              test makes something other than a directory stop its own deletion, or expects
+              the operating system to refuse something on the mode bits.
 """
 
 from __future__ import annotations
