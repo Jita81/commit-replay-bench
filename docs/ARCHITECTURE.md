@@ -378,13 +378,13 @@ A dedicated `SECURITY.md` and `THREAT-MODEL.md` land in P7.
 
 Every stage emits a `StepEvent` (`crb.observability.events`): `trace_id` = run,
 `step_id` = task, `stage ∈ {mine, prep, build, grade, ledger, oracle, factory, system}`,
-`action` from the vocabulary in [API.md](API.md#event-vocabulary) (about a hundred
-actions — `mine.candidate`, `grade.belt`, `delivery.opened`, `run.cancel_requested`, … —
-each with its payload keys and consumer; `tests/test_event_vocabulary.py` keeps the table
+`action` from the vocabulary in [API.md](API.md#event-vocabulary) (every action —
+`mine.candidate`, `grade.belt`, `delivery.opened`, `run.cancel_requested`, … — with its
+payload keys and consumer; `tests/test_event_vocabulary.py` keeps the table
 in step with the code). Sinks: `MemorySink`, `JsonlSink`, `MultiSink`, `CallbackSink`; the
 server adds an events table and SSE; the worker's emitter also feeds a metering sink.
 
-Prometheus is two expositions, because the registry is per process: the **api** serves
+Prometheus has one exposition per process, because the registry is per process: the **api** serves
 `crb_http_requests_total{method, route, status}`, `crb_http_request_duration_seconds`,
 `crb_ledger_rows` and `crb_false_q1_total` (recounted on every scrape; **must stay 0** — a
 non-zero value is a stop condition) at `/metrics`; the **worker** serves
@@ -478,7 +478,7 @@ sample per repo" takes minutes; `counts_json` of a `label` run carries the per-c
 counts, mean confidence (with its n), the unclassified count and the labeller's cost.
 
 Layering: `crb.core.taxonomy` (data) ← `crb.core.classify` (label, evidence, resolution,
-reply parser, prompt) ← `crb.core.spec` (task spec); `crb.builders.labeller` adds the two
+reply parser, prompt) ← `crb.core.spec` (task spec); `crb.builders.labeller` adds its
 transports (OpenAI-compatible chat; `claude -p` with `--tools ""`, one turn, structured
 output, the same `auth = api_key | cli` environment as the builder). Extending the
 vocabulary changes the instrument (§7.4).
@@ -543,7 +543,7 @@ vocabulary changes the instrument (§7.4).
 - `pyproject.toml` layers contract marks not-yet-existing packages optional (parenthesised);
   each package's landing PR must remove its parentheses.
 - Reference sandbox images ship for python, node and go (`deploy/sandbox/`, proven from
-  inside by CI **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]**); a
+  inside by CI **[measured — `tests/test_sandbox_images_docker.py`, n = 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]**); a
   repository's dependencies are still the operator's extension of one, and a JVM image waits
   on the Maven runner's docker branch (`deploy/sandbox/README.md` §6) **[aspiration]**.
 
