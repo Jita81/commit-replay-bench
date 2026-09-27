@@ -14,8 +14,9 @@ could edit — so an edit to it moved stored rows between denominators (external
 
 Navigation
 ----------
-What it is:   The golden table of the failure rule, one hash per apparatus version, and the
-              pinned hash of the frozen 2.3 outage markers.
+What it is:   The golden table of the failure rule, one hash per apparatus version, the
+              pinned hash of the frozen 2.3 outage markers, and the pin of the outage-cause
+              rule the 2.4 rows' ``outage_cause`` label is stamped by (pilot D1).
 What it does: Fails when the live rule or its markers change under an unchanged
               ``APPARATUS_VERSION``; fails when the frozen v1 rule or markers change at all;
               shows the frozen reading of a row below 2.4 cannot move when the live markers do;
@@ -307,3 +308,30 @@ def test_a_docstring_or_comment_edit_leaves_the_source_pin_alone() -> None:
     assert edited != src
     live = _sources(LIVE_RULE)
     assert _source_digest([edited, *live[1:]]) == _source_digest(live)
+
+
+#: The outage-cause rule (pilot D1, P-205): its code and the constants it reads — written when
+#: the rule was added, for the 2.4 rows that carry its label, and never edited. A change to the
+#: rule or its markers moves an ``outage_cause`` already pinned in the chain, so it is an
+#: apparatus bump with the old rule frozen beside the new one, like the failure rule's.
+OUTAGE_CAUSE_SOURCE_SHA256 = "b199fb590cdecfa336c8664cdbf267465a85831b9bcff7ec3bfa5cc30ceb25d7"
+
+
+def _outage_cause_digest(source: str) -> str:
+    body = {
+        "code": _code_tokens(source),
+        "constants": {
+            "AUTH_ERROR_MARKERS": list(lg.AUTH_ERROR_MARKERS),
+            "OUTAGE_CAUSES": list(lg.OUTAGE_CAUSES),
+            "FAILURE_OUTAGE": lg.FAILURE_OUTAGE,
+        },
+    }
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+
+
+def test_the_outage_cause_rule_is_pinned_by_its_code_and_markers() -> None:
+    got = _outage_cause_digest(inspect.getsource(lg.derive_outage_cause))
+    assert got == OUTAGE_CAUSE_SOURCE_SHA256, (
+        f"the outage-cause rule changed (now {got}); it decides a hashed 2.4 label, so a "
+        "change is an apparatus bump"
+    )

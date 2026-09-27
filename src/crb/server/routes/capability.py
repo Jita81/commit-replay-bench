@@ -352,6 +352,7 @@ def split_out(c: CapabilityCell) -> FailureSplitOut:
         protocol=c.n_protocol,
         harness=c.n_harness,
         outage=c.n_outage,
+        outage_auth=c.stats.n_outage_auth if c.stats is not None else 0,
         disqualified=c.n_disqualified,
         lint=c.stats.n_lint if c.stats is not None else 0,
         lint_evaluated=c.stats.n_lint_evaluated if c.stats is not None else 0,

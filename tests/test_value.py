@@ -409,6 +409,42 @@ def test_process_loss_counts_rows_and_pounds_per_kind() -> None:
     assert pl["budget_protocol_share_of_valid_failures"] == pytest.approx(2 / 3, abs=1e-4)
 
 
+def test_process_loss_says_your_login_apart_from_the_provider() -> None:
+    """Pilot D1 (P-205): the campaign's process-loss line must say "your login" when the
+    credential this deployment presented was refused, and "the provider" when the provider
+    refused a working one — both still ``outage``, both still outside every rate. A row below
+    2.4 carries no cause and is counted as not recorded, never guessed."""
+    rows = [
+        dataclasses.replace(vr(1, kind=FAILURE_OUTAGE, cost=0.0), outage_cause="auth"),
+        dataclasses.replace(vr(2, kind=FAILURE_OUTAGE, cost=0.0), outage_cause="auth"),
+        dataclasses.replace(vr(3, kind=FAILURE_OUTAGE, cost=0.0), outage_cause="provider"),
+        vr(4, kind=FAILURE_OUTAGE, cost=0.0),
+        vr(5, kind=FAILURE_CLEAN, cost=1.0),
+    ]
+    pl = process_loss(rows, usd_per_gbp=1.0).to_dict()
+    assert pl["kinds"]["outage"]["rows"] == 4
+    assert pl["outage_causes"] == {"auth": 2, "provider": 1, "unrecorded": 1}
+
+
+def test_the_adapter_carries_an_outage_rows_cause() -> None:
+    from crb.core.ledger import GradeRow
+
+    base = {
+        "repo": "alpha",
+        "task_id": "c" * 40,
+        "clean": False,
+        "tests_unmodified": True,
+        "target_green": None,
+        "no_new_failures": None,
+        "source_changed": None,
+        "mode": "blind",
+        "error": "model_error: authentication failed (HTTP 401)",
+    }
+    row = posture_row(**base, cost_usd=0.0)
+    assert isinstance(row, GradeRow) and row.outage_cause == ""  # a 2.3 row: not recorded
+    assert value_row_from_grade(row).outage_cause == ""
+
+
 # --- the learning curve -----------------------------------------------------------------
 
 

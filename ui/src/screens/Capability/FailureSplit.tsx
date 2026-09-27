@@ -4,7 +4,7 @@
  * Navigation
  * ----------
  * What it is:   Three small components: `FailureSplitPills` (red · lint · budget · protocol ·
- *               harness · outage · DQ), `ModelPointLine` (the model's rate on fair attempts,
+ *               harness · outage, with its `login` part — pilot D1 · DQ), `ModelPointLine` (the model's rate on fair attempts,
  *               next to the routing rate) and `ControlsPill` (the repo's controls verdict).
  * What it does: Puts the WHY behind every pass rate on the page: how many misses were the
  *               model's, how many the budget's, how many the instrument's (protocol /
@@ -54,13 +54,17 @@ export function controlsHint(state: string): HintId {
  */
 export function FailureSplitPills({ split, size = 'xs', ...rest }: { split: FailureSplit; size?: 'xs' | 'sm'; 'data-testid'?: string }) {
   return (
-    <span className="num inline-flex flex-wrap items-center gap-1" data-testid={rest['data-testid'] ?? 'failure-split'} aria-label={KIND_DISPLAY.map((k) => `${k.short} ${split[k.key] ?? 0}`).join(', ')}>
+    <span className="num inline-flex flex-wrap items-center gap-1" data-testid={rest['data-testid'] ?? 'failure-split'} aria-label={KIND_DISPLAY.map((k) => `${k.short} ${split[k.key] ?? 0}${k.key === 'outage' && (split.outage_auth ?? 0) > 0 ? ` (login ${split.outage_auth})` : ''}`).join(', ')}>
       {KIND_DISPLAY.map((k) => {
         const n = split[k.key] ?? 0
         return (
           <Hint key={k.key} id={`kind.${k.key}`} data-component="pill" data-testid={`kind-${k.key}`} className={`inline-flex items-baseline gap-0.5 ${size === 'xs' ? 'text-[10px]' : 'text-xs'} ${n > 0 ? TONE_TEXT[k.tone] : 'text-on-surface-muted'}`}>
             <span>{k.short}</span>
             <span className={n > 0 ? 'font-semibold' : ''}>{fmtInt(n)}</span>
+            {k.key === 'outage' && (split.outage_auth ?? 0) > 0 && (
+              // pilot D1: "your login", not "the provider" — said inside the outage count
+              <span data-testid="kind-outage-auth">(login {fmtInt(split.outage_auth ?? 0)})</span>
+            )}
           </Hint>
         )
       })}

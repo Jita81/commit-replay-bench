@@ -243,3 +243,79 @@ def test_a_2_4_factory_row_without_its_kind_is_refused() -> None:
     made = _factory(_result(clean=False, belts=g.Belts(True, False), lint_status="not_reached"), V2)
     with pytest.raises(lg.LedgerIntegrityError, match=lg.LABEL_FAILURE_KIND):
         lg.GradeRow(**_without(made, lg.LABEL_FAILURE_KIND))
+
+
+# --- the cause of an outage (pilot D1, P-205) -------------------------------------------
+
+#: What the claude_code builder records when the login it presented is refused (the pilot's
+#: canary 79cb7521: a keychain login answered HTTP 401 and the row read `outage`).
+AUTH_401 = "model_error: authentication failed (HTTP 401) — run `claude login` as the worker's user"
+USAGE_LIMIT = "model_error: you have hit your limit · resets 5pm"
+
+
+def _outage(error: str, apparatus: str = V2) -> lg.GradeRow:
+    red = g.Belts(True, None, None, None)
+    return lg.grade_row_from_result(
+        _result(clean=False, belts=red, error=error, lint_status=lint_mod.LINT_NOT_REACHED),
+        _task(),
+        pack_hash="c" * 64,
+        apparatus_version=apparatus,
+    )
+
+
+def test_a_2_4_outage_row_names_a_refused_login_as_its_own_cause() -> None:
+    """Pilot D1: a login this deployment presented was refused (HTTP 401) and the row was
+    filed as a provider outage — the right denominator, the wrong reader's story. From 2.4 the
+    row pins WHY the call never happened: ``auth`` (a local credential fault the operator
+    fixes) or ``provider`` (a usage limit, a 429, an overload) — still ``outage``, still
+    outside every ``n``."""
+    auth = _outage(AUTH_401)
+    assert auth.failure_kind == lg.FAILURE_OUTAGE and not auth.eligible
+    assert auth.labels[lg.LABEL_OUTAGE_CAUSE] == lg.OUTAGE_CAUSE_AUTH
+    assert auth.outage_cause == lg.OUTAGE_CAUSE_AUTH
+    limit = _outage(USAGE_LIMIT)
+    assert limit.failure_kind == lg.FAILURE_OUTAGE
+    assert limit.outage_cause == lg.OUTAGE_CAUSE_PROVIDER
+    split = lg.failure_split([auth, limit])
+    assert split.n == 0 and split.outage == 2 and split.outage_auth == 1
+    assert split.to_dict()["outage_auth"] == 1
+
+
+def test_an_outage_row_below_2_4_carries_no_cause() -> None:
+    """The cause is a 2.4 label (DL-106 (2), P-123): a 2.3 row is written as before and reads
+    no cause — never one derived after the fact."""
+    row = _outage(AUTH_401, apparatus="2.3")
+    assert row.failure_kind == lg.FAILURE_OUTAGE
+    assert lg.LABEL_OUTAGE_CAUSE not in row.labels and row.outage_cause == ""
+
+
+def test_the_ledger_refuses_an_outage_cause_that_does_not_fit_its_row() -> None:
+    auth = _outage(AUTH_401)
+    with pytest.raises(lg.LedgerIntegrityError, match=lg.LABEL_OUTAGE_CAUSE):
+        lg.GradeRow(**_without(auth, lg.LABEL_OUTAGE_CAUSE))  # a 2.4 outage row names it
+    with pytest.raises(ValueError, match="outage_cause"):
+        lg.GradeRow(**_with(auth, **{lg.LABEL_OUTAGE_CAUSE: "weather"}))
+    clean = _replay(_result(lint_status=lint_mod.LINT_NONE_DETECTED))
+    with pytest.raises(ValueError, match="outage_cause"):
+        lg.GradeRow(**_with(clean, **{lg.LABEL_OUTAGE_CAUSE: lg.OUTAGE_CAUSE_AUTH}))
+    old = _outage(AUTH_401, apparatus="2.3")
+    with pytest.raises(ValueError, match="outage_cause"):
+        lg.GradeRow(**_with(old, **{lg.LABEL_OUTAGE_CAUSE: lg.OUTAGE_CAUSE_AUTH}))
+
+
+@pytest.mark.parametrize(
+    ("error", "cause"),
+    [
+        (AUTH_401, "auth"),
+        ("model_error: authentication failed (HTTP 403) — check ANTHROPIC_API_KEY", "auth"),
+        ("model_error: OAuth access token is invalid", "auth"),
+        (USAGE_LIMIT, "provider"),
+        ("model_error: 529 overloaded", "provider"),
+        ("model_error: 429 rate_limit", "provider"),
+        ("model_error: some other trouble", ""),  # harness, not an outage
+        ("", ""),
+    ],
+)
+def test_the_outage_cause_rule(error: str, cause: str) -> None:
+    kind = lg.derive_failure_kind(clean=False, disqualified=False, error=error)
+    assert lg.derive_outage_cause(kind, error) == cause

@@ -65,7 +65,9 @@ What it does: Reduces rows (``ValueRow``, adapted from ``GradeRow`` or read from
               defaults to the current version (pooling is explicit and flagged), whose
               headline reads one checks
               arm (named in ``checks``) and whose cells never pool two, and whose time-ordered
-              measures use only prior data. Never writes, never calls a model.
+              measures use only prior data; its process loss counts outage rows by cause
+              ("your login" apart from "the provider", pilot D1). Never writes, never calls a
+              model.
 How:          ``select_rows`` (repo, apparatus) → the ``checks`` arm → ``north_star``
               (``Rate`` × ``precision``) → ``process_loss`` → ``learning_curve``
               (``BugRegister.class_of`` per attempt, windows, ``statuses`` → shares) →
@@ -106,6 +108,7 @@ from crb.core.ledger import (
     FAILURE_KINDS,
     FAILURE_OUTAGE,
     FAILURE_PROTOCOL,
+    OUTAGE_CAUSES,
     PROTOCOL_VIOLATION_PREFIX,
     CellKey,
     CellStats,
@@ -188,6 +191,9 @@ class ValueRow:
     builder: str = ""
     model: str = ""
     provider: str = ""
+    #: Why an ``outage`` row's call never happened, as the row pinned it from 2.4: ``auth``
+    #: (this deployment's login was refused), ``provider``, or ``""`` (not recorded).
+    outage_cause: str = ""
     #: The ``checks`` arm the row was graded under (ADR-0024): a cell never pools two
     checks_arm: str = ARM_OFF
     grade: GradeRow | None = field(default=None, compare=False, repr=False)
@@ -281,6 +287,7 @@ def value_row_from_grade(row: GradeRow) -> ValueRow:
         model=row.model,
         provider=row.provider,
         checks_arm=row.checks_arm,
+        outage_cause=row.outage_cause,
         grade=row,
     )
 
@@ -722,6 +729,10 @@ class ProcessLoss:
     usd_per_gbp: float
     #: Rows whose cost is not a measurement: in ``rows`` but in no dollar sum.
     rows_unpriced: int = 0
+    #: The ``outage`` rows by cause (pilot D1): ``auth`` = this deployment's login was refused
+    #: ("your login"), ``provider`` = the provider refused a working one, ``unrecorded`` = a
+    #: row below 2.4, which carries no cause.
+    outage_causes: dict[str, int] = field(default_factory=dict)
 
     def _gbp(self, usd: float | None) -> float | None:
         return None if usd is None else usd / self.usd_per_gbp
@@ -747,6 +758,9 @@ class ProcessLoss:
             "all_usd": _money(self.usd_total),
             "valid_failures": self.valid_failures,
             "rows_unpriced": self.rows_unpriced,
+            "outage_causes": {
+                c: int(self.outage_causes.get(c, 0)) for c in (*OUTAGE_CAUSES, "unrecorded")
+            },
             "budget_protocol_share_of_valid_failures": (
                 _r(bp / self.valid_failures) if self.valid_failures else None
             ),
@@ -765,6 +779,10 @@ def process_loss(
             by_kind[r.failure_kind].append(r)
     kinds = {k: (len(rs), spend_of_rows(rs).usd) for k, rs in by_kind.items()}
     total = spend_of_rows(rows)
+    causes: dict[str, int] = {}
+    for r in by_kind[FAILURE_OUTAGE]:
+        key = r.outage_cause or "unrecorded"
+        causes[key] = causes.get(key, 0) + 1
     return ProcessLoss(
         kinds=kinds,
         rows=len(rows),
@@ -772,6 +790,7 @@ def process_loss(
         valid_failures=sum(1 for r in rows if r.valid and not r.clean),
         usd_per_gbp=usd_per_gbp,
         rows_unpriced=total.rows_unpriced,
+        outage_causes=causes,
     )
 
 

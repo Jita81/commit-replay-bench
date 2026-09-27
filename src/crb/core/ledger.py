@@ -61,7 +61,9 @@ What it is:   The ledger — the append-only, hash-chained record of every grade
 What it does: Constructs rows that cannot be clean with a failed belt, without an evidence
               pack, or under a belt set their apparatus could not have recorded; chains each
               row to the previous one by SHA-256 and verifies a chain; names why every
-              non-clean row failed by ONE rule; reduces rows to a cell's ``n``, clean count,
+              non-clean row failed by ONE rule (and, from 2.4, why an outage's call never
+              happened: ``outage_cause`` ``auth`` or ``provider`` — pilot D1); reduces rows to
+              a cell's ``n``, clean count,
               Wilson interval, failure split and false-Q1 count (which must read 0); refuses
               to reduce rows of two ``checks`` arms to one cell and keeps one arm on request.
 How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to a row and
@@ -289,6 +291,39 @@ OUTAGE_ERROR_MARKERS_V1: tuple[str, ...] = (
 def is_outage_error_v1(error: str) -> bool:
     """:func:`is_outage_error` against the frozen :data:`OUTAGE_ERROR_MARKERS_V1`."""
     return _outage(error, OUTAGE_ERROR_MARKERS_V1)
+
+
+#: WHY an ``outage`` row's call never happened — a hashed label from apparatus 2.4, stamped at
+#: write by :func:`row_labels_at_write` and read verbatim (pilot D1, P-205). The kind stays
+#: ``outage`` either way, outside every ``n``; the cause only says whose move it is.
+LABEL_OUTAGE_CAUSE = "outage_cause"
+#: The credential THIS deployment presented was refused (HTTP 401/403, an invalid OAuth token or
+#: API key): a local login fault the operator repairs — "your login", not "the provider".
+OUTAGE_CAUSE_AUTH = "auth"
+#: Every other provider refusal: a usage limit, a quota, a 429, an overload, a 5xx.
+OUTAGE_CAUSE_PROVIDER = "provider"
+OUTAGE_CAUSES: tuple[str, ...] = (OUTAGE_CAUSE_AUTH, OUTAGE_CAUSE_PROVIDER)
+#: The builders' own words for a refused credential (``crb.builders.claude_code`` writes
+#: ``authentication failed (HTTP 401)``). Matched case-insensitively on an outage row only;
+#: ``tests/test_failure_rule_golden.py`` pins this list and the rule's code.
+AUTH_ERROR_MARKERS: tuple[str, ...] = (
+    "authentication failed",
+    "oauth access token is invalid",
+    "invalid x-api-key",
+    "invalid api key",
+    "http 401",
+    "http 403",
+)
+
+
+def derive_outage_cause(kind: str, error: str) -> str:
+    """THE rule for an outage row's cause: ``""`` unless ``kind`` is ``outage``; then
+    ``auth`` when ``error`` names a refused credential (:data:`AUTH_ERROR_MARKERS`), else
+    ``provider``. Deterministic; it reads only the error text the row hashes."""
+    if kind != FAILURE_OUTAGE:
+        return ""
+    e = error.lower()
+    return OUTAGE_CAUSE_AUTH if any(m in e for m in AUTH_ERROR_MARKERS) else OUTAGE_CAUSE_PROVIDER
 
 
 #: The kinds where the model finished and was judged on its own terms (the
@@ -557,6 +592,9 @@ def row_labels_at_write(
     out = {LABEL_FAILURE_KIND: kind, LABEL_LINT_REASON: result.lint_status}
     if change_id:
         out[LABEL_CHANGE_ID] = change_id
+    cause = derive_outage_cause(kind, error)
+    if cause:  # pilot D1: "your login" or "the provider", pinned at write (P-205)
+        out[LABEL_OUTAGE_CAUSE] = cause
     return out
 
 
@@ -759,6 +797,21 @@ class GradeRow:
                 raise ValueError(
                     f"failure_kind label {kind!r} contradicts disqualified={self.disqualified}"
                 )
+        cause = self.labels.get(LABEL_OUTAGE_CAUSE)
+        if cause is not None:
+            # a 2.4 label on an outage row only (P-123's class: a label below its apparatus)
+            if cause not in OUTAGE_CAUSES:
+                raise ValueError(f"outage_cause label {cause!r} not in {OUTAGE_CAUSES}")
+            if not is_v2_apparatus(self.apparatus_version):
+                raise ValueError(
+                    f"outage_cause label on a row of {self.apparatus_version}: it is written "
+                    "from apparatus 2.4 only"
+                )
+            if self.failure_kind != FAILURE_OUTAGE:
+                raise ValueError(
+                    f"outage_cause label {cause!r} on a row whose failure_kind is "
+                    f"{self.failure_kind!r}, not 'outage'"
+                )
         ck = self.labels.get(LABEL_COST_KNOWN)
         if ck is not None and ck not in ("true", "false"):
             raise ValueError(f"cost_known label must be 'true' or 'false', got {ck!r}")
@@ -810,6 +863,10 @@ class GradeRow:
         where = f"ledger refuses row {self.task_id[:10]} ({self.repo}) of {self.apparatus_version}"
         if LABEL_FAILURE_KIND not in self.labels:
             raise LedgerIntegrityError(f"{where}: no failure_kind label (stamped at write)")
+        if self.failure_kind == FAILURE_OUTAGE and LABEL_OUTAGE_CAUSE not in self.labels:
+            raise LedgerIntegrityError(
+                f"{where}: an outage row without its outage_cause label (stamped at write)"
+            )
         reason = self.labels.get(LABEL_LINT_REASON)
         if reason is None:
             raise LedgerIntegrityError(f"{where}: no lint_reason label (stamped at write)")
@@ -920,6 +977,13 @@ class GradeRow:
             lint_only=self.lint_only(),
             api_only=self.api_only(),
         )
+
+    @property
+    def outage_cause(self) -> str:
+        """Why an outage row's call never happened — ``auth`` (the credential this
+        deployment presented was refused) or ``provider`` — as pinned at write from 2.4;
+        ``""`` on every other row and on a row below 2.4 (never derived after the fact)."""
+        return self.labels.get(LABEL_OUTAGE_CAUSE, "")
 
     @property
     def cost_known(self) -> bool:
@@ -1341,8 +1405,13 @@ class FailureSplit:
     #: Provider outages (usage limit, 429, dead credential): the call never happened.
     #: Counted over all rows, outside ``n`` — like ``disqualified``.
     outage: int = 0
+    #: Of ``outage``, the rows whose cause is ``auth``: the login THIS deployment presented
+    #: was refused — "your login", not "the provider" (pilot D1; rows of 2.4 and later).
+    outage_auth: int = 0
 
     def __post_init__(self) -> None:
+        if not 0 <= self.outage_auth <= self.outage:
+            raise ValueError("a FailureSplit's outage_auth must be a part of its outage")
         # the split must partition n exactly: a kind that is dropped or double-counted
         # would let a rate be quoted over a denominator nobody can reconstruct
         kinds = self.clean + self.builder_red + self.lint + self.api + self.budget + self.protocol
@@ -1391,6 +1460,7 @@ class FailureSplit:
             "harness": self.harness,
             "disqualified": self.disqualified,
             "outage": self.outage,
+            "outage_auth": self.outage_auth,
             "rows": self.rows,
             "lint_evaluated": self.lint_evaluated,
             "point": round(self.point, 4),
@@ -1429,6 +1499,11 @@ def failure_split(rows: Iterable[GradeRow]) -> FailureSplit:
         lint_evaluated=sum(1 for r in eligible if r.repo_lint_clean is not None),
         api=kinds[FAILURE_API],
         outage=sum(1 for r in rs if r.failure_kind == FAILURE_OUTAGE),
+        outage_auth=sum(
+            1
+            for r in rs
+            if r.failure_kind == FAILURE_OUTAGE and r.outage_cause == OUTAGE_CAUSE_AUTH
+        ),
     )
 
 
@@ -1456,6 +1531,8 @@ class CellStats:
     n_protocol: int = 0
     n_harness: int = 0
     n_outage: int = 0  # provider outages: outside n, reported so a reader sees the gap
+    #: Of ``n_outage``, the rows whose login this deployment presented was refused (pilot D1).
+    n_outage_auth: int = 0
     #: DISTINCT tasks among the eligible rows. ``n`` counts attempts: a cell of 16 rows on
     #: 4 commits is a statement about 4 commits — the clustering EVIDENCE-AND-CLAIMS §3
     #: forbids hiding (decider pass 2, 2026-09-15). Shown next to ``n`` everywhere.
@@ -1515,6 +1592,7 @@ class CellStats:
             "n_protocol": self.n_protocol,
             "n_harness": self.n_harness,
             "n_outage": self.n_outage,
+            "n_outage_auth": self.n_outage_auth,
             "n_disqualified": self.n_disqualified,
             "n_lint_evaluated": self.n_lint_evaluated,
             "model_n": self.model_n,
@@ -1573,6 +1651,7 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_protocol=split.protocol,
         n_harness=split.harness,
         n_outage=split.outage,
+        n_outage_auth=split.outage_auth,
         n_tasks=len({r.task_id for r in eligible if r.task_id}),
         model_n=split.model_n,
         model_point=split.model_point,
