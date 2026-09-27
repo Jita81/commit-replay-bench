@@ -8,8 +8,10 @@ What it does: Pins #60's semantics — a failed query fails the check, every que
               by the time left, a slow last query after the name was listed reads as still
               listed, a daemon that never answers fails the check — and refuses any
               ``docker ps`` / ``docker container ls`` / ``docker network ls`` call in a test
-              module other than the helper, proving on planted source that it catches each
-              shape (docs/PREVENTION.md P-052).
+              module other than the helper — as an argv list, a wrapper call or inside a
+              shell string — and any ``docker inspect`` of a container after a ``kill``,
+              ``rm`` or ``stop`` in the same function, proving on planted source that it
+              catches each shape (docs/PREVENTION.md P-052, P-119).
 How:          ``monkeypatch.setattr(subprocess, "run", …)`` for the helper; an ``ast`` walk
               for the ratchet: a call whose argv is ``[<docker>, "ps", …]``,
               ``[<docker>, "network", "ls", …]`` or ``_docker("ps", …)``.
@@ -26,6 +28,7 @@ Touch when:   a test needs another docker listing: add it to tests/docker_wait.p
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -44,6 +47,19 @@ _LISTINGS: tuple[tuple[str, ...], ...] = (
     ("container", "ps"),
     ("network", "ls"),
 )
+#: The same listings written into a shell string.
+_SHELL_LISTING = re.compile(r"\bdocker\s+(?:ps|container\s+(?:ls|ps)|network\s+ls)\b")
+#: ``docker <these>`` changes a container's state ...
+_CHANGES: tuple[tuple[str, ...], ...] = (
+    ("kill",),
+    ("rm",),
+    ("stop",),
+    ("container", "kill"),
+    ("container", "rm"),
+    ("container", "stop"),
+)
+#: ... and ``docker <these>`` read it back, which after a change races the daemon.
+_INSPECTS: tuple[tuple[str, ...], ...] = (("inspect",), ("container", "inspect"))
 
 
 def test_the_check_fails_when_docker_ps_itself_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -148,28 +164,63 @@ def _callee(node: ast.Call) -> str:
     return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
 
 
+def _docker_words(node: ast.Call) -> list[str | None]:
+    """The docker sub-command words of a call, or ``[]`` when it does not run docker: a
+    ``_docker("ps", …)``-style wrapper's arguments, or an argv list ``[<docker>, …]``'s tail
+    (the binary a literal ``docker`` or any expression)."""
+    if "docker" in _callee(node).lower() and node.args:
+        return [w for a in node.args for w in _strings(a)]
+    for arg in node.args:
+        if not isinstance(arg, ast.List | ast.Tuple) or len(arg.elts) < 2:
+            continue
+        words = _strings(arg)
+        head = arg.elts[0]
+        if words[0] == "docker" or not (
+            isinstance(head, ast.Constant) and isinstance(head.value, str)
+        ):
+            return words[1:]
+    return []
+
+
+def _shell_listing(node: ast.Call) -> bool:
+    """A listing inside a shell string (``shell=True``, ``sh -c``, an f-string)."""
+    texts: list[str] = []
+    for a in ast.walk(node):
+        if isinstance(a, ast.Constant) and isinstance(a.value, str):
+            texts.append(a.value)
+    return any(_SHELL_LISTING.search(t) for t in texts)
+
+
+def _starts(words: list[str | None], shapes: tuple[tuple[str, ...], ...]) -> bool:
+    return any(tuple(words[: len(shape)]) == shape for shape in shapes)
+
+
 def docker_listing_reads(source: str, name: str = "<source>") -> list[str]:
-    """Every call in ``source`` that asks docker to list containers or networks, as
-    ``name:line``: an argv list ``[<docker>, "ps", …]`` (the binary a literal ``docker`` or
-    any expression) or a ``_docker("ps", …)``-style wrapper call."""
+    """Every call in ``source`` that reads docker's state the instant after changing it, as
+    ``name:line``: a listing of containers or networks (an argv list ``[<docker>, "ps", …]``,
+    a ``_docker("ps", …)``-style wrapper, or ``docker ps`` inside a shell string), and a
+    ``docker inspect`` / ``docker container inspect`` of a container after a ``kill``,
+    ``rm`` or ``stop`` earlier in the same function — each races the daemon's own
+    removal."""
     found: set[int] = set()
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if "docker" in _callee(node).lower() and node.args:
-            words = [w for a in node.args for w in _strings(a)]
-            if _lists(words):
-                found.add(node.lineno)
-        for arg in node.args:
-            if not isinstance(arg, ast.List | ast.Tuple) or len(arg.elts) < 2:
-                continue
-            words = _strings(arg)
-            head = arg.elts[0]
-            is_docker = words[0] == "docker" or not (
-                isinstance(head, ast.Constant) and isinstance(head.value, str)
-            )
-            if is_docker and _lists(words[1:]):
-                found.add(node.lineno)
+        if _lists(_docker_words(node)) or _shell_listing(node):
+            found.add(node.lineno)
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        calls = sorted((n for n in ast.walk(fn) if isinstance(n, ast.Call)), key=lambda n: n.lineno)
+        changed_at = min(
+            (c.lineno for c in calls if _starts(_docker_words(c), _CHANGES)), default=None
+        )
+        if changed_at is None:
+            continue
+        for c in calls:
+            if c.lineno > changed_at and _starts(_docker_words(c), _INSPECTS):
+                found.add(c.lineno)
     return [f"{name}:{line}" for line in sorted(found)]
 
 
@@ -200,12 +251,30 @@ def test_c():
     subprocess.run(["docker", "network", "ls", "-q", "--filter", "name=x"])
 def test_d():
     subprocess.run((shutil.which("docker"), "container", "ls", "-aq"))
+def test_e():
+    out = subprocess.run("docker ps -aq --filter name=x", shell=True, capture_output=True)
+def test_f(name):
+    subprocess.run(["sh", "-c", f"docker network ls -q --filter name={name}"])
+def test_g(name):
+    subprocess.run(["docker", "kill", name])
+    state = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name])
+def test_h(docker, name):
+    subprocess.run([docker, "rm", "-f", name])
+    subprocess.run([docker, "container", "inspect", name])
+def test_i(name):
+    _docker("stop", name)
+    _docker("inspect", name)
 """
     assert docker_listing_reads(planted, "planted") == [
         "planted:6",
         "planted:9",
         "planted:11",
         "planted:13",
+        "planted:15",
+        "planted:17",
+        "planted:20",
+        "planted:23",
+        "planted:26",
     ]
 
 
@@ -218,5 +287,10 @@ def test_ok(docker):
     subprocess.run(["docker", "run", "--rm", "img", "ps"])
     if argv[0] == "ps":
         pass
+    subprocess.run([docker, "inspect", "x"])  # no kill or rm before it in this function
+    subprocess.run("echo docker is not listed", shell=True)
+def test_image_after_rm(docker):
+    subprocess.run([docker, "rm", "-f", "c"])
+    subprocess.run([docker, "image", "inspect", "img"])
 """
     assert docker_listing_reads(allowed) == []
