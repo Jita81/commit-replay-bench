@@ -21,7 +21,7 @@ stale cells current again.
 mutants, an apparatus bump, weak-oracle verdicts, merged and closed pull requests → three
 reproducible artefacts a person accepts or refuses: a candidate guard-corpus line with its
 provenance, a strengthening backlog whose items already pass the factory's readiness gate, and
-an exact re-measurement plan with its cost.
+an exact re-measurement plan with its cost **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** The product proposes and never accepts. Every write in this stream is a named
 person's act, recorded with their identity: nothing appends a corpus line, registers a
@@ -29,7 +29,7 @@ strengthening item, spends money on a re-measurement or writes a test on its own
 no derivation carries a verdict of its own. What the product does do, since 2026-09-23, is put
 each of those three decisions where the reason for it is being read — on the Learn page, instead
 of as a command on the host — and refuse a request that supplies a body rather than naming an id.
-Cross-organisation abstract learning is designed and parked until a second organisation asks.
+Cross-organisation abstract learning is designed and parked until a second organisation asks **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 ## Definition of done
 
