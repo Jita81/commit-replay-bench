@@ -15,7 +15,8 @@ How:          ``ast`` over every ``tests/*.py``: the ``with pytest.raises(...)``
               ``user=`` keywords, per enclosing function.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   tests/test_provision_store.py, tests/test_provision_fetch.py (the two it found),
+Works with:   tests/test_provision_store.py (the seal's write probe it found),
+              tests/test_provision_fetch.py (the fetch user it found),
               tests/test_builders_container.py (the sibling ratchet for builder settings on
               the host's uid), .github/workflows/ci.yml (job ``fresh-clone``)
 Tested by:    itself (the planted samples)

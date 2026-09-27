@@ -14,16 +14,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **Gates from a lock, a run that keeps its spend cap, and click provisioned sealed**
   (north-star Wave 2, stream H; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-h)).
-  CI installs every library, pip-audit, cyclonedx-bom and uv itself at pinned versions, and a
-  `fresh-clone` job runs every gate as root with no docker daemon (DL-113); it has not run
-  yet, so `product.evidence.205` stays partial. A build run may declare `max_cost_usd`. It
-  stops before work that could pass the cap, counts a factory test author's calls, and ends
-  `failed` if an attempt with no cost cap of its own took it past; every page that names the
-  cap says it is a guard (ADR-0043, DL-114). The sealed posture reads a `uv.lock`, refusing
-  one whose text would reach pip as an option, and `deps_lock` alternatives provision click
-  across its lock move. The chart ships the alert rules and one evidence store, and carries
-  what an older worker kept into it on upgrade; the reaper and docker-wait tests no longer
-  race the machine.
+  CI installs every library, the audit tools and uv at pinned versions; a `fresh-clone` job
+  runs every gate as root with no docker daemon, though it has not run yet (DL-113). A build
+  run may declare `max_cost_usd`, a guard that counts the test author's calls and says when
+  the run passed it (ADR-0043, DL-114). The sealed posture reads a `uv.lock`, refusing text
+  that would reach pip as an option, and provisions click across its lock move. The chart
+  ships the alert rules and one evidence store, carrying an older worker's evidence into it.
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
