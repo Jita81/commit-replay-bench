@@ -128,10 +128,15 @@ def _model_names(model: type[BaseModel], prefix: str) -> Iterator[str]:
             yield env
 
 
+def _names_in_source(text: str) -> set[str]:
+    """Every endpoint-shaped setting name a Python source text reads as a string literal."""
+    return set(_SOURCE_NAME.findall(text))
+
+
 def _discovered() -> set[str]:
     names = set(_model_names(Settings, "CRB_"))
     for path in SRC.rglob("*.py"):
-        names |= set(_SOURCE_NAME.findall(path.read_text(encoding="utf-8")))
+        names |= _names_in_source(path.read_text(encoding="utf-8"))
     return names
 
 
@@ -144,13 +149,17 @@ def _slice(text: str, start: str, end: str) -> str:
     return text[i : text.index(end, i + len(start))]
 
 
+def _table_end(security: str) -> int:
+    """Where the SECURITY.md boundary table ends: the first blank line after its header."""
+    return security.index("\n\n", security.index("\n| Flow |"))
+
+
 def _statements() -> dict[str, str]:
     security = (DOCS / "SECURITY.md").read_text(encoding="utf-8")
     deployment = (DOCS / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    start = security.index("**What crosses the tenant boundary")
     return {
-        "SECURITY.md boundary table": _slice(
-            security, "**What crosses the tenant boundary", "The intake flow is the only one"
-        ),
+        "SECURITY.md boundary table": security[start : _table_end(security)],
         "DEPLOYMENT.md §1 invariant": _slice(
             deployment, "Both enforce the same invariants", "\n\n"
         ),
@@ -221,3 +230,53 @@ def test_the_provisioning_row_says_what_a_fetch_sends_and_never_sends() -> None:
     assert "off by default" in flow and "CRB_PROVISION__" in endpoint
     assert "names and versions" in sent and "go.sum" in sent
     assert "source code" in never and "credential" in never
+
+
+#: A word in a row's "What is sent" cell that says the flow CHANGES something outside the
+#: deployment (a pushed branch, a comment, a closed pull request, a label, a transition).
+_WRITE_VERB = re.compile(r"\b(?:push|comments?|close|labels?|transition)\b", re.IGNORECASE)
+
+
+def _write_statement() -> str:
+    """The prose under the boundary table that says which flows WRITE, up to the C6 rules."""
+    security = (DOCS / "SECURITY.md").read_text(encoding="utf-8")
+    end = _table_end(security)
+    return security[end : security.index("Since 2026-09-25 (assessment C6", end)]
+
+
+def test_the_write_statement_names_every_flow_whose_row_writes() -> None:
+    """The table is the inventory; the prose under it may not name fewer writers than the
+    table's rows describe (PR #61 review: GitHub delivery comments and closes a pull request,
+    and pushes a branch, while the prose said intake was the only writer)."""
+    writers = {
+        k
+        for k, f in FLOWS.items()
+        for row in _table_rows()
+        if row[0].startswith(f.row) and _WRITE_VERB.search(row[2])
+    }
+    assert "tracker (intake)" in writers, writers  # the verb list still reads the table
+    text = " ".join(_write_statement().split())
+    named = {k for k, f in FLOWS.items() if re.search(f.rx, text, re.IGNORECASE)}
+    assert named == writers, (
+        f"the rows of {sorted(writers)} say they write; the statement under the table names "
+        f"{sorted(named)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'os.getenv("CRB_NEW_ENDPOINT")',
+        "os.getenv('CRB_NEW_ENDPOINT')",
+        "os.environ['CRB_NEW_ENDPOINT']",
+        "NAME = r'CRB_NEW_ENDPOINT'",
+    ],
+)
+def test_an_endpoint_read_is_discovered_whatever_quote_it_uses(source: str) -> None:
+    """PR #61 review: the discovery matched only double-quoted names, so a single-quoted
+    read of a new endpoint would have passed the inventory unseen."""
+    assert _names_in_source(source) == {"CRB_NEW_ENDPOINT"}
+
+
+def test_a_name_that_is_not_an_endpoint_is_not_discovered() -> None:
+    assert _names_in_source("os.getenv('CRB_HOME'); os.getenv(\"CRB_BUDGET_USD\")") == set()

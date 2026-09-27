@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-525 files with a header · 1 exempt (listed at the end).
+526 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -244,7 +244,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py) | a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (171 files)
+## `tests` (172 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -351,6 +351,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_posture.py`](../tests/test_posture.py) | The tests for ``Posture``, ``posture_id``, ``posture_class`` and ``resolve_posture`` (ADR-0019 §1). | [`tests/test_posture.py`](../tests/test_posture.py) | a fact joins the posture (a field, a line here proving the id moves with it). |
 | [`tests/test_posture_docker.py`](../tests/test_posture_docker.py) | The docker-marked proof of ADR-0019's sealed posture on a real Go repository with a third-party module. | [`tests/test_posture_docker.py`](../tests/test_posture_docker.py) | the sealed posture's contract changes. The per-task module cache (stream D) is proven end to end in [`tests/test_posture_e2e_docker.py`](../tests/test_posture_e2e_docker.py); this suite keeps the "nothing provisioned" and the baked-image shapes. |
 | [`tests/test_posture_e2e_docker.py`](../tests/test_posture_e2e_docker.py) | The docker-marked end-to-end proof of the sealed posture: per-task provisioning (stream D) under posture-relative qualification and the blame witness (stream Q). | [`tests/test_posture_e2e_docker.py`](../tests/test_posture_e2e_docker.py) | the sealed posture's contract changes — provisioning, qualification, the gate or the witness; [`docs/reviews/2026-09-25-sealed-posture.md`](../docs/reviews/2026-09-25-sealed-posture.md) repeats this proof on cobra. |
+| [`tests/test_prevention_register.py`](../tests/test_prevention_register.py) | The claim-tag rule applied to the rows of ``[`docs/PREVENTION.md`](../docs/PREVENTION.md)``, which the claims gate cannot see because it skips tables. | [`tests/test_prevention_register.py`](../tests/test_prevention_register.py) | the register gains a column, or the claims gate's tag rule changes. |
 | [`tests/test_provision.py`](../tests/test_provision.py) | The suite for the pure half of dependency provisioning — lockfile readers over git objects, refusals, bundle keys and the closure selector. | [`tests/test_provision.py`](../tests/test_provision.py) | a lock format or a refusal rule changes in [`src/crb/core/provision.py`](../src/crb/core/provision.py). |
 | [`tests/test_provision_fetch.py`](../tests/test_provision_fetch.py) | The suite for ``crb.provision.fetch`` (and the extracted ``EgressSidecar`` it runs behind). | [`tests/test_provision_fetch.py`](../tests/test_provision_fetch.py) | a flag on the fetch's ``docker run`` changes (a security decision: SECURITY §3.1.1). |
 | [`tests/test_provision_go.py`](../tests/test_provision_go.py) | The suite for the Go recipe (``crb.provision.go``) and the providers (``crb.provision``) on a Go repository with a module dependency. | [`tests/test_provision_go.py`](../tests/test_provision_go.py) | the Go recipe's plan, environment or refusals change. |
