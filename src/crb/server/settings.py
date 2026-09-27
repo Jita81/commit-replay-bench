@@ -423,10 +423,10 @@ class FactorySettings(BaseModel):
     product did before the setting existed. A run may override it
     (``params.test_author``); ``none`` in either place means no author.
 
-    ``require_signed_cell`` (ADR-0018, default true) is the delivery gate's second clause:
-    the factory opens a pull request only for a cell a human has attested — an active
-    sign-off on the current apparatus — as well as one the map routes ``deliver``. Setting
-    it false is a deployment's stated decision that the measurement alone is its licence;
+    ``require_signed_cell`` (ADR-0018 as amended by ADR-0026 item 8, default true) is the
+    sign-off clause: an item whose cell routes ``deliver`` is built only when a human has
+    attested that cell — an active sign-off on the current apparatus — and otherwise stops
+    ``unsigned_cell`` before any spend. Setting it false removes this clause only;
     the posture is served (``/settings``, the Posture page) so it is never a silent choice,
     and the Factory screen predicts each item's delivery under whichever is in force.
     """

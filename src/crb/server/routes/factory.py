@@ -309,8 +309,8 @@ class CellRouteOut(BaseModel):
     ci_high: float = 0.0
     apparatus_versions: list[str] = []
     #: The cell's verification tier with the repo's sign-offs overlaid — ``human-verified``
-    #: or ``ab-confirmed`` means a person has attested it (the delivery gate's second
-    #: clause, ADR-0018); ``automated-pass`` means the ledger alone, ``""`` unmeasured.
+    #: or ``ab-confirmed`` means a person has attested it (the sign-off clause, ADR-0018,
+    #: which stops an unsigned item before any spend); ``automated-pass`` means the ledger alone, ``""`` unmeasured.
     verification_tier: str = ""
     #: Has a human attested this cell (an active sign-off on the current apparatus)?
     signed: bool = False

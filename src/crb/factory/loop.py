@@ -3,6 +3,9 @@
     assess readiness ──refuse on unsigned structural gap──▶ not_ready
       │ route hint ──human──▶ routed_human
       │ the capability map's route for the cell is read HERE, once, before any build
+      │ THE SIGN-OFF CLAUSE (ADR-0018 as amended by ADR-0026 item 8), before any spend,
+      │   delivery on or off: a cell that routes deliver with no active human sign-off
+      │   ──▶ unsigned_cell (the ONE clause ``deliver_override`` lifts, by name)
       ▼
     RED proof (authored test, or the test-first author rung) ──refused──▶ not_red
       ▼
@@ -15,7 +18,8 @@
       │        same oracle ──▶ oracle_needs_strengthening (routed human; NO rebuild)
       ▼ reject / rework_exhausted / oracle_needs_strengthening ──▶ NO pull request
     deliver — ONLY an `accept` verdict reaches it (ADR-0021); OPT-IN, default OFF; fails
-      │   closed on missing creds; gated on the route read at readiness (DL-038, DL-045)
+      │   closed on missing creds; gated on the route read at readiness (DL-038, DL-045),
+      │   which no override lifts (ADR-0026 item 8)
       ▼   ──▶ delivery_failed
     accepted
 
@@ -39,9 +43,10 @@ What it does: Sequences readiness (where the capability map's route for the item
               build ladder → independent review → rework (edit permitted only after a
               recorded verdict; bounded by ``max_rework``; a ``weak_oracle`` verdict never
               rebuilds against an unchanged oracle — DL-045 rule 3) → optional delivery
-              (default OFF, fails closed, gated on that route AND on the cell's sign-off —
-              ADR-0018 — and reached ONLY by an ``accept`` verdict — ADR-0021), turning every governed refusal into an
-              ``ItemOutcome`` status rather than an exception; an open pull request an
+              (default OFF, fails closed, gated on that route, and reached ONLY by an
+              ``accept`` verdict — ADR-0021), after the sign-off clause stopped an unsigned
+              cell before any spend (ADR-0018, ADR-0026 item 8), turning every governed refusal
+              into an ``ItemOutcome`` status rather than an exception; an open pull request an
               earlier run opened is updated on ``accept`` and closed, naming the verdict, on
               anything else; ``run_backlog`` requires a frozen, verifying backlog and records
               a blocked item explicitly when a dependency was not accepted. Emits a
@@ -59,8 +64,10 @@ ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               2026-09-21: a weak_oracle verdict never rebuilds against an unchanged oracle),
               docs/adr/0021-factory-review-before-delivery.md (review before delivery; only
               `accept` delivers; a later non-accept closes the open pull request),
-              docs/adr/0018-a-signed-cell-licenses-delivery.md (the signed-cell clause on
-              the delivery gate, default ON, and what an override may be claimed to mean)
+              docs/adr/0018-a-signed-cell-licenses-delivery.md (the sign-off clause, default
+              ON, and what an override may be claimed to mean),
+              docs/adr/0026-the-context-standard.md (item 8: the clause stops before any
+              spend; the override lifts it and nothing else)
 Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory/readiness.py
               + src/crb/factory/testfirst.py + src/crb/factory/build.py +
               src/crb/factory/review.py + src/crb/factory/delivery.py (the steps, in order),
@@ -69,8 +76,8 @@ Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory
 Tested by:    tests/test_factory_loop.py
 Touch when:   never for a new repository (delivery is switched on per run, not per repo);
               adding a status means ``STATUSES`` here, the UI's factory screen and
-              docs/API.md#factory-phase-p6; adding a clause to the delivery gate means a
-              refusal code here, the pre-run prediction in
+              docs/API.md#factory-phase-p6; adding a clause to the gate means a
+              stop code here, the pre-run prediction in
               src/crb/server/routes/factory.py (``_cell_routes``) and the posture row, so
               what is predicted and what is enforced never disagree; changing the step order
               is a governance change — an ADR (ADR-0021 is the current order).
@@ -164,6 +171,10 @@ STATUS_REWORK_EXHAUSTED = "rework_exhausted"
 #: can be had — no test author, or the author returned the same bytes: a rebuild would only
 #: let the builder find another way to pass the same test (B-1b finding 3, DL-045 rule 3).
 STATUS_ORACLE_NEEDS_STRENGTHENING = "oracle_needs_strengthening"
+#: The sign-off clause stopped the item BEFORE ANY SPEND (ADR-0018 as amended by ADR-0026
+#: item 8): its cell routes ``deliver`` but carries no active human sign-off on the current
+#: apparatus, posture class and checks arm. Nothing was authored, built or reviewed.
+STATUS_UNSIGNED_CELL = "unsigned_cell"
 STATUS_BLOCKED = "blocked_on_dependency"
 STATUS_ERROR = "error"
 STATUSES: tuple[str, ...] = (
@@ -178,14 +189,10 @@ STATUSES: tuple[str, ...] = (
     STATUS_REJECTED,
     STATUS_REWORK_EXHAUSTED,
     STATUS_ORACLE_NEEDS_STRENGTHENING,
+    STATUS_UNSIGNED_CELL,
     STATUS_BLOCKED,
     STATUS_ERROR,
 )
-#: The delivery gate's second clause (ADR-0018): the item's cell carries no active human
-#: attestation on this apparatus, so nothing but a measurement licensed the pull request.
-#: Recorded as the ``delivery.refused`` event's ``reason_code`` and emitted as
-#: ``delivery.unsigned``; ``FactorySpec.require_signed_cell`` is the setting.
-REFUSAL_UNSIGNED_CELL = "unsigned_cell"
 
 #: How much of a ``weak_oracle`` finding's detail the ``oracle_needs_strengthening`` reason
 #: quotes — its head, so the reason's prefix and way forward fit ``ItemOutcome.error``.
@@ -238,17 +245,18 @@ class FactorySpec:
     #: item, at readiness, before any build: the map that licenses a delivery is the map
     #: as it stood before this run's own rows landed (B-1b finding 2 → DL-045).
     route_decision_for: Callable[[BacklogItem], Mapping[str, Any] | None] | None = None
-    #: Does a pull request need a SIGNED cell as well as a ``deliver`` route? Default True
-    #: (ADR-0018): the tier of the cell decision read at readiness must be an earned one
-    #: (``crb.core.capability.EARNED_TIERS``), else delivery is withheld ``unsigned_cell``.
-    #: False is a deployment's stated decision that the measurement is its whole licence
-    #: (``CRB_FACTORY__REQUIRE_SIGNED_CELL=false``), and the served posture says which is in
-    #: force — it is never a silent choice.
+    #: The sign-off clause (ADR-0018 decision 1, as amended by ADR-0026 item 8). Default
+    #: True: an item whose cell routes ``deliver`` must also carry an earned verification
+    #: tier (``crb.core.capability.EARNED_TIERS``) in the decision read at readiness, or it
+    #: stops ``unsigned_cell`` BEFORE ANY SPEND. False (``CRB_FACTORY__REQUIRE_SIGNED_CELL=
+    #: false``) removes this clause only, never the entry gate; the served posture says
+    #: which is in force, so it is never a silent choice.
     require_signed_cell: bool = True
-    #: An approver's identity that overrides the delivery gate for THIS run — BOTH clauses
-    #: (the route and the signed cell); recorded on the evidence chain as a ``route.decided``
-    #: event naming the clause and the measured route it overrode. Empty = no override (the
-    #: default). One person, one run, no attestation (ADR-0018 §4).
+    #: An approver's identity that lifts the SIGN-OFF clause (``unsigned_cell``) for THIS
+    #: run, and nothing else (ADR-0018 decision 3 as amended by ADR-0026 item 8): never the
+    #: route, a missing standard, a ceiling or missing context. Recorded on the evidence chain
+    #: as a ``route.decided`` event naming the clause. Empty = no override (the default).
+    #: One person, one run, no attestation (ADR-0018 decision 4).
     deliver_override_by: str = ""
     keep_workspaces: bool = False
     #: The posture the run grades in and the dependency bindings its items build with
@@ -336,8 +344,8 @@ _ROUTE_SUMMARY_KEYS: tuple[str, ...] = (
     "false_q1",
     "policy_version",
     "apparatus_versions",
-    # ADR-0018: whether a human had attested the cell when the route was read — the second
-    # clause of the delivery gate, so the chain quotes the licence as well as the route
+    # ADR-0018: whether a human had attested the cell when the route was read — the sign-off
+    # clause's reading, so the chain quotes the licence as well as the route
     "verification_tier",
 )
 
@@ -347,6 +355,31 @@ def _route_summary(route: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if route is None:
         return None
     return {k: route[k] for k in _ROUTE_SUMMARY_KEYS if k in route}
+
+
+def unsigned_cell_reason(route: Mapping[str, Any] | None, *, require_signed_cell: bool) -> str:
+    """The sign-off clause as a pure rule (ADR-0018 decision 1, amended by ADR-0026 item 8):
+    the sentence an item stops ``unsigned_cell`` with, or ``""`` when the clause lets it in.
+
+    It bites only on a cell whose route, read at readiness, says ``deliver`` — the stand-in
+    for "a proven standard that is not a ceiling" until ADR-0026's ``standard_for`` lands; a
+    cell that routes anything else is the route clause's (and the entry gate's) to stop.
+    Such a cell is licensed only by an earned tier (``human-verified`` or ``ab-confirmed``)
+    in the SAME reading: an absent or ``automated-pass`` tier is not a licence, so the rule
+    fails closed. ``require_signed_cell=False`` removes the clause."""
+    if not require_signed_cell or route is None:
+        return ""
+    if str(route.get("route", "")) != ROUTE_DELIVER_WORD:
+        return ""
+    tier = str(route.get("verification_tier", "") or "")
+    if tier in EARNED_TIERS:
+        return ""
+    return (
+        f"the cell routes deliver but nobody has signed it off (verification tier "
+        f"{tier or 'unmeasured'}): it is not built. A second person signs the cell, or an "
+        "approver's named override licenses this one run (it lifts only the sign-off; "
+        "ADR-0018)"
+    )
 
 
 class _Stop(Exception):
@@ -430,7 +463,62 @@ class FactoryLoop:
         self._emit("route.decided", item.id, route=r.route_hint, reason=r.reason, cell_route=cell)
         if r.route_hint == ROUTE_HUMAN:
             raise _Stop(STATUS_ROUTED_HUMAN, readiness=r)
+        self._signoff_clause(item, r, route)
         return r, route
+
+    def _signoff_clause(
+        self, item: BacklogItem, r: Readiness, route: Mapping[str, Any] | None
+    ) -> None:
+        """THE SIGN-OFF CLAUSE (ADR-0018, as amended by ADR-0026 item 8), before any spend.
+
+        A measurement is not a person: an item whose cell routes ``deliver`` but carries no
+        active human sign-off stops here ``unsigned_cell`` — nothing is authored, built or
+        reviewed, whether or not delivery is on. The tier is the one the readiness reading
+        already carries (DL-045), which the sign-off overlay narrowed to active,
+        repository-scoped records on the current apparatus, posture class and checks arm.
+        An approver's named override lifts this clause, and only this one, for the run.
+        The integration's entry gate (``crb.factory.standard.decide_entry``) carries the same
+        clause on a proven standard; this reads the route as that standard's stand-in."""
+        s = self.spec
+        why = unsigned_cell_reason(route, require_signed_cell=s.require_signed_cell)
+        if not why:
+            return
+        tier = str((route or {}).get("verification_tier", "") or "")
+        ev = s.evidence
+        if s.deliver_override_by:
+            ev.record_route(
+                item.id,
+                r.route_hint,
+                f"sign-off clause lifted by {s.deliver_override_by} for this run: {why}",
+                override_by=s.deliver_override_by,
+                clause=STATUS_UNSIGNED_CELL,
+                verification_tier=tier,
+            )
+            self._emit(
+                "delivery.override",
+                item.id,
+                override_by=s.deliver_override_by,
+                clause=STATUS_UNSIGNED_CELL,
+                verification_tier=tier,
+            )
+            return
+        ev.record_route(
+            item.id,
+            ROUTE_HUMAN,
+            why,
+            reason_code=STATUS_UNSIGNED_CELL,
+            verification_tier=tier,
+            measured_route=ROUTE_DELIVER_WORD,
+        )
+        self._emit(
+            "entry.refused",
+            item.id,
+            status=StepStatus.SKIPPED,
+            code=STATUS_UNSIGNED_CELL,
+            reason=why,
+            verification_tier=tier,
+        )
+        raise _Stop(STATUS_UNSIGNED_CELL, readiness=r, error=why)
 
     def _oracle(
         self, item: BacklogItem, r: Readiness, authored: AuthoredTest | None
@@ -572,11 +660,11 @@ class FactoryLoop:
             return None, ""
         # THE ROUTE GATE (external review 2026-09-16, point 36 → DL-038): the capability
         # map decides what the factory may deliver. A clean build in a cell that does not
-        # route `deliver` — or in a cell nobody has measured — is built, graded and
-        # reviewed, but no pull request is opened; the withholding and the measured route
-        # are on the evidence chain. An approver may override for one run, and that
-        # override is itself an event naming the route it overrode. The route was read
+        # route `deliver` — or in a cell nobody has measured — opens no pull request; the
+        # withholding and the measured route are on the evidence chain. The route was read
         # ONCE, at readiness, before this build's row landed (DL-045) — never re-read here.
+        # No override lifts it (ADR-0026 item 8: ``deliver_override`` lifts the sign-off
+        # clause only, before any spend — :meth:`_signoff_clause`).
         measured = str(route.get("route", "")) if route else ""
         if measured != ROUTE_DELIVER_WORD:
             why = (
@@ -584,86 +672,22 @@ class FactoryLoop:
                 if route is None
                 else f"the cell routes {measured} ({route.get('reason_code') or route.get('reason', '')})"
             )
-            if not s.deliver_override_by:
-                s.evidence.record_delivery_refused(
-                    item.id,
-                    f"route gate: {why}",
-                    pack_hash=final.pack_hash,
-                    measured_route=measured,
-                    reason_code=str((route or {}).get("reason_code", "")),
-                    policy_version=str((route or {}).get("policy_version", "")),
-                )
-                self._emit(
-                    "delivery.withheld",
-                    item.id,
-                    status=StepStatus.SKIPPED,
-                    reason=why,
-                    measured_route=measured,
-                )
-                return None, ""
-            s.evidence.record_route(
+            s.evidence.record_delivery_refused(
                 item.id,
-                ROUTE_DELIVER_WORD,
-                f"route gate overridden by {s.deliver_override_by}: {why}",
-                override_by=s.deliver_override_by,
+                f"route gate: {why}",
+                pack_hash=final.pack_hash,
                 measured_route=measured,
                 reason_code=str((route or {}).get("reason_code", "")),
                 policy_version=str((route or {}).get("policy_version", "")),
             )
             self._emit(
-                "delivery.override",
+                "delivery.withheld",
                 item.id,
-                override_by=s.deliver_override_by,
+                status=StepStatus.SKIPPED,
+                reason=why,
                 measured_route=measured,
             )
-        # THE SIGNED-CELL CLAUSE (ADR-0018, G-517): the route is a measurement, and a
-        # measurement is not a person. A pull request in somebody else's repository is
-        # licensed by a human attestation on the cell as well as by its route — the
-        # verification tier of the SAME reading taken at readiness, which the sign-off
-        # overlay has already narrowed to active, repo-scoped, current-apparatus records
-        # (ADR-0015). An approver's named per-run override lifts this clause too and says so
-        # on the chain; what that override may be claimed to mean is bounded by ADR-0018 §4
-        # (one person, one run, no attestation) and the pull request body repeats it.
-        tier = str((route or {}).get("verification_tier", "") or "")
-        if s.require_signed_cell and tier not in EARNED_TIERS:
-            unsigned = (
-                f"the cell is not signed (verification tier {tier or 'unmeasured'}) — "
-                "a measured route alone does not license a pull request (ADR-0018)"
-            )
-            if not s.deliver_override_by:
-                s.evidence.record_delivery_refused(
-                    item.id,
-                    f"signed-cell gate: {unsigned}",
-                    pack_hash=final.pack_hash,
-                    measured_route=measured,
-                    reason_code=REFUSAL_UNSIGNED_CELL,
-                    verification_tier=tier,
-                )
-                self._emit(
-                    "delivery.unsigned",
-                    item.id,
-                    status=StepStatus.SKIPPED,
-                    reason=unsigned,
-                    reason_code=REFUSAL_UNSIGNED_CELL,
-                    verification_tier=tier,
-                )
-                return None, ""
-            s.evidence.record_route(
-                item.id,
-                ROUTE_DELIVER_WORD,
-                f"signed-cell gate overridden by {s.deliver_override_by}: {unsigned}",
-                override_by=s.deliver_override_by,
-                clause=REFUSAL_UNSIGNED_CELL,
-                measured_route=measured,
-                verification_tier=tier,
-            )
-            self._emit(
-                "delivery.override",
-                item.id,
-                override_by=s.deliver_override_by,
-                clause=REFUSAL_UNSIGNED_CELL,
-                verification_tier=tier,
-            )
+            return None, ""
         try:
             d = deliver(
                 self.repo,
@@ -1113,8 +1137,10 @@ __all__ = [
     "STATUS_REJECTED",
     "STATUS_REWORK_EXHAUSTED",
     "STATUS_ROUTED_HUMAN",
+    "STATUS_UNSIGNED_CELL",
     "FactoryLoop",
     "FactorySpec",
     "ItemOutcome",
     "ReworkTestFn",
+    "unsigned_cell_reason",
 ]

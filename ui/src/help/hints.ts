@@ -576,9 +576,9 @@ export const HINTS = {
   'field.factory.deliver':
     'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell this deployment would open a pull request from: the map routes it deliver AND a person has signed the cell off. It is read at this moment and changes as measurement and sign-off change; the rest are built and withheld.',
+    'How many items sit right now in a cell this deployment would open a pull request from: the map routes it deliver AND a person has signed the cell off. It is read at this moment and changes as measurement and sign-off change. An item in an unsigned cell is not built at all; one in a cell that routes elsewhere is built and withheld.',
   'field.factory.override':
-    'Let this run open pull requests for items the delivery gate would withhold — a cell that does not route deliver, or one nobody has signed off. Each clause you override is recorded on the evidence chain under your name. It licenses this run only; it is not a sign-off. Approver only.',
+    'Let this run build, and open pull requests for, items in a cell that routes deliver but nobody has signed off — the sign-off clause, and only that one. It never lifts the route gate. It is recorded on the evidence chain under your name, licenses this run only, and is not a sign-off. Approver only.',
   'details.factory.own_builder':
     'Name a registered builder and model for this run instead of the deployment’s default. Blank keeps the builder above.',
   'field.factory.own_builder':
@@ -748,7 +748,7 @@ export const HINTS = {
   'summary.posture.separation':
     'The two-person rule and how it is enforced: the server refuses a sign-off whose approver produced the evidence, so an operator who queued the runs cannot also sign them.',
   'summary.posture.delivery_licence':
-    'What has to be true before this deployment opens a pull request in someone else’s repository: the cell’s route, and — while the default is in force — a person’s sign-off on that cell.',
+    'What has to be true before this deployment builds and delivers in someone else’s repository: the cell’s route, and — while the default is in force — a person’s sign-off on that cell. Without the sign-off an item is not built at all.',
   'summary.posture.source_control':
     'Whether the GitHub App is registered, how many installations it has, and that its tokens are minted per use and never stored.',
   'summary.posture.executor':
@@ -772,7 +772,7 @@ export const HINTS = {
   'summary.posture.route_gate':
     'A pull request opens only for a cell the map routes deliver under the named policy.',
   'summary.posture.override':
-    'An approver may override the gate for one run; the override is an event on the chain naming them and the route it overrode.',
+    'An approver may lift the sign-off clause for one run — never the route. The override is an event on the chain naming them and the clause.',
   'summary.posture.credentials':
     'Installation tokens are minted per push and never stored.',
   'summary.posture.retention':

@@ -2546,7 +2546,7 @@ class Worker:
         current apparatus, the repo's latest controls verdict, sign-offs overlaid). ``None``
         for a cell nobody has measured: the loop withholds delivery on it (DL-038).
         Each decision carries the cell's ``verification_tier`` as well — the human
-        attestation the delivery gate's second clause reads (ADR-0018).
+        attestation the sign-off clause reads at readiness (ADR-0018).
 
         Rows of ``run_id`` — THIS run's own graded builds — are excluded: the map that
         licenses a delivery is the map as it stood before the run, never one the run's own
@@ -2570,7 +2570,7 @@ class Worker:
                         **c.decision.to_dict(),
                         "apparatus_versions": list(st.apparatus_versions) if st else [],
                         # ADR-0018 — the cell's verification tier from the SAME signed map:
-                        # an earned tier is the human attestation the delivery gate's second
+                        # an earned tier is the human attestation the sign-off
                         # clause requires, and the overlay has already dropped a revoked,
                         # foreign-repo or stale-apparatus record (ADR-0015)
                         "verification_tier": c.verification_tier or "",

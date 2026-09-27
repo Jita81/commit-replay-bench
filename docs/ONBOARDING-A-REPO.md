@@ -148,10 +148,12 @@ failing clause listed, shown on the Sign-off page before you try. A sign-off is 
 hash-chained row that records who signed and what kind of account it was; it is revoked by a
 newer row, never deleted.
 
-Step 7 is before step 8 in the code as well as in this guide: by default the factory opens
-**no pull request** in a cell nobody has signed off, however well that cell measures
-([ADR-0018](adr/0018-a-signed-cell-licenses-delivery.md)). A sign-off expires with the
-apparatus, so after an apparatus move delivery waits for a fresh signature.
+Step 7 is before step 8 in the code as well as in this guide: by default the factory does
+**not build** an item in a cell nobody has signed off, however well that cell measures — it
+stops `unsigned_cell` before any spend, so no pull request can follow
+([ADR-0018](adr/0018-a-signed-cell-licenses-delivery.md), as amended by ADR-0026 item 8). A
+sign-off expires with the apparatus, so after an apparatus move building in that cell waits
+for a fresh signature.
 
 ## Step 8 — Forward mode (when a cell is trusted)
 
@@ -163,14 +165,16 @@ and — only when you switch delivery on — opens a branch + PR, never touching
 branch. Every step is in the evidence chain ([API.md](API.md) "Factory").
 
 **What licenses that pull request** (ADR-0018): the item's (class × size) cell must route
-`deliver` **and** carry your approver's sign-off. Either clause failing means the change is
-built, graded and reviewed and the delivery is withheld, with the clause on the item's chain
-(`unsigned_cell` for the missing signature). The Factory screen says which items would be
-delivered before you spend anything. An approver may override the gate for one run; that
-override is one person licensing one pull request under their own name — it is not a
-sign-off, and the pull request body says so. A deployment that decides the measurement is
-its whole licence sets `CRB_FACTORY__REQUIRE_SIGNED_CELL=false`, and the Posture page then
-says that is what it is running.
+`deliver` **and** carry your approver's sign-off. A missing signature stops the item before
+any spend (`unsigned_cell` on the item's chain: nothing is built); a cell that does not route
+`deliver` is built, graded and reviewed and its delivery is withheld, with the route on the
+chain. The Factory screen says which items would be
+delivered before you spend anything. An approver may lift the sign-off clause — and only
+that clause, never the route — for one run; that override is one person licensing one run
+under their own name — it is not a sign-off, and the pull request body says so. A
+deployment that decides to drop the sign-off clause sets
+`CRB_FACTORY__REQUIRE_SIGNED_CELL=false`, and the Posture page then says that is what it is
+running.
 
 ---
 

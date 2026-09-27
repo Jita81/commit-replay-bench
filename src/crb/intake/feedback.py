@@ -178,8 +178,8 @@ def _route_block(item_class: str, size: str, route: Mapping[str, Any] | None) ->
         lines.append(f"Why that route: {reason}.")
     if word == "deliver" and route.get("deliverable") is False:
         lines.append(
-            "A change of this kind would still be held back: this deployment opens a pull "
-            "request only for a cell a person has signed off, and nobody has signed this "
+            "A change of this kind would not be built yet: this deployment builds and "
+            "delivers only in a cell a person has signed off, and nobody has signed this "
             "one yet."
         )
     return lines
@@ -260,9 +260,9 @@ def _label_for(readiness: Readiness, route: Mapping[str, Any] | None) -> str:
         return LABEL_NEEDS_INFO
     if not route or str(route.get("route", "")) != "deliver":
         return LABEL_NOT_DELIVERABLE
-    # the whole gate, not half of it (ADR-0018): when the server's reading says a clean
-    # build of this cell would still be withheld — today because no human has signed the
-    # cell — the ticket must not read `ready`. A reading without the key (an older caller)
+    # the whole gate, not half of it (ADR-0018): when the server's reading says this cell
+    # would not deliver — today because no human has signed it, so an item there is not
+    # even built — the ticket must not read `ready`. A reading without the key (an older caller)
     # falls back to the route word alone.
     if route.get("deliverable") is False:
         return LABEL_NOT_DELIVERABLE

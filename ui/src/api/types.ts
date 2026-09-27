@@ -1416,7 +1416,7 @@ export interface FactoryTask {
   row_hash?: string
   /** F28 — the capability map's route for the item's (class × size) cell, from the same
    * signed map the delivery gate reads; `route: ''` = nobody has measured the cell. */
-  /** `deliverable` is BOTH clauses of the delivery gate under this deployment's posture (ADR-0018): the route says `deliver` and, while `require_signed_cell` is on, `signed` is true. */
+  /** `deliverable` is the whole licence under this deployment's posture (ADR-0018): the route says `deliver` and, while `require_signed_cell` is on, `signed` is true — an item in a deliver cell that is not signed is not built at all. */
   cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; verification_tier?: string; signed?: boolean; deliverable: boolean }
 }
 

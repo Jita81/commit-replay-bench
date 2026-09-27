@@ -132,6 +132,7 @@ const STATUS_LABEL: Record<string, string> = {
   delivery_failed: 'Delivery failed',
   rework_exhausted: 'Rework exhausted',
   oracle_needs_strengthening: 'Test needs strengthening',
+  unsigned_cell: 'Not built: cell not signed off',
   blocked_on_dependency: 'Waiting on a dependency',
   error: 'Error',
 }
@@ -147,7 +148,6 @@ const findingOf = (reason: string) => reason.replace(new RegExp(`:\\s*${WAY_FORW
 /** The reason a delivery refusal records when the opt-in was off (src/crb/factory/loop.py `_deliver`). */
 const OPT_IN_OFF = /^delivery is opt-in and OFF/
 const ROUTE_GATE = /^route gate: /
-const SIGNED_CELL_GATE = /^signed-cell gate: /
 
 /** What an open value slot means, after the readiness detail: it routes, it is never signed. */
 function valueGapNote(t: FactoryTask): string {
@@ -170,6 +170,14 @@ export function stepsFor(t: FactoryTask): Step[] {
           status: 'current',
           detail: `${gaps} structural gap${gaps === 1 ? '' : 's'} unsigned: ${t.dor_gaps.join(', ')}${valueGapNote(t)}`,
         }
+      : r?.step === 'readiness' && r.reason_code === 'unsigned_cell'
+        ? // ADR-0018 as amended by ADR-0026 item 8: stopped before any spend, never a route to a person
+          {
+            id: 'readiness',
+            title: 'Readiness',
+            status: 'failed',
+            detail: `Not built — ${r.reason}.`,
+          }
       : r?.step === 'readiness'
         ? {
             id: 'readiness',
@@ -283,14 +291,7 @@ export function stepsFor(t: FactoryTask): Step[] {
             status: 'skipped',
             detail: 'Delivery withheld — delivery was off for this run. Built and graded locally only.',
           }
-        : SIGNED_CELL_GATE.test(r.reason)
-          ? {
-              id: 'delivery',
-              title: 'Delivery',
-              status: 'skipped',
-              detail: `Delivery withheld — the signed-cell clause: nobody has signed ${t.capability_class} × ${t.size} off, and this deployment opens a pull request only for a cell a person has attested (ADR-0018). Built, graded and reviewed; no pull request opened.`,
-            }
-          : ROUTE_GATE.test(r.reason)
+        : ROUTE_GATE.test(r.reason)
           ? {
               id: 'delivery',
               title: 'Delivery',
@@ -770,7 +771,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             Open pull requests where the map routes <code>deliver</code>
             {tasks && (
               <Hint id="stat.factory.deliverable" className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
-                {deliverable} of {tasks.length} items sit in a cell this deployment would deliver from today; the rest are built and withheld — by the route, or because nobody has signed the cell off (ADR-0018)
+                {deliverable} of {tasks.length} items sit in a cell this deployment would deliver from today; an item in a cell nobody has signed off is not built at all, and one in a cell that routes elsewhere is built and withheld (ADR-0018)
               </Hint>
             )}
           </span>
@@ -779,8 +780,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           <Hint as="label" id="field.factory.override" className="flex items-start gap-2">
             <input type="checkbox" className="mt-1" checked={override} onChange={(e) => setOverride(e.target.checked)} />
             <span>
-              Override the delivery gate (approver)
-              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain under your name, one clause at a time: the route gate, and the signed-cell clause. It licenses this run to open a pull request; it is not an attestation of the cell and no second person is claimed for it.</span>
+              Override the sign-off clause (approver)
+              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain under your name. For this run only, an item whose cell routes deliver but nobody has signed off is built and may open a pull request. It never lifts the route gate; it is not an attestation of the cell and no second person is claimed for it.</span>
             </span>
           </Hint>
         )}
@@ -1066,10 +1067,11 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
   )
 }
 
-/** Which clause of the delivery gate holds this cell back (ADR-0018) — the route, or the
- * missing signature. Said in the reader's words, never as a code on its own. */
+/** Which clause holds this cell back (ADR-0018 as amended by ADR-0026 item 8) — the route, or
+ * the missing signature, which stops an item before it is built. Said in the reader's words,
+ * never as a code on its own. */
 function withheldWhy(r: NonNullable<FactoryTask['cell_route']>): string {
-  return r.route === 'deliver' && r.signed === false ? 'nobody has signed this cell off, and a signed cell is what licenses a pull request here' : r.reason
+  return r.route === 'deliver' && r.signed === false ? 'nobody has signed this cell off, so an item here is not built at all unless an approver overrides the sign-off clause for one run' : r.reason
 }
 
 function pct(x: number): string {

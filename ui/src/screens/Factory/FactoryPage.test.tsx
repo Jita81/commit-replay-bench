@@ -313,31 +313,35 @@ describe('FactoryPage — the shipped contract', () => {
     expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell this deployment would deliver from today')
   })
 
-  it('a cell that measures well but nobody signed reads withheld, and the withheld delivery step names the clause (ADR-0018)', async () => {
+  it('an item in a cell that measures well but nobody signed is not built, and its readiness step says so (ADR-0018, ADR-0026 item 8)', async () => {
     const unsigned: FactoryTask = {
       ...TASKS[0]!,
       cell_route: DELIVER_UNSIGNED,
       pr_url: null,
-      status: 'accepted',
-      last_event: 'delivery.refused',
+      status: 'unsigned_cell',
+      route_hint: 'human',
+      build_status: 'not_built',
+      last_event: 'item.outcome',
       refusal: {
-        step: 'delivery',
-        reason: 'signed-cell gate: the cell is not signed (verification tier automated-pass) — a measured route alone does not license a pull request (ADR-0018)',
+        step: 'readiness',
+        reason: "the cell routes deliver but nobody has signed it off (verification tier automated-pass): it is not built. A second person signs the cell, or an approver's named override licenses this one run (it lifts only the sign-off; ADR-0018)",
         reason_code: 'unsigned_cell',
-        measured_route: 'deliver',
       },
     }
     mockApi(base({ 'GET /factory/alpha/tasks': [unsigned, TASKS[1]] }))
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
     await waitFor(() => expect(screen.getByTestId('cell-route-I-1')).toBeInTheDocument())
-    // the cell's own pill: the route is deliver and the answer is still withheld
+    // the cell's own pill: the route is deliver and the answer is still withheld, and why
     const pill = screen.getByTestId('cell-route-I-1')
     expect(pill).toHaveTextContent('routes deliver · withheld')
-    expect(pill).toHaveAttribute('aria-label', expect.stringContaining('nobody has signed this cell off, and a signed cell is what licenses a pull request here'))
-    // the delivery step says which clause, not just that something was withheld
-    expect(screen.getByTestId('step-I-1-delivery')).toHaveTextContent('Delivery withheld — the signed-cell clause: nobody has signed bug.fix × XS off')
+    expect(pill).toHaveAttribute('aria-label', expect.stringContaining('nobody has signed this cell off, so an item here is not built at all'))
+    // the readiness step: stopped before any spend, never "routed to a person"
+    const step = screen.getByTestId('step-I-1-readiness')
+    expect(step).toHaveTextContent('Not built — the cell routes deliver but nobody has signed it off')
+    expect(step).not.toHaveTextContent('Routed to a person')
+    expect(screen.getAllByText('Not built: cell not signed off').length).toBeGreaterThan(0)
     // nothing this deployment would deliver from today
-    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('0 of 2 items sit in a cell this deployment would deliver from today')
+    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('0 of 2 items sit in a cell this deployment would deliver from today; an item in a cell nobody has signed off is not built at all')
   })
 
   it('a stopped item shows what to change and the replacement item already drafted (G-904)', async () => {
@@ -511,9 +515,9 @@ describe('FactoryPage — the shipped contract', () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     await userEvent.click(deliver)
     expect(box).toHaveTextContent('on — a clean build in a deliver cell pushes a branch to acme/cobra and opens a pull request against main; nothing is written to main.')
-    const override = within(box).getByRole('checkbox', { name: /Override the delivery gate/ })
-    // ADR-0018 — the gate has two clauses now, and the override says what it is not
-    expect(box).toHaveTextContent('Recorded on the evidence chain under your name, one clause at a time: the route gate, and the signed-cell clause.')
+    const override = within(box).getByRole('checkbox', { name: /Override the sign-off clause/ })
+    // ADR-0018 as amended by ADR-0026 item 8 — the override lifts one clause, and says what it is not
+    expect(box).toHaveTextContent('It never lifts the route gate')
     expect(box).toHaveTextContent('it is not an attestation of the cell and no second person is claimed for it')
     await userEvent.click(override)
     await userEvent.click(screen.getByRole('button', { name: /^Run the factory/ }))

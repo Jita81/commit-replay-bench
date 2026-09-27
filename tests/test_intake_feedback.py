@@ -94,13 +94,15 @@ def test_a_cell_that_does_not_route_deliver_is_not_deliverable_even_when_ready()
 
 
 def test_a_deliver_route_the_server_says_is_not_deliverable_is_not_labelled_ready() -> None:
-    """ADR-0018: the route is only half the delivery gate. When the server's reading says a
-    clean build of this cell would still be withheld — today because nobody has signed the
-    cell off — the ticket must not promise `ready`, and the comment must say why."""
+    """ADR-0018: the route is not the whole licence. When the server's reading says this cell
+    would not deliver — today because nobody has signed it off, so the loop stops an item
+    there before any spend (ADR-0026 item 8) — the ticket must not promise `ready`, and the
+    comment must say why."""
     f = _render(_ready_ticket(), _deliver_route(deliverable=False))
     assert f.label == c.LABEL_NOT_DELIVERABLE
-    assert f.ready_to_register is True  # still built and withheld, never dropped
-    assert "only for a cell a person has signed off" in f.text
+    assert f.ready_to_register is True  # registered, never dropped: a sign-off lets it in
+    assert "would not be built yet" in f.text
+    assert "only in a cell a person has signed off" in f.text
     # a reading without the key at all (an older caller) still reads the route alone
     assert _render(_ready_ticket(), _deliver_route()).label == c.LABEL_READY
 
