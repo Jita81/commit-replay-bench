@@ -1,5 +1,5 @@
 """The browser walkthrough's stack runs the checkout under test, never a shared venv's other
-checkout (P-052).
+checkout (P-101).
 
 Navigation
 ----------
@@ -19,7 +19,7 @@ How:          A temporary bin directory holds the fake ``python`` and ``crb`` an
               the check stops at "git is required" instead — and the message check fails.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   scripts/walkthrough.sh (the check under test), docs/PREVENTION.md (row P-052),
+Works with:   scripts/walkthrough.sh (the check under test), docs/PREVENTION.md (row P-101),
               ui/e2e/walkthrough/README.md (how the walkthrough is run)
 Tested by:    tests/test_walkthrough_script.py
 Touch when:   the walkthrough's interpreter checks move or change their wording.

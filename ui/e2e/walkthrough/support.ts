@@ -273,7 +273,7 @@ export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
  * Wait until the page has settled, so a scan reads the colours a person sees rather than a
  * frame in between. Found by the 07 sweep on 2026-09-26: the walk page's Baseline button
  * turns from outlined to filled when the last stage's data arrives, `transition-colors` blends
- * the two, and axe read the half-way frame as a 3.05:1 contrast failure (P-051). Waiting only
+ * the two, and axe read the half-way frame as a 3.05:1 contrast failure (P-100). Waiting only
  * for "no transition running now" was not enough: on 2026-09-27 the wait returned, the stage
  * answered, and the transition began during the scan (3.19:1). So the settle waits, bounded,
  * for the network to go idle (the data has arrived) and then for a quiet window of `quietMs`

@@ -1,5 +1,5 @@
 """Every axe scan in the browser walkthrough goes through ``axeScan``, which waits for CSS
-transitions to settle first (P-051).
+transitions to settle first (P-100).
 
 Navigation
 ----------
@@ -18,7 +18,7 @@ ADRs:         none
 Works with:   ui/e2e/walkthrough/support.ts (``axeScan``, ``settleTransitions``),
               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts and
               ui/e2e/walkthrough/11-screens.spec.ts (the sweeps that call it),
-              docs/PREVENTION.md (row P-051)
+              docs/PREVENTION.md (row P-100)
 Tested by:    tests/test_walkthrough_axe_scan.py
 Touch when:   the walkthrough's scan helper is renamed or moves out of support.ts.
 """
@@ -53,7 +53,7 @@ def test_the_one_scan_helper_waits_for_transitions_before_it_analyses() -> None:
 
 
 def test_the_settle_waits_for_the_data_and_a_quiet_page_not_only_a_running_transition() -> None:
-    # P-051 recurred on 2026-09-27: the settle returned while no transition was running, the
+    # P-100 recurred on 2026-09-27: the settle returned while no transition was running, the
     # walk page's last stage then answered, the Baseline button began its outlined-to-filled
     # transition during the scan and axe read the blend (3.19:1). Waiting for "no transition
     # now" is not enough; the settle must wait for the network to go idle and for a window in

@@ -98,7 +98,7 @@ fi
 # The stack must run THIS checkout's code. A venv shared between worktrees has an editable
 # install pointing at one checkout, and without this the server, the worker and the fixture
 # would import that checkout's crb while the specs come from this one — a run can then pass
-# or fail on code that is not under test (P-052: a qualify run refused 422 by another
+# or fail on code that is not under test (P-101: a qualify run refused 422 by another
 # checkout's server). PYTHONPATH puts this checkout first; the check below proves it did.
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 if ! "$PY" -c "import crb.server.app" 2>/dev/null; then

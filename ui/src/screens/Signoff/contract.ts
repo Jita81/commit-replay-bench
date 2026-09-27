@@ -223,7 +223,7 @@ export const signoffKeys = {
  * The preview re-fetches as the approver's choices change (the cell, the named row):
  * it reflects exactly what the POST would do with the form as it stands — once it has
  * answered. While a newly named row of the same cell loads, `data` is the previous row's
- * answer and `isPlaceholderData` is true; a gate reads neither (P-053).
+ * answer and `isPlaceholderData` is true; a gate reads neither (P-102).
  */
 export function useSignoffPreview(repo: string, cell: Record<string, string> | null, reviewedRowHash = ''): UseQueryResult<SignoffPreview, ApiError> {
   const key = cell ?? {}
@@ -239,7 +239,7 @@ export function useSignoffPreview(repo: string, cell: Record<string, string> | n
     // the page — found by the walkthrough's keyboard step (G-905). A different cell or
     // repository starts empty: its rows and refusals are not the old cell's. The placeholder
     // is the previous ROW's answer, so no verdict may be read from it: a caller builds its
-    // gate from `isPlaceholderData ? undefined : data` (P-053, SignoffPage's `current`).
+    // gate from `isPlaceholderData ? undefined : data` (P-102, SignoffPage's `current`).
     placeholderData: (previous, previousQuery) => {
       const k = previousQuery?.queryKey
       return k && k[1] === repo && JSON.stringify(k[2]) === JSON.stringify(key) ? previous : undefined
