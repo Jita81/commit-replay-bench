@@ -580,3 +580,19 @@ rule makes them prospective (item 10).
   commits can resolve **[hypothesis — power]**; sets first, leave-one-out after.
 - **Keep the gate at delivery ("build and withhold").** Rejected: it spends money on work that
   cannot be delivered and reads to the ticket's author as a promise.
+
+## Operator values
+
+The values marked **[operator]** above are proposals until the operator fixes them. Each is one
+row here. A criterion or gap line of the definition of done that states one carries
+`ADR-0026 [operator]` and follows the operator's choice; `scripts/dod_check.py` refuses one that
+does not, refuses a marker this table does not register, and refuses the marker once this ADR
+is accepted (docs/PREVENTION.md P-117).
+
+| item | the proposal | the words a criterion states it in |
+|---|---|---|
+| 3 | the first look at 20 | `of the first 20` |
+| 5 | one error budget per cell of 5% (2.5% is the stricter choice) | `budget of 5%` |
+| 8 | until the points-to-churn agreement passes, the more demanding of the named size's cell and the next larger one (or refuse every pointed ticket `size_unknown`) | `the more demanding` |
+| 9 | a derivation set of one third and a confirmation set of two thirds | `one third` · `two thirds` |
+| 9 | the validity report's thresholds | `twenty confirmation` · `20 confirmation` · `at least 90%` · `κ at least` |

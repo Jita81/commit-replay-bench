@@ -53,6 +53,15 @@ Two of the critical friend's ten actions (#8, an independent human review of the
 rotating a pasted token) sat for twelve days with no record at all, which is what this rule
 stops.
 
+**A capability is stated only once it is built.** ``PROMISES`` registers capabilities a
+page may state in the present tense only once the criterion that builds them is ``met`` in
+``docs/dod/``: a matching sentence on a ``PROMISE_PAGES`` page (the allowlist and
+EVIDENCE-AND-CLAIMS) is refused until then, and a promise whose criterion no longer exists is
+refused too. The README once said the product names which ISO/IEC 25010 characteristics its
+checks evidence while the criterion that builds that table was unmet (P-115). It holds only
+the promises registered here; an unregistered capability sentence still needs a reader
+(G-935).
+
 **How a file opts in.** Add its repository-relative path to ``ALLOWLIST`` below and make it
 pass in the same change. The list only grows: a page that has been cleaned never leaves it,
 because leaving is how a gate quietly stops gating.
@@ -66,7 +75,8 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               without an n, a method or an apparatus version; reports every numbered action
               in a review's Actions table that has no stated record in the decision log,
               and every record whose review no longer lists the action or is no longer on
-              disk; --check exits non-zero.
+              disk; reports a registered promise stated in the present tense before its
+              criterion is met (P-115); --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
@@ -74,7 +84,8 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
               each docs/reviews/**/*.md Actions table (fenced examples skipped) and each review
               the log names → its action numbers ⇄ the records in
               docs/DECISION-LOG.md, each under a head that names the review's stem in
-              backticks, then ``action #N: <state>``.
+              backticks, then ``action #N: <state>``. Then each ``PROMISES`` pattern over the
+              sentences of ``PROMISE_PAGES`` ⇄ its criterion's state in docs/dod/.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of),
@@ -82,6 +93,7 @@ Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the sh
               docs/CONTRIBUTING.md, docs/SUMMARY.md and
               docs/reviews/2026-09-25-value-baseline.md are the others),
               docs/DECISION-LOG.md (where a review action's record lives),
+              docs/dod/ (a promise's criterion and its state),
               docs/reviews/2026-09-13-critical-friend.md (the review whose actions it holds),
               .github/workflows/ci.yml (the claims job that runs --check),
               scripts/code_map.py (the same gate idiom: parse, validate, --check)
@@ -110,6 +122,33 @@ ALLOWLIST: tuple[str, ...] = (
     "docs/CONTRIBUTING.md",
     "docs/SUMMARY.md",
     "docs/reviews/2026-09-25-value-baseline.md",
+)
+
+#: The pages the promise rule reads: the allowlist and the claims policy itself (P-115).
+PROMISE_PAGES: tuple[str, ...] = (*ALLOWLIST, "docs/EVIDENCE-AND-CLAIMS.md")
+#: Where the definition of done's criteria live — a promise's criterion is read from there.
+DOD_DIR = "docs/dod"
+
+
+@dataclass(frozen=True)
+class Promise:
+    """A capability a page may state in the present tense only once ``criterion`` is met."""
+
+    pattern: re.Pattern[str]
+    criterion: str
+    says: str
+
+
+#: Registered promises (P-115). A sentence on a ``PROMISE_PAGES`` page that matches
+#: ``pattern`` is refused while ``criterion`` is not ``met`` in docs/dod/. A future tense
+#: ("will name") is not the present one, so the page may say what is coming and cite its gap.
+_NAMING = r"(?<!will )\b(?:names?|maps?|lists?|shows?)\s+(?:which|each|the)\b"
+PROMISES: tuple[Promise, ...] = (
+    Promise(
+        re.compile(rf"25010.*{_NAMING}|{_NAMING}.*25010", re.I),
+        "product.claims.210",
+        "that the product names which ISO/IEC 25010 characteristics its checks evidence",
+    ),
 )
 
 #: Where reviews live, and where a review action's record must be.
@@ -475,6 +514,70 @@ def check_tree(root: Path, allow: tuple[str, ...]) -> list[Finding]:
     return findings
 
 
+_CRITERION_ROW_RE = re.compile(r"^\|\s*([a-z0-9-]+(?:\.[a-z0-9-]+)+\.\d+)\s*\|")
+
+
+def criterion_states(root: Path) -> dict[str, str]:
+    """Each criterion id under docs/dod/ with its state (the row's second-last cell)."""
+    out: dict[str, str] = {}
+    base = root / DOD_DIR
+    if not base.is_dir():
+        return out
+    for path in sorted(base.rglob("*.md")):
+        if path.name == "GAP-ANALYSIS.md":
+            continue
+        for line in path.read_text(encoding="utf-8").split("\n"):
+            m = _CRITERION_ROW_RE.match(line)
+            if m:
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if len(cells) >= 6:
+                    out.setdefault(m.group(1), cells[-2])
+    return out
+
+
+def check_promises(root: Path, pages: tuple[str, ...]) -> list[Finding]:
+    """A registered capability stated in the present tense before its criterion is met
+    (P-115): the README said the product names which ISO/IEC 25010 characteristics its checks
+    evidence while the criterion that builds that table was unmet."""
+    findings: list[Finding] = []
+    if not (root / DOD_DIR).is_dir():
+        return findings  # a tree with no definition of done has no promise to hold
+    states = criterion_states(root)
+    for promise in PROMISES:
+        if promise.criterion not in states:
+            findings.append(
+                Finding(
+                    DOD_DIR,
+                    0,
+                    "",
+                    f"the promise {promise.says!r} names {promise.criterion}, but no criterion "
+                    "has that id — update PROMISES in scripts/claims_check.py",
+                )
+            )
+    for rel in pages:
+        path = root / rel
+        if not path.is_file():
+            continue
+        for block in blocks_of(path.read_text(encoding="utf-8")):
+            for sentence in _SENTENCE_SPLIT.split(_strip_markup(block.text)):
+                for promise in PROMISES:
+                    state = states.get(promise.criterion)
+                    if state is None or state == "met":
+                        continue
+                    if promise.pattern.search(sentence):
+                        findings.append(
+                            Finding(
+                                rel,
+                                block.line,
+                                sentence.strip(),
+                                f"states {promise.says} while {promise.criterion} is {state} — "
+                                "say what exists now, and what is coming in the future tense "
+                                "with its gap",
+                            )
+                        )
+    return findings
+
+
 _ACTIONS_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s.*\bActions\b")
 _ACTION_ROW_RE = re.compile(r"^\s*\|\s*(\d+)\s*\|")
 _ACTION_STATE_RE = re.compile(
@@ -602,7 +705,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     root = Path(args.root).resolve() if args.root else ROOT
     allow = tuple(args.allow) if args.allow else ALLOWLIST
-    findings = check_tree(root, allow) + check_review_actions(root)
+    pages = tuple(args.allow) if args.allow else PROMISE_PAGES
+    findings = check_tree(root, allow) + check_review_actions(root) + check_promises(root, pages)
     stream = sys.stderr if args.check else sys.stdout
     for f in findings:
         where = f"{f.path}:{f.line}" if f.line else f.path

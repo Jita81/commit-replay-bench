@@ -18,8 +18,10 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               they are unquantified, keep their ``[aspiration]`` tags; that every numbered
               action in a review's Actions table has a record in docs/DECISION-LOG.md that
               names the review, the action and its state — so an action cannot disappear
-              without one (the critical friend's #8 and #9 did); and that the fence reader
-              agrees with a CommonMark parser line for line.
+              without one (the critical friend's #8 and #9 did); that the fence reader
+              agrees with a CommonMark parser line for line; and that a registered promise
+              is refused in the present tense until its criterion is met, on a fixture and
+              on the live pages (P-115).
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -610,3 +612,48 @@ def test_the_measured_count_of_gated_pages_is_the_allowlist() -> None:
     assert int(m.group(1)) == len(cc.ALLOWLIST)
     for rel in cc.ALLOWLIST:
         assert f"`{rel}`" in text, f"G-929 does not name {rel}"
+
+
+PROMISE_ROW = "| product.claims.210 | CLAIMS | the quality table | `absent` | {STATE} | G-674 |\n"
+
+
+def test_a_capability_is_refused_on_a_page_until_the_criterion_that_builds_it_is_met(
+    tree: Path,
+) -> None:
+    """docs/PREVENTION.md P-115: README said the product and EVIDENCE-AND-CLAIMS name which
+    ISO/IEC 25010 characteristics its checks evidence, while product.claims.210 — the table
+    that would name them — was unmet and G-674 said the product names no quality model. A
+    registered promise is refused on every page the gate reads until its criterion is met."""
+    (tree / "docs/dod").mkdir()
+    product = tree / "docs/dod/product.md"
+    product.write_text(PROMISE_ROW.replace("{STATE}", "unmet"), encoding="utf-8")
+    ahead = (
+        "# t\n\n- **Not a standards authority.** Its checks evidence only some of ISO/IEC "
+        "25010's characteristics; the product and EVIDENCE-AND-CLAIMS name which, and never "
+        "claim more.\n"
+    )
+    _write(tree, "README.md", ahead)
+    findings = cc.check_promises(tree, ("README.md",))
+    assert len(findings) == 1
+    assert "product.claims.210" in findings[0].reason and findings[0].line == 3
+    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 1
+    honest = (
+        "# t\n\n- **Not a standards authority.** Its checks evidence parts of only some of "
+        "ISO/IEC 25010's characteristics; ADR-0026 item 11 proposes which, and the product "
+        "will name them (G-674).\n"
+    )
+    _write(tree, "README.md", honest)
+    assert cc.check_promises(tree, ("README.md",)) == []
+    # once the table ships, the present tense is true and the sentence may say so
+    _write(tree, "README.md", ahead)
+    product.write_text(PROMISE_ROW.replace("{STATE}", "met"), encoding="utf-8")
+    assert cc.check_promises(tree, ("README.md",)) == []
+    # a promise whose criterion no longer exists is itself a finding: it would gate nothing
+    product.write_text("", encoding="utf-8")
+    assert any("no criterion" in f.reason for f in cc.check_promises(tree, ("README.md",)))
+
+
+def test_the_live_pages_make_no_promise_ahead_of_its_criterion() -> None:
+    """The live pages the promise rule reads (the allowlist and EVIDENCE-AND-CLAIMS)."""
+    assert cc.check_promises(ROOT, cc.PROMISE_PAGES) == []
+    assert "docs/EVIDENCE-AND-CLAIMS.md" in cc.PROMISE_PAGES
