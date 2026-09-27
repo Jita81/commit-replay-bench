@@ -310,9 +310,20 @@ export interface RepoSummary {
   github_full_name: string | null
 }
 
-/** `GET /repos/{name}` — repo + config. */
+/**
+ * The server's record that a person opened the baseline of a repository with rows
+ * (`POST /repos/{name}/baseline-read`, the `repo.baseline_read` event): the first read,
+ * who made it and when. Home task 6 "Read the baseline" completes on it (DL-074).
+ */
+export interface BaselineRead {
+  at: string
+  by: string
+}
+
+/** `GET /repos/{name}` — repo + config, and the first read of its baseline (`null` until one). */
 export interface RepoDetail extends RepoSummary {
   config: RepoConfig
+  baseline_read?: BaselineRead | null
 }
 
 /**

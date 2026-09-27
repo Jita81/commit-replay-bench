@@ -7,8 +7,9 @@ parent: dod.journey.orient
 children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
-status: partial                # WRITTEN BY THE CHECKER — never by hand
+status: done                # WRITTEN BY THE CHECKER — never by hand
 updated: 2026-09-27
+updated: 2026-09-26
 ---
 
 # This page does not exist
@@ -39,7 +40,7 @@ the API's 404 on its own page, not this one.
 | not-found.entry-exit.3 | ENTRY-EXIT | The page says what to do, not only where to go: it names the likely causes of the failure (a mistyped address, a link from an older version, a record that no longer exists) and the next move for each, so a person who did not arrive here by typing knows whether to report it | `vitest:ui/src/screens/NotFoundPage.test.tsx::"says why the address failed, what to do, and what the page will not do"` · `code:ui/src/screens/NotFoundPage.tsx::NotFoundPage` | met | |
 | not-found.truth.4 | TRUTH | The address the page reports is the address that was asked for, query string and hash included, so it matches the link the person followed | `code:ui/src/screens/NotFoundPage.tsx::NotFoundPage` · `vitest:ui/src/screens/NotFoundPage.test.tsx::"shows the whole address asked for — the query string and the hash too"` | met | |
 | not-found.actions.5 | ACTIONS | The page has one action and it names its destination: "Back to Home". Nothing here writes, spends or can fail, so there is no success or error state to state | `code:ui/src/screens/NotFoundPage.tsx::NotFoundPage` · `vitest:ui/src/screens/NotFoundPage.test.tsx::"shows the path and leads back to Home"` | met | |
-| not-found.explanation.6 | EXPLANATION | Every element carries a hint and the ratchet holds `*` with a `SCREENS` entry and a `MIN_HINTS` floor, and the screen carries an About block like every other | `hint:id:button.notfound.home` · `vitest:ui/src/help/help.test.ts::"every route in App.tsx except /login and * has an entry"` · `vitest:ui/src/components/Help.test.tsx::"renders nothing on a route with no entry"` · `hint:ratchet:*` | partial | G-926 |
+| not-found.explanation.6 | EXPLANATION | Every element carries a hint and the ratchet holds `*` with a `SCREENS` entry and a `MIN_HINTS` floor, and the screen carries an About block like every other | `hint:id:button.notfound.home` · `vitest:ui/src/help/help.test.ts::"every route in App.tsx has an entry of its own"` · `vitest:ui/src/components/Help.test.tsx::"the four shell screens carry an About block of their own"` · `hint:about:*` · `hint:ratchet:*` | met | |
 | not-found.evidence.7 | EVIDENCE | The page's two facts — it shows the path, it leads back to Home — are unit-tested, the shell-intact behaviour is asserted end to end, and a CI job runs both suites | `vitest:ui/src/screens/NotFoundPage.test.tsx::"shows the path and leads back to Home"` · `spec:ui/e2e/smoke.spec.ts::"unknown routes render the 404 inside the shell"` · `ci:ui-unit` · `ci:ui-smoke` | met |  |
 | not-found.evidence.8 | EVIDENCE | An unknown address is walked on the live stack and captured, like every other route | `spec:ui/e2e/walkthrough/11-screens.spec.ts::"${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen"` | met |  |
 | not-found.roles.9 | ROLES | Every role sees the same page and no role sees it sooner: the route sits inside `RequireAuth`, so an unmatched URL with no session lands on `/login?next=` and the product tells an anonymous visitor nothing about which addresses exist | `code:ui/src/lib/auth.tsx::RequireAuth` · `code:ui/src/App.tsx::App` · `spec:ui/e2e/smoke.spec.ts::"a protected route redirects to /login with ?next="` · `spec:ui/e2e/smoke.spec.ts::"unknown routes render the 404 inside the shell"` | met | |
@@ -48,4 +49,3 @@ the API's 404 on its own page, not this one.
 | not-found.non-goals.12 | NON-GOALS | The page states what it will not do — it does not search, guess a near match or report the link — so a person does not wait for it to recover for them | `vitest:ui/src/screens/NotFoundPage.test.tsx::"says why the address failed, what to do, and what the page will not do"` | met | |
 
 ## Gaps
-- **G-926** — **[gap]** the four shell screens carry no About block: `/login`, `/help`, `/help/docs/:name` and the catch-all have no `HELP` entry, so a reader on the screen a lost person lands on, or on the screen they sign in from, gets no purpose sentence and no next step per role, although the journey says every screen has one · add a `HELP` entry for each (and decide, in the same change, whether the help pages are the exception the walkthrough currently asserts) · ui

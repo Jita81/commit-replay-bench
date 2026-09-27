@@ -10,7 +10,10 @@
  *               this screen is for, what to do next for this role (falling down the ladder to
  *               the viewer's step), what the numbers mean, the terms on the screen, the
  *               elements on the screen and where to read more; it renders nothing where the
- *               registry has no entry. "Elements on this screen" is generated when the block
+ *               registry has no entry. Every link it offers leads behind `RequireAuth`, so on
+ *               a definite "no session" (the sign-in page) it names the guides and the
+ *               glossary as text and links nothing — a link would bounce the reader straight
+ *               back to sign-in (P-110). "Elements on this screen" is generated when the block
  *               opens: every `data-hint` on the page (deduplicated; the screen's own, under
  *               `<main>`, in DOM order, then the shell's under their own sub-heading) with
  *               the trigger's visible text and the registry sentence — the printable,
@@ -101,8 +104,12 @@ function nextFor(next: Partial<Record<Role, string>> & { viewer: string }, role:
  */
 export function AboutThisScreen() {
   const { pathname } = useLocation()
-  const { me } = useAuth()
+  const { me, loading, error } = useAuth()
   const help = helpFor(pathname)
+  // every screen the block links to sits behind RequireAuth: on a definite "no session" (its
+  // own redirect condition — the sign-in page) a link would bounce the reader straight back,
+  // so the guides are named as text instead
+  const linkable = Boolean(me) || loading || Boolean(error)
   const [elements, setElements] = useState<HintedElement[] | null>(null)
   if (!help) return null
   // collected when the block opens, so the list is what the reader sees on the page now
@@ -127,9 +134,13 @@ export function AboutThisScreen() {
               {help.terms.map((id) => (
                 <div key={id} className="mb-2">
                   <dt className="inline font-bold">
-                    <Link to={`/help#${id}`} className="text-on-surface no-underline hover:underline">
-                      {TERMS[id].term}
-                    </Link>
+                    {linkable ? (
+                      <Link to={`/help#${id}`} className="text-on-surface no-underline hover:underline">
+                        {TERMS[id].term}
+                      </Link>
+                    ) : (
+                      TERMS[id].term
+                    )}
                   </dt>
                   <dd className="ml-0 inline">
                     {' '}
@@ -181,14 +192,10 @@ export function AboutThisScreen() {
         <h3 className="mb-1 mt-0 text-[16px]">Read more</h3>
         <ul className="mb-4 mt-0 list-disc pl-5">
           {help.readMore.map((r) => (
-            <li key={r.to}>
-              <Link to={docHref(r.to)}>{r.label}</Link>
-            </li>
+            <li key={r.to}>{linkable ? <Link to={docHref(r.to)}>{r.label}</Link> : r.label}</li>
           ))}
         </ul>
-        <p className="m-0">
-          <Link to="/help">Glossary and guides</Link>
-        </p>
+        <p className="m-0">{linkable ? <Link to="/help">Glossary and guides</Link> : 'You can open these guides and the glossary once you have signed in.'}</p>
       </Details>
     </section>
   )

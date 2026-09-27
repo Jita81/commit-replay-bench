@@ -61,7 +61,7 @@
 
 import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { currentData, useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
+import { currentData, useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRecordBaselineRead, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
 import { isApiError } from '../../api/client'
 import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryTask, type RepoPool } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
@@ -222,6 +222,9 @@ export function ResultsPage() {
   // read only through `currentData`, so an old value is never shown as current, and a source
   // ratchet in the page's test refuses any `<query>.data` read (PR #54 review)
   const mapData = currentData(map)
+  // a person with the map of a repository with rows in front of them has read its baseline:
+  // the server records it once per person, and Home's task 6 completes on it (DL-074)
+  useRecordBaselineRead(repo, (mapData?.summary.n_total ?? 0) > 0)
   const controlsData = currentData(controls)
   const oracleData = currentData(oracle)
   const poolData = currentData(pool)

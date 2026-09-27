@@ -6,9 +6,9 @@
  * What it is:   Tests for the subset markdown renderer.
  * What it does: Pins each construct (h1–h4 with slug ids, paragraphs, lists, fenced code,
  *               tables, links, emphasis, inline code), the link rewriting rules (a bundled
- *               doc → `/help/docs/…`; external → `rel="noopener noreferrer"`; other relative
- *               links → text) and that an HTML tag in the source is shown as text, never
- *               injected.
+ *               doc or decision record → `/help/docs/…`; external → `rel="noopener
+ *               noreferrer"`; other relative links → text) and that an HTML tag in the
+ *               source is shown as text, never injected.
  * How:          `renderMarkdown` into a `MemoryRouter`, asserted through the DOM.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -32,6 +32,14 @@ describe('renderMarkdown', () => {
     expect(screen.getByRole('heading', { level: 2 })).toHaveAttribute('id', '2-configure-a-repository')
     expect(screen.getByRole('heading', { level: 3 })).toHaveAttribute('id', '21-environment-setup--the-only-network-phase')
     expect(screen.getAllByRole('heading', { level: 4 }).map((h) => h.id)).toEqual(['301-token', 'deep'])
+  })
+
+  it('under a page title every heading moves one level down and keeps its id, so the page has no second h1', () => {
+    render(<MemoryRouter>{renderMarkdown('# Operator guide\n## 2. Configure a repository\n#### 3.0.1 Token\n##### deep', { headingOffset: 1 })}</MemoryRouter>)
+    expect(screen.queryAllByRole('heading', { level: 1 })).toHaveLength(0)
+    expect(screen.getByRole('heading', { level: 2, name: 'Operator guide' })).toHaveAttribute('id', 'operator-guide')
+    expect(screen.getByRole('heading', { level: 3 })).toHaveAttribute('id', '2-configure-a-repository')
+    expect(screen.getAllByRole('heading', { level: 5 }).map((h) => h.id)).toEqual(['301-token', 'deep'])
   })
 
   it('duplicate headings get -1, -2 suffixes like GitHub', () => {
@@ -82,15 +90,20 @@ describe('renderMarkdown', () => {
     expect(plainText('a `b` **c** *d* [e](x.md) f')).toBe('a b c d e f')
   })
 
-  it('links: a bundled doc becomes /help/docs/…, an in-page anchor stays, external gets rel, other relatives become text', () => {
-    const { container } = mount('[map](OPERATOR.md#4-read-the-capability-map) [same](#1-install) [ext](https://example.org/x) [adr](adr/0003-one-routing-rule.md) [src](../src/crb/core/grade.py)')
+  it('links: a bundled doc or decision record becomes /help/docs/…, an in-page anchor stays, external gets rel, other relatives become text', () => {
+    const { container } = mount('[map](OPERATOR.md#4-read-the-capability-map) [same](#1-install) [ext](https://example.org/x) [adr](adr/0003-one-routing-rule.md) [sibling](0015-signoffs-expire-with-the-apparatus.md) [up](../SECURITY.md) [gone](adr/9999-no-such-record.md) [src](../src/crb/core/grade.py)')
     expect(screen.getByRole('link', { name: 'map' })).toHaveAttribute('href', '/help/docs/OPERATOR#4-read-the-capability-map')
     expect(screen.getByRole('link', { name: 'same' })).toHaveAttribute('href', '#1-install')
     const ext = screen.getByRole('link', { name: 'ext' })
     expect(ext).toHaveAttribute('href', 'https://example.org/x')
     expect(ext).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(screen.queryByRole('link', { name: 'adr' })).toBeNull()
-    expect(container.textContent).toContain(' adr ')
+    // the decision records are bundled (DL-073): a guide's and a sibling record's links open them here
+    expect(screen.getByRole('link', { name: 'adr' })).toHaveAttribute('href', '/help/docs/ADR-0003')
+    expect(screen.getByRole('link', { name: 'sibling' })).toHaveAttribute('href', '/help/docs/ADR-0015')
+    expect(screen.getByRole('link', { name: 'up' })).toHaveAttribute('href', '/help/docs/SECURITY')
+    // a record the build does not carry, and a source file, have no target: text, not a dead link
+    expect(screen.queryByRole('link', { name: 'gone' })).toBeNull()
+    expect(container.textContent).toContain(' gone ')
     expect(screen.queryByRole('link', { name: 'src' })).toBeNull()
   })
 

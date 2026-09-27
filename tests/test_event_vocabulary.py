@@ -10,7 +10,8 @@ appears in the table. A new action fails here until its row is written.
 Navigation
 ----------
 What it is:   The documentation ratchet for event action names.
-What it does: Extracts every action literal from the emit call sites in ``src/crb`` (emitter
+What it does: Extracts every action literal from the emit call sites in ``src/crb`` — a
+              literal or a module-level string constant passed in its place (P-107) — (emitter
               ``emit`` / ``error`` / ``timed``, the core's ``_emit(on_event, "…")`` helpers,
               plain ``on_event("…", …)`` callbacks, ``append_event(action=…)``, the factory
               loop's ``self._emit("…", item_id)``, the account trail's
@@ -64,18 +65,40 @@ BUILDER_PREFIX = "builder."
 TIMED_SUFFIXES = (".start", ".done", ".error")
 
 
-def _literals(node: ast.AST) -> list[str]:
+def _literals(node: ast.AST, consts: dict[str, str] | None = None) -> list[str]:
     """The string(s) an action expression can evaluate to (a constant, a prefixed constant,
-    or either branch of ``"a" if x else "b"``)."""
+    a module-level string constant named by ``consts``, or either branch of
+    ``"a" if x else "b"``)."""
     if isinstance(node, ast.IfExp):
-        return _literals(node.body) + _literals(node.orelse)
-    lit = _literal(node)
+        return _literals(node.body, consts) + _literals(node.orelse, consts)
+    lit = _literal(node, consts or {})
     return [lit] if lit is not None else []
 
 
-def _literal(node: ast.AST) -> str | None:
+def _module_constants(tree: ast.Module) -> dict[str, str]:
+    """``NAME = "a.b"`` / ``NAME: str = "a.b"`` at module level — a name an emit call may pass
+    as its action (P-107: such an action escaped the ratchet while it read literals only)."""
+    out: dict[str, str] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            targets, value = list(stmt.targets), stmt.value
+        elif isinstance(stmt, ast.AnnAssign):
+            targets, value = [stmt.target], stmt.value
+        else:
+            continue
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+            continue
+        for t in targets:
+            if isinstance(t, ast.Name):
+                out[t.id] = value.value
+    return out
+
+
+def _literal(node: ast.AST, consts: dict[str, str]) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
+    if isinstance(node, ast.Name) and node.id in consts:
+        return consts[node.id]
     # BUILDER_EVENT_PREFIX + "discard"
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left, right = node.left, node.right
@@ -93,7 +116,9 @@ def _actions_in(path: Path) -> set[str]:
     """Every action literal an emit call in ``path`` can produce."""
     out: set[str] = set()
     in_builders = path.parent == SRC / "builders" and path.name != "adapter.py"
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    consts = _module_constants(tree)
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
@@ -110,7 +135,7 @@ def _actions_in(path: Path) -> set[str]:
             candidates.append(args[1])  # _emit(on_event, action, …)
         if name in {"_emit", "on_event", "cb"} and args:
             candidates.append(args[0])  # self._emit(action, item_id) / on_event(action, payload)
-        for lit in (x for c in candidates for x in _literals(c)):
+        for lit in (x for c in candidates for x in _literals(c, consts)):
             if "." not in lit:
                 continue
             if name == "timed":
@@ -208,6 +233,25 @@ def test_the_walker_sees_every_emit_shape() -> None:
     assert "builder.build.turn" in emitted and "build.turn" in emitted  # a builder's own
     assert "grade.belt" in emitted  # core/grade.py on_event / _emit
     assert "user.created" in emitted  # record_user_event(db, action="user.created", …)
+
+
+def test_an_action_named_by_a_module_constant_is_seen(tmp_path: Path) -> None:
+    """``action=SOME_CONSTANT`` is how a module names an action it also queries by; the walker
+    read literals only, so such an action escaped the table entirely (found 2026-09-26 while
+    adding ``repo.baseline_read``: the ratchet stayed green with no row — P-107)."""
+    src = tmp_path / "mod.py"
+    src.write_text(
+        'READ: str = "demo.read"\n'
+        'OTHER = "demo.other"\n'
+        "def f(db):\n"
+        "    append_system_event(db, trace_id='t', action=READ)\n"
+        "    emitter.emit('system', OTHER)\n"
+        "    local = 'demo.local'\n"
+        "    append_system_event(db, trace_id='t', action=local)\n",
+        encoding="utf-8",
+    )
+    # the two module constants resolve; a function-local variable is not a module constant
+    assert _actions_in(src) == {"demo.read", "demo.other"}
 
 
 #: The UI's one plain sentence per action (the live log's explanation).

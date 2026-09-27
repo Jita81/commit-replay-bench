@@ -23,6 +23,8 @@
  *               non-goal: an admin resets a password on Settings, or the person who runs the
  *               deployment does (`crb users`, OPERATOR §9) — accounts are never created, reset
  *               or reactivated here. The session note states the server's default length.
+ *               Last, it mounts the "About this screen" block itself — the screen is outside
+ *               the shell that mounts it everywhere else (G-926).
  * How:          `useAuth` (redirect if logged in) → `useLogin` mutation on submit → the auth
  *               query is seeded with the principal; `safeNext` validates the return path;
  *               `nextStep` / `failureTitle` pick the envelope's copy by status;
@@ -34,14 +36,15 @@
  *               envelope), ui/src/help/hints.ts (the `field.login.*` / `button.login.*`
  *               copy), src/crb/server/routes/auth.py (login and the OIDC start URL),
  *               src/crb/server/auth.py (the session and CSRF cookies the login sets, and
- *               `session_ttl`, the length the session note states)
+ *               `session_ttl`, the length the session note states), ui/src/components/Help.tsx
+ *               (`AboutThisScreen`, fed by the `/login` entry in ui/src/help/help.ts)
  * Tested by:    ui/src/screens/Login/LoginPage.test.tsx (the strapline; the hints resolve;
  *               every stop's next step; the /version states),
  *               tests/test_server_auth.py (the session note matches `session_ttl`),
  *               ui/e2e/walkthrough/13-recover-an-account.spec.ts (the recovery, timed),
  *               ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
  *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
- *               the role chip)
+ *               the role chip), ui/src/components/Help.test.tsx (the About block mounts here)
  * Touch when:   the OIDC start path or the login body changes (docs/API.md "Auth"); never for
  *               a new repository.
  */
@@ -51,6 +54,7 @@ import { useLogin, useVersion } from '../../api/hooks'
 import { apiUrl, type ApiError } from '../../api/client'
 import { AnchorButton, Button } from '../../components/Button'
 import { ErrorState } from '../../components/ErrorState'
+import { AboutThisScreen } from '../../components/Help'
 import { TextField } from '../../components/Field'
 import { BRAND } from '../../components/Layout'
 import { useAuth } from '../../lib/auth'
@@ -197,6 +201,9 @@ export function LoginPage() {
         <p className="text-center text-[11px] text-on-surface-muted" data-testid="login-session-note">
           A session lasts 8 hours unless this deployment sets another length. Signing out ends it on every device.
         </p>
+
+        {/* The screen sits outside the shell, so it mounts its own About block (G-926). */}
+        <AboutThisScreen />
       </main>
     </div>
   )

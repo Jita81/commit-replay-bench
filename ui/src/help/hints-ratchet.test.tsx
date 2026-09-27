@@ -237,6 +237,9 @@ describe('hint ratchet: the route table', () => {
         await waitFor(() => expect(hinted(container)).toBeGreaterThanOrEqual(MIN_HINTS[pattern]!))
         const misses = unhinted(container)
         expect(misses, `unhinted elements on ${pattern} as ${role}:\n  ${misses.join('\n  ')}`).toEqual([])
+        // one page title: a second h1 (a rendered document's own `#`) made a walkthrough query
+        // ambiguous and gives a screen reader two titles (P-109)
+        expect(container.querySelectorAll('h1'), `${pattern} as ${role}: more than one h1`).toHaveLength(1)
       })
     }
   }
