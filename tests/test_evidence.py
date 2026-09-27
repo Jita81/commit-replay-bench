@@ -32,6 +32,7 @@ from crb.core import evidence as ev
 from crb.core.grade import Belts, GradeResult
 from crb.core.spec import TaskSpec
 from crb.core.version import APPARATUS_VERSION, __version__
+from fixtures.posture import posture_result
 
 SHA = "b7c6251293a287542ac8568cad7505b710fa3532"
 
@@ -53,7 +54,7 @@ def _task() -> TaskSpec:
 
 def _grade(clean: bool = True) -> GradeResult:
     belts = Belts(True, True, True, True) if clean else Belts(True, False)
-    return GradeResult(
+    return posture_result(
         SHA,
         "r",
         "sighted",

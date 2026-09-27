@@ -110,6 +110,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import dataclasses
 import os
 import re
 import time
@@ -120,13 +121,14 @@ from typing import Any
 
 from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.git import GitRepo
-from crb.core.grade import MODE_SIGHTED, GradeResult, grade
+from crb.core.grade import MODE_SIGHTED, GradeContext, GradeResult, grade
 from crb.core.oracle import controls_go, controls_js
+from crb.core.qualify import adhoc_context
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, tail_of
 from crb.core.spec import BELT_AFFECTED_DIRS, BELT_TARGET_ONLY, Language, RepoConfig, TaskSpec
 from crb.core.version import APPARATUS_VERSION
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 
 CONTROLS_SCHEMA = "crb.negative_controls.v1"
 CONTROLS_VERSION = "controls.v2"  # v2: Go + JavaScript transforms
@@ -1209,9 +1211,11 @@ def _red_at_parent(
     executor: Executor,
     scratch: Path,
     timeout: int,
+    on_event: EventFn | None = None,
 ) -> tuple[bool, str]:
     """(is_red, note). Vacuous controls are never a violation — but a harness error is."""
-    dest = Path(scratch) / f"ctrl-{config.name}-{task.short_id}-red"
+    dest = opaque_dest(scratch, "ctrl", avoid=(task.task_id,))  # never the commit's name (B1)
+    _emit(on_event, "controls.red_check", task=task.task_id, worktree=dest.name)
     with Workspace.create(repo, task.task_id, dest, config=config) as ws:
         ws.overlay_tests(task.test_files)
         run = runner.run_for(
@@ -1235,15 +1239,26 @@ def controls_for_task(
     controls: Sequence[str] = CONTROLS,
     timeout: int = 0,
     on_event: EventFn | None = None,
+    context: GradeContext | None = None,
 ) -> list[ControlRow]:
     """Run the controls for one task, each in a FRESH workspace, through :func:`grade`.
 
     One row per control. Raises :class:`SandboxUnavailable` (infrastructure) so a
     run can stop; every other error is a recorded ``VIOLATION`` row.
+
+    ``context`` is the task's grade context in the run's posture (ADR-0019): the worker
+    passes the in-posture qualification so belt 3 subtracts the baseline measured there.
+    The controls always grade UNWITNESSED — a control's verdict is never a row that
+    blames a model, and a control writes no ``GradeRow`` at all. With no context the
+    task's own discovery values are used (an ad hoc context).
     """
     unknown = [c for c in controls if c not in CONTROLS]
     if unknown:
         raise ValueError(f"unknown control(s): {unknown}")
+    if context is None:
+        graded, gctx = adhoc_context(task, executor=executor)
+    else:
+        graded, gctx = context.spec(task), dataclasses.replace(context, witness=None)
     rows: list[ControlRow] = []
 
     def row(
@@ -1276,6 +1291,7 @@ def controls_for_task(
             executor=executor,
             scratch=scratch,
             timeout=timeout,
+            on_event=on_event,
         )
     except SandboxUnavailable:
         raise
@@ -1291,8 +1307,8 @@ def controls_for_task(
 
     for name in controls:
         started = time.monotonic()
-        dest = Path(scratch) / f"ctrl-{config.name}-{task.short_id}-{name}"
-        _emit(on_event, "controls.control", task=task.task_id, control=name)
+        dest = opaque_dest(scratch, "ctrl", avoid=(task.task_id,))
+        _emit(on_event, "controls.control", task=task.task_id, control=name, worktree=dest.name)
         try:
             with Workspace.create(repo, task.task_id, dest, config=config) as ws:
                 ws.overlay_tests(task.test_files)
@@ -1322,7 +1338,8 @@ def controls_for_task(
                 guard.check()  # re-hash the oracle BEFORE grading (belt 1 re-checks inside)
                 result = grade(
                     ws,
-                    task,
+                    graded,
+                    ctx=gctx,
                     config=config,
                     runner=runner,
                     executor=executor,

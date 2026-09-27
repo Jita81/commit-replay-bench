@@ -57,6 +57,7 @@ from crb.core.routing import (
     ControlsVerdict,
 )
 from crb.core.spec import Language, RepoConfig, classify_commit, size_tier
+from fixtures.posture import posture_row
 
 PACK = "a" * 64
 
@@ -85,7 +86,7 @@ def _row(
     belts = (True, True, True, True) if clean else (True, False, True, True)
     if belt_set == "v3-legacy":
         belts = (*belts[:3], None)
-    return GradeRow(
+    return posture_row(
         repo=repo,
         task_id=task_id,
         clean=clean and not disqualified,

@@ -9,7 +9,8 @@ Real parts run the actual toolchains on the fixture repos and are marked
 ``@pytest.mark.network`` when they install from a registry (``pip install`` of
 pytest / the fixture distribution, ``npm install`` of mocha, Maven's warm-up) or
 ``@pytest.mark.toolchain(...)`` when they only need the binary. Each skips with
-its reason when the tool is missing; none decides a verdict.
+its reason when the tool is missing, and a network test skips with the host and the reason
+when the registry it names is unreachable (tests/conftest.py); none decides a verdict.
 
 Navigation
 ----------
@@ -498,7 +499,7 @@ def test_node_setup_plan(tmp_path: Path) -> None:
     assert not none.ok and "package.json" in none.note and len(ex.commands) == 2
 
 
-@pytest.mark.network
+@pytest.mark.network("registry.npmjs.org")
 @pytest.mark.toolchain("npm")
 @pytest.mark.skipif(not langs.has_tool("npm"), reason="npm not on PATH")
 def test_node_setup_installs_node_modules_for_real(tmp_path: Path) -> None:
@@ -578,7 +579,7 @@ def test_maven_setup_plan(tmp_path: Path) -> None:
     assert "pom.xml" in r.setup(ex, root, env_dir=tmp_path / "env", timeout=0).note
 
 
-@pytest.mark.network
+@pytest.mark.network("repo.maven.apache.org")
 @pytest.mark.toolchain("mvn")
 @pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
 @pytest.mark.skipif(not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME")

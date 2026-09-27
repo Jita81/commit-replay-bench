@@ -6,6 +6,9 @@
  *     (no swallowed `.catch`, no fabricated data);
  *   - `retry: false` by default so a missing endpoint shows an honest error,
  *     not a 3× delayed spinner;
+ *   - a query whose last request failed keeps its earlier data: a screen reads
+ *     `currentData(q)`, never `q.data`, where showing that data would present an old
+ *     value as current (PR #54 review);
  *   - polling only while a run is non-terminal, never in a background tab;
  *   - `useRunEvents` is the SSE hook (EventSource, `?after=` resume,
  *     reconnection, bounded buffer) — see `sse.ts`.
@@ -37,7 +40,10 @@
  *               ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/src/screens/Signoff/SignoffPage.test.tsx,
- *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks)
+ *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the GitHub App hooks),
+ *               ui/src/screens/Results/ResultsPage.test.tsx and
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx (`currentData`, with the
+ *               source ratchet that refuses a `<query>.data` read on those pages)
  *               (every screen test exercises its hooks through `mockApi`)
  * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
  *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
@@ -81,6 +87,8 @@ import type {
   Principal,
   RepoCreateRequest,
   RepoDetail,
+  RepoPool,
+  RepoPosture,
   RepoProfile,
   RepoSummary,
   Role,
@@ -115,6 +123,16 @@ import { isRunTerminal } from './types'
  * read it is meant to refresh. Keys nest (`['runs', id, 'tasks']` under `['runs', id]`) so
  * invalidating a prefix reaches its children.
  */
+/**
+ * The data a query holds only while its last request succeeded. TanStack Query keeps the
+ * earlier data when a refetch fails and sets `isError` beside it, so reading `q.data` would
+ * show an old value as if it were current; a screen that must not do that reads this, and
+ * shows the query's error instead (PR #54 review).
+ */
+export function currentData<T>(q: { data: T | undefined; isError: boolean }): T | undefined {
+  return q.isError ? undefined : q.data
+}
+
 export const keys = {
   health: ['health'] as const,
   version: ['version'] as const,
@@ -122,6 +140,8 @@ export const keys = {
   repos: ['repos'] as const,
   repo: (name: string) => ['repos', name] as const,
   repoProfile: (name: string) => ['repos', name, 'profile'] as const,
+  repoPool: (name: string) => ['repos', name, 'pool'] as const,
+  repoPosture: (name: string) => ['repos', name, 'posture'] as const,
   repoTasks: (name: string, p?: PageParams) => ['repos', name, 'tasks', p ?? {}] as const,
   runs: (p?: RunListParams) => ['runs', p ?? {}] as const,
   run: (id: string) => ['runs', id] as const,
@@ -278,11 +298,43 @@ export function useProbeRepo(): UseMutationResult<Run, ApiError, string> {
   })
 }
 
+/** `GET /repos/{name}/posture` — qualified N of M in the posture last recorded (ADR-0019). */
+export function useRepoPosture(name: string): UseQueryResult<RepoPosture, ApiError> {
+  return useQuery({
+    queryKey: keys.repoPosture(name),
+    queryFn: () => api<RepoPosture>(`/repos/${enc(name)}/posture`),
+    enabled: name.length > 0,
+    retry: false,
+  })
+}
+
+/** `POST /runs {kind: qualify, repo}` — measure the tasks in the posture; no builder, no model spend. */
+export function useQualifyRepo(): UseMutationResult<Run, ApiError, string> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (name) => api<Run>('/runs', { method: 'POST', body: { repo: name, kind: 'qualify' } }),
+    onSuccess: (_run, name) => {
+      qc.invalidateQueries({ queryKey: keys.repoPosture(name) })
+      qc.invalidateQueries({ queryKey: ['runs'] })
+    },
+  })
+}
+
 /** `GET /repos/{name}/profile` — the (class × size) change profile the coverage figures need. */
 export function useRepoProfile(name: string): UseQueryResult<RepoProfile, ApiError> {
   return useQuery({
     queryKey: keys.repoProfile(name),
     queryFn: () => api<RepoProfile>(`/repos/${enc(name)}/profile`),
+    enabled: name.length > 0,
+    retry: false,
+  })
+}
+
+/** `GET /repos/{name}/pool` — the mined tasks' date range and the share of history it covers. */
+export function useRepoPool(name: string): UseQueryResult<RepoPool, ApiError> {
+  return useQuery({
+    queryKey: keys.repoPool(name),
+    queryFn: () => api<RepoPool>(`/repos/${enc(name)}/pool`),
     enabled: name.length > 0,
     retry: false,
   })
@@ -857,6 +909,23 @@ export function useSetIntakeListener(): UseMutationResult<Intake, ApiError, { re
       api<Intake>(`/factory/${enc(repo)}/intake`, { method: 'PUT', body: { enabled, column: column ?? '' } }),
     onSuccess: (data, { repo }) => {
       qc.setQueryData(keys.intake(repo), data)
+    },
+  })
+}
+
+/** `POST /factory/{repo}/intake/{key}/register` (operator) — the Register act (ADR-0022):
+ *  put the draft waiting for ticket `key` on the frozen backlog, exactly as it was read at
+ *  `revision` (409 `revision_moved` when the ticket changed since). Invalidates the backlog
+ *  and the tasks, because it registers an item. */
+export function useRegisterIntakeTicket(): UseMutationResult<Intake, ApiError, { repo: string; key: string; revision: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, key, revision }) =>
+      api<Intake>(`/factory/${enc(repo)}/intake/${enc(key)}/register`, { method: 'POST', body: { revision } }),
+    onSuccess: (data, { repo }) => {
+      qc.setQueryData(keys.intake(repo), data)
+      void qc.invalidateQueries({ queryKey: keys.factoryBacklog(repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
     },
   })
 }

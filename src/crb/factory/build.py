@@ -59,19 +59,23 @@ from __future__ import annotations
 import hashlib
 import shutil
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from crb.builders.base import Budget, BuildBrief, Builder, BuildOutcome, Rung
+from crb.core.deps import NullDepsProvider, TaskDeps
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack, utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
-from crb.core.grade import MODE_SIGHTED, GradeResult, grade
-from crb.core.ledger import BELT_SET_V5, PROCESS_FACTORY, GradeRow, JsonlLedger
+from crb.core.grade import MODE_SIGHTED, GradeContext, GradeResult, grade
+from crb.core.ledger import BELT_SET_V5, PROCESS_FACTORY, GradeRow, JsonlLedger, posture_labels
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
 from crb.core.patches import PatchStore, keep_patch
+from crb.core.posture import Posture, resolve_posture
+from crb.core.qualify import STATE_QUALIFIED, EnvProbeWitness, Qualification
 from crb.core.redact import redact_and_cap
 from crb.core.run import write_pack
 from crb.core.runners.base import BaseRunner
@@ -264,6 +268,9 @@ class BuildResult:
     workspace: Workspace | None = None
     error: str = ""
     labels: Mapping[str, str] = field(default_factory=dict)
+    #: The grade context the attempt was graded under (its in-run qualification and the
+    #: environment-probe witness); the review's belt re-run grades under the same one.
+    grade_context: GradeContext | None = None
 
     @property
     def clean(self) -> bool:
@@ -358,7 +365,7 @@ def factory_row(
         evidence_pack_hash=pack.pack_hash,
         belt_set=BELT_SET_V5,
         provenance="measured",
-        labels={"rung": trial, **dict(labels)},
+        labels={"rung": trial, **dict(labels), **posture_labels(result)},
     )
 
 
@@ -383,12 +390,19 @@ def build_item(
     timeout: int = 0,
     keep_workspace: bool = True,
     on_event: EventFn | None = None,
+    posture: Posture | None = None,
+    deps: TaskDeps | None = None,
     keep_patches: bool = True,
 ) -> BuildResult:
     """Stage the oracle, build at the parent with it overlaid, grade, pack, ledger.
 
     Never returns a clean result it did not observe: a builder exception is
     recorded and the (unchanged) worktree is still graded — it fails belts 2/4.
+
+    ADR-0019: the attempt is graded under an in-run qualification — the RED proof and
+    the baseline measured here, in ``posture`` (resolved live when not given) — and a
+    verdict that would blame the builder is witnessed by the environment probe on a
+    fresh base tree (a factory item has no gold).
     """
     started = time.monotonic()
     label = builder_label(builder)
@@ -405,7 +419,14 @@ def build_item(
             raise OracleTampered("overlaid oracle does not hash to the RED proof")
         scope = runner.target_scope([oracle.test_path])
         belt_scope = runner.belt_scope(scope, [oracle.test_path])
-        base = runner.run(executor, ws.root, belt_scope, timeout=timeout)
+        null = NullDepsProvider()
+        deps = deps or null.for_executor(executor.name)
+        posture = posture or resolve_posture(
+            executor, runner, deps_mode=null.mode(config, executor.name), root=ws.root
+        )
+        base = runner.run_for(
+            executor, ws.root, belt_scope, timeout=timeout, authored=None, deps=deps.parent
+        )
         base_labels: dict[str, str] = {}
         if base.timed_out:
             base_labels["baseline_timeout"] = "true"
@@ -471,9 +492,47 @@ def build_item(
                 **base_labels,
             },
         )
+        # the in-run qualification: the RED proof and the baseline just measured, in
+        # this posture — a factory item has no gold, so there is no gold fact to record
+        qualification = Qualification(
+            qualification_id="",
+            repo=config.name,
+            task_id=oracle.sha,
+            posture_id=posture.posture_id,
+            posture=posture.to_dict(),
+            state=STATE_QUALIFIED,
+            deps=deps.to_dict(),
+            red={"kind": "red_proof", "test_sha256": proof.test_sha256, "failing": []},
+            baseline_failing=tuple(sorted(base.failing)),
+            gold={"clean": None, "note": "a factory item has no gold", "lint": None},
+            run_id=run_id,
+        )
+        task = qualification.project(task).with_(gold_clean=None)
+
+        def fresh_base() -> Workspace:
+            dest_probe = (
+                Path(scratch)
+                / f"envprobe-{config.name}-{item.id}-{oracle.sha[:10]}-{uuid.uuid4().hex[:6]}"
+            )
+            return Workspace.create(repo, oracle.sha, dest_probe, config=config)
+
+        gctx = GradeContext(
+            posture=posture,
+            qualification=qualification,
+            deps=deps,
+            witness=EnvProbeWitness(
+                fresh_base,
+                runner=runner,
+                executor=executor,
+                binding=deps.parent,
+                test_files=(oracle.test_path,),
+                timeout=timeout,
+            ),
+        )
         result = grade(
             ws,
             task,
+            ctx=gctx,
             config=config,
             runner=runner,
             executor=executor,
@@ -485,6 +544,7 @@ def build_item(
             runner=runner.name,
             executor=executor.describe(),
             extra={"process_step": PROCESS_FACTORY, "oracle_branch": oracle.branch},
+            posture=posture.to_dict(),
         )
         # every graded attempt keeps its patch (crb.core.patches), before the pack cites it
         kept = (
@@ -559,6 +619,7 @@ def build_item(
             workspace=ws if keep else None,
             error=error,
             labels=row_labels,
+            grade_context=gctx,
         )
     except BaseException:
         keep = False
@@ -589,6 +650,8 @@ def build_ladder(
     timeout: int = 0,
     trial_prefix: str = "r",
     on_event: EventFn | None = None,
+    posture: Posture | None = None,
+    deps: TaskDeps | None = None,
     keep_patches: bool = True,
 ) -> list[BuildResult]:
     """Climb the escalation ladder: one graded, ledgered attempt per rung until a
@@ -622,6 +685,8 @@ def build_ladder(
             facts=facts,
             timeout=timeout,
             on_event=on_event,
+            posture=posture,
+            deps=deps,
             keep_patches=keep_patches,
         )
         results.append(res)

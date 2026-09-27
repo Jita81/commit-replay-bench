@@ -54,6 +54,7 @@ from crb.core.run import RunSpec, run
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.posture import witnessed_context_for
 
 RUFF = shutil.which("ruff") or str(Path(__file__).resolve().parents[1] / ".venv" / "bin" / "ruff")
 
@@ -161,6 +162,16 @@ def _run(
         evidence_dir=tmp_path / "evidence",
         mode=mode,
         ladder=adapter.ladder_labels(ladder),
+        # ADR-0019 (PR #56): every run grades each task in its own posture context
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=runner,
+            executor=LocalExecutor(),
+            scratch=tmp_path / "scratch",
+            # the fixture's gold passes belt 5, so a lint rejection is the model's (ADR-0019)
+            gold_lint=True,
+        ),
     )
     events: list[tuple[str, dict[str, Any]]] = []
     resolved = (

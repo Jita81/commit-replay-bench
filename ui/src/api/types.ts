@@ -149,10 +149,34 @@ export interface WorkerProbeData {
   unconfirmed_containers?: number
 }
 
+/**
+ * Where tests and the builder run, as the API reads the deployment's environment (ADR-0023):
+ * production refuses an unsealed posture unless `CRB_ALLOW_UNSEALED_PROD=1`, and then says so.
+ */
+export interface DeploymentPosture {
+  env: 'dev' | 'prod'
+  /** `docker` (sealed) or `local`. */
+  sandbox_executor: string
+  /** `docker` (sealed) or `host`. */
+  builder_executor: string
+  sealed: boolean
+  /** Production running unsealed under `CRB_ALLOW_UNSEALED_PROD=1`; every run's apparatus carries it. */
+  unsealed_prod_override: boolean
+  /**
+   * The factory's own posture: a factory build hands the builder a host worktree, never a
+   * container. `refused` in prod without the override (the worker refuses the run); `host`
+   * otherwise (in prod every factory run's apparatus then carries the override). Absent on an
+   * older server.
+   */
+  factory_builds?: 'refused' | 'host'
+}
+
 /** `GET /health` — overall status is the worst probe. */
 export interface Health {
   status: ProbeStatus
   probes: Probe[]
+  /** The deployment's posture (ADR-0023). Absent on an older server. */
+  posture?: DeploymentPosture
 }
 
 /** `GET /version` — the package, the apparatus (the instrument's version, ADR-0001) and the routing policy. */
@@ -332,14 +356,32 @@ export interface RepoProfile {
   cells: ProfileCell[]
 }
 
+/**
+ * `GET /repos/{name}/pool` — which stretch of history the mined tasks come from. The miner
+ * takes the newest non-merge commits that touch both source and tests, so this is the pool's
+ * recency bias, shown. The history fields and `share` are `null` when the clone cannot be read
+ * on the API host, and `history_unavailable` says why.
+ */
+export interface RepoPool {
+  repo: string
+  n_tasks: number
+  oldest_authored: string | null
+  newest_authored: string | null
+  history_commits: number | null
+  history_first_authored: string | null
+  window_commits: number | null
+  share: number | null
+  history_unavailable: '' | 'no_clone_path' | 'clone_path_escapes' | 'clone_unavailable' | 'git_failed'
+}
+
 // ---------------------------------------------------------------------------
 // Runs
 // ---------------------------------------------------------------------------
 
 /** What a run does; `probe` is queued from the repo page, the rest from the run dialog. */
-export type RunKind = 'mine' | 'replay' | 'blind' | 'oracle' | 'controls' | 'probe' | 'label' | 'factory'
+export type RunKind = 'mine' | 'replay' | 'blind' | 'oracle' | 'controls' | 'probe' | 'label' | 'factory' | 'qualify'
 /** The kinds an operator can start from the run dialog (a probe has its own button). */
-export const RUN_KINDS: readonly RunKind[] = ['mine', 'replay', 'blind', 'oracle', 'controls']
+export const RUN_KINDS: readonly RunKind[] = ['mine', 'qualify', 'replay', 'blind', 'oracle', 'controls']
 
 /** Queue lifecycle; the three in `RUN_TERMINAL` are final. */
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
@@ -498,6 +540,49 @@ export interface RunCreateRequest {
   deliver?: boolean
   deliver_override?: boolean
   max_rework?: number
+  /**
+   * ADR-0019 — qualify every task with no record in the posture that will grade it before
+   * any builder call (no model spend). On by default; `false` makes the submit refuse a run
+   * with nothing qualified (409 `posture_unqualified`).
+   */
+  qualify_first?: boolean
+  /** ADR-0019 — stop after this many consecutive environment rows (default 2; 0 = off). */
+  env_stop?: number
+}
+
+/** One refusal code of a repository's posture, with what to do (ADR-0019 §9). */
+export interface PostureRefusal {
+  code: string
+  n: number
+  message: string
+  fix: string
+  doc: string
+}
+
+/** How one task's record differs from its record in another posture. */
+export interface PostureDelta {
+  task_id: string
+  reference_posture_id: string
+  reference_posture_class: string
+  same_fingerprint: boolean
+  only_here: string[]
+  only_there: string[]
+}
+
+/** `GET /repos/{name}/posture` — the posture most recently recorded for the repository. */
+export interface RepoPosture {
+  repo: string
+  executor: string
+  image_ref: string
+  posture_id: string
+  posture_class: string
+  posture: Record<string, string>
+  provisioning: { enabled?: boolean }
+  qualified: number
+  total: number
+  refusals_by_code: PostureRefusal[]
+  delta: PostureDelta[]
+  stale_reason: string
 }
 
 /** `GET /runs` filters. */
@@ -872,6 +957,12 @@ export interface CapabilitySummary {
   n_total: number
   false_q1_total: number
   apparatus_versions: string[]
+  /** ADR-0019 §8 — the posture class the map reads (the deployment's by default). */
+  posture_class?: string
+  /** Rows `posture=all` left out because the task's oracle differs between classes. */
+  excluded_posture_divergent?: number
+  /** Pre-2.3 docker rows graded against a baseline measured elsewhere — excluded. */
+  unqualified_posture?: number
 }
 
 /** `GET /capability-map` — only MEASURED cells are listed; absence is `NOT_YET_MEASURED`. */
@@ -1330,6 +1421,8 @@ export interface Settings {
     /** The BUILDER posture (`BuilderSettings.redacted()`): where the model-driven builder runs. */
     builder?: { executor: string; image?: string; egress_network?: string; allow_hosts?: string[] }
     sandbox?: { executor: string; image?: string }
+    /** Dependency provisioning for the sealed sandbox (ADR-0019; `CRB_PROVISION__*`). */
+    provision?: { enabled?: boolean }
   }
 }
 
@@ -1423,6 +1516,10 @@ export interface IntakeConnection {
   configured: boolean
   credential_set: boolean
   credential_fingerprint: string
+  /** ADR-0022 — a ready ticket waits for an operator's Register act (default true). */
+  require_approval?: boolean
+  /** Tracker authors whose ready tickets skip the Register act (default empty). */
+  approve_authors?: string[]
 }
 
 /** One ticket in the watched column, exactly as the last read saw it. */
@@ -1451,6 +1548,10 @@ export interface IntakeRow {
   /** A published stop reason when this ticket's own step stopped; '' otherwise. */
   stopped: string
   stopped_advice: string
+  /** ADR-0022 — a ready draft waiting for an operator's Register act. */
+  awaiting_approval?: boolean
+  /** Who created the ticket, as the tracker names them (the allowlist's input). */
+  author?: string
 }
 
 /** What the last poll did, and why it stopped if it did. */
@@ -1463,10 +1564,14 @@ export interface IntakePoll {
   commented: number
   registered: number
   queued: number
+  /** Ready drafts left waiting for an operator's Register act (ADR-0022). */
+  awaiting?: number
   stopped: string
   detail: string
   advice: string
   at: string
+  /** Another pass held the repository's lease; this one did nothing. */
+  busy?: boolean
 }
 
 /** `GET /factory/{repo}/intake` — the listener, the connection, the last poll, the column. */

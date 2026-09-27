@@ -69,7 +69,7 @@ describe('RunsPage', () => {
     const options = within(kind)
       .getAllByRole('option')
       .map((o) => (o as HTMLOptionElement).value)
-    expect(options).toEqual(['', 'mine', 'replay', 'blind', 'oracle', 'controls', 'probe', 'label', 'factory'])
+    expect(options).toEqual(['', 'mine', 'qualify', 'replay', 'blind', 'oracle', 'controls', 'probe', 'label', 'factory'])
     expect(screen.getByText(/Every mine, replay, blind, oracle, controls and factory run/)).toBeInTheDocument()
     expect(await screen.findByText('run-fact')).toBeInTheDocument()
   })

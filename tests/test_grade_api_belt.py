@@ -48,6 +48,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.posture import grade_adhoc, posture_row
 
 try:
     from tests import conftest_langs as langs
@@ -124,7 +125,7 @@ def test_go_belt_six(tmp_path: Path, executor: LocalExecutor, case: str) -> None
         if edit:
             _edit(ws, *edit)
         task = _lang_task(sha, cfg, gorepo.TEST_SUB, gorepo.SRC_SUB)
-        res = g.grade(
+        res = grade_adhoc(
             ws, task, config=cfg, runner=get_runner(cfg), executor=executor, evaluate_api=True
         )
         assert res.belts.target_green is True and res.belts.no_new_failures is True
@@ -182,7 +183,7 @@ def test_python_belt_six(
         ws.overlay_sources([pr.SRC])
         if old:
             _edit(ws, pr.SRC, old, new)
-        res = g.grade(
+        res = grade_adhoc(
             ws, task, config=pyrepo.config, runner=runner, executor=executor, evaluate_api=True
         )
         assert res.belts.target_green is True, res.to_dict()
@@ -202,7 +203,7 @@ def test_belt_six_is_off_by_default_and_then_the_grade_and_row_are_unchanged(
     try:
         ws.overlay_sources([pr.SRC])
         _edit(ws, pr.SRC, "def add(a: int, b: int)", "def add(a: int, b: int, c: int = 0)")
-        res = g.grade(ws, task, config=pyrepo.config, runner=runner, executor=executor)
+        res = grade_adhoc(ws, task, config=pyrepo.config, runner=runner, executor=executor)
         assert res.clean is True and res.api_run is None and res.belts.api_stable is None
         d = res.to_dict()
         assert "api_stable" not in d and "api_run" not in d
@@ -247,7 +248,7 @@ def test_node_belt_six(
                 )
             (ws.root / noderepo.SRC_ADD).write_text(text.replace(old, new), encoding="utf-8")
         task = _lang_task(sha, cfg, test_file, src)
-        res = g.grade(
+        res = grade_adhoc(
             ws, task, config=cfg, runner=get_runner(cfg), executor=executor, evaluate_api=True
         )
         assert res.belts.target_green is True and res.belts.no_new_failures is True, res.to_dict()
@@ -288,7 +289,7 @@ def test_a_clean_row_that_records_belt_six_failed_is_a_false_q1() -> None:
 
 
 def test_an_unpinned_row_derives_api_from_its_label_and_the_split_counts_it() -> None:
-    row = GradeRow(
+    row = posture_row(
         repo="r",
         task_id="b" * 40,
         clean=False,

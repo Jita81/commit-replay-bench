@@ -1,0 +1,21 @@
+{
+ "duration_s": 8.908,
+ "executor": {
+  "cpus": "2",
+  "executor": "docker",
+  "image": "crb-sandbox-go:main-8ab88ad",
+  "memory": "2g",
+  "network": "none",
+  "pids_limit": 512,
+  "user": "65534:65534"
+ },
+ "failing": [],
+ "green": true,
+ "parse_error": "",
+ "probe": "./...",
+ "repo": "cobra",
+ "returncode": 0,
+ "runner": "go",
+ "tail": "letionWithActiveHelp\",\"Elapsed\":0}\n{\"Time\":\"2026-09-25T21:36:38.878056625Z\",\"Action\":\"output\",\"Package\":\"github.com/spf13/cobra\",\"Output\":\"PASS\\n\"}\n{\"Time\":\"2026-09-25T21:36:38.87885112Z\",\"Action\":\"output\",\"Package\":\"github.com/spf13/cobra\",\"Output\":\"ok  \\tgithub.com/spf13/cobra\\t1.436s\\n\"}\n{\"Time\":\"2026-09-25T21:36:38.878871787Z\",\"Action\":\"pass\",\"Package\":\"github.com/spf13/cobra\",\"Elapsed\":1.436}",
+ "timed_out": false
+}

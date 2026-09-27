@@ -255,3 +255,22 @@ Behind `CRB_BUILDER__EXECUTOR=docker` (`crb.builders.container`, wired through
   Rejected for the builder: it must write everywhere in the checkout; the worker's own uid
   keeps ownership sane on every platform without widening permissions.
 - **gVisor / Kata for the builder.** Deferred, as in ADR-0005: the `Executor` seam allows it.
+
+## Amendment 2026-09-25 — ADR-0019: the sealed builder may read the parent's dependency set, never the gold's
+
+Dependencies are provisioned per task (ADR-0019): the parent's and the gold's lockfiles are
+read from git objects, fetched outside every test container and sealed read-only. Two things
+follow for this ADR:
+
+- **The egress sidecar is shared.** `crb.builders.sidecar.EgressSidecar` is the
+  `--internal` network and CONNECT-only proxy this ADR introduced, extracted from
+  `ContainerSession` with no change in behaviour; the dependency fetch runs behind the same
+  program with the registry hosts as its allowlist. The builder's allowlist does not change:
+  model endpoints only. A package registry is never on it.
+- **The builder may be given the parent's set, never the gold's.** A builder that runs the
+  repository's tests before it answers needs the dependencies the parent tree declares. When
+  a task's dependencies are bound, the builder container mounts `TaskDeps.builder` — the
+  parent-only set — read-only with the same offline environment as a test container. The
+  gold's set is never mounted where a builder can read it: its module list is part of the
+  answer (SECURITY T21). A trial whose own manifests step outside the task's closure is
+  disqualified at grading, never graded against a set it was not given.

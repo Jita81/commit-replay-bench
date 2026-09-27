@@ -11,22 +11,29 @@
  * What it does: Makes the entry point of the factory legible before any money is spent: a
  *               reader can see which ticket the product understood, as what kind of change
  *               and with what confidence, what it still needs answering, what the map says
- *               about work of that kind and size, and where the item went. An operator has
- *               three acts — switch the listener on or off, re-read the column now, post
- *               the feedback again — each with a success state naming what happened
- *               (tickets read, comments posted, items registered) and an error that says
- *               what to do (tracker unreachable, credential missing, the write refused).
+ *               about work of that kind and size, and where the item went. A ready ticket
+ *               is a DRAFT until an operator registers it (ADR-0022): the row says it is
+ *               waiting and who wrote the ticket. An operator has four acts — switch the
+ *               listener on or off, re-read the column now, post the feedback again, and
+ *               Register a waiting draft (as the revision they read) — each with a success
+ *               state naming what happened (tickets read, comments posted, items registered,
+ *               drafts waiting) and an error that says what to do (tracker unreachable,
+ *               credential missing, the write refused, the ticket changed since, another
+ *               pass busy).
  *               A row's `item_url` is the ABSOLUTE address written on the customer's ticket;
  *               in here the item page is one route away, so the screen builds its own path.
  * How:          `useRepoParam({ defaultToLatest: true })` → `useIntake` (a pure read: no
  *               tracker is contacted) → `useSetIntakeListener` (PUT, operator) and
- *               `usePollIntake` (POST, operator; `force` is "post the feedback again").
+ *               `usePollIntake` (POST, operator; `force` is "post the feedback again") →
+ *               `useRegisterIntakeTicket` (POST …/intake/{key}/register, operator).
  *               Every stop reason the server serves comes with the server's own advice, so
  *               this screen never invents a way forward. The row's feedback is the comment
  *               verbatim, so the screen and the ticket can never disagree.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
- * Works with:   ui/src/api/hooks.ts (`useIntake`, `useSetIntakeListener`, `usePollIntake`),
+ * ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
+ *               docs/adr/0022-intake-approval-by-default.md
+ * Works with:   ui/src/api/hooks.ts (`useIntake`, `useSetIntakeListener`, `usePollIntake`,
+ *               `useRegisterIntakeTicket`),
  *               ui/src/api/types.ts (`Intake`, `IntakeRow`),
  *               src/crb/server/routes/factory.py (the three routes),
  *               src/crb/server/intake.py (the listener these acts drive),
@@ -42,7 +49,7 @@
 
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { useAllRepos, useIntake, usePollIntake, useSetIntakeListener } from '../../api/hooks'
+import { useAllRepos, useIntake, usePollIntake, useRegisterIntakeTicket, useSetIntakeListener } from '../../api/hooks'
 import type { Intake, IntakeRow } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -92,8 +99,26 @@ function Stopped({ reason, advice }: { reason: string; advice: string }) {
   )
 }
 
-/** One ticket: what it is, what the product understood, what is still missing, where it went. */
-function Row({ row, repo }: { row: IntakeRow; repo: string }) {
+/** One ticket: what it is, what the product understood, what is still missing, where it went —
+ *  and, for a ready draft, the operator's Register act (ADR-0022). */
+function Row({
+  row,
+  repo,
+  operator,
+  listening,
+  onRegister,
+  registering,
+}: {
+  row: IntakeRow
+  repo: string
+  operator: boolean
+  /** The repository's listener is on. Registering writes on the board, and the switch is
+   *  the consent to write on it, so with it off the act is not offered (the server refuses
+   *  it with `intake_listener_off` anyway — PR #55 review). */
+  listening: boolean
+  onRegister: (row: IntakeRow) => void
+  registering: boolean
+}) {
   const display = LABEL_DISPLAY[row.label]
   const route = row.cell_route
   const unclassified = row.capability_class === UNCLASSIFIED || !row.capability_class
@@ -156,6 +181,11 @@ function Row({ row, repo }: { row: IntakeRow; repo: string }) {
                   </Link>
                   {row.is_evolution ? ` (replaces ${row.supersedes})` : ''}
                 </>
+              ) : row.awaiting_approval ? (
+                <>
+                  Waiting for an operator to register it as <span className="font-mono">{row.item_id}</span>
+                  {row.is_evolution ? ` (it would replace ${row.supersedes})` : ''} — nothing is on the frozen backlog until then.
+                </>
               ) : (
                 <>
                   Would be registered as <span className="font-mono">{row.item_id}</span> — nothing is registered until the questions are answered.
@@ -165,6 +195,23 @@ function Row({ row, repo }: { row: IntakeRow; repo: string }) {
           </Hint>
         </div>
       </dl>
+      {row.awaiting_approval && (
+        <p className="mt-2 text-sm">
+          <Hint id="item.intake.author">
+            <span>
+              Ticket written by <span className="font-mono">{row.author || 'someone the tracker did not name'}</span>. Read the comment below before you register it: what it says becomes the
+              backlog item.
+            </span>
+          </Hint>
+        </p>
+      )}
+      {row.awaiting_approval && !listening && (
+        <p className="mt-2 text-sm">
+          <Hint id="item.intake.register_off">
+            <span>The listener is off, and registering writes on the ticket. Switch the listener on to register it.</span>
+          </Hint>
+        </p>
+      )}
       {row.stopped && (
         <p className="mt-2 text-sm text-status-red">
           <Hint id="item.intake.stopped">
@@ -211,6 +258,11 @@ function Row({ row, repo }: { row: IntakeRow; repo: string }) {
             Open the item
           </LinkButton>
         )}
+        {row.awaiting_approval && operator && listening && (
+          <Button variant="filled" size="sm" onClick={() => onRegister(row)} disabled={registering} hint="button.intake.register">
+            Register this ticket
+          </Button>
+        )}
       </div>
     </li>
   )
@@ -223,6 +275,7 @@ export function IntakePage() {
   const intake = useIntake(repo)
   const setListener = useSetIntakeListener()
   const poll = usePollIntake()
+  const register = useRegisterIntakeTicket()
   const [column, setColumn] = useState('')
   const [done, setDone] = useState('')
 
@@ -251,6 +304,27 @@ export function IntakePage() {
     )
   }
 
+  function registerTicket(row: IntakeRow) {
+    setDone('')
+    register.mutate(
+      { repo, key: row.key, revision: row.revision },
+      {
+        onSuccess: (next) => {
+          // PR #55 review: the act stands when the tracker refuses the queued label, note or
+          // link — the returned row carries that stop — so the message never claims the
+          // ticket was told when it was not
+          const after = next.rows.find((r) => r.key === row.key)
+          const registered = `Registered ticket ${row.key} as ${after?.item_id || row.item_id}. It is on the frozen backlog and queued for the factory`
+          say(
+            after?.stopped
+              ? `${registered}, but the ticket could not be updated to say so. ${after.stopped_advice}`
+              : `${registered}, and the ticket has been told.`,
+          )
+        },
+      },
+    )
+  }
+
   function readNow(force: boolean) {
     setDone('')
     poll.mutate(
@@ -262,7 +336,8 @@ export function IntakePage() {
           if (p.stopped) return say('')
           say(
             `Read the column “${p.column}”: ${fmtInt(p.seen)} ticket(s) seen, ${fmtInt(p.read)} read, ${fmtInt(p.commented)} commented on, ` +
-              `${fmtInt(p.registered)} registered${p.queued ? `, ${fmtInt(p.queued)} waiting for the factory run to finish` : ''}.`,
+              `${fmtInt(p.registered)} registered${p.queued ? `, ${fmtInt(p.queued)} waiting for the factory run to finish` : ''}` +
+              `${p.awaiting ? `, ${fmtInt(p.awaiting)} waiting for an operator to register them` : ''}.`,
           )
         },
       },
@@ -276,7 +351,7 @@ export function IntakePage() {
         title="Work arriving from your board"
         purpose={
           <>
-            A ticket moved into one watched column is the request to manufacture: the ticket <em>is</em> the backlog item, and the column is the consent gate. Before anything is
+            A ticket moved into one watched column is the request to manufacture: the ticket <em>is</em> the backlog item, and an operator registers it here before any of it is built. Before anything is
             built, the product tells the ticket what a good acceptance test still needs answering, and what it knows about changes of that kind and size (the{' '}
             <Term id="cell">cell</Term>’s <Term id="deliver">route</Term>, with its n and interval). It never edits any other field, never creates a ticket, and never reads a
             column it was not pointed at.
@@ -313,6 +388,7 @@ export function IntakePage() {
           )}
           {setListener.isError && <ErrorState error={setListener.error} />}
           {poll.isError && <ErrorState error={poll.error} />}
+          {register.isError && <ErrorState error={register.error} />}
           {last?.stopped && <Stopped reason={last.stopped} advice={last.advice} />}
 
           <Card title="The listener" eyebrow="one column · one repository · off until somebody switches it on">
@@ -352,6 +428,17 @@ export function IntakePage() {
                   value: `every ${fmtInt(connection.poll_s)} seconds`,
                   note: 'The worker reads the column on this timer while the listener is on.',
                   hint: 'stat.intake.poll_s',
+                },
+                {
+                  key: 'Who registers a ready ticket',
+                  value: connection.require_approval === false ? 'Nobody: registered as soon as it is ready' : 'An operator, on this screen',
+                  note:
+                    connection.require_approval === false
+                      ? 'This deployment registers ready tickets unattended; the record says so on every one.'
+                      : connection.approve_authors && connection.approve_authors.length
+                        ? `Except tickets written by ${connection.approve_authors.join(', ')}, which this deployment registers without the act.`
+                        : 'A ready ticket waits below until an operator registers it. Nobody is exempt.',
+                  hint: 'stat.intake.approval',
                 },
                 {
                   key: 'When a pull request merges',
@@ -403,7 +490,8 @@ export function IntakePage() {
                 <Hint id="stat.intake.last_poll">
                   <span>
                     {fmtInt(last.seen)} ticket(s) in the column, {fmtInt(last.read)} read this time, {fmtInt(last.skipped)} already handled at that revision, {fmtInt(last.registered)}{' '}
-                    registered{last.queued ? `, ${fmtInt(last.queued)} waiting for a factory run to finish` : ''}.
+                    registered{last.queued ? `, ${fmtInt(last.queued)} waiting for a factory run to finish` : ''}
+                    {last.awaiting ? `, ${fmtInt(last.awaiting)} waiting for an operator to register them` : ''}.
                   </span>
                 </Hint>
               </p>
@@ -414,7 +502,7 @@ export function IntakePage() {
                 title={listener.enabled ? 'No ticket has entered the watched column yet' : 'Nothing has been read'}
                 reason={
                   listener.enabled
-                    ? 'Move a ticket into the watched column on your board. The product reads it, tells it what a good acceptance test still needs, and registers it when the gaps close.'
+                    ? 'Move a ticket into the watched column on your board. The product reads it, tells it what a good acceptance test still needs, and drafts it when the gaps close — an operator registers the draft here.'
                     : 'Switch the listener on to read the column. Until then nothing on that board is touched.'
                 }
                 data-testid="intake-empty"
@@ -422,7 +510,7 @@ export function IntakePage() {
             ) : (
               <ul className="m-0 list-none p-0">
                 {data.rows.map((row) => (
-                  <Row key={row.key} row={row} repo={repo} />
+                  <Row key={row.key} row={row} repo={repo} operator={operator} listening={listener.enabled} onRegister={registerTicket} registering={register.isPending} />
                 ))}
               </ul>
             )}

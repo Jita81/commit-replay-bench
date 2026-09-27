@@ -848,3 +848,85 @@ def test_intent_classes_extend_the_closed_vocabulary() -> None:
     assert set(CLASS_VOCABULARY) == set(ALL_CLASSES) | set(INTENT_CLASSES)
     # the path classifier never returns an intent-only class
     assert classify_commit(["command.go", "completions.go"]) == "bug.fix"
+
+
+# ---------------------------------------------------------------------------
+# ADR-0019: the posture stamp on a spec is written only when set
+# ---------------------------------------------------------------------------
+
+
+def _pinned_spec(**kw: Any) -> TaskSpec:
+    return TaskSpec(
+        task_id="a" * 40,
+        repo="r",
+        subject="s",
+        authored="2026-01-01T00:00:00Z",
+        test_files=("tests/test_x.py",),
+        src_files=("x.py",),
+        target_tests=("tests/test_x.py",),
+        belt_scope=("tests/test_x.py",),
+        baseline_failing=("tests/test_y.py::t",),
+        red_checked=True,
+        gold_clean=True,
+        **kw,
+    )
+
+
+def test_a_spec_without_a_posture_round_trips_byte_identical() -> None:
+    """A spec (and the pack that carries it) written before ADR-0019 hashes exactly as it
+    did: the two new fields are absent from the dict unless set. The hashes were pinned on
+    the tree before the fields existed."""
+    from crb.core.evidence import (
+        ApparatusStamp,
+        BuilderRef,
+        EvidencePack,
+        canonical_json,
+        sha256_text,
+    )
+    from crb.core.grade import MODE_SIGHTED, Belts, GradeResult
+
+    t = _pinned_spec()
+    d = t.to_dict()
+    assert "posture_id" not in d and "qualification_ref" not in d
+    assert sha256_text(canonical_json(d)) == (
+        "9a95158a1278e8675e946c8614fb85696d701fd915cfd316712d51f5af02c5a5"
+    )
+    assert TaskSpec.from_dict(d) == t
+    pack = EvidencePack(
+        task=t,
+        grade=GradeResult(
+            task_id="a" * 40,
+            repo="r",
+            mode=MODE_SIGHTED,
+            clean=True,
+            belts=Belts(True, True, True, True),
+        ),
+        apparatus=ApparatusStamp(
+            apparatus_version="2.2",
+            crb_version="2.0.0a1",
+            runner="pytest",
+            executor={"executor": "local"},
+        ),
+        builder=BuilderRef(name="fixture_gold", mode="sighted"),
+        run_id="r1",
+        trial="r1",
+        actor="a",
+        created="2026-09-25T00:00:00Z",
+    )
+    assert pack.pack_hash == "cbea0f20e29ad6e22ed38c32d94fce89fd7ed8fee010b44f8f48a961cb4af3ec"
+    stamped = _pinned_spec(posture_id="pst_" + "1" * 24, qualification_ref="qid")
+    sd = stamped.to_dict()
+    assert sd["posture_id"] == "pst_" + "1" * 24 and sd["qualification_ref"] == "qid"
+    assert TaskSpec.from_dict(sd) == stamped
+    assert stamped.with_(subject="t").posture_id == "pst_" + "1" * 24
+
+
+def test_sandbox_tree_is_validated() -> None:
+    assert RepoConfig(name="r", language=Language.GO).sandbox_tree == ""
+    assert RepoConfig(name="r", language=Language.GO, sandbox_tree="copy").sandbox_tree == "copy"
+    with pytest.raises(ValueError, match="sandbox_tree"):
+        RepoConfig(name="r", language=Language.GO, sandbox_tree="scratch")
+    plain = RepoConfig(name="r", language=Language.GO).to_dict()
+    assert "sandbox_tree" not in plain  # a stored config is unchanged unless it chooses
+    ro = RepoConfig.from_dict("r", {**plain, "sandbox_tree": "readonly"})
+    assert ro.sandbox_tree == "readonly" and ro.to_dict()["sandbox_tree"] == "readonly"

@@ -1,6 +1,6 @@
 # ADR-0024 — "Clean" means working, by construction: the format step, the finish gate, belt 6 `api_stable`, and one switchboard
 
-**Status:** Accepted (operator decision DL-054; built in the value wave, stream W)
+**Status:** Accepted (operator decision DL-062; built in the value wave, stream W)
 **Date:** 2026-09-25
 **Apparatus impact:** none — no `APPARATUS_VERSION` bump and no new belt set; the checks
 are a hashed stamp and a read filter, as ADR-0019 makes posture (§6). The format step and

@@ -1,5 +1,6 @@
 *.egg-info/
 *.py[cod]
+.coverage
 .DS_Store
 .claude/
 .crb/
@@ -9,5 +10,6 @@
 .venv/
 __pycache__/
 build/
+coverage.xml
 dist/
 venv/

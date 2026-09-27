@@ -60,6 +60,7 @@ from crb.core.routing import (
 )
 from crb.factory.backlog import Backlog, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
+from fixtures.posture import posture_row
 
 PACK = "b" * 64
 
@@ -144,7 +145,7 @@ def _row(**kw: Any) -> GradeRow:
     base.setdefault(
         "belt_set", (expected_belt_sets(base["apparatus_version"], "measured") or ("v5",))[0]
     )
-    return GradeRow(**base)
+    return posture_row(**base)
 
 
 def _protocol(err: str, **kw: Any) -> GradeRow:

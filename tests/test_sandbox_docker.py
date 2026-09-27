@@ -8,7 +8,8 @@ already present (CI: the reference image it just built from
 
 * ``qualify`` + ``grade`` run and parse under ``--network=none`` (gold → clean);
 * a test that opens ``https://example.com`` FAILS (the network is truly off);
-* a test that writes ``/work/hacked.txt`` FAILS (the worktree is read-only);
+* the worktree is read-only at ``/src``, and a test that writes ``/work/hacked.txt``
+  writes a throwaway copy — it passes and nothing reaches the host (ADR-0019 §7);
 * the worktree on the host is byte-identical after a sandboxed run;
 * a cancel and the wall clock on ``DockerExecutor.run`` (the non-stream path the grade
   stage uses) kill the CONTAINER, confirmed by the daemon, and ``docker ps`` no longer
@@ -28,7 +29,8 @@ What it is:   The sandbox suite — the instrument inside ``DockerExecutor`` aga
               and proof that the walls hold.
 What it does: Pins that the executor is hardened, that ``qualify`` and ``grade`` run and parse
               under ``--network=none`` (gold → clean), that a test opening ``https://example.com``
-              FAILS, that a test writing ``/work/hacked.txt`` FAILS (read-only worktree), that
+              FAILS, that the worktree is read-only at ``/src`` and a test writing
+              ``/work/hacked.txt`` writes only a throwaway copy, that
               the host worktree is byte-identical after a sandboxed run, and that a cancel /
               the wall clock on ``run()`` ends in a daemon-confirmed ``docker kill`` of the
               container (``kill_confirmed`` True, nothing reported, ``docker ps`` empty).
@@ -66,14 +68,21 @@ from pathlib import Path
 
 import pytest
 
-from crb.core.execution import Command, DockerExecutor, DockerSettings, UnconfirmedKill
+from crb.core.execution import (
+    TREE_COPY_MARKER,
+    TREE_COPY_RC,
+    Command,
+    DockerExecutor,
+    DockerSettings,
+    UnconfirmedKill,
+)
 from crb.core.git import GitRepo
-from crb.core.grade import grade
 from crb.core.mine import Candidate, qualify
 from crb.core.runners import get_runner
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from fixtures.posture import grade_adhoc as grade
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -235,14 +244,23 @@ def test_network_is_off(trial, task, runner, executor):
     assert "URLError" in run.tail, run.tail
 
 
-def test_worktree_is_read_only(trial, task, runner, executor):
+def test_worktree_is_read_only_and_a_test_writes_only_a_throwaway_copy(
+    trial, task, runner, executor
+):
+    """ADR-0019 §7: the worktree is read-only at ``/src``; a test that writes into ``/work``
+    writes a throwaway copy (so it PASSES, as it does on the host), and nothing it writes
+    reaches the host tree."""
     trial.overlay_sources(task.src_files)
     (trial.root / pyrepo_min.WRITE_TEST).write_text(pyrepo_min.WRITE_TEST_SRC, encoding="utf-8")
+    before = _snapshot(trial.root)
     run = runner.run(executor, trial.root, (pyrepo_min.WRITE_TEST,))
-    assert run.red and not run.timed_out
-    assert run.failing == frozenset({pyrepo_min.WRITE_TEST_ID})
-    assert "Read-only file system" in run.tail, run.tail
+    assert run.green, run.tail
     assert not (trial.root / "hacked.txt").exists()
+    assert _snapshot(trial.root) == before
+    src = executor.run(
+        Command(("sh", "-c", "echo owned > /src/hacked.txt"), trial.root, timeout=60)
+    )
+    assert not src.ok and "Read-only file system" in src.combined, src.combined
 
 
 def test_host_worktree_unchanged_after_sandboxed_run(trial, task, config, runner, executor):
@@ -258,6 +276,79 @@ def test_host_worktree_unchanged_after_sandboxed_run(trial, task, config, runner
 
 
 # ---------------------------------------------------------------------------
+# Host modes never hide the tree from the sandbox uid (PR #56, the sandbox-images job)
+# ---------------------------------------------------------------------------
+
+#: What a real worktree can hold that the sandbox uid cannot read as it stands: a
+#: directory with no mode bits, a file only its owner may read (a restrictive umask, a
+#: tool's private cache) and a file with no mode bits at all.
+_HIDDEN = {"locked/inner.txt": "inner", "owner_only.txt": "owner", "no_bits.txt": "none"}
+
+
+def _plant_hidden(root: Path) -> None:
+    for rel, text in _HIDDEN.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text + "\n", encoding="utf-8")
+    (root / "owner_only.txt").chmod(0o600)
+    (root / "no_bits.txt").chmod(0o000)
+    (root / "locked").chmod(0o000)
+
+
+def _unplant_hidden(root: Path) -> None:
+    """Give the owner its modes back so the worktree can be removed whatever the run did."""
+    (root / "locked").chmod(0o755)
+    for rel in _HIDDEN:
+        (root / rel).chmod(0o644)
+
+
+@pytest.mark.parametrize("tree", ["copy", "readonly"])
+def test_a_path_host_modes_hide_from_the_sandbox_uid_still_reaches_the_tests(trial, tree):
+    """The tree the tests see is the WHOLE worktree, whatever its host modes: a mode-000
+    directory, a mode-600 file and a mode-000 file are read inside the container, in the
+    throwaway copy and in the read-only tree alike — never a ``tree_copy_failed`` the model
+    would be disqualified for, never a path silently left out of the copy."""
+    _plant_hidden(trial.root)
+    try:
+        ex = DockerExecutor(DockerSettings(image=IMAGE, tree=tree))
+        r = ex.run(Command(("cat", *_HIDDEN), trial.root, timeout=60))
+    finally:
+        _unplant_hidden(trial.root)
+    assert r.ok and r.env_error == "", r.combined
+    assert r.stdout.split() == list(_HIDDEN.values())
+
+
+def test_a_command_after_a_runner_wrote_its_scratch_still_copies_the_tree(
+    trial, task, runner, executor
+):
+    """The CI failure, reproduced from the product's own steps: the pytest runner declares
+    ``.pytest_scratch`` writable (created 0733 on the host); the NEXT command, which does
+    not declare it, copies the tree including that directory — and must not fail on it."""
+    trial.overlay_sources(task.src_files)
+    assert runner.run(executor, trial.root, (pyrepo_min.TEST_SUB,)).green
+    r = executor.run(Command(("ls", "-A"), trial.root, timeout=60))
+    assert r.ok and r.env_error == "", r.combined
+    assert ".pytest_scratch" in r.stdout.split()
+
+
+def test_the_copy_fails_closed_on_a_path_it_cannot_read_never_drops_it(trial, executor):
+    """Belt and braces under the host-side grant: the copy script itself, run WITHOUT the
+    grant, stops with the tree-copy marker on a directory it cannot read. Under colima GNU
+    tar calls such a directory "removed before we read it" and exits 1 — the exit the script
+    must tolerate for "file changed" — so the rc alone would have dropped it silently."""
+    locked = trial.root / "locked"
+    locked.mkdir()
+    (locked / "inner.txt").write_text("inner\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        argv = executor.build_argv(Command(("true",), trial.root, timeout=60))
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=120, check=False)
+    finally:
+        locked.chmod(0o755)
+    assert r.returncode == TREE_COPY_RC and TREE_COPY_MARKER in r.stderr, r.stderr
+
+
+# ---------------------------------------------------------------------------
 # The non-stream kill path — a cancel or the wall clock ends in a CONFIRMED docker kill
 # ---------------------------------------------------------------------------
 
@@ -270,6 +361,45 @@ def _ps(name: str) -> str:
         check=False,
         timeout=30,
     ).stdout.strip()
+
+
+#: How long a confirmed-killed container may take to disappear from ``docker ps -a``.
+#: ``--rm`` removal runs in the daemon after the kill returns, so an instant check races
+#: it (it failed CI on PRs #49 and #53); a container still listed after this is a leak.
+GONE_WITHIN_S = 15.0
+
+
+def _gone(name: str, within_s: float = GONE_WITHIN_S) -> bool:
+    """``True`` once a SUCCESSFUL ``docker ps -a`` no longer lists ``name``; ``False`` if it
+    is still listed at ``within_s`` seconds — a leaked container, which the tests refuse.
+    Every query is bounded by the time left. A failed query fails the test, and so does a
+    daemon that never answered: empty output from it is not proof of removal. A query that
+    times out after the daemon has already listed the container reads as still listed —
+    it ran to the deadline, which is where a container that stays behind always ends."""
+    deadline = time.monotonic() + within_s
+    seen_listed = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            q = subprocess.run(
+                ["docker", "ps", "-aq", "--filter", f"name={name}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=remaining,
+            )
+        except subprocess.TimeoutExpired:
+            if seen_listed:
+                return False
+            pytest.fail(f"docker ps did not answer within {within_s:g}s while checking {name}")
+        if q.returncode != 0:
+            pytest.fail(f"docker ps failed (rc={q.returncode}) checking {name}: {q.stderr.strip()}")
+        if q.stdout.strip() == "":
+            return True
+        seen_listed = True
+        time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
 
 
 def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
@@ -292,7 +422,7 @@ def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.cancelled and r.returncode == 130 and not r.timed_out and not r.ok
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
-    assert _ps(r.container) == ""
+    assert _gone(r.container), f"container {r.container} still listed: leaked"
 
 
 def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
@@ -308,4 +438,93 @@ def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.timed_out and not r.cancelled and r.returncode == 124
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
-    assert _ps(r.container) == ""
+    assert _gone(r.container), f"container {r.container} still listed: leaked"
+
+
+def test_the_gone_check_still_catches_a_container_that_is_left_behind():
+    """The bounded wait tolerates ``--rm``'s background removal and nothing more: a
+    container that stays behind is still reported as leaked."""
+    name = f"crb-leak-probe-{uuid.uuid4().hex[:10]}"
+    started = subprocess.run(
+        ["docker", "run", "-d", "--name", name, "--pull=never", IMAGE, "sleep", "30"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert started.returncode == 0, started.stderr
+    try:
+        # a real docker ps under a loaded CI runner can take longer than a second; the
+        # container sleeps 30 s, so 10 s still proves "left behind reads as leaked"
+        assert _gone(name, within_s=10.0) is False
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=60)
+    assert _gone(name) is True
+
+
+def test_the_gone_check_fails_when_docker_ps_itself_fails(monkeypatch):
+    """A ``docker ps`` that fails prints nothing — that is not proof the container went.
+    The check fails the test with the daemon's error instead of reading it as removal."""
+
+    def failing(argv, **kw):
+        return subprocess.CompletedProcess(argv, 1, "", "Cannot connect to the Docker daemon")
+
+    monkeypatch.setattr(subprocess, "run", failing)
+    with pytest.raises(pytest.fail.Exception, match="docker ps failed"):
+        _gone("crb-any", within_s=1.0)
+
+
+def test_the_gone_check_never_waits_past_its_bound(monkeypatch):
+    """Every query is bounded by the time left, so a stalled daemon cannot stretch the
+    check past ``within_s``; a container still listed at the deadline reads as leaked."""
+    timeouts: list[float] = []
+
+    def still_listed(argv, **kw):
+        timeouts.append(kw["timeout"])
+        return subprocess.CompletedProcess(argv, 0, "abc123\n", "")
+
+    monkeypatch.setattr(subprocess, "run", still_listed)
+    started = time.monotonic()
+    assert _gone("crb-any", within_s=0.6) is False
+    assert time.monotonic() - started < 1.2
+    assert timeouts and all(0 < t <= 0.6 for t in timeouts), timeouts
+
+
+def test_a_slow_last_query_reads_as_still_listed_not_as_a_silent_daemon(monkeypatch):
+    """A container that stays listed keeps the check polling to its deadline, so the last
+    query only gets the time left and can time out on a loaded runner (CI on PR #60). The
+    daemon already answered that the container was there, so the reading is "still listed
+    at the deadline" (False), never a failure blaming a daemon that did answer."""
+    calls = {"n": 0}
+
+    def listed_then_slow(argv, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return subprocess.CompletedProcess(argv, 0, "abc123\n", "")
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", listed_then_slow)
+    assert _gone("crb-any", within_s=1.0) is False
+    assert calls["n"] == 2
+
+
+def test_a_daemon_that_never_answers_still_fails_the_check(monkeypatch):
+    """With no answer at all there is no reading to report, listed or gone: the check fails
+    the test naming the silent daemon, as before."""
+
+    def silent(argv, **kw):
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", silent)
+    with pytest.raises(pytest.fail.Exception, match="did not answer"):
+        _gone("crb-any", within_s=1.0)
+
+
+def test_a_command_that_reads_no_tree_runs_in_an_empty_scratch(trial, executor):
+    """The toolchain probe's shape (``Command(tree=False)``): nothing of the worktree is in
+    the container — no ``/src``, an empty ``/work`` — and the command still runs, so a
+    posture is resolved without copying the clone it is resolved in (CodeRabbit on PR #56)."""
+    r = executor.run(
+        Command(("sh", "-c", "ls -A /work; test ! -e /src && echo no-src"), trial.root, tree=False)
+    )
+    assert r.ok and r.stdout.split() == ["no-src"], r.combined

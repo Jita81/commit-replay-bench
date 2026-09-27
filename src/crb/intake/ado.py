@@ -44,6 +44,7 @@ Touch when:   Azure DevOps changes an api-version or a field name; a deployment 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -82,6 +83,9 @@ FIELD_REV = "System.Rev"
 FIELD_CHANGED = "System.ChangedDate"
 FIELD_AC = "Microsoft.VSTS.Common.AcceptanceCriteria"
 FIELD_POINTS = "Microsoft.VSTS.Scheduling.StoryPoints"
+#: Who created the work item — an identity object (``uniqueName`` is the sign-in name);
+#: the operator-approval allowlist reads it (ADR-0022).
+FIELD_CREATED_BY = "System.CreatedBy"
 
 #: What the WIQL query asks for. Everything else comes from the work-item read.
 _WIQL_FIELDS = (FIELD_TITLE, FIELD_REV, FIELD_CHANGED)
@@ -122,6 +126,18 @@ class AdoConfig:
 def _quote(value: str) -> str:
     """A WIQL string literal. Single quotes are doubled; nothing else is interpolated."""
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def _identity(value: Any) -> str:
+    """The sign-in name of an Azure DevOps identity field: ``uniqueName`` of the object
+    the REST API returns, or the ``Name <email>`` string an older API version returns —
+    ``""`` when there is none."""
+    if isinstance(value, Mapping):
+        return str(value.get("uniqueName") or value.get("displayName") or "")
+    text = str(value or "")
+    if "<" in text and text.endswith(">"):
+        return text[text.rindex("<") + 1 : -1]
+    return text
 
 
 class AdoTracker:
@@ -236,6 +252,7 @@ class AdoTracker:
             links=links,
             url=self._web_url(str(key)),
             state=str(fields.get(FIELD_STATE, "")),
+            author=_identity(fields.get(FIELD_CREATED_BY)),
         )
 
     # --- write --------------------------------------------------------------------

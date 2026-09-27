@@ -246,6 +246,9 @@ def test_docker_settings_defaults() -> None:
     s = DockerSettings(image="img")
     assert s.user == "65534:65534" and s.memory == "2g" and s.cpus == "2" and s.pids_limit == 512
     assert s.workdir == "/work" and s.extra_ro_mounts == {}
+    assert s.tree == "copy" and s.work_size == "1g"  # ADR-0019 §7: a throwaway tree by default
+    with pytest.raises(SandboxUnavailable, match="sandbox tree"):
+        DockerSettings(image="img", tree="rw")
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +318,7 @@ def test_docker_daemon_probe_failure_fails_closed() -> None:
 
 
 def test_docker_build_argv_has_every_hardening_flag(tmp_path: Path) -> None:
-    d = DockerExecutor(_settings(), runner=FakeRunner(_ok()), verify_daemon=False)
+    d = DockerExecutor(_settings(tree="readonly"), runner=FakeRunner(_ok()), verify_daemon=False)
     cmd = Command(
         ("python", "-m", "pytest", "-q"), tmp_path, env={"PYTHONPATH": "/work/src"}, timeout=90
     )
@@ -365,9 +368,9 @@ def test_docker_build_argv_exec_tmp_is_declared_per_command(tmp_path: Path) -> N
     assert "--read-only" in go and "--cap-drop=ALL" in go and "--network=none" in go
 
 
-def test_docker_build_argv_network_writable_paths_extra_mounts_and_cwd(tmp_path: Path) -> None:
+def test_docker_build_argv_writable_paths_extra_mounts_and_cwd(tmp_path: Path) -> None:
     d = DockerExecutor(
-        _settings(extra_ro_mounts={"/opt/gomod": "/gomod"}, workdir="/w"),
+        _settings(extra_ro_mounts={"/opt/gomod": "/gomod"}, workdir="/w", tree="readonly"),
         runner=FakeRunner(_ok()),
         verify_daemon=False,
     )
@@ -376,12 +379,11 @@ def test_docker_build_argv_network_writable_paths_extra_mounts_and_cwd(tmp_path:
         tmp_path,
         cwd_rel="core",
         writable_paths=("target", "core/target/"),
-        network=True,
         timeout=5,
     )
     argv = d.build_argv(cmd)
-    assert "--network=bridge" in argv and "--network=none" not in argv
-    assert "--cap-drop=ALL" in argv and "--read-only" in argv  # every other cap still applies
+    assert "--network=none" in argv and "--network=bridge" not in argv
+    assert "--cap-drop=ALL" in argv and "--read-only" in argv
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     assert mounts == [
         f"type=bind,src={tmp_path.resolve()},dst=/w,readonly",
@@ -396,6 +398,279 @@ def test_docker_build_argv_network_writable_paths_extra_mounts_and_cwd(tmp_path:
             stat.S_IMODE(p.stat().st_mode) & 0o777 == 0o733
         )  # writable for uid 65534, never world-listable
     assert argv[argv.index("--workdir") + 1] == "/w/core"
+
+
+def test_readonly_tree_keeps_todays_argv(tmp_path: Path) -> None:
+    """``tree: readonly`` is the shape every run had before ADR-0019, token for token."""
+    d = DockerExecutor(_settings(tree="readonly"), runner=FakeRunner(_ok()), verify_daemon=False)
+    argv = d.build_argv(Command(("go", "test", "./..."), tmp_path, exec_tmp=True, timeout=60))
+    assert argv == [
+        "/fake/docker",
+        "run",
+        "--rm",
+        "--pull=never",
+        "--network=none",
+        "--memory=2g",
+        "--cpus=2",
+        "--pids-limit=512",
+        "--user=65534:65534",
+        "--cap-drop=ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,exec,nosuid,nodev,size=512m",
+        "--mount",
+        f"type=bind,src={tmp_path.resolve()},dst=/work,readonly",
+        "--env",
+        "HOME=/tmp",
+        "--env",
+        "CI=1",
+        "--env",
+        "NO_COLOR=1",
+        "--workdir",
+        "/work",
+        "--stop-timeout=60",
+        "crb/py:test",
+        "go",
+        "test",
+        "./...",
+    ]
+
+
+def test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tmpfs_at_work(
+    tmp_path: Path,
+) -> None:
+    """The default tree (ADR-0019 §7): the worktree read-only at ``/src``, a size-capped tmpfs
+    at ``/work`` — ``exec`` because the tree was always executable to its own tests, and
+    ``nosuid,nodev`` — a declared writable path still bound from the worktree and excluded
+    from the copy, and the command run by ``sh`` in the copy after a tar that fails closed."""
+    d = DockerExecutor(_settings(work_size="3g"), runner=FakeRunner(_ok()), verify_daemon=False)
+    cmd = Command(
+        ("python", "-m", "pytest", "-q"),
+        tmp_path,
+        cwd_rel="pkg",
+        env={"PYTHONPATH": "/work"},
+        writable_paths=(".pytest_scratch",),
+        timeout=90,
+    )
+    argv = d.build_argv(cmd)
+    script = (
+        "{ { tar -C /src --warning=no-file-changed --exclude=./node_modules "
+        "--exclude=./.pytest_scratch -cf - .; "
+        "[ $? -le 1 ] || : > /tmp/.crb-copy-failed; } 2> /tmp/.crb-copy-err; "
+        "cat /tmp/.crb-copy-err >&2; "
+        'case "$(cat /tmp/.crb-copy-err)" in *"removed before we read"*) '
+        ": > /tmp/.crb-copy-failed;; esac; } | tar -C /work -xf - "
+        "&& [ ! -e /tmp/.crb-copy-failed ] "
+        "|| { echo crb:tree-copy-failed >&2; exit 97; }; "
+        'cd "/work/$0" && exec "$@"'
+    )
+    assert argv == [
+        "/fake/docker",
+        "run",
+        "--rm",
+        "--pull=never",
+        "--network=none",
+        "--memory=2g",
+        "--cpus=2",
+        "--pids-limit=512",
+        "--user=65534:65534",
+        "--cap-drop=ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,nodev,size=512m",
+        "--mount",
+        f"type=bind,src={tmp_path.resolve()},dst=/src,readonly",
+        "--tmpfs",
+        "/work:rw,exec,nosuid,nodev,size=3g,uid=65534,gid=65534,mode=0700",
+        "--mount",
+        f"type=bind,src={tmp_path.resolve() / '.pytest_scratch'},dst=/work/.pytest_scratch",
+        "--env",
+        "PYTHONPATH=/work",
+        "--env",
+        "HOME=/tmp",
+        "--env",
+        "CI=1",
+        "--env",
+        "NO_COLOR=1",
+        "--workdir",
+        "/work",
+        "--stop-timeout=90",
+        "crb/py:test",
+        "/bin/sh",
+        "-c",
+        script,
+        "pkg",
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+    ]
+    facts = d.posture_facts()
+    assert facts["tree"] == "copy" and facts["limits"].endswith(",work=3g")
+    ro = DockerExecutor(_settings(tree="readonly"), runner=FakeRunner(_ok()), verify_daemon=False)
+    ro_facts = ro.posture_facts()
+    assert ro_facts["tree"] == "readonly" and "work=" not in ro_facts["limits"]
+    assert LocalExecutor().posture_facts() == {
+        "executor": "local",
+        "tree": "inplace",
+        "network": "host",
+    }
+    # the builder's own fixer writes the worktree itself: "." keeps today's shape
+    fixer = d.build_argv(Command(("gofmt", "-w", "x.go"), tmp_path, writable_paths=(".",)))
+    assert "/bin/sh" not in fixer
+    assert f"type=bind,src={tmp_path.resolve()},dst=/work,readonly" in fixer
+    assert any(a.endswith("dst=/work/.") for a in fixer)  # the fixer's rw bind, as before
+
+
+def test_once_the_posture_names_the_image_by_id_every_container_runs_that_id(
+    tmp_path: Path,
+) -> None:
+    """The posture names the image by content id; a container started by tag would run
+    whatever the tag points at NOW — a rebuild mid-run would grade a trial on bytes no
+    posture or qualification names. After ``image_id()`` every argv carries the id."""
+    ident = "sha256:" + "9" * 64
+    d = DockerExecutor(_settings(), runner=FakeRunner(_ok(ident)), verify_daemon=False)
+    before = d.build_argv(Command(("go", "test"), tmp_path))
+    assert "crb/py:test" in before  # nothing has named the id yet (an ad hoc grade)
+    assert d.posture_facts()["image_id"] == ident
+    for tree in ("copy", "readonly"):
+        d.settings = _settings(tree=tree)
+        argv = d.build_argv(Command(("go", "test"), tmp_path))
+        assert ident in argv and "crb/py:test" not in argv, argv
+    assert d.posture_facts()["image_ref"] == "crb/py:test"  # the stamp still names the tag
+
+
+def test_network_true_is_refused_under_docker(tmp_path: Path) -> None:
+    d = DockerExecutor(_settings(), runner=FakeRunner(_ok()), verify_daemon=False)
+    for tree in ("copy", "readonly"):
+        ex = DockerExecutor(_settings(tree=tree), runner=FakeRunner(_ok()), verify_daemon=False)
+        with pytest.raises(SandboxUnavailable, match="never installed in the sandbox"):
+            ex.build_argv(Command(("npm", "ci"), tmp_path, network=True))
+    with pytest.raises(SandboxUnavailable, match="provisioned per task"):
+        d.run(Command(("pip", "install", "x"), tmp_path, network=True))
+
+
+def test_a_bundle_mount_outside_the_store_is_refused(tmp_path: Path) -> None:
+    from crb.core.deps import BundleMount
+    from crb.provision.store import BundleStore
+
+    store = BundleStore(tmp_path / "deps")
+    st = store.stage()
+    (st / "out" / "gomod").mkdir()
+    key = "dep_" + "4" * 64
+    store.seal(st, {"lang": "go", "key": key})
+    good = store.mount(key, "go", "gomod", "/deps/gomod")
+    d = DockerExecutor(_settings(), runner=FakeRunner(_ok()), verify_daemon=False)
+    argv = d.build_argv(Command(("go", "test"), tmp_path, ro_mounts=(good,)))
+    assert f"type=bind,src={good.host_path.resolve()},dst=/deps/gomod,readonly" in argv
+    forged = object.__new__(BundleMount)
+    object.__setattr__(forged, "host_path", tmp_path / "evil" / "go" / key)
+    object.__setattr__(forged, "container_path", "/deps/gomod")
+    object.__setattr__(forged, "key", key)
+    with pytest.raises(SandboxUnavailable, match="registered bundle store"):
+        d.build_argv(Command(("go", "test"), tmp_path, ro_mounts=(forged,)))
+    # a sealed set someone made writable again is refused at use, too
+    (good.host_path).chmod(0o755)
+    with pytest.raises(SandboxUnavailable, match="not sealed"):
+        d.build_argv(Command(("go", "test"), tmp_path, ro_mounts=(good,)))
+
+
+@pytest.mark.parametrize("tree", ["copy", "readonly"])
+def test_a_command_that_reads_no_tree_mounts_none_copies_none_and_walks_none(
+    tmp_path: Path, tree: str
+) -> None:
+    """``Command(tree=False)`` (a toolchain version probe): the sandbox mounts no worktree,
+    runs no copy script and never walks the tree to make it readable — the probe costs a
+    container, not a copy of the clone (CodeRabbit on PR #56). A writable path makes no
+    sense without a tree and is refused."""
+    root = tmp_path / "clone"
+    (root / ".git").mkdir(parents=True)
+    (root / "private.txt").write_text("x", encoding="utf-8")
+    (root / "private.txt").chmod(0o600)
+    fr = FakeRunner(_ok(), _ok("go version go1.26.8 linux/arm64"))
+    d = DockerExecutor(_settings(tree=tree), runner=fr)
+    cmd = Command(("go", "version"), root, tree=False, timeout=30)
+    argv = d.build_argv(cmd)
+    assert not any(str(root) in a for a in argv), argv
+    assert "/bin/sh" not in argv and argv[-2:] == ["go", "version"]
+    assert "/work:rw,noexec,nosuid,nodev,size=16m,uid=65534,gid=65534,mode=0700" in argv
+    assert d.run(cmd).stdout.startswith("go version")
+    assert stat.S_IMODE(os.lstat(root / "private.txt").st_mode) == 0o600  # never walked
+    with pytest.raises(ValueError, match="writable"):
+        Command(("go", "version"), root, tree=False, writable_paths=("out",))
+
+
+@pytest.mark.parametrize("tree", ["copy", "readonly"])
+def test_docker_run_lets_the_sandbox_uid_read_the_tree_never_write_never_through_a_link(
+    tmp_path: Path, tree: str
+) -> None:
+    """Host modes never hide the tree from the sandbox uid (PR #56, sandbox-images): before
+    the container starts, every directory and file the worker owns gains read (and search on
+    a directory) for its owner and for others — a file executable by its owner becomes so
+    for others. No write bit is ever added, the owner's execute bit (git's mode) is never
+    changed, a link is never followed, the command's own writable paths are left to
+    ``build_argv``, and in the copy tree ``node_modules`` (never copied) is not walked."""
+
+    def mode(p: Path) -> int:
+        return stat.S_IMODE(os.lstat(p).st_mode)
+
+    root = tmp_path / "tree"
+    planted = {
+        "locked/sub/inner.txt": 0o644,
+        "owner_only.txt": 0o600,
+        "no_bits.txt": 0o000,
+        "run.sh": 0o700,
+        "node_modules/pkg.js": 0o600,
+    }
+    for rel, m in planted.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("x", encoding="utf-8")
+        (root / rel).chmod(m)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    outside.chmod(0o600)
+    (root / "link").symlink_to(outside)
+    (root / ".pytest_scratch").mkdir()
+    (root / "locked" / "sub").chmod(0o000)
+    (root / "locked").chmod(0o000)
+    try:
+        d = DockerExecutor(_settings(tree=tree), runner=FakeRunner(_ok(), _ok("")))
+        d.run(Command(("pytest",), root, writable_paths=(".pytest_scratch",)))
+        assert mode(root / "locked") == 0o505 and mode(root / "locked" / "sub") == 0o505
+        assert mode(root / "locked" / "sub" / "inner.txt") == 0o644
+        assert mode(root / "owner_only.txt") == 0o604
+        assert mode(root / "no_bits.txt") == 0o404
+        assert mode(root / "run.sh") == 0o705
+        assert mode(outside) == 0o600  # never through the link
+        assert mode(root / ".pytest_scratch") == 0o733  # build_argv's, not widened
+        assert mode(root / "node_modules" / "pkg.js") == (0o600 if tree == "copy" else 0o604)
+    finally:
+        for p in (root / "locked", root / "locked" / "sub"):
+            p.chmod(0o755)
+
+
+def test_tree_copy_failure_is_an_env_error_not_a_verdict(tmp_path: Path) -> None:
+    from crb.core.runners import get_runner
+    from crb.core.spec import Language, RepoConfig
+
+    failed = subprocess.CompletedProcess([], 97, "", "tar: short read\ncrb:tree-copy-failed\n")
+    fr = FakeRunner(_ok(), failed)
+    r = DockerExecutor(_settings(), runner=fr).run(Command(("pytest",), tmp_path))
+    assert r.env_error == "tree_copy_failed" and not r.ok
+    # a test that merely exits 97 is not an environment error
+    fr2 = FakeRunner(_ok(), subprocess.CompletedProcess([], 97, "", "boom"))
+    assert DockerExecutor(_settings(), runner=fr2).run(Command(("x",), tmp_path)).env_error == ""
+    # through a runner: red, no failing id attributed, the environment named
+    runner = get_runner(RepoConfig(name="fx", language=Language.PYTHON, runner="pytest"))
+    fr3 = FakeRunner(_ok(), failed)
+    run = runner.run(DockerExecutor(_settings(), runner=fr3), tmp_path, ("tests/x.py",))
+    assert run.env_error == "tree_copy_failed" and run.red and run.failing == frozenset()
+    assert run.parse_error == "environment: tree_copy_failed"
+    assert run.to_dict()["env_error"] == "tree_copy_failed"
 
 
 def test_docker_run_returns_result_and_records_argv(tmp_path: Path) -> None:

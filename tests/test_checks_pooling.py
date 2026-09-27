@@ -69,6 +69,7 @@ from crb.core.signoff import (
 from crb.core.value import prospective_routing, value_report, value_row_from_grade
 from crb.store.ledger import DbLedger
 from crb.store.models import Signoff
+from fixtures.posture import posture_row
 from fixtures.server_seed import ALPHA, Env, make_env, task_id
 from fixtures.signoff_seed import attested_body, clear_policy
 
@@ -85,7 +86,7 @@ def _row(i: int, *, stamp: str = "", clean: bool = True, belt6: str | None = Non
         labels[LABEL_CHECKS] = stamp
     if belt6 is not None:
         labels[LABEL_API_STABLE] = belt6
-    return GradeRow(
+    return posture_row(
         repo="r",
         task_id=f"{i:016x}",
         clean=clean,
@@ -203,7 +204,7 @@ def test_the_map_reads_the_repositorys_own_arm_and_never_a_pooled_one(env: Env) 
     n_off = _n(env)
     assert n_off > 0
     DbLedger(env.factory).append(
-        GradeRow(
+        posture_row(
             repo=ALPHA,
             task_id=task_id(1),
             clean=True,

@@ -74,14 +74,20 @@ from typing import Any
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
-from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES, GradeResult, grade
-from crb.core.ledger import PROCESS_REPLAY, GradeRow, JsonlLedger, grade_row_from_result
+from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES, GradeContext, GradeResult, grade
+from crb.core.ledger import (
+    PROCESS_REPLAY,
+    GradeRow,
+    JsonlLedger,
+    grade_row_from_result,
+    is_environment_error,
+)
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
 from crb.core.patches import PatchStore, keep_patch
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.spend import EscalationGate
-from crb.core.workspace import Workspace
+from crb.core.workspace import Workspace, opaque_dest
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -107,6 +113,12 @@ class BuildAttempt:
 #: never given the belt scope, the baseline or the grader (ADR-0004).
 BuildFn = Callable[[Workspace, TaskSpec, str, str], BuildAttempt]
 
+#: ``context_for(task) -> GradeContext`` — the task's grade context in the run's posture
+#: (ADR-0019 §3): its qualification there, its dependency bindings and the witness. It
+#: raises :class:`~crb.core.posture.PostureMismatch` (a :class:`SandboxUnavailable`: the
+#: run stops) for a task not qualified in this posture, BEFORE any builder is called.
+ContextFor = Callable[[TaskSpec], GradeContext]
+
 
 @dataclass(frozen=True)
 class RunSpec:
@@ -131,6 +143,15 @@ class RunSpec:
     policy_version: str = ""
     keep_worktrees: bool = False
     extra: Mapping[str, Any] = field(default_factory=dict)
+    #: The grade context of each task in this run's posture (ADR-0019). Required: a run
+    #: without one could only grade against facts another instrument measured.
+    context_for: ContextFor | None = None
+    #: The posture the run grades in (``Posture.to_dict()``), stamped on every pack.
+    posture: Mapping[str, Any] = field(default_factory=dict)
+    #: Called with the task and the row when a graded attempt is an ENVIRONMENT failure
+    #: (the trial's gold control was red in the posture): the task's ladder stops there
+    #: and the caller revokes its qualification (ADR-0019 §5).
+    on_environment: Callable[[TaskSpec, GradeRow], None] | None = None
     #: Where every graded attempt's patch is kept (:mod:`crb.core.patches`); ``None`` keeps
     #: none (a deployment with ``retention.patches`` off, and bare core callers).
     patch_store: PatchStore | None = None
@@ -146,7 +167,13 @@ class RunSpec:
             raise ValueError(f"mode must be one of {MODES}")
         if not self.ladder:
             raise ValueError("ladder must have at least one rung")
+        if self.context_for is None:
+            raise ValueError(
+                "a RunSpec needs context_for — each task's grade context in the run's posture "
+                "(ADR-0019)"
+            )
         object.__setattr__(self, "extra", dict(self.extra))
+        object.__setattr__(self, "posture", dict(self.posture))
 
     def apparatus(self) -> ApparatusStamp:
         """The stamp every pack of this run carries: which instrument produced it."""
@@ -156,6 +183,7 @@ class RunSpec:
             corpus_sha=self.corpus_sha,
             policy_version=self.policy_version,
             extra=dict(self.extra),
+            posture=dict(self.posture),
         )
 
 
@@ -265,10 +293,16 @@ def run_task(
     rows: list[GradeRow] = []
     packs: list[str] = []
     clean = disqualified = False
+    # BEFORE any builder call: the task's context in this posture. A task not qualified
+    # here raises (the run stops) and never reaches build_fn (ADR-0019 §3).
+    assert spec.context_for is not None  # __post_init__ refuses a RunSpec without one
+    ctx = spec.context_for(task)
+    task = ctx.spec(task)
     for i, rung in enumerate(spec.ladder, start=1):
         trial = f"r{i}"
-        dest = spec.scratch / f"run-{spec.config.name}-{task.short_id}-{spec.run_id[:8]}-{trial}"
-        _emit(on_event, "prep.start", task=task.task_id, trial=trial, rung=rung)
+        # opaque: the builder's cwd must not name the future commit (B1); the event maps it
+        dest = opaque_dest(spec.scratch, "run", avoid=(task.task_id,))
+        _emit(on_event, "prep.start", task=task.task_id, trial=trial, rung=rung, worktree=dest.name)
         ws = Workspace.create(repo, task.task_id, dest, config=spec.config)
         try:
             # blind: the held-out tests reach the worktree only inside grade()
@@ -305,6 +339,7 @@ def run_task(
             result = grade(
                 ws,
                 task,
+                ctx=ctx,
                 config=spec.config,
                 runner=spec.runner,
                 executor=spec.executor,
@@ -348,6 +383,10 @@ def run_task(
                     ),
                     **dict(attempt.notes),
                     **({PATCH_NOTE_KEY: kept} if kept is not None else {}),
+                    # the row's own link to the worktree it graded: a reclaimed run writes
+                    # two rows under one trial, so no event key names one attempt (PR #53).
+                    # Last, so a builder's notes cannot point the row at another worktree.
+                    "worktree": dest.name,
                 },
             )
             # pack first, row second: a row exists only for a pack that is on disk
@@ -374,6 +413,12 @@ def run_task(
         # a disqualified attempt is excluded, not retried: climbing would let a
         # tampering builder buy itself another observation
         if clean or disqualified:
+            break
+        # the posture, not the patch, failed: another rung would pay for the same
+        # environment — the ladder stops and the caller revokes the qualification
+        if is_environment_error(result.error):
+            if spec.on_environment is not None:
+                spec.on_environment(task, rows[-1])
             break
         if decision is not None and not decision.climb:
             _emit(
@@ -420,15 +465,8 @@ def run(
         if stop is not None and stop():
             stopped = "cancelled"
             break
-        # None (never gold-checked) is allowed through; only a MEASURED bad gold skips
-        if task.gold_clean is False:
-            _emit(
-                on_event,
-                "run.skip",
-                task=task.task_id,
-                reason="gold not clean — oracle cannot judge",
-            )
-            continue
+        # no discovery-value skip here (ADR-0019): whether the gold passes is a fact of
+        # the task's qualification in THIS posture, which context_for enforces
         try:
             outcome = run_task(spec, repo, task, build_fn, on_event=on_event)
         except SandboxUnavailable as exc:

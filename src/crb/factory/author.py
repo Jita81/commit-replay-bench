@@ -18,14 +18,14 @@ that names the same rung on both sides fails before a penny is spent. Nothing ne
 is invented here; this module only makes the author side configurable so the
 refusal has something to compare.
 
-What the refusal deliberately does NOT catch: the *same model* under a different
-registered builder name (``editblock:m`` authoring, ``openai_agent:m`` building).
-That is a different process, and the label space is closed to the registered
-builder names (:func:`crb.builders.builder_names`), so no label can be invented to
-dodge the check — but an operator who wants model-level separation must choose
-different models. The belts remain the authority either way: the authored test is
-proven RED at the base before it is trusted, staged as a throwaway commit, and
-belt 1 re-checks every test byte after the build.
+Since 2026-09-25 (assessment C3) the refusal also compares the MODEL half of the two
+labels: the same model under a different registered builder name (``editblock:m``
+authoring, ``openai_agent:m`` building) is one model's judgement on both sides of the
+oracle — correlated judgement, not independent evidence — and it is refused, with the
+rung to change named. Aliases are normalised through the pricing table
+(:func:`crb.factory.testfirst.canonical_model`). The belts remain the authority either
+way: the authored test is proven RED at the base before it is trusted, staged as a
+throwaway commit, and belt 1 re-checks every test byte after the build.
 
 The process
 -----------
@@ -44,8 +44,8 @@ What it is:   The configurable test-author rung — a ``TestAuthor`` that writes
               test for an item nobody authored an oracle for, named in the same
               ``builder:model[:provider]`` spelling as a build rung.
 What it does: Turns a rung label into a test author whose identity the loop's existing
-              refusal compares against every build rung (the author rung and the build rung
-              are never the same rung); asks one OpenAI-compatible model for a single test
+              refusal compares against every build rung (the author and a build rung are
+              never the same rung, nor the same model — C3); asks one OpenAI-compatible model for a single test
               file in the repository's own conventions, re-asking on a reply it cannot parse
               or a path the repository does not call a test, and refuses to return anything
               else.

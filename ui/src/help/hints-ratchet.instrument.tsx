@@ -55,6 +55,22 @@ export interface InstrumentScreen {
 
 // ─── shared fixtures ─────────────────────────────────────────────────────────────────────
 
+/** ADR-0019 — the Posture panel's reading: one task qualified, one refused with its fix. */
+const REPO_POSTURE = {
+  repo: 'alpha',
+  executor: 'docker',
+  image_ref: 'crb-sandbox-go:main',
+  posture_id: 'pst_' + '1'.repeat(24),
+  posture_class: 'docker/readonly/sealed',
+  posture: { toolchain: 'go version go1.26.8 linux/arm64' },
+  provisioning: { enabled: false },
+  qualified: 1,
+  total: 2,
+  refusals_by_code: [{ code: 'QUAL_ENV_UNLOADABLE', n: 1, message: '', fix: 'the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run crb deps verify and delete any set it names (the next run fetches it again); otherwise fix the module named', doc: 'docs/OPERATOR.md#7a-when-a-posture-is-unqualified' }],
+  delta: [],
+  stale_reason: '',
+}
+
 const REPO = {
   name: 'alpha',
   language: 'python',
@@ -307,6 +323,15 @@ const INTAKE = {
       capability_class: 'backend.route.add', confidence: 0.5, size: 'M', registered: false, is_evolution: false, supersedes: '',
       cell_route: NO_ROUTE, read_at: '2026-09-22T09:05:00Z', stopped: '', stopped_advice: '',
     },
+    {
+      // ADR-0022 — a ready draft waiting for an operator: the Register act and its author line
+      key: '4714', title: 'Fix the rounding on the invoice total', url: 'https://dev.azure.invalid/contoso/Widgets/_workitems/edit/4714', revision: '5',
+      label: 'crb:ready', state: 'Ready for manufacture', item_id: 'ado-4714', item_url: '/factory?repo=alpha&item=ado-4714',
+      feedback: 'Commit Replay Bench: this ticket is ready to manufacture.', open_questions: [],
+      capability_class: 'bug.fix', confidence: 0.67, size: 'S', registered: false, is_evolution: false, supersedes: '',
+      cell_route: DELIVER, read_at: '2026-09-22T09:05:00Z', stopped: '', stopped_advice: '',
+      awaiting_approval: true, author: 'ada@contoso.invalid',
+    },
   ],
 }
 
@@ -468,7 +493,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/repos/alpha',
     path: '/repos/:name',
     element: <RepoDetail />,
-    api: { 'GET /repos/alpha': REPO, 'GET /repos/alpha/profile': PROFILE, 'GET /repos/alpha/tasks': TASKS, 'GET /repos/alpha/events': REPO_EVENTS, 'GET /health': HEALTH, 'GET /repos': REPOS },
+    api: { 'GET /repos/alpha': REPO, 'GET /repos/alpha/profile': PROFILE, 'GET /repos/alpha/tasks': TASKS, 'GET /repos/alpha/events': REPO_EVENTS, 'GET /repos/alpha/posture': REPO_POSTURE, 'GET /health': HEALTH, 'GET /repos': REPOS },
     roles: ['viewer', 'operator'],
   },
   '/runs': {

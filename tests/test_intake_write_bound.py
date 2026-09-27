@@ -206,15 +206,35 @@ def _tracker() -> FakeTracker:
 
 
 def _poll(home: FactoryHome, tracker: FakeTracker) -> sv.PollReport:
-    return sv.poll_repository(
+    """One poll under the product's default policy and, since ADR-0022, the operator's
+    Register act that a ready draft now waits for: the bound is a bound on the ticket's
+    whole life, so it counts the writes the act makes too (the same three an unattended
+    registration made — the queued label, the queued note, the item link)."""
+
+    def item_url(item_id: str) -> str:
+        return f"https://crb.invalid/factory?item={item_id}"
+
+    report = sv.poll_repository(
         "alpha",
         tracker=tracker,
         listener=sv.ListenerState(enabled=True),
         column="Ready",
         home=home,
         route_for=lambda item: None,
-        item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+        item_url=item_url,
     )
+    for row in report.rows:
+        if row.awaiting_approval:
+            sv.register_approved(
+                "alpha",
+                row.key,
+                revision=row.revision,
+                tracker=tracker,
+                home=home,
+                item_url=item_url,
+                approver="operator:test",
+            )
+    return report
 
 
 def test_one_poll_of_a_ready_ticket_leaves_two_marked_comments_one_label_and_one_link(
@@ -226,7 +246,10 @@ def test_one_poll_of_a_ready_ticket_leaves_two_marked_comments_one_label_and_one
     tracker = _tracker()
     report = _poll(home, tracker)
 
-    assert report.registered == 1
+    # the draft waited for the operator (ADR-0022) and the Register act registered it
+    assert report.awaiting == 1
+    backlog = home.load_backlog()
+    assert backlog is not None and [i.id for i in backlog.items] == ["fake-4711"]
     assert sorted(tracker.comments[KEY]) == sorted(
         [c.marker_for("fake", KEY), c.marker_for("fake", f"{KEY}:queued")]
     )

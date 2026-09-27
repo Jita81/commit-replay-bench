@@ -300,6 +300,9 @@ BELT_BARE = "BARE"
 #: Runner names. Each maps to a class in :mod:`crb.core.runners`.
 RUNNERS: tuple[str, ...] = ("pytest", "go", "node", "vitest", "jest", "mocha", "maven", "cargo")
 
+#: ``RepoConfig.sandbox_tree``: the deployment default, a throwaway copy, or read-only.
+SANDBOX_TREE_CHOICES: tuple[str, ...] = ("", "copy", "readonly")
+
 #: The runner a config gets when it names none (``mocha`` for JavaScript: the census
 #: default; ``node`` / ``vitest`` / ``jest`` must be chosen explicitly).
 _DEFAULT_RUNNER_FOR_LANGUAGE: dict[Language, str] = {
@@ -384,6 +387,10 @@ class RepoConfig:
     sandbox_image: str = ""
     mining: Mapping[str, int] = field(default_factory=dict)
     lint: Mapping[str, Any] = field(default_factory=dict)
+    #: How the sandbox presents the tree to the tests (ADR-0019 §7): ``""`` — the
+    #: deployment's default; ``copy`` — a throwaway copy; ``readonly`` — the worktree
+    #: read-only (a different posture, qualified separately).
+    sandbox_tree: str = ""
     spend: Mapping[str, Any] = field(default_factory=dict)
     checks: Mapping[str, Any] = field(default_factory=dict)
 
@@ -415,6 +422,10 @@ class RepoConfig:
         object.__setattr__(self, "mining", dict(self.mining))
         object.__setattr__(self, "lint", dict(self.lint))
         plan_from_config(self.lint)  # validates the declared shape (raises ValueError)
+        if self.sandbox_tree not in SANDBOX_TREE_CHOICES:
+            raise ValueError(
+                f"sandbox_tree must be one of {SANDBOX_TREE_CHOICES}, got {self.sandbox_tree!r}"
+            )
         object.__setattr__(self, "spend", validate_spend_config(self.spend))
         object.__setattr__(self, "checks", dict(self.checks))
         RepoChecks.from_config(self.checks)  # validates the checks block (raises ValueError)
@@ -496,6 +507,8 @@ class RepoConfig:
     def to_dict(self) -> dict[str, Any]:
         """The native JSON shape (``language`` as its string, ``belt_scope`` as a list)."""
         d = asdict(self)
+        if not self.sandbox_tree:
+            d.pop("sandbox_tree")  # a stored config is unchanged unless it chooses a tree
         d["language"] = self.language.value
         d["belt_scope"] = (
             list(self.belt_scope) if isinstance(self.belt_scope, tuple) else self.belt_scope
@@ -541,6 +554,7 @@ class RepoConfig:
             sandbox_image=str(d.get("sandbox_image", "")),
             mining=mining,
             lint=dict(d.get("lint") or {}),
+            sandbox_tree=str(d.get("sandbox_tree") or ""),
             spend=dict(d.get("spend") or {}),
             checks=dict(d.get("checks") or {}),
         )
@@ -605,6 +619,11 @@ class TaskSpec:
     labels: Mapping[str, str] = field(default_factory=dict)
     path_class: str = ""
     intent: IntentLabel | None = None
+    #: The posture stamp of a spec PROJECTED from a qualification (ADR-0019 §4): the
+    #: posture it was proven in and the qualification it came from. Empty on a discovery
+    #: spec; written by ``to_dict`` only when set, so stored specs stay byte-identical.
+    posture_id: str = ""
+    qualification_ref: str = ""
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[0-9a-f]{7,64}", self.task_id):
@@ -670,6 +689,8 @@ class TaskSpec:
             "path_class": self.path_class,
             "intent": self.intent.to_dict() if self.intent is not None else None,
             "class_source": self.class_source,  # derived; ignored on load
+            **({"posture_id": self.posture_id} if self.posture_id else {}),
+            **({"qualification_ref": self.qualification_ref} if self.qualification_ref else {}),
         }
 
     @classmethod
@@ -712,6 +733,8 @@ class TaskSpec:
             labels=dict(d.get("labels") or {}),
             path_class=str(d.get("path_class") or ""),
             intent=intent,
+            posture_id=str(d.get("posture_id") or ""),
+            qualification_ref=str(d.get("qualification_ref") or ""),
         )
 
     def with_(self, **changes: Any) -> TaskSpec:

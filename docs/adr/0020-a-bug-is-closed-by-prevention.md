@@ -1,6 +1,6 @@
 # ADR-0020 — A bug is closed by prevention: every failure class gets the strongest change it admits, and is closed only when the attempts that saw the change stop showing it
 
-**Status:** Accepted (operator decision DL-053; built in the value wave, stream L). It follows the
+**Status:** Accepted (operator decision DL-061; built in the value wave, stream L). It follows the
 operator's instruction of 2026-09-25 and was chosen by judging a panel of independent designs.
 Amended at the value merge after an adversarial review (§5, §6.6, §6.9–6.11, §6.14 below;
 docs/PREVENTION.md P-019 to P-023).

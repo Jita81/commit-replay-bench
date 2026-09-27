@@ -45,6 +45,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.posture import witnessed_context_for
 
 
 def _spec(
@@ -64,6 +65,10 @@ def _spec(
         ledger=JsonlLedger(tmp / "ledger.jsonl"),
         evidence_dir=tmp / "evidence",
         patch_store=PatchStore.under(tmp / "evidence") if store else None,
+        # ADR-0019 (PR #56): every run grades each task in its own posture context
+        context_for=witnessed_context_for(
+            pyrepo.repo, pyrepo.config, runner=runner, executor=executor, scratch=tmp / "scratch"
+        ),
     )
 
 
@@ -117,8 +122,12 @@ def test_a_red_attempt_keeps_its_patch_too_anchored_by_the_pack_alone(
     outcome = run_task(_spec(pyrepo, runner, executor, tmp_path), pyrepo.repo, feat_task, build_fn)
     (row,) = outcome.rows
     assert not row.clean and not row.disqualified
-    note = kept_patch_note(_pack(tmp_path, row.evidence_pack_hash))
-    assert note["anchored"] is None  # the grade stopped before hashing a diff
+    pack = _pack(tmp_path, row.evidence_pack_hash)
+    note = kept_patch_note(pack)
+    # ADR-0019 (PR #56): the grader reads the builder's diff before any test runs, so a red
+    # attempt's pack now carries the diff anchor too, and the kept patch must match it
+    diff_anchor = pack["grade"]["diff"]["diff_sha256"]  # type: ignore[index]
+    assert note["sha256"] == diff_anchor and note["anchored"] is True
     data = PatchStore.under(tmp_path / "evidence").get(str(note["stored_sha256"]))
     assert data is not None and b"a wrong attempt" in data
 

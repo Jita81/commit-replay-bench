@@ -131,3 +131,39 @@ commit's three added tests; apparatus 2.2]**.
   touching runners or the grader.
 - **Allow the docker socket as a mount for DinD builds.** Rejected explicitly in
   `DockerSettings.__post_init__`.
+
+## Amendment 2026-09-25 — ADR-0019: a throwaway tree, read-only dependency sets and no network for any command
+
+The first replay in the docker posture (F42 part 2, run `0c44ff24…`, cobra) graded every
+attempt `builder_red` because the sealed container held none of the repository's modules,
+and a test that writes into its own package directory (`TestDeadcodeElimination`) failed on
+the read-only worktree while it passes on the host **[measured — n = 3 or 4 rows, each
+`builder_red` with the target red (disputed: 3 observed when the run was cancelled, 4 in
+stream D's reading of the deployment's ledger export, which is not committed — [gap] F42);
+method: the run's grade rows as read on 2026-09-25, and each defect reproduced by hand
+against a fresh clone inside the shipped Go image with `--network none`; apparatus 2.2]**. ADR-0019 decides the fix; this
+ADR's argv changes three ways:
+
+1. **Tests run in a throwaway copy of the tree.** The worktree is bind-mounted read-only at
+   `/src`; every command runs in a copy of it on a tmpfs at `/work` — capped at
+   `DockerSettings.work_size`, owned by the container's uid (mode 0700), `exec,nosuid,nodev`
+   (the tree was always executable to its own tests), made by GNU `tar` under `/bin/sh` and
+   gone with the container. Declared writable paths are still bound from the worktree and
+   excluded from the copy; the builder's own fixer (`writable_paths=(".",)`) keeps the old
+   shape. A copy that fails exits 97 with a marker and is `env_error: tree_copy_failed` on
+   the result — red, never attributed, never a verdict. `tree: readonly` keeps the old argv
+   token for token, as a separate posture. **[measured — `tests/test_execution.py` pins both
+   shapes; `tests/test_sandbox_images_docker.py` proves from inside each shipped image that
+   `/src` refuses a write, `/work` accepts one and the host tree is byte-identical, and that
+   the D5 test reads the same on the host and in the copy; n = 3 images, colima, Docker
+   29.5.2, 2026-09-25; apparatus 2.2]**
+2. **Dependency sets are mounted read-only.** `Command.ro_mounts` carries sealed sets from
+   the bundle store (`crb.provision.store`); the executor re-validates each one — inside a
+   registered store, under its `dep_<sha256>` key, nothing writable — before it becomes a
+   `--mount …,readonly`, and refuses (`SandboxUnavailable`) otherwise.
+3. **No command gets a network.** `Command.network=True` is refused under docker. The
+   dependency-install phase this ADR once allowed a network for is gone from the sandbox:
+   dependencies are fetched outside it, by a fetch container behind the same allowlisting
+   proxy the sealed builder uses (ADR-0012), and sealed (docs/SECURITY.md §3.1.1).
+
+`--network=none` on every test container is unchanged, and is now without exception.

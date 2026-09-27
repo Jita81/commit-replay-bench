@@ -55,10 +55,11 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core import evidence as ev
-from crb.core.grade import Belts, GradeResult
+from crb.core.grade import Belts
 from crb.core.ledger import GradeRow
 from crb.core.spec import TaskSpec
 from crb.store.db import make_engine, make_session_factory
+from fixtures.posture import posture_result, posture_row
 
 POSTGRES_URL = os.environ.get("CRB_TEST_POSTGRES_URL", "").strip()
 
@@ -204,7 +205,7 @@ def grade_row(**kw: Any) -> GradeRow:
     # 4): a "v4" row here stands for one written by the pre-belt-5 apparatus (2.1)
     if "apparatus_version" not in kw and base.get("belt_set") == "v4":
         base["apparatus_version"] = "2.1"
-    return GradeRow(**base)
+    return posture_row(**base)
 
 
 def task_spec() -> TaskSpec:
@@ -227,7 +228,9 @@ def evidence_pack(**kw: Any) -> ev.EvidencePack:
     """A clean, fully-stamped ``EvidencePack`` (grade matches the belts) unless overridden."""
     base: dict[str, Any] = {
         "task": task_spec(),
-        "grade": GradeResult(SHA, "r", "sighted", clean=True, belts=Belts(True, True, True, True)),
+        "grade": posture_result(
+            SHA, "r", "sighted", clean=True, belts=Belts(True, True, True, True)
+        ),
         "apparatus": ev.ApparatusStamp(runner="pytest", executor={"executor": "local"}),
         "builder": ev.BuilderRef(name="agentic", model="m", provider="p", cost_usd=0.01),
         "run_id": "run-1",

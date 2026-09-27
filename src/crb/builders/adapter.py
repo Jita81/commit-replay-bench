@@ -119,6 +119,7 @@ from crb.builders.container import (
 )
 from crb.builders.toolcheck import runner_tool_missing
 from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
+from crb.core.deps import TaskDeps
 from crb.core.evidence import BuilderRef
 from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.finish_gate import (
@@ -381,7 +382,11 @@ def _write_transcript(
     if not outcome.transcript:
         return ""
     transcript_dir.mkdir(parents=True, exist_ok=True)
-    name = f"{task.short_id}-{rung.builder}-{uuid.uuid4().hex[:8]}.json"
+    # the task is inside the file and on the pack that cites it; the name carries no task only
+    # so that nothing built from it names a commit. It is not a seal: on the host posture a
+    # builder can read this file, and CRB_HOME, outright (DL-055's residual — production
+    # refuses the host posture, ADR-0023); the sealed builder sees only its exported checkout
+    name = f"{rung.builder}-{uuid.uuid4().hex[:12]}.json"
     path = transcript_dir / name
     body = {
         "task_id": task.task_id,
@@ -520,6 +525,7 @@ def build_fn_for(
     session_factory: SessionFactory = ContainerSession,
     preflight: Preflight | None = None,
     on_kill_unconfirmed: KillUnconfirmedFn | None = None,
+    deps_for: Callable[[TaskSpec], TaskDeps | None] | None = None,
     budget_for_task: BudgetForTaskFn | None = None,
     checks: ResolvedChecks | None = None,
     learning: LearningSnapshot | None = None,
@@ -552,6 +558,10 @@ def build_fn_for(
         :class:`SealedCheckout` inside a :class:`ContainerSession`; other builders
         (the test-only gold replay) keep the real worktree. ``session_factory``
         exists for tests.
+    deps_for:
+        ``task → TaskDeps`` (ADR-0019): when it returns one, the sealed container mounts
+        the task's BUILDER set — the parent's, never the gold's — read-only. ``None`` (the
+        default) mounts nothing.
     budget_for_task:
         ``(task, mode, rung, rung_budget) -> (budget, labels)`` — the calibrated budget
         profile (:func:`crb.core.spend.calibrate`, bound by the worker). The attempt runs
@@ -647,8 +657,10 @@ def build_fn_for(
             # follows a cancelled run instead of waiting for the wall clock
             cancel = getattr(executor, "cancel_fn", None)
             try:
+                task_deps = deps_for(task) if deps_for is not None else None
+                deps_kw = {"deps": task_deps} if task_deps is not None else {}
                 with session_factory(
-                    container, sealed, cancel=cancel, label=task.short_id
+                    container, sealed, cancel=cancel, label=ws.root.name, **deps_kw
                 ) as session:
                     # the session supplies the container-bound spawn / executor; an
                     # explicit override (a test's fake binary) still wins
