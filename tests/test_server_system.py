@@ -84,6 +84,10 @@ PROBE_NAMES = {
 }
 
 
+#: The ``ledger`` probe's chain fields on a store with no sign-off and no review (EI-6).
+CHAINS_INTACT = {"signoffs": 0, "signoffs_chain_ok": True, "reviews": 0, "reviews_chain_ok": True}
+
+
 @pytest.fixture(autouse=True)
 def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
@@ -171,8 +175,8 @@ class TestHealth:
         assert _probe(body, "ledger") == {
             "name": "ledger",
             "status": "ok",
-            "detail": "0 rows, false_q1=0",
-            "data": {"rows": 0, "false_q1": 0},
+            "detail": "0 rows, false_q1=0; sign-off and review chains intact",
+            "data": {"rows": 0, "false_q1": 0, **CHAINS_INTACT},
         }
         sandbox = _probe(body, "sandbox")
         assert sandbox["status"] == "degraded" and sandbox["data"] == {"executor": "local"}
@@ -190,7 +194,7 @@ class TestHealth:
             s.commit()
         body = client.get(f"{API_PREFIX}/health").json()
         assert _probe(body, "append_only")["status"] == "ok"
-        assert _probe(body, "ledger")["data"] == {"rows": 1, "false_q1": 0}
+        assert _probe(body, "ledger")["data"] == {"rows": 1, "false_q1": 0, **CHAINS_INTACT}
 
     def test_false_q1_row_bypassing_the_ledger_is_caught(
         self, client: TestClient, factory: sessionmaker[Session]
@@ -210,7 +214,7 @@ class TestHealth:
         assert body["status"] == "down"
         ledger = _probe(body, "ledger")
         assert ledger["status"] == "down"
-        assert ledger["data"] == {"rows": 3, "false_q1": 1}
+        assert ledger["data"] == {"rows": 3, "false_q1": 1, **CHAINS_INTACT}
         assert "honesty floor" in ledger["detail"]
         m = client.get(f"{API_PREFIX}/metrics").text
         assert "crb_false_q1_total 1.0" in m

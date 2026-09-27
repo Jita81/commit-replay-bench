@@ -15,7 +15,8 @@ store-level checks:
 * ``append_only`` — the ledger triggers exist AND an ``UPDATE`` on ``grades`` is refused
   (:func:`crb.store.ledger.assert_append_only`). Missing triggers = ``down``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
-  semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``.
+  semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``; and
+  the sign-off and review chains walked from their stored columns — a break = ``down``.
   The same numbers refresh the ``crb_false_q1_total`` / ``crb_ledger_rows`` gauges.
 * ``worker``      — liveness from the ``workers`` table each worker upserts every
   ``heartbeat_s`` even when idle (J-TEL-2): a worker seen within 3 × its own
@@ -142,6 +143,8 @@ from crb.provision.probe import probe_provision
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.flow_record import stamp_first_healthy
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
+from crb.server.routes.reviews import verify_reviews
+from crb.server.routes.signoffs import verify_signoffs
 from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
@@ -329,14 +332,42 @@ def refresh_ledger_gauges(factory: sessionmaker[Session]) -> tuple[int, int]:
 
 
 def probe_ledger(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
-    """``ledger``: ``down`` on any false-Q1 row — the honesty floor is a readiness condition."""
+    """``ledger``: ``down`` on any false-Q1 row — the honesty floor is a readiness condition —
+    and ``down`` when the sign-off or the review chain no longer verifies from its stored
+    columns (EI-6, 2026-09-27: a licence altered under the triggers was served as active
+    while every probe read ok). Both tables are small; the grades chain itself is walked by
+    ``/ledger/verify``, not here."""
 
     def _read() -> ProbeResult:
         rows, fq1 = refresh_ledger_gauges(factory)
-        data = {"rows": rows, "false_q1": fq1}
+        with factory() as s:
+            signoffs = verify_signoffs(s)
+            reviews = verify_reviews(s)
+        data = {
+            "rows": rows,
+            "false_q1": fq1,
+            "signoffs": signoffs.rows,
+            "signoffs_chain_ok": signoffs.chain_ok,
+            "reviews": reviews.rows,
+            "reviews_chain_ok": reviews.chain_ok,
+        }
         if fq1:
             return ProbeResult("ledger", DOWN, f"false_q1={fq1} — honesty floor breached", data)
-        return ProbeResult("ledger", OK, f"{rows} rows, false_q1=0", data)
+        broken = [
+            f"{name} chain broken at {chain.detail}"
+            for name, chain in (("sign-off", signoffs), ("review", reviews))
+            if not chain.chain_ok
+        ]
+        if broken:
+            return ProbeResult(
+                "ledger", DOWN, "; ".join(broken) + " — the record was altered", data
+            )
+        return ProbeResult(
+            "ledger",
+            OK,
+            f"{rows} rows, false_q1=0; sign-off and review chains intact",
+            data,
+        )
 
     return probes.run_probe("ledger", _read, request_id=request_id)
 

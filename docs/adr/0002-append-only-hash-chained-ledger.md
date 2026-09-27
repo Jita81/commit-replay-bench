@@ -45,7 +45,14 @@ measurement]`. Convention is not evidence.
    on that file reports the first gap. To verify a subset, verify the full export and check
    the subset's `row_hash` values are in it (`export` + a join), or re-chain it on import
    (`import` re-chains foreign rows and keeps the source hash in
-   `labels.source_row_hash`).
+   `labels.source_row_hash`). *Amended 2026-09-27 (DL-145):* an import also stamps every
+   row as imported inside its hashed body — `provenance` `imported:…`, `actor` `import`,
+   who imported it, when and from which file, and the source row's own actor and
+   provenance in `labels` — and is one `ledger.imported` event; an imported row is a
+   record of someone else's measurement and never counts toward a sign-off or the route
+   the delivery gate reads. The `signoffs` and `reviews` chains are verified on the
+   server as the `grades` chain is (`/ledger/verify`, `/signoffs/verify`, the `/health`
+   `ledger` probe).
 7. Statistics are computed only from ledger rows (`cell_stats`, `all_cell_stats`), and
    `cell_stats.false_q1` re-derives `clean == all recorded belts True` at read time.
 

@@ -415,9 +415,12 @@ def measure_cell(
     The route is ``route(stats, controls=controls, policy=policy)`` — nothing
     else. ``controls`` is the repo's negative-controls verdict (``None`` = not
     evaluated by this caller; the decision records the absence). ``oracle_by_task``
-    is the repo's latest mutation score per task (:func:`task_oracle_strength`); the
-    cell is routed under that measured strength, else under the rows' own
-    ``oracle_strength`` mean, else unmeasured. The tier is ``untrusted`` iff
+    is the repo's latest mutation score per task (:func:`task_oracle_strength`): when it
+    is given (even empty) the cell is routed under that measured strength or unmeasured,
+    and the rows' own ``oracle_strength`` is never read — a caller that keeps an oracle
+    ledger (the server) never lends a cell a row's own number (EI-2, 2026-09-27); with no
+    ledger (``None``, the CLI over a census JSONL) the rows' own mean, else unmeasured.
+    The tier is ``untrusted`` iff
     ``false_q1 > 0`` (structurally impossible for rows written through
     :class:`~crb.core.ledger.GradeRow`, re-checked here anyway) and
     ``automated-pass`` otherwise; earned tiers are overlaid by
@@ -433,6 +436,7 @@ def measure_cell(
         oracle_strength=task_oracle_strength(rows, oracle_by_task),
         controls=controls,
         policy=policy,
+        rows_oracle=oracle_by_task is None,
     )
     tier = TIER_UNTRUSTED if stats.false_q1 > 0 else TIER_AUTOMATED_PASS
     economics = fold_economics(rows)

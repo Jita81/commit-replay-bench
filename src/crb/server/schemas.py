@@ -1267,6 +1267,10 @@ class SignoffOut(BaseModel):
     checks_arm_current: str = ""
     posture_class: str = ""
     posture_class_current: str = ""
+    #: The stored row no longer hashes to its ``row_hash`` — it was altered under the append-only
+    #: triggers (EI-6, 2026-09-27). A tampered record is served ``active: false`` and lifts no
+    #: cell whatever it says; ``/signoffs/verify`` and ``/health`` report the break.
+    tampered: bool = False
     evidence: SignoffEvidence
     prev_hash: str
     row_hash: str
@@ -1317,7 +1321,30 @@ class SignoffRevokeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ChainVerifyOut(BaseModel):
+    """One hash-chained table walked from its stored columns: how many rows, whether every
+    link and every row hash holds, the ``seq`` of the first break and a sentence."""
+
+    rows: int
+    chain_ok: bool
+    broken_at: int | None
+    detail: str
+
+
+class SignoffVerifyOut(ChainVerifyOut):
+    """``GET /signoffs/verify`` — never raises; ``tampered`` counts the rows whose own hash
+    no longer recomputes (each is served inactive and lifts nothing)."""
+
+    ok: bool
+    tampered: int
+    verified_at: str
+
+
 class LedgerVerifyOut(BaseModel):
+    """``GET /ledger/verify`` — the grades chain, false-Q1 over the stored belts, the clean
+    rows measured here whose pack is absent or does not re-hash to its name, and the
+    sign-off and review chains (EI-6): ``ok`` only when every one of them holds."""
+
     rows: int
     ok: bool
     false_q1_total: int
@@ -1325,6 +1352,8 @@ class LedgerVerifyOut(BaseModel):
     broken_at: int | None
     detail: str
     clean_without_pack: int
+    signoffs: ChainVerifyOut
+    reviews: ChainVerifyOut
     verified_at: str
 
 
@@ -1406,6 +1435,7 @@ __all__ = [
     "CapabilityCellOut",
     "CapabilityMapOut",
     "CapabilitySummary",
+    "ChainVerifyOut",
     "ComponentForecastOut",
     "EvidenceResponse",
     "ForecastBuildOut",
@@ -1445,6 +1475,7 @@ __all__ = [
     "SignoffEvidence",
     "SignoffOut",
     "SignoffRevokeRequest",
+    "SignoffVerifyOut",
     "StepEventOut",
     "TaskDetail",
     "TaskSpecOut",

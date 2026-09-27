@@ -27,7 +27,8 @@ Navigation
 What it is:   The ``/capability-map``, ``/routes`` and ``/failure-split`` route module — the
               product's central read: what the ledger licenses per cell.
 What it does: Loads the repo's rows as ``GradeRow`` (a false-Q1 row refuses to load →
-              409), filters to one mode, one apparatus (never pooled by default) and one
+              409), filters to one mode, one apparatus (never pooled by default; the
+              default ``current`` counts rows measured here only, never imported ones) and one
               ``checks`` arm (never pooled at all — the repository's own by default),
               reduces them under the ONE routing rule with the repo's latest controls
               verdict and task-level oracle scores, overlays active sign-offs at read time,
@@ -79,7 +80,13 @@ from crb.core.capability import (
 )
 from crb.core.checks import ARMS
 from crb.core.economics import Economics, fold_economics
-from crb.core.ledger import CELL_FIELDS, GradeRow, failure_split, rows_for_checks
+from crb.core.ledger import (
+    CELL_FIELDS,
+    GradeRow,
+    failure_split,
+    rows_for_checks,
+    rows_measured_here,
+)
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DELIVER, ControlsVerdict
 from crb.core.signoff import apply_signoffs_to_map
 from crb.core.spec import SIZE_TIER_NAMES
@@ -132,12 +139,19 @@ def rows_for_apparatus(rows: Iterable[GradeRow], apparatus: str) -> list[GradeRo
     to the CURRENT apparatus (``crb.core.version.APPARATUS_VERSION``); an explicit
     version selects that one; ``all`` pools them for a reader who asks (the cell still
     lists ``apparatus_versions``). Rows measured under an older belt set (no belt 5,
-    the pre-2.1 belt 1) must not lift a current cell toward ``deliver``."""
+    the pre-2.1 belt 1) must not lift a current cell toward ``deliver``.
+
+    ``current`` is also the reading every licensing gate uses (the delivery gate, the
+    factory's cell routes), so it counts the rows THIS deployment measured only
+    (:func:`crb.core.ledger.rows_measured_here`): an imported row stamped with the current
+    apparatus is someone else's measurement and never routes a cell here (EI-2). An
+    explicit version or ``all`` is a reader's view and includes imported rows."""
     rs = list(rows)
     if apparatus == "all":
         return rs
-    want = APPARATUS_VERSION if apparatus in ("", "current") else apparatus
-    return [r for r in rs if r.apparatus_version == want]
+    if apparatus in ("", "current"):
+        return [r for r in rows_measured_here(rs) if r.apparatus_version == APPARATUS_VERSION]
+    return [r for r in rs if r.apparatus_version == apparatus]
 
 
 #: ``?posture=`` values beside a posture class: the deployment's own class (the default)

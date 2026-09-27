@@ -117,6 +117,7 @@ OUT_KEYS = {
     "checks_arm_current",
     "posture_class",
     "posture_class_current",
+    "tampered",
     "created",
     "revoked",
     "revoked_by",
@@ -990,6 +991,8 @@ class TestPolicy:
             "false_q1",
             "oracle_unmeasured",
             "attestation_missing",
+            "attested_row_not_measured",
+            "attested_row_without_pack",
             "same_actor",
         ]
         assert d["bounds"]["n_min"] == [1, 10000]

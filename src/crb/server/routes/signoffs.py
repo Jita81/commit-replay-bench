@@ -134,6 +134,7 @@ from crb.core.ledger import (
     CELL_FIELDS,
     GENESIS_HASH,
     LABEL_API_STABLE,
+    PROVENANCE_MEASURED,
     CellKey,
     GradeRow,
     LedgerIntegrityError,
@@ -142,6 +143,8 @@ from crb.core.ledger import (
 from crb.core.redact import redact
 from crb.core.routing import ControlsVerdict
 from crb.core.signoff import (
+    REFUSAL_ATTESTED_ROW_NOT_MEASURED,
+    REFUSAL_ATTESTED_ROW_WITHOUT_PACK,
     REFUSAL_FALSE_Q1,
     SIGNOFF_SCHEMA,
     SIGNOFF_SCHEMA_V1,
@@ -163,14 +166,20 @@ from crb.server.auth import ApproverDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep
 from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import checks_arm_in
-from crb.server.routes.grades import grade_to_dict
+from crb.server.routes.grades import grade_to_dict, pack_verified
 from crb.server.routes.oracle import (
     latest_controls_verdict,
     oracle_by_task,
     verdict_dict,
 )
 from crb.server.routes.runs import append_system_event, system_trace_id
-from crb.server.schemas import Page, PageDep, SignoffCreateRequest, SignoffRevokeRequest
+from crb.server.schemas import (
+    Page,
+    PageDep,
+    SignoffCreateRequest,
+    SignoffRevokeRequest,
+    SignoffVerifyOut,
+)
 from crb.server.schemas_capability import ControlsVerdictOut, FailureSplitOut
 from crb.server.schemas_signoff import (
     AcceptedRowOut,
@@ -187,7 +196,7 @@ from crb.server.schemas_signoff import (
     SignoffRouteOut,
     SignoffWithPolicyOut,
 )
-from crb.store.models import Grade, Repo, Run, Signoff, Task, User
+from crb.store.models import EvidencePackRow, Grade, Repo, Run, Signoff, Task, User
 
 router = APIRouter(tags=["signoffs"])
 _ERR = {"model": ErrorEnvelope}
@@ -301,6 +310,60 @@ def verify_signoff_rows(rows: Iterable[Signoff]) -> int:
             raise LedgerIntegrityError(f"sign-off {n} ({r.signoff_id[:8]}) row_hash mismatch")
         prev = r.row_hash
     return n
+
+
+def signoff_tampered(row: Signoff) -> bool:
+    """The stored row no longer hashes to its own ``row_hash`` — something altered it under
+    the append-only triggers. Such a row is served inactive and lifts nothing (EI-6)."""
+    return row.row_hash != signoff_hash(row)
+
+
+def _iter_signoffs(session: Session, batch: int = 1000) -> Iterable[Signoff]:
+    """Every sign-off row in ``seq`` order, keyset-paged."""
+    last = 0
+    while True:
+        chunk = list(
+            session.execute(
+                select(Signoff).where(Signoff.seq > last).order_by(Signoff.seq).limit(batch)
+            ).scalars()
+        )
+        if not chunk:
+            return
+        yield from chunk
+        last = chunk[-1].seq
+
+
+def verify_signoffs(session: Session) -> SignoffVerifyOut:
+    """Walk the sign-off chain from the stored columns (never raises): every ``prev_hash``
+    link and every ``row_hash`` recomputed by :func:`signoff_hash`; the first break is
+    reported by ``seq`` and the walk goes on counting rows and rows that no longer hash to
+    their own name (``tampered``). The server-side twin of :func:`verify_signoff_rows`."""
+    rows = tampered = 0
+    prev = GENESIS_HASH
+    broken_at: int | None = None
+    detail = ""
+    for r in _iter_signoffs(session):
+        rows += 1
+        edited = signoff_tampered(r)
+        tampered += int(edited)
+        if broken_at is None:
+            if r.prev_hash != prev:
+                broken_at, detail = r.seq, f"seq {r.seq}: prev_hash mismatch"
+            elif edited:
+                broken_at, detail = r.seq, f"seq {r.seq}: row_hash mismatch (row edited)"
+        prev = r.row_hash
+    chain_ok = broken_at is None
+    if chain_ok:
+        detail = f"{rows} rows, chain intact"
+    return SignoffVerifyOut(
+        rows=rows,
+        ok=chain_ok,
+        chain_ok=chain_ok,
+        broken_at=broken_at,
+        detail=detail,
+        tampered=tampered,
+        verified_at=utc_now_iso(),
+    )
 
 
 def _lock(session: Session) -> None:
@@ -452,8 +515,22 @@ def load_signoff_rows(session: Session, repo: str | None = None) -> list[Signoff
 def load_signoff_records(session: Session, repo: str | None = None) -> list[SignoffRecord]:
     """Every stored sign-off (attestations and revocations) as core records, chain order.
     Feed these to :func:`crb.core.signoff.apply_signoffs_to_map`, which collapses to the
-    latest per scope and re-checks the cell's current false-Q1."""
-    return [to_record(r) for r in load_signoff_rows(session, repo)]
+    latest per scope and re-checks the cell's current false-Q1.
+
+    A row that no longer hashes to its ``row_hash`` (:func:`signoff_tampered`) fails
+    closed: it is read as a REVOCATION of the scope it names — it lifts nothing and shadows
+    any earlier attestation of that scope — and one whose altered fields cannot even be
+    read as a record is left out (EI-6, 2026-09-27)."""
+    out: list[SignoffRecord] = []
+    for r in load_signoff_rows(session, repo):
+        if not signoff_tampered(r):
+            out.append(to_record(r))
+            continue
+        try:
+            out.append(replace(to_record(r), revoked=True, attestation=None))
+        except ValueError:
+            continue
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -490,10 +567,16 @@ def cell_rows(
     current instrument on the sighted measurement: rows from an older belt set, blind
     attempts, or rows graded with the format step or belt 6 switched differently never lift
     the cell (EVIDENCE-AND-CLAIMS §5, ADR-0024; the capability map applies the same
-    defaults — its ``checks`` default is :func:`checks_arm_in`)."""
+    defaults — its ``checks`` default is :func:`checks_arm_in`). Only rows this deployment
+    MEASURED count: an imported row is a record of someone else's measurement and never
+    evidences a licence (EI-2 — ``rows_measured_here``, the map's ``current`` reading)."""
     q = (
         _scope_where(select(Grade), repo, scope)
-        .where(Grade.mode == "sighted", Grade.apparatus_version == APPARATUS_VERSION)
+        .where(
+            Grade.mode == "sighted",
+            Grade.apparatus_version == APPARATUS_VERSION,
+            Grade.provenance == PROVENANCE_MEASURED,
+        )
         .order_by(Grade.seq)
     )
     grades: Iterable[Grade] = session.execute(q).scalars()
@@ -607,11 +690,17 @@ def accepted_rows(
     *,
     limit: int = ACCEPTED_ROWS_LIMIT,
 ) -> list[AcceptedRowOut]:
-    """The cell's accepted rows — clean and not disqualified, on the ``checks`` ``arm`` the
-    cell is read on — newest first, with the graded task's subject, for the attestation
-    picker."""
+    """The cell's accepted rows — clean, not disqualified and measured here, on the
+    ``checks`` ``arm`` the cell is read on — newest first, with the graded task's subject,
+    for the attestation picker (an imported row is never offered: it cannot be attested)."""
     q = _scope_where(
-        select(Grade).where(Grade.clean.is_(True), Grade.disqualified.is_(False)), repo, scope
+        select(Grade).where(
+            Grade.clean.is_(True),
+            Grade.disqualified.is_(False),
+            Grade.provenance == PROVENANCE_MEASURED,
+        ),
+        repo,
+        scope,
     )
     newest_first: Iterable[Grade] = session.execute(q.order_by(Grade.seq.desc())).scalars()
     grades: list[Grade] = []
@@ -691,6 +780,28 @@ def attested_run_id_for(attested: ResolvedAttestation | None, approver: str) -> 
     return attested.run_id if attested.run_actor == approver else ""
 
 
+class AttestationRefused(Exception):
+    """The attested row exists and is accepted, but cannot carry an attestation: it was
+    not measured here, or it has no stored, verified pack. A policy refusal (409
+    ``signoff_refused`` with ``detail.code``), never overridable — not a malformed
+    request."""
+
+    def __init__(self, code: str, message: str, *, threshold: Any, observed: Any) -> None:
+        super().__init__(message)
+        self.refusal = SignoffRefusal(code, message, threshold=threshold, observed=observed)
+
+    def detail(self) -> dict[str, Any]:
+        """The 409 envelope's ``detail`` keys a policy refusal carries (the caller adds the
+        cell and the repo)."""
+        r = self.refusal
+        return {
+            "code": r.code,
+            "threshold": r.threshold,
+            "observed_value": r.observed,
+            "refusals": [r.to_dict()],
+        }
+
+
 def _attestation_422(msg: str) -> ApiError:
     """A 422 located at ``body.attestation.reviewed_row_hash``."""
     return ApiError(
@@ -722,7 +833,9 @@ def resolve_attestation(
     plus the task's subject and the actors behind the row. 422 unless the row exists, is
     this repo's, sits in the cell — on the ``checks`` ``arm`` the cell is read on — and is
     an ACCEPTED row (clean, not disqualified) — an approver can only attest to a diff the
-    instrument accepted."""
+    instrument accepted. Then :class:`AttestationRefused` (a 409 refusal, recorded on a
+    POST) when the row was not measured here (``attested_row_not_measured``) or its pack is
+    not stored and verified (``attested_row_without_pack``) — EI-2, 2026-09-27."""
     g = session.execute(
         select(Grade).where(Grade.row_hash == att.reviewed_row_hash)
     ).scalar_one_or_none()
@@ -753,6 +866,26 @@ def resolve_attestation(
             f"row {att.reviewed_row_hash[:12]}… is not an accepted row "
             f"(clean={bool(g.clean)}, disqualified={bool(g.disqualified)}) — "
             "an approver attests to a diff the instrument accepted"
+        )
+    if g.provenance != PROVENANCE_MEASURED:
+        raise AttestationRefused(
+            REFUSAL_ATTESTED_ROW_NOT_MEASURED,
+            f"row {att.reviewed_row_hash[:12]}… was imported (provenance {g.provenance!r}), "
+            "not measured by this deployment — an approver attests to a diff this instrument "
+            "graded, never to a record of someone else's grading",
+            threshold=PROVENANCE_MEASURED,
+            observed=g.provenance,
+        )
+    stored = session.get(EvidencePackRow, g.evidence_pack_hash) if g.evidence_pack_hash else None
+    if stored is None or not pack_verified(g.evidence_pack_hash, dict(stored.body_json or {})):
+        state = "is not stored here" if stored is None else "does not re-hash to its name"
+        raise AttestationRefused(
+            REFUSAL_ATTESTED_ROW_WITHOUT_PACK,
+            f"row {att.reviewed_row_hash[:12]}…'s evidence pack "
+            f"{g.evidence_pack_hash[:12] or '(none)'}… {state} — there is no accepted diff "
+            "the approver can have read",
+            threshold="a stored, verified pack",
+            observed="absent" if stored is None else "unverified",
         )
     subject = _subjects(session, repo, [g.task_id]).get(g.task_id, "")
     run_actor = run_actors(session, [g.run_id]).get(g.run_id, "")
@@ -828,7 +961,8 @@ def signoff_out(
 ) -> SignoffWithPolicyOut:
     """One attestation as served: the stored snapshot plus the LIVE ``active`` /
     ``current_false_q1`` — a cell that has since acquired a false-Q1 row is shown
-    inactive even though its row is untouched."""
+    inactive even though its row is untouched — and ``tampered``: a row that no longer
+    hashes to its own ``row_hash`` is served inactive whatever it says (EI-6)."""
     revocation = _revocation_for(row, all_rows)
     current_fq1, _ = (
         cell_false_q1(session, row.repo, scope_of(row)) if row.repo != WILDCARD else (0, [])
@@ -849,8 +983,13 @@ def signoff_out(
         or (bool(arm_now) and signed_arm != arm_now)
         or (bool(posture_current) and bool(signed_posture) and signed_posture != posture_current)
     )
+    tampered = signoff_tampered(row)
     active = (
-        revocation is None and not _superseded(row, all_rows) and current_fq1 == 0 and not stale
+        revocation is None
+        and not _superseded(row, all_rows)
+        and current_fq1 == 0
+        and not stale
+        and not tampered
     )
     return SignoffWithPolicyOut(
         id=row.signoff_id,
@@ -876,6 +1015,7 @@ def signoff_out(
         checks_arm_current=arm_now,
         posture_class=signed_posture,
         posture_class_current=posture_current,
+        tampered=tampered,
         evidence=_evidence(row),
         prev_hash=row.prev_hash,
         row_hash=row.row_hash,
@@ -1210,7 +1350,15 @@ def preview_signoff(
             )
         except ValidationError as exc:
             raise _attestation_422(exc.errors()[0]["msg"] if exc.errors() else str(exc)) from exc
-        attested = resolve_attestation(db, repo, scope, att_in, arm, posture_class=posture)
+        try:
+            attested = resolve_attestation(db, repo, scope, att_in, arm, posture_class=posture)
+        except AttestationRefused as exc:  # a preview is not an attempt: no event
+            raise ApiError(
+                409,
+                CODE_REFUSED,
+                redact(exc.refusal.message),
+                detail={"cell": scope.to_dict(), "repo": repo, **exc.detail()},
+            ) from exc
         record = replace(record, attestation=attested.attestation)
         attestation_out = AttestationOut(**attested.attestation.to_dict(), subject=attested.subject)
     # the two-person rule is judged for the viewer as the would-be approver, so the
@@ -1283,6 +1431,18 @@ def preview_signoff(
 
 
 @router.get(
+    "/signoffs/verify",
+    response_model=SignoffVerifyOut,
+    responses={401: _ERR},
+    summary="Walk the sign-off chain from the stored columns and report the first break (never raises)",
+)
+def signoffs_verify(viewer: ViewerDep, db: DbDep) -> SignoffVerifyOut:
+    """Registered before ``/signoffs/{signoff_id}`` so the path is never read as an id."""
+    del viewer
+    return verify_signoffs(db)
+
+
+@router.get(
     "/signoffs/{signoff_id}",
     response_model=SignoffWithPolicyOut,
     responses={401: _ERR, 404: _ERR},
@@ -1348,9 +1508,22 @@ def create_signoff(
     #    actors behind it and behind every accepted row, for the two-person rule.
     attested: ResolvedAttestation | None = None
     if body.attestation is not None:
-        attested = resolve_attestation(
-            db, body.repo, scope, body.attestation, arm, posture_class=posture
-        )
+        try:
+            attested = resolve_attestation(
+                db, body.repo, scope, body.attestation, arm, posture_class=posture
+            )
+        except AttestationRefused as exc:
+            raise _refuse(
+                db,
+                repo=body.repo,
+                actor=approver.id,
+                scope=scope,
+                reason=redact(exc.refusal.message),
+                detail={
+                    **exc.detail(),
+                    "reviewed_row_hash": body.attestation.reviewed_row_hash,
+                },
+            ) from exc
         record = replace(record, attestation=attested.attestation)
     # 4. The policy.
     refusals = evaluate_signoff(
@@ -1542,6 +1715,7 @@ __all__ = [
     "CODE_POLICY_INVALID",
     "CODE_REFUSED",
     "FALSE_Q1_PREDICATE",
+    "AttestationRefused",
     "CellOracle",
     "ResolvedAttestation",
     "accepted_rows",
@@ -1561,7 +1735,9 @@ __all__ = [
     "signoff_body",
     "signoff_hash",
     "signoff_out",
+    "signoff_tampered",
     "to_record",
     "verifier_kind_of",
     "verify_signoff_rows",
+    "verify_signoffs",
 ]
