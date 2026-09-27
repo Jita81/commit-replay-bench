@@ -8,26 +8,25 @@ most of them, review enforces the rest. Read [ARCHITECTURE](ARCHITECTURE.md),
 
 ```bash
 # Python ≥ 3.12; uv on PATH (https://docs.astral.sh/uv/); git; docker for sandbox tests.
-uv venv -q .venv --python 3.12
-uv pip install -q -e '.[server,postgres,mcp,dev]' --python .venv/bin/python
-# optional extras: '.[openai]' '.[claude]' or '.[all]'
+uv sync --locked --python 3.12 --extra server --extra postgres --extra mcp --extra dev
+# optional extras: --extra openai --extra claude, or --all-extras
 ```
 
 The server, postgres and mcp extras are part of what the gates check: without them `mypy`
 cannot see the server and store code, and the suite skips it. Run tools from the venv
-(`.venv/bin/…`). Do not commit `.venv/`, `uv.lock` is not yet committed (see
-[Known debt](ARCHITECTURE.md#93-known-debt-tracked)).
+(`.venv/bin/…`). Do not commit `.venv/`.
 
-`mypy` and `ruff` are pinned to exact versions in the `dev` extra, so a fresh environment and
-CI run the same versions of those two gate tools. Dependabot's `dev-tooling` group moves the
-pins in a pull request of their own. The pins do not make the verdict the same: every other
-dependency is resolved fresh on every run, and a new release of one can change what the same
-`mypy` reports on the same tree. SQLAlchemy 2.1 did: `mypy` 2.3.1 on `main` at `8ab88ad`
-reports no errors with SQLAlchemy 2.0.52 and 8 errors with 2.1.0 or 2.1.1 **[measured — n = 3
-fresh `uv` environments whose resolved packages differ only in SQLAlchemy; method: `mypy` over
-`src/crb` in each, 2026-09-25; apparatus 2.2]**. So CI also runs every day on `main`
-with nothing changed: a new upstream release that moves a verdict fails there first, naming
-the release, not on the next unrelated pull request.
+`uv.lock` pins every package the extras reach, by version and hash, and every CI job installs
+from it, so a fresh environment and CI run the same versions of every library as well as of
+the gate tools. Before the lock only `mypy` and `ruff` were pinned, and a new release of a
+library could change what the same `mypy` reports on the same tree. SQLAlchemy 2.1 did:
+`mypy` 2.3.1 on `main` at `8ab88ad` reports no errors with SQLAlchemy 2.0.52 and 8 errors with
+2.1.0 or 2.1.1 **[measured — n = 3 fresh `uv` environments whose resolved packages differ only
+in SQLAlchemy; method: `mypy` over `src/crb` in each, 2026-09-25; apparatus 2.2]**. Change a
+dependency in `pyproject.toml` and run `uv lock` in the same commit: `--locked` fails every CI
+job while the two disagree, and `tests/test_ci_lock.py` names the difference. The
+`fresh-clone` job runs every gate below on a clone made by root, from the lock, with no docker
+daemon, so a gate that passes only on a warm machine fails there.
 
 ## The gates
 
@@ -187,11 +186,12 @@ PRs delete theirs. Feature branches
 workstream where possible. **Branch protection on `main` requires the CI jobs green and
 the branch up to date before a merge** (every job in `.github/workflows/ci.yml`: lint,
 types, layers, code-map, dod, claims, both pytest matrices, PostgreSQL, security, sbom,
-container, sandbox-images, walkthrough, ui-unit and ui-smoke;
+container, sandbox-images, walkthrough, ui-unit and ui-smoke — all but `fresh-clone`, which
+waits for an administrator to add it, DL-113;
 `scripts/check_branch_protection.py` compares the setting with the workflow — commands you can run
 locally: the five in [The gates](#the-gates), exactly as written there, and
 `python scripts/code_map.py --check`, `python scripts/dod_check.py --check`,
-`python scripts/claims_check.py --check`,
+`.venv/bin/python scripts/claims_check.py --check`,
 `cd ui && npm run typecheck && npx vitest run`,
 `helm lint deploy/helm/crb --strict`); the adversarial verify pass (re-run the full suite on the merged
 tree) before each release tag. The repository is public and Actions minutes are free, so

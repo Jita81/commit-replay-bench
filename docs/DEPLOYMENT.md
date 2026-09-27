@@ -369,11 +369,17 @@ run replaces this with a measured figure]**.
 
 Every job in `.github/workflows/ci.yml` blocks a merge to `main` only while its check name is
 on the branch's required-status-checks list, which is a repository setting, not a workflow
-file. The list names every job, `sandbox-images` and `sbom` among them, and is strict (a
-branch must be up to date) **[measured 2026-09-27 — n = 16 required checks against 16 check
-names the workflow renders, method: `scripts/check_branch_protection.py` against
+file. The list names every job the workflow had when it was last read, `sandbox-images` and
+`sbom` among them, and is strict (a branch must be up to date) **[measured 2026-09-27 — n = 16
+required checks against the 16 check names the workflow rendered then, method:
+`scripts/check_branch_protection.py` against
 `GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
-apparatus 2.3; the same list was read on 2026-09-26]**.
+apparatus 2.3; the same list was read on 2026-09-26]**. The `fresh-clone` job, which runs
+every gate on a fresh clone from `uv.lock` as root with no docker daemon (G-664), came later
+and is not on the list: an administrator adds its check name with the call below. Until then
+the saved reading (`tests/fixtures/branch_protection_main.json`) names it under
+`awaiting_protection` with that step, and the daily comparison against the live setting fails
+(DL-113).
 
 `scripts/check_branch_protection.py` compares the two both ways. It fails on a required check
 that no job reports (every pull request would wait on it for ever), a job that no required

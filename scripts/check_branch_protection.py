@@ -13,7 +13,9 @@ setting and compares it with the workflow's jobs, both ways.
 It fails on: a required check that no job reports (every pull request waits on it for
 ever); a job that no required check names (it can fail and the change still merges); a
 setting that is not strict (a branch may merge while behind ``main``); and a job name of 100
-characters or more (GitHub cuts a check name at 100, so no run can satisfy it).
+characters or more (GitHub cuts a check name at 100, so no run can satisfy it). A saved
+reading may list a job added before the administrator could require it, under
+``awaiting_protection`` with the step that remains; the live setting never does (DL-113).
 
 Navigation
 ----------
@@ -21,7 +23,8 @@ What it is:   The comparator between branch protection's required checks and ci.
               (stdlib only; ``gh`` reads the setting).
 What it does: Expands ci.yml's jobs into the check names GitHub reports (a matrix job once per
               value), reads ``required_status_checks`` through ``gh api`` (or from a saved
-              JSON reading), and prints every difference; exits non-zero on any.
+              JSON reading, which may name jobs awaiting the administrator), and prints every
+              difference; exits non-zero on any.
 How:          Line-scan the workflow's ``jobs:`` block (job key, ``name:``, a one-key list
               matrix) → expand ``${{ matrix.<key> }}`` → set comparison with the reading.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -51,6 +54,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 #: GitHub cuts a check-run name at this length (docs/DEPLOYMENT.md §3.4).
 NAME_LIMIT = 100
+
+#: A saved reading's record of jobs that await the administrator: ``{check name: the step}``.
+AWAITING_KEY = "awaiting_protection"
 
 _JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 _NAME = re.compile(r"^    name:\s*(.+?)\s*$")
@@ -143,6 +149,34 @@ def compare(jobs: list[str], required: list[str], strict: bool) -> list[str]:
     return errors
 
 
+def compare_reading(jobs: list[str], reading: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """``(errors, notes)`` for one reading. A SAVED reading may name, under
+    :data:`AWAITING_KEY`, a job added to ci.yml before an administrator could require it, with
+    the step that remains: it is not an error while the setting lacks it, and it is listed as a
+    note. The entry is an error once the setting requires the job (read it again and drop the
+    entry), when no job reports it, or when it names no step. The live setting never carries
+    the key, so the scheduled comparison stays red until the administrator acts (DL-113)."""
+    required = [str(c) for c in reading.get("contexts", [])]
+    awaiting = {str(k): str(v) for k, v in dict(reading.get(AWAITING_KEY) or {}).items()}
+    errors = compare(
+        jobs, required + [c for c in awaiting if c in jobs], bool(reading.get("strict"))
+    )
+    notes: list[str] = []
+    for ctx, step in awaiting.items():
+        if ctx in required:
+            errors.append(
+                f"branch protection now requires {ctx!r}: save the reading again without it "
+                f"under {AWAITING_KEY}"
+            )
+        elif ctx not in jobs:
+            errors.append(f"{ctx!r} awaits branch protection, but no job in ci.yml reports it")
+        elif not step.strip():
+            errors.append(f"{ctx!r} awaits branch protection with no step named")
+        else:
+            notes.append(f"job {ctx!r} awaits the administrator: {step}")
+    return errors, notes
+
+
 def read_live(repo: str, branch: str) -> dict[str, Any]:
     """``required_status_checks`` for ``repo``'s ``branch``, read with ``gh`` (its token must
     be allowed to read the setting: Administration: read)."""
@@ -178,14 +212,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         reading = read_live(args.repo, args.branch)
     required = [str(c) for c in reading.get("contexts", [])]
-    strict = bool(reading.get("strict"))
     jobs = job_contexts(args.ci.read_text(encoding="utf-8"))
-    errors = compare(jobs, required, strict)
+    errors, notes = compare_reading(jobs, reading)
     for e in errors:
         print(e)
     if errors:
         print(f"{len(errors)} difference(s)")
         return 1
+    for n in notes:
+        print(n)
     print(f"branch protection: {len(required)} required checks match the jobs in {args.ci.name}")
     return 0
 

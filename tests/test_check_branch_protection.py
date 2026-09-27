@@ -8,7 +8,9 @@ What it does: Pins that the workflow's jobs expand to the check names branch pro
               check no job reports, a job nobody requires, a non-strict setting and a job name
               GitHub would cut at 100 characters; that the last reading of the setting
               (tests/fixtures/branch_protection_main.json) still matches ci.yml, so renaming or
-              adding a job fails here until the setting is read again; and that the scheduled
+              adding a job fails here until the setting is read again — or until the reading
+              names the job under ``awaiting_protection`` with the administrator's step, an
+              entry that is itself refused once stale (DL-113); and that the scheduled
               workflow runs the live comparison and fails, never passes, without its token.
 How:          Calls the module's functions on fixture text and on the real ci.yml, runs
               ``main`` against the saved reading, and reads the workflow file.
@@ -20,7 +22,8 @@ Works with:   scripts/check_branch_protection.py (under test), .github/workflows
               docs/dod/product.md (product.evidence.6 cites these tests)
 Tested by:    (this is a test file)
 Touch when:   a job is added to or renamed in ci.yml (read the setting again after the
-              administrator updates it, and save the reading in the fixture).
+              administrator updates it, and save the reading in the fixture; until then name
+              the job under ``awaiting_protection`` with the step that remains).
 """
 
 from __future__ import annotations
@@ -119,8 +122,44 @@ def test_the_last_reading_of_the_setting_still_matches_the_workflow() -> None:
     mod = _load()
     reading = json.loads(READING.read_text(encoding="utf-8"))
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert mod.compare(mod.job_contexts(ci), reading["contexts"], reading["strict"]) == []
+    errors, awaiting = mod.compare_reading(mod.job_contexts(ci), reading)
+    assert errors == []
     assert len(reading["contexts"]) == 16
+    # a job the administrator has not yet required is named, with its step, never silent
+    fresh = "fresh-clone (every gate from uv.lock, as root, no docker daemon)"
+    step = reading["awaiting_protection"][fresh]
+    assert awaiting == [f"job {fresh!r} awaits the administrator: {step}"]
+
+
+def test_a_job_awaiting_protection_is_held_to_the_setting_and_the_workflow() -> None:
+    """The saved reading's ``awaiting_protection`` entry is honest only while the setting
+    lacks the job, a job reports it and it names the step; each lapse is a difference. A
+    reading without the entry — every live reading — still refuses the unrequired job."""
+    mod = _load()
+    jobs = mod.job_contexts(CI_TEXT)
+    base = {"strict": True, "contexts": ["lint (ruff)", "test (py3.12)", "test (py3.13)"]}
+    assert mod.compare_reading(jobs, base)[0] == [
+        "job 'bare' runs on every pull request but branch protection does not require it: "
+        "it can fail and the change still merges"
+    ]
+    waiting = {**base, "awaiting_protection": {"bare": "an administrator requires it"}}
+    assert mod.compare_reading(jobs, waiting) == (
+        [],
+        ["job 'bare' awaits the administrator: an administrator requires it"],
+    )
+    now_required = {**waiting, "contexts": [*base["contexts"], "bare"]}
+    assert mod.compare_reading(jobs, now_required)[0] == [
+        "branch protection now requires 'bare': save the reading again without it under "
+        "awaiting_protection"
+    ]
+    ghost = {**waiting, "awaiting_protection": {"bare": "x", "gone": "an administrator"}}
+    assert mod.compare_reading(jobs, ghost)[0] == [
+        "'gone' awaits branch protection, but no job in ci.yml reports it"
+    ]
+    silent = {**base, "awaiting_protection": {"bare": " "}}
+    assert mod.compare_reading(jobs, silent)[0] == [
+        "'bare' awaits branch protection with no step named"
+    ]
 
 
 def test_main_compares_a_saved_reading_and_fails_on_any_difference(
@@ -128,7 +167,9 @@ def test_main_compares_a_saved_reading_and_fails_on_any_difference(
 ) -> None:
     mod = _load()
     assert mod.main(["--from-json", str(READING)]) == 0
-    assert "branch protection: 16 required checks match" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert "branch protection: 16 required checks match" in said
+    assert "awaits the administrator" in said
     reading = json.loads(READING.read_text(encoding="utf-8"))
     reading["contexts"].remove(
         "dod (every route, journey and stream has its definition of done; evidence resolves)"
