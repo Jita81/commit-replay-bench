@@ -42,15 +42,20 @@ What it does: Enqueues runs, hands each to exactly one worker, measures liveness
 How:          ``claim_next`` flips ``queued → running`` in one locked transaction (``BEGIN
               IMMEDIATE`` / ``FOR UPDATE SKIP LOCKED``); ``heartbeat`` / ``progress`` refresh
               the stamp; ``reclaim_stale`` compares stamps to a threshold in Python;
-              ``finish`` is idempotent on a terminal run.
+              ``finish`` is idempotent on a terminal run; ``stage_queued`` is the enqueue
+              inside a caller's transaction (a run and the event that records it commit
+              together).
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         none
 Works with:   src/crb/store/models.py (the ``Run`` row and its liveness columns),
               src/crb/server/worker.py (the consumer: claim → execute → heartbeat → finish),
               src/crb/store/events.py (``append_event`` for the reclaim / cancel notes),
               src/crb/server/routes/runs.py (enqueues, lists and cancels over HTTP),
-              src/crb/server/worker_main.py (the process that polls this queue)
-Tested by:    tests/test_store_jobs.py, tests/test_server_routes_runs.py
+              src/crb/server/worker_main.py (the process that polls this queue),
+              src/crb/server/routes/learn.py (``stage_queued`` — a re-measurement's runs
+              and their event in one transaction)
+Tested by:    tests/test_store_jobs.py, tests/test_server_routes_runs.py,
+              tests/test_server_routes_learn.py
 Touch when:   never for a new repository; adding a run kind means extending ``RUN_KINDS``
               here and the executor table in src/crb/server/worker.py together (and
               docs/API.md); changing the reclaim threshold or ``max_reclaims`` default is an
@@ -158,6 +163,35 @@ def _cancelled(run: Run, now: str) -> None:
     run.heartbeat = ""
 
 
+def stage_queued(session: Session, run: Run) -> Run:
+    """Add ``run`` to ``session`` in ``queued`` state (id/mode/created filled in when blank),
+    NOT committed: the caller commits it with whatever else the same decision writes — a
+    Learn re-measurement commits its runs and their ``learn.remeasure.queued`` event as one
+    transaction, so a failure leaves neither (EI-1). :meth:`JobQueue.enqueue` is this plus
+    its own commit."""
+    if run.kind not in RUN_KINDS:
+        raise ValueError(f"unknown run kind {run.kind!r}; expected one of {RUN_KINDS}")
+    if not run.repo:
+        raise ValueError("a run needs a repo")
+    if not run.id:
+        run.id = new_run_id()
+    if not run.mode:
+        run.mode = MODE_BLIND if run.kind == KIND_BLIND else MODE_SIGHTED
+    run.status = STATUS_QUEUED
+    run.worker_id = ""
+    run.heartbeat = ""
+    run.started = ""
+    run.finished = ""
+    run.cancel_requested = False
+    if not run.created:
+        run.created = _created_now()
+    for attr in ("ladder_json", "params_json", "apparatus_json", "counts_json"):
+        if getattr(run, attr) is None:
+            setattr(run, attr, [] if attr == "ladder_json" else {})
+    session.add(run)
+    return run
+
+
 class JobQueue:
     """The queue API over the ``runs`` table — see the module docstring for the state
     machine and the guarantees each method upholds."""
@@ -191,27 +225,8 @@ class JobQueue:
     # --- enqueue / read ----------------------------------------------------------
     def enqueue(self, run: Run) -> Run:
         """Insert a run in ``queued`` state (id/mode/created filled in when blank)."""
-        if run.kind not in RUN_KINDS:
-            raise ValueError(f"unknown run kind {run.kind!r}; expected one of {RUN_KINDS}")
-        if not run.repo:
-            raise ValueError("a run needs a repo")
-        if not run.id:
-            run.id = new_run_id()
-        if not run.mode:
-            run.mode = MODE_BLIND if run.kind == KIND_BLIND else MODE_SIGHTED
-        run.status = STATUS_QUEUED
-        run.worker_id = ""
-        run.heartbeat = ""
-        run.started = ""
-        run.finished = ""
-        run.cancel_requested = False
-        if not run.created:
-            run.created = _created_now()
-        for attr in ("ladder_json", "params_json", "apparatus_json", "counts_json"):
-            if getattr(run, attr) is None:
-                setattr(run, attr, [] if attr == "ladder_json" else {})
         with self._factory() as s:
-            s.add(run)
+            stage_queued(s, run)
             s.commit()
         return run
 
@@ -499,4 +514,5 @@ __all__ = [
     "age_s",
     "new_run_id",
     "parse_ts",
+    "stage_queued",
 ]

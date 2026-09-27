@@ -18,6 +18,9 @@ Invariants
 * Out-of-band system events (a reclaim, a worker note) go through
   :func:`append_event`, which allocates the next ``seq`` under the same write
   lock the ledger uses, so they never collide with a live emitter's sequence.
+  An event added to a caller's own transaction (the server's ``append_system_event``)
+  takes the same lock first, through :func:`lock_event_writes` — one lock for every
+  writer that allocates a ``seq``, so no two can read the same last one (EI-1).
 
 Navigation
 ----------
@@ -29,14 +32,16 @@ What it does: Writes every ``StepEvent`` as one ``events`` row and never raises 
 How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one transaction
               with a per-row fallback; ``read_events`` = ``seq > after`` ordered by
               ``(seq, id)`` with a clamped limit; ``append_event`` = lock → ``max(seq)+1`` →
-              insert.
+              insert; ``lock_event_writes`` is that lock, for a writer adding an event to
+              its own caller's transaction.
 Layer:        store — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/observability/events.py (``StepEvent`` / ``Emitter`` — the envelope
               and the sequence assigner), src/crb/store/models.py (the ``Event`` columns),
               src/crb/store/jobs.py (writes reclaim / cancel notes through ``append_event``),
               src/crb/server/worker.py (installs the sink and resumes from ``last_seq``),
-              src/crb/server/routes/runs.py (serves ``read_events`` over SSE)
+              src/crb/server/routes/runs.py (serves ``read_events`` over SSE;
+              ``append_system_event`` takes ``lock_event_writes``)
 Tested by:    tests/test_store_events.py, tests/test_store_jobs.py, tests/test_server_routes_runs.py
 Touch when:   never for a new repository; when ``StepEvent`` gains a field (a migration and
               both mappers change together); when a new out-of-band system action is
@@ -51,7 +56,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.observability.events import StepEvent, StepStatus
@@ -113,11 +118,24 @@ def _from_model(m: Event) -> StepEvent:
     )
 
 
-def _lock(s: Session) -> None:
-    """Serialise ``seq`` allocation the way :class:`crb.store.ledger.DbLedger` does."""
+def lock_event_writes(s: Session) -> None:
+    """Hold the ``events`` write lock for the rest of ``s``'s transaction, so the trace's
+    last ``seq`` read after this call is still the last when the transaction commits.
+
+    Every out-of-band writer takes it before it reads ``max(seq)``: :func:`append_event`,
+    the sink's re-allocation, and the server's ``append_system_event`` — which adds its
+    event to a CALLER's transaction and so may already have written there (EI-1, DL-144).
+    SQLite: ``BEGIN IMMEDIATE`` (pysqlite opens a transaction only at the first write, so a
+    transaction that is already open has written and holds the database's write lock).
+    PostgreSQL: a transaction-scoped advisory lock (id 7332 — one id per table, see
+    ``crb.store.jobs``), re-entrant within the transaction. Other dialects: no-op."""
     dialect = s.get_bind().dialect.name
     if dialect == "sqlite":
-        s.execute(text("BEGIN IMMEDIATE"))
+        try:
+            s.execute(text("BEGIN IMMEDIATE"))
+        except OperationalError as exc:
+            if "within a transaction" not in str(exc):
+                raise
     elif dialect == "postgresql":
         s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
 
@@ -166,7 +184,7 @@ class DbEventSink:
 
     def _emit_reallocated(self, event: StepEvent) -> None:
         with self._factory() as s:
-            _lock(s)
+            lock_event_writes(s)
             nxt = (
                 int(
                     s.execute(
@@ -283,7 +301,7 @@ def append_event(
     )
     try:
         with factory() as s:
-            _lock(s)
+            lock_event_writes(s)
             nxt = (
                 int(
                     s.execute(
@@ -316,5 +334,6 @@ __all__ = [
     "append_event",
     "count_events",
     "last_seq",
+    "lock_event_writes",
     "read_events",
 ]

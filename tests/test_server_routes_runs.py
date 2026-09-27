@@ -710,9 +710,12 @@ class TestCredentialPresence:
         """P-093, the route half of P-003's class: a second route that queues runs (Learn's
         re-measurement queue) enqueued them with no credential check, so a cell whose builder
         had no key was queued to fail at $0. Every function in the server that calls
-        ``.enqueue(`` must call ``submit_refusals`` — the one gate ``POST /runs`` applies — or
-        be named here with the reason it cannot queue a build."""
+        ``.enqueue(`` (or stages a run with ``stage_queued(``) must call ``submit_refusals`` —
+        the one gate ``POST /runs`` applies — or be named here with the reason it cannot
+        queue a build."""
         import ast
+
+        queue_calls = {"enqueue", "stage_queued"}
 
         import crb.server as server_pkg
 
@@ -731,8 +734,12 @@ class TestCredentialPresence:
                 if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
                     continue
                 calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)]
+                # ``.enqueue(`` commits a run; ``stage_queued(`` adds one to the caller's own
+                # transaction (the Learn queue, EI-1) — both put a run on the queue
                 enqueues = any(
-                    isinstance(c.func, ast.Attribute) and c.func.attr == "enqueue" for c in calls
+                    (isinstance(c.func, ast.Attribute) and c.func.attr in queue_calls)
+                    or (isinstance(c.func, ast.Name) and c.func.id in queue_calls)
+                    for c in calls
                 )
                 if not enqueues:
                     continue

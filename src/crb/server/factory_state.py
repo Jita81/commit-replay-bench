@@ -24,7 +24,9 @@ Two more things live here because both the API and the worker need them:
 
 * **Evolutions** (F32): :meth:`FactoryHome.register_evolution` is the only way a frozen
   backlog changes — a NEW item chained onto the frozen hash (``Backlog.evolve``), a
-  history copy, a ``backlog.evolved`` event, then the active pointer. The task view shows
+  history copy, a ``backlog.evolved`` event, then the active pointer, all under the
+  repository's registration lock (:meth:`FactoryHome.registration`), so two registrations
+  at once never drop one another's item (EI-7). The task view shows
   the superseded item as ``superseded`` (with ``superseded_by``) directly above its
   evolution, so the chain reads as it was registered.
 * **The outcome sync** (B-9 / F30): :func:`sync_outcomes` reads every delivered pull
@@ -47,7 +49,10 @@ What it does: Registers and freezes a backlog (history kept), registers evolutio
               request's outcome and each item's supersession) from the evidence events,
               syncs delivered pull requests' outcomes, and counts deliveries per cell.
 How:          Plain JSON/JSONL under ``<home>/factory/<repo>/``; the backlog is hashed by
-              ``crb.factory.backlog`` before it is written; the task view folds the events
+              ``crb.factory.backlog`` before it is written, and every registration holds
+              one OS-level lock (``registration`` — ``flock`` on ``backlog.json.lock``)
+              from the load to the active pointer, written through a temporary file of its
+              own; the task view folds the events
               newest-wins per kind per item, and the newest refusal per item since its
               last readiness pass (:class:`Refusal`); ``sync_outcomes`` is a pure fold
               over a reader callable so the API and the worker share one rule.
@@ -62,7 +67,8 @@ Works with:   src/crb/factory/backlog.py (Backlog/BacklogItem, the hash, ``evolv
               ``delivery_counts`` for the map's cells), src/crb/server/worker.py (the
               ``factory`` run kind; runs the sync first)
 Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py
-Touch when:   a new factory record kind needs serving (add it to task_views), a refusal is
+Touch when:   never for a new repository (its directory is made on first registration); a
+              new factory record kind needs serving (add it to task_views), a refusal is
               recorded in a new shape (extend ``_refusal_of``), or the layout under
               CRB_HOME changes (update docs/OPERATOR.md and the worker together).
 """
@@ -70,11 +76,16 @@ Touch when:   a new factory record kind needs serving (add it to task_views), a 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+import os
+import tempfile
+import threading
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core.ledger import jsonl_append_lock
 from crb.core.redact import redact_and_cap
 from crb.factory.backlog import Backlog, BacklogError, BacklogItem
 from crb.factory.delivery import repository_mismatch
@@ -407,6 +418,38 @@ class FactoryHome:
     def __init__(self, home: str | Path, repo: str) -> None:
         self.repo = repo
         self.dir = Path(home) / FACTORY_DIR / repo
+        #: per thread: how deep it is inside :meth:`registration` (the OS lock is taken once)
+        self._registering = threading.local()
+
+    @contextmanager
+    def registration(self) -> Iterator[None]:
+        """Hold the repository's registration lock: an OS-level exclusive lock on
+        ``backlog.json.lock`` (the same ``flock`` the evidence chain and the Learn corpus
+        use, so it spans the API's threads and the intake listener's process).
+
+        Registering is a read-modify-write of the ACTIVE backlog — load, freeze or evolve,
+        history, event, pointer — and two writers that both loaded the same backlog both
+        recorded ``backlog.evolved`` while the second pointer write dropped the first's item
+        (EI-7, DL-144). :meth:`register_backlog` and :meth:`register_evolution` take it; a
+        caller that decides between them from what it loaded (freeze the first item, evolve
+        the rest) holds it around that decision too. Re-entrant per instance, so a caller
+        holding it can still call the register methods (per thread: two threads sharing an
+        instance still exclude each other)."""
+        depth = getattr(self._registering, "depth", 0)
+        if depth:
+            self._registering.depth = depth + 1
+            try:
+                yield
+            finally:
+                self._registering.depth = depth
+            return
+        self.dir.mkdir(parents=True, exist_ok=True)
+        with jsonl_append_lock(self.backlog_path):
+            self._registering.depth = 1
+            try:
+                yield
+            finally:
+                self._registering.depth = 0
 
     # --- backlog -------------------------------------------------------------------
     @property
@@ -423,19 +466,21 @@ class FactoryHome:
         evidence chain. The previous active backlog stays in the history files. Raises
         :class:`BacklogError` when the items do not validate (the loop's own rules)."""
         backlog = Backlog(items=tuple(items), repo=self.repo).freeze()
-        self.dir.mkdir(parents=True, exist_ok=True)
         body = json.dumps(backlog.to_dict(), sort_keys=True, ensure_ascii=False, indent=1)
         # Order matters: history file, then the freeze EVENT, and only then the active
         # pointer. A failure in the evidence append leaves the previous active backlog
         # intact and one unreferenced history file behind — never an active backlog the
         # chain does not cover (CodeRabbit on PR #4, 2026-09-15).
-        (self.dir / f"backlog-{backlog.backlog_hash[:16]}.json").write_text(body, encoding="utf-8")
-        self.evidence(actor=actor).record_freeze(
-            backlog_hash=backlog.backlog_hash,
-            item_ids=[i.id for i in backlog.items],
-            frozen_at=backlog.frozen_at,
-        )
-        self._write_active(body)
+        with self.registration():
+            (self.dir / f"backlog-{backlog.backlog_hash[:16]}.json").write_text(
+                body, encoding="utf-8"
+            )
+            self.evidence(actor=actor).record_freeze(
+                backlog_hash=backlog.backlog_hash,
+                item_ids=[i.id for i in backlog.items],
+                frozen_at=backlog.frozen_at,
+            )
+            self._write_active(body)
         return backlog
 
     def register_evolution(self, item: BacklogItem, *, actor: str) -> Backlog:
@@ -445,27 +490,35 @@ class FactoryHome:
         history copy, the ``backlog.evolved`` event, then the active pointer. Raises
         :class:`BacklogError` (``BacklogFrozen`` for an id that exists or an item already
         superseded) and ``LookupError`` when no backlog is registered."""
-        backlog = self.load_backlog()
-        if backlog is None:
-            raise LookupError(f"no backlog registered for {self.repo!r}")
-        evolved = backlog.evolve(item)
-        body = json.dumps(evolved.to_dict(), sort_keys=True, ensure_ascii=False, indent=1)
-        (self.dir / f"backlog-{evolved.evolutions_hash[:16]}.json").write_text(
-            body, encoding="utf-8"
-        )
-        self.evidence(actor=actor).record_evolution(
-            item_id=item.id,
-            supersedes=item.supersedes,
-            backlog_hash=evolved.backlog_hash,
-            evolutions_hash=evolved.evolutions_hash,
-        )
-        self._write_active(body)
+        with self.registration():  # the load and the pointer write are one step (EI-7)
+            backlog = self.load_backlog()
+            if backlog is None:
+                raise LookupError(f"no backlog registered for {self.repo!r}")
+            evolved = backlog.evolve(item)
+            body = json.dumps(evolved.to_dict(), sort_keys=True, ensure_ascii=False, indent=1)
+            (self.dir / f"backlog-{evolved.evolutions_hash[:16]}.json").write_text(
+                body, encoding="utf-8"
+            )
+            self.evidence(actor=actor).record_evolution(
+                item_id=item.id,
+                supersedes=item.supersedes,
+                backlog_hash=evolved.backlog_hash,
+                evolutions_hash=evolved.evolutions_hash,
+            )
+            self._write_active(body)
         return evolved
 
     def _write_active(self, body: str) -> None:
-        tmp = self.backlog_path.with_suffix(".json.tmp")
-        tmp.write_text(body, encoding="utf-8")
-        tmp.replace(self.backlog_path)  # atomic on POSIX: readers see old or new, never half
+        # a temporary file of its own, in the same directory (so the rename is atomic): a
+        # fixed ``backlog.json.tmp`` let one writer rename another's file away (EI-7)
+        fd, tmp = tempfile.mkstemp(prefix=".backlog-", suffix=".tmp", dir=self.dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            Path(tmp).replace(self.backlog_path)  # atomic: readers see old or new, never half
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     # --- evidence / sign-offs / authored tests ----------------------------------------
     def evidence(self, *, actor: str = "") -> FactoryEvidence:

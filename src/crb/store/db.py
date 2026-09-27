@@ -6,25 +6,39 @@ SQLite (``RAISE(ABORT)``) and PostgreSQL (a trigger function raising an
 exception). Alembic migrations (``crb.store.migrations``) call the same helper
 so a migrated database carries the same protection as a freshly created one.
 
+Short of DDL on the triggers themselves, no statement the product's connections can
+issue rewrites or removes an append-only row: ``UPDATE`` and ``DELETE`` meet the row
+triggers; SQLite's ``REPLACE`` meets the delete trigger because every connection turns
+``recursive_triggers`` on; PostgreSQL's ``TRUNCATE`` meets a statement-level trigger and
+its ``ON CONFLICT DO UPDATE`` the update trigger. Trigger DDL (``DROP``/``DISABLE``) is
+what ``/health``'s ``append_only`` probe watches, and what a separate owner role
+removes from the application's reach on PostgreSQL (docs/DEPLOYMENT.md).
+
 Navigation
 ----------
 What it is:   The engine / session factory / schema-init module of the store, and the home of
               the append-only trigger SQL.
 What it does: Resolves the database URL (``CRB_DATABASE_URL`` → explicit → SQLite under
               ``CRB_HOME``), builds a SQLAlchemy engine with the SQLite pragmas the ledger
-              relies on (WAL, foreign keys, ``synchronous=FULL``), and installs the
-              ``UPDATE``/``DELETE``-refusing triggers on every append-only table. Refuses any
-              dialect other than SQLite or PostgreSQL rather than run without the triggers.
+              relies on (WAL, foreign keys, ``synchronous=FULL``, recursive triggers so a
+              ``REPLACE`` fires the delete trigger), and installs the ``UPDATE``/``DELETE``-
+              refusing triggers on every append-only table — plus, on PostgreSQL, a
+              statement-level ``TRUNCATE``-refusing one. Refuses any dialect other than
+              SQLite or PostgreSQL rather than run without the triggers.
 How:          ``database_url`` → ``make_engine`` (per-connection pragmas via an event
               listener) → ``init_db`` = ``create_all`` + ``install_append_only_triggers``;
-              ``session_scope`` is the commit-or-rollback context for callers outside FastAPI.
+              ``expected_triggers`` is the one list the installer, the ``/health`` probe and
+              the tests share; ``session_scope`` is the commit-or-rollback context for
+              callers outside FastAPI.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/models.py (``Base`` and ``APPEND_ONLY_TABLES``),
               src/crb/store/migrate.py (installs the same triggers on Alembic's connection),
               src/crb/store/ledger.py (relies on the triggers and the WAL/busy-timeout
               settings), src/crb/server/app.py (calls ``make_engine`` / ``init_db`` in the
-              lifespan), src/crb/server/settings.py (the URL the server passes in)
+              lifespan), src/crb/server/settings.py (the URL the server passes in),
+              src/crb/server/routes/system.py (the ``append_only`` probe counts
+              ``expected_triggers``)
 Tested by:    tests/test_store_db.py, tests/test_store_migrate.py, tests/test_store_ledger.py
 Touch when:   never for a new repository (the database is per deployment, not per repo);
               adding an append-only table means adding it to ``APPEND_ONLY_TABLES`` in
@@ -38,8 +52,9 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, cast
 
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Connection, Engine, Result, create_engine, event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -90,6 +105,11 @@ def make_engine(url: str | None = None, *, echo: bool = False) -> Engine:
             cur.execute("PRAGMA journal_mode=WAL")
             cur.execute("PRAGMA foreign_keys=ON")
             cur.execute("PRAGMA synchronous=FULL")
+            # REPLACE (``INSERT OR REPLACE`` / ``REPLACE INTO``) deletes the conflicting row
+            # before it inserts, and that implicit delete fires the ``BEFORE DELETE``
+            # append-only trigger only with recursive triggers on — without it a whole row
+            # was rewritten in place and verified clean once re-hashed (EI-5, DL-145).
+            cur.execute("PRAGMA recursive_triggers=ON")
             cur.close()
 
         return engine
@@ -116,61 +136,152 @@ def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
         s.close()
 
 
-def _sqlite_trigger_sql(table: str) -> list[str]:
-    # IF NOT EXISTS makes re-installation (init_db on an existing file, migrate.upgrade)
-    # a no-op rather than an error.
-    return [
-        f"CREATE TRIGGER IF NOT EXISTS {table}_no_update BEFORE UPDATE ON {table} "
-        f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END;",
-        f"CREATE TRIGGER IF NOT EXISTS {table}_no_delete BEFORE DELETE ON {table} "
-        f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END;",
-    ]
+#: The trigger kinds each dialect installs on every append-only table, with the event each
+#: refuses. SQLite has no ``TRUNCATE`` (its truncate is ``DELETE`` without ``WHERE``, which
+#: the row trigger refuses); PostgreSQL's ``TRUNCATE`` is a STATEMENT event no ``FOR EACH
+#: ROW`` trigger sees, so it gets its own statement-level trigger (EI-4, DL-145).
+TRIGGER_KINDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "sqlite": (("no_update", "UPDATE"), ("no_delete", "DELETE")),
+    "postgresql": (("no_update", "UPDATE"), ("no_delete", "DELETE"), ("no_truncate", "TRUNCATE")),
+}
 
-
-_PG_FUNCTION = """
-CREATE OR REPLACE FUNCTION crb_append_only() RETURNS trigger AS $$
+#: The body of ``crb_append_only()`` exactly as installed — the live check compares it, so a
+#: function its owner replaced with a no-op does not count as protection.
+_PG_FUNCTION_SRC = """
 BEGIN
   RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
 END;
-$$ LANGUAGE plpgsql;
 """
+_PG_FUNCTION = (
+    "CREATE OR REPLACE FUNCTION crb_append_only() RETURNS trigger AS $$"
+    + _PG_FUNCTION_SRC
+    + "$$ LANGUAGE plpgsql;"
+)
 
 
-def _pg_trigger_sql(table: str) -> list[str]:
-    # PostgreSQL has no CREATE TRIGGER IF NOT EXISTS; DROP + CREATE gives the same
-    # idempotence (the function above is CREATE OR REPLACE for the same reason).
-    return [
-        f"DROP TRIGGER IF EXISTS {table}_no_update ON {table};",
-        f"CREATE TRIGGER {table}_no_update BEFORE UPDATE ON {table} "
-        f"FOR EACH ROW EXECUTE FUNCTION crb_append_only();",
-        f"DROP TRIGGER IF EXISTS {table}_no_delete ON {table};",
-        f"CREATE TRIGGER {table}_no_delete BEFORE DELETE ON {table} "
-        f"FOR EACH ROW EXECUTE FUNCTION crb_append_only();",
-    ]
+def expected_triggers(
+    dialect: str, tables: tuple[str, ...] = APPEND_ONLY_TABLES
+) -> tuple[tuple[str, str], ...]:
+    """``(table, trigger name)`` for every append-only trigger ``dialect`` must carry — the
+    one list the installer, ``/health``'s ``append_only`` probe and the tests share. An
+    unsupported dialect has none (it is refused before anything is written)."""
+    kinds = TRIGGER_KINDS.get(dialect, ())
+    return tuple((t, f"{t}_{kind}") for t in tables for kind, _ in kinds)
+
+
+def _event_of(name: str, dialect: str) -> str:
+    return next(ev for kind, ev in TRIGGER_KINDS[dialect] if name.endswith(f"_{kind}"))
+
+
+def _sqlite_trigger_sql(table: str, name: str) -> str:
+    return (
+        f"CREATE TRIGGER {name} BEFORE {_event_of(name, 'sqlite')} ON {table} "
+        f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END;"
+    )
+
+
+def _pg_trigger_sql(table: str, name: str) -> str:
+    event = _event_of(name, "postgresql")
+    level = "STATEMENT" if event == "TRUNCATE" else "ROW"
+    return (
+        f"CREATE TRIGGER {name} BEFORE {event} ON {table} "
+        f"FOR EACH {level} EXECUTE FUNCTION crb_append_only();"
+    )
+
+
+def _read(conn: Connection, sql: str, params: dict[str, Any] | None = None) -> list[Any] | None:
+    """The rows of ``sql``, or ``None`` on an offline (``alembic upgrade --sql``) connection,
+    which emits statements and reads nothing — so every trigger is emitted there."""
+    res = cast("Result[Any] | None", conn.execute(text(sql), params or {}))
+    return None if res is None else list(res.all())
+
+
+def _pg_function_src(conn: Connection) -> str | None:
+    """The installed body of ``crb_append_only()``; ``None`` when absent or unreadable."""
+    rows = _read(conn, "SELECT prosrc FROM pg_proc WHERE oid = to_regproc('crb_append_only')")
+    return str(rows[0][0]) if rows else None
+
+
+def live_triggers(conn: Connection) -> set[str]:
+    """The expected append-only triggers that are LIVE on ``conn``'s database: on their own
+    table, refusing their own event, and — on PostgreSQL — enabled and calling an unaltered
+    ``crb_append_only()``. A trigger its table's owner disabled (``ALTER TABLE … DISABLE
+    TRIGGER``), one of the right name hung on another table, or a function rewritten to a
+    no-op is not counted (EI-4). ``/health``'s ``append_only`` probe and the installer both
+    read it. Unsupported dialects: none."""
+    dialect = conn.dialect.name
+    expected = expected_triggers(dialect)
+    if dialect == "sqlite":
+        rows = _read(conn, "SELECT tbl_name, name, sql FROM sqlite_master WHERE type = 'trigger'")
+        if rows is None:
+            return set()
+        found = {
+            (str(t), str(n))
+            for t, n, sql in rows
+            if str(n) in {name for _, name in expected}
+            and f"RAISE(ABORT, '{t} is append-only')" in str(sql or "")
+            and f"BEFORE {_event_of(str(n), dialect)} ON {t} " in " ".join(str(sql).split())
+        }
+    elif dialect == "postgresql":
+        if _pg_function_src(conn) != _PG_FUNCTION_SRC:
+            return set()
+        # tgenabled 'O' (origin) / 'A' (always) fire in an ordinary session; 'D' is disabled
+        # and 'R' fires only on a replica. to_regclass resolves through the same search_path
+        # the application's own statements use.
+        rows = _read(
+            conn,
+            "SELECT c.relname, t.tgname, pg_get_triggerdef(t.oid) FROM pg_trigger t "
+            "JOIN pg_class c ON c.oid = t.tgrelid "
+            "WHERE NOT t.tgisinternal AND t.tgenabled IN ('O', 'A') "
+            "AND t.tgfoid = to_regproc('crb_append_only') "
+            "AND c.relname = ANY(:tables) "
+            "AND c.oid = to_regclass(quote_ident(c.relname))",
+            {"tables": list(APPEND_ONLY_TABLES)},
+        )
+        if rows is None:
+            return set()
+        found = {
+            (str(t), str(n))
+            for t, n, ddl in rows
+            if str(n) in {name for _, name in expected}
+            and f" BEFORE {_event_of(str(n), dialect)} ON " in str(ddl)
+        }
+    else:  # pragma: no cover — unsupported by policy
+        return set()
+    return {name for table, name in expected if (table, name) in found}
 
 
 def install_append_only_triggers(
     engine: Engine, tables: tuple[str, ...] = APPEND_ONLY_TABLES
 ) -> None:
-    """Install the ``UPDATE``/``DELETE``-refusing triggers on ``tables`` (idempotent).
+    """Install every append-only trigger :func:`expected_triggers` names on ``tables`` that is
+    not already live (idempotent): ``UPDATE`` and ``DELETE`` refused on both dialects, and a
+    statement-level ``TRUNCATE`` on PostgreSQL.
 
     The one place the trigger SQL lives: ``init_db`` and every Alembic revision (through
-    :func:`crb.store.migrate.install_append_only_triggers_on`) call this. An unsupported
+    :func:`crb.store.migrate.install_append_only_triggers_on`) call this. A store whose
+    triggers are all live gets NO DDL, so the API and the worker start under an application
+    role that does not own the tables (which therefore cannot drop, disable or truncate
+    them — docs/DEPLOYMENT.md §3.3); a trigger that is missing, disabled, moved or pointing
+    at an altered function is re-created, which only the owner can do. An unsupported
     dialect raises rather than leaving the ledger rewritable.
     """
     dialect = engine.dialect.name
+    if dialect not in TRIGGER_KINDS:  # pragma: no cover — other dialects are unsupported
+        raise RuntimeError(f"append-only triggers not implemented for dialect {dialect!r}")
     with engine.begin() as conn:
-        if dialect == "sqlite":
-            for t in tables:
-                for stmt in _sqlite_trigger_sql(t):
-                    conn.execute(text(stmt))
-        elif dialect == "postgresql":
+        if dialect == "postgresql" and _pg_function_src(conn) != _PG_FUNCTION_SRC:
             conn.execute(text(_PG_FUNCTION))
-            for t in tables:
-                for stmt in _pg_trigger_sql(t):
-                    conn.execute(text(stmt))
-        else:  # pragma: no cover — other dialects are unsupported by policy
-            raise RuntimeError(f"append-only triggers not implemented for dialect {dialect!r}")
+        live = live_triggers(conn)
+        for table, name in expected_triggers(dialect, tables):
+            if name in live:
+                continue
+            if dialect == "sqlite":
+                conn.execute(text(f"DROP TRIGGER IF EXISTS {name}"))
+                conn.execute(text(_sqlite_trigger_sql(table, name)))
+            else:
+                conn.execute(text(f"DROP TRIGGER IF EXISTS {name} ON {table}"))
+                conn.execute(text(_pg_trigger_sql(table, name)))
 
 
 def init_db(engine: Engine) -> None:

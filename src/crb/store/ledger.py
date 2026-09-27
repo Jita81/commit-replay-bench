@@ -29,7 +29,9 @@ What it does: Appends hash-chained rows under a per-table write lock, re-asserti
 How:          ``append`` = lock → last ``row_hash`` → ``GradeRow.chained`` → insert → commit;
               ``verify`` re-walks the chain with the core's ``verify_chain``;
               ``DbReviewLedger.append`` resolves the reviewed row and its stored pack, runs
-              ``check_review_anchor``, then chains and inserts the same way.
+              ``check_review_anchor``, then chains and inserts the same way;
+              ``assert_append_only`` tries a no-op UPDATE on the first ``grades`` row and, on
+              SQLite, a same-row ``REPLACE``, and requires both refused.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md
@@ -58,6 +60,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import EvidencePack
@@ -356,7 +359,8 @@ class DbReviewLedger:
 
 
 def assert_append_only(factory: sessionmaker[Session]) -> None:
-    """Prove the triggers are live: an UPDATE on grades must fail. Used by /health."""
+    """Prove the triggers are live: an UPDATE on grades must fail, and on SQLite so must a
+    ``REPLACE`` of the same row. Used by /health."""
     with factory() as s:
         first = s.execute(select(Grade).order_by(Grade.seq).limit(1)).scalar_one_or_none()
         if first is None:
@@ -368,7 +372,31 @@ def assert_append_only(factory: sessionmaker[Session]) -> None:
             s.rollback()
         except Exception:
             s.rollback()
-            return
-        raise LedgerIntegrityError(
-            "grades table accepted an UPDATE — append-only triggers are missing"
+        else:
+            raise LedgerIntegrityError(
+                "grades table accepted an UPDATE — append-only triggers are missing"
+            )
+        if s.get_bind().dialect.name == "sqlite":
+            _assert_replace_refused(s, first.seq)
+
+
+def _assert_replace_refused(s: Session, seq: int) -> None:
+    """SQLite's ``REPLACE`` deletes the conflicting row before it inserts, and that delete
+    fires the append-only delete trigger only when the connection has ``recursive_triggers``
+    on (EI-5): the row is replaced by an identical copy, and the rollback undoes it either
+    way. Only the trigger's own refusal counts as refused — any other error propagates."""
+    try:
+        s.execute(
+            text("INSERT OR REPLACE INTO grades SELECT * FROM grades WHERE seq = :seq"),
+            {"seq": seq},
         )
+    except DBAPIError as exc:
+        s.rollback()
+        if "append-only" not in str(exc):
+            raise
+        return
+    s.rollback()
+    raise LedgerIntegrityError(
+        "grades table accepted a REPLACE — this connection does not fire the append-only "
+        "delete trigger (PRAGMA recursive_triggers is off)"
+    )

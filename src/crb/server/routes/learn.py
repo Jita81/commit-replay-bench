@@ -54,9 +54,11 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               refused and served with those runs, so money is never spent twice (P-115).
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
-              the writes go through ``apply_triage`` / ``FactoryHome.register_*`` /
-              ``new_run`` + the job queue, each with an ``append_system_event`` on the
-              repo's ``learn:<repo>`` trace in the same transaction.
+              the writes go through ``apply_triage`` / ``FactoryHome.register_*`` (under
+              ``FactoryHome.registration``) / ``new_run`` + ``stage_queued``, each with an
+              ``append_system_event`` on the repo's ``learn:<repo>`` trace in the same
+              transaction; the queue's in-flight guard is read under the events write lock
+              (``lock_event_writes``), so the check and the act are one step.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` — the same
@@ -69,7 +71,8 @@ Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` 
               registration path), src/crb/server/routes/runs.py (``new_run``,
               ``submit_refusals``, ``require_jobs``, ``append_system_event`` — how a run is
               built, refused at submit, queued, and how an event is chained),
-              src/crb/server/routes/factory.py
+              src/crb/store/events.py (``lock_event_writes``), src/crb/store/jobs.py
+              (``stage_queued``), src/crb/server/routes/factory.py
               (``_refuse_if_run_active``, ``_next_item_id`` — the backlog write's own
               guards, shared rather than copied), src/crb/cli/commands/learn.py (the CLI
               twin), docs/LEARNING-LOOP.md (what loops mechanically, what a human decides),
@@ -126,6 +129,8 @@ from crb.server.routes.runs import (
     system_trace_id,
 )
 from crb.server.schemas import TERMINAL_STATUSES, RunCreateRequest
+from crb.store.events import lock_event_writes
+from crb.store.jobs import stage_queued
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run, Task
 
@@ -673,34 +678,40 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
     items = [_backlog_item(by_id[i]) for i in chosen]
     home = FactoryHome(settings.home, repo)
     registered: list[RegisteredItemOut] = []
-    for item in items:
-        active = home.load_backlog()
-        try:
-            if active is None:
-                home.register_backlog([item], actor=operator.id)
-                registered.append(RegisteredItemOut(item_id=item.id, supersedes="", how="frozen"))
-                continue
-            to_register = item
-            if active.get(item.id) is not None:
-                to_register = replace(
-                    item,
-                    id=_next_item_id(item.id, [i.id for i in active.all_items()]),
-                    supersedes=_latest_in_lineage(active, item.id),
+    # one locked read-modify-write from the first load to the last pointer write (EI-7): a
+    # second registration waits, then sees this one's freeze and evolves onto it — never a
+    # second freeze that replaces the first, never an evolution the pointer drops
+    with home.registration():
+        for item in items:
+            active = home.load_backlog()
+            try:
+                if active is None:
+                    home.register_backlog([item], actor=operator.id)
+                    registered.append(
+                        RegisteredItemOut(item_id=item.id, supersedes="", how="frozen")
+                    )
+                    continue
+                to_register = item
+                if active.get(item.id) is not None:
+                    to_register = replace(
+                        item,
+                        id=_next_item_id(item.id, [i.id for i in active.all_items()]),
+                        supersedes=_latest_in_lineage(active, item.id),
+                    )
+                home.register_evolution(to_register, actor=operator.id)
+            except (BacklogError, ValueError) as exc:
+                raise ApiError(
+                    409,
+                    "register_refused",
+                    f"item {item.id!r} was not registered: {exc}",
+                    detail={"registered": [r.item_id for r in registered]},
+                ) from exc
+            registered.append(
+                RegisteredItemOut(
+                    item_id=to_register.id, supersedes=to_register.supersedes, how="evolved"
                 )
-            home.register_evolution(to_register, actor=operator.id)
-        except (BacklogError, ValueError) as exc:
-            raise ApiError(
-                409,
-                "register_refused",
-                f"item {item.id!r} was not registered: {exc}",
-                detail={"registered": [r.item_id for r in registered]},
-            ) from exc
-        registered.append(
-            RegisteredItemOut(
-                item_id=to_register.id, supersedes=to_register.supersedes, how="evolved"
             )
-        )
-    final = home.load_backlog()
+        final = home.load_backlog()
     assert final is not None  # something was registered above, or a 409 was raised
     append_system_event(
         db,
@@ -756,8 +767,11 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     refused with nothing queued; **409 ``remeasure_already_queued``** while any run an earlier
     queue of this cell (same mode and apparatus) put on the queue has not finished, naming
     those runs — the plan is derived from graded rows only, so without this a double click
-    or a second operator would spend the estimate twice; **503 ``queue_unavailable``** when
-    this server has no queue.
+    or a second operator would spend the estimate twice. The guard is read under the events
+    write lock and the runs are staged on this request's session, so the guard, the runs
+    and the ``learn.remeasure.queued`` event commit together and a simultaneous second
+    request waits, then is refused (EI-1). **503 ``queue_unavailable``** when this server
+    has no queue.
     """
     get_repo_or_404(db, repo)
     if body.apparatus != APPARATUS_VERSION:
@@ -792,6 +806,11 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             detail={"modes": sorted(c.mode for c in matches)},
         )
     cell = matches[0]
+    require_jobs()  # 503 before anything is read under the lock
+    # The guard, the runs and their event are ONE transaction under the events write lock
+    # (EI-1, DL-144): a second request for the same cell waits here and then reads the
+    # first one's event, so it is refused — the check can no longer race the act.
+    lock_event_writes(db)
     in_flight = in_flight_runs(
         db, repo, cell=cell.cell.label, mode=cell.mode, apparatus=body.apparatus
     )
@@ -803,7 +822,6 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             "finished — nothing was queued; the plan is re-read once they have graded",
             detail={"run_ids": in_flight},
         )
-    api = require_jobs()
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
     # whole or not at all (P-093 — the gate is the one POST /runs applies)
     runs = []
@@ -818,7 +836,9 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
         run = new_run(validated, actor=operator.id)
         submit_refusals(db, settings, validated, run)
         runs.append(run)
-    run_ids = [api.enqueue(factory, run).id for run in runs]
+    # staged on the request's own session, committed with the event below: a failure
+    # leaves neither runs nobody recorded nor an event naming runs that were never queued
+    run_ids = [stage_queued(db, run).id for run in runs]
     append_system_event(
         db,
         trace_id=learn_trace_id(repo),

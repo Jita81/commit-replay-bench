@@ -282,6 +282,45 @@ managed server; use `sslmode=require` (or `verify-full` with the CA) and a priva
 `postgresql.mode: embedded` renders a single-replica StatefulSet (`postgres:16-alpine`, uid
 70, read-only root) for **evaluation only** — no HA, no PITR, no managed backups.
 
+**Do not let the application own the ledger.** On PostgreSQL the role that owns a table may
+disable, drop or re-create its triggers, so a deployment whose API and worker connect as the
+tables' owner holds append-only only against its own good behaviour (DL-145). Where your
+platform allows a second role, split them:
+
+- the **owner** runs `crb migrate` (the migration job) and owns every table and the
+  `crb_append_only()` function;
+- the **application** role — the one in the API's and the worker's `CRB_DATABASE_URL` — is
+  granted `SELECT, INSERT` on the append-only tables and `SELECT, INSERT, UPDATE, DELETE` on
+  the rest, and `USAGE, SELECT` on the sequences:
+
+```sql
+-- as the owner, after `crb migrate` has created the schema
+CREATE ROLE crb_app LOGIN PASSWORD '<secret>';
+GRANT CONNECT ON DATABASE crb TO crb_app;
+GRANT USAGE ON SCHEMA public TO crb_app;
+GRANT SELECT, INSERT ON grades, events, signoffs, evidence, reviews, task_qualifications
+  TO crb_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON repos, runs, tasks, users, workers,
+  github_installations, alembic_version TO crb_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO crb_app;
+```
+
+(`SELECT tablename FROM pg_tables WHERE schemaname = 'public'` lists every table; the
+append-only ones are `APPEND_ONLY_TABLES` in `src/crb/store/models.py`.) The API and the
+worker then start with no DDL: `init_db` re-creates only a trigger that is not live, and a
+store whose triggers are all live gets none. The application role cannot `TRUNCATE`,
+disable, drop or redefine anything, and a trigger that is missing or disabled makes
+`/health`'s `append_only` probe `down` with its name in `data.missing`. The proof is
+`tests/test_store_db.py::test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_protection`,
+run on PostgreSQL in CI.
+
+The chart and the compose file still give the migration job, the API and the worker one
+`CRB_DATABASE_URL` [gap] G-760: run `crb migrate` as the owner yourself before each
+install or upgrade (`CRB_DATABASE_URL=<owner URL> crb migrate`), and put the application
+role's URL in the Secret. The chart's migration hook then finds the store at head, issues no
+DDL and passes; an upgrade whose migration the owner has not run fails at that hook, before
+any pod changes.
+
 ### 3.4 The worker's sandbox — choose deliberately
 
 The worker creates one hardened container per test command (`--network=none --read-only
@@ -635,7 +674,7 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
 - [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
       `database at <rev> = code head` — its contract is
       [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
-      line. `append_only` proves an
+      line. `append_only` proves every trigger live and an
       UPDATE refused, `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
       worker owns it; prove it with `crb doctor` on the worker host).
@@ -643,6 +682,8 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
       reason you have written down; no `fail`. It covers what `/health` cannot see from
       inside a pod — the GitHub App's installations, the secrets directory mode, the
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
+- [ ] On PostgreSQL, the API and the worker connect as a role that does not own the ledger
+      tables (§3.3) — or the reason your platform cannot is written down.
 - [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
       (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
 - [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
