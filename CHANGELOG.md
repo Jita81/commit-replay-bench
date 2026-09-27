@@ -12,6 +12,20 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Gates from a lock, a run that keeps its spend cap, and click provisioned sealed**
+  (north-star Wave 2, stream H; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-h)).
+  Every CI job installs from the new `uv.lock`, and a `fresh-clone` job runs every gate on a
+  clone made by root with the docker daemon stopped; making it a required check is an
+  administrator's step (DL-113). A build run may declare `max_cost_usd`: it stops itself
+  before an attempt, or a factory item, that could take its spend past the cap, and a cap over
+  an unpriced model is refused at submit; the Measure page names the cap and says when a run
+  stopped at it (ADR-0043). The sealed posture reads a `uv.lock`, and `deps_lock` may name
+  alternatives, so one declaration provisions click across its move from
+  `requirements/tests.txt` to `uv.lock` (DL-114). The chart ships the four alert rules as a
+  `PrometheusRule` (off by default) and gives the API and the worker one evidence store; the
+  reaper's budget tests run on a fake clock; every docker-state check after a kill waits
+  through one bounded helper.
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the
