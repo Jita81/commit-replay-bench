@@ -37,7 +37,10 @@ abstract cells, never code.
 > **[measured 2026-09-27 — the required-checks list read from the repository setting
 > (`gh api …/branches/main/protection`) and compared with the workflow's job names by
 > `scripts/check_branch_protection.py`, n = 16 required checks and 2 readings (26 and 27
-> September); apparatus 2.3 — a repository setting, not a graded number, so no interval]** — and every change since
+> September); apparatus 2.3 — a repository setting, not a graded number, so no interval]**. One
+> workflow outside `ci.yml` is red by design: the daily `branch-protection` check fails until an
+> administrator adds the `BRANCH_PROTECTION_TOKEN` secret it reads the setting with (G-930;
+> [DEPLOYMENT §3.4](docs/DEPLOYMENT.md)) — and every change since
 > 2026-09-15 reviewed by CodeRabbit (ADR-0013). Every phase of the product plan has shipped (P0–P7: engine, oracle,
 > builders, store, server, UI, factory, deployment) plus the MCP server (P8) so Claude Code
 > can drive a deployment. `v2.0.0a1` is tagged and its image is on GHCR; `v2.0.0b1` will be

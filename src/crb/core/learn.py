@@ -47,8 +47,9 @@ What it does: Groups every ``protocol`` row's guard refusals by (reason, command
               turns every oracle-held cell into ``test.add`` backlog items with structural
               facts from the ledger; lists every cell with stale-apparatus evidence, the
               rows it needs to clear the rule's bars and the ``POST /runs`` bodies that
-              would renew it. Writes only what a named human decided (``apply_triage``)
-              and queues nothing.
+              would renew it. Writes only what a named human decided (``apply_triage``,
+              under a lock on the corpus directory; a supplied command only completes a
+              cut example) and queues nothing.
 How:          ``triage_refusals`` (``parse_violations`` → ``normalise_reason`` /
               ``normalise_command`` → ``RefusalGroup``) → a decisions file → ``apply_triage``
               (validate all, then append with provenance); ``strengthening_backlog`` (cells
@@ -77,11 +78,14 @@ Touch when:   never for a new repository; a new guard prefix, a new routing reas
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
+import fcntl
 import hashlib
 import json
+import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -652,6 +656,71 @@ def apply_triage(
         raise LearnError("apply_triage needs decided_by")
     day = date or _dt.datetime.now(tz=_dt.UTC).date().isoformat()
     base = Path(corpus_dir)
+    # what needs no file is refused before anything is touched, the directory included
+    for d in decisions:
+        g = report.get(d.group_id)
+        if g is None:
+            raise LearnError(f"decision {d.group_id}: no such group in the report")
+        if d.verdict != VERDICT_UNSURE:
+            _command_for(d, g)
+    # the read, the other-corpus check and the append are one step: two deciders at once
+    # (the HTTP write runs in a thread pool) must never both pass the check and put one
+    # command in both corpora
+    with _corpus_lock(base):
+        return _apply_locked(decisions, report, base=base, who=who, day=day)
+
+
+@contextlib.contextmanager
+def _corpus_lock(base: Path) -> Iterator[None]:
+    """An exclusive lock on the corpus directory for the length of one ``apply_triage``
+    (``flock`` on the directory itself, so no lock file is left among the corpus files).
+    Creating the directory is the only write it makes before a decision is validated."""
+    base.mkdir(parents=True, exist_ok=True)
+    fd = os.open(base, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)  # closing the descriptor releases the lock
+
+
+def _command_for(d: RefusalDecision, g: RefusalGroup) -> str:
+    """The corpus line a decision writes: the report's candidate, or — only for a class
+    whose every recorded example was cut — the person's completion of that example. A
+    ``command`` for a whole class, or one that does not continue a recorded cut example, is
+    a different line from the one the rows refused, and is refused (a line nobody saw
+    refused must never sit under the provenance of real rows)."""
+    if not d.command:
+        if g.truncated:
+            raise LearnError(
+                f"decision {d.group_id}: every recorded example was truncated by the "
+                "recorder's cap; supply the full 'command'"
+            )
+        return g.candidate_honest
+    if not g.truncated:
+        raise LearnError(
+            f"decision {d.group_id}: 'command' completes a class whose recorded examples were "
+            "all truncated; this class is not truncated, so its line is the report's own"
+        )
+    cmd = encode_corpus_line(d.command)
+    if not any(cmd.startswith(e) for e in g.examples if e):
+        raise LearnError(
+            f"decision {d.group_id}: 'command' must continue a recorded cut example "
+            f"({', '.join(repr(e) for e in g.examples)}); it completes that line, never "
+            "replaces it"
+        )
+    return cmd
+
+
+def _apply_locked(
+    decisions: Sequence[RefusalDecision],
+    report: RefusalReport,
+    *,
+    base: Path,
+    who: str,
+    day: str,
+) -> TriageApplied:
+    """:func:`apply_triage`'s body, run under :func:`_corpus_lock`."""
     honest_path = base / CORPUS_HONEST_FILE
     refused_path = base / CORPUS_REFUSED_FILE
     honest_have = _existing_lines(honest_path)
@@ -666,14 +735,9 @@ def apply_triage(
         if d.verdict == VERDICT_UNSURE:
             unsure.append(d.group_id)
             continue
-        cmd = encode_corpus_line(d.command) if d.command else g.candidate_honest
+        cmd = _command_for(d, g)
         if not cmd:
             raise LearnError(f"decision {d.group_id}: no command to append (supply 'command')")
-        if g.truncated and not d.command:
-            raise LearnError(
-                f"decision {d.group_id}: every recorded example was truncated by the "
-                "recorder's cap; supply the full 'command'"
-            )
         other = refused_have if d.verdict == VERDICT_HONEST else honest_have
         if cmd in other:
             raise LearnError(

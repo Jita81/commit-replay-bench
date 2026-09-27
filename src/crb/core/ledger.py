@@ -1397,6 +1397,19 @@ def rows_for_checks(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
     return [r for r in rows if r.checks_arm == arm]
 
 
+#: The axes on which two rows of one class and size are NEVER pooled into one cell: a row of
+#: another apparatus version, mode, checks arm (ADR-0024) or posture class (ADR-0019 §8) is
+#: another cell's evidence. A fold that keys cells by class and size keys them by
+#: :func:`pool_scope` too — so an axis added here reaches every such fold at once
+#: (``tests/test_server_routes_flow.py`` splits a cell on each axis; docs/PREVENTION.md P-117).
+NEVER_POOL_AXES: tuple[str, ...] = ("apparatus_version", "mode", "checks_arm", "posture_class")
+
+
+def pool_scope(row: GradeRow) -> tuple[str, ...]:
+    """``row``'s value on every axis of :data:`NEVER_POOL_AXES`, in that order."""
+    return tuple(str(getattr(row, axis)) for axis in NEVER_POOL_AXES)
+
+
 def group_by_cell(
     rows: Iterable[GradeRow], *, key_fields: Sequence[str] = CELL_FIELDS
 ) -> dict[tuple[str, ...], list[GradeRow]]:

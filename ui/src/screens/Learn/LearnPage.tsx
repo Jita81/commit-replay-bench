@@ -14,13 +14,15 @@
  *               ui/src/screens/Learn/PreventionSection.tsx), then `GET /learn/refusals`
  *               (protocol rows grouped by guard, reason and command shape, every verdict
  *               "unsure", with the decisions a person has already made), `/learn/strengthen`
- *               (cells withheld from deliver for a weak oracle, as frozen-backlog-shaped
- *               items) and `/learn/remeasure` (cells whose rows predate the current apparatus,
- *               with the rows and spend still needed). An operator decides from the report
- *               that computed the thing: accept a refusal class into the guard corpus,
- *               register a strengthening item onto the backlog, queue a cell's re-measurement
- *               runs. The product still decides nothing — every one of the three is a
- *               person's act, recorded with their name, and each reports back what was written.
+ *               (cells withheld from deliver for a weak oracle, as frozen-backlog-shaped items)
+ *               and `/learn/remeasure` (cells whose rows predate the current apparatus, with the
+ *               rows and spend still needed). An operator decides from the report that computed
+ *               the thing: accept a refusal class into the guard corpus, register a
+ *               strengthening item onto the backlog, queue a cell's re-measurement runs — and a
+ *               cell whose queued runs are unfinished shows them in place of Queue (the server
+ *               refuses a second queue). The product still decides nothing — every one of the
+ *               three is a person's act, recorded with their name, and each reports back what
+ *               was written.
  * How:          Three local read hooks and three mutations (the shapes mirror
  *               `crb.core.learn` `to_dict()`s and the route's response models) → one section
  *               component each with tiles + `DataTable` + its action; the note the server
@@ -201,6 +203,8 @@ export interface RemeasureCell {
   cost_known: boolean
   repos: string[]
   requests: Array<Record<string, unknown>>
+  /** Runs an earlier queue of this cell put on the queue that have not finished: shown in place of Queue. */
+  in_flight_run_ids: string[]
 }
 
 /** `GET /learn/remeasure` — evidence expires with the apparatus (EVIDENCE-AND-CLAIMS §4). */
@@ -291,8 +295,12 @@ function useQueueRemeasurement(repo: string): UseMutationResult<RemeasureQueued,
   return useMutation({
     mutationFn: (body: { cell: string; mode: string }) =>
       api<RemeasureQueued>(`/learn/remeasure/queue?repo=${enc(repo)}`, { method: 'POST', body }),
-    // the runs list is keyed ['runs', params]: the prefix reaches every filter of it
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['runs'] }),
+    // the runs list is keyed ['runs', params]: the prefix reaches every filter of it; the plan
+    // is re-read so the cell shows its runs in flight in place of a second Queue
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['runs'] })
+      void qc.invalidateQueries({ queryKey: ['learn', repo, 'remeasure'] })
+    },
   })
 }
 
@@ -818,16 +826,23 @@ function RemeasureSection({ repo }: { repo: string }) {
               key: 'queue',
               header: 'Queue',
               hint: 'col.learn_remeasure.queue' as const,
-              cell: (c: RemeasureCell) => (
-                <Button size="sm" hint="button.learn.queue_remeasure" onClick={() => setQueueing(`${c.label}|${c.mode}`)}>
-                  Queue runs
-                </Button>
-              ),
+              cell: (c: RemeasureCell) =>
+                c.in_flight_run_ids.length ? (
+                  // queued already and not finished: the server refuses a second queue
+                  // (remeasure_already_queued), so the page offers the runs instead
+                  <Hint as={Link} id="link.learn.remeasure_in_flight" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">
+                    {c.in_flight_run_ids.length === 1 ? '1 run queued' : `${c.in_flight_run_ids.length} runs queued`}
+                  </Hint>
+                ) : (
+                  <Button size="sm" hint="button.learn.queue_remeasure" onClick={() => setQueueing(`${c.label}|${c.mode}`)}>
+                    Queue runs
+                  </Button>
+                ),
             },
           ]
         : []),
     ],
-    [operator],
+    [operator, repo],
   )
   const whatIfControls = (
     <div className="flex flex-wrap items-end gap-2">

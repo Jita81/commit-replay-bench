@@ -9,8 +9,8 @@ What it does: Says which gaps travel together, on which branch, and what "done" 
 How:          One table per wave; its `gaps` column holds gap ids and nothing else (the checker
               reads it); the other columns say what ships and why. Ids a wave closes stay
               valid here because the generator lists them under "Gap ids retired" once the
-              artefacts' git history shows they were gaps; every gap among the order of
-              work's first 25 rows must sit in some wave.
+              artefacts' git history shows they were gaps; every gap the order of work ranks
+              must sit in some table here, and no heading quotes a rank (P-122).
 Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none (DL-063 records the rule the checker enforces on this file)
 Works with:   docs/dod/GAP-ANALYSIS.md (the order of work this batches), docs/dod/STANDARD.md
@@ -20,6 +20,8 @@ Works with:   docs/dod/GAP-ANALYSIS.md (the order of work this batches), docs/do
               the "trustworthy when" criteria Wave 2 closes)
 Tested by:    tests/test_dod_check.py::test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid,
               ::test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave,
+              ::test_every_open_gap_is_in_the_plan_not_only_the_top,
+              ::test_a_plan_heading_never_quotes_a_rank,
               ::test_a_retired_id_must_have_been_a_gap_in_the_artefacts_history
 Touch when:   a wave lands (say so and move to the next), a gap is opened that belongs in a
               wave, or the order of work changes which gap is first.
@@ -39,9 +41,11 @@ then plan it. `scripts/dod_check.py` holds this file to the rule: every cell of 
 prevention register defines, a backlog row a criterion cites, or one the order of work has
 retired (closed or merged). An id is retired only when the artefacts' git history, or the base
 branch's committed gap analysis, shows it was a gap, so editing the generated file cannot
-admit one. A wave that closes a gap never breaks this plan; a typo does. Every gap among the
-order of work's first 25 rows must also sit in some wave. The check reads ids, not meaning, so
-a reviewer still reads each row against the lines its ids carry.
+admit one. A wave that closes a gap never breaks this plan; a typo does. Every gap the order
+of work ranks must also sit in some table here — a wave, or the list after the waves — and no
+heading quotes a rank: the order of work is `GAP-ANALYSIS.md`, and a rank copied here reads
+false as soon as the order moves (P-122). The check reads ids, not meaning, so a reviewer
+still reads each row against the lines its ids carry.
 
 **How every wave works.** One pull request per stream, merged onto one branch, attacked by
 adversarial verifiers, then merged to `main` by the operator. Each pull request flips the
@@ -53,8 +57,17 @@ their files; the shared registries (`hints.ts`, `help.ts`, `types.ts`, `API.md`,
 **Integrated.** Wave 0 (`feat/ns1-d`) and Wave 1 (`feat/ns1-m`, `feat/ns1-l`, `feat/ns1-u`,
 `feat/ns1-e`, `feat/ns1-a1` and `feat/ns1-a2`) are merged onto one branch, `feat/ns1`, cut
 from the integration tree, with every stream's ids renumbered to follow the base in merge
-order. It awaits the operator's merge. The gaps the streams opened are placed in Waves 2 and 4
-below. Waves 2 to 4 have not started.
+order. It awaits the operator's merge. The gaps the streams opened are placed in Wave 2, Wave 4
+or the list after Wave 4 below, and the checker now refuses a ranked gap in no table (P-122).
+Waves 2 to 4 have not started.
+
+Some ids the base carried are retired on this branch because they were **merged or narrowed,
+not closed**: the criteria that cited them are still open under the id that replaced them.
+Merged: G-100, G-252 and G-445 into G-977; G-116 and G-220 into G-979; G-118 into G-907;
+G-141 and G-364 into G-978; G-261, G-381 and G-398 into G-976. Narrowed: G-905 into G-992
+(`factory.accessibility.18`) and G-993 (`signoff.accessibility.14`), its other three
+criteria met; G-925 into G-556 (`connect-and-prove.measure.14`) and G-584
+(`run-the-platform.measure.14`), its other three criteria met.
 
 ## Wave 0 — correct the record (autonomous; integrated on `feat/ns1`)
 
@@ -62,6 +75,7 @@ below. Waves 2 to 4 have not started.
 |---|---|---|
 | D0 · the artefacts | G-930, G-661, G-662, G-663, G-664, G-703, G-403, G-480, G-500, G-548, G-907, G-976, G-977, G-978, G-979 | `product.evidence.6` kept `partial` on G-930, cut to what remains: `scripts/check_branch_protection.py` compares the required-check list with ci.yml's jobs, and a daily workflow runs it once the operator provisions its token; criteria 202 to 205 `partial`, citing what landed, each gap line cut to what remains; P-008 closed with #56's tests; the external assessment vendored as `docs/reviews/2026-09-25-external-assessment.md`; F42 and F43 given their own backlog rows and F5b re-scoped against the assessment's C8; the orphan gap lines (G-931, G-940 to G-944, the stray copies of G-905) deleted and G-605 folded into G-929; each duplicated change that no other stream owns carried by one id; the non-goals that contradicted a gap rewritten; the Results throughput copy, README's status paragraph and the `/health` probe list in the guides corrected; this plan rewritten |
 | D0 · registered, not yet closed | G-970, G-971, G-972 | the docker-wait flake class, the five executor and mining defects (the assessment's B5) and the append-only probe (A5(c)) registered in `docs/PREVENTION.md`, each pending with its gap |
+| D0 · the integration's own links | G-997 | the changelog entries of this integration link GitHub's create-a-pull-request form (`pull/new/feat/ns1`), which never becomes the pull request's page; they are replaced with `pull/<n>` when the operator opens it, and the changelog test then refuses a create-form link |
 | D0 · the criteria Wave 2 needs | G-973, G-974, G-975 | the criteria the assessment's A3 (`lint_status`), A6 (`mutation.v2`) and C4 (the delivered change's own cell) need before Wave 2 may build them, added `unmet` |
 
 D1, the checker, closes in the same change the register rows that name it (P-051, "the record
@@ -79,9 +93,10 @@ after #57 lands. Their criterion is on the record already: `sign-off-a-cell.trut
 `product.evidence.6` partial on G-930 alone (the operator's token), criteria 202 to 205
 partial, P-008 closed and no orphan gap line; every wave item here is a gap id.
 
-## Wave 1 — finish what was built (autonomous; integrated on `feat/ns1`): ranks 3 to 20
+## Wave 1 — finish what was built (autonomous; integrated on `feat/ns1`)
 
-The gaps ranked 3 to 20, plus the smaller gaps on the same screens that finish an artefact.
+The gaps the north-star synthesis ranked 3 to 20 on `81536f3`, plus the smaller gaps on the
+same screens that finish an artefact.
 Five of these streams restart work parked on 25 September (`feat/w2-m`, `feat/w2-l`,
 `feat/w2-u`, `feat/w3-e`, `feat/w3-a`).
 
@@ -100,9 +115,13 @@ the tier-1 walkthrough passes with specs in which an admin resets a colleague's 
 the colleague signs in again, and an operator accepts a refusal line on `/learn` and reads what
 it did.
 
-## Wave 2 — trustworthy when (autonomous): ranks 23 to 50
+## Wave 2 — trustworthy when (autonomous)
 
-Four of the external assessment's five conditions, and spend under control. H, I and C can
+Four of the external assessment's five conditions, spend under control, and the approver task
+that now leads the autonomous work. On this branch the order of work puts G-477 (Home's task 7
+reads Completed with only the bootstrap admin) first among the gaps nobody but us can close,
+so it moves here from Wave 4 (STANDARD §6); it restarts from the parked `feat/w2-s`, whose
+readiness rule it is, and the rest of that stream stays in Wave 4. H, I and C can
 start beside Wave 1; R branches from Wave 1's merge, because it shares `capability.py` with E
 and `learn.py` with L; F owns `worker.py` for the wave. A3 (G-973) and A6 (G-974) ride the one
 apparatus bump to 2.4 with `routing.v2`.
@@ -114,18 +133,19 @@ apparatus bump to 2.4 with `routing.v2`.
 | I · audit | G-663, F51, G-601, G-924, G-972 | an audit event naming who set the unsealed override; the `events` table hash-chained and verified; the head `row_hash` served and logged at worker start; `crb_signoffs_total`; the append-only probe on every table |
 | H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970, G-971, G-987 | `uv.lock`, CI installing from it, and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap (the assessment's C8 re-scoped to it); the reaper test on a fake clock; the Helm API and worker share the evidence directories; the docker-wait sites and their ratchet; the executor and mining edge cases; one retrying helper for every system event's trace seq |
 | E2 · economics in one scope | G-990, G-991, G-989 | a cell's flat cost and latency means, the Pareto frontier, the best config and the forecast's price read one apparatus version and one posture class or are withheld; `GET /value` filters by posture class and refuses to pool two; a help-copy ratchet ties "not yet served" sentences to the API's fields (opened by Wave 1's stream E) |
-| C · claims | G-929, G-660, G-994, G-996 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the README routing bar generated and checked; a scheduled mutation pass that proves the evidence of a met criterion or a closed prevention row can fail, and a check that a criterion flipped to met kept its words |
+| S0 · the approver task · from `feat/w2-s` | G-477 | Home task 7 reads the real two-person readiness: Completed only when an approver other than the operator who would queue exists, never on the bootstrap admin alone |
+| C · claims | G-929, G-660, G-994, G-996, G-995, G-998 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the README routing bar generated and checked; a scheduled mutation pass that proves the evidence of a met criterion or a closed prevention row can fail, and a check that a criterion flipped to met kept its words; one owner per shared defect class in a wave, so parallel streams stop fixing one class several ways; a `[measured]` tag whose method names a source the repository does not carry is refused |
 
 The builder-endpoint work parked on `feat/w3-x` joins this wave when its criteria reach the
 record; until then it is not a wave item.
 
 **Done when:** truth.202, truth.203, posture.204, roles.7, evidence.205, go-live.15, go-live.20
-and claims.21 read `met`; `APPARATUS_VERSION` reads 2.4; the fresh-clone job passes every gate
+and claims.21 read `met`, and so do `home.truth.13` and `sign-off-a-cell.truth.3` (G-477); `APPARATUS_VERSION` reads 2.4; the fresh-clone job passes every gate
 as root without a docker daemon, installing from `uv.lock`; tests show a cell of many attempts
 on too few tasks routing `calibrate`, a build that cannot be scored stopping before any push,
 and a production start under the override writing an event that names who set it.
 
-## Wave 3 — the measurement (needs the operator): ranks 1, 2, 22, 44, 45 and 47
+## Wave 3 — the measurement (needs the operator)
 
 One campaign, graded at apparatus 2.4, in the sealed posture (sandbox and builder both in
 docker), after Wave 2 — rows of two apparatus versions are never pooled, so a campaign graded
@@ -144,11 +164,11 @@ n, its interval in pounds and apparatus 2.4 (value.109 met); README's measured s
 vendored rows whose checksum manifest and re-derivation test pass in CI (claims.201 met);
 posture.23 and go-live.18 read met.
 
-## Wave 4 — the second person and the go-live truth (autonomous): ranks 51 to 78
+## Wave 4 — the second person and the go-live truth (autonomous)
 
 | stream · base | gaps | what ships |
 |---|---|---|
-| S · the second person · `feat/w2-s` | G-517, G-518, G-516, G-477, G-476, G-478, G-479, G-480, G-481, G-284, G-285, G-286 | a signed cell licenses delivery by default (ADR-0018); an approver is invited with a one-time link; Home task 7 reads the real two-person readiness; a decision carries its age; the sign-off gate shows the evidence's posture |
+| S · the second person · `feat/w2-s` | G-517, G-518, G-516, G-476, G-478, G-479, G-480, G-481, G-284, G-285, G-286 | a signed cell licenses delivery by default (ADR-0018); an approver is invited with a one-time link (task 7's readiness rule lands first, in Wave 2's S0); a decision carries its age; the sign-off gate shows the evidence's posture |
 | P · posture and go-live · new | G-317, G-316, G-318, G-319, G-580, G-581, G-583, G-584, G-582, G-212, G-213, G-214, G-215, G-320, G-321, G-950, G-951, G-966 | `/posture` lists each go-live line as proven, attested or unproven; each posture row names its source and the page prints; the go-live walkthrough; mirror credentials; the remaining lock formats sealed; a damaged sealed set quarantined |
 | T · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952, G-992, G-993 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control; the walkthrough presses Sign off, Revoke sign-off, Freeze and Run by Tab and Enter |
 
@@ -178,7 +198,7 @@ These are not wave items; each unblocks the work named beside it.
 
 | theme | gaps |
 |---|---|
-| each stream's own numbers and automation | G-535, G-500, G-536, G-565, G-534, G-564, G-548 |
+| each stream's own numbers and automation | G-535, G-500, G-536, G-556, G-565, G-534, G-564, G-548 |
 | honest actions and failure states | G-397, G-976, G-101, G-117, G-127, G-128, G-132, G-134, G-181, G-182, G-205, G-206, G-237, G-254, G-294, G-368, G-400, G-920, F32, F6 |
 | doors and wayfinding | G-907, G-977, G-236, G-444, G-253, G-260, G-293, G-366, G-228, G-396, G-979 |
 | proof through each journey's own doors | G-428, G-300, G-380, G-399, G-446, G-109, G-119, G-125, G-133, G-238, G-256, G-268, G-183 |

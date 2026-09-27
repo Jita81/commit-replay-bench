@@ -42,8 +42,15 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from crb.core.capability import WILDCARD
+from crb.core.checks import LABEL_CHECKS
 from crb.core.flow import parse_ts
-from crb.core.ledger import LABEL_COST_KNOWN, GradeRow
+from crb.core.ledger import (
+    LABEL_COST_KNOWN,
+    LABEL_POSTURE_CLASS,
+    NEVER_POOL_AXES,
+    GradeRow,
+)
 from crb.core.review import ReviewRecord
 from crb.core.signoff import SignoffRecord
 from crb.core.version import APPARATUS_VERSION
@@ -268,6 +275,23 @@ class TestMeasure:
             dataclasses.replace(r, mode="blind") if i % 2 else r for i, r in enumerate(ten)
         ]
         assert measure(split_mode, {}, {}).counts["cells_at_bar"] == 0
+        # nor across two posture classes: the map reads one posture class and never blends
+        # two (ADR-0019 §8), so neither may the flow's "first row → tenth"
+        split_posture = [split_on(r, "posture_class") if i % 2 else r for i, r in enumerate(ten)]
+        assert measure(split_posture, {}, {}).counts["cells_at_bar"] == 0
+
+    @pytest.mark.parametrize("axis", NEVER_POOL_AXES)
+    def test_every_never_pool_axis_splits_a_cell(self, env: Env, axis: str) -> None:
+        """P-117: the flow keyed a cell without the posture class, the one never-pool axis a
+        parallel stream added, and nothing named the axes in one place. Every axis in
+        ``NEVER_POOL_AXES`` now splits ten rows into two cells of five here — a new axis is
+        covered the moment it is named, and :func:`split_on` refuses an axis it cannot split."""
+        base = env.info.rows[0]
+        ten = [
+            dataclasses.replace(base, created=f"2026-09-01T10:{i:02d}:00+00:00") for i in range(10)
+        ]
+        split = [split_on(r, axis) if i % 2 else r for i, r in enumerate(ten)]
+        assert measure(split, {}, {}).counts["cells_at_bar"] == 0
 
     def test_queued_to_graded_is_timed_from_the_runs_own_created_stamp(self, env: Env) -> None:
         s = stream(reading(env), "measure")
@@ -284,6 +308,31 @@ class TestMeasure:
         }
         assert lead(s, "queued_to_graded")["median_s"] is None
         assert lead(s, "queued_to_graded")["reason"]
+
+
+def split_on(row: GradeRow, axis: str) -> GradeRow:
+    """``row`` moved to another value of one never-pool axis. An axis this helper does not
+    know fails the test, so an axis added to ``NEVER_POOL_AXES`` is never silently skipped."""
+    # two axes are read from the row's labels, so the split writes the label
+    labelled = {
+        "posture_class": {
+            LABEL_POSTURE_CLASS: "host"
+            if row.posture_class == "docker/gvisor/sealed"
+            else "docker/gvisor/sealed"
+        },
+        "checks_arm": {LABEL_CHECKS: "fmt=0" if row.checks_arm == "fmt" else "fmt=1"},
+    }
+    fields = {
+        "apparatus_version": "2.1" if row.apparatus_version == "2.2" else "2.2",
+        "mode": "sighted" if row.mode == "blind" else "blind",
+    }
+    assert axis in labelled or axis in fields, f"split_on cannot split a cell on {axis!r}"
+    if axis in labelled:
+        out = dataclasses.replace(row, labels={**row.labels, **labelled[axis]})
+    else:
+        out = dataclasses.replace(row, **{axis: fields[axis]})
+    assert getattr(out, axis) != getattr(row, axis), f"the split did not move {axis!r}"
+    return out
 
 
 #: The queued stamps of the two runs the exact-answer measure tests grade rows for.
@@ -544,6 +593,40 @@ class TestDecideAndLicense:
         )
         lt = lead(stream(reading(env), "decide-and-license"), "routed_deliver_to_signed")
         assert lt["n"] == 0 and lt["median_s"] is None and lt["reason"]
+
+    def test_a_wildcard_signature_is_dated_from_the_latest_stamp_it_answers(self, env: Env) -> None:
+        """A signature over every size (``*``) answers a stamp of each size of its class, so
+        several stamps can precede it. The rule is the LATEST at or before the signature: the
+        transition this signature answered, not the first one the class ever made. Two
+        stamps of the class at two sizes, a day apart, both before the signature — the lead
+        time starts at the later one."""
+        rec = sign_the_deliver_cell(env)
+        wild = dataclasses.replace(rec, size=WILDCARD)
+        cls = DELIVER_CLS[0]
+        early, late = "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00"
+        for i, (ts, size) in enumerate(((early, "XS"), (late, DELIVER_CLS[1]))):
+            add_event(
+                env,
+                event_id=f"{i + 1:032x}",
+                trace_id="w" * 32,
+                seq=i + 1,
+                timestamp=ts,
+                stage="system",
+                action="cell.routed_deliver",
+                status="ok",
+                repo=ALPHA,
+                payload_json={
+                    "capability_class": cls,
+                    "size": size,
+                    "moment": "observed",
+                    **scope_of(rec),
+                },
+            )
+        with env.factory() as db:
+            flow = decide_and_license(db, ALPHA, [wild], env.info.rows)
+        lt = next(lt for lt in flow.lead_times if lt.key == "routed_deliver_to_signed")
+        expected = seconds_between(late, rec.verified_at)
+        assert (lt.n, lt.median_s) == (1, expected)
 
     def test_the_reviewers_stated_minutes_are_shown_with_their_n(self, env: Env) -> None:
         s = stream(reading(env), "decide-and-license")

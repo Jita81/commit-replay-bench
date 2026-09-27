@@ -440,7 +440,11 @@ const REMEASURE = {
   min_n: 10,
   rows_total: 40,
   rows_stale: 12,
-  cells: [{ label: 'bug.fix · XS', mode: 'sighted', capability_class: 'bug.fix', size: 'XS', n_stale: 12, stale_versions: ['2.1'], n_current: 4, n_needed: 6, est_cost_usd: 2.4, cost_known: true, requests: [{ kind: 'replay', limit: 6 }] }],
+  cells: [
+    { label: 'bug.fix · XS', mode: 'sighted', capability_class: 'bug.fix', size: 'XS', n_stale: 12, stale_versions: ['2.1'], n_current: 4, n_needed: 6, est_cost_usd: 2.4, cost_known: true, requests: [{ kind: 'replay', limit: 6 }], in_flight_run_ids: [] },
+    // a cell whose runs are queued and unfinished: the page shows them in place of Queue
+    { label: 'bug.fix · S', mode: 'sighted', capability_class: 'bug.fix', size: 'S', n_stale: 3, stale_versions: ['2.1'], n_current: 0, n_needed: 10, est_cost_usd: 1.1, cost_known: true, requests: [{ kind: 'replay', limit: 10 }], in_flight_run_ids: ['r1'] },
+  ],
   up_to_date: [],
   summary: { cells_stale: 1, n_needed_total: 6, est_cost_usd_total: 2.4, est_minutes_total: 20, cost_known_cells: 1 },
   note: '',

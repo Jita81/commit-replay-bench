@@ -202,8 +202,11 @@ cell of a wave table's `gaps` column is a list of gap ids and nothing else, and 
 an artefact or the register defines, a backlog row that a criterion or a pending register row
 cites, or one the order of work has retired. A wave that closes a gap therefore never breaks
 the plan that named it, while an id that was never a gap (a typo, an id no artefact defines, a
-backlog row nothing asks for) fails the `dod` job. Every gap among the first 25 rows of the
-order of work must also sit in some wave, so the plan cannot skip the top of the list.
+backlog row nothing asks for) fails the `dod` job. Every gap the order of work ranks must
+also sit in some table of the plan — a wave, or the list after the waves — so the plan can
+neither skip the top of the list nor leave a newly opened gap unplanned; and no heading of
+the plan quotes a rank, because the order of work is the generated file and a copied rank
+reads false as soon as the order moves (P-122).
 
 The retired list is carried forward by the generator, but the generated file never vouches
 for itself: an id stays retired only while the git history of the artefacts and the register

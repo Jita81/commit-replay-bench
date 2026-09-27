@@ -99,7 +99,7 @@ from crb.core.flow import (
     spend_of_rows,
     stated_durations,
 )
-from crb.core.ledger import PROCESS_FACTORY, GradeRow
+from crb.core.ledger import PROCESS_FACTORY, GradeRow, pool_scope
 from crb.core.routing import DEFAULT_POLICY, ControlsVerdict
 from crb.core.signoff import SignoffRecord
 from crb.core.version import APPARATUS_VERSION
@@ -297,9 +297,11 @@ def measure(
     the figure is withheld with the reason, never divided over a floor.
 
     A cell here is what the map keys a cell by before it routes: class and size WITHIN one
-    apparatus version, one mode and one checks arm. Rows of two apparatus versions, of
-    sighted and blind, or of two arms are never pooled into one cell's ten (the map would not
-    pool them either, ADR-0003 and ADR-0024). ``repository`` is the cumulative spend of every
+    apparatus version, one mode, one checks arm and one posture class
+    (:data:`~crb.core.ledger.NEVER_POOL_AXES`). Rows of two apparatus versions, of sighted
+    and blind, of two arms or of two posture classes are never pooled into one cell's ten
+    (the map would not pool them either: ADR-0003, ADR-0024, and ADR-0019 §8 — the map reads
+    one posture class and never blends two). ``repository`` is the cumulative spend of every
     graded row of the repository (the criterion's "cumulative spend per repository"); it is
     served on the reading, and named here in a count so the two are never confused."""
     by_run: dict[str, list[GradeRow]] = {}
@@ -311,9 +313,10 @@ def measure(
         for run_id, rs in by_run.items()
         if rs
     ]
-    by_cell: dict[tuple[str, str, str, str, str], list[GradeRow]] = {}
+    by_cell: dict[tuple[str, ...], list[GradeRow]] = {}
     for r in rows:
-        key = (r.apparatus_version, r.mode, r.checks_arm, r.capability_class, r.size)
+        # every never-pool axis, from the one place they are named (P-117)
+        key = (*pool_scope(r), r.capability_class, r.size)
         by_cell.setdefault(key, []).append(r)
     bar_pairs: list[tuple[str, str]] = []
     to_bar: list[GradeRow] = []
@@ -351,7 +354,7 @@ def measure(
                 bar_pairs,
                 reason=(
                     f"no class and size has reached {CELL_N_BAR} graded rows yet within one "
-                    "apparatus version, mode and checks arm"
+                    "apparatus version, mode, checks arm and posture class"
                 ),
             ),
         ),

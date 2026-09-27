@@ -22,11 +22,12 @@ line that does not read "what is missing · the smallest change that closes it �
 whose owner is not one of ui/server/factory/docs/deploy; the same gap id carrying two
 different lines in two files (one id is one piece of work); a gap line that no criterion of
 its file cites (or, in the register, no pending row); a ``PLAN.md`` wave item that is not a
-gap id the record defines or has retired; a gap among the order of work's first ``TOP`` rows
-that no wave names; a retired id that neither the artefacts' git history nor the base
-branch's committed gap analysis shows was a gap (the generated file never vouches for
-itself); an evidence reference that does not resolve; and a ``GAP-ANALYSIS.md`` or a
-``status:`` line that differs from what the artefacts generate. It never edits a criterion.
+gap id the record defines or has retired; a gap the order of work ranks that no table of
+the plan names, and a plan heading that quotes a rank; a retired id that neither the
+artefacts' git history nor the base branch's committed gap analysis shows was a gap (the
+generated file never vouches for itself); an evidence reference that does not resolve; and a
+``GAP-ANALYSIS.md`` or a ``status:`` line that differs from what the artefacts generate. It
+never edits a criterion.
 
     python scripts/dod_check.py --check --base origin/integration/next   # another base branch
     DOD_BASE=origin/integration/next python scripts/dod_check.py --check  # the same (CI's form)
@@ -41,8 +42,9 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               code symbols, doc anchors, CI jobs, ADRs, decision-log rows), computes the
               four-level roll-up and writes docs/dod/GAP-ANALYSIS.md (the order of work, the
               gaps by fan-out, the gap ids retired, and every open criterion); refuses a gap
-              line nothing cites, a PLAN.md wave item that is not a gap, a top-ranked gap in
-              no wave, and a retired id that git history does not vouch for; --check exits
+              line nothing cites, a PLAN.md wave item that is not a gap, a ranked gap in no
+              table of the plan, a plan heading that quotes a rank, and a retired id that git
+              history does not vouch for; --check exits
               non-zero on any defect or drift.
 How:          Walk docs/dod/{pages,journeys,streams}/*.md + product.md → parse front matter
               and the criteria table → resolve evidence (one resolver per prefix) → demote
@@ -1004,10 +1006,12 @@ def validate_retired(bad: list[str], base: str, root: Path) -> list[str]:
 
 
 def validate_plan_covers_the_top(
-    ranked_gaps: list[str], items: list[tuple[int, str]], top: int = TOP
+    ranked_gaps: list[str], items: list[tuple[int, str]], top: int | None = None
 ) -> list[str]:
-    """STANDARD.md §6: the plan batches the order of work, so every gap among its first
-    ``top`` rows is in some wave (the plan once left rank 1, G-653, in none)."""
+    """STANDARD.md §6: the plan batches the order of work, so every gap the order ranks sits
+    in some table of the plan — a wave, or the list after the waves (the plan once left rank
+    1, G-653, in none; later a stream's new gap, G-556 at rank 73, sat in none while the plan
+    said every opened gap was placed, P-122). ``top`` limits the check to the first rows."""
     planned = {gid for _n, gid in items}
     errors: list[str] = []
     seen: set[str] = set()
@@ -1016,10 +1020,26 @@ def validate_plan_covers_the_top(
             continue
         seen.add(gid)
         errors.append(
-            f"docs/dod/PLAN.md: gap {gid} is rank {rank} in the order of work but in no wave — "
-            "add it to the wave that will close it"
+            f"docs/dod/PLAN.md: gap {gid} is rank {rank} in the order of work but in no table "
+            "of the plan — add it to the wave that will close it, or to the list after the waves"
         )
     return errors
+
+
+_RANK_RE = re.compile(r"\branks?\s+\d", re.I)
+
+
+def plan_headings_quote_no_rank(path: Path) -> list[str]:
+    """A plan heading never quotes a rank: the order of work is the generated file, and a
+    rank copied into a heading reads false as soon as the order moves (P-122)."""
+    if not path.is_file():
+        return []
+    return [
+        f"docs/dod/PLAN.md:{n}: a heading quotes a rank ({line.strip()!r}) — the order of "
+        "work is GAP-ANALYSIS.md; name the gaps, never their ranks"
+        for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1)
+        if line.startswith("#") and _RANK_RE.search(line)
+    ]
 
 
 def plan_items(path: Path) -> tuple[list[tuple[int, str]], list[str]]:
@@ -1339,6 +1359,7 @@ def main(argv: list[str] | None = None) -> int:
     if PLAN.is_file():
         ranked_gaps = [c.gap for _s, _f, _a, c in _rank(arts)]
         errors.extend(validate_plan_covers_the_top(ranked_gaps, items))
+        errors.extend(plan_headings_quote_no_rank(PLAN))
     rendered = render(arts, (prevention, pgaps), retired)
     if args.check:
         errors.extend(status_drift(arts))

@@ -172,10 +172,12 @@ class ValueRow:
     mode: str
     clean: bool
     failure_kind: str
-    cost_usd: float = 0.0
     #: Is ``cost_usd`` a measurement (``GradeRow.cost_known``)? An unpriced row is never
     #: summed as zero: every money figure here goes through ``crb.core.flow.spend_of_rows``.
-    cost_known: bool = True
+    #: Required, with no default: an adapter that forgot it would claim a price for every row
+    #: it read (the pipe-separated reader did, docs/PREVENTION.md P-118).
+    cost_known: bool
+    cost_usd: float = 0.0
     apparatus_version: str = APPARATUS_VERSION
     gold_clean: bool | None = None
     repo_lint_clean: bool | None = None

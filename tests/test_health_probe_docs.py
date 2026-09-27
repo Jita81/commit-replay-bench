@@ -8,7 +8,9 @@ What it does: Collects the probes the readiness route actually serves (every pro
               fail, so the test needs no database, no docker daemon and no network) and
               refuses a guide that omits one by name or states the wrong count — DEPLOYMENT
               §9.3 said seven probes while ``/health`` served eleven, and API.md said ten and
-              left out ``provision`` (G-403; docs/PREVENTION.md P-059).
+              left out ``provision`` (G-403; docs/PREVENTION.md P-059). And refuses a §9.3
+              that names other probes as raising a banner than the UI raises one for: every
+              UI reader of a probe is classified in ``BANNERS`` (P-121).
 How:          ``collect_health`` over a session factory that raises and probe functions that
               raise, as tests/test_server_system.py's fixed-detail test does; the names come
               from the body; each guide's section is cut from the Markdown and searched for
@@ -16,17 +18,21 @@ How:          ``collect_health`` over a session factory that raises and probe fu
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/server/routes/system.py (collect_health, the probe list under test),
+              ui/src/components/Layout.tsx and ui/src/screens/Home/HomePage.tsx (the two
+              banners a probe raises),
               docs/API.md (the /health row it reads), docs/DEPLOYMENT.md (§9.3 Health, which it
               reads), tests/test_server_system.py (pins the same names against the served
               body), docs/dod/journeys/operate.md (G-403, which this closes)
 Tested by:    (this is a test file)
 Touch when:   a probe is added to or removed from ``collect_health`` — name it in both guides
-              and change the count there; this test tells you which guide is behind.
+              and change the count there; this test tells you which guide is behind — or a
+              screen starts reading a probe by name (classify it in ``BANNERS``).
 """
 
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -106,4 +112,53 @@ def test_each_guide_names_every_probe_health_serves_and_their_count(
     assert not missing, f"{guide} does not name the probe(s) {missing} that /health serves"
     assert f"{WORDS[len(names)]} probes" in text.lower(), (
         f"{guide} does not say /health runs {WORDS[len(names)]} probes"
+    )
+
+
+#: A screen that reads one probe finds it by name: ``probes.find((p) => p.name === '<probe>')``.
+_READS_PROBE = re.compile(r"""probes\.find\(\(\w+\)\s*=>\s*\w+\.name\s*===\s*['"](\w+)['"]\)""")
+#: Every (probe, file) the UI reads by name, classified: a probe that raises a banner, or one
+#: whose data a screen shows. A new reader fails the test until it is classified here, so
+#: the guide's banner sentence cannot fall behind a new banner unseen.
+BANNERS: dict[tuple[str, str], bool] = {
+    # the shell's red stop-condition banner, above every screen, on any false-Q1 row
+    ("ledger", "ui/src/components/Layout.tsx"): True,
+    # Home's banner when the sandbox cannot run
+    ("sandbox", "ui/src/screens/Home/HomePage.tsx"): True,
+    # the Measure summary names the posture the sandbox probe reports, and raises no banner
+    ("sandbox", "ui/src/screens/Connect/MeasurePage.tsx"): False,
+    # the run page reads the worker's heartbeat window and queue depth, and raises no banner
+    ("worker", "ui/src/screens/Runs/RunDetailPage.tsx"): False,
+}
+
+
+def _ui_probe_readers() -> set[tuple[str, str]]:
+    src = ROOT / "ui" / "src"
+    return {
+        (m.group(1), p.relative_to(ROOT).as_posix())
+        for p in src.rglob("*.tsx")
+        if ".test." not in p.name
+        for m in _READS_PROBE.finditer(p.read_text(encoding="utf-8"))
+    }
+
+
+def test_the_guide_names_the_probes_that_raise_a_banner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-121: DEPLOYMENT §9.3 said only the ``sandbox`` probe raises a banner, while the shell
+    raises the red stop-condition banner on every screen for the ``ledger`` probe. Every probe
+    the UI reads by name is classified in ``BANNERS``, and the sentences of §9.3 that speak of
+    a banner name exactly the probes classified as raising one."""
+    served = set(_served(tmp_path, monkeypatch))
+    readers = _ui_probe_readers()
+    assert readers == set(BANNERS), (
+        f"classify each UI reader of a probe in BANNERS: new {sorted(readers - set(BANNERS))}, "
+        f"gone {sorted(set(BANNERS) - readers)}"
+    )
+    banner = {probe for (probe, _f), raises in BANNERS.items() if raises}
+    assert banner <= served
+    sentences = [s for s in re.split(r"(?<=[.;])\s+", _deployment_9_3()) if "banner" in s]
+    named = {n for s in sentences for n in re.findall(r"`(\w+)`", s) if n in served}
+    assert named == banner, (
+        f"DEPLOYMENT §9.3 says {sorted(named)} raise a banner; the UI raises one for {sorted(banner)}"
     )

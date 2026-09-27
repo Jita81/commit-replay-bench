@@ -215,8 +215,13 @@ POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", m
 
 * **accept** appends through the same `apply_triage` the CLI calls, so the API and the host
   write the same bytes and refuse the same things (a truncated class with no full command, a
-  line that contradicts the other corpus, a `tamper` offered as a shell refusal). It is
-  idempotent: a line already present is reported, not written twice. The note is one line —
+  `command` for a class that is not truncated or one that does not continue the recorded cut
+  example, a line that contradicts the other corpus, a `tamper` offered as a shell refusal).
+  `command` completes a line the recorder cut; it never replaces the line the report computed,
+  so no line nobody saw refused can sit under the provenance of real rows. It is
+  idempotent: a line already present is reported, not written twice, and two operators
+  deciding one class at once are serialised by a lock on the corpus directory, so the same
+  command never lands in both corpora. The note is one line —
   it is written as the provenance comment, so a note with a line break is refused rather than
   allowed to write a corpus line nobody decided. The corpus directory is
   `CRB_LEARN_CORPUS_DIR`, else `<CRB_HOME>/learn/corpus` — this deployment's own record of
@@ -236,7 +241,10 @@ POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", m
   whole with nothing queued (`builder_credential_missing`). A what-if plan (an `apparatus`
   other than the running one) is refused: its runs would grade under the running apparatus
   and could never clear the plan they were queued from. The response repeats the plan's
-  estimate with `cost_known` honoured, so an unknown cost is never read as zero.
+  estimate with `cost_known` honoured, so an unknown cost is never read as zero. While the
+  runs an earlier queue of the same cell put on the queue are unfinished, the cell is refused
+  (`remeasure_already_queued`): the plan reads graded rows only, so it still holds the cell,
+  and the page shows the runs in flight in place of the Queue control.
 
 All three read the ledger the way `crb route` does: `--path <ledger.jsonl>` or
 `<workdir>/ledger.jsonl` (`--workdir` / `$CRB_HOME`). `--policy-json` overrides the routing
@@ -259,7 +267,9 @@ summary.
   ids independent of the `registered` stamp; the CLI writes identical files twice.
 * **Never auto-accept**: every group is `unsure`; a `RefusalGroup` with another verdict
   cannot be constructed; `apply_triage` needs `decided_by`, validates every decision before
-  writing, refuses a truncated candidate without a human-supplied full command, refuses to
+  writing, refuses a truncated candidate without a human-supplied full command, refuses a
+  supplied command for a class that is not truncated or that does not continue the cut
+  example, holds a lock across the read, the check and the append, refuses to
   file a `tamper:` as a shell-corpus refusal (that is belt 1's), and is idempotent.
 * **The items pass the factory's gate**: every strengthening item round-trips through
   `BacklogItem.from_dict` and `readiness.assess` as `ready` / `build` with no value gaps, and

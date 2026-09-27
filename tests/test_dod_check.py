@@ -24,8 +24,9 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               item must be a gap id, while a gap the wave closes stays a valid item through the
               generated "Gap ids retired" list; that a retired id is admitted only when the
               artefacts' git history (never the generated file, never a parent repository)
-              or the base branch's committed gap analysis vouches for it; and that a gap
-              among the order of work's first rows must sit in some wave.
+              or the base branch's committed gap analysis vouches for it; that every gap the
+              order of work ranks, not only the first rows, sits in some table of the plan;
+              and that no plan heading quotes a rank (P-122).
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
@@ -999,10 +1000,41 @@ def test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave(
     _write_all(root, ng_state="unmet", ng_gap="G-001")
     assert mod.main([]) == 1
     said = capsys.readouterr().out
-    assert "docs/dod/PLAN.md: gap G-001 is rank 1 in the order of work but in no wave" in said
+    assert "docs/dod/PLAN.md: gap G-001 is rank 1 in the order of work but in no table" in said
     assert mod.main(["--check"]) == 1
     (root / "docs/dod/PLAN.md").write_text(PLAN.replace("G-701", "G-701, G-001"), encoding="utf-8")
     assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+
+
+def test_every_open_gap_is_in_the_plan_not_only_the_top() -> None:
+    """docs/PREVENTION.md P-122: the plan said every gap the streams opened was placed, and
+    one (G-556, rank 73) sat in no table; the check only read the first ``TOP`` rows. Every
+    gap the order of work ranks must now sit in some table of the plan, whatever its rank."""
+    mod = _load()
+    ranked = [f"G-{i:03d}" for i in range(1, 31)]
+    planned = [(1, g) for g in ranked[:-1]]
+    errors = mod.validate_plan_covers_the_top(ranked, planned)
+    assert len(errors) == 1 and "gap G-030 is rank 30" in errors[0], errors
+    assert mod.validate_plan_covers_the_top(ranked, [*planned, (2, "G-030")]) == []
+
+
+def test_a_plan_heading_never_quotes_a_rank(tmp_path: Path) -> None:
+    """P-122: the wave headings quoted ranks ("ranks 23 to 50") of the tree the plan was
+    written on, and read false on the branch whose order had moved. The order of work is
+    the generated file; the plan names gaps, never their ranks."""
+    mod = _load()
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(
+        PLAN.replace("## Wave 1 — the first wave", "## Wave 1 — the first wave: ranks 3 to 20"),
+        encoding="utf-8",
+    )
+    assert any("rank" in e for e in mod.plan_headings_quote_no_rank(plan))
+    plan.write_text(
+        PLAN.replace("## Wave 1 — the first wave", "## Wave 1 — rank 4 first"), encoding="utf-8"
+    )
+    assert mod.plan_headings_quote_no_rank(plan)
+    plan.write_text(PLAN, encoding="utf-8")
+    assert mod.plan_headings_quote_no_rank(plan) == []
 
 
 def test_the_ci_job_reads_the_full_history_and_the_pull_requests_base() -> None:

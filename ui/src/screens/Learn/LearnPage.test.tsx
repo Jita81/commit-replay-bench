@@ -70,7 +70,7 @@ describe('the register fixture', () => {
 /** One refusal class, one strengthening item and one stale cell — the rows the three decisions act on. */
 const GROUP: RefusalGroup = { group_id: 'g1', prefix: 'network', reason: 'egress refused', shape: 'curl <url>', n: 3, cost_usd: 1.2, minutes: 4, repos: ['alpha'], tasks: ['t1'], examples: ['curl https://x'], truncated: false, candidate_honest: 'curl https://x', candidate_refused: 'curl https://x\tnetwork:', verdict: 'unsure' }
 const ITEM: StrengthenItem = { id: 'strengthen-1', title: 'Strengthen the divide tests', description: 'kill the surviving mutants', capability_class: 'test.add', labels: { cell: 'bug.fix|S', reason_code: 'oracle_weak', oracle_strength: '0.40', threshold: '0.80', escaped: '1' } }
-const CELL: RemeasureCell = { label: 'replay|bug.fix|S|python|editblock|m|cerebras', mode: 'sighted', stale_versions: ['2.1'], n_stale: 12, n_current: 4, n_needed: 6, est_cost_usd: 2.4, est_minutes: 30, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay' }, { kind: 'replay' }] }
+const CELL: RemeasureCell = { label: 'replay|bug.fix|S|python|editblock|m|cerebras', mode: 'sighted', stale_versions: ['2.1'], n_stale: 12, n_current: 4, n_needed: 6, est_cost_usd: 2.4, est_minutes: 30, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay' }, { kind: 'replay' }], in_flight_run_ids: [] }
 
 /** The signed-in operator's view of one repository with one row in each report. */
 function operatorApi(extra: Record<string, unknown> = {}) {
@@ -361,6 +361,27 @@ describe('LearnPage', () => {
     expect(done).toHaveAttribute('role', 'status')
     expect(done.textContent).toContain('The plan estimated $2.40.')
     expect(screen.getByRole('link', { name: 'Runs' })).toHaveAttribute('href', '/runs?repo=alpha')
+  })
+
+  it('a cell whose runs are still in flight shows them in place of Queue, so the estimate is never spent twice', async () => {
+    // the plan reads graded rows only, so it still holds a cell whose runs are queued: after a
+    // queue the page re-reads the plan and offers the runs, not a second Queue
+    let reads = 0
+    mockApi(
+      operatorApi({
+        'GET /learn/remeasure': () => json({ ...REMEASURE, cells: [{ ...CELL, in_flight_run_ids: reads++ === 0 ? [] : ['r1', 'r2'] }] }),
+        'POST /learn/remeasure/queue': { repo: 'alpha', cell: CELL.label, mode: 'sighted', run_ids: ['r1', 'r2'], n_needed: 6, est_cost_usd: 2.4, cost_known: true },
+      }),
+    )
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Queue runs' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Queue the runs' }))
+    await screen.findByText(/Queued 2 runs/)
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    const remeasure = within(document.getElementById('remeasure')!)
+    const inFlight = await remeasure.findByRole('link', { name: '2 runs queued' })
+    expect(inFlight).toHaveAttribute('href', '/runs?repo=alpha')
+    expect(remeasure.queryByRole('button', { name: 'Queue runs' })).toBeNull()
   })
 
   it('a cell whose cost nothing recorded says so instead of showing zero', async () => {

@@ -1525,6 +1525,8 @@ export const HINTS = {
     'Queues this cell’s re-measurement runs. Only an operator sees this column, and the estimate is shown before anything is sent.',
   'button.learn.queue_remeasure':
     'Shows what queueing this cell would run and cost before anything is sent.',
+  'link.learn.remeasure_in_flight':
+    'The runs already queued for this cell and not yet finished. Queue comes back once they have graded, so the same estimate is never spent twice.',
   'button.learn.cancel_queue':
     'Closes the confirmation. Nothing is queued and nothing is spent.',
   'button.learn.confirm_queue':

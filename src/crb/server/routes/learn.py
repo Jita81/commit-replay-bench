@@ -50,7 +50,8 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               the strengthening items carry the same strengths ``/oracle/{repo}`` shows;
               and writes what a named operator accepts — a corpus line, the strengthening
               items, the re-measurement runs — re-deriving each body here so the caller
-              can choose but never compose.
+              can choose but never compose; a cell whose queued runs are unfinished is
+              refused and served with those runs, so money is never spent twice (P-115).
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
               the writes go through ``apply_triage`` / ``FactoryHome.register_*`` /
@@ -124,9 +125,9 @@ from crb.server.routes.runs import (
     submit_refusals,
     system_trace_id,
 )
-from crb.server.schemas import RunCreateRequest
+from crb.server.schemas import TERMINAL_STATUSES, RunCreateRequest
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, Task
+from crb.store.models import Event, Run, Task
 
 router = APIRouter(tags=["learn"])
 _ERR = {"model": ErrorEnvelope}
@@ -275,6 +276,29 @@ def derive_remeasure(
     )
 
 
+def in_flight_runs(db: Session, repo: str, *, cell: str, mode: str, apparatus: str) -> list[str]:
+    """The runs an earlier ``learn.remeasure.queued`` queued for this (cell, mode, apparatus)
+    that have not finished. The plan is derived from graded rows only, so it still holds a
+    cell whose runs are queued or running; this is what keeps the one write that spends
+    money from spending the same estimate twice (a double click, or two operators)."""
+    queued: list[str] = []
+    for ev in db.execute(
+        select(Event)
+        .where(Event.repo == repo, Event.action == ACTION_REMEASURE_QUEUED)
+        .order_by(Event.id)
+    ).scalars():
+        p = dict(ev.payload_json or {})
+        if (p.get("cell"), p.get("mode"), p.get("apparatus")) == (cell, mode, apparatus):
+            queued.extend(str(x) for x in (p.get("run_ids") or []))
+    if not queued:
+        return []
+    return sorted(
+        db.execute(
+            select(Run.id).where(Run.id.in_(queued), Run.status.not_in(TERMINAL_STATUSES))
+        ).scalars()
+    )
+
+
 @router.get(
     "/learn/refusals",
     responses={401: _ERR, 404: _ERR, 409: _ERR},
@@ -331,7 +355,16 @@ def learn_remeasure(
 ) -> dict[str, Any]:
     del viewer
     get_repo_or_404(db, repo)
-    return {"repo": repo, **derive_remeasure(db, factory, repo, apparatus=apparatus).to_dict()}
+    body = derive_remeasure(db, factory, repo, apparatus=apparatus).to_dict()
+    # beside each cell, the runs already queued for it and not finished: the page shows them
+    # in place of the Queue control. A what-if plan queues nothing, so it has none.
+    for c in body["cells"]:
+        c["in_flight_run_ids"] = (
+            in_flight_runs(db, repo, cell=str(c["label"]), mode=str(c["mode"]), apparatus=apparatus)
+            if apparatus == APPARATUS_VERSION
+            else []
+        )
+    return {"repo": repo, **body}
 
 
 # ===========================================================================
@@ -345,12 +378,16 @@ def learn_remeasure(
 # ``decided_by`` in the file, and a file can say anything). (2) **The caller chooses, the
 # product composes.** Every body the write acts on — the corpus line, the backlog item,
 # the ``POST /runs`` request — is re-derived here from the ledger by the same function the
-# read uses, so a request can only name what the report computed, never supply it.
+# read uses, so a request can only name what the report computed, never supply it. The one
+# free text that reaches a corpus line, a ``command`` completing an example the recorder
+# cut, is refused unless the class is truncated and the command continues that example.
 
 
 class RefusalAcceptIn(BaseModel):
     """One refusal class's verdict. ``command`` completes a class whose every recorded
-    example was cut by the recorder's cap; ``prefix`` labels a refusal whose own guard
+    example was cut by the recorder's cap, and must continue that cut example —
+    ``apply_triage`` refuses it for any other class, so it can never replace the line the
+    report computed; ``prefix`` labels a refusal whose own guard
     family the refused corpus does not take (a ``tamper`` is belt 1's, never a shell
     line). There is deliberately no ``decided_by``: the signed-in operator is the decider."""
 
@@ -692,7 +729,7 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
     "/learn/remeasure/queue",
     response_model=RemeasureQueueOut,
     status_code=status.HTTP_201_CREATED,
-    responses={401: _ERR, 403: _ERR, 404: _ERR, 422: _ERR, 503: _ERR},
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR, 503: _ERR},
     summary="Queue the re-measurement runs the plan computed for ONE cell (the bodies are the plan's, never the caller's)",
 )
 def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + query
@@ -716,7 +753,11 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     ``builder_credential_missing``** (and every other submit refusal ``POST /runs`` makes)
     when any run of the cell would meet it — checked for every run before any is enqueued,
     through the same :func:`~crb.server.routes.runs.submit_refusals`, so the whole cell is
-    refused with nothing queued; **503 ``queue_unavailable``** when this server has no queue.
+    refused with nothing queued; **409 ``remeasure_already_queued``** while any run an earlier
+    queue of this cell (same mode and apparatus) put on the queue has not finished, naming
+    those runs — the plan is derived from graded rows only, so without this a double click
+    or a second operator would spend the estimate twice; **503 ``queue_unavailable``** when
+    this server has no queue.
     """
     get_repo_or_404(db, repo)
     if body.apparatus != APPARATUS_VERSION:
@@ -751,6 +792,17 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             detail={"modes": sorted(c.mode for c in matches)},
         )
     cell = matches[0]
+    in_flight = in_flight_runs(
+        db, repo, cell=cell.cell.label, mode=cell.mode, apparatus=body.apparatus
+    )
+    if in_flight:
+        raise ApiError(
+            409,
+            "remeasure_already_queued",
+            f"{len(in_flight)} run(s) queued for {cell.cell.label!r} ({cell.mode}) have not "
+            "finished — nothing was queued; the plan is re-read once they have graded",
+            detail={"run_ids": in_flight},
+        )
     api = require_jobs()
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
     # whole or not at all (P-093 — the gate is the one POST /runs applies)
