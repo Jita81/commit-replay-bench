@@ -246,7 +246,7 @@ export function signedInShell(page: Page): Locator {
 
 /** Sign out through the shell at any width: on a phone, open the Menu first (F26). */
 export async function signOut(page: Page): Promise<void> {
-  const button = page.getByRole('button', { name: 'Sign out' })
+  const button = page.getByRole('button', { name: 'Sign out', exact: true })
   if (!(await button.isVisible())) await page.getByTestId('shell-menu-button').click()
   await button.click()
   signedInAs.delete(page)

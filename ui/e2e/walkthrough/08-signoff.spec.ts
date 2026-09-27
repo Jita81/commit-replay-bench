@@ -328,7 +328,7 @@ test.describe('08 sign-off policy', () => {
   test('a second person (the approver) signs the deliver cell with an attestation; the record shows the snapshot and who signed', async ({ page }) => {
     // the page fixture signed in as the admin who queued the runs: end that session first
     await page.goto('/home')
-    await page.getByRole('button', { name: 'Sign out' }).click()
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click()
     await expect(page).toHaveURL(/\/login/)
     await signIn(page, APPROVER, APPROVER_PASS)
     await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)

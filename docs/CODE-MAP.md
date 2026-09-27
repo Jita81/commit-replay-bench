@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-621 files with a header · 1 exempt (listed at the end).
+623 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -271,7 +271,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py) | a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (217 files)
+## `tests` (219 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -480,6 +480,8 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_version_consistency.py`](../tests/test_version_consistency.py) | The version-drift test suite — one package version in three places, and the chart version as its SemVer form. | [`tests/test_version_consistency.py`](../tests/test_version_consistency.py) | releasing (bump all four and the CHANGELOG together — this suite is the checklist); never tie ``APPARATUS_VERSION`` to the package version. |
 | [`tests/test_walkthrough_axe_scan.py`](../tests/test_walkthrough_axe_scan.py) | A source gate over ``[`ui/e2e/walkthrough`](../ui/e2e/walkthrough)``: no spec builds its own ``AxeBuilder``. | [`tests/test_walkthrough_axe_scan.py`](../tests/test_walkthrough_axe_scan.py) | the scan helper is renamed or moves out of [`ui/e2e/axe.ts`](../ui/e2e/axe.ts). |
 | [`tests/test_walkthrough_axe_settles.py`](../tests/test_walkthrough_axe_settles.py) | The ratchet over axe sweeps in [`ui/e2e/walkthrough`](../ui/e2e/walkthrough): each sweep is a call of the settling helper, and every ``.analyze()`` under [`ui/e2e`](../ui/e2e) is preceded, within its few lines, by a settle. | (this is a test file) | the axe helper is renamed or moves. |
+| [`tests/test_walkthrough_locators.py`](../tests/test_walkthrough_locators.py) | A source gate over ``[`ui/e2e/walkthrough`](../ui/e2e/walkthrough)``: the "Sign out" locator is exact. | (this is a test file) | the shell's Sign out is renamed. |
+| [`tests/test_walkthrough_order.py`](../tests/test_walkthrough_order.py) | A source gate over the order of ``[`ui/e2e/walkthrough`](../ui/e2e/walkthrough)``'s specs. | (this is a test file) | the Baseline stops recording a read on a visit, or 06b is renamed or moved. |
 | [`tests/test_walkthrough_script.py`](../tests/test_walkthrough_script.py) | The tests for walkthrough.sh's preflight: which checkout the stack imports. | (this is a test file) | the walkthrough starts another process that imports crb (add it to the guard's module list). |
 | [`tests/test_walkthrough_serves_this_tree.py`](../tests/test_walkthrough_serves_this_tree.py) | The regression test for P-090: the walkthrough driver served whatever tree the interpreter's ``crb`` import resolved to, so a worktree run against a shared, editable venv walked the OTHER checkout's server and reported its results as this branch's. | [`tests/test_walkthrough_serves_this_tree.py`](../tests/test_walkthrough_serves_this_tree.py) | the walkthrough's preflight changes order, or it gains another way to choose the interpreter it serves with. |
 | [`tests/test_worker.py`](../tests/test_worker.py) | The worker's test suite, end to end on a temp SQLite database and the ``pyrepo`` fixture — every run kind, cancellation, the fail-closed sandbox, stale-claim resume, ``--once`` and the polling loop. | [`tests/test_worker.py`](../tests/test_worker.py) | a run kind is added (``stage_for``, a run case here and the queue's ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs ``succeeded`` honestly. |

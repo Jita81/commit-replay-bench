@@ -128,7 +128,7 @@ test.describe('13 orient — sign in and find your way', () => {
     await expect(page).toHaveURL(/\/home$/)
 
     // and out: sign-out ends the session; a protected screen bounces again
-    await page.getByRole('button', { name: 'Sign out' }).click()
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click()
     await expect(page).toHaveURL(/\/login/)
     await page.goto('/home')
     await expect(page).toHaveURL(/\/login\?next=%2Fhome$/)
