@@ -857,6 +857,8 @@ export const HINTS = {
     'The sandbox image the posture runs, by the name the deployment gives it. The posture itself is keyed to the image’s content, so re-pinning the same name to new bytes asks for a new qualification.',
   'text.repo.posture_toolchain':
     'The exact toolchain version read inside the posture. A patch release is a different posture, because a test can pass on one and fail on the other.',
+  'text.repo.posture_environment':
+    'Where the tests get their tools. Declared: on the host they see only the tools the runner lists (its toolchain, git and the basic shell tools), and a change to any of them asks for a new qualification. The image: the sandbox image is the environment. Inherited: this runner does not declare its tools yet, so what is installed on the host can change a result.',
   'pill.repo.provisioning':
     'Whether this deployment provisions a task’s dependencies for the sealed sandbox. Off means a repository whose tests need a third-party module cannot be qualified there, and says so instead of blaming the model.',
   'text.repo.posture_stale':

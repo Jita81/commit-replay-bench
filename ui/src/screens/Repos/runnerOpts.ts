@@ -5,7 +5,9 @@
  * a hand-written key never silently disappears, but the form never invents one.
  *
  * Source of truth, key by key:
- *   base.py       `timeout`, `setup_timeout`                         (every runner)
+ *   base.py       `timeout`, `setup_timeout`                         (every runner);
+ *                 `tools` (the runners with a declared host environment: pytest, the four
+ *                 node runners, go — ADR-0048)
  *   pytest_runner `python`, `pythonpath_suffix`, `pip`, `pip_fallback`, `uninstall`, `env`
  *   node_runners  `npm`, `env` (all four); `node` (node --test only);
  *                 `extra_args` (jest / vitest / mocha — not node); `mocha_require` (mocha)
@@ -130,6 +132,15 @@ const ENV: OptSpec = {
   hint: 'Added to the test command’s environment (and, for the node runners, to npm setup). Put a pinned toolchain first on PATH here, e.g. PATH=/opt/node@24/bin:/usr/bin:/bin.',
 }
 
+/** Shared `tools` spec: the runners whose host test environment is declared (ADR-0048). */
+const TOOLS: OptSpec = {
+  key: 'tools',
+  kind: 'list',
+  label: 'Extra host tools',
+  hint: 'On the host, the tests see only the tools the runner declares (its toolchain, git and the POSIX basics). Name each further tool this repository’s tests run, one per row, e.g. make. Any change to a declared tool asks for the tasks to be qualified again.',
+  placeholder: 'make',
+}
+
 /** Shared `npm` spec for the four node runners. */
 const NPM: OptSpec = {
   key: 'npm',
@@ -195,6 +206,7 @@ export const RUNNER_OPTS: Record<Runner, readonly OptSpec[]> = {
       hint: 'Distributions removed after the install — the repo’s OWN package — so the worktree source on PYTHONPATH is what the tests import, never a stale wheel.',
       placeholder: 'myrepo',
     },
+    TOOLS,
     ENV,
   ],
   node: [
@@ -206,10 +218,11 @@ export const RUNNER_OPTS: Record<Runner, readonly OptSpec[]> = {
       placeholder: '/opt/node@24/bin/node',
     },
     NPM,
+    TOOLS,
     ENV,
   ],
-  vitest: [NPM, EXTRA_ARGS('vitest'), ENV],
-  jest: [NPM, EXTRA_ARGS('jest'), ENV],
+  vitest: [NPM, EXTRA_ARGS('vitest'), TOOLS, ENV],
+  jest: [NPM, EXTRA_ARGS('jest'), TOOLS, ENV],
   mocha: [
     NPM,
     {
@@ -220,6 +233,7 @@ export const RUNNER_OPTS: Record<Runner, readonly OptSpec[]> = {
       placeholder: 'test/support/env',
     },
     EXTRA_ARGS('mocha'),
+    TOOLS,
     ENV,
   ],
   go: [
@@ -245,6 +259,7 @@ export const RUNNER_OPTS: Record<Runner, readonly OptSpec[]> = {
       placeholder: '/tmp/gomod',
       dockerOnly: true,
     },
+    TOOLS,
   ],
   cargo: [
     {

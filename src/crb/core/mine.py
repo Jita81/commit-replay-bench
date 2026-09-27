@@ -456,8 +456,9 @@ def qualify(
             return MineOutcome(sha, None, "baseline timeout", time.monotonic() - started)
         # the rule qualify_task applies (ADR-0019, one vocabulary): a baseline whose output
         # does not parse is refused unless the RED itself was a build failure that explains
-        # it — else the task would later fail belt 3 on the unparsed run (P-057)
-        if base.parse_error and red.failing:
+        # it — else the task would later fail belt 3 on the unparsed run (P-057); a RED
+        # with an unattributed part (a target package that did not build) explains it too
+        if base.parse_error and red.failing and not red.parse_error:
             reason = (
                 f"{QUAL_BASELINE_UNATTRIBUTED}: the belt scope failed at the parent without "
                 f"naming a test: {base.parse_error}"

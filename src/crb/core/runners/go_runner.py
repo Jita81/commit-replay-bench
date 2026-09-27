@@ -10,24 +10,30 @@ Navigation
 What it is:   The Go runner — ``GoRunner`` over ``go test -json``.
 What it does: Maps test files to their packages (Go addresses packages, not files), runs
               ``go test -json`` with build caching disabled and the toolchain pinned to the
-              host's, parses the event stream into ``<package>::<Test>`` ids, warms the module
-              cache in setup and detects ``gofmt`` for belt 5.
+              host's, parses the event stream into ``<package>::<Test>`` ids (a package that
+              fails naming no test is unattributed, never dropped), declares the tools a test
+              may run on the host (ADR-0048), warms the module cache in setup and detects
+              ``gofmt`` for belt 5.
 How:          ``target_scope``: directory of each test file → ``./pkg``. ``command``: env
               (``-count=1``, ``GOTOOLCHAIN=local``, ``CGO_ENABLED``; the caches under ``/tmp``
               and ``Command.exec_tmp`` under docker, because ``go test`` execs the binaries it
               builds there) → ``go test -json``. ``parse``: one JSON event per line;
-              ``Action == "fail"`` with a ``Test`` name.
+              ``Action == "fail"`` with a ``Test`` name; a package's own ``fail`` beside named
+              ones is a ``parse_error``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0005-fail-closed-docker-sandbox.md
+ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0048-the-host-posture-declares-its-environment.md
 Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/lint.py (``go_plan``),
               src/crb/core/execution.py (``Executor.tool``; ``exec_tmp`` on the sandbox's
               tmpfs), src/crb/core/spec.py (``BELT_AFFECTED_DIRS`` is reinterpreted here),
               src/crb/core/runners/__init__.py, deploy/sandbox/Dockerfile.go (the reference
               image this command runs in)
 Tested by:    tests/test_runners_go.py, tests/test_runners_parsers.py, tests/test_runners_setup.py,
-              tests/test_sandbox_images_docker.py
-Touch when:   a Go repository needs cgo, a pinned ``go`` binary or a module cache path —
-              set ``runner_opts`` (``cgo``, ``go``, ``gofmt``, ``gomodcache``; docs/OPERATOR.md);
+              tests/test_sandbox_images_docker.py, tests/test_runners_go_baseline.py,
+              tests/test_runners_toolenv.py
+Touch when:   a Go repository needs cgo, a pinned ``go`` binary, a module cache path or a host
+              tool its tests run — set ``runner_opts`` (``cgo``, ``go``, ``gofmt``,
+              ``gomodcache``, ``tools``; docs/OPERATOR.md);
               a change to how packages are addressed needs a parser/scope test.
 """
 
@@ -49,7 +55,11 @@ from crb.core.runners.base import (
     host_check,
     tail_of,
 )
+from crb.core.runners.toolenv import POSIX_BASICS, ToolSpec
 from crb.core.spec import BELT_AFFECTED_DIRS
+
+#: What cgo needs on top when ``runner_opts.cgo`` is on (the C toolchain the build calls).
+_CGO_TOOLS: tuple[str, ...] = ("cc", "gcc", "clang", "ld", "ar", "pkg-config")
 
 #: ``-mod=mod`` lets go.mod be updated from the cache; ``GOTOOLCHAIN=local`` refuses the
 #: silent toolchain download a newer ``go`` directive would otherwise trigger.
@@ -69,6 +79,27 @@ class GoRunner(BaseRunner):
     def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:
         """``go version`` — the exact toolchain (``go1.26.8``), part of the posture."""
         return (self._go(executor), "version")
+
+    def declared_tools(self, executor: Executor, root: Path | None = None) -> tuple[ToolSpec, ...]:
+        """What a Go test may run by name on the host (ADR-0048): the ``go`` the command
+        runs, ``gofmt``, ``git`` and the POSIX basics the sealed image carries — plus the C
+        toolchain when cgo is on. A tool that is merely installed (``shellcheck``) is not
+        on the list, so it can never change a verdict."""
+        go = self._go(executor)
+        gofmt = self.opts.get("gofmt")
+        tools = [
+            ToolSpec("go", go if os.path.isabs(go) else None, ("version",)),
+            ToolSpec("gofmt", str(gofmt) if gofmt else None),
+            ToolSpec("git", None, ("--version",)),
+            *(ToolSpec(name) for name in POSIX_BASICS),
+        ]
+        if str(self.opts.get("cgo", "0")) == "1":
+            tools += [ToolSpec(name) for name in _CGO_TOOLS]
+        return tuple(tools)
+
+    def env_passthrough(self) -> tuple[str, ...]:
+        """The module and build caches (and ``GOPATH``) the worker's environment points at."""
+        return ("GOPATH", "GOCACHE", "GOMODCACHE")
 
     def environment_ready(self, root: Path, env_dir: Path) -> bool:
         """``go list ./...`` with ``GOPROXY=off`` — resolves offline or it is not ready."""
@@ -180,19 +211,41 @@ class GoRunner(BaseRunner):
         return self.bind_deps(cmd, executor)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
-        """``<Package>::<Test>`` for every ``fail`` event that names a test (a package-level
-        ``fail`` without a ``Test`` is a build failure — left to the fail-closed rule)."""
-        failing = set()
+        """``<Package>::<Test>`` for every ``fail`` event that names a test. A package whose
+        ``fail`` names no test of its own (a build or vet failure, a crash outside a test) is
+        UNATTRIBUTED: with nothing else named the base's fail-closed rule applies; beside
+        named failures it is a ``parse_error`` here, so it can never hide behind ids the
+        baseline subtracts (pilot finding D6, ADR-0048)."""
+        failing: set[str] = set()
+        failed_pkgs: set[str] = set()
+        named_pkgs: set[str] = set()
         for line in result.stdout.splitlines():
             try:
                 ev = json.loads(line)
             except ValueError:
                 continue
-            if ev.get("Action") == "fail" and ev.get("Test"):
-                failing.add(f"{ev.get('Package', '')}::{ev['Test']}")
+            if not isinstance(ev, dict) or ev.get("Action") != "fail":
+                continue
+            pkg = str(ev.get("Package", ""))
+            if ev.get("Test"):
+                failing.add(f"{pkg}::{ev['Test']}")
+                named_pkgs.add(pkg)
+            elif pkg:
+                failed_pkgs.add(pkg)
+        unnamed = sorted(failed_pkgs - named_pkgs)
+        parse_error = ""
+        if failing and unnamed:
+            shown = ", ".join(unnamed[:5]) + (
+                f" and {len(unnamed) - 5} more" if len(unnamed) > 5 else ""
+            )
+            parse_error = (
+                f"unattributed failure (package{'s' if len(unnamed) > 1 else ''} {shown} "
+                f"failed without naming a test)"
+            )
         return TestRun(
             result.returncode,
             frozenset(failing),
             tail_of(result.combined),
             duration_s=result.duration_s,
+            parse_error=parse_error,
         )

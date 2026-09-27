@@ -6,7 +6,8 @@
  * ----------
  * What it is:   Screen test for the Posture panel on /repos/:name against a mocked
  *               `GET /repos/{name}/posture`.
- * What it does: Pins that the panel reads the counts, the class, the toolchain and the
+ * What it does: Pins that the panel reads the counts, the class, the toolchain, where the
+ *               tests get their tools (declared, the image, or inherited) and the
  *               provisioning state; lists every refusal code with its count, its fix and a guide
  *               link into /help/docs; says why a reading is stale; offers "Qualify for this
  *               posture — no model spend" to an operator only; and that pressing it posts a
@@ -77,12 +78,34 @@ describe('PosturePanel', () => {
     expect(screen.getByTestId('posture-toolchain')).toHaveTextContent('go1.26.8')
     expect(screen.getByTestId('posture-image')).toHaveTextContent('crb-sandbox-go:main-8ab88ad')
     expect(screen.getByTestId('posture-provisioning')).toHaveTextContent('off')
+    expect(screen.getByTestId('posture-environment')).toHaveTextContent('the image')
     const unloadable = screen.getByTestId('refusal-QUAL_ENV_UNLOADABLE')
     expect(within(unloadable).getByRole('img', { name: 'QUAL_ENV_UNLOADABLE: 5 tasks' })).toBeInTheDocument()
     expect(unloadable).toHaveTextContent('switch provisioning on')
     expect(within(unloadable).getByRole('link', { name: 'What to do' })).toHaveAttribute('href', '/help/docs/OPERATOR#7a-when-a-posture-is-unqualified')
     expect(screen.getByTestId('refusal-POSTURE_UNQUALIFIED')).toHaveTextContent('costs no model money')
     expect(screen.queryByTestId('posture-stale')).toBeNull()
+  })
+
+  it('a host posture names its declared environment: the digest and how many tools, never the host PATH', async () => {
+    const declared = {
+      ...POSTURE,
+      executor: 'local',
+      image_ref: '',
+      posture_class: 'local/inplace/host-env',
+      posture: {
+        toolchain: 'go version go1.26.8 darwin/arm64',
+        environment: 'declared:sha256:' + 'ab12'.repeat(16),
+        environment_tools: 'git=git version 2.51@0123456789ab; go=go version go1.26.8@ba9876543210; shellcheck=absent',
+      },
+    }
+    setup(VIEWER, declared)
+    await waitFor(() => expect(screen.getByTestId('posture-environment')).toHaveTextContent('declared · ab12ab12ab12 · 2 tools'))
+  })
+
+  it('a host posture whose runner declares nothing says the tests inherit the host', async () => {
+    setup(VIEWER, { ...POSTURE, executor: 'local', image_ref: '', posture_class: 'local/inplace/host-env', posture: { toolchain: 'cargo 1.90.0' } })
+    await waitFor(() => expect(screen.getByTestId('posture-environment')).toHaveTextContent('inherited from the host'))
   })
 
   it('a viewer sees no Qualify button; the stale reason is said in words', async () => {

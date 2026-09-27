@@ -109,8 +109,8 @@ QUAL_TEXT: dict[str, str] = {
         "on); this costs no model money"
     ),
     POSTURE_DRIFT: (
-        "the image, toolchain, limits or runner environment changed after qualification: "
-        "qualify again"
+        "the image, toolchain, limits, runner environment or a declared host tool changed "
+        "after qualification: qualify again"
     ),
     POSTURE_CANARY_FAILED: (
         "the gold did not grade clean here: read the canary's tail (the cause is usually "
@@ -511,7 +511,11 @@ class EnvProbeWitness:
                     ws.root, (), executor=self.executor, timeout=t
                 )
             if probe is not None:
-                res = self.executor.run(with_deps(probe, self.binding, self.executor.name))
+                res = self.executor.run(
+                    self.runner.declare(
+                        with_deps(probe, self.binding, self.executor.name), self.executor
+                    )
+                )
                 out = ControlRun(
                     kind=BLAME_ENV_PROBE,
                     scope=tuple(probe.argv[1:]),
@@ -587,7 +591,8 @@ def qualify_task(
     1. the environment probe at the parent (``runner.env_probe_command``, offline, with
        the parent's dependency binding) — ``QUAL_ENV_UNLOADABLE`` when it fails;
     2. RED once with the tests overlaid — ``QUAL_NOT_RED`` / ``QUAL_RED_TIMEOUT``; a RED
-       with no parsed failing id is a build failure, accepted only after a GREEN probe
+       with no parsed failing id, or with a part no id names (a target package that did not
+       build), is a build failure, accepted only after a GREEN probe
        (or, in the host-env mode with no probe, under the rule this product always had);
     3. the belt scope twice — the union is the baseline, the difference the flaky set —
        ``QUAL_BASELINE_TIMEOUT``, or ``QUAL_BASELINE_UNATTRIBUTED`` when the target built;
@@ -672,7 +677,9 @@ def qualify_task(
             with runner.deps_bound(deps.parent):
                 probe = runner.env_probe_command(ws.root, (), executor=executor, timeout=t)
             if probe is not None:
-                res = executor.run(with_deps(probe, deps.parent, executor.name))
+                res = executor.run(
+                    runner.declare(with_deps(probe, deps.parent, executor.name), executor)
+                )
                 if res.env_error:
                     return refuse(
                         QUAL_TREE_COPY_FAILED, f"the tree could not be prepared: {res.env_error}"
@@ -708,7 +715,10 @@ def qualify_task(
                 return refuse(QUAL_RED_TIMEOUT, "target timeout at parent")
             if red.green:
                 return refuse(QUAL_NOT_RED, "target green at parent")
-            kind = RED_TESTS_FAILED if red.failing else RED_BUILD_FAILED
+            # a RED with an unattributed part (a target package that did not build beside
+            # one whose test failed) is a build failure too: the probe must have proven the
+            # posture can load it, and the belt scope's unattributed package is explained
+            kind = RED_TESTS_FAILED if red.failing and not red.parse_error else RED_BUILD_FAILED
             facts["red"] = {
                 "kind": kind,
                 "rc": red.returncode,

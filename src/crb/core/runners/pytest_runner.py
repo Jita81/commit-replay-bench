@@ -28,13 +28,14 @@ What it is:   The Python runner — ``PytestRunner`` — and the reference imple
 What it does: Builds a deterministic ``python -m pytest -rfE`` command for a scope, parses the
               short summary into failing ids, checks a target file really defines tests
               (malformed-oracle guard), installs the repository's test dependencies into a venv
-              under ``env_dir`` (the network phase), and detects ruff for belt 5.
+              under ``env_dir`` (the network phase), declares the tools a test may run on the
+              host (the interpreter, git and the basics; ADR-0048), and detects ruff for belt 5.
 How:          ``command``: resolve the interpreter (opts → venv → crb's own) → pin ``PYTHONPATH``
               to the worktree (``/work`` under docker) → pytest argv. ``setup``: venv → install
               (``runner_opts.pip`` / fallback, else ``-e .[test]``) → uninstall the repo's own
               distribution → dist-info stubs → ``finish_setup``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0048-the-host-posture-declares-its-environment.md
 Works with:   src/crb/core/runners/base.py (the contract and the setup records),
               src/crb/core/lint.py (``python_plan``, ``pinned_ruff_spec``),
               src/crb/core/execution.py (``Executor.tool`` picks the sandbox interpreter),
@@ -42,7 +43,7 @@ Works with:   src/crb/core/runners/base.py (the contract and the setup records),
               tests/fixtures/pyrepo.py (the fixture repository the tests drive it on)
 Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_lint.py
 Touch when:   a Python repository needs a different install recipe — prefer ``runner_opts``
-              (``pip``, ``pip_fallback``, ``uninstall``, ``python``, ``env``,
+              (``pip``, ``pip_fallback``, ``uninstall``, ``python``, ``env``, ``tools``,
               ``dist_info_stubs``; docs/OPERATOR.md) over editing this file; a new pytest
               reporter shape or a new interpreter source changes ``parse``/``python_for`` and
               needs a parser test.
@@ -72,6 +73,7 @@ from crb.core.runners.base import (
     parse_pytest_failures,
     tail_of,
 )
+from crb.core.runners.toolenv import POSIX_BASICS, ToolSpec
 
 #: (interpreter, spec) pairs already satisfied this process — one install per commit pin.
 _PINNED_RUFF_DONE: set[tuple[str, str]] = set()
@@ -153,6 +155,37 @@ class PytestRunner(BaseRunner):
     def python_for(self, root: Path, env_dir: Path | None) -> str:
         """The interpreter the tests run with (see the module docstring for the order)."""
         return self.configured_python(root, env_dir) or sys.executable
+
+    # --- the declared environment on the host (ADR-0048) ----------------------------
+    def _host_python(self, root: Path | None) -> tuple[str | None, bool]:
+        """The interpreter a host command runs, as an absolute path when one can be
+        named, and whether it is a virtualenv's (a ``pyvenv.cfg`` beside its ``bin``)."""
+        python = self.python_for(Path(root) if root is not None else Path("."), self.env_dir)
+        if not os.path.isabs(python):
+            python = shutil.which(python) or ""
+        if not python:
+            return None, False
+        return python, (Path(python).parent.parent / "pyvenv.cfg").is_file()
+
+    def declared_tools(self, executor: Executor, root: Path | None = None) -> tuple[ToolSpec, ...]:
+        """The interpreter the tests run (as ``python`` and ``python3``), ``git`` and the
+        POSIX basics. A virtualenv's interpreter is named in the identity but reached
+        through the venv's own ``bin`` (:meth:`declared_path`), never linked elsewhere."""
+        python, is_venv = self._host_python(root)
+        interp = [
+            ToolSpec(name, python, ("-V",), link=not is_venv) for name in ("python", "python3")
+        ]
+        return (
+            *interp,
+            ToolSpec("git", None, ("--version",)),
+            *(ToolSpec(name) for name in POSIX_BASICS),
+        )
+
+    def declared_path(self, root: Path | None = None) -> tuple[str, ...]:
+        """A virtualenv's ``bin``: the interpreter and the console scripts the repository's
+        own dependencies installed (the host-env mode's declared dependency set)."""
+        python, is_venv = self._host_python(root)
+        return (str(Path(python).parent),) if python and is_venv else ()
 
     # --- execution ---------------------------------------------------------------
     def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:

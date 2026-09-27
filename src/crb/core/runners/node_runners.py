@@ -65,6 +65,7 @@ from crb.core.runners.base import (
     TestRun,
     tail_of,
 )
+from crb.core.runners.toolenv import POSIX_BASICS, ToolSpec
 
 _NPM_FLAGS: tuple[str, ...] = ("--no-audit", "--no-fund", "--loglevel=error")
 
@@ -157,6 +158,20 @@ class _NodeBase(BaseRunner):
     def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:
         """``node --version`` — the runtime the tests run under, part of the posture."""
         return (executor.tool("node", self.opts.get("node")), "--version")
+
+    def declared_tools(self, executor: Executor, root: Path | None = None) -> tuple[ToolSpec, ...]:
+        """What a Node test may run by name on the host (ADR-0048): ``node`` (the pinned one
+        when ``runner_opts.node`` names it), ``npm``, ``npx``, ``git`` and the POSIX basics.
+        A ``PATH`` in ``runner_opts.env`` is the operator's own declaration and wins."""
+        node = self.opts.get("node")
+        npm = self.opts.get("npm")
+        return (
+            ToolSpec("node", str(node) if node else None, ("--version",)),
+            ToolSpec("npm", str(npm) if npm else None),
+            ToolSpec("npx"),
+            ToolSpec("git", None, ("--version",)),
+            *(ToolSpec(name) for name in POSIX_BASICS),
+        )
 
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
         """Test files as the tool addresses them; a ``.snap`` maps to the test that owns it."""
