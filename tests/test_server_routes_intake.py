@@ -600,8 +600,10 @@ def test_a_ready_ticket_lands_as_a_draft_until_an_operator_registers_it(
     (row,) = body["rows"]
     assert row["awaiting_approval"] is True and row["registered"] is False
     # unqueued, and labelled with the product's readiness word for this deployment: the
-    # test cell routes nothing to `deliver`, so the draft reads not-deliverable (not ready)
-    assert row["label"] == c.LABEL_NOT_DELIVERABLE
+    # entry gate admits it, so it is ready — it will be built even though the test cell
+    # routes nothing to `deliver`, which only withholds the pull request (P-129) — and the
+    # label stays true once registered (queued, below)
+    assert row["label"] == c.LABEL_READY
     assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
     # the Register act is an operator's (the role ladder test pins the refusals below it),
     # and it names the revision the operator read

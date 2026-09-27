@@ -10,14 +10,17 @@ What it does: Pins, on the real loop over the fixture repository, that an item i
               with no proven standard stops before any spend whether or not delivery is on;
               that a ticket missing what its standard arm needs stops ``needs_context``
               naming it; that an ``S3`` ceiling admits only an approver's calibration build,
-              which is evented and never opens a pull request; that the builder gets exactly
+              which is evented, never opens a pull request and is claimed by one run on the
+              chain before any spend (two interleaved runs build once — P-131); that the
+              builder gets exactly
               the standard arm's context (a person's test on an ``S1`` cell is held out); the
               size rule (the more demanding of two cells until the points-to-churn agreement
               passes; ``L`` stops ``granularize``; no points is ``unsized`` and goes to a
-              person); the sign-off clause and the override that lifts only it; and the
-              licence keyed on the building rung's builder and model, before the build
+              person); the sign-off clause and the override that lifts only it — for every
+              other stop the pure gate makes, the override changes nothing; and the licence
+              keyed on the building rung's builder and model, before the build
               (``not_licensed``, $0) and on the measured size after it
-              (``size_exceeds_licence``).
+              (``size_exceeds_licence``), a line shaped like a diff header included (P-127).
 How:          The loop rig of ``tests/test_factory_loop.py`` with the gate's readers replaced
               per test; ``decide_entry`` directly for the pure size-rule cases.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -32,6 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from crb.builders.brief import (
     ACCEPTANCE_HELD_OUT,
@@ -43,10 +47,12 @@ from crb.builders.brief import (
 from crb.factory import evidence as fe
 from crb.factory import loop as fl
 from crb.factory.standard import (
+    OVERRIDABLE,
     STOP_GRANULARIZE,
     STOP_NEEDS_CONTEXT,
     STOP_NO_PROVEN_STANDARD,
     STOP_UNSIGNED_CELL,
+    STOP_UNSIZED,
     Calibration,
     CellRef,
     Readers,
@@ -57,6 +63,7 @@ from crb.intake.draft import size_for
 from fixtures import pyrepo as pr
 from test_factory_build import (
     MULTIPLY_DEF,
+    TEST_MULTIPLY,
     TEST_MULTIPLY_SRC,
     authored_multiply,
     multiply_item,
@@ -178,6 +185,60 @@ def test_a_calibration_build_never_opens_a_pull_request(pyrepo: pr.PyRepo, tmp_p
     # spent: the next run meets the gate again
     again = rig.loop().run_item(multiply_item(), authored=authored_multiply())
     assert again.status == fl.STATUS_NO_PROVEN_STANDARD and len(list(rig.ledger.rows())) == 1
+
+
+def test_a_grant_is_claimed_once_on_either_store(tmp_path: Path) -> None:
+    """The claim is a conditional append — the check and the write under the store's one
+    lock — on the in-memory store and on the JSONL file both writers share (P-131)."""
+    for store in (fe.MemoryFactoryStore(), fe.JsonlFactoryStore(tmp_path / "ev.jsonl")):
+        ev = fe.FactoryEvidence(store, actor="tester", repo="pyrepo")
+        grant = ev.record_calibration("I-1", approver="approver:ada", reason="measure")
+        first = ev.claim_calibration("I-1", grant.event_id, run_id="run-a")
+        assert first is not None and first.payload == {"grant": grant.event_id, "run_id": "run-a"}
+        assert ev.claim_calibration("I-1", grant.event_id, run_id="run-b") is None
+        assert fe.spent_grants(ev.events()) == {grant.event_id}
+        assert ev.verify() == 2
+
+
+class _StartsAnotherRun(MultiBuilder):
+    """A builder that, during its first build, runs ``other`` — a second factory run on the
+    same repository that starts while the first is still building (a second worker)."""
+
+    other: Callable[[], object] | None = None
+    seen: list[object]
+
+    def build(self, workspace: Any, brief: Any, budget: Any, *, on_event: Any = None) -> Any:
+        if self.other is not None:
+            run, self.other = self.other, None
+            self.seen.append(run())
+        return super().build(workspace, brief, budget, on_event=on_event)
+
+
+def test_one_grant_funds_one_build_when_two_runs_interleave(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-131: the grant counted as spent only when a run's outcome was written, so a second
+    run that started while the first was building read the same grant as unspent and built
+    too — one approver's grant, two paid builds. The grant is claimed on the chain, under
+    the store's lock, before any spend: the second run finds it claimed and stops at the
+    gate. Two grants recorded at once (two approvers' POSTs racing) still fund one build."""
+    builder = _StartsAnotherRun()
+    builder.seen = []
+    a = _rig(pyrepo, _sub(tmp_path, "a"), readers=_readers(_none), builder=builder)
+    b = _rig(pyrepo, _sub(tmp_path, "b"), readers=_readers(_none), evidence=a.evidence)
+    a.evidence.record_calibration("I-1", approver="approver:ada", reason="measure the arm")
+    a.evidence.record_calibration("I-1", approver="approver:bo", reason="measure it too")
+    builder.other = lambda: b.loop().run_item(multiply_item(), authored=authored_multiply())
+    first = a.loop().run_item(multiply_item(), authored=authored_multiply())
+    (second,) = builder.seen
+    assert first.status == fl.STATUS_CALIBRATION_BUILD
+    assert second.status == fl.STATUS_NO_PROVEN_STANDARD  # type: ignore[attr-defined]
+    assert b.builder.calls == 0 and len(list(a.ledger.rows()) + list(b.ledger.rows())) == 1
+    (claim,) = a.evidence.events_for("I-1", fe.EV_CALIBRATION_CLAIMED)
+    newest = a.evidence.events_for("I-1", fe.EV_CALIBRATION_FUNDED)[-1]
+    assert claim.payload["grant"] == newest.event_id and claim.payload["run_id"] == "run-1"
+    # the claim spent it: the next run meets the gate again
+    assert a.loop().run_item(multiply_item()).status == fl.STATUS_NO_PROVEN_STANDARD
 
 
 # --- the builder gets exactly the standard arm's context --------------------------------
@@ -350,6 +411,49 @@ def test_deliver_override_lifts_only_a_missing_sign_off_never_a_missing_standard
     assert big.status == fl.STATUS_SIZE_EXCEEDS_LICENCE and not rig.prs
 
 
+#: Every way the pure gate stops an item except the sign-off clause, keyed by a name the
+#: failure message quotes: (size, standard_for, missing_slots, person_test, author).
+_NOT_OVERRIDABLE: dict[str, tuple[str, StandardFn, tuple[str, ...], bool, str | None]] = {
+    "unsized": ("unsized", _s1, (), False, None),
+    "granularize": ("L", _s1, (), False, None),
+    "no_proven_standard/none": ("XS", _none, (), False, None),
+    "no_proven_standard/ceiling": ("XS", lambda c: Standard("S3", signed=True), (), True, None),
+    "needs_context/S1 slot": ("XS", _s1, ("expected_behaviour",), False, None),
+    "needs_context/S1 author": ("XS", _s1, (), False, "someone-else"),
+    "needs_context/S2 test": ("XS", lambda c: Standard(ARM_S2, signed=True), (), False, None),
+}
+
+
+def test_an_override_never_admits_any_stop_but_the_sign_off_clause() -> None:
+    """``deliver_override`` lifts ``unsigned_cell`` and nothing else (ADR-0026 item 8): for
+    every other stop the pure gate makes — no size, a size split, no proven standard, an
+    ``S3`` ceiling, and each way context is missing — an approver's override changes
+    nothing, with or without a signed cell required. The cases cover every stop code the
+    gate returns but ``unsigned_cell`` (a case removed fails the last assertion)."""
+    seen: set[str] = set()
+    for name, (size, fn, missing, person, author) in _NOT_OVERRIDABLE.items():
+        for signed in (False, True):
+            kw: dict[str, Any] = {
+                "capability_class": "bug.fix",
+                "size": size,
+                "standard_for": fn,
+                "agreement_passed": False,
+                "missing_slots": missing,
+                "person_test": person,
+                "require_signed_cell": signed,
+                "author": author,
+            }
+            plain = decide_entry(**kw)
+            lifted = decide_entry(**kw, override_by="approver:ada")
+            assert not plain.enters, name
+            assert not lifted.enters, f"the override admitted {name}"
+            assert (lifted.code, lifted.reason_code) == (plain.code, plain.reason_code), name
+            assert lifted.override_by == "", name
+            seen.add(plain.code)
+    assert seen == {STOP_UNSIZED, STOP_GRANULARIZE, STOP_NO_PROVEN_STANDARD, STOP_NEEDS_CONTEXT}
+    assert not seen & OVERRIDABLE
+
+
 # --- the licence of the delivered change (C4) --------------------------------------------
 
 #: A multiply with a dozen more lines: its churn is an S change, whatever the estimate said.
@@ -390,6 +494,33 @@ def test_a_change_larger_than_its_licence_stops_size_exceeds_licence(
         "model": "multi",
         "arm": ARM_S2,
     }
+
+
+#: The same dozen-line change behind a line that reads, in the diff, as the oracle's own
+#: file header (``+`` + ``++ b/<oracle>``): a prefix parse stopped counting there (P-127).
+SMUGGLED_MULTIPLY = (
+    MULTIPLY_DEF
+    + f'\nNOTE = """\n++ b/{TEST_MULTIPLY}\n"""'
+    + "".join(f"\n# a note the builder left, line {i}" for i in range(12))
+)
+
+
+def test_a_line_shaped_like_the_oracles_header_does_not_shrink_the_measured_size(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        readers=_readers(_xs_licence_only),
+        builder=MultiBuilder(first_edit=SMUGGLED_MULTIPLY),
+        deliver=True,
+        creds=_creds(),
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_SIZE_EXCEEDS_LICENCE
+    assert not rig.pushes and not rig.prs
+    (row,) = list(rig.ledger.rows())
+    assert row.size == "S"
 
 
 def test_an_unlicensed_cell_is_refused_before_any_build_at_no_cost(

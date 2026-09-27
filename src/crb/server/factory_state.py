@@ -98,6 +98,7 @@ from crb.factory.evidence import (
     FactoryEvent,
     FactoryEvidence,
     JsonlFactoryStore,
+    spent_grants,
 )
 from crb.factory.readiness import SLOT_STRUCTURAL, SLOT_VALUE, JsonlGapSignoffLedger
 from crb.factory.standard import (
@@ -595,7 +596,7 @@ class FactoryHome:
         outcomes: dict[tuple[str, int], FactoryEvent] = {}
         entries: dict[str, FactoryEvent] = {}  # the entry stop since the last readiness
         grants: dict[str, FactoryEvent] = {}  # the newest calibration grant
-        spent: set[str] = set()  # grant event ids an item outcome consumed
+        spent: set[str] = set()  # grant event ids a run claimed (P-131)
         for ev in self.events():
             if ev.item_id:
                 latest.setdefault(ev.item_id, {})[ev.kind] = ev  # newest wins per kind
@@ -608,8 +609,7 @@ class FactoryHome:
                     entries[ev.item_id] = ev
                 if ev.kind == EV_CALIBRATION_FUNDED:
                     grants[ev.item_id] = ev
-                if ev.kind == EV_ITEM_OUTCOME and ev.payload.get("calibration_event"):
-                    spent.add(str(ev.payload["calibration_event"]))
+                spent |= spent_grants((ev,))  # claimed, or consumed by an older outcome
                 refusal = _refusal_of(ev)
                 if refusal is not None:
                     refusals[ev.item_id] = refusal

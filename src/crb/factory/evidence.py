@@ -39,10 +39,12 @@ What it does: Appends ``FactoryEvent`` rows (freeze, evolution, sign-off, readin
               door; redacts every payload string at construction; refuses to record an edit
               for a build with no verdict, refuses a verdict that claims to precede an
               edit already on the record, and records a pull request's outcome at most
-              once; ``verify`` proves the chain.
+              once; claims a calibration grant for one run only (``claim_calibration``, a
+              conditional append — P-131); ``verify`` proves the chain.
 How:          ``FactoryEvidence.record_*`` → ``FactoryStore.append`` (``JsonlFactoryStore``
               fsyncs a line per event; ``MemoryFactoryStore`` for tests) → ``chained`` with
-              the previous ``row_hash``; ``verify_events`` re-walks.
+              the previous ``row_hash``; ``append_if`` reads the chain and writes under the
+              same lock; ``verify_events`` re-walks.
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0006-zero-raw-retention-and-evidence-packs.md
@@ -54,7 +56,8 @@ Works with:   src/crb/factory/loop.py (calls a ``record_*`` at every arrow),
               the outcome sync that calls ``record_delivery_outcome``),
               src/crb/server/routes/factory.py (serves the chain)
 Tested by:    tests/test_factory_review.py, tests/test_factory_loop.py,
-              tests/test_factory_outcomes.py
+              tests/test_factory_outcomes.py, tests/test_factory_entry_gate.py (the grant
+              claim)
 Touch when:   never for a new repository; adding a governed step means a new ``EV_*`` kind,
               a ``record_*`` method, and a call from the loop — all in one change (an
               unknown kind is refused at construction).
@@ -69,7 +72,7 @@ import json
 import os
 import threading
 import uuid
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -112,6 +115,11 @@ EV_ENTRY_REFUSED = "entry.refused"
 #: An approver funded ONE calibration build of an item the entry gate stopped (ADR-0026
 #: item 8): who, why, and the stop it answers. A calibration build never delivers.
 EV_CALIBRATION_FUNDED = "calibration.funded"
+#: A factory run claimed a calibration grant, before any spend: the grant's event id and the
+#: run. A claimed grant is spent — the store appends the claim only while no other claim or
+#: outcome has spent it, under the lock every append takes, so one grant funds one run
+#: however many runs start at once (docs/PREVENTION.md P-131).
+EV_CALIBRATION_CLAIMED = "calibration.claimed"
 #: Intake (ADR-0017): what the listener did with a ticket. These sit on the SAME chain as
 #: the manufacture steps on purpose — "who read this ticket, when, at which revision, and
 #: what it wrote back" is evidence of the same kind as "who built it", and a reader
@@ -159,6 +167,7 @@ EVENT_KINDS: tuple[str, ...] = (
     EV_PROBE_WAIVED,
     EV_ENTRY_REFUSED,
     EV_CALIBRATION_FUNDED,
+    EV_CALIBRATION_CLAIMED,
     *INTAKE_EVENT_KINDS,
 )
 #: The two ways a delivered pull request ends; the sync records exactly one of them.
@@ -249,10 +258,19 @@ class FactoryEvent:
         return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
 
 
+#: ``admit(events) -> bool`` — whether a conditional append may go ahead, given every event
+#: on the chain at the moment of the append (read under the store's lock).
+Admit = Callable[[list[FactoryEvent]], bool]
+
+
 class FactoryStore(Protocol):
-    """Append-only event persistence. ``append`` chains and returns the stored event."""
+    """Append-only event persistence. ``append`` chains and returns the stored event;
+    ``append_if`` does so only when ``admit`` holds over the chain as it stands, the read
+    and the write under one lock, so two writers cannot both pass the same check."""
 
     def append(self, event: FactoryEvent) -> FactoryEvent: ...
+
+    def append_if(self, event: FactoryEvent, admit: Admit) -> FactoryEvent | None: ...
 
     def events(self) -> Iterator[FactoryEvent]: ...
 
@@ -266,10 +284,17 @@ class MemoryFactoryStore:
 
     def append(self, event: FactoryEvent) -> FactoryEvent:
         with self._lock:
-            prev = self._events[-1].row_hash if self._events else GENESIS_HASH
-            ev = event.chained(prev)
-            self._events.append(ev)
-            return ev
+            return self._append(event)
+
+    def append_if(self, event: FactoryEvent, admit: Admit) -> FactoryEvent | None:
+        with self._lock:
+            return self._append(event) if admit(list(self._events)) else None
+
+    def _append(self, event: FactoryEvent) -> FactoryEvent:
+        prev = self._events[-1].row_hash if self._events else GENESIS_HASH
+        ev = event.chained(prev)
+        self._events.append(ev)
+        return ev
 
     def events(self) -> Iterator[FactoryEvent]:
         return iter(list(self._events))
@@ -299,14 +324,25 @@ class JsonlFactoryStore:
         same evidence file, and a thread lock cannot order two processes (CodeRabbit on
         PR #4, 2026-09-15)."""
         with self._lock, jsonl_append_lock(self.path):
-            ev = event.chained(self._last_hash())
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            line = json.dumps(ev.to_dict(), sort_keys=True, ensure_ascii=False)
-            with self.path.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-            return ev
+            return self._append(event)
+
+    def append_if(self, event: FactoryEvent, admit: Admit) -> FactoryEvent | None:
+        """:meth:`append` only when ``admit`` holds over the file as it stands, read under
+        the same thread and OS file lock as the write — two processes cannot both pass the
+        check (P-131)."""
+        with self._lock, jsonl_append_lock(self.path):
+            return self._append(event) if admit(list(self.events())) else None
+
+    def _append(self, event: FactoryEvent) -> FactoryEvent:
+        """Chain and write one line; the caller holds both locks."""
+        ev = event.chained(self._last_hash())
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(ev.to_dict(), sort_keys=True, ensure_ascii=False)
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        return ev
 
     def events(self) -> Iterator[FactoryEvent]:
         """Every event in file order (an absent file is an empty ledger)."""
@@ -330,6 +366,19 @@ def verify_events(events: Iterable[FactoryEvent]) -> int:
             raise LedgerIntegrityError(f"factory event {n} ({ev.kind}) row_hash mismatch")
         prev = ev.row_hash
     return n
+
+
+def spent_grants(events: Iterable[FactoryEvent]) -> set[str]:
+    """The calibration grants (``calibration.funded`` event ids) that are spent: claimed by
+    a run (``calibration.claimed``), or — on a chain written before claims existed — named
+    by an item outcome's ``calibration_event``. One grant funds one run (ADR-0026 item 8)."""
+    spent: set[str] = set()
+    for ev in events:
+        if ev.kind == EV_CALIBRATION_CLAIMED and ev.payload.get("grant"):
+            spent.add(str(ev.payload["grant"]))
+        elif ev.kind == EV_ITEM_OUTCOME and ev.payload.get("calibration_event"):
+            spent.add(str(ev.payload["calibration_event"]))
+    return spent
 
 
 def _payload(d: Mapping[str, Any]) -> dict[str, Any]:
@@ -578,6 +627,19 @@ class FactoryEvidence:
             EV_CALIBRATION_FUNDED, item_id, approver=approver, reason=reason, answers=answers
         )
 
+    def claim_calibration(self, item_id: str, grant: str, *, run_id: str) -> FactoryEvent | None:
+        """Claim the grant ``grant`` for this run before any spend, or ``None`` when another
+        run (or an outcome) spent it first. The check and the append are one step under the
+        store's lock (P-131)."""
+        event = FactoryEvent(
+            kind=EV_CALIBRATION_CLAIMED,
+            item_id=item_id,
+            payload={"grant": grant, "run_id": run_id},
+            actor=self.actor,
+            repo=self.repo,
+        )
+        return self.store.append_if(event, lambda events: grant not in spent_grants(events))
+
     # --- queries -----------------------------------------------------------------
     def verdict_for(self, item_id: str, pack_hash: str = "") -> FactoryEvent | None:
         """The LATEST verdict for the item (optionally for one build)."""
@@ -625,6 +687,7 @@ __all__ = [
     "EV_BACKLOG_EVOLVED",
     "EV_BACKLOG_FROZEN",
     "EV_BUILD",
+    "EV_CALIBRATION_CLAIMED",
     "EV_CALIBRATION_FUNDED",
     "EV_CHECKPOINT",
     "EV_DELIVERY",
@@ -653,5 +716,6 @@ __all__ = [
     "JsonlFactoryStore",
     "MemoryFactoryStore",
     "VerdictBeforeEditViolation",
+    "spent_grants",
     "verify_events",
 ]

@@ -6,7 +6,8 @@ What it is:   The trial worktree's test suite — parent checkout, overlays, ``t
               ``diff_stats`` and the integrity checks on the fixture repository.
 What it does: Pins that a workspace checks out the parent, overlays tests and sources, detects a
               tampered (even whitespace-only) or missing test file, counts diff stats over
-              untracked and deleted files, and that ``touched_files`` reads the filesystem against
+              untracked and deleted files (a content line shaped like a diff header included —
+              P-127), and that ``touched_files`` reads the filesystem against
               the parent tree — so builder-authored ``.gitignore`` rules, ``info/exclude``,
               ``core.excludesFile``, a forged index, a rename, a symlink or a self-hiding ignore
               file cannot hide a change — while pre-existing ignore rules and harness-written
@@ -35,6 +36,7 @@ from crb.core.workspace import (
     HARNESS_SYMLINK,
     DiffStats,
     Workspace,
+    diff_file_counts,
     git_blob_oid,
     sha256_bytes,
 )
@@ -171,6 +173,50 @@ def test_diff_stats_includes_untracked_new_files(pyrepo: pr.PyRepo, tmp_path: Pa
         ex = ws.diff_stats(exclude=["src/calc/extra.py"])
         assert ex.files == () and ex.additions == 0
         assert ex.diff_sha256 == stats.diff_sha256
+
+
+def test_a_content_line_that_looks_like_a_header_is_still_counted(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-127: an added line whose text is ``++ b/<path>`` reads ``+++ b/<path>`` in the
+    diff, and a deleted ``-- x`` reads ``--- x``. Parsed by prefix, the first became a file
+    header — the excluded test path, so every line after it went uncounted — and the second
+    was dropped. Inside a hunk every line is content, so each is counted."""
+    smuggle = "\n".join(
+        ['X = """', f"++ b/{pr.TEST_CALC}", *(f"line {i}" for i in range(40)), '"""', ""]
+    )
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        # a tracked file: the header-shaped line and 40 more, all additions
+        src = ws.root / pr.SRC
+        src.write_text(src.read_text(encoding="utf-8") + smuggle, encoding="utf-8")
+        # an untracked new file: the same text, diffed against /dev/null
+        (ws.root / "src" / "calc" / "extra.py").write_text(smuggle, encoding="utf-8")
+        stats = ws.diff_stats(exclude=[pr.TEST_CALC])
+        n = len(smuggle.splitlines())
+        assert stats.files == (pr.SRC, "src/calc/extra.py")
+        assert stats.additions == 2 * n and stats.deletions == 0
+
+    # the pure parse, on the deletion side: a removed ``-- x`` line reads ``--- x``
+    diff = (
+        "diff --git a/src/calc/a.py b/src/calc/a.py\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/src/calc/a.py\n"
+        "+++ b/src/calc/a.py\n"
+        "@@ -1,3 +1,2 @@\n"
+        " keep\n"
+        "--- a comment that began with two dashes\n"
+        "+++ b/tests/test_calc.py\n"
+        "-gone\n"
+        "\\ No newline at end of file\n"
+        "diff --git a/src/calc/b.py b/src/calc/b.py\n"
+        "deleted file mode 100644\n"
+        "index 3333333..0000000\n"
+        "--- a/src/calc/b.py\n"
+        "+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n"
+        "-only\n"
+    )
+    assert diff_file_counts(diff) == (("src/calc/a.py", 1, 2), ("src/calc/b.py", 0, 1))
 
 
 def test_diff_stats_counts_deletions(pyrepo: pr.PyRepo, tmp_path: Path) -> None:

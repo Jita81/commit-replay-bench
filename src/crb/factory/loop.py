@@ -134,11 +134,11 @@ from crb.factory.evidence import (
     EV_CALIBRATION_FUNDED,
     EV_DELIVERY,
     EV_DELIVERY_UPDATED,
-    EV_ITEM_OUTCOME,
     EV_PROBE_WAIVED,
     OUTCOME_CLOSED,
     FactoryEvent,
     FactoryEvidence,
+    spent_grants,
 )
 from crb.factory.readiness import (
     ROUTE_HUMAN,
@@ -493,19 +493,18 @@ class FactoryLoop:
 
     def _calibration(self, item: BacklogItem) -> Calibration | None:
         """The item's unspent calibration grant: the newest ``calibration.funded`` that no
-        ``item.outcome`` has consumed yet (one grant funds ONE run's build)."""
+        run has claimed (one grant funds ONE run — :func:`spent_grants`). Reading it is not
+        taking it: :meth:`_assess` claims it on the chain before any spend (P-131)."""
         grant: Calibration | None = None
-        spent: set[str] = set()
-        for ev in self.spec.evidence.events_for(item.id):
+        events = self.spec.evidence.events_for(item.id)
+        for ev in events:
             if ev.kind == EV_CALIBRATION_FUNDED:
                 grant = Calibration(
                     approver=str(ev.payload.get("approver", "")),
                     reason=str(ev.payload.get("reason", "")),
                     event_id=ev.event_id,
                 )
-            elif ev.kind == EV_ITEM_OUTCOME and ev.payload.get("calibration_event"):
-                spent.add(str(ev.payload["calibration_event"]))
-        return None if grant is None or grant.event_id in spent else grant
+        return None if grant is None or grant.event_id in spent_grants(events) else grant
 
     def _stop_entry(self, item: BacklogItem, r: Readiness, entry: Entry) -> NoReturn:
         """Record the entry gate's stop — before any spend — and end the item."""
@@ -567,16 +566,20 @@ class FactoryLoop:
             self._emit("route.decided", item.id, route=ROUTE_HUMAN, reason=r.reason)
             raise _Stop(STATUS_ROUTED_HUMAN, readiness=r)
         g = s.gate
-        entry = gate_for(
-            item,
-            r,
-            g,
-            person_test=authored is not None and authored.operator_authored,
-            calibration=self._calibration(item),
-            require_signed_cell=s.require_signed_cell,
-            override_by=s.deliver_override_by,
-            author=self._s1_author(authored),
-        )
+
+        def decide(calibration: Calibration | None) -> Entry:
+            return gate_for(
+                item,
+                r,
+                g,
+                person_test=authored is not None and authored.operator_authored,
+                calibration=calibration,
+                require_signed_cell=s.require_signed_cell,
+                override_by=s.deliver_override_by,
+                author=self._s1_author(authored),
+            )
+
+        entry = decide(self._calibration(item))
         if not entry.enters:
             self._stop_entry(item, r, entry)
         if entry.override_by:
@@ -595,6 +598,12 @@ class FactoryLoop:
             )
             self._emit("readiness.refused", item.id, status=StepStatus.SKIPPED, reason=r.reason)
             raise _Stop(STATUS_NOT_READY, readiness=r)
+        if entry.calibration is not None and (
+            ev.claim_calibration(item.id, entry.calibration.event_id, run_id=s.run_id) is None
+        ):
+            # another run claimed the grant between our read and now: this run is answered
+            # as if it had never been funded — the gate's own stop, before any spend (P-131)
+            self._stop_entry(item, r, decide(None))
         route = self._map_route(item)
         cell = _route_summary(route)
         ev.record_route(

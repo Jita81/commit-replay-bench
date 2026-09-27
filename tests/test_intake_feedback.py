@@ -11,7 +11,9 @@ What it does: Pins the label ladder (needs-info beats not deliverable beats read
               an unclassified item SAYS it is unclassified rather than showing a class,
               that a cell nobody has measured is named as unmeasured rather than shown as
               zero, that the same inputs render byte-identical text (so a re-post writes
-              nothing), and that every gap names what closes it.
+              nothing), that every gap names what closes it, and that only an entry stop
+              says "not built": a ticket the entry gate admits is ready whatever its cell
+              routes, told whether a pull request opens (P-129).
 How:          Real ``Readiness`` objects from ``crb.factory.readiness.assess`` over drafts
               built by ``crb.intake.draft`` — no hand-written gap fixtures, so a change to
               the catalogue shows up here.
@@ -105,11 +107,53 @@ def test_a_missing_structural_slot_is_needs_info() -> None:
     assert f.ready_to_register is False
 
 
-def test_a_cell_that_does_not_route_deliver_is_not_deliverable_even_when_ready() -> None:
-    f = _render(_ready_ticket(), _deliver_route(route="calibrate", reason_code="n_below_min", n=3))
-    assert f.label == c.LABEL_NOT_DELIVERABLE
-    assert f.ready_to_register is True  # it waits on the record, never dropped
-    assert "will not be built" in f.text and "held back" not in f.text
+#: Words that say a ticket is not built — true only of an entry-gate stop (P-121, P-129).
+NOT_BUILT_WORDS: tuple[str, ...] = (
+    "not be built",
+    "not built",
+    "nothing is built",
+    "will not build",
+    "not build it",
+    "not build anything",
+    "not build this",
+)
+
+
+def test_a_ticket_the_gate_admits_is_built_whatever_its_cells_route() -> None:
+    """The route gate is not the entry gate (P-121's class, in the ticket comment): a ticket
+    the entry gate admits is built, graded and reviewed whatever its cell routes, and only
+    ``deliver`` opens a pull request. For every other route — and an unmeasured cell — the
+    comment says it is built with no pull request, never "not built"; the label is
+    ``crb:ready`` and, once registered, ``crb:queued``: both stay true."""
+    routes: list[dict[str, Any] | None] = [
+        _deliver_route(route=word, reason_code=word, n=3)
+        for word in ("calibrate", "human", "do_not_ship", "granularize")
+    ]
+    for route in [*routes, None]:
+        f = _render(_ready_ticket(), route)
+        word = route["route"] if route else "unmeasured"
+        assert f.entry is not None and f.entry["code"] == "", word
+        assert f.label == c.LABEL_READY and f.ready_to_register is True, word
+        lowered = f.text.lower()
+        assert not [w for w in NOT_BUILT_WORDS if w in lowered], (word, f.text)
+        assert "no pull request opens" in lowered, word
+        assert fb.label_once_registered(f.entry["code"]) == c.LABEL_QUEUED, word
+    ready = _render(_ready_ticket(), _deliver_route())
+    assert "no pull request opens" not in ready.text.lower()
+
+
+def test_only_an_entry_stop_says_not_built() -> None:
+    """The other side: every entry stop the comment renders says the ticket is not built."""
+    none = Readers(standard_for=lambda cell: None)
+    ceiling = Readers(standard_for=lambda cell: Standard("S3", signed=True))
+    unsigned = Readers(standard_for=lambda cell: Standard("S1@claude-sonnet-5", signed=False))
+    for f in (
+        _render(_ready_ticket(), _deliver_route(), readers=none),
+        _render(_ready_ticket(), _deliver_route(), readers=ceiling),
+        _render(_ready_ticket(), _deliver_route(), readers=unsigned, require_signed_cell=True),
+    ):
+        assert f.label == c.LABEL_NOT_DELIVERABLE
+        assert "will not be built" in f.text
 
 
 def test_a_cell_with_no_proven_standard_is_not_deliverable_naming_each_arm_and_the_way_forward() -> (
@@ -228,8 +272,9 @@ def test_a_false_q1_cell_is_reported_as_the_honesty_floor_breach_it_is() -> None
         _ready_ticket(),
         _deliver_route(route="do_not_ship", reason_code="false_q1", reason="a row credited clean"),
     )
-    assert f.label == c.LABEL_NOT_DELIVERABLE
+    assert f.label == c.LABEL_READY  # admitted by the entry gate: built, never delivered
     assert "do not ship" in f.text.lower() or "do_not_ship" in f.text
+    assert "no pull request opens" in f.text.lower()
 
 
 def test_the_comment_counts_what_it_writes_rather_than_promising_it_writes_little() -> None:

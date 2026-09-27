@@ -29,6 +29,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Intake } from '../../api/types'
+import { HINTS } from '../../help/hints'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import { IntakePage } from './IntakePage'
 
@@ -257,6 +258,18 @@ describe('IntakePage', () => {
     const row2 = screen.getByTestId('intake-row-4716')
     expect(within(row2).getByTestId('intake-entry-4716')).toHaveTextContent('not built · needs_context')
     expect(within(row2).getByTestId('intake-entry-4716')).toHaveTextContent('Attach to the ticket: a failing test.')
+  })
+
+  it('the intake pills tell the two gates apart: only a stop says not built, and ready promises no pull request its cell does not route (P-129)', () => {
+    const notBuilt = /not (be )?built|nothing is built/i
+    // the two stops before any build say so; the two labels of an admitted ticket never do
+    expect(HINTS['pill.intake.not_deliverable']).toMatch(notBuilt)
+    expect(HINTS['pill.intake.needs_info']).toMatch(notBuilt)
+    for (const id of ['pill.intake.ready', 'pill.intake.queued'] as const) {
+      expect(HINTS[id]).not.toMatch(notBuilt)
+    }
+    expect(HINTS['pill.intake.ready']).toContain('it will be built, graded and reviewed')
+    expect(HINTS['pill.intake.ready']).toContain('A pull request opens only if its cell routes deliver')
   })
 
   it('an unmeasured cell is named as unmeasured, never shown as a zero rate', async () => {

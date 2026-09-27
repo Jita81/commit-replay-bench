@@ -55,7 +55,9 @@ What it does: Per attempt: resolves the rung, refuses the attempt before any bui
               mode; the context arm and its provenance on the row; learned lines held out and
               time-ordered, and any line naming a token the commit introduced refused), on arm
               ``S1`` first has the test author write a test in a sealed checkout of the parent and
-              proves it RED (removing it before the grade), runs one ``builder.build`` — on the host
+              proves it RED (removing it before the grade; an author whose provider refused the
+              call is recorded ``model_error:`` so the ledger reads an outage — P-126), stamps
+              every attempt with the run's one arm (P-128), runs one ``builder.build`` — on the host
               or against a sealed checkout in a container — writes the redacted transcript to a
               file, maps the outcome to a ``BuildAttempt`` and discards the source edits of any
               errored attempt so it can never grade clean-with-error. A sealed attempt whose
@@ -134,6 +136,7 @@ from crb.builders.container import (
     SessionFactory,
     UnconfirmedKill,
 )
+from crb.builders.openai_client import ModelCallError
 from crb.builders.toolcheck import runner_tool_missing
 from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
 from crb.core.deps import TaskDeps
@@ -206,6 +209,34 @@ def git_commit_dates(repo: Any, shas: Sequence[str]) -> dict[str, str]:
 def loop_on(learning: LearningSnapshot | None) -> bool:
     """Whether the repository's loop switch is part of this run's arm (``+L``)."""
     return learning is not None and not learning.opted_out and learning.auto_apply != AUTO_OFF
+
+
+#: The HTTP statuses that mean the provider refused the key itself: nothing was observed.
+_AUTH_STATUSES: frozenset[int] = frozenset({401, 403})
+
+
+def author_error(exc: BaseException) -> str:
+    """The text an ``S1`` test author's exception is recorded as.
+
+    A failed provider call (a :class:`~crb.builders.openai_client.ModelCallError` anywhere
+    in the chain) is written ``model_error: …``, the head every builder writes for the same
+    failure, so :func:`crb.core.ledger.authoring_outage` classifies the author's rate limit,
+    quota, overloaded server or refused key as an ``outage`` exactly as it would the
+    builder's (docs/PREVENTION.md P-005, P-126). Any other exception — the author ran and
+    could not produce a test — stays as it is, an ``authoring`` failure."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, ModelCallError):
+            auth = (
+                f"authentication failed (HTTP {cur.status}) — "
+                if cur.status in _AUTH_STATUSES
+                else ""
+            )
+            return f"model_error: {auth}{type(cur).__name__}: {cur}"
+        cur = cur.__cause__ or cur.__context__
+    return f"{type(exc).__name__}: {exc}"
 
 
 def unconfirmed_kill_error(kill: UnconfirmedKill) -> str:
@@ -717,7 +748,7 @@ def build_fn_for(
             mode=mode,
         )
         stamp = {
-            LABEL_CONTEXT_ARM: s1.arm,
+            LABEL_CONTEXT_ARM: run_arm(mode),
             **({LABEL_CTX_AUTHOR: s1.author_stamp} if s1.author_stamp else {}),
         }
 
@@ -743,7 +774,7 @@ def build_fn_for(
         except SandboxUnavailable:
             raise
         except Exception as exc:
-            return fail(f"the test author failed: {type(exc).__name__}: {exc}")
+            return fail(f"the test author failed: {author_error(exc)}")
         path = path.strip().lstrip("/")
         if not path or ".." in path.split("/") or not config.is_test(path):
             return fail(f"{path!r} is not a test path for {config.name!r}")
@@ -781,6 +812,15 @@ def build_fn_for(
         loop switch is on for the run (ADR-0026 item 1)."""
         base = ARM_S3 if mode == MODE_SIGHTED else ARM_A0
         return context_arm_for(base=base, plus_l=loop_on(learning))
+
+    def run_arm(mode: str) -> str:
+        """The arm EVERY attempt of this run is stamped with — ``S1@<author>`` (with ``+L``
+        when the loop is on) on the ``S1`` arm, else :func:`arm_of` — worked out once, so an
+        authoring failure or a harness refusal lands in the same arm as a success
+        (docs/PREVENTION.md P-128)."""
+        if s1 is not None:
+            return context_arm_for(base=ARM_S1, author=s1.author_model, plus_l=loop_on(learning))
+        return arm_of(mode)
 
     #: the finish gate's parent verdicts per (task, mode, commands) — see ``baseline_for``
     baselines: dict[tuple[str, str, tuple[CheckCommand, ...]], dict[str, bool | None]] = {}
@@ -905,10 +945,11 @@ def build_fn_for(
 
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         """The ``BuildFn``: one attempt of ``task`` on ``rung_label`` in ``mode``. The ONE
-        exit every attempt leaves by, so the ``checks`` stamp is on each of them — a
-        refusal before spend, a builder that could not be built or raised, and an error
-        the core would otherwise record unstamped (ADR-0024 §5 and §6: a row's arm is read
-        from the stamp, so an unstamped row of a checks-on run would join arm ``off``)."""
+        exit every attempt leaves by, so the ``checks`` stamp and the run's context arm are
+        on each of them — a refusal before spend, a builder that could not be built or
+        raised, and an error the core would otherwise record unstamped (ADR-0024 §5 and §6,
+        ADR-0026 item 1: a row's arm is read from the stamp, so an unstamped row of a
+        checks-on run would join arm ``off``, and an unstamped S1 row no arm at all)."""
         try:
             attempt = attempt_of(ws, task, mode, rung_label)
         except SandboxUnavailable:
@@ -921,9 +962,16 @@ def build_fn_for(
         finally:
             # the S1 arm: the authored test is gone before the held-out grade (ADR-0026)
             remove_authored(ws)
-        if checks is None or LABEL_CHECKS in attempt.labels:
+        stamps: dict[str, str] = {}
+        if LABEL_CONTEXT_ARM not in attempt.labels:
+            # a refusal before compose is still this run's attempt: the arm's row, never
+            # an unstamped one a per-arm reading drops (P-128)
+            stamps[LABEL_CONTEXT_ARM] = run_arm(mode)
+        if checks is not None and LABEL_CHECKS not in attempt.labels:
+            stamps[LABEL_CHECKS] = checks.label()
+        if not stamps:
             return attempt
-        return replace(attempt, labels={**attempt.labels, LABEL_CHECKS: checks.label()})
+        return replace(attempt, labels={**attempt.labels, **stamps})
 
     def attempt_of(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         """One attempt, unstamped — only :func:`build` calls it."""
@@ -984,9 +1032,7 @@ def build_fn_for(
             s1_path = s1_test[0]
             s1_scope = tuple(runner.target_scope([s1_path]))
             composed = compose(
-                context_arm_for(base=ARM_S1, author=s1.author_model, plus_l=loop_on(learning))
-                if s1 is not None
-                else "",
+                run_arm(mode),
                 ticket,
                 repo=task.repo,
                 language=task.language,

@@ -738,7 +738,7 @@ export const HINTS = {
   'pill.intake.needs_info':
     'The acceptance test still needs something this ticket does not say. Nothing is built and nothing is spent until it is answered on the ticket.',
   'pill.intake.ready':
-    'Every question the acceptance test needs is answered and the change can be offered as a pull request once it is built.',
+    'The ticket answers every question the acceptance test needs and carries what its cell’s context standard needs, so it will be built, graded and reviewed. A pull request opens only if its cell routes deliver; the comment on the ticket says which.',
   'pill.intake.not_deliverable':
     'This ticket will not be built: its cell has no proven context standard, or the standard is a ceiling or not signed off. The comment names each measured arm and the way forward.',
   'pill.intake.entry_stop':

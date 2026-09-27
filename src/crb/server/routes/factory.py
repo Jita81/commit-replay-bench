@@ -102,7 +102,15 @@ from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.redact import redact_and_cap_head
 from crb.core.routing import ROUTE_DELIVER
 from crb.core.spec import SIZE_TIER_NAMES
-from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogFrozen, BacklogItem
+from crb.factory.backlog import (
+    ITEM_SIZES,
+    KINDS,
+    LEVELS,
+    SIZE_UNSIZED,
+    BacklogError,
+    BacklogFrozen,
+    BacklogItem,
+)
 from crb.factory.evidence import EV_RED_PROOF, verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, assess, sign, slots_for
 from crb.factory.standard import CALIBRATABLE, Entry, gate_for
@@ -179,7 +187,11 @@ class BacklogItemIn(BaseModel):
     description: str = Field(default="", max_length=8000)
     acceptance_criteria: list[str] = Field(default_factory=list, max_length=50)
     capability_class: str = Field(default="(unclassified)", max_length=64)
-    size_estimate: str = Field(default="S", max_length=4)
+    #: No estimate is ``unsized`` — the gate sends it to a person — never a size it did not
+    #: claim (ADR-0026 item 8; P-130). One of the ladder's sizes or ``unsized``.
+    size_estimate: str = Field(
+        default=SIZE_UNSIZED, max_length=16, pattern=rf"^({'|'.join(ITEM_SIZES)})$"
+    )
     structural_facts: list[str] = Field(default_factory=list, max_length=100)
     depends_on: list[str] = Field(default_factory=list, max_length=50)
     level: str = "L1"
@@ -1331,7 +1343,8 @@ def fund_calibration(  # noqa: PLR0917 — FastAPI dependencies + path/body
     """ADR-0026 item 8: an approver may fund an item stopped ``no_proven_standard`` (a
     ceiling included) or ``needs_context`` only as a calibration build — evented here, built
     by the next factory run with its arm on the row, and never able to open a pull request.
-    One grant funds one run's build; a second grant while one waits is refused."""
+    One grant funds one run, which claims it on the chain before any spend
+    (``calibration.claimed``); a second grant while one waits is refused."""
     get_repo_or_404(db, repo)
     home = _home(settings, repo)
     item = _backlog_item(home, repo, item_id)

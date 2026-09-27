@@ -418,6 +418,27 @@ def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:
     assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404  # nothing was written
 
 
+def test_an_item_registered_without_a_size_is_unsized_and_stops_before_any_spend(
+    env: Env,
+) -> None:
+    """P-130: the operator API froze an item with no estimate as ``S``, a cell it never
+    claimed, and refused ``unsized`` outright (seven characters, four allowed). An item
+    with no size is ``unsized``: registered as such, and told now that the next run's
+    pre-build check stops it ``unsized`` — to a person, before any spend."""
+    bare = {k: v for k, v in ITEM.items() if k != "size_estimate"}
+    r = _register(env, [bare, {**ITEM, "id": "I-3", "size_estimate": "unsized"}])
+    assert r.status_code == 201, r.text
+    backlog = FactoryHome(env.settings.home, ALPHA).load_backlog()
+    assert backlog is not None
+    assert [i.size_estimate for i in backlog.items] == ["unsized", "unsized"]
+    tasks = {t["id"]: t for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert tasks["I-1"]["entry"]["code"] == "unsized"
+    assert tasks["I-3"]["entry"]["code"] == "unsized"
+    # a size outside the ladder is refused, never truncated or defaulted
+    r = _register(env, [{**ITEM, "id": "I-4", "size_estimate": "XXL"}])
+    assert r.status_code == 422, r.text
+
+
 def test_register_refused_while_a_factory_run_is_active(env: Env) -> None:
     assert _register(env, [ITEM]).status_code == 201
     with env.factory() as s:

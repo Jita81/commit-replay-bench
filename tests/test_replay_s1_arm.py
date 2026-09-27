@@ -13,7 +13,10 @@ What it does: Pins that the author works in a checkout holding one commit and no
               after the change, left in place, would fail the regression belt); that an
               authoring failure — a test green at the parent, an author that raises — is an
               ``authoring`` row that counts against the arm and never against the builder or
-              the harness; and that ``POST /runs`` takes ``arm: S1`` on a blind run only.
+              the harness, unless the author's provider refused the call on the production
+              path (an ``outage``, outside n — P-126); that every row of one run carries the
+              run's arm, ``+L`` included (P-128); and that ``POST /runs`` takes ``arm: S1`` on
+              a blind run only.
 How:          ``pyrepo``'s feat commit replayed blind through ``crb.core.run.run`` with a
               recording builder that applies the commit's own patch and a scripted author.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -35,8 +38,14 @@ from typing import Any
 import pytest
 
 import crb.builders as builders_pkg
+from crb.builders import adapter
+from crb.builders.base import Budget, EscalationLadder, Rung
 from crb.builders.brief import LABEL_CONTEXT_ARM, LABEL_CTX_AUTHOR, S1Arm
+from crb.core.execution import LocalExecutor
 from crb.core.ledger import FAILURE_AUTHORING, cell_stats, derive_failure_kind
+from crb.core.prevention import AUTO_CONTEXT, LearningSnapshot
+from crb.core.runners.pytest_runner import PytestRunner
+from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, envelope, login, make_env
 from test_builders_brief import Recorder, _replay
@@ -182,17 +191,99 @@ def test_the_s1_author_is_never_a_build_rungs_model(pyrepo: pr.PyRepo) -> None:
     assert _worker()._s1_arm(_ctx(pyrepo, sink), ladder, "blind") is None
 
 
-def test_an_author_outage_is_an_outage_never_an_authoring_failure() -> None:
-    """The S1 test author's provider refused the call (a usage limit, a 429): nothing was
-    observed, so the row is an ``outage`` — outside n — not an ``authoring`` failure
-    counted against the arm. An author that ran and produced no RED test stays
-    ``authoring``."""
-    outage = "authoring: the test author failed: ModelError: model_error: 429 usage limit reached"
-    assert derive_failure_kind(clean=False, disqualified=False, error=outage) == "outage"
+def _provider_refusal(status: int) -> Any:
+    """An author whose provider answers ``status``, raised exactly as the real author's chat
+    raises it: through :func:`crb.builders.openai_client.with_retries` (``OpenAIChat``'s
+    path), so the row carries the production text, never a hand-typed one."""
+    import httpx
+    import openai
+
+    from crb.builders.openai_client import with_retries
+
+    request = httpx.Request("POST", "https://provider.invalid/v1/chat/completions")
+    response = httpx.Response(status, request=request, json={"error": {"message": "no"}})
+    kinds = {
+        400: openai.BadRequestError,
+        401: openai.AuthenticationError,
+        402: openai.APIStatusError,
+        429: openai.RateLimitError,
+        503: openai.InternalServerError,
+    }
+
+    def call() -> Any:
+        raise kinds[status](f"Error code: {status} - refused", response=response, body=None)
+
+    def author(ws: Any, subject: str, message: str) -> tuple[str, str]:
+        return with_retries(call, max_retries=1, sleep=lambda s: None)  # type: ignore[no-any-return]
+
+    return author
+
+
+def test_an_author_outage_is_an_outage_never_an_authoring_failure(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-126: the S1 test author's provider refused the call (a rate limit, a quota, an
+    overloaded server, a refused key): nothing was observed, so the row is an ``outage`` —
+    outside n — not an ``authoring`` failure counted against the arm. A call the provider
+    answered as a bad request, and an author that ran and produced no RED test, stay
+    ``authoring``. The refusal is raised on the production path (``with_retries``)."""
+    for status in (429, 402, 503, 401):
+        rows, _ = _replay(
+            pyrepo,
+            tmp_path / f"s{status}",
+            s1=S1Arm(author=_provider_refusal(status), author_model="t1"),
+        )
+        (row,) = rows
+        assert row.failure_kind == "outage", (status, row.error)
+        assert row.error.startswith("authoring: the test author failed: model_error:"), row.error
+        assert cell_stats(rows).n == 0
+    rows, _ = _replay(
+        pyrepo, tmp_path / "s400", s1=S1Arm(author=_provider_refusal(400), author_model="t1")
+    )
+    assert rows[0].failure_kind == FAILURE_AUTHORING, rows[0].error
     red = "authoring: the authored test 'tests/test_x.py' is not RED at the parent: it passes"
     assert derive_failure_kind(clean=False, disqualified=False, error=red) == "authoring"
-    other = "authoring: the test author failed: ModelError: model_error: bad json"
-    assert derive_failure_kind(clean=False, disqualified=False, error=other) == "authoring"
+
+
+def test_every_row_of_one_s1_run_carries_the_runs_arm(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """With the repository's loop on, an S1 run is ``S1@t1+L``: its authoring failures carry
+    that arm as its successes do, so a per-arm reading counts them against the arm the run
+    measured, never another arm's bucket. A harness refusal before the author runs (an
+    unknown rung here) carries the run's arm too."""
+    loop = LearningSnapshot(repo="pyrepo", auto_apply=AUTO_CONTEXT, lines=())
+
+    def ok(ws: Any, subject: str, message: str) -> tuple[str, str]:
+        return AUTHORED, AUTHORED_SRC
+
+    def green(ws: Any, subject: str, message: str) -> tuple[str, str]:
+        return (
+            "tests/test_s1_add.py",
+            "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        )
+
+    arms = {}
+    for name, author in (("ok", ok), ("green", green)):
+        rows, _ = _replay(
+            pyrepo,
+            tmp_path / name,
+            s1=S1Arm(author=author, author_model="t1"),
+            learning=loop,
+        )
+        arms[name] = rows[0].labels.get(LABEL_CONTEXT_ARM)
+    assert arms == {"ok": "S1@t1+L", "green": "S1@t1+L"}
+    # the run's own BuildFn, called on a rung it does not have: refused, and stamped
+    fn = adapter.build_fn_for(
+        EscalationLadder((Rung("rec", "m"),)),
+        budget=Budget(),
+        runner=PytestRunner(pyrepo.config),
+        executor=LocalExecutor(),
+        config=pyrepo.config,
+        s1=S1Arm(author=ok, author_model="t1"),
+        learning=loop,
+    )
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        refused = fn(ws, pyrepo.feat_task(), "blind", "r9")
+    assert refused.error and refused.labels[LABEL_CONTEXT_ARM] == "S1@t1+L"
 
 
 def test_an_s1_run_whose_test_author_has_no_credential_is_refused_at_submit(

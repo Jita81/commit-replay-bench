@@ -30,7 +30,9 @@ What it is:   ``render_feedback`` (draft + readiness + cell route → one marked
 What it does: Turns the gate's open questions, the entry gate's stop and the map's decision
               into GOV.UK plain English a person who has never heard of this product can act
               on, and picks exactly one of the four ``crb:`` labels (``crb:not-deliverable``
-              for a ticket that will not be built, also once registered).
+              for a ticket the entry gate stops, which will not be built, also once
+              registered; ``crb:ready`` for one it admits, which is built whatever its
+              cell routes — the route decides only whether a pull request opens, P-129).
 How:          String building over :class:`crb.factory.readiness.Readiness` and the plain
               ``cell_route`` mapping the API and the worker both serve; no I/O, no clock,
               no randomness — determinism is the idempotency.
@@ -89,26 +91,29 @@ GLOSSED: dict[str, str] = {
     ),
 }
 
-#: What each routing decision means for this ticket, in one sentence a person can act on.
+#: What each routing decision means for this ticket's PULL REQUEST, in one sentence a person
+#: can act on. The route gate decides delivery only: whether the ticket is BUILT is the entry
+#: gate's word (``_entry_block``), so no sentence here says "not built" (P-121, P-129).
 ROUTE_WORDS: dict[str, str] = {
     "deliver": ("the product may build this and open a pull request for a person to review"),
     "calibrate": (
-        "there is not enough evidence yet, so the product will not build this until the "
-        "cell has been measured"
+        "there is not enough evidence yet, so no pull request opens for changes in this "
+        "cell until it has been measured"
     ),
     "granularize": (
-        "changes this large are split into smaller ones before they are attempted — "
-        "please split this ticket"
+        "changes this large are split into smaller ones, so no pull request opens for one "
+        "this size — please split this ticket"
     ),
     "human": (
-        "a pass here would not be trustworthy whatever the rate, so this needs a person; "
-        "the product will not build it"
+        "a pass here would not be trustworthy whatever the rate, so a person decides and "
+        "no pull request opens from the product"
     ),
     "do_not_ship": (
         "the record for this cell is under audit, so nothing measured in it counts as "
-        "evidence; the product will not build anything in it"
+        "evidence and no pull request opens in it"
     ),
 }
+
 
 #: What this product does to a ticket, stated as the COUNT a reader can check against their
 #: own board, not as a reassuring "only". Over a ticket's life it adds up to four comments,
@@ -175,8 +180,8 @@ def _route_block(item_class: str, size: str, route: Mapping[str, Any] | None) ->
             head,
             "",
             "This cell has not been measured on this repository, so the product has no rate "
-            "to quote. It says nothing, not zero. Nothing is built in it until somebody "
-            "measures the cell.",
+            "to quote. It says nothing, not zero. No pull request opens in it until "
+            "somebody measures the cell.",
         ]
     word = str(route.get("route", ""))
     meaning = ROUTE_WORDS.get(word, "the product will hold any change back until a person decides")
@@ -283,14 +288,20 @@ def _label_for(readiness: Readiness, route: Mapping[str, Any] | None, entry: Ent
     product could not classify is needs-info too — an unclassified item has no question
     set, so "nothing is missing" would be an artefact of not knowing what to ask. Then any
     other entry stop — no proven standard, a ceiling, a size split, an unsigned cell — is
-    not deliverable: NOT BUILT (ADR-0026 item 8)."""
+    not deliverable: NOT BUILT (ADR-0026 item 8). A ticket the entry gate admits is ready:
+    it is built, graded and reviewed whatever its cell routes; the route decides only
+    whether a pull request opens, and the headline says which (P-129). ``route`` is not
+    read here, so the label stays true once the ticket is registered (``crb:queued``)."""
     if not readiness.ready or not readiness.catalogued or entry.code in _ASK_STOPS:
         return LABEL_NEEDS_INFO
     if not entry.enters:
         return LABEL_NOT_DELIVERABLE
-    if not route or str(route.get("route", "")) != "deliver":
-        return LABEL_NOT_DELIVERABLE
     return LABEL_READY
+
+
+def _delivers(route: Mapping[str, Any] | None) -> bool:
+    """Whether the cell's measured route opens a pull request (the loop's route gate)."""
+    return bool(route) and str((route or {}).get("route", "")) == "deliver"
 
 
 def _pct_or(value: float) -> str:
@@ -381,7 +392,12 @@ def render_feedback(
     marker = marker_for(draft.tracker, draft.ticket.key)
     label = _label_for(readiness, cell_route, entry)
     headline = {
-        LABEL_READY: "This ticket is ready to manufacture.",
+        LABEL_READY: (
+            "This ticket is ready to manufacture."
+            if _delivers(cell_route)
+            else "This ticket will be built, graded and reviewed, but no pull request opens "
+            "for it: its cell does not route deliver."
+        ),
         LABEL_NEEDS_INFO: "This ticket needs more information before anything is built.",
         LABEL_NOT_DELIVERABLE: (
             "This ticket will not be built: nothing measured yet licenses changes like it."
