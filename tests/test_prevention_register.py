@@ -108,9 +108,8 @@ def test_the_row_check_refuses_an_untagged_and_an_incomplete_measured_row() -> N
 
 
 def test_the_row_reader_sees_every_row_markdown_renders() -> None:
-    """PR #61 review: the reader took only rows at column zero written ``| P-``, so a row
-    Markdown still renders as a register row — indented, or with no space or no leading
-    pipe — was never read and its missing tag never seen."""
+    """Every row Markdown renders as a register row is read — indented, with no space after
+    the pipe or with no leading pipe — and an example inside a fence is not a row (P-113)."""
     page = (
         "| id | bug | class | first seen |\n"
         "|---|---|---|---|\n"

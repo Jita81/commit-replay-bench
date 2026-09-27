@@ -246,8 +246,9 @@ def test_the_ratchet_finds_a_denial_that_does_not_ask_whether_permissions_bind()
 
 
 def test_the_ratchet_finds_a_denial_outside_the_true_branch_of_the_guard() -> None:
-    """PR #61 review: the ratchet took ANY ``permissions_bind()`` call in the function as the
-    guard, so a denial asserted unconditionally beside it passed."""
+    """A denial counts as guarded only in the true branch of an ``if permissions_bind():``
+    in its own function: beside the call, in the ``else``, under ``not``, after the ``if``
+    or inside a nested function it is unguarded (P-112)."""
     beside = (
         "def test_u(p):\n    permissions_bind()\n"
         "    with pytest.raises(PermissionError):\n        p.write_bytes(b'x')\n"
