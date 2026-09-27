@@ -283,10 +283,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # dod reads the history and the base branch; mining tests walk it
+      # no cache: root fills its own, and a root-owned cache is one the runner could not save
       - uses: astral-sh/setup-uv@v7
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          enable-cache: false
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -295,7 +295,7 @@ jobs:
           version: v3.16.4
       - name: Stop the docker daemon, and prove none answers
         run: |
-          sudo systemctl stop docker.socket docker.service containerd.service
+          sudo systemctl stop docker.socket docker.service
           if docker info >/dev/null 2>&1; then echo "::error::a docker daemon still answers"; exit 1; fi
       - name: Every gate on a fresh clone, installed from uv.lock, as root
         env:
@@ -325,7 +325,7 @@ jobs:
           (cd ui && npm ci --no-audit --no-fund --legacy-peer-deps && npm run typecheck && npx vitest run)
           .venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images"
           GATES
-          sudo --preserve-env=DOD_BASE,SRC,UV_CACHE_DIR,PYTHONDONTWRITEBYTECODE \
+          sudo --preserve-env=DOD_BASE,SRC,PYTHONDONTWRITEBYTECODE \
             env "PATH=$PATH" HOME=/root bash -euo pipefail "$RUNNER_TEMP/gates.sh" < /dev/null
 
   ui-unit:
