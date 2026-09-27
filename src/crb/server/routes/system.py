@@ -811,7 +811,7 @@ def health(
     state = request.app.state
     mounted = state.ui_dist if getattr(state, "ui_mounted", False) else UI_DIST_UNKNOWN
     out = collect_health(factory, settings, request_id=request_id(request), ui_dist=mounted)
-    # ADR-0029: the first green read is the go-live stream's end mark, stamped once
+    # ADR-0028: the first green read is the go-live stream's end mark, stamped once
     stamp_first_healthy(factory, str(out["status"]))
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

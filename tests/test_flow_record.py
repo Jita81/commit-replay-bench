@@ -2,7 +2,7 @@
 
 Navigation
 ----------
-What it is:   The unit suite of ``crb.server.flow_record`` (ADR-0029) over a real SQLite store.
+What it is:   The unit suite of ``crb.server.flow_record`` (ADR-0028) over a real SQLite store.
 What it does: Pins that the recorder's first look at a repository stamps no cell and records
               the cells already at deliver as inherited (their moment is unknown, so never
               timed); that a later cell reaching deliver is stamped once per scope, at the run
@@ -14,7 +14,7 @@ What it does: Pins that the recorder's first look at a repository stamps no cell
 How:          ``make_factory`` for the schema; the recorder writes into a session the test
               commits, as its callers do; the readers fold the events back.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0029-the-moments-flow-needs-are-recorded.md
+ADRs:         docs/adr/0028-the-moments-flow-needs-are-recorded.md
 Works with:   src/crb/server/flow_record.py (under test), src/crb/server/flow.py (the reader
               of these moments), tests/test_server_routes_flow.py (the same moments seen
               through ``GET /flow``), tests/fixtures/server_seed.py (``make_factory``)

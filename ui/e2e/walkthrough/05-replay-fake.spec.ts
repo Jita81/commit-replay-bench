@@ -221,7 +221,7 @@ test.describe(`05 replay (${BUILDER})`, () => {
     await expect(spend).toContainText(
       /\d+ row\(s\) reported no price and are not counted as zero, so this is a floor\.|Every row counted here reported its own price\./,
     )
-    // and the repository's cumulative spend, every graded row once, stands beside it (DL-067)
+    // and the repository's cumulative spend, every graded row once, stands beside it (DL-066)
     await expect(page.getByTestId('flow-spend-total')).toContainText('every graded row counted once')
     // and the counts are counts: the rows this repository has graded
     await expect(card).toContainText('graded rows')

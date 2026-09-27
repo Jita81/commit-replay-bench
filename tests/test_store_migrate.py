@@ -943,7 +943,7 @@ def _insert_review(conn: Any, *, n: int, minutes: int | None = None) -> None:
 def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     backend: Backend,
 ) -> None:
-    """Revision 0012 (DL-068) adds ``reviews.minutes`` — the reviewer's own time on a review.
+    """Revision 0012 (DL-067) adds ``reviews.minutes`` — the reviewer's own time on a review.
     Every existing review reads NULL (not stated, so its hash is unchanged); the append-only
     triggers still refuse an UPDATE; a downgrade is refused while any review states its
     minutes, and otherwise drops the column. A ``create_all`` schema from the release before

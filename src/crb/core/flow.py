@@ -12,7 +12,7 @@ store (events, runs, graded rows, sign-offs, the factory's evidence chain) and p
   counted as zero (``GradeRow.cost_known``): the sum is over priced rows only and the reading
   says how many rows were unpriced, so a reader can see how much of the money is missing.
   :func:`spend_of_rows` is THE spend rule of the product — the value scorecard
-  (``crb.core.value``) sums with it too, so the two readers of money never disagree (DL-067);
+  (``crb.core.value``) sums with it too, so the two readers of money never disagree (DL-066);
 * the **figures nobody measured** — named, with why, and with the gap id that would close
   them. A number the product does not capture is stated as absent, never derived from a
   neighbouring number that happens to exist.
@@ -261,7 +261,7 @@ def per_unit(spend: Spend, units: int) -> float | None:
     ``None`` when nothing is priced, when there are no units, or when any row of the spend
     carried no price: a cost per unit with no unit to divide by is not zero, it is unmeasured,
     and a cost per unit over a floor would understate it. This is the value scorecard's rule
-    for its per-pound figures too (DL-067): neither reading divides by a floor.
+    for its per-pound figures too (DL-066): neither reading divides by a floor.
     """
     if per_unit_withheld(spend, units):
         return None

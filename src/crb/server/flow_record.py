@@ -1,4 +1,4 @@
-"""The moments the flow reading cannot derive, recorded when they happen (ADR-0029).
+"""The moments the flow reading cannot derive, recorded when they happen (ADR-0028).
 
 The flow reading (:mod:`crb.server.flow`) is a fold over stored records, and three of the
 moments its streams' MEASURE criteria name were never stored: the route is recomputed on every
@@ -37,7 +37,7 @@ How:          ``append_system_event`` on a deterministic trace per repository (o
               deployment); the "already written?" checks are single ``select``s on
               ``Event.action``; the readers return plain stamps and cell keys.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0029-the-moments-flow-needs-are-recorded.md
+ADRs:         docs/adr/0028-the-moments-flow-needs-are-recorded.md
 Works with:   src/crb/server/worker.py (stamps deliver transitions after every finished run),
               src/crb/server/app.py (stamps the install at startup, before the bootstrap
               admin), src/crb/server/routes/system.py (stamps the first green ``/health``),
@@ -45,7 +45,7 @@ Works with:   src/crb/server/worker.py (stamps deliver transitions after every f
               src/crb/server/routes/runs.py (``append_system_event`` — the one event writer)
 Tested by:    tests/test_flow_record.py, tests/test_server_routes_flow.py, tests/test_worker.py
 Touch when:   a stream's MEASURE criterion needs a moment the store does not keep (add its
-              writer here, its reader beside it, and an ADR-0029 amendment); never to derive a
+              writer here, its reader beside it, and an ADR-0028 amendment); never to derive a
               moment from a neighbouring one.
 """
 

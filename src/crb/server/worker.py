@@ -2467,7 +2467,7 @@ class Worker:
         return cmap, scope
 
     def _record_flow(self, run: Run) -> None:
-        """ADR-0029: after a run finishes, stamp every cell the served map now routes
+        """ADR-0028: after a run finishes, stamp every cell the served map now routes
         ``deliver`` for the first time — the moment the decide stream's clock starts. It is
         observability, never a verdict: a failure is logged and the run stands."""
         try:

@@ -1,6 +1,6 @@
-# ADR-0029 — The moments the flow reading needs are recorded when they happen, never derived
+# ADR-0028 — The moments the flow reading needs are recorded when they happen, never derived
 
-**Status:** Proposed (DL-068; stream M, G-557 and G-558)
+**Status:** Proposed (DL-067; stream M, G-557 and G-558)
 **Date:** 2026-09-26
 **Apparatus impact:** none (no belt, size, class, route or threshold changes meaning; the
 recorder only writes system events that the flow reading reads back).

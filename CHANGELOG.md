@@ -17,9 +17,9 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `GET /flow?repo=` derives each stream's lead time, spend and counts from stored records, and
   each stream's screen shows its own. Money is summed by one rule in `/flow` and `/value`: an
   unpriced row is never $0, and the per-pound figures are withheld while one is in scope
-  (DL-067). `POST /reviews` takes the reviewer's minutes (DL-068, revision 0012). A cell first
+  (DL-066). `POST /reviews` takes the reviewer's minutes (DL-067, revision 0012). A cell first
   routing deliver, the install and the first green `/health` are recorded when they happen,
-  never back-dated (ADR-0029).
+  never back-dated (ADR-0028).
 
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile

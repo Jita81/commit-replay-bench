@@ -491,7 +491,7 @@ def _lifespan_factory(
         assert_append_only(factory)  # raises LedgerIntegrityError → refuse to start
         app.state.engine = engine
         app.state.session_factory = factory
-        # ADR-0029: the install is stamped before the bootstrap admin writes the first row,
+        # ADR-0028: the install is stamped before the bootstrap admin writes the first row,
         # so a database that held nothing reads as this start being the install
         stamp_install(factory)
         bootstrap_admin_if_empty(factory, settings)

@@ -15,13 +15,13 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 | connect-and-prove | repository registered → its first controls report that passed |
 | measure | run queued → its last row graded; a cell's first row → its tenth |
 | decide-and-license | a cell first routed ``deliver`` in the sign-off's own scope (recorded, |
-| | ADR-0029 §6) → the cell signed; |
+| | ADR-0028 §6) → the cell signed; |
 | | the attested row graded clean (accepted) → the cell signed; and the |
 | | minutes each review took, as the reviewer stated them on ``POST /reviews`` |
 | manufacture-and-deliver | item registered → pull request opened → merged |
 | learn | a refusal raised → the strengthening item that supersedes it registered |
 | run-the-platform | an admin set an account's password → that account signed in again; |
-| | the install → the first green ``/health`` (both recorded, ADR-0029) |
+| | the install → the first green ``/health`` (both recorded, ADR-0028) |
 
 **Money is counted once.** Every graded row belongs to exactly one stream's spend
 (:func:`partition_rows`: a factory-built row is manufacture's, a row of a £0 proving run is
@@ -30,10 +30,10 @@ spend, which the parts add up to. The sums use the product's one spend rule
 (``crb.core.flow.spend_of_rows``), which the value scorecard also uses. A cost per unit is the
 price of the rows that bought the unit (a cell's first ten rows; the factory's rows per merged
 pull request) and is withheld with the reason while any of them is unpriced, never divided
-over a floor (DL-067).
+over a floor (DL-066).
 
 **Who reads what.** Every figure is a viewer's except the platform stream's account counts
-and its recovery lead time, which are an admin's (ADR-0029 §7): anyone else reads the lead time
+and its recovery lead time, which are an admin's (ADR-0028 §7): anyone else reads the lead time
 as unmeasured with :data:`ADMIN_ONLY` and no account count.
 
 **What it refuses to invent.** Three figures those criteria ask for are not recorded anywhere,
@@ -41,7 +41,7 @@ so they are served as :class:`~crb.core.flow.NotCaptured` — named, with why an
 that would close them — and never derived from a neighbouring number: the developer hours of
 the guide's "real work" (G-556), how many go-live lines are proven (G-584) and the guard's
 false-positive rate (G-536). A screen prints the absence; nobody can mistake it for a zero.
-Three moments that were missing are now recorded when they happen (ADR-0029,
+Three moments that were missing are now recorded when they happen (ADR-0028,
 :mod:`crb.server.flow_record`) and read back here: a cell first routing ``deliver``, the
 install and the first green ``/health``. A moment that passed before recording began is
 counted and never dated.

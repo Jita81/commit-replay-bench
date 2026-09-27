@@ -1758,7 +1758,7 @@ def test_route_lookup_reads_the_map_as_it_stood_before_the_run(h: Harness) -> No
 def test_every_finished_run_stamps_the_cells_that_first_route_deliver(
     h: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ADR-0029: after a run finishes the worker reads the served map and records the moment a
+    """ADR-0028: after a run finishes the worker reads the served map and records the moment a
     cell first routes ``deliver``. The first look marks what was already at deliver (never
     timed); a cell that reaches deliver after it is stamped with the run that tipped it; a
     recorder that fails never fails the run."""
