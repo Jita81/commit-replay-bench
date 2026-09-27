@@ -268,6 +268,7 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
         "at_head": False,
         "unversioned_at": None,
         "matches_models": False,
+        "drift": [],
     }
 
     init_db(backend.engine)
@@ -276,7 +277,11 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
     assert created.unversioned_at == head and created.matches_models is True
 
     migrate.upgrade(backend.url)
-    assert migrate.head_status(backend.url) == migrate.HeadStatus(head, head, True)
+    # a migrated store at head is compared with the models too (pilot D7, P-207): its
+    # schema matches, and the reading says so rather than a false that means "not checked"
+    assert migrate.head_status(backend.url) == migrate.HeadStatus(
+        head, head, True, matches_models=True
+    )
     with backend.factory() as s:  # the connection form /health uses (a session's)
         assert migrate.head_status_on(s.connection()).at_head is True
 
@@ -284,6 +289,34 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
     behind = migrate.head_status(backend.url)
     assert behind == migrate.HeadStatus(migrate.INITIAL_REVISION, head, False)
     assert migrate.check(backend.url) is False  # ``check`` is ``head_status().at_head``
+
+
+def test_a_migrated_store_at_head_reads_that_its_schema_matches_the_models(
+    backend: Backend,
+) -> None:
+    """Pilot D7 (P-207): the ``migrations`` probe read ``matches_models: false`` on a store
+    migrated to head whose schema equals the models — the field was computed for an
+    unversioned store only and left ``False`` for every versioned one, so the truth ("it
+    matches") and the unknown ("never compared") read the same. A versioned store at head is
+    now compared, by the same ``compare_metadata`` adoption uses, and reads ``True``."""
+    migrate.upgrade(backend.url)
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True
+    assert st.matches_models is True and st.drift == ()
+    assert st.to_dict()["matches_models"] is True and st.to_dict()["drift"] == []
+
+
+def test_a_store_at_head_whose_schema_drifted_names_the_drift(backend: Backend) -> None:
+    """The class D7 belongs to — a reading that cannot tell a matching schema from one that
+    was never compared — is closed only if a real difference reads ``False``: an index
+    dropped outside the migrations leaves the store stamped at head, and the reading names
+    the difference instead of passing it."""
+    migrate.upgrade(backend.url)
+    with backend.engine.begin() as c:
+        c.execute(text("DROP INDEX ix_runs_status"))
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True and st.matches_models is False
+    assert any("ix_runs_status" in d for d in st.drift), st.drift
 
 
 def test_head_status_of_an_older_release_create_all_schema(backend: Backend) -> None:
