@@ -31,7 +31,8 @@ thereby tagged the sentence around it.
   matter, and the text of a link to a heading on the same page (a contents line);
 - a gap register line (``**G-nnn** — what is missing · what closes it``, or a backlog id
   such as ``**F42**``) is taken as its own ``[gap]`` tag: its form names what is absent and
-  what would close it, which is what the tag must cite; and a sentence under a heading
+  what would close it, which is what the tag must cite (a ``[measured]`` figure inside one
+  still owes its n, method and apparatus); and a sentence under a heading
   that lists what must never be said is quoted in order to forbid it, not claimed;
 - a percentage that is itself the confidence level ("Wilson 95% interval", "95% CI") — a
   result standing beside one ("65% passed (Wilson 95% interval)") *is* caught — a four-digit
@@ -613,11 +614,11 @@ def check_text(rel: str, text: str) -> list[Finding]:
         claims = [s for s in _SENTENCE_SPLIT.split(block.text) if is_claim(s)]
         if not claims:
             continue
-        if _GAP_LINE_RE.match(block.text):
-            continue  # a gap register line is its own [gap] tag
         if _FORBIDDEN_SECTION_RE.search(block.heading):
             continue  # a sentence quoted in order to forbid it is not a claim
         defects = tag_defects(block.cover)
+        if defects is None and _GAP_LINE_RE.match(block.text):
+            continue  # a gap register line is its own [gap] tag; a [measured] in it still owes
         reasons = ["no claim tag"] if defects is None else defects
         for reason in reasons:
             findings.append(Finding(rel, block.line, claims[0].strip(), reason))

@@ -885,6 +885,13 @@ def test_a_gap_register_line_is_its_own_gap_tag(tree: Path) -> None:
     assert cc.check_tree(tree, ("README.md",)) == []
     _write(tree, "README.md", "# t\n\n- The walkthrough asserts two of the 24 rows (G-214).\n")
     assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
+    # a [measured] figure inside a gap line still owes its evidence
+    _write(tree, "README.md", "# t\n\n- **G-9** — covers five pages **[measured]** · add more · docs\n")
+    assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == [
+        "[measured] without n",
+        "[measured] without a method",
+        "[measured] without an apparatus version",
+    ]
 
 
 def test_an_allowlist_glob_reads_every_page_it_matches_and_no_generated_one(tree: Path) -> None:
