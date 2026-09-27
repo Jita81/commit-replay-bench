@@ -32,6 +32,15 @@ and readiness reads false — nothing is probed. ``-DforkCount=1`` outranks a
 ``forkCount`` *property*, and ``-Dtest=*#crbNoSuchMethod`` is a second wall: no
 test method runs even if a fork were ever real.
 
+Dropping ``-DskipTests`` also un-skips every OTHER plugin bound to ``test`` that
+honours it (exec, frontend-maven-plugin's karma/jest, scalatest). Where surefire
+forks, its stub failure stops the module first; where it does not (no test class,
+surefire skipped) the next goal runs repository code with the network. So a second
+offline ``-X`` dry plan, to ``process-test-classes`` with the same flags, is diffed
+against the ``test`` plan: what the ``test`` plan adds is exactly the ``test`` phase,
+and unless each addition is a surefire ``test`` (:func:`only_surefire_runs_at_test`)
+setup refuses with :data:`TEST_PHASE_REFUSED` and readiness reads false.
+
 Ready is the same guard and probe offline (``-o``): ready iff every module that
 failed is a surefire ``test`` failure whose fork reached the stub
 (:func:`surefire_probe_ready`) — i.e. the offline test run can resolve every plugin,
@@ -50,7 +59,8 @@ How:          ``run``: delete every ``target/surefire-reports`` → base ``run``
               ``./mvnw`` if present → ``-q -B -o`` → ``-Dtest`` from the scope. ``parse``:
               walk ``TEST-*.xml`` for ``<failure>``/``<error>`` children. ``SurefireProbe``:
               a temp ``bin/java`` stub; ``-X`` dry configuration → ``surefire_forks_to_stub``;
-              then ``-fn`` → ``surefire_probe_ready`` over the output.
+              ``-X`` plan to ``process-test-classes`` → ``only_surefire_runs_at_test``; then
+              ``-fn`` → ``surefire_probe_ready`` over the output.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0011-repo-lint-belt.md
 Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/lint.py (``jvm_plan``),
@@ -58,7 +68,8 @@ Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/lint.py 
               src/crb/core/spec.py (``src_prefix`` locates the module's ``target/``),
               src/crb/core/runners/__init__.py
 Tested by:    tests/test_runners_jvm.py, tests/test_runners_parsers.py, tests/test_runners_setup.py
-              (the cold-repository case runs setup against an EMPTY private local repository)
+              (the cold-repository and test-phase-plugin cases run setup against an EMPTY
+              private local repository)
 Touch when:   a Maven repository needs a JDK, extra flags or profiles — set ``runner_opts``
               (``java_home``, ``maven_flags``, ``maven_opts``, ``mvn``, ``writable``,
               ``offline``; docs/OPERATOR.md); Gradle would be a new runner, not an option here.
@@ -73,6 +84,7 @@ import shlex
 import shutil
 import tempfile
 import xml.etree.ElementTree as ET
+from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import TracebackType
@@ -112,6 +124,19 @@ IN_PROCESS_REFUSED = (
     "warm it by hand (one online `mvn test` you trust) or drop that configuration"
 )
 
+#: Setup's note when a plugin other than surefire is bound to ``test`` (the module docstring).
+TEST_PHASE_REFUSED = (
+    "a plugin other than surefire is bound to the test phase, and the provider probe runs that "
+    "phase without -DskipTests, so it would run with the network: warm the local repository by "
+    "hand (one online `mvn test` you trust) or move that plugin out of the test phase"
+)
+
+#: ``-X``: one module's PROJECT BUILD PLAN header and each mojo execution in it.
+_PLAN_PROJECT = re.compile(
+    r"^\[DEBUG\] === PROJECT BUILD PLAN =+\s*\n\[DEBUG\] Project:\s+(\S+)", re.M
+)
+_PLAN_GOAL = re.compile(r"^\[DEBUG\] Goal:\s+(\S+ \([^)]*\))", re.M)
+
 #: ``-X``: one surefire ``test`` execution's configuration block, then its parameters.
 _MOJO_BLOCK = re.compile(r"^\[DEBUG\] Configuring mojo execution '([^']*)'", re.M)
 _MOJO_PARAM = re.compile(r"^\[DEBUG\]\s+\([a-z]\) (\w+) = (.*)$", re.M)
@@ -141,6 +166,50 @@ def surefire_forks_to_stub(debug_output: str, java: str) -> bool:
         if forks <= 0:
             return False
     return True
+
+
+def _build_plans(debug_output: str) -> dict[str, list[str]]:
+    """Each module's ``-X`` PROJECT BUILD PLAN: ``g:a:v`` → its ``g:a:v:goal (id)`` entries."""
+    heads = list(_PLAN_PROJECT.finditer(debug_output))
+    plans: dict[str, list[str]] = {}
+    for head, nxt in itertools.zip_longest(heads, heads[1:]):
+        end = nxt.start() if nxt is not None else len(debug_output)
+        plans.setdefault(head.group(1), []).extend(
+            _PLAN_GOAL.findall(debug_output, head.end(), end)
+        )
+    return plans
+
+
+def only_surefire_runs_at_test(test_plan: str, before_test_plan: str) -> bool:
+    """``True`` iff every execution the ``test`` plan adds to the ``process-test-classes``
+    plan, module by module, is a surefire ``test`` — the probe drops ``-DskipTests``, so any
+    other goal there could run with the network. No plan read is ``False``; a module the
+    earlier plan does not name counts every execution it has."""
+    after = _build_plans(test_plan)
+    if not after:
+        return False
+    before = _build_plans(before_test_plan)
+    for project, goals in after.items():
+        added = Counter(goals) - Counter(before.get(project, []))
+        for goal in added:
+            coords = goal.split(" ", 1)[0].split(":")
+            if coords[1:2] != ["maven-surefire-plugin"] or coords[3:] != ["test"]:
+                return False
+    return True
+
+
+def probe_refusal(
+    dry: Callable[[Sequence[str]], ExecResult], probe: SurefireProbe, mvn: str, flags: Sequence[str]
+) -> str | None:
+    """The two offline guards before any probe; ``dry`` runs an argv. ``None`` admits the
+    probe; otherwise the note (:data:`IN_PROCESS_REFUSED` / :data:`TEST_PHASE_REFUSED`)."""
+    plan = dry(probe.preflight_argv(mvn, flags))
+    if not plan.ok or not surefire_forks_to_stub(plan.combined, str(probe.java)):
+        return IN_PROCESS_REFUSED
+    before = dry(probe.preflight_argv(mvn, flags, phase="process-test-classes"))
+    if not before.ok or not only_surefire_runs_at_test(plan.combined, before.combined):
+        return TEST_PHASE_REFUSED
+    return None
 
 
 class SurefireProbe:
@@ -187,16 +256,17 @@ class SurefireProbe:
             "-Dsurefire.failIfNoSpecifiedTests=false",
         ]
 
-    def preflight_argv(self, mvn: str, flags: Sequence[str]) -> list[str]:
-        """``mvn -o -X -B <flags> test -DskipTests`` with the probe's ``jvm`` / ``forkCount``:
-        prints the configuration surefire will run with, and runs no test."""
+    def preflight_argv(self, mvn: str, flags: Sequence[str], *, phase: str = "test") -> list[str]:
+        """``mvn -o -X -B <flags> <phase> -DskipTests`` with the probe's ``jvm`` /
+        ``forkCount``: prints the build plan and the configuration surefire will run with,
+        and runs no test. The same flags for both phases keep profile activation equal."""
         return [
             mvn,
             "-o",
             "-X",
             "-B",
             *flags,
-            "test",
+            phase,
             "-DskipTests",
             f"-Djvm={self.java}",
             "-DforkCount=1",
@@ -265,23 +335,21 @@ class MavenRunner(BaseRunner):
         return jvm_plan(root, self._mvn(root, executor), self._flags(), self._env(executor))
 
     def environment_ready(self, root: Path, env_dir: Path) -> bool:
-        """The guard, then the provider probe, offline (``-o``): every plugin, artifact and
-        surefire provider resolves (``surefire_probe_ready``); a POM that would not fork the
-        stub, a launch error or a timeout reads not ready."""
+        """The guards, then the provider probe, offline (``-o``): every plugin, artifact and
+        surefire provider resolves (``surefire_probe_ready``); a POM the guards refuse
+        (``probe_refusal``), a launch error or a timeout reads not ready."""
         root = Path(root)
         mvn = "./mvnw" if (root / "mvnw").exists() else str(self.opts.get("mvn") or "mvn")
         env = {"JAVA_HOME": str(self.opts["java_home"])} if self.opts.get("java_home") else {}
         with SurefireProbe() as probe:
-            try:
-                dry = LocalExecutor().run(
-                    Command(
-                        tuple(probe.preflight_argv(mvn, self._flags())),
-                        root,
-                        env=env,
-                        timeout=READY_CHECK_TIMEOUT_S,
-                    )
+
+            def dry(argv: Sequence[str]) -> ExecResult:
+                return LocalExecutor().run(
+                    Command(tuple(argv), root, env=env, timeout=READY_CHECK_TIMEOUT_S)
                 )
-                if not dry.ok or not surefire_forks_to_stub(dry.combined, str(probe.java)):
+
+            try:
+                if probe_refusal(dry, probe, mvn, self._flags()) is not None:
                     return False
                 argv = probe.argv(mvn, self._flags(), offline=True)
                 res = LocalExecutor().run(
@@ -300,7 +368,7 @@ class MavenRunner(BaseRunner):
         timeout: int,
         on_step: Callable[[SetupStep], None] | None = None,
     ) -> SetupResult:
-        """``mvn test -DskipTests`` online, the offline guard, then the provider probe
+        """``mvn test -DskipTests`` online, the offline guards, then the provider probe
         online — the build alone leaves surefire's provider cold (the module docstring)."""
         refusal = self.sandbox_refusal(executor)
         if refusal is not None:
@@ -325,25 +393,29 @@ class MavenRunner(BaseRunner):
 
         if not online([mvn, "-q", "-B", *self._flags(), "test", "-DskipTests"]).ok:
             return self.finish_setup(session, root, Path(env_dir))
-        with SurefireProbe() as probe:
-            dry = self._run_quiet(
+
+        def dry(argv: Sequence[str]) -> ExecResult:
+            return self._run_quiet(
                 executor,
                 Command(
-                    tuple(probe.preflight_argv(mvn, self._flags())),
+                    tuple(argv),
                     root,
                     env=self._env(executor),
                     timeout=self.setup_timeout(timeout),
                     writable_paths=self._writable(),
                 ),
             )
-            if not dry.ok or not surefire_forks_to_stub(dry.combined, str(probe.java)):
-                return session.result(False, IN_PROCESS_REFUSED)
+
+        with SurefireProbe() as probe:
+            refused = probe_refusal(dry, probe, mvn, self._flags())
+            if refused is not None:
+                return session.result(False, refused)
             online(probe.argv(mvn, self._flags(), offline=False))
         return self.finish_setup(session, root, Path(env_dir))
 
     @staticmethod
     def _run_quiet(executor: Executor, cmd: Command) -> ExecResult:
-        """A setup-phase command that is not a step: the offline ``-X`` dry configuration,
+        """A setup-phase command that is not a step: an offline ``-X`` dry plan,
         whose multi-megabyte debug output is read, never recorded. A launch error is a
         failed result (rc 127), as ``SetupSession.run`` records one."""
         try:
