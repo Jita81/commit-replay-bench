@@ -918,6 +918,41 @@ export type CellField =
   | 'model'
   | 'provider'
 
+/**
+ * One economics figure (`crb.core.economics.Estimate`, F35). `n` is its denominator (the
+ * attempts — or clean attempts — with a KNOWN value). `value` is `null` when nothing is
+ * known, never `0`; `ci_low` / `ci_high` are `null` whenever no interval is served, and
+ * `reason` then says why (`''` only when the value and its interval are both served).
+ */
+export interface EconomicsEstimate {
+  n: number
+  value: number | null
+  ci_low: number | null
+  ci_high: number | null
+  method: string
+  reason: string
+}
+
+/** `crb.core.economics.Economics` — cost and latency with their denominators, intervals and apparatus. `pooled` = the rows span more than one apparatus version, posture class or checks arm, so every estimate is withheld and `pooled_reason` names what they span. */
+export interface Economics {
+  n_attempts: number
+  n_clean: number
+  cost_known: number
+  cost_known_clean: number
+  latency_known: number
+  latency_known_clean: number
+  apparatus_versions: string[]
+  /** The labelled posture classes of the rows (ADR-0019); empty for rows graded before 2.3. */
+  posture_classes: string[]
+  /** The checks arms of the rows (ADR-0024); one, unless the fold was refused. */
+  checks_arms: string[]
+  pooled: boolean
+  pooled_reason: string
+  cost_per_attempt: EconomicsEstimate
+  cost_per_clean: EconomicsEstimate
+  latency_per_attempt: EconomicsEstimate
+}
+
 /** One cell of `GET /capability-map` (API.md lists these fields). */
 export interface CapabilityCell {
   capability_class: string
@@ -934,8 +969,14 @@ export interface CapabilityCell {
   ci_low: number
   ci_high: number
   false_q1: number
+  /** Flat means over the known rows; they follow the map's filters, so `posture=all` / `apparatus=all` pools them (G-990). Quote `economics`, never these. */
   cost_usd_mean: number
   latency_s_mean: number
+  /** Did any eligible row record a known cost (a known $0 counts) / a latency? */
+  cost_known?: boolean
+  latency_known?: boolean
+  /** F35 — the cell's cost and latency with known counts, t intervals and apparatus. */
+  economics?: Economics
   oracle_strength_mean: number | null
   route: CellVerdict
   reason: string
@@ -976,6 +1017,8 @@ export interface CapabilityMap {
   cells: CapabilityCell[]
   summary: CapabilitySummary
   policy: RoutingPolicy
+  /** F35 — the economics of every row behind the map, folded from the rows (the Baseline's tiles). */
+  economics?: Economics
 }
 
 /** `crb.core.routing.RoutingPolicy.to_dict()` */

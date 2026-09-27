@@ -1278,6 +1278,10 @@ class CellStats:
     n_api: int = 0
     #: The ``checks`` arm every row of the cell was graded under (ADR-0024) — one, always.
     checks_arm: str = ARM_OFF
+    #: Eligible rows whose cost is KNOWN (``GradeRow.cost_known``) — the denominator of
+    #: ``cost_usd_mean``. ``0`` means the mean is unknown, never ``$0``: a reader decides
+    #: known-ness from this count, never by comparing the mean with zero (P-064).
+    n_cost_known: int = 0
 
     @property
     def n_disqualified(self) -> int:
@@ -1345,10 +1349,11 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
     # re-checked at read time over ALL rows, not just eligible ones: the write-time
     # gate should make this 0, and a reader must be able to see that it is
     fq1 = sum(1 for r in rs if r.clean and not r.belts_all_true())
-    # means over the rows that carry a value — a $0 / 0 s is "not measured" here, not
-    # a free, instant trial (cost_known tells the two apart per row)
-    costs = [r.cost_usd for r in eligible if r.cost_usd]
-    lats = [r.latency_s for r in eligible if r.latency_s]
+    # means over the rows that carry a value: a cost is a row fact (``cost_known`` — a
+    # known $0 counts as $0, an unknown cost is left out, never read as $0); a 0 s
+    # latency is "not recorded", never an instant trial (crb.core.economics, F35)
+    costs = [r.cost_usd for r in eligible if r.cost_known]
+    lats = [r.latency_s for r in eligible if r.latency_s > 0]
     strengths = [r.oracle_strength for r in eligible if r.oracle_strength is not None]
     split = failure_split(rs)
     return CellStats(
@@ -1379,6 +1384,7 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_lint_evaluated=split.lint_evaluated,
         n_api=split.api,
         checks_arm=arms[0],
+        n_cost_known=len(costs),
     )
 
 

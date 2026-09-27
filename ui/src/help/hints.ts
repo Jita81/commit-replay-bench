@@ -363,15 +363,15 @@ export const HINTS = {
   'banner.results.licence':
     'The one sentence the largest signed cell permits you to say, with every qualifier: repository, apparatus, belt set, controls gate, n, class and size, rate with interval, who signed and when. Every figure is the signed snapshot, not the cell as it reads now.',
   'stat.results.cost_per_attempt':
-    'The mean builder-reported dollars per attempt over every cell with a known cost, weighted by n, on the current apparatus. A mean only: the API serves no interval for cost yet.',
+    'The mean builder-reported dollars per attempt over every attempt with a known cost on the current apparatus; a reported $0 counts as $0. n is the attempts with a known cost, and the interval is a Student-t 95% interval on them. A dash means no attempt recorded a cost, not that it was free.',
   'stat.results.cost_per_clean':
-    'The same mean divided by the clean rate: what one clean attempt cost on average, over n clean attempts. No interval.',
+    'Every known dollar divided by the clean attempts with a known cost: what one clean attempt cost on average. n is those clean attempts; the interval is a delta-method Student-t 95% interval. It is not a cost per accepted change.',
   'stat.results.latency':
-    'The mean wall-clock time of one attempt over every cell with a known latency, weighted by n. A mean only, no interval.',
+    'The mean wall-clock time of one attempt over the attempts that recorded one, with n and a Student-t 95% interval. A dash means no attempt recorded a time.',
   'stat.results.clean_rate':
-    'Clean attempts over all attempts across every measured cell (n shown). It is a whole-repository summary and is never a routing input: routes are decided cell by cell.',
+    'Clean attempts over all attempts across every measured cell, with n and a Wilson 95% interval. It is a whole-repository summary and is never a routing input: routes are decided cell by cell.',
   'banner.results.no_throughput':
-    'The ledger records no human hours, and the merge outcomes the factory records are not joined to the replay rows behind this map, so cost per accepted change cannot be shown honestly. Cost per clean attempt is what is measured.',
+    'The ledger records no human hours, and the merge outcomes the factory records are not joined to the replay rows behind this map: merge outcomes are recorded only for the pull requests the factory opened, never for the attempts measured here. So cost per accepted change cannot be shown honestly. Cost per clean attempt is what is measured.',
   'button.results.routing':
     'Every cell’s route decision with its reason code and the policy thresholds in force.',
   'button.results.oracle':
@@ -1195,9 +1195,9 @@ export const HINTS = {
   'map.cell.fq1':
     'The false-Q1 count for this cell. Must be 0.',
   'map.cell.cost':
-    'Mean builder-reported dollars per attempt in this cell.',
+    'Mean builder-reported dollars per attempt in this cell, over the attempts with a known cost (a known $0 counts as $0). A dash means none was recorded, or the rows span more than one apparatus version, posture class or checks arm, which are never pooled: open the cell for the reason, the n and the interval.',
   'map.cell.latency':
-    'Mean wall-clock time per attempt in this cell.',
+    'Mean wall-clock time per attempt in this cell, over the attempts with a known latency. A dash means none was recorded, or the rows span more than one apparatus version, posture class or checks arm, which are never pooled: open the cell for the reason, the n and the interval.',
   'map.cell.oracle':
     'Mean oracle strength of the tasks in this cell (faults caught over faults planted). Below the policy bar the cell routes to a human.',
   'map.cell.tier':
@@ -1221,9 +1221,9 @@ export const HINTS = {
   'stat.capability.cell_false_q1':
     'Rows in this cell credited clean against a failed belt. Must be 0.',
   'stat.capability.cost':
-    'Mean builder-reported dollars per attempt in this cell over n. A mean, no interval.',
+    'Mean builder-reported dollars per attempt in this cell over the attempts with a known cost (n); a reported $0 counts as $0. The interval is a Student-t 95% interval. A dash means no attempt recorded a cost, not that it was free.',
   'stat.capability.latency':
-    'Mean wall-clock time of the build per attempt over n. A mean, no interval.',
+    'Mean wall-clock time of the build per attempt over the attempts that recorded one (n), with a Student-t 95% interval. A dash means no time was recorded.',
   'stat.capability.oracle':
     'Mean mutation kill-rate of the tasks’ tests in this cell. Below the policy bar the cell routes to a human.',
   'banner.capability.ci_drift':

@@ -14,7 +14,9 @@
  *               repository with no gold-clean task points at stage 3 of the walk, and that a
  *               replay already queued or running replaces the red button with a banner naming
  *               the run — never a second spend (J-ONR-4); and that every field, row and the
- *               button carry a hint, with the attempts radio opening on hover.
+ *               button carry a hint, with the attempts radio opening on hover; and that the
+ *               estimate reads the map's economics fold, so a known $0 is quoted as $0.00
+ *               over the attempts with a known cost, never dropped for the planning range (P-064).
  * How:          `mockApi` + `renderApp` with `path` for `useParams`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
@@ -32,7 +34,16 @@ import { PRINCIPAL, expectHintOpens, json, mockApi, renderApp } from '../../test
 import { MeasurePage } from './MeasurePage'
 
 const REPO = { name: 'cobra', language: 'go', runner: 'go', url: 'https://github.com/spf13/cobra', clone_path: '', probe: { status: 'ok', run_id: 'r', checked: 'x', detail: '' }, task_counts: { total: 36, standard: 30, hard: 6, gold_clean: 32, gold_failed: 4, unchecked: 0 }, last_run: null, created: '', updated: '', config: {} }
-const MAP = { repo: 'cobra', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [{ capability_class: 'bug.fix', size: 'XS', n: 22, clean: 22, point: 1, ci_low: 0.85, ci_high: 1, false_q1: 0, route: 'deliver', reason: '', cost_usd_mean: 0.34, latency_s_mean: 200, verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }], summary: { trusted_autonomy_coverage: 1, total_cells: 1, measured_cells: 1, deliver_cells: 1, n_total: 22, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } }
+// the map's own economics fold (F35): the spend estimate reads its cost per attempt over the KNOWN count
+const est = (n: number, value: number | null, reason = '') => ({ n, value, ci_low: null, ci_high: null, method: 'Student-t 95% on the known rows (n-1 df), lower bound floored at 0', reason })
+const econ = (n_attempts: number, cost_known: number, value: number | null, reason = '') => ({
+  n_attempts, n_clean: n_attempts, cost_known, cost_known_clean: cost_known, latency_known: n_attempts, latency_known_clean: n_attempts,
+  apparatus_versions: ['2.2'], posture_classes: [], checks_arms: ['off'], pooled: false, pooled_reason: '',
+  cost_per_attempt: est(cost_known, value, reason), cost_per_clean: est(cost_known, value, reason), latency_per_attempt: est(n_attempts, 200),
+})
+const NONE_KNOWN = 'no attempt recorded a known cost'
+const MAP = { repo: 'cobra', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [{ capability_class: 'bug.fix', size: 'XS', n: 22, clean: 22, point: 1, ci_low: 0.85, ci_high: 1, false_q1: 0, route: 'deliver', reason: '', cost_usd_mean: 0.34, latency_s_mean: 200, verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }], summary: { trusted_autonomy_coverage: 1, total_cells: 1, measured_cells: 1, deliver_cells: 1, n_total: 22, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' }, economics: econ(22, 22, 0.34) }
+const EMPTY_MAP = { ...MAP, cells: [], economics: econ(0, 0, null, NONE_KNOWN) }
 
 describe('MeasurePage', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -69,11 +80,38 @@ describe('MeasurePage', () => {
     expect(box).toHaveTextContent('the operator’s own CLI login (development and evaluation only)')
   })
 
+  it('quotes a known $0 as $0.00 over the attempts with a known cost, never the planning range (P-064)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      // every attempt with a known cost cost $0 (a fixture, a metered subscription); two of 22 carry no price
+      'GET /capability-map': { ...MAP, cells: [{ ...MAP.cells[0]!, cost_usd_mean: 0 }], economics: econ(22, 20, 0) },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent('$0.00 to $0.00 for 30 attempts, at about $0.00 each'))
+    expect(box).toHaveTextContent("this repository's measured mean over n=20 attempts with a known cost at apparatus 2.2")
+    expect(box).not.toHaveTextContent('a planning range, not a measured interval')
+  })
+
+  it('attempts with no known cost fall back to the range and say why, never n = 0', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': { ...MAP, economics: econ(22, 0, null, NONE_KNOWN) },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent('this repository has no measured mean yet (no attempt recorded a known cost)'))
+  })
+
   it('a viewer sees the page but no button; no measured mean falls back to the documented range', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /repos/cobra': REPO,
-      'GET /capability-map': { ...MAP, cells: [] },
+      'GET /capability-map': EMPTY_MAP,
       'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: '', data: { executor: 'local' } }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false } }] },
     })
     renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
@@ -117,7 +155,7 @@ describe('MeasurePage', () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/cobra': { ...REPO, task_counts: { ...REPO.task_counts, gold_clean: 0 } },
-      'GET /capability-map': { ...MAP, cells: [] },
+      'GET /capability-map': EMPTY_MAP,
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
     })
     renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })

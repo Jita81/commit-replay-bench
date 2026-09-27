@@ -108,7 +108,7 @@ test.describe('10 factory (fixture_gold)', () => {
     // J-FAC-2/3 — what the run will spend and where it would deliver, before the button
     const box = page.getByTestId('before-you-start')
     await expect(box).toContainText('2 of 2 will be worked')
-    await expect(box).toContainText(/a planning range, not a measured interval|measured mean over n = \d+ attempts at apparatus/)
+    await expect(box).toContainText(/a planning range, not a measured interval|measured mean over n = \d+ attempts with a known cost at apparatus/)
     await expect(box).toContainText('not linked — no pull request')
     await expect(box).toContainText('it is connected by URL, not through the GitHub App')
     await expect(box.getByRole('checkbox', { name: /Open pull requests/ })).toBeDisabled()
