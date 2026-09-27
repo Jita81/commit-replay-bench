@@ -15,7 +15,7 @@ updated: 2026-09-26
 
 **Purpose.** "The six stages that take one repository from registered to measured. Each stage
 says what it proves and whether it spends money; the first five involve no model." (About
-block, `help.ts`; eyebrow `Journey · 1 of 4 · Connection`.)
+block, `help.ts`; eyebrow `Journey · 1 of 4 · Connection`.) **[aspiration — this artefact's specification; its criteria state what is met]**
 
 **Entry → exit.** Arrive from a row on Connection (name link or *Continue*), from Home tasks 4
 and 5, from the repository page's *Connection walk* button, from the Measure page's back link,
