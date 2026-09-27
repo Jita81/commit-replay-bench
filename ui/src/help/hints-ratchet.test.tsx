@@ -269,10 +269,12 @@ describe('hint ratchet: the shell (enforced from the start)', () => {
       const misses = unhinted(container)
       expect(misses, `unhinted shell elements as ${role}:\n  ${misses.join('\n  ')}`).toEqual([])
       // the chrome beyond the selectors: theme, sign out, the role chip, the footer line
-      for (const id of ['button.shell.theme', 'button.shell.sign_out', 'pill.shell.role', 'pill.shell.health', 'nav.help', 'nav.version_line', 'nav.footer_help', 'nav.footer_glossary', 'nav.decisions_count']) {
+      for (const id of ['button.shell.menu', 'button.shell.theme', 'button.shell.sign_out', 'pill.shell.role', 'pill.shell.health', 'nav.help', 'nav.version_line', 'nav.footer_help', 'nav.footer_glossary', 'nav.decisions_count']) {
         expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
       }
-      const floor = role === 'admin' ? 22 : role === 'operator' ? 21 : 16
+      // a viewer sees every instrument entry but Runs and Settings (G-914), and every role the
+      // phone Menu button (F26): the floor moves up with them, so losing one fails here
+      const floor = role === 'admin' ? 23 : role === 'operator' ? 22 : 21
       expect(hinted(container), `hinted elements in the shell as ${role}`).toBeGreaterThanOrEqual(floor)
     })
   }

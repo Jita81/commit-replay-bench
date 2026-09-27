@@ -52,6 +52,12 @@ describe('RepoDetail', () => {
     expect(screen.queryByRole('button', { name: 'Start a run' })).toBeNull()
   })
 
+  it('carries the journey eyebrow of step 1 — the repository page is where the shape is confirmed (G-301)', async () => {
+    setup(VIEWER, `/repos/${REPO.name}`)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Next steps' })).toBeInTheDocument())
+    expect(screen.getByText('Journey · 1 of 4 · Connection · shape')).toBeInTheDocument()
+  })
+
   it('?tab=config opens the Configuration tab; clicking a tab writes it to the URL', async () => {
     setup(VIEWER, `/repos/${REPO.name}?tab=config`)
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Configuration' })).toHaveAttribute('aria-selected', 'true'))
