@@ -1172,11 +1172,33 @@ export interface SignoffCreateRequest {
 // ---------------------------------------------------------------------------
 
 /** `GET /ledger/verify` — chain walk result; `broken_at` is the first bad seq. */
+/** The audit trail's chain inside `GET /ledger/verify` (`events`, ADR-0041): `broken_at` is an event id. */
+export interface EventsVerify {
+  rows: number
+  chain_ok: boolean
+  broken_at: number | null
+  detail: string
+  /** The last event's `row_hash` (`""` when there is none), to record outside the store. */
+  head_row_hash: string
+}
+
+/**
+ * `GET /ledger/verify` — mirrors `LedgerVerifyOut`. `ok` holds only when the grade chain, the
+ * audit trail's chain, false-Q1 = 0 and every clean row's pack all hold; `chain_ok` and
+ * `broken_at` are the grade chain's alone, so a reader is told WHICH part failed.
+ */
 export interface LedgerVerify {
   rows: number
   ok: boolean
   false_q1_total: number
-  broken_at?: number | null
+  chain_ok: boolean
+  broken_at: number | null
+  detail: string
+  clean_without_pack: number
+  verified_at: string
+  /** The grade ledger's last `row_hash` (`""` when empty), to record outside the store. */
+  head_row_hash: string
+  events: EventsVerify
 }
 
 /** `GET /ledger/export?format=`. */

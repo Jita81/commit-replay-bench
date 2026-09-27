@@ -181,7 +181,10 @@ worker:
   # commit and one allowlisting egress sidecar; the worker needs a daemon, sandbox.mode
   # below, and the builder image pre-pulled — without `image` a build fails CLOSED, never on
   # the host), host in dev. An explicit `docker` needs `image` (the API refuses to start
-  # without it). host is refused in prod unless CRB_ALLOW_UNSEALED_PROD=1 (ADR-0023).
+  # without it). host is refused in prod unless config.CRB_ALLOW_UNSEALED_PROD: "1" is set
+  # with config.CRB_ALLOW_UNSEALED_PROD_BY (an active admin's username) and
+  # config.CRB_ALLOW_UNSEALED_PROD_REASON (why) — without both, neither the API nor the worker
+  # starts (ADR-0023; docs/DEPLOYMENT.md §2.1).
   builder:
     executor: ""
     image: ""

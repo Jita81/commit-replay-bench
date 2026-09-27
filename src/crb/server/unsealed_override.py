@@ -21,9 +21,11 @@ What it does: Resolves ``CRB_ALLOW_UNSEALED_PROD_BY`` to exactly one active admi
               anything else with :class:`OverrideRefused`; writes one ``system`` event
               ``posture.unsealed_override`` whose actor is that account and whose payload
               names the username, the reason, the process and the posture it admits.
-How:          ``find_acknowledging_admin`` = read the ``users`` table, match, check role and
-              active → ``record_unsealed_override`` = ``append_system_event`` on the fixed
-              trace ``posture:unsealed_override`` → commit (the chain's flush hook hashes it).
+How:          ``record_unsealed_override`` = take the events write lock (``lock_events``: the
+              trace is shared by every process start) → ``find_acknowledging_admin`` = read
+              the ``users`` table, match, check role and active → ``append_system_event`` on
+              the fixed trace ``posture:unsealed_override`` → commit (the chain's flush hook
+              hashes it).
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0023-production-refuses-the-unsealed-posture.md,
               docs/adr/0041-the-audit-trail-is-hash-chained.md
@@ -33,7 +35,8 @@ Works with:   src/crb/server/settings.py (``unsealed_override_ack_refusal`` — 
               src/crb/server/routes/runs.py (``append_system_event`` writes the event),
               docs/API.md (the event's row in the vocabulary),
               docs/DEPLOYMENT.md#21-environment-reference (the two variables, for operators)
-Tested by:    tests/test_settings_posture.py, tests/test_worker_start.py
+Tested by:    tests/test_settings_posture.py, tests/test_worker_start.py,
+              tests/test_unsealed_override_race.py
 Touch when:   the override's variables change name, or another process starts under it.
 """
 
@@ -51,6 +54,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.server.auth import LOCAL_ISSUER
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.settings import ALLOW_UNSEALED_PROD_BY_ENV, ALLOW_UNSEALED_PROD_ENV
+from crb.store.events import lock_events
 from crb.store.models import User
 
 log = logging.getLogger(__name__)
@@ -110,6 +114,10 @@ def record_unsealed_override(
     was recorded. Raises :class:`OverrideRefused` (nothing written) when ``by`` is not one
     active admin — the caller must not start."""
     with factory() as db:
+        # the events write lock first: every start writes this one trace, and two processes
+        # starting at once must not read one ``seq`` (P-118 — the API and a worker, or two
+        # replicas, at the same moment; the second insert would break (trace_id, seq))
+        lock_events(db)
         user = find_acknowledging_admin(db, by)
         payload: dict[str, Any] = {
             "username": _username(user),

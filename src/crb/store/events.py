@@ -32,7 +32,9 @@ What it does: Writes every ``StepEvent`` as one ``events`` row and never raises 
               (drops are counted and logged); chains every new row of the table, from any
               writer, in that writer's flush; reads a trace's events in ``seq`` order with a
               resume cursor; allocates the next ``seq`` for out-of-band system events under
-              the same write lock the ledger uses; walks the whole chain and reads its head.
+              the same write lock the ledger uses, and lends that lock (``lock_events``) to a
+              writer on a trace other processes also write; walks the whole chain and reads
+              its head.
 How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one transaction
               with a per-row fallback; ``read_events`` = ``seq > after`` ordered by
               ``(seq, id)`` with a clamped limit; ``append_event`` = lock → ``max(seq)+1`` →
@@ -134,8 +136,14 @@ def _from_model(m: Event) -> StepEvent:
 EVENTS_LOCK_KEY = 7332
 
 
-def _lock(s: Session) -> None:
-    """Serialise ``seq`` allocation the way :class:`crb.store.ledger.DbLedger` does."""
+def lock_events(s: Session) -> None:
+    """Take the events write lock at the start of ``s``'s transaction, before any ``seq`` is
+    read: ``BEGIN IMMEDIATE`` on SQLite, the ``EVENTS_LOCK_KEY`` advisory lock on PostgreSQL.
+
+    Serialises ``seq`` allocation the way :class:`crb.store.ledger.DbLedger` does. A writer
+    that reads ``max(seq)`` on a trace other processes also write, at the same moment, must
+    hold it (P-083, P-118: without it two writers read one ``seq`` and the second insert
+    breaks the unique ``(trace_id, seq)``). Call it first in a fresh session."""
     dialect = s.get_bind().dialect.name
     if dialect == "sqlite":
         s.execute(text("BEGIN IMMEDIATE"))
@@ -262,7 +270,7 @@ class DbEventSink:
 
     def _emit_reallocated(self, event: StepEvent) -> None:
         with self._factory() as s:
-            _lock(s)
+            lock_events(s)
             nxt = (
                 int(
                     s.execute(
@@ -379,7 +387,7 @@ def append_event(
     )
     try:
         with factory() as s:
-            _lock(s)
+            lock_events(s)
             nxt = (
                 int(
                     s.execute(
@@ -462,6 +470,7 @@ __all__ = [
     "count_events",
     "events_head",
     "last_seq",
+    "lock_events",
     "read_events",
     "verify_events",
     "verify_events_in",

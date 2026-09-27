@@ -201,8 +201,9 @@ worker's privileges and egress. Run the worker as a dedicated low-privilege user
 dedicated node with an egress policy allowing only the model endpoint (Helm ships a
 default-deny `NetworkPolicy`); do not onboard repositories you would not run locally; and
 use container mode for any measurement that will be relied on. With `CRB_ENV=prod` the
-API and the worker refuse to start in host mode unless `CRB_ALLOW_UNSEALED_PROD=1`, and a run
-made under that override carries it in its apparatus (§5, ADR-0023).
+API and the worker refuse to start in host mode unless `CRB_ALLOW_UNSEALED_PROD=1` is set
+with `CRB_ALLOW_UNSEALED_PROD_BY` (the admin who set it) and `CRB_ALLOW_UNSEALED_PROD_REASON`,
+and a run made under that override carries it in its apparatus (§5, ADR-0023).
 
 ### 3.3 Credentials
 
@@ -600,7 +601,8 @@ subject to a retention window.
   apparatus 2.3]
 - **Factory builds are not sealed** (ADR-0023 §5). The builder executor setting governs
   replay builds; a factory run hands its builder a host worktree and no container. A `prod`
-  worker therefore refuses every factory run unless `CRB_ALLOW_UNSEALED_PROD=1`, and with it
+  worker therefore refuses every factory run unless `CRB_ALLOW_UNSEALED_PROD=1` is set (with
+  `CRB_ALLOW_UNSEALED_PROD_BY` and `CRB_ALLOW_UNSEALED_PROD_REASON`, as above), and with it
   stamps the run's apparatus (`run_kind: factory`); `/health` reports this as
   `posture.factory_builds`. [measured — `tests/test_worker.py`,
   `tests/test_settings_posture.py::TestFactoryBuilds`] Sealing factory builds is not done.

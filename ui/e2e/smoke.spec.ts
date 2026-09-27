@@ -51,7 +51,7 @@ async function mockApi(page: Page, loggedIn: boolean) {
     if (path === '/health') return json({ status: 'ok', probes: [{ name: 'db', status: 'ok', detail: 'append-only triggers present', data: {} }] })
     if (path === '/version') return json({ crb: '2.0.0', apparatus: '2.0', policy: 'routing.v1', oidc_enabled: true })
     if (path === '/repos') return json({ items: [], total: 0, limit: 50, offset: 0 })
-    if (path === '/ledger/verify') return json({ rows: 0, ok: true, false_q1_total: 0 })
+    if (path === '/ledger/verify') return json({ rows: 0, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '' } })
     return route.fulfill(envelope(404, 'not_found', `no fixture for ${path}`))
   })
 }

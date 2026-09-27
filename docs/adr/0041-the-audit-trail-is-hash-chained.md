@@ -72,7 +72,20 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
   decision or override start was edited, removed from the middle or moved after it was
   written — on the API, from the command line, and from an export of the rows.
 - Writes to `events` are serialised by one lock, as grade rows already are. A run's events
-  wait for each other's commit; the SSE stream reads committed rows as before.
+  wait for each other's commit; the SSE stream reads committed rows as before. A writer that
+  reads a trace's last `seq` on a trace other processes write at the same moment takes the
+  lock before it reads (`crb.store.events.lock_events`): the override's start event does, as
+  every process start writes its one trace (P-118).
+- Reading the chain costs a walk of the whole trail, every time. `GET /ledger/verify`
+  re-hashes every event on each call, and the Ledger and Posture pages call it whenever a
+  person opens them (a browser reuses an answer for 30 seconds). The trail holds a row for
+  every step of every run, many times the grade ledger, so the call slows as the trail grows
+  [hypothesis — two readings of `verify_events` over 100,000 events, SQLite on developers'
+  machines, 2026-09-27: 1.6 s and 2.7 s; a timing on a store of the deployment's own size
+  would confirm or refute it]. Nothing verifies from a head already
+  verified [gap — an incremental walk from the last verified id and head, with the full walk
+  kept for `crb ledger verify --store`, would close it; it waits for a criterion that bounds
+  the page's cost]. DEPLOYMENT §9.5 tells an operator to size for it.
 - Truncation and wholesale replacement stay invisible to the chain alone; they are caught
   only by comparing a head the operator recorded outside the store. That comparison is the
   operator's act (DEPLOYMENT §8), not the product's.

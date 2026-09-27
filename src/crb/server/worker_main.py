@@ -28,7 +28,8 @@ applies); with it, every run's apparatus carries the override, and without it th
 refuses a run that asks for the local executor in its own parameters. In ``prod`` the override
 must name who set it and why (``CRB_ALLOW_UNSEALED_PROD_BY`` / ``_REASON``, G-663):
 :func:`announce_start` checks the name is an active admin and writes the audit event, or the
-worker exits 2 without taking a run.
+worker exits 2 without taking a run — as it does when the event cannot be written (a store
+error at start is the JSON error on stderr, never a traceback; P-118).
 
 **At every start the worker logs both chains' heads** (G-601): the grade ledger's and the audit
 trail's last ``row_hash``, so the log store holds a copy outside the database.
@@ -97,6 +98,7 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from crb.core.execution import SANDBOX_TREES, TREE_COPY, DockerSettings, SandboxUnavailable
 from crb.observability import metrics
@@ -479,7 +481,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_ERROR
     try:
         announce_start(worker)
-    except OverrideRefused as exc:  # the override names no active admin: do not start
+    except (OverrideRefused, SQLAlchemyError) as exc:
+        # the override names no active admin, or its start could not be recorded (a lost
+        # connection, a lock timeout): do not start, and say so as the JSON error (P-118)
         print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}), file=sys.stderr)
         return EXIT_ERROR
 

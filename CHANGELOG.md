@@ -19,7 +19,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   serve both chains' heads, which every worker start also logs. In production the override
   needs `CRB_ALLOW_UNSEALED_PROD_BY` (an active admin) and `_REASON`, and every start writes
   an event naming that admin (DL-102). The append-only probe proves every table (DL-104), and
-  `crb_signoffs_total{outcome}` counts sign-offs.
+  `crb_signoffs_total{outcome}` counts sign-offs. The Ledger and Posture pages report a broken
+  audit trail as the audit trail's, naming the event, and send the reader to verify the store;
+  two processes starting under the override at once both record it; and every operator
+  document that sets the override names the admin and the reason (P-118 to P-122).
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

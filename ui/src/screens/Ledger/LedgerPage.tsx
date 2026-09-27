@@ -5,7 +5,9 @@
  * ----------
  * What it is:   The screen at /ledger: the chain-verification gate, the false-Q1 tile, the
  *               filterable row table and the export buttons.
- * What it does: Shows `GET /ledger/verify` as a gate (chain intact ∧ false-Q1 total = 0) and
+ * What it does: Shows `GET /ledger/verify` as a gate with one row per part it checks — the
+ *               grade chain (by row), the audit trail's chain (by event id, ADR-0041),
+ *               false-Q1 total = 0 and every clean row's pack — so a break names its part, and
  *               lists `GET /grades` rows AS STORED — belts, clean / DQ / error, cost, latency,
  *               oracle strength, provenance and the row hash — with the API's filters carried
  *               in the URL. Export links point straight at the API's download URLs (JSONL,
@@ -14,7 +16,8 @@
  *               `GradeListParams` → `useGrades` → `DataTable` with offset paging (100 rows).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
- *               docs/adr/0007-abstract-cell-export-only.md
+ *               docs/adr/0007-abstract-cell-export-only.md,
+ *               docs/adr/0041-the-audit-trail-is-hash-chained.md
  * Works with:   ui/src/api/hooks.ts (`useLedgerVerify`, `useGrades`), ui/src/api/types.ts
  *               (`GradeRow`, `LedgerVerify`, `beltsOf`), ui/src/components/GateBanner.tsx (the
  *               gate), ui/src/components/BeltPills.tsx and ui/src/components/Provenance.tsx
@@ -22,9 +25,10 @@
  *               their definitions beside the filters), src/crb/server/routes/ledger.py (verify
  *               and export), src/crb/server/routes/grades.py (the rows, served column-by-column)
  * Tested by:    ui/src/screens/Ledger/LedgerPage.test.tsx (the abstract export's sentence per
- *               role, the filter terms), ui/e2e/walkthrough/05-replay-fake.spec.ts (gate OPEN
- *               with false-Q1 = 0, rows listed, the JSONL export verifies with
- *               `crb ledger verify`), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
+ *               role, the filter terms, each failure state on its own gate row),
+ *               ui/e2e/walkthrough/05-replay-fake.spec.ts (gate OPEN with false-Q1 = 0, rows
+ *               listed, the JSONL export verifies with `crb ledger verify`),
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   a filter is added to `GET /grades` (docs/API.md) — add it to `FILTER_KEYS`
  *               and `GradeListParams` in ui/src/api/types.ts; never for a new repository.
  * Claims:       A verified chain proves the rows were not edited, reordered or removed — not
@@ -163,8 +167,10 @@ export function LedgerPage() {
               eyebrow="append-only · hash-chained"
               data-testid="ledger-gate"
               criteria={[
-                { label: 'Hash chain verifies', ok: v.ok, detail: v.ok ? `${fmtInt(v.rows)} rows, every prev_hash and row_hash match` : `broken at row ${v.broken_at ?? '?'} of ${fmtInt(v.rows)}`, hint: 'gate.ledger.chain' },
+                { label: 'Hash chain verifies', ok: v.chain_ok, detail: v.chain_ok ? `${fmtInt(v.rows)} rows, every prev_hash and row_hash match` : `broken at row ${v.broken_at ?? '?'} of ${fmtInt(v.rows)}`, hint: 'gate.ledger.chain' },
+                { label: 'Audit trail verifies', ok: v.events.chain_ok, detail: v.events.chain_ok ? `${fmtInt(v.events.rows)} events, every prev_hash and row_hash match` : `broken at event ${v.events.broken_at ?? '?'} of ${fmtInt(v.events.rows)}: ${v.events.detail}`, hint: 'gate.ledger.audit_trail' },
                 { label: 'false-Q1 total = 0', ok: v.false_q1_total === 0, detail: `false_q1_total = ${v.false_q1_total}`, hint: 'gate.ledger.false_q1' },
+                { label: 'Every clean row has its evidence pack', ok: v.clean_without_pack === 0, detail: `clean rows without a pack = ${fmtInt(v.clean_without_pack)}`, hint: 'gate.ledger.packs' },
               ]}
             />
           </Hint>

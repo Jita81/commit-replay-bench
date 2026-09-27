@@ -4,13 +4,17 @@ admin who set it (G-663).
 
 Navigation
 ----------
-What it is:   The suite for ``crb.server.worker_main.announce_start``.
+What it is:   The suite for ``crb.server.worker_main.announce_start`` and the entry point
+              that calls it.
 What it does: Pins that a starting worker logs the grade ledger's and the audit trail's
               head ``row_hash`` (and their row counts) so the log store holds a copy outside
               the database; that a production worker under ``CRB_ALLOW_UNSEALED_PROD`` writes
               a ``posture.unsealed_override`` event whose actor is the named admin and whose
-              payload carries the name, the reason and ``process: worker``; and that an
-              unknown or non-admin name refuses the start with nothing written.
+              payload carries the name, the reason and ``process: worker``; that an
+              unknown or non-admin name refuses the start with nothing written; and that
+              ``crb worker`` itself (``worker_main.main``) does all of it at every start, and
+              turns a store error while the start is recorded into its JSON error and exit 2
+              (P-121, P-118).
 How:          A ``Worker`` over a temp SQLite store (``init_db``), rows through ``DbLedger``
               and the event sink, accounts through ``create_local_user``; ``caplog`` reads
               the log line, rendered again through the deployed redacting JSON handler.
@@ -134,3 +138,101 @@ def test_a_prod_worker_naming_an_unknown_or_non_admin_account_refuses_to_start(
             is None
         )
         assert len(list(db.execute(select(User)).scalars())) == 2
+
+
+# --- the entry point: `crb worker` itself does both at every start --------------------------
+# The tests above call announce_start directly; these drive worker_main.main, so a main()
+# that stopped calling it (no override event, no refusal, no heads) fails here (P-118).
+
+
+def _prod_override_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, by: str) -> list[str]:
+    for key, value in {
+        "CRB_ENV": "prod",
+        "CRB_HOME": str(tmp_path / "home"),
+        "CRB_SANDBOX__EXECUTOR": "local",
+        "CRB_BUILDER__EXECUTOR": "host",
+        "CRB_ALLOW_UNSEALED_PROD": "1",
+        "CRB_ALLOW_UNSEALED_PROD_BY": by,
+        "CRB_ALLOW_UNSEALED_PROD_REASON": REASON,
+    }.items():
+        monkeypatch.setenv(key, value)
+    return [
+        "--database-url",
+        f"sqlite:///{tmp_path / 'crb.db'}",
+        "--home",
+        str(tmp_path / "home"),
+        "--worker-id",
+        "w-main",
+        "--metrics-port",
+        "0",
+        "--once",
+        "--log-format",
+        "json",
+    ]
+
+
+def _override_events(w: Worker) -> list[Event]:
+    with w.factory() as db:
+        return list(
+            db.execute(select(Event).where(Event.action == unsealed_override.ACTION)).scalars()
+        )
+
+
+def test_crb_worker_under_the_override_writes_the_event_and_logs_both_heads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = _prod_override_env(monkeypatch, tmp_path, "root")
+    w = _worker(tmp_path)  # the same store main() opens: create the accounts in it first
+    root_id = _accounts(w)
+    assert worker_main.main(argv) == worker_main.EXIT_IDLE  # started, found no run, left
+    (ev,) = _override_events(w)
+    assert ev.actor == root_id and ev.payload_json["username"] == "root"
+    assert ev.payload_json["process"] == "worker" and ev.payload_json["worker_id"] == "w-main"
+    lines = [json.loads(x) for x in capsys.readouterr().err.splitlines() if x.startswith("{")]
+    (heads,) = [x for x in lines if "ledger heads at worker start" in x.get("msg", "")]
+    # the override's own event is on the trail before the heads are read, so its hash is the head
+    assert heads["events_rows"] == 1 and heads["events_head"] == ev.row_hash
+    assert heads["grades_rows"] == 0
+
+
+@pytest.mark.parametrize(
+    ("name", "why"), [("nobody", "names no account"), ("olive", "only an admin")]
+)
+def test_crb_worker_naming_an_unknown_or_non_admin_account_exits_2_with_nothing_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    name: str,
+    why: str,
+) -> None:
+    argv = _prod_override_env(monkeypatch, tmp_path, name)
+    w = _worker(tmp_path)
+    _accounts(w)
+    assert worker_main.main(argv) == worker_main.EXIT_ERROR
+    err = [json.loads(x) for x in capsys.readouterr().err.splitlines() if x.startswith("{")]
+    assert any("OverrideRefused" in x.get("error", "") and why in x["error"] for x in err)
+    assert _override_events(w) == []
+    assert not any("ledger heads" in x.get("msg", "") for x in err)  # it never started
+
+
+def test_crb_worker_whose_start_cannot_be_recorded_exits_2_with_the_error_as_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A store error while the start is recorded (a lost connection, a lock timeout) is the
+    worker's JSON error and ``EXIT_ERROR``, never a traceback with exit 1 — and it never
+    takes a run unrecorded (P-118)."""
+    from sqlalchemy.exc import OperationalError
+
+    argv = _prod_override_env(monkeypatch, tmp_path, "root")
+    _accounts(_worker(tmp_path))
+
+    def lost(*_a: Any, **_k: Any) -> Any:
+        raise OperationalError("INSERT INTO events", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(worker_main, "record_unsealed_override", lost)
+    assert worker_main.main(argv) == worker_main.EXIT_ERROR
+    err = [json.loads(x) for x in capsys.readouterr().err.splitlines() if x.startswith("{")]
+    assert any("OperationalError" in x.get("error", "") for x in err)
+    assert not any("ledger heads" in x.get("msg", "") for x in err)

@@ -309,9 +309,15 @@ export function PosturePage() {
             `Append-only, hash-chained · ${verify.data.rows} rows · chain intact · false-Q1 ${verify.data.false_q1_total}`
           ) : (
             <>
-              Append-only, hash-chained · {verify.data.rows} rows · chain broken at {verify.data.broken_at ?? '?'} · false-Q1 {verify.data.false_q1_total}.{' '}
+              Append-only, hash-chained · {verify.data.rows} rows · {verify.data.chain_ok ? 'chain intact' : `chain broken at ${verify.data.broken_at ?? '?'}`} · false-Q1 {verify.data.false_q1_total}
+              {verify.data.events.chain_ok ? '' : ` · audit trail broken at event ${verify.data.events.broken_at ?? '?'}`}
+              {verify.data.clean_without_pack > 0 ? ` · ${verify.data.clean_without_pack} clean rows without a pack` : ''}.{' '}
               <NextStep admin={admin} doc={<DocLink to="OPERATOR#6-export-and-verify-the-ledger">Export and verify the ledger (OPERATOR)</DocLink>}>
-                Stop writing and verify the ledger from the export (<code>crb ledger verify</code>); a broken chain is a finding, never repaired in place.
+                {verify.data.events.chain_ok ? (
+                  <>Stop writing and verify the ledger from the export (<code>crb ledger verify</code>); a broken chain is a finding, never repaired in place.</>
+                ) : (
+                  <>Stop writing and verify the store itself (<code>crb ledger verify --store</code>): the export holds the grades only, so it cannot show a break in the audit trail. A broken chain is a finding, never repaired in place.</>
+                )}
               </NextStep>
             </>
           ),
