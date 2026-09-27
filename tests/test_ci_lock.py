@@ -13,8 +13,10 @@ What it is:   The gate on how CI installs Python dependencies and on the fresh-c
 What it does: Fails when a CI job installs the project or a library other than from
               ``uv.lock`` (``uv sync --locked``, or ``uv export --locked`` with
               ``--require-hashes``); when ``uv.lock`` no longer matches the extras
-              ``pyproject.toml`` declares (a dependency added or re-pinned without relocking)
-              or pins a gate tool at another version than ``pyproject.toml``; and when the
+              and dependency groups ``pyproject.toml`` declares (a dependency added or
+              re-pinned without relocking) or pins a gate or reporting tool at another
+              version than ``pyproject.toml``; when a workflow's ``setup-uv`` step lets the
+              installer float (no exact ``version``); and when the
               ``fresh-clone`` job stops running a gate, stops running as root in its own
               clone, or stops proving the docker daemon is gone. Each check is also run on a
               planted regression so it cannot pass vacuously.
@@ -59,11 +61,10 @@ GATES = (
     "npx vitest run",
     '.venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images"',
 )
-#: Tools a job adds beside the locked environment to report on it, never imported by crb.
-REPORTING_TOOLS = frozenset({"pip", "pip-audit", "cyclonedx-bom"})
 
 _UV_SYNC = re.compile(r"\buv sync\b[^\n]*")
 _PIP_INSTALL = re.compile(r"\b(?:uv )?pip install\b[^\n]*")
+_UV_EXPORT = re.compile(r"\buv export\b[^\n]*")
 
 
 def _runs(workflow: dict[str, Any]) -> list[tuple[str, str]]:
@@ -85,15 +86,15 @@ def install_findings(ci_text: str) -> list[str]:
                 findings.append(f"{job}: {m.group(0)!r} resolves instead of reading uv.lock")
         for m in _PIP_INSTALL.finditer(run):
             line = m.group(0)
-            if "--require-hashes -r locked-requirements.txt" in line:
-                if "uv export" not in run or "--locked" not in run.split("uv export", 1)[1]:
-                    findings.append(f"{job}: locked-requirements.txt is not exported --locked")
+            hashed = re.search(r"--require-hashes -r (\S+)", line)
+            if hashed:
+                exported = [e for e in _UV_EXPORT.findall(run) if f"-o {hashed.group(1)}" in e]
+                if not exported or not all("--locked" in e for e in exported):
+                    findings.append(f"{job}: {hashed.group(1)} is not exported --locked")
                 continue
-            words = [w for w in line.split() if not w.startswith("-")]
-            named = words[words.index("install") + 1 :]
-            named = [w for w in named if not w.startswith(".venv") and not w.startswith(".audit")]
-            if not named or any(n not in REPORTING_TOOLS for n in named):
-                findings.append(f"{job}: {line!r} installs from outside uv.lock")
+            # anything else names packages on the command line: none come from the lock
+            # (the reporting tools are in uv.lock's audit and sbom dependency groups)
+            findings.append(f"{job}: {line!r} installs from outside uv.lock")
     return findings
 
 
@@ -126,6 +127,19 @@ def pyproject_requirements(pyproject: dict[str, Any]) -> set[tuple[str, tuple[st
     return out
 
 
+def group_requirements(pyproject: dict[str, Any]) -> set[tuple[str, tuple[str, ...], str, str]]:
+    """``pyproject.toml``'s dependency groups as the lock's ``requires-dev`` records them."""
+    out: set[tuple[str, tuple[str, ...], str, str]] = set()
+    for group, reqs in (pyproject.get("dependency-groups") or {}).items():
+        for req in reqs:
+            m = _PEP508.match(str(req).strip())
+            assert m, req
+            name = m.group(1).lower().replace("_", "-")
+            extras = tuple(sorted(e.strip() for e in (m.group(2) or "").split(",") if e.strip()))
+            out.add((name, extras, m.group(3).replace(" ", ""), f"group {group}"))
+    return out
+
+
 def lock_findings(lock: dict[str, Any], pyproject: dict[str, Any]) -> list[str]:
     """Each way ``uv.lock`` disagrees with ``pyproject.toml``."""
     name = pyproject["project"]["name"]
@@ -134,10 +148,17 @@ def lock_findings(lock: dict[str, Any], pyproject: dict[str, Any]) -> list[str]:
         return [f"uv.lock has {len(roots)} entries for {name}"]
     locked = {_req_key(r) for r in roots[0]["metadata"]["requires-dist"]}
     declared = pyproject_requirements(pyproject)
+    for group, reqs in (roots[0]["metadata"].get("requires-dev") or {}).items():
+        locked |= {(*_req_key(r)[:3], f"group {group}") for r in reqs}
+    declared |= group_requirements(pyproject)
     findings = [f"declared but not locked: {k}" for k in sorted(declared - locked)]
     findings += [f"locked but no longer declared: {k}" for k in sorted(locked - declared)]
     versions = {p["name"]: p.get("version") for p in lock["package"]}
-    for extra in pyproject["project"]["optional-dependencies"].values():
+    pinned = [
+        *pyproject["project"]["optional-dependencies"].values(),
+        *(pyproject.get("dependency-groups") or {}).values(),
+    ]
+    for extra in pinned:
         for req in extra:
             m = re.match(r"^([A-Za-z0-9_.-]+)==(\S+)$", req.strip())
             if m and versions.get(m.group(1)) != m.group(2):
@@ -188,9 +209,59 @@ def test_the_install_check_refuses_a_fresh_resolution() -> None:
     unlocked = CI.read_text(encoding="utf-8").replace("uv sync -q --locked", "uv sync -q", 1)
     assert any("resolves instead of reading uv.lock" in f for f in install_findings(unlocked))
     named = CI.read_text(encoding="utf-8").replace(
-        "uv pip install -q pip pip-audit", "uv pip install -q pip pip-audit sqlalchemy", 1
+        "--only-group audit --no-emit-project -o audit-tools.txt\n",
+        "--only-group audit --no-emit-project -o audit-tools.txt\n"
+        "          uv pip install -q sqlalchemy --python .audit/bin/python\n",
+        1,
     )
     assert any("installs from outside uv.lock" in f for f in install_findings(named))
+    # the reporting tools too: pip-audit's verdict is a gate, so it comes from the lock
+    for tool in ("pip pip-audit", "cyclonedx-bom"):
+        loose = CI.read_text(encoding="utf-8").replace(
+            "run: |\n", f"run: |\n          uv pip install -q {tool} --python .venv/bin/python\n", 1
+        )
+        assert any("installs from outside uv.lock" in f for f in install_findings(loose)), tool
+    unexported = CI.read_text(encoding="utf-8").replace(
+        "uv export -q --locked --only-group audit", "uv export -q --only-group audit", 1
+    )
+    assert any("is not exported --locked" in f for f in install_findings(unexported))
+
+
+WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+_EXACT = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def installer_findings(name: str, text: str) -> list[str]:
+    """Each ``astral-sh/setup-uv`` step that does not pin the installer's own version: a uv
+    release that changes how a lock is read would otherwise turn every ``--locked`` job red
+    on an unchanged tree."""
+    out: list[str] = []
+    for job, body in (yaml.safe_load(text).get("jobs") or {}).items():
+        for step in body.get("steps", []):
+            if str(step.get("uses", "")).startswith("astral-sh/setup-uv@"):
+                version = str((step.get("with") or {}).get("version", ""))
+                if not _EXACT.match(version):
+                    out.append(f"{name}: {job}: setup-uv floats (version {version or 'unset'!r})")
+    return out
+
+
+def test_every_workflow_pins_the_installer() -> None:
+    found = [f for w in WORKFLOWS for f in installer_findings(w.name, w.read_text("utf-8"))]
+    assert found == []
+    assert WORKFLOWS and any("setup-uv" in w.read_text("utf-8") for w in WORKFLOWS)
+
+
+def test_the_installer_check_refuses_a_floating_uv() -> None:
+    text = CI.read_text(encoding="utf-8")
+    pinned = re.search(r'\n( +)version: "\d+\.\d+\.\d+"\n', text)
+    assert pinned, "ci.yml pins no setup-uv version"
+    assert installer_findings("ci.yml", text.replace(pinned.group(0), "\n", 1)) != []
+    assert (
+        installer_findings(
+            "ci.yml", text.replace(pinned.group(0), f'\n{pinned.group(1)}version: "latest"\n', 1)
+        )
+        != []
+    )
 
 
 def test_the_lock_matches_pyproject_and_pins_the_gate_tools() -> None:
@@ -199,6 +270,8 @@ def test_the_lock_matches_pyproject_and_pins_the_gate_tools() -> None:
     assert lock_findings(lock, pyproject) == []
     versions = {p["name"]: p.get("version") for p in lock["package"]}
     for tool in ("ruff", "mypy", "pytest", "import-linter", "markdown-it-py", "sqlalchemy"):
+        assert versions.get(tool), f"uv.lock pins no {tool}"
+    for tool in ("pip", "pip-audit", "cyclonedx-bom"):  # the reporting tools, by group
         assert versions.get(tool), f"uv.lock pins no {tool}"
 
 
@@ -212,6 +285,12 @@ def test_the_lock_check_refuses_a_dependency_added_without_relocking() -> None:
     dev[:] = ["ruff==0.0.1" if d.startswith("ruff==") else d for d in dev]
     findings = lock_findings(lock, pyproject)
     assert any("ruff is pinned 0.0.1 in pyproject.toml but locked at" in f for f in findings)
+    pyproject = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    pyproject["dependency-groups"]["audit"] = ["pip==26.2.1", "pip-audit==0.0.1"]
+    findings = lock_findings(lock, pyproject)
+    assert any("pip-audit is pinned 0.0.1 in pyproject.toml but locked at" in f for f in findings)
+    pyproject["dependency-groups"]["sbom"].append("rich>=13")
+    assert any("declared but not locked" in f for f in lock_findings(lock, pyproject))
 
 
 def test_the_fresh_clone_job_runs_every_gate_as_root_without_docker() -> None:

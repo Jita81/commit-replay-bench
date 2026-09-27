@@ -54,6 +54,7 @@
 #                  Playwright report + traces are uploaded on failure
 #
 # Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
+# The installer itself is pinned too: every setup-uv step names the same exact uv version.
 # Every Python install reads uv.lock (`uv sync --locked`, or `uv export --locked` with
 # hashes), which pins every package the extras reach by version and hash; `--locked` fails
 # the job when pyproject.toml has moved and the lock was not regenerated
@@ -97,6 +98,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -118,6 +120,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -178,6 +181,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -201,6 +205,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -232,6 +237,7 @@ jobs:
           fetch-depth: 0 # fixture replays and mining tests walk git history
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: ${{ matrix.python }}
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -286,6 +292,7 @@ jobs:
       # no cache: root fills its own, and a root-owned cache is one the runner could not save
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           enable-cache: false
       - uses: actions/setup-node@v7
         with:
@@ -419,6 +426,7 @@ jobs:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -430,7 +438,10 @@ jobs:
           uv export -q --locked --all-extras --no-emit-project -o locked-requirements.txt
           uv venv -q .audit --python 3.12
           uv pip install -q --require-hashes -r locked-requirements.txt --python .audit/bin/python
-          uv pip install -q pip pip-audit --python .audit/bin/python
+          # pip and pip-audit from uv.lock's audit group, by version and hash: the audit's
+          # verdict is a gate, so its tool does not move with a release nobody chose
+          uv export -q --locked --only-group audit --no-emit-project -o audit-tools.txt
+          uv pip install -q --require-hashes -r audit-tools.txt --python .audit/bin/python
       - name: Record the resolved environment
         run: |
           uv pip freeze --python .audit/bin/python > resolved-requirements.txt
@@ -460,13 +471,13 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install the resolved environment (every extra) + cyclonedx-bom
         run: |
-          uv sync -q --locked --python 3.12 --extra openai --extra claude --extra server --extra postgres --extra dev
-          uv pip install -q cyclonedx-bom --python .venv/bin/python
+          uv sync -q --locked --python 3.12 --extra openai --extra claude --extra server --extra postgres --extra dev --group sbom
       - name: Generate SBOM (CycloneDX JSON of the environment; root component from pyproject)
         run: >-
           .venv/bin/cyclonedx-py environment
@@ -508,6 +519,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -681,6 +693,7 @@ jobs:
           cache: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -729,6 +742,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
