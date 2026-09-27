@@ -148,6 +148,8 @@ jobs:
           load: true
           tags: crb:release-candidate
           labels: ${{ steps.meta.outputs.labels }}
+          # the served-commit stamp (src/crb/observability/build_stamp.py): the context has no .git
+          build-args: CRB_SOURCE_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true
 
@@ -202,6 +204,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: CRB_SOURCE_COMMIT=${{ github.sha }}  # identical to the candidate's: a cache hit
           # SLSA provenance + BuildKit's own SBOM attestation, attached to the image index.
           provenance: mode=max
           sbom: true

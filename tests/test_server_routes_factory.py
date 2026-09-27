@@ -29,7 +29,8 @@ Works with:   src/crb/server/routes/factory.py (under test), src/crb/server/fact
               src/crb/factory/readiness.py (slots), tests/fixtures/server_seed.py (the app),
               tests/test_server_github_app.py (``FakeGitHub`` plays the pulls API)
 Tested by:    tests/test_server_routes_factory.py
-Touch when:   a factory route or a field of the task view changes (docs/API.md first).
+Touch when:   never for a new repository; a factory route or a field of the task view changes
+              (docs/API.md first).
 """
 
 from __future__ import annotations
@@ -95,6 +96,9 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
         if key.startswith("CRB_"):
             monkeypatch.delenv(key, raising=False)
+    # POST /runs refuses a builder whose key variable is unset (P-003): the OpenAI-compatible
+    # builders' key is PRESENT here — a placeholder, never a real key
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk-test-placeholder-not-a-key")
 
 
 @pytest.fixture

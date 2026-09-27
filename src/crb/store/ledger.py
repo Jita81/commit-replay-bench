@@ -73,6 +73,7 @@ from crb.core.review import (
     REFUSAL_ROW_NOT_FOUND,
     ReviewRecord,
     ReviewRefused,
+    check_mergeable_statement,
     check_review_anchor,
     pack_is_authentic,
     verify_review_chain,
@@ -272,8 +273,11 @@ class DbReviewLedger:
         ``pack`` is optional: the stored pack is the anchor; a caller's copy is only
         accepted in its place when it is self-certifying for the row's hash, and is
         refused when it is not the row's. A record with a verdict whose row has no
-        stored (or supplied, authentic) pack is refused — ``no_diff_in_pack``.
+        stored (or supplied, authentic) pack is refused — ``no_diff_in_pack``. A record
+        whose ``mergeable`` answer contradicts its own statement is refused first —
+        ``mergeable_contradicts_statement`` (:func:`check_mergeable_statement`).
         """
+        check_mergeable_statement(record)
         with self._factory() as s:
             g = s.execute(
                 select(Grade).where(Grade.row_hash == record.grade_row_hash)

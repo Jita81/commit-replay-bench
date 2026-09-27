@@ -19,18 +19,19 @@ spec:
       {{- include "crb.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: api
   template:
+    {{- $labels := printf "%s\napp.kubernetes.io/component: api\n%s" (include "crb.selectorLabels" .) (include "crb.secretsStore.podLabel" .) }}
+    {{- /* Roll the pods when configuration changes. */}}
+    {{- $annotations := printf "checksum/config: %s" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum) }}
     metadata:
       labels:
-        {{- include "crb.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: api
-        {{- with .Values.api.podLabels }}
-        {{- toYaml . | nindent 8 }}
+        {{- $labels | nindent 8 }}
+        {{- with include "crb.podExtra" (dict "owned" $labels "extra" .Values.api.podLabels "what" "api.podLabels") }}
+        {{- . | nindent 8 }}
         {{- end }}
       annotations:
-        # Roll the pods when configuration changes.
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- with .Values.api.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
+        {{- $annotations | nindent 8 }}
+        {{- with include "crb.podExtra" (dict "owned" $annotations "extra" .Values.api.podAnnotations "what" "api.podAnnotations") }}
+        {{- . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "crb.serviceAccountName" . }}
@@ -95,10 +96,13 @@ spec:
             {{- include "crb.scratchMounts" . | nindent 12 }}
             - name: data
               mountPath: /srv/crb
+            {{- include "crb.secretsStore.mount" . | nindent 12 }}
       volumes:
         {{- include "crb.scratchVolumes" . | nindent 8 }}
-        # The API keeps nothing durable on disk (evidence lives in the database);
-        # this is scratch for exports.
+        {{- /* the secrets store the worker reads (CRB_SECRETS_DIR): one claim for both pods */}}
+        {{- include "crb.secretsStore.volume" . | nindent 8 }}
+        # Scratch for exports. Evidence lives in the database; the stored credentials live
+        # in the secrets store above, never here.
         - name: data
           emptyDir:
             sizeLimit: 1Gi
@@ -110,9 +114,8 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.api.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
+      {{- with include "crb.secretsStore.affinity" (dict "root" $ "affinity" .Values.api.affinity "labels" (merge ($labels | fromYaml) (.Values.api.podLabels | default dict)) "what" "api") }}
+      {{- . | nindent 6 }}
       {{- end }}
 ---
 {{- if .Values.api.podDisruptionBudget.enabled }}

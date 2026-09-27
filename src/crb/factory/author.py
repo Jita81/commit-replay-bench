@@ -45,7 +45,8 @@ What it is:   The configurable test-author rung — a ``TestAuthor`` that writes
               ``builder:model[:provider]`` spelling as a build rung.
 What it does: Turns a rung label into a test author whose identity the loop's existing
               refusal compares against every build rung (the author and a build rung are
-              never the same rung, nor the same model — C3); asks one OpenAI-compatible model for a single test
+              never the same rung, nor the same model — C3); asks one OpenAI-compatible model for a
+              single test
               file in the repository's own conventions, re-asking on a reply it cannot parse
               or a path the repository does not call a test, and refuses to return anything
               else.
@@ -67,9 +68,9 @@ Works with:   src/crb/factory/testfirst.py (the ``TestAuthor`` protocol, ``autho
               label space), src/crb/server/worker.py (the served deployment's setting and
               per-run override)
 Tested by:    tests/test_factory_author.py, tests/test_worker_test_author.py
-Touch when:   another authoring process is added (a second ``TestAuthor`` and a way to name
-              it); the reply format changes (``parse_authored`` and its test move together);
-              never for a new repository — the test layout comes from the repo config.
+Touch when:   never for a new repository — the test layout comes from the repo config; another
+              authoring process is added (a second ``TestAuthor`` and a way to name it); the reply
+              format changes (``parse_authored`` and its test move together).
 Claims:       An authored test is never trusted on the author's say-so; it is proven RED at
               the base and re-checked by belt 1 (docs/EVIDENCE-AND-CLAIMS.md). [measured]
               claims about author quality belong to the ledger, not to this module.
@@ -84,7 +85,13 @@ from typing import Any
 from crb.builders import builder_names
 from crb.builders.adapter import parse_rung_label
 from crb.builders.base import Rung, emit
-from crb.builders.openai_client import ChatFn, ChatReply, EndpointConfig, make_chat
+from crb.builders.openai_client import (
+    ChatFn,
+    ChatReply,
+    EndpointConfig,
+    make_chat,
+    resolved_endpoint,
+)
 from crb.core.spec import RepoConfig
 from crb.core.workspace import Workspace
 from crb.factory.backlog import BacklogItem
@@ -244,7 +251,7 @@ class RungTestAuthor:
         self.name = name.strip()
         self.model = model.strip()
         self.endpoint = endpoint
-        self.provider = provider or (endpoint.provider if endpoint else "cerebras")
+        self.provider = provider or resolved_endpoint(endpoint).provider
         self._chat_fn = chat_fn
         self.attempts = attempts
         self.max_examples = max_examples

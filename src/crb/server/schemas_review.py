@@ -214,9 +214,39 @@ class RetainedArtefactStatus(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
+class MergeableCorrectionRequest(BaseModel):
+    """``POST /reviews/corrections/mergeable``: ``apply: false`` (the default) lists what
+    would be appended; ``apply: true`` appends it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    apply: bool = False
+
+
+class MergeableCorrectionOut(BaseModel):
+    """One standing review whose ``mergeable`` flag contradicts its own statement, and
+    (when applied) the review id of the appended correction."""
+
+    review_id: str
+    grade_row_hash: str
+    repo: str
+    task_id: str
+    stored_mergeable: bool | None
+    statement_says: bool
+    correction_review_id: str = ""
+
+
+class MergeableCorrectionsOut(BaseModel):
+    applied: bool
+    corrections: list[MergeableCorrectionOut]
+
+
 __all__ = [
     "FindingIn",
     "FindingOut",
+    "MergeableCorrectionOut",
+    "MergeableCorrectionRequest",
+    "MergeableCorrectionsOut",
     "RetainedArtefactStatus",
     "ReviewCellStatsOut",
     "ReviewCreateRequest",

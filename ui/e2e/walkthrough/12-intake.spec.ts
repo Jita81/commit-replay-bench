@@ -32,7 +32,8 @@
  * How:          support.ts's `test` fixture, which has ALREADY signed in as the admin —
  *               calling `signIn` again would go to /login, which redirects an authenticated
  *               person away, and wait for a form that never renders; a viewer persona in its
- *               own context for the role gate; `POST /factory/{repo}/intake/poll` through the
+ *               own context for the role gate (`ensurePersona` makes the account, so the spec
+ *               never relies on 11-screens); `POST /factory/{repo}/intake/poll` through the
  *               UI buttons; and Node's `fs` to write and read the fake board — the tracker's
  *               whole state.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -45,10 +46,11 @@
  *               src/crb/server/intake.py (the flow), scripts/walkthrough.sh (the stack),
  *               tests/test_server_routes_intake.py (the same journey at the API)
  * Tested by:    scripts/walkthrough.sh (runs it, tier 1)
- * Touch when:   a label or a stop reason is added; the screen's act labels change.
+ * Touch when:   never for a new repository (intake reads the fake board, tier 1 only); a label
+ *               or a stop reason is added; the screen's act labels change.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
-import { env, expect, primary, test } from './support'
+import { ensurePersona, env, expect, personaPassword, primary, signIn, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -215,10 +217,11 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
     expect(commentText()).toContain('Commit Replay Bench')
   })
 
-  test('a viewer can read the column but cannot switch the listener or re-read it', async ({ browser }) => {
+  test('a viewer can read the column but cannot switch the listener or re-read it', async ({ page: admin, browser }) => {
+    // this spec owns its viewer: it must not rely on 11-screens (another CI job) having made one
+    await ensurePersona(admin, 'walk-viewer', 'viewer')
     const ctx = await browser.newContext()
     const page = await ctx.newPage()
-    const { personaPassword, signIn } = await import('./support')
     await signIn(page, 'walk-viewer', personaPassword('walk-viewer'))
     await page.goto(`/factory/intake?repo=${REPO}`)
     await expect(page.getByText(/Only an operator can switch the listener/)).toBeVisible()

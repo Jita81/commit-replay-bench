@@ -30,7 +30,8 @@ What it is:   The ``claude setup-token`` PTY driver — the only process that ev
 What it does: Runs the CLI, publishes the sign-in URL, types the pasted code, stores the
               token, reports state; gives up at the session TTL (``expired``) or on SIGTERM
               (``cancelled``); exits on its own.
-How:          ``cli_environment`` → ``pty.fork`` + ``execvpe`` → non-blocking reads → ``URL_RE`` / ``TOKEN_RE`` over a stripped
+How:          ``cli_environment`` → ``pty.fork`` + ``execvpe`` → non-blocking reads → ``URL_RE`` /
+              ``TOKEN_RE`` over a stripped
               buffer → ``SecretsStore.set``; ``status.json`` written atomically, mode 0600.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         none
@@ -41,10 +42,10 @@ Works with:   src/crb/server/claude_login.py (the broker that spawns and reads t
 Tested by:    tests/test_server_claude_login.py (a fake ``claude`` script replays the CLI's
               transcript: URL, paste prompt, token — and the failure wordings; another dumps
               the environment it was given)
-Touch when:   the CLI changes its sign-in transcript (the URL host/path, the paste prompt, the
-              token prefix) or needs another variable to run (add it to ``CLI_PASSTHROUGH``
-              or ``CLI_NETWORK_PASSTHROUGH`` with the reason, never the whole environment);
-              never for a new repository.
+Touch when:   never for a new repository; the CLI changes its sign-in transcript (the URL host/path,
+              the paste prompt, the token prefix) or needs another variable to run (add it to
+              ``CLI_PASSTHROUGH`` or ``CLI_NETWORK_PASSTHROUGH`` with the reason, never the whole
+              environment).
 """
 
 from __future__ import annotations

@@ -84,6 +84,7 @@ from crb.builders.openai_client import (
     EndpointConfig,
     MissingCredential,
     make_chat,
+    resolved_endpoint,
 )
 from crb.core.classify import (
     IntentLabel,
@@ -215,7 +216,7 @@ class OpenAILabeller:
             raise ValueError("an OpenAI-compatible labeller needs a model")
         self.model = model.strip()
         self.endpoint = endpoint
-        self.provider = provider or (endpoint.provider if endpoint else "cerebras")
+        self.provider = provider or resolved_endpoint(endpoint).provider
         self._chat_fn = chat_fn
         self.max_tokens = max_tokens
         self.temperature = temperature
@@ -241,7 +242,7 @@ class OpenAILabeller:
     def _chat(self) -> ChatFn:
         """The chat callable, built lazily so construction needs no credential."""
         if self._chat_fn is None:
-            ep = self.endpoint or EndpointConfig.from_env()
+            ep = resolved_endpoint(self.endpoint)
             self._chat_fn = make_chat(
                 self.model, ep, max_tokens=self.max_tokens, temperature=self.temperature
             ).text

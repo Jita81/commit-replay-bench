@@ -18,8 +18,8 @@
  * Works with:   ui/src/screens/Routing/RoutingPage.tsx (the code under test),
  *               ui/src/screens/Capability/contract.ts (the fixture shapes), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx
- * Touch when:   a reason code or policy threshold is added — extend the fixture and the
- *               rule-text assertion.
+ * Touch when:   never for a new repository; a reason code or policy threshold is added — extend the
+ *               fixture and the rule-text assertion.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -123,7 +123,7 @@ describe('RoutingPage — reason codes, the controls verdict and the split (A2)'
     // the split and the model rate travel with each decision
     const splits = screen.getAllByTestId('failure-split')
     expect(splits.map((s) => s.getAttribute('aria-label'))).toEqual(
-      expect.arrayContaining(['red 2, lint 0, budget 0, protocol 0, harness 0, outage 0, DQ 0', 'red 1, lint 0, budget 0, protocol 0, harness 1, outage 0, DQ 0']),
+      expect.arrayContaining(['red 2, lint 0, api 0, budget 0, protocol 0, harness 0, outage 0, DQ 0', 'red 1, lint 0, api 0, budget 0, protocol 0, harness 1, outage 0, DQ 0']),
     )
     const models = screen.getAllByTestId('model-point').map((m) => m.textContent)
     // the model rate keeps its n and, when served, its interval (the second decision has

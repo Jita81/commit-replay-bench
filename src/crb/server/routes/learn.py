@@ -63,6 +63,7 @@ from crb.core.routing import DEFAULT_POLICY
 from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
+from crb.server.routes.capability import CHECKS_CURRENT, rows_for_arm
 from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
 from crb.store.ledger import DbLedger
@@ -142,7 +143,8 @@ def learn_strengthen(
             f"unknown projection {by!r}",
             detail={"allowed": sorted(PROJECTIONS)},
         )
-    rows = list(DbLedger(factory).rows(repo=repo))
+    # the repository's own checks arm: a cell never pools two arms (ADR-0024)
+    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
     controls = latest_controls_verdict(db, repo)
     cmap = build_capability_map(
         rows, projection=PROJECTIONS[by], policy=DEFAULT_POLICY, controls=controls
@@ -171,7 +173,8 @@ def learn_remeasure(
 ) -> dict[str, Any]:
     del viewer
     get_repo_or_404(db, repo)
-    rows = list(DbLedger(factory).rows(repo=repo))
+    # the arm the repository grades under now: a cell never pools two arms (ADR-0024)
+    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
     # each task's CURRENT label: a stale task that was relabelled since would put its new
     # rows in another cell, so the plan leaves it out and names it (decider pass 2, §3)
     labels = {

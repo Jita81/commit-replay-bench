@@ -14,7 +14,9 @@
  *               typed caps (omitted when all blank), that the blind sweep preset replaces the
  *               ladder with three object rungs at 25 → 50 → 100 tool calls, that object rungs
  *               follow the labels with provider and typed caps only, and that an empty
- *               ladder or an incomplete rung blocks submit.
+ *               ladder or an incomplete rung blocks submit; and that a submit the server
+ *               refuses for a builder with no credential (`builder_credential_missing`,
+ *               docs/PREVENTION.md P-003) shows the refusal with its fix and creates nothing.
  * How:          `mockApi` records the POST body; `userEvent` drives the form; assertions on
  *               the body and the field errors.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -88,6 +90,36 @@ describe('RunNewDialog', () => {
       builder_config: { auth: 'cli', effort: 'high' },
     })
     await waitFor(() => expect(onCreated).toHaveBeenCalled())
+  })
+
+  it('a submit refused for a builder with no credential shows the refusal and its fix, and nothing is created', async () => {
+    // P-003 (docs/PREVENTION.md): run 8d9c5e55 queued claude_code on the default api_key auth
+    // with no key and failed nine attempts at $0; POST /runs now refuses it at submit
+    const user = userEvent.setup()
+    const onCreated = vi.fn()
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'POST /runs': () =>
+        json(
+          {
+            error: {
+              code: 'builder_credential_missing',
+              message: "the claude_code builder with auth 'api_key' needs ANTHROPIC_API_KEY in the worker's environment and it is not set — set it, or choose auth 'cli' (builder config {\"auth\": \"cli\"}) to use the stored Claude Code login — nothing was queued",
+              detail: { builder: 'claude_code', auth: 'api_key' },
+            },
+          },
+          422,
+        ),
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" onCreated={onCreated} />)
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByText('No credential for this builder — nothing was queued')).toBeInTheDocument()
+    expect(within(alert).getByText(/needs ANTHROPIC_API_KEY/)).toBeInTheDocument()
+    expect(within(alert).getByText(/builder_credential_missing/)).toBeInTheDocument()
+    expect(onCreated).not.toHaveBeenCalled()
   })
 
   it('omits builder_config when the editor is blank', async () => {

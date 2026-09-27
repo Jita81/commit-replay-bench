@@ -42,6 +42,14 @@ over a ``regression``. ``mergeable`` is the reviewer's separate answer to "would
 maintainer merge this as-is" (``None`` = not answered); a ``regression`` finding
 refuses ``mergeable=True`` — a known regression is never mergeable.
 
+**The mergeable answer agrees with the words** (2026-09-25). A record whose statement
+answers "would a maintainer merge this" (:func:`statement_mergeable` — "Mergeable as-is.",
+"NOT mergeable") while its ``mergeable`` flag says otherwise, or nothing, is refused at
+append by both ledgers (:func:`check_mergeable_statement`, ``mergeable_contradicts_statement``);
+two stored reviews did exactly that. Construction does not refuse it, so stored records
+stay readable; :func:`mergeable_flag_corrections` builds the APPENDED corrections that
+supersede them.
+
 Reviews are governance evidence and are kept forever (``docs/DATA-RETENTION.md``).
 A later review of the same row is a new record; the latest per row is the standing
 verdict (:func:`latest_reviews`), which :func:`review_cell_stats` joins onto the
@@ -86,6 +94,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -165,6 +174,7 @@ REFUSAL_ROW_NOT_FOUND = "row_not_found"
 REFUSAL_ROW_MISMATCH = "row_mismatch"
 REFUSAL_PACK_MISMATCH = "pack_hash_mismatch"
 REFUSAL_PACK_REQUIRED = "pack_required"
+REFUSAL_MERGEABLE_CONTRADICTS = "mergeable_contradicts_statement"
 
 
 def is_sha256(value: str) -> bool:
@@ -447,6 +457,116 @@ def check_review_anchor(
 
 
 # ---------------------------------------------------------------------------
+# The mergeable answer must agree with the statement (the 2026-09-25 flag defect)
+# ---------------------------------------------------------------------------
+
+#: The words that may stand between a negation and ``mergeable`` and keep it one ("not
+#: YET mergeable", "never BE mergeable", "isn't QUITE mergeable"). Any other word breaks
+#: it: "not ONLY mergeable" and "never seen MORE mergeable" affirm (CodeRabbit, PR #57).
+_NEGATION_KEEPS = (
+    "be|been|yet|really|quite|currently|entirely|fully|safely|cleanly|directly|"
+    "immediately|obviously|necessarily|straightforwardly"
+)
+#: A statement that says the change is NOT mergeable ("NOT mergeable as-is", "never
+#: mergeable", "wouldn't be mergeable", "unmergeable"). Checked first: a negation wins.
+_NOT_MERGEABLE = re.compile(
+    rf"(?:\bnot|\bnever|n['\u2019]t)\s+(?:(?:{_NEGATION_KEEPS})\s+){{0,2}}mergeable\b"
+    r"|\b(?:un|non-?)mergeable\b",
+    re.IGNORECASE,
+)
+#: A sentence that asserts the change IS mergeable: one that opens with the word
+#: ("Mergeable as-is.", "Mergeable.") or says "is / are / looks mergeable".
+_OPENS_MERGEABLE = re.compile(r"^\W*mergeable\b", re.IGNORECASE)
+_IS_MERGEABLE = re.compile(r"\b(?:is|are|looks|judged)\s+mergeable\b", re.IGNORECASE)
+_SENTENCE_END = re.compile(r"(?<=[.;!?])\s+")
+
+
+def statement_mergeable(statement: str) -> bool | None:
+    """What a review's words say about "would a maintainer merge this as-is":
+    ``False`` when any clause says it is not; ``True`` when a sentence asserts it is;
+    ``None`` when the words do not answer (a question is not an answer). Deterministic —
+    the rule the write boundary holds the ``mergeable`` flag to."""
+    if _NOT_MERGEABLE.search(statement):
+        return False
+    for sentence in _SENTENCE_END.split(statement):
+        s = sentence.strip()
+        if not s or s.endswith("?"):
+            continue
+        if _OPENS_MERGEABLE.search(s) or _IS_MERGEABLE.search(s):
+            return True
+    return None
+
+
+def check_mergeable_statement(record: ReviewRecord) -> None:
+    """Refuse a review whose ``mergeable`` answer contradicts, or omits, what its own
+    statement says (:func:`statement_mergeable`).
+
+    The 2026-09-25 value baseline found 2 of 10 stored reviews whose statement reads
+    "Mergeable." but whose flag is ``false``: the write boundary took the flag and the
+    words as two unrelated inputs, so a client that set one and wrote the other stored a
+    contradiction every count of mergeable patches then read. Applied at append (both
+    ledgers), never at construction, so the two stored records stay readable — they are
+    superseded by an appended correction (:func:`mergeable_flag_corrections`)."""
+    if not record.reviewed:
+        return
+    said = statement_mergeable(record.statement)
+    if said is None or record.mergeable is said:
+        return
+    raise ReviewRefused(
+        f"the statement says the change is {'mergeable' if said else 'not mergeable'} but "
+        f"the mergeable answer is {record.mergeable!r} — answer the mergeable question the "
+        "way the statement does, or reword the statement",
+        code=REFUSAL_MERGEABLE_CONTRADICTS,
+        expected=said,
+        observed=record.mergeable,
+    )
+
+
+def mergeable_flag_corrections(
+    records: Iterable[ReviewRecord], *, corrector: str
+) -> list[ReviewRecord]:
+    """The APPEND-ONLY corrections for standing reviews whose flag contradicts their own
+    statement: for each, a new record on the same row — same findings, verdict, patch
+    hash and pack — whose ``mergeable`` is what the statement says, whose statement names
+    the review it corrects and quotes the original, and whose reviewer is ``corrector``
+    (the person applying the correction). Nothing is edited; :func:`latest_reviews` then
+    reads the correction as the standing verdict. A statement that says mergeable over a
+    ``regression`` finding is left alone (a regression is never mergeable). Idempotent: a
+    row whose standing record already agrees is skipped."""
+    out: list[ReviewRecord] = []
+    for rec in latest_reviews(records).values():
+        if not rec.reviewed:
+            continue
+        said = statement_mergeable(rec.statement)
+        if said is None or rec.mergeable is said:
+            continue
+        if said and any(f.kind == VERDICT_REGRESSION for f in rec.findings):
+            continue
+        note = (
+            f"Flag correction, appended: review {rec.review_id} by {rec.reviewer} "
+            f"({rec.created}) stored the mergeable answer as {rec.mergeable!r} while its "
+            f"statement answers {'yes' if said else 'no'}. Nothing else changes. "
+            f"The statement as written: {rec.statement}"
+        )
+        out.append(
+            ReviewRecord(
+                grade_row_hash=rec.grade_row_hash,
+                repo=rec.repo,
+                task_id=rec.task_id,
+                reviewer=corrector,
+                statement=note,
+                verdict=rec.verdict,
+                findings=rec.findings,
+                mergeable=said,
+                patch_sha256_reviewed=rec.patch_sha256_reviewed,
+                evidence_pack_hash=rec.evidence_pack_hash,
+                apparatus_version=rec.apparatus_version,
+            )
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # JSONL ledger (append-only, hash-chained)
 # ---------------------------------------------------------------------------
 
@@ -496,6 +616,7 @@ class JsonlReviewLedger:
         otherwise), and ``row`` is checked whenever the caller has it. There is no
         unchecked path: a verdict without its pack is refused, never chained.
         """
+        check_mergeable_statement(record)
         check_review_anchor(record, pack=pack, row=row)
         chained = record.chained(self._last_hash())
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -671,6 +792,7 @@ def review_cell_stats(
 __all__ = [
     "DEFECT_VERDICTS",
     "FINDING_KINDS",
+    "REFUSAL_MERGEABLE_CONTRADICTS",
     "REFUSAL_NO_DIFF_IN_PACK",
     "REFUSAL_PACK_MISMATCH",
     "REFUSAL_PACK_REQUIRED",
@@ -693,13 +815,16 @@ __all__ = [
     "ReviewCellStats",
     "ReviewRecord",
     "ReviewRefused",
+    "check_mergeable_statement",
     "check_patch_anchor",
     "check_review_anchor",
     "derive_verdict",
     "is_sha256",
     "latest_reviews",
+    "mergeable_flag_corrections",
     "pack_diff_sha256",
     "pack_is_authentic",
     "review_cell_stats",
+    "statement_mergeable",
     "verify_review_chain",
 ]

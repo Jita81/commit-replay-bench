@@ -79,19 +79,24 @@ from crb.core.review import (
     ReviewRecord,
     ReviewRefused,
     derive_verdict,
+    latest_reviews,
+    mergeable_flag_corrections,
     pack_diff_sha256,
     review_cell_stats,
 )
 from crb.observability.events import StepStatus
-from crb.server.auth import OperatorDep, ViewerDep
+from crb.server.auth import AdminDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
-from crb.server.routes.capability import parse_by
+from crb.server.routes.capability import CHECKS_CURRENT, parse_by, rows_for_arm
 from crb.server.routes.grades import grade_to_dict
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.schemas import Page, PageDep
 from crb.server.schemas_review import (
     FindingOut,
+    MergeableCorrectionOut,
+    MergeableCorrectionRequest,
+    MergeableCorrectionsOut,
     ReviewCellStatsOut,
     ReviewCreateRequest,
     ReviewOut,
@@ -351,6 +356,8 @@ def reviews_stats(
             detail={"repo": repo},
         ) from exc
     reviews = list(DbReviewLedger(factory).records(repo=repo))
+    # the cells the map beside it shows: the repository's own checks arm (ADR-0024)
+    rows = rows_for_arm(factory, repo, rows, CHECKS_CURRENT)
     cells = review_cell_stats(rows, reviews, projection=projection)
     return ReviewStatsOut(
         repo=repo,
@@ -504,10 +511,81 @@ def create_review(
     return _outs(db, [m])[0]
 
 
+@router.post(
+    "/reviews/corrections/mergeable",
+    response_model=MergeableCorrectionsOut,
+    responses={401: _ERR, 403: _ERR, 422: _ERR},
+    summary="List (apply=false) or append (apply=true, admin) corrections for reviews whose mergeable flag contradicts their statement",
+)
+def correct_mergeable_flags(
+    body: MergeableCorrectionRequest, admin: AdminDep, db: DbDep, factory: SessionFactoryDep
+) -> MergeableCorrectionsOut:
+    """The one-off correction path for the 2026-09-25 flag defect. Nothing is edited: each
+    correction is a NEW review on the same row (same findings, verdict and patch hash; the
+    statement quotes the original and names it), appended through the same ledger and
+    anchor as ``POST /reviews``, so the standing verdict per row becomes the corrected
+    one and the original stays in the chain. ``apply: false`` only lists them.
+    Idempotent: a second apply finds nothing to correct. Each correction and its
+    ``review.corrected`` event are committed together, one by one: a refusal part-way
+    (422) leaves the ones before it applied WITH their evidence, and a second apply picks
+    up the rest."""
+    ledger = DbReviewLedger(factory)
+    records = list(ledger.records())
+    standing = latest_reviews(records)
+    out: list[MergeableCorrectionOut] = []
+    for correction in mergeable_flag_corrections(records, corrector=admin.id):
+        original = standing[correction.grade_row_hash]
+        correction_id = ""
+        if body.apply:
+            try:
+                chained = ledger.append(correction)
+            except ReviewRefused as exc:
+                raise ApiError(
+                    422,
+                    CODE_REFUSED,
+                    str(exc),
+                    detail={"code": exc.code, "review_id": original.review_id},
+                ) from exc
+            correction_id = chained.review_id
+            append_system_event(
+                db,
+                trace_id=system_trace_id("reviews", correction.repo),
+                action="review.corrected",
+                repo=correction.repo,
+                actor=admin.id,
+                task_id=correction.task_id,
+                payload={
+                    "corrects": original.review_id,
+                    "review_id": chained.review_id,
+                    "grade_row_hash": correction.grade_row_hash,
+                    "field": "mergeable",
+                    "stored": original.mergeable,
+                    "corrected": correction.mergeable,
+                    "row_hash": chained.row_hash,
+                },
+            )
+            # the correction is already on the review chain (its own commit): its evidence
+            # event is committed with it, so a later refusal cannot drop it
+            db.commit()
+        out.append(
+            MergeableCorrectionOut(
+                review_id=original.review_id,
+                grade_row_hash=original.grade_row_hash,
+                repo=original.repo,
+                task_id=original.task_id,
+                stored_mergeable=original.mergeable,
+                statement_says=bool(correction.mergeable),
+                correction_review_id=correction_id,
+            )
+        )
+    return MergeableCorrectionsOut(applied=body.apply, corrections=out)
+
+
 __all__ = [
     "CODE_FALSE_Q1",
     "CODE_REFUSED",
     "REVIEW_FIELDS",
+    "correct_mergeable_flags",
     "review_body_from_stored",
     "review_hash_from_stored",
     "review_out",

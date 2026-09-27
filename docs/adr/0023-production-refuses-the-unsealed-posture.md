@@ -1,6 +1,6 @@
 # ADR-0023 — Production refuses the unsealed posture unless an evented override says so
 
-**Status:** Proposed
+**Status:** Proposed (DL-056)
 **Date:** 2026-09-25
 **Apparatus impact:** none (no belt, size, class, route or threshold changes meaning; a run
 produced under the override is marked on its apparatus as `unsealed_prod_override`, so it is

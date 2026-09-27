@@ -55,6 +55,7 @@ from crb.cli.commands import (
     table,
     workdir_of,
 )
+from crb.core.checks import ARMS
 from crb.core.federated import export_abstract
 from crb.core.ledger import (
     CELL_FIELDS,
@@ -64,6 +65,7 @@ from crb.core.ledger import (
     cell_stats,
     false_q1_total,
     group_by_cell,
+    rows_for_checks,
 )
 from crb.core.legacy import (
     CENSUS_PROVENANCE,
@@ -361,13 +363,20 @@ def cmd_stats(args: argparse.Namespace) -> int:
     ledger = _ledger(args)
     rows = list(ledger.rows())
     fields = _group_fields(args.by)
-    groups = group_by_cell(rows, key_fields=fields)
+    # one cell per key AND checks arm: rows graded with the format step or belt 6 on are
+    # never pooled with rows graded without (ADR-0024)
+    groups = [
+        (arm, key, rs)
+        for arm in ARMS
+        for key, rs in sorted(group_by_cell(rows_for_checks(rows, arm), key_fields=fields).items())
+    ]
     stats: list[dict[str, Any]] = []
-    for key, rs in sorted(groups.items()):
+    for arm, key, rs in groups:
         s = cell_stats(rs)
         d: dict[str, Any] = dict(zip(fields, key, strict=True))
         d.update(
             {
+                "checks": arm,
                 "n": s.n,
                 "clean": s.clean,
                 "point": round(s.point, 4),
@@ -416,6 +425,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
             "fq1",
             "belts",
             "apparatus",
+            "checks",
         ]
         body = [
             [
@@ -430,6 +440,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 d["false_q1"],
                 "+".join(d["belt_sets"]),
                 "+".join(d["apparatus_versions"]),
+                d["checks"],
             ]
             for d in stats
         ]

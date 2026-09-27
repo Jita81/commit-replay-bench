@@ -80,7 +80,8 @@ Works with:   src/crb/core/grade.py (folds ``LintRun.ok`` into belt 5),
               resolution), src/crb/core/execution.py (Command / ExecResult), src/crb/core/spec.py
               (validates the declared ``lint`` block at config time), src/crb/core/ledger.py
               (the ``lint`` failure kind)
-Tested by:    tests/test_lint.py, tests/test_grade.py, tests/test_mine.py, tests/test_runners_node.py
+Tested by:    tests/test_lint.py, tests/test_grade.py, tests/test_mine.py,
+              tests/test_runners_node.py, tests/test_runner_audit.py
 Touch when:   onboarding a repository whose linter detection is wrong or missing — declare it
               in the repo config (``lint: {command, paths, exts, findings_rc, findings_re,
               timeout}`` or ``{disabled: true}``, the shape under ``plan_from_config``;
@@ -92,6 +93,7 @@ Touch when:   onboarding a repository whose linter detection is wrong or missing
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -164,6 +166,10 @@ class LintTool:
     writable_paths: tuple[str, ...] = ()
     unrunnable_re: str = ""
     findings_re: str = ""
+    #: A reason this step must NOT run — it would apply a definition of acceptable the
+    #: repository does not hold (the resolved ruff does not satisfy the repository's pin).
+    #: The step is then a harness error, never a verdict (runner-command audit, 2026-09-25).
+    refuse: str = ""
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -206,6 +212,7 @@ class LintTool:
             "stdout_is_findings": self.stdout_is_findings,
             "unrunnable_re": self.unrunnable_re,
             "findings_re": self.findings_re,
+            **({"refuse": self.refuse} if self.refuse else {}),
         }
 
 
@@ -460,6 +467,9 @@ def run_plan(
             continue  # nothing of this tool's kind changed: the step is not evaluated
         ran += 1
         argv = (*tool.argv, *files)
+        if tool.refuse:
+            steps.append(LintStep(tool.name, argv, files, 127, None, "", False, 0.0, tool.refuse))
+            break
         cmd = Command(
             argv,
             root,
@@ -708,9 +718,12 @@ def python_ruff_evidence(root: Path) -> tuple[bool, bool]:
 
 
 _PRECOMMIT_RUFF_REPO = re.compile(
-    r"repo:\s*https://github\.com/(?:astral-sh|charliermarsh)/ruff-pre-commit\s*\n\s*rev:\s*v?([0-9][\w.]*)",
+    r"repo:\s*https://github\.com/(?:astral-sh|charliermarsh)/ruff-pre-commit\s*\n"
+    r"\s*rev:\s*['\"]?([^\s'\"#]+)['\"]?[ \t]*(?:#[ \t]*frozen:[ \t]*v?([0-9][\w.]*))?",
     re.M,
 )
+_VERSION_RE = re.compile(r"^v?([0-9]+(?:\.[0-9]+)*)$")
+_HEX_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _PEP508_RUFF = re.compile(r"^\s*ruff\s*(\[[^\]]*\])?\s*([=<>!~^][^;#]*)?", re.I)
 
 
@@ -729,7 +742,14 @@ def pinned_ruff_spec(root: Path) -> str:
     if pc.is_file():
         m = _PRECOMMIT_RUFF_REPO.search(pc.read_text(encoding="utf-8", errors="replace"))
         if m:
-            return f"=={m.group(1)}"
+            rev, frozen = m.group(1), m.group(2)
+            # ``rev: <sha>  # frozen: v0.15.9`` (pre-commit autoupdate --freeze, pallets/click):
+            # the comment is the version; a bare sha is no version at all, never ``==<sha>``
+            if frozen:
+                return f"=={frozen}"
+            v = _VERSION_RE.match(rev)
+            if v and ("." in rev or rev.startswith("v")) and not _HEX_SHA_RE.match(rev):
+                return f"=={v.group(1)}"
     py = root / "pyproject.toml"
     if py.is_file():
         try:
@@ -798,28 +818,122 @@ def _poetry_to_pep440(spec: str) -> str:
     return s if s[0] in "=<>!~" else f"=={s}"
 
 
+def _vtuple(version: str) -> tuple[int, ...] | None:
+    m = re.match(r"^v?(\d+(?:\.\d+)*)", version.strip())
+    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+
+
+def _vcmp(a: tuple[int, ...], b: tuple[int, ...]) -> int:
+    n = max(len(a), len(b))
+    pa, pb = a + (0,) * (n - len(a)), b + (0,) * (n - len(b))
+    return (pa > pb) - (pa < pb)
+
+
+def version_satisfies(version: str, spec: str) -> bool | None:
+    """Does ``version`` satisfy the PEP 440 ``spec`` (``==``, ``!=``, ``>=``, ``<=``, ``>``,
+    ``<``, ``~=``, ``==X.*``)? ``None`` when either cannot be read — the caller then does
+    not refuse (unknown is never read as a mismatch)."""
+    v = _vtuple(version)
+    if v is None or not spec.strip():
+        return None
+    for clause in (c.strip() for c in spec.split(",") if c.strip()):
+        m = re.match(r"^(~=|==|!=|>=|<=|>|<)\s*(.+)$", clause)
+        if not m:
+            return None
+        op, target = m.group(1), m.group(2).strip()
+        if target.endswith(".*"):
+            prefix = _vtuple(target[:-2])
+            if prefix is None:
+                return None
+            same = v[: len(prefix)] == prefix
+            if (op == "==" and not same) or (op == "!=" and same):
+                return False
+            continue
+        t = _vtuple(target)
+        if t is None:
+            return None
+        c = _vcmp(v, t)
+        ok = {
+            "==": c == 0,
+            "!=": c != 0,
+            ">=": c >= 0,
+            "<=": c <= 0,
+            ">": c > 0,
+            "<": c < 0,
+            "~=": c >= 0 and v[: max(1, len(t) - 1)] == t[: max(1, len(t) - 1)],
+        }[op]
+        if not ok:
+            return False
+    return True
+
+
 def python_plan(root: Path, ruff: str | None) -> LintPlan | None:
     """``ruff check <changed .py>`` (+ ``ruff format --check <changed .py>`` when the
     repository evidences ``ruff format``). ``ruff`` is the resolved binary (the
     repository's venv first, then the host); ``None`` ⇒ the plan cannot run and is
     not detected (the belt is not evaluated, and the note says why)."""
     check, fmt = python_ruff_evidence(root)
-    if not check and not fmt:
-        return None
-    if not ruff:
+    black = black_evidence(root) and not fmt
+    if not check and not fmt and not black:
         return None
     tools: list[LintTool] = []
     names: list[str] = []
-    version = ruff_version(ruff)
-    tag = f"ruff@{version}" if version else "ruff"
-    if check:
-        # --no-fix: the belt observes the tree, it never edits it
-        tools.append(LintTool("ruff", (ruff, "check", "--no-fix"), exts=(".py",)))
-        names.append(tag)
-    if fmt:
-        tools.append(LintTool("ruff-format", (ruff, "format", "--check"), exts=(".py",)))
-        names.append("ruff-format")
+    if (check or fmt) and ruff:
+        version = ruff_version(ruff)
+        tag = f"ruff@{version}" if version else "ruff"
+        # The repository's pinned ruff VERSION is part of its definition of acceptable: a
+        # host-resolved ruff that does not satisfy the pin must not judge (it read every
+        # mesh-client row as ``lint``, 2026-09-14) — the step is refused, a harness error
+        # with the reason, never a verdict. A bare name (the sandbox's) is not checked here.
+        spec = pinned_ruff_spec(root)
+        refuse = ""
+        if spec and version and os.path.isabs(ruff) and version_satisfies(version, spec) is False:
+            refuse = f"ruff {version} does not satisfy the repository's pin ruff{spec}"
+            tag += f"!pin{spec}"
+        if check:
+            # --no-fix: the belt observes the tree, it never edits it
+            tools.append(
+                LintTool("ruff", (ruff, "check", "--no-fix"), exts=(".py",), refuse=refuse)
+            )
+            names.append(tag)
+        if fmt:
+            tools.append(
+                LintTool("ruff-format", (ruff, "format", "--check"), exts=(".py",), refuse=refuse)
+            )
+            names.append("ruff-format")
+    if black and ruff and os.path.isabs(ruff):
+        # black's check mode (mesh-client: ``[tool.black]`` + ``make black-check`` in CI):
+        # rc 1 = would reformat, 123 = internal error (the tool's own failure). Host only:
+        # under the sandbox (a bare ``ruff``) the image's contents are not known here, and a
+        # host path means nothing inside it — declare black in ``RepoConfig.lint`` there.
+        binary = _sibling(ruff, "black") or shutil.which("black")
+        if binary:
+            tools.append(LintTool("black", (binary, "--check", "-q"), exts=(".py", ".pyi")))
+            names.append("black")
+    if not tools:
+        return None
     return LintPlan(tuple(tools), "+".join(names))
+
+
+def _sibling(binary: str | None, name: str) -> str | None:
+    """``name`` next to ``binary`` (the same virtualenv), when it exists there."""
+    if not binary or not os.path.isabs(binary):
+        return None
+    p = Path(binary).parent / name
+    return str(p) if p.exists() else None
+
+
+_PRECOMMIT_BLACK = re.compile(r"^\s*-\s*id:\s*black(?:-jupyter)?\s*$", re.M)
+
+
+def black_evidence(root: Path) -> bool:
+    """Does the repository configure black? ``[tool.black]`` in ``pyproject.toml`` or a
+    ``black`` pre-commit hook (mesh-client: ``[tool.black]``, CI ``make black-check``)."""
+    root = Path(root)
+    tool = _read_toml(root / "pyproject.toml").get("tool")
+    if isinstance(tool, dict) and isinstance(tool.get("black"), dict):
+        return True
+    return _PRECOMMIT_BLACK.search(_read_text(root / ".pre-commit-config.yaml")) is not None
 
 
 def ruff_version(ruff: str) -> str:
@@ -866,6 +980,59 @@ _PRETTIER_CONFIGS: tuple[str, ...] = (
     "prettier.config.mjs",
 )
 _JS_EXTS: tuple[str, ...] = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx")
+#: What ``prettier --check`` formats besides JS/TS — nhsuk-frontend's CI runs ``prettier
+#: --check .``, so a changed stylesheet, JSON or Markdown file is judged too (runner-command
+#: audit, 2026-09-25); files the repository's ``.prettierignore`` names are skipped by
+#: prettier itself.
+_PRETTIER_EXTS: tuple[str, ...] = (
+    *_JS_EXTS,
+    ".css",
+    ".scss",
+    ".less",
+    ".json",
+    ".md",
+    ".yml",
+    ".yaml",
+    ".html",
+)
+_STYLELINT_CONFIGS: tuple[str, ...] = (
+    "stylelint.config.js",
+    "stylelint.config.mjs",
+    "stylelint.config.cjs",
+    ".stylelintrc",
+    ".stylelintrc.json",
+    ".stylelintrc.yml",
+    ".stylelintrc.yaml",
+    ".stylelintrc.js",
+    ".stylelintrc.cjs",
+    ".stylelintrc.mjs",
+)
+_MAX_WARNINGS_RE = re.compile(r"--max-warnings[= ](\d+)")
+#: The ``package.json`` scripts belt 5 reads flags from — each one is test infrastructure
+#: (``crb.core.test_infra``), so the builder cannot edit its way past them.
+_LINT_SCRIPTS: tuple[str, ...] = ("lint", "lint:js", "lint:css", "lint:prettier")
+
+
+def _script_flag(pkg: Mapping[str, Any], tool: str) -> list[str]:
+    """``["--max-warnings", "N"]`` when a ``package.json`` script that runs ``tool`` passes
+    it (nhsuk-frontend / nhsuk-react-components: ``eslint … --max-warnings 0``) — CI then
+    rejects a WARNING, and so must belt 5."""
+    scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
+    if not isinstance(scripts, dict):
+        return []
+    # only the lint scripts, which belt 1b holds (a builder cannot weaken them unseen)
+    for name in _LINT_SCRIPTS:
+        text = str(scripts.get(name, ""))
+        if re.search(rf"(?:^|[\s/]){re.escape(tool)}(?:\s|$)", text):
+            m = _MAX_WARNINGS_RE.search(text)
+            if m:
+                return ["--max-warnings", m.group(1)]
+    return []
+
+
+#: The prettier configuration files (public: the format step names prettier as configured
+#: but not installed when one exists and the binary does not).
+PRETTIER_CONFIGS: tuple[str, ...] = _PRETTIER_CONFIGS
 
 #: tsc's per-diagnostic line (``--pretty false``): ``path(line,col): error TSnnnn: …``.
 #: The path group stops at the first ``(``; tsc prints it relative to the cwd.
@@ -977,16 +1144,17 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
         pkg.get("eslintConfig"), dict
     )
     if eslint_cfg and have("eslint"):
+        warn = _script_flag(pkg, "eslint")
         tools.append(
             LintTool(
                 "eslint",
-                (binary("eslint"),),
+                (binary("eslint"), *warn),
                 exts=_JS_EXTS,
                 findings_rcs=frozenset({1}),
                 env={"NODE_ENV": "test"},
             )
         )
-        names.append("eslint")
+        names.append("eslint" + (f"(max-warnings={warn[1]})" if warn else ""))
     prettier_cfg = any((root / c).is_file() for c in _PRETTIER_CONFIGS) or (
         "prettier" in pkg and pkg.get("prettier") is not None
     )
@@ -995,11 +1163,26 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
             LintTool(
                 "prettier",
                 (binary("prettier"), "--check", "--log-level=warn"),
-                exts=_JS_EXTS,
+                exts=_PRETTIER_EXTS,
                 findings_rcs=frozenset({1}),
             )
         )
         names.append("prettier")
+    stylelint_cfg = any((root / c).is_file() for c in _STYLELINT_CONFIGS) or isinstance(
+        pkg.get("stylelint"), dict
+    )
+    if stylelint_cfg and have("stylelint"):
+        # nhsuk-frontend: ``stylelint.config.mjs`` + ``lint:css`` (``--max-warnings 0``) in CI
+        warn = _script_flag(pkg, "stylelint")
+        tools.append(
+            LintTool(
+                "stylelint",
+                (binary("stylelint"), *warn),
+                exts=(".css", ".scss", ".less"),
+                findings_rcs=frozenset({2}),
+            )
+        )
+        names.append("stylelint")
     if not tools:
         scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
         lint_script = str(scripts.get("lint", "")) if isinstance(scripts, dict) else ""
@@ -1146,6 +1329,8 @@ _FIXERS: dict[str, tuple[str, ...]] = {
     "standard": ("--fix",),
     "gofmt": ("-w",),
     "cargo-fmt": ("fmt", "--"),
+    "black": ("-q",),
+    "stylelint": ("--fix",),
 }
 
 
@@ -1156,7 +1341,9 @@ def fix_commands(plan: LintPlan, files: Sequence[str]) -> list[tuple[str, tuple[
     out: list[tuple[str, tuple[str, ...]]] = []
     for tool in plan.tools:
         fix = _FIXERS.get(tool.name)
-        if fix is None:
+        if fix is None or tool.refuse:
+            # a binary belt 5 refuses to judge with (outside the repository's pin) never
+            # rewrites the builder's files either (docs/PREVENTION.md P-031)
             continue
         scoped = [f for f in files if not tool.exts or f.endswith(tool.exts)]
         if not scoped:
@@ -1173,12 +1360,14 @@ __all__ = [
     "DEFAULT_LINT_TIMEOUT_S",
     "PATHS_ALL",
     "PATHS_CHANGED",
+    "PRETTIER_CONFIGS",
     "TSC_FINDINGS_RE",
     "LintPlan",
     "LintRun",
     "LintStep",
     "LintTool",
     "attribute_findings",
+    "black_evidence",
     "fix_commands",
     "go_plan",
     "js_plan",
@@ -1190,5 +1379,6 @@ __all__ = [
     "run_plan",
     "rust_plan",
     "tsc_evidence",
+    "version_satisfies",
     "which",
 ]

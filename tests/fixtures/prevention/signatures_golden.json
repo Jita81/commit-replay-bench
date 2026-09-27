@@ -1,0 +1,103 @@
+{
+ "cases": {
+  "archaeology": [
+   "protocol:archaeology:git log"
+  ],
+  "blocked": [
+   "harness:runner-tool-missing:jest"
+  ],
+  "budget": [
+   "budget:max_turns"
+  ],
+  "clean": [],
+  "disqualified": [
+   "disqualified:target_test_modified"
+  ],
+  "harness": [
+   "harness:other"
+  ],
+  "harness:SandboxUnavailable: the docker daemon is": [
+   "sandbox"
+  ],
+  "harness:TimeoutExpired: the runner took longer t": [
+   "timeout"
+  ],
+  "harness:builder unavailable: RuntimeError: no AP": [
+   "no-credential"
+  ],
+  "harness:container exited 137 before the tests ra": [
+   "sandbox"
+  ],
+  "harness:copy_back failed: OSError: disk full": [
+   "other"
+  ],
+  "harness:executable 'pytest' was not found": [
+   "runner-tool-missing:pytest"
+  ],
+  "harness:go: downloading example.com/mod: dial tc": [
+   "env-network:go"
+  ],
+  "harness:grade timed out after 900 s": [
+   "timeout"
+  ],
+  "harness:grader exception: KeyError: 'target'": [
+   "other"
+  ],
+  "harness:lint: linter could not run (a step error": [
+   "linter-unrunnable:other"
+  ],
+  "harness:lint: ruff could not run: No such file o": [
+   "linter-unrunnable:ruff"
+  ],
+  "harness:model_error: ANTHROPIC_API_KEY not set \u2014": [
+   "no-credential"
+  ],
+  "harness:npm ERR! request to https://registry.npm": [
+   "env-network:npm"
+  ],
+  "harness:npx: command not found": [
+   "runner-tool-missing:npx"
+  ],
+  "harness:pip install -e . failed: Could not resol": [
+   "env-network:pip"
+  ],
+  "harness:runner tool missing: frobnicate \u2014 not on": [
+   "runner-tool-missing:other"
+  ],
+  "harness:runner tool missing: jest \u2014 the node run": [
+   "runner-tool-missing:jest"
+  ],
+  "harness:sh: 1: jest: not found": [
+   "runner-tool-missing:jest"
+  ],
+  "head:cd /x && go mod tidy": [
+   "go mod"
+  ],
+  "head:git stash list": [
+   "git stash"
+  ],
+  "head:npx jest": [
+   "npx jest"
+  ],
+  "head:python -m pytest -q": [
+   "python -m pytest"
+  ],
+  "lint_ruff": [
+   "lint:ruff:e501"
+  ],
+  "no_source_change": [
+   "builder_red:no_source_change"
+  ],
+  "outage": [],
+  "protocol": [
+   "protocol:network:go mod"
+  ],
+  "regression": [
+   "builder_red:regression"
+  ],
+  "target_red": [
+   "builder_red:target_red"
+  ]
+ },
+ "rules": "crb.prevention.sig.v1"
+}

@@ -77,6 +77,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from crb.core.redact import redact
 from crb.core.version import __version__
+from crb.observability import build_stamp
 from crb.server import http_metrics
 from crb.server.auth import (
     CSRF_HEADER,
@@ -496,6 +497,9 @@ def _lifespan_factory(
             app.state.ui_dist = mount_ui(app, settings)
             app.state.ui_mounted = True
         app.state.started_at = time.time()
+        # the commit this process runs, captured NOW: a later `git pull` then reads as a
+        # disagreement on /health (the `build` probe), never as fresh code
+        app.state.source_commit = build_stamp.process_commit()
         log.info(
             "crb server ready",
             extra={"version": __version__, "env": settings.env, "db": settings.database_dialect},

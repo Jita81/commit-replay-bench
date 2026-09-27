@@ -15,7 +15,8 @@ What it does: Pins that editing a worktree changes neither the inputs nor the ke
               tree (an escaping replace or a linked manifest); and that a trial selects the
               parent's or the gold's set
               or raises ``ClosureViolation`` naming what was outside.
-How:          ``two_commit_repo`` / ``init_repo`` + ``commit_all`` → ``LockInputs.from_git`` → assert;
+How:          ``two_commit_repo`` / ``init_repo`` + ``commit_all`` → ``LockInputs.from_git`` →
+              assert;
               a spy ``GitRepo`` records every path asked for.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
@@ -23,7 +24,8 @@ Works with:   src/crb/core/provision.py (under test), src/crb/core/deps.py (the 
               vocabulary and the selector), tests/fixtures/goproxy.py (real go.sum lines),
               tests/fixtures/langs/gorepo_deps.py (the D4 shape)
 Tested by:    tests/test_provision.py
-Touch when:   a lock format or a refusal rule changes in src/crb/core/provision.py.
+Touch when:   never for a new repository; a lock format or a refusal rule changes in
+              src/crb/core/provision.py.
 """
 
 from __future__ import annotations

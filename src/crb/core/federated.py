@@ -51,8 +51,9 @@ What it does: Projects ``CellStats`` onto the allowlist and nothing else; refuse
               contributor's false-Q1 visible in the sum so averaging cannot hide it; adds
               seeded Laplace noise to released means when asked. Consumes nothing back
               into routing — by design.
-How:          ``all_cell_stats`` → ``to_abstract_cell`` (redacted key strings, ``None`` for
-              an unmeasured axis) → sorted dicts; aggregation groups contributions by
+How:          the ``off`` checks arm → ``all_cell_stats`` → ``to_abstract_cell`` (redacted
+              key strings, ``None`` for an unmeasured axis) → sorted dicts; aggregation
+              groups contributions by
               key → cohort check → pooled counts, n-weighted means, Wilson interval
               recomputed → optional DP → ``SharedCell``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -62,7 +63,8 @@ Works with:   src/crb/core/ledger.py (CellStats and the cell key — the abstrac
               src/crb/core/stats.py (the recomputed interval),
               src/crb/cli/commands/ledger.py (``crb ledger export --abstract``),
               src/crb/server/routes/ledger.py (``GET /ledger/export/abstract``)
-Tested by:    tests/test_federated.py, tests/test_server_routes_ledger.py
+Tested by:    tests/test_federated.py, tests/test_server_routes_ledger.py,
+              tests/test_checks_pooling.py
 Touch when:   never for a new repository; adding a field to the export is a privacy decision
               — it must be added to ``ABSTRACT_ALLOWLIST`` on purpose (the import-time
               assertion and tests/test_federated.py refuse a drift), justified in
@@ -81,7 +83,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from crb.core.ledger import CellKey, CellStats, GradeRow, all_cell_stats
+from crb.core.checks import ARM_OFF
+from crb.core.ledger import CellKey, CellStats, GradeRow, all_cell_stats, rows_for_checks
 from crb.core.redact import redact
 from crb.core.stats import wilson_interval
 
@@ -206,8 +209,12 @@ def to_abstract_cell(stats: CellStats) -> AbstractCell:
 
 
 def export_abstract(rows: Iterable[GradeRow]) -> list[dict[str, Any]]:
-    """``crb ledger export --abstract``: every full-key cell, allowlisted, key-sorted."""
-    cells = [to_abstract_cell(s) for s in all_cell_stats(rows)]
+    """``crb ledger export --abstract``: every full-key cell, allowlisted, key-sorted.
+
+    Only rows graded under the default instrument (the ``checks`` arm ``off``) leave the
+    tenant: a switched-on arm is a local experiment until a paired A/B makes it the default,
+    and an abstract cell carries no field that could keep two arms apart (ADR-0024)."""
+    cells = [to_abstract_cell(s) for s in all_cell_stats(rows_for_checks(rows, ARM_OFF))]
     cells.sort(key=lambda c: c.key)
     return [c.to_dict() for c in cells]
 

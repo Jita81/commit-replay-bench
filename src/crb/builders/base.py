@@ -77,6 +77,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from crb.core.evidence import BuilderRef
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES
+from crb.core.playbook import HEADING as PLAYBOOK_HEADING
 from crb.core.redact import redact_and_cap, redact_and_cap_head
 from crb.core.spec import Language, RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
@@ -167,11 +168,22 @@ class BuildBrief:
     #: patch and the fixers could not clear it. Set on a SECOND, bounded build call: the
     #: builder is told the findings and asked to fix only those. Empty on a first build.
     repair_note: str = ""
+    #: Finish gate (ADR-0024, opt-in ``checks.finish_gate``): the repository's own check
+    #: commands as a short numbered checklist (``crb.core.finish_gate.checklist``). Operating
+    #: facts only — never a target test, never anything derived from the gold.
+    finish_checks: tuple[str, ...] = ()
+    #: Finish-gate repair: set on a SECOND, bounded build call with the failing checks'
+    #: output after the harness re-ran them. Empty on a first build.
+    gate_note: str = ""
+    #: The prevention loop's operating notes (ADR-0020 §7): at most seven checklist lines
+    #: from closed templates, held out by task and leak-gated at injection
+    #: (``crb.core.playbook``). Empty unless the repository's loop switch is on.
+    playbook: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
-        for attr in ("test_files", "target_tests", "spec_facts"):
+        for attr in ("test_files", "target_tests", "spec_facts", "finish_checks", "playbook"):
             object.__setattr__(self, attr, tuple(str(x) for x in getattr(self, attr)))
         if self.mode == MODE_BLIND and (self.test_files or self.target_tests or self.test_command):
             raise ValueError(
@@ -211,6 +223,7 @@ class BuildBrief:
         spec_facts: Sequence[str] = (),
         rules: str = DEFAULT_RULES,
         config: RepoConfig | None = None,
+        finish_checks: Sequence[str] = (),
     ) -> BuildBrief:
         """Derive a brief from a task. ``task.src_files`` is never copied over.
 
@@ -232,6 +245,7 @@ class BuildBrief:
             spec_facts=tuple(spec_facts),
             rules=rules,
             config=config,
+            finish_checks=tuple(finish_checks),
         )
 
     def task_text(self, *, worktree: str = "") -> str:
@@ -267,6 +281,8 @@ class BuildBrief:
                     "The test environment is provisioned. Run any existing tests (or tests you "
                     f"write to check your work) with: {self.harness_command} <paths>"
                 )
+        if self.playbook:
+            lines += ["", PLAYBOOK_HEADING] + [f"  - {p}" for p in self.playbook]
         if self.spec_text.strip():
             lines += [
                 "",
@@ -282,6 +298,22 @@ class BuildBrief:
                 "the repository's OWN linter/formatter rejects the changed files. Fix ONLY these "
                 "findings (no other changes, no new features, never touch tests):",
                 self.repair_note.strip(),
+            ]
+        if self.finish_checks:
+            lines += [
+                "",
+                "FINISH GATE — the repository's own checks. Before you report done, run each "
+                "on your change and make it pass; the harness re-runs them and does not accept "
+                "done until they pass:",
+                *(f"  {c}" for c in self.finish_checks),
+            ]
+        if self.gate_note.strip():
+            lines += [
+                "",
+                "FINISH GATE FAILED: your edits are in the worktree, but these checks of the "
+                "repository fail on them. Fix ONLY what they report (no new features, never "
+                "touch tests), then re-run them:",
+                self.gate_note.strip(),
             ]
         lines += ["", self.rules]
         return "\n".join(lines)
@@ -303,6 +335,9 @@ class BuildBrief:
             "rules": self.rules,
             "config": self.config.to_dict() if self.config else None,
             **({"repair_note": self.repair_note} if self.repair_note else {}),
+            **({"finish_checks": list(self.finish_checks)} if self.finish_checks else {}),
+            **({"gate_note": self.gate_note} if self.gate_note else {}),
+            **({"playbook": list(self.playbook)} if self.playbook else {}),
         }
 
 

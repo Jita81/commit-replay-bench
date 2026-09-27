@@ -16,9 +16,11 @@ What it does: ``serve`` hands off to uvicorn; ``worker`` forwards its flags to t
               (configured, key parses, one installation reachable), the server settings, the
               ``CRB_HOME`` location and the secrets directory mode and owner, the database
               (initialised, every append-only trigger present, an UPDATE refused), the
-              migration head, the worker heartbeat and the built UI with its help bundle
-              (exit 1 only on a fail). ``probe_claude_code`` never prints a token — a
-              fingerprint of at most four characters.
+              migration head, the worker heartbeat, the built UI with its help bundle and
+              the served-commit ``build`` line (a UI bundle from another commit fails; a
+              checkout behind ``origin/main`` warns) — exit 1 only on a fail.
+              ``probe_claude_code`` never prints a token — a fingerprint of at most four
+              characters.
 How:          Each ``cmd_*`` imports inside the function and turns ``ImportError`` into a
               ``CliError`` naming the extra; ``doctor`` = ``probes.aggregate`` over the
               observability probes plus the server's ``probe_append_only`` (the trigger
@@ -122,7 +124,8 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     doctor = sub.add_parser(
         "doctor",
         help="check the installation: toolchains, sandbox, builders, Claude Code login, GitHub "
-        "App, settings, CRB_HOME, database, migration head, worker, UI + help bundle",
+        "App, settings, CRB_HOME, database, migration head, worker, UI + help bundle, and "
+        "whether the UI bundle was built from the code this checkout holds",
     )
     doctor.add_argument("--json", action="store_true")
     doctor.add_argument("--database-url", default=None)
@@ -514,6 +517,35 @@ def _is_chunk(path: Path) -> bool:
     return stat.S_ISREG(st.st_mode) and st.st_size > 0
 
 
+def probe_served(settings: Settings | None) -> ProbeResult:
+    """``build``: the code this checkout holds and the UI bundle the API would serve were
+    built from the same commit — ``fail`` (exit 1) when not, or when a served bundle carries
+    no stamp; ``warn`` when the checkout trails ``origin/main`` by the local ref (as of the
+    last fetch; doctor never fetches). docs/PREVENTION.md P-002: the stack once served a
+    checkout behind ``origin/main`` and a UI built from an older tree still."""
+    from crb.observability import build_stamp, probes
+
+    dist = None
+    if settings is not None:
+        from crb.server.app import resolve_ui_dist
+
+        dist = resolve_ui_dist(settings)
+    r = build_stamp.probe_build(dist, stale_status=probes.DOWN)
+    if r.status != probes.OK:
+        return r
+    behind = build_stamp.commits_behind()
+    if behind:
+        return probes.ProbeResult(
+            "build",
+            probes.DEGRADED,
+            f"{r.detail} · the checkout is {behind} commit(s) behind "
+            f"{build_stamp.UPSTREAM_REF} as of the last fetch — pull, rebuild the UI "
+            "(`npm --prefix ui run build`) and restart",
+            {**r.data, "behind": behind},
+        )
+    return r
+
+
 def probe_database(engine: Engine, factory: sessionmaker[Session], url: str) -> ProbeResult:
     """``database``: the store answers and is initialised (``grades`` exists), and the
     append-only guarantee holds the way ``/health`` proves it — ``probe_append_only``:
@@ -625,6 +657,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     finally:
         engine.dispose()
     results.append(probe_ui(settings))
+    results.append(probe_served(settings))
     return _finish_doctor(results, as_json=bool(args.json))
 
 
@@ -661,6 +694,7 @@ __all__: Sequence[str] = (
     "probe_claude_code",
     "probe_github_app",
     "probe_home",
+    "probe_served",
     "probe_settings",
     "probe_ui",
     "register",

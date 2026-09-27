@@ -45,16 +45,16 @@ ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md
 Works with:   src/crb/server/worker_main.py (the worker applies ``unsealed_prod_refusal`` to
               its own reading of the same environment), src/crb/server/app.py (reads
-              ``resolved_database_url``, cookie security, CORS),
-              src/crb/server/auth.py (``ROLE_RANK``, ``session_ttl``, ``secret_key_value``),
+              ``resolved_database_url``, cookie security, CORS; src/crb/server/auth.py reads
+              ``ROLE_RANK``, ``session_ttl``, ``secret_key_value``),
               src/crb/server/routes/system.py (serves ``redacted_dict``),
               src/crb/builders/container.py (the worker reads the same ``CRB_BUILDER__*``),
               src/crb/cli/commands/service.py (``crb doctor``'s ``home`` line reuses
               ``temp_dir_reason``), src/crb/provision/config.py (the worker's side of
-              ``CRB_PROVISION__*`` and its production refusals), src/crb/factory/author.py (the rung spelling
-              ``CRB_FACTORY__TEST_AUTHOR`` carries and the refusal it feeds),
-              docs/DEPLOYMENT.md#21-environment-reference (the operator-facing list; §1.1 the
-              temporary-directory rule)
+              ``CRB_PROVISION__*`` and its production refusals), src/crb/factory/author.py
+              (the rung spelling ``CRB_FACTORY__TEST_AUTHOR`` carries and the refusal it
+              feeds), docs/DEPLOYMENT.md#21-environment-reference (the operator-facing list;
+              §1.1 the temporary-directory rule)
 Tested by:    tests/test_server_app.py, tests/test_server_system.py, tests/test_server_auth.py,
               tests/test_settings_home_guard.py, tests/test_settings_posture.py
 Touch when:   never for a new repository (repositories are configured in the database, not
@@ -324,10 +324,14 @@ class BootstrapAdmin(BaseModel):
 
 
 class RetentionSettings(BaseModel):
-    """Zero-raw-retention defaults (ADR-0006); only transcripts have a knob today."""
+    """Raw-retention defaults (ADR-0006 and its 2026-09-25 amendment)."""
 
     #: Days to keep builder transcripts referenced from evidence packs. 0 = keep none (default).
     transcripts_days: int = Field(default=0, ge=0)
+    #: Keep every graded attempt's patch — redacted, capped at 1 MiB, content-addressed under
+    #: ``<home>/evidence/patches`` and anchored by its evidence pack (crb.core.patches) — for
+    #: as long as its row. ``false`` for a deployment that must keep no code.
+    patches: bool = True
 
 
 class SandboxSettings(BaseModel):
@@ -910,7 +914,10 @@ class Settings(BaseSettings):
             },
             "cors_origins": list(self.cors_origins),
             "trusted_proxies": list(self.trusted_proxies),
-            "retention": {"transcripts_days": self.retention.transcripts_days},
+            "retention": {
+                "transcripts_days": self.retention.transcripts_days,
+                "patches": self.retention.patches,
+            },
             "sandbox": {
                 "executor": self.sandbox.executor,
                 "image": self.sandbox.image,

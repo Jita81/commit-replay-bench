@@ -30,7 +30,8 @@
  *               ui/src/components/Layout.tsx (the footer versions), src/crb/server/routes/admin.py
  *               (the secrets routes)
  * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a screen is added (add it to the axe sweep) or the settings fields change.
+ * Touch when:   never for a new repository (it sweeps the product's own screens); a screen is
+ *               added (add it to the axe sweep) or the settings fields change.
  */
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
@@ -43,6 +44,12 @@ const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 
 async function axeClean(page: Page, where: string): Promise<void> {
+  // let every CSS transition in flight finish first: axe samples the blended colour of a
+  // half-done one as a contrast failure. /connect/:repo flips its "baseline" button from
+  // outlined to filled (`transition-colors`) when its last query settles, and on a fast
+  // machine axe read it mid-flip (#c0c3c5 on #488ccc, 2:1) — two runs of two on a laptop,
+  // never on the hosted runner. The spec asserts the settled screen, not the animation.
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))))
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
   expect(results.violations, `${where}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([])
 }

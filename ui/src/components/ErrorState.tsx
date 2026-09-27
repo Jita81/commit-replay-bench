@@ -7,8 +7,9 @@
  * What it is:   The `ErrorState` alert every failed query or mutation renders through.
  * What it does: Shows the human message from the envelope under a heading chosen by code
  *               (`timeout`, `network`, `sandbox_unavailable`, `false_q1_refused`,
- *               `invalid_response`) or by HTTP status (401 / 403 / 404 / 409 / 5xx), the
- *               `HTTP <status> · <code>` line in small mono, the structured `detail` behind a
+ *               `invalid_response`, `builder_credential_missing`) or by HTTP status
+ *               (401 / 403 / 404 / 409 / 5xx), the `HTTP <status> · <code>` line in small
+ *               mono, the structured `detail` behind a
  *               collapsed disclosure, and an optional Retry. No stack traces, no raw JSON in
  *               chrome (design law 4 in ui/README.md); a non-`ApiError` is shown by its
  *               message.
@@ -24,8 +25,8 @@
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx and
  *               ui/src/screens/Capability/CapabilityPage.test.tsx (a 409 and a 5xx as rendered),
  *               ui/e2e/walkthrough/01-login.spec.ts (the envelope on a wrong password)
- * Touch when:   a reserved error code is added to docs/API.md "Conventions" — add its heading
- *               to `CODE_TITLES`; never for a new repository.
+ * Touch when:   never for a new repository; a reserved error code is added to docs/API.md
+ *               "Conventions" — add its heading to `CODE_TITLES`.
  */
 import type { ReactNode } from 'react'
 import { ApiError } from '../api/client'
@@ -48,6 +49,8 @@ const CODE_TITLES: Record<string, string> = {
   sandbox_unavailable: 'Sandbox unavailable — stopped fail-closed',
   false_q1_refused: 'Refused: false-Q1 invariant',
   invalid_response: 'Unexpected response from the server',
+  // POST /runs: the chosen builder auth has no credential (docs/PREVENTION.md P-003)
+  builder_credential_missing: 'No credential for this builder — nothing was queued',
 }
 
 /** A heading from the HTTP status when the code is not a reserved one. */

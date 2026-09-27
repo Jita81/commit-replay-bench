@@ -8,6 +8,9 @@
   (validated through the factory's ``BacklogItem`` + DoR gate before they are written).
 * ``crb learn remeasure [--apparatus X]`` — cells whose rows predate the apparatus →
   the ``POST /runs`` bodies an operator can queue. Nothing is queued.
+* ``crb learn prevention --repo R [--ledger] [--reviews] [--store] [--tick]`` — the
+  prevention register (ADR-0020) over JSONL files, the twin of ``GET /learn/register``;
+  ``--tick`` appends what one tick of the loop writes to the JSONL chain.
 
 The ledger is read the way ``crb route`` reads it: ``--path`` or ``<workdir>/ledger.jsonl``.
 
@@ -26,8 +29,9 @@ with the same ids from the same evidence.
 
 Navigation
 ----------
-What it is:   ``crb learn refusals | strengthen | remeasure`` — the learning loop's three
-              reports over a JSONL ledger, plus the one write a human authorises.
+What it is:   ``crb learn refusals | strengthen | remeasure | prevention`` — the learning
+              loop's reports over a JSONL ledger, the one write a human authorises, and the
+              prevention register with its tick.
 What it does: Triages protocol rows into candidate guard-corpus lines (``--apply`` appends
               a named human's decisions with provenance); derives ``test.add`` backlog
               items for oracle-weak cells from the ledger plus the oracle / controls
@@ -43,8 +47,9 @@ Works with:   src/crb/core/learn.py (the derivations and renderers),
               src/crb/server/routes/learn.py (the HTTP twin — same ids over the same
               evidence), src/crb/factory/backlog.py (``BacklogItem`` + ``assess`` for the
               strengthening items), src/crb/cli/commands/route.py (``load_policy``),
+              src/crb/core/prevention.py (the register and the tick ``prevention`` prints),
               docs/LEARNING-LOOP.md (the contract, incl. what a bare export cannot carry)
-Tested by:    tests/test_cli_learn.py
+Tested by:    tests/test_cli_learn.py, tests/test_cli_learn_prevention.py
 Touch when:   never for a new repository; when a new derivation lands in
               src/crb/core/learn.py (add the subcommand, the route, and the
               docs/LEARNING-LOOP.md section together); when the server's oracle / controls
@@ -70,6 +75,7 @@ from crb.cli.commands import (
 )
 from crb.cli.commands.route import load_policy
 from crb.core.capability import PROJECTIONS, build_capability_map
+from crb.core.checks import ARM_OFF, ARMS
 from crb.core.learn import (
     OracleTaskScore,
     RefusalDecision,
@@ -84,7 +90,9 @@ from crb.core.learn import (
     strengthening_backlog,
     triage_refusals,
 )
-from crb.core.ledger import JsonlLedger
+from crb.core.ledger import JsonlLedger, rows_for_checks
+from crb.core.prevention import JsonlPreventionStore, Register, build_register, tick
+from crb.core.review import JsonlReviewLedger
 from crb.core.routing import ControlsVerdict
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.backlog import BacklogItem
@@ -185,6 +193,26 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     add_common(m)
     m.set_defaults(func=cmd_remeasure)
 
+    v = ls.add_parser(
+        "prevention",
+        help="the prevention register (ADR-0020): bug classes, levers, before → after, status",
+    )
+    v.add_argument("--repo", required=True, help="the repository whose register to build")
+    v.add_argument("--ledger", default="", help="ledger JSONL (default <workdir>/ledger.jsonl)")
+    v.add_argument("--reviews", default="", help="review ledger JSONL (optional)")
+    v.add_argument(
+        "--store",
+        default="",
+        help="the prevention chain JSONL (default <workdir>/prevention.jsonl)",
+    )
+    v.add_argument(
+        "--tick",
+        action="store_true",
+        help="run one tick and append what it writes to --store (nothing when the switch is off)",
+    )
+    add_common(v)
+    v.set_defaults(func=cmd_prevention)
+
     add_common(p)  # so `crb learn --workdir X` parses and prints the sub-command help
     p.set_defaults(func=lambda args: _usage(p))
 
@@ -196,8 +224,16 @@ def _usage(parser: argparse.ArgumentParser) -> int:
 
 
 def _ledger_args(p: argparse.ArgumentParser) -> None:
-    """``--path`` and ``--policy-json`` — the same pair ``crb route`` takes."""
+    """``--path`` and ``--policy-json`` — the same pair ``crb route`` takes — and ``--checks``,
+    the one arm whose rows are read (a cell never pools two, ADR-0024)."""
     p.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
+    p.add_argument(
+        "--checks",
+        default=ARM_OFF,
+        choices=ARMS,
+        help="read only rows graded under this 'clean means working' arm (default off: the "
+        "format step and belt 6 both off) — rows of two arms never share a cell",
+    )
     p.add_argument(
         "--policy-json",
         default="",
@@ -209,7 +245,9 @@ def _rows(args: argparse.Namespace) -> tuple[Path, list[Any]]:
     """``(ledger path, rows)`` for the command line."""
     wd = workdir_of(args)
     path = Path(args.path).expanduser() if args.path else wd.ledger_path
-    return path, list(JsonlLedger(path).rows())
+    rows = list(JsonlLedger(path).rows())
+    arm = getattr(args, "checks", None)
+    return path, rows if arm is None else rows_for_checks(rows, arm)
 
 
 def _read_json(spec: str, *, what: str) -> Any:
@@ -464,3 +502,59 @@ __all__ = [
     "load_oracle_export",
     "register",
 ]
+
+
+# ---------------------------------------------------------------------------
+# prevention (ADR-0020) — the JSONL twin of GET /learn/register and POST /learn/tick
+# ---------------------------------------------------------------------------
+
+
+def render_register(reg: Register) -> list[str]:
+    """The register as plain lines: one per class, most first attempts first."""
+    sw = reg.switch
+    out = [
+        f"{reg.repo}: switch {sw.auto_apply}"
+        + (f" (by {sw.switched_by}, {sw.switched_at}: {sw.reason})" if sw.switched_by else "")
+        + f" · {reg.attempts.get('first_attempts', 0)} first attempts · "
+        + " · ".join(f"{k} {v}" for k, v in reg.counts.items())
+    ]
+    for e in reg.entries:
+        lever = e.recommendation.lever_id or "-"
+        level = f" ({e.recommendation.level})" if e.recommendation.level else ""
+        quals = f" [{', '.join(e.qualifiers)}]" if e.qualifiers else ""
+        out.append(
+            f"  {e.signature}: {e.first_attempts} first attempt(s) on {e.tasks} task(s), "
+            f"${e.cost_usd:.2f} · lever {lever}{level} · {e.status}{quals}"
+        )
+        out.append(f"      next: {e.next}")
+    return out
+
+
+def cmd_prevention(args: argparse.Namespace) -> int:
+    """Build a repository's prevention register from JSONL files; ``--tick`` appends."""
+    wd = workdir_of(args)
+    ledger = Path(args.ledger).expanduser() if args.ledger else wd.ledger_path
+    if not ledger.is_file():
+        raise CliError(f"ledger {ledger} is not a file")
+    rows = list(JsonlLedger(ledger).rows())
+    reviews = (
+        list(JsonlReviewLedger(Path(args.reviews).expanduser()).records()) if args.reviews else []
+    )
+    store = JsonlPreventionStore(
+        Path(args.store).expanduser() if args.store else wd.root / "prevention.jsonl"
+    )
+    records = store.records()
+    reg = build_register(rows, reviews, (), records, repo=args.repo)
+    appended = []
+    if args.tick:
+        appended = [store.append(r) for r in tick(reg, records)]
+        if appended:
+            reg = build_register(rows, reviews, (), store.records(), repo=args.repo)
+    if args.json:
+        print_json({**reg.to_dict(), "appended": [r.to_dict() for r in appended]})
+        return EXIT_OK
+    lines = render_register(reg)
+    if args.tick:
+        lines.append(f"tick: {len(appended)} record(s) appended")
+    print_lines(lines)
+    return EXIT_OK

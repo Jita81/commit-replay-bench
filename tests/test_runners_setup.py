@@ -20,9 +20,11 @@ What it does: Pins the setup records and their redaction, the ``network=True`` m
               setup fails closed under a sandbox executor, the pytest install plan (declared
               extras, ``pip`` / ``pip_fallback`` / ``uninstall``), interpreter resolution
               (explicit > venv > never the crb interpreter), that every registered runner answers
-              the contract, that only pytest creates ``env_dir``, and the ``dist_info_stubs``
-              option; the network- and toolchain-marked cases build a real venv, ``npm install``
-              mocha, warm Maven and check go / cargo readiness.
+              the contract, that only pytest creates ``env_dir``, the ``dist_info_stubs`` option
+              and Maven's surefire provider probe; the network- and toolchain-marked cases
+              build a real venv, ``npm install`` mocha, warm Maven (once into an EMPTY private
+              local repository, proving setup runs no repository test code) and check go /
+              cargo readiness.
 How:          ``FakeExecutor`` scripts answers by argv substring for the hermetic half; the real
               half runs the toolchains on the fixture repositories and skips with the reason.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -40,9 +42,11 @@ Touch when:   onboarding a repository whose environment needs an option the plan
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import shutil
 import stat
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -61,6 +65,11 @@ from crb.core.runners.base import (
     SetupStep,
     failed_step_note,
     host_check,
+)
+from crb.core.runners.jvm_runner import (
+    SurefireProbe,
+    surefire_forks_to_stub,
+    surefire_probe_ready,
 )
 from crb.core.runners.pytest_runner import (
     PytestRunner,
@@ -571,10 +580,49 @@ def test_maven_setup_plan(tmp_path: Path) -> None:
     r = get_runner(cfg)
     ex = FakeExecutor()
     r.setup(ex, root, env_dir=tmp_path / "env", timeout=0)
-    (cmd,) = ex.commands
-    assert cmd.argv == ("mvn", "-q", "-B", "-Denforcer.skip=true", "test", "-DskipTests")
-    assert cmd.network and cmd.env == {"JAVA_HOME": "/opt/jdk"} and "target" in cmd.writable_paths
-    assert "-o" not in cmd.argv  # setup is the ONLINE phase; the test command stays offline
+    build, preflight, probe = ex.commands
+    assert build.argv == ("mvn", "-q", "-B", "-Denforcer.skip=true", "test", "-DskipTests")
+    # the provider probe: surefire resolves its provider, then forks a stub that runs nothing
+    jvm = next(a for a in probe.argv if a.startswith("-Djvm="))
+    assert jvm.endswith("/bin/java") and not Path(jvm[len("-Djvm=") :]).exists()  # cleaned up
+    # before it, an offline dry configuration reads what surefire WILL do with the probe's flags
+    assert preflight.argv == (
+        "mvn",
+        "-o",
+        "-X",
+        "-B",
+        "-Denforcer.skip=true",
+        "test",
+        "-DskipTests",
+        jvm,
+        "-DforkCount=1",
+    )
+    assert not preflight.network
+    assert probe.argv == (
+        "mvn",
+        "-q",
+        "-B",
+        "-fn",
+        "-Denforcer.skip=true",
+        "test",
+        jvm,
+        "-DforkCount=1",
+        "-Dtest=*#crbNoSuchMethod",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+    )
+    for cmd in (build, probe):
+        assert cmd.network and cmd.env == {"JAVA_HOME": "/opt/jdk"}
+        assert "target" in cmd.writable_paths
+        assert "-o" not in cmd.argv  # setup is the ONLINE phase; the test command stays offline
+    ex = FakeExecutor(script={"-DskipTests": (1, "[ERROR] compile failed")})
+    assert not r.setup(ex, root, env_dir=tmp_path / "env", timeout=0).ok
+    assert len(ex.commands) == 1  # a failed build is the stop; no probe after it
+    # a POM that keeps surefire in-process outranks the command line: refused, never probed
+    in_process = _SUREFIRE_CONFIG.format(fork="0", jvm="/x/bin/java")
+    ex = FakeExecutor(script={" -X ": (0, in_process)})
+    res = r.setup(ex, root, env_dir=tmp_path / "env", timeout=0)
+    assert not res.ok and "without running tests" in res.note
+    assert len(ex.commands) == 2 and not any("-fn" in c.argv for c in ex.commands)
     (root / "pom.xml").unlink()
     assert "pom.xml" in r.setup(ex, root, env_dir=tmp_path / "env", timeout=0).note
 
@@ -590,10 +638,194 @@ def test_maven_setup_warms_the_local_repository(tmp_path: Path) -> None:
     res = r.setup(LocalExecutor(), root, env_dir=env_dir, timeout=900)
     assert res.ok, res.to_dict()
     assert res.steps[0].argv[-2:] == ("test", "-DskipTests")
+    assert res.steps[1].argv[-3:] == (
+        "-DforkCount=1",
+        "-Dtest=*#crbNoSuchMethod",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+    )
     assert r.environment_ready(root, env_dir)
     # the offline test command now resolves everything setup warmed
     run = r.run(LocalExecutor(), root, (), timeout=600)
     assert run.green, run.tail
+
+
+_SUREFIRE_CONFIG = (
+    "[DEBUG] Configuring mojo execution 'org.apache.maven.plugins:maven-surefire-plugin:3.5.6:"
+    "test:default-test' with basic configurator -->\n"
+    "[DEBUG]   (f) forkCount = {fork}\n"
+    "[DEBUG]   (f) jvm = {jvm}\n"
+    "[DEBUG]   (s) skipTests = true\n"
+    "[DEBUG] -- end configuration --\n"
+)
+
+
+def test_surefire_preflight_admits_only_a_forking_surefire_on_the_stub() -> None:
+    """The guard before the online probe (hermetic): plugin configuration in a POM outranks
+    ``-Djvm`` / ``-DforkCount``, and in-process surefire (``forkCount`` 0) or the POM's own
+    ``jvm`` would run the repository's launcher code with the network — so the probe runs
+    only when every surefire ``test`` execution forks, and forks the stub. Unknown fails
+    closed."""
+    stub = "/t/crb-surefire-probe-x/bin/java"
+    cfg = _SUREFIRE_CONFIG.format
+    assert surefire_forks_to_stub("", stub)  # no surefire execution: nothing to guard
+    assert surefire_forks_to_stub(cfg(fork="1", jvm=stub), stub)
+    assert surefire_forks_to_stub(cfg(fork="2C", jvm=stub), stub)  # a POM's parallel forks
+    assert not surefire_forks_to_stub(cfg(fork="0", jvm=stub), stub)
+    assert not surefire_forks_to_stub(cfg(fork="0C", jvm=stub), stub)
+    assert not surefire_forks_to_stub(cfg(fork="many", jvm=stub), stub)
+    assert not surefire_forks_to_stub(cfg(fork="1", jvm="/usr/bin/java"), stub)
+    assert not surefire_forks_to_stub(cfg(fork="1", jvm=stub) + cfg(fork="0", jvm=stub), stub)
+    never = cfg(fork="1", jvm=stub).replace(
+        "(s) skipTests", "(f) forkMode = never\n[DEBUG]   (s) skipTests"
+    )
+    assert not surefire_forks_to_stub(never, stub)  # surefire 2.x's in-process switch
+    no_jvm = cfg(fork="1", jvm=stub).replace(f"[DEBUG]   (f) jvm = {stub}\n", "")
+    assert not surefire_forks_to_stub(no_jvm, stub)
+    assert not surefire_forks_to_stub("[DEBUG] resolved maven-surefire-plugin:3.5.6", stub)
+
+
+_SUREFIRE_FAILED = (
+    "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.6:test"
+    " (default-test) on project {}: {}"
+)
+
+
+def test_surefire_probe_is_ready_only_when_every_failed_module_reached_the_stub() -> None:
+    """The readiness verdict over the probe's output (hermetic). Under ``-fn`` Maven exits 0
+    whatever failed, so the verdict is: every failed module is a surefire ``test`` failure
+    AND each one is a module whose fork reached the stub; anything unparsed fails closed."""
+    fork_a = _SUREFIRE_FAILED.format("a", "")
+    cold_b = _SUREFIRE_FAILED.format("b", "The following artifacts could not be resolved: x")
+    compiler = (
+        "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.0:"
+        "compile (default-compile) on project a: Compilation failure"
+    )
+    assert surefire_probe_ready(ExecResult(0, "", ""), set())  # no tests: nothing to resolve
+    assert surefire_probe_ready(ExecResult(0, fork_a, ""), {"/r/a"})
+    assert surefire_probe_ready(ExecResult(0, "", fork_a), {"/r/a"})  # stderr counts too
+    assert not surefire_probe_ready(ExecResult(0, fork_a + "\n" + cold_b, ""), {"/r/a"})
+    assert not surefire_probe_ready(ExecResult(0, fork_a, ""), set())  # failed before the fork
+    assert not surefire_probe_ready(ExecResult(1, fork_a, ""), {"/r/a"})  # Maven itself failed
+    assert not surefire_probe_ready(ExecResult(0, compiler, ""), set())
+    assert not surefire_probe_ready(ExecResult(0, "[ERROR] unparsed wording", ""), set())
+    assert not surefire_probe_ready(ExecResult(124, "", "", True), set())  # timed out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub is a POSIX shell script")
+def test_surefire_probe_stub_runs_nothing_and_records_the_module(tmp_path: Path) -> None:
+    """The fake ``java`` exits non-zero at once and records the module it was forked for —
+    the nearest directory holding a ``pom.xml``, so per-fork working directories
+    (``target/fork1``) still count as one module."""
+    module = tmp_path / "mod"
+    (module / "target" / "fork1").mkdir(parents=True)
+    (module / "pom.xml").write_text("<project/>", encoding="utf-8")
+    with SurefireProbe() as probe:
+        assert probe.java.name == "java" and probe.java.parent.name == "bin"
+        for cwd in (module, module / "target" / "fork1"):
+            done = subprocess.run(
+                [str(probe.java), "-jar", "surefirebooter.jar"], cwd=cwd, check=False
+            )
+            assert done.returncode != 0  # surefire must never read a stub fork as a pass
+        assert {Path(m).resolve() for m in probe.reached()} == {module.resolve()}
+        stub_dir = probe.java.parent.parent
+    assert not stub_dir.exists()
+
+
+def _add_launcher_listener(root: Path, marker: Path) -> None:
+    """Repository test code that runs whenever a JUnit Platform launcher starts: a
+    ``LauncherSessionListener`` registered through ``META-INF/services``. It is loaded before
+    any test is selected, so no ``-Dtest`` filter keeps it from running — only not starting
+    a test JVM does."""
+    pom = root / "pom.xml"
+    pom.write_text(
+        pom.read_text(encoding="utf-8").replace(
+            "  </dependencies>",
+            "    <dependency>\n"
+            "      <groupId>org.junit.platform</groupId>\n"
+            "      <artifactId>junit-platform-launcher</artifactId>\n"
+            "      <version>1.14.3</version>\n"
+            "      <scope>test</scope>\n"
+            "    </dependency>\n"
+            "  </dependencies>",
+        ),
+        encoding="utf-8",
+    )
+    java = root / "src/test/java/ex/probe/Listener.java"
+    java.parent.mkdir(parents=True)
+    java.write_text(
+        "package ex.probe;\n\n"
+        "public class Listener implements org.junit.platform.launcher.LauncherSessionListener {\n"
+        "    public Listener() {\n"
+        "        try {\n"
+        "            java.nio.file.Files.writeString(\n"
+        f'                java.nio.file.Path.of("{marker.as_posix()}"), "ran");\n'
+        "        } catch (java.io.IOException e) {\n"
+        "            throw new RuntimeException(e);\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    services = root / "src/test/resources/META-INF/services"
+    services.mkdir(parents=True)
+    (services / "org.junit.platform.launcher.LauncherSessionListener").write_text(
+        "ex.probe.Listener\n", encoding="utf-8"
+    )
+
+
+@pytest.mark.network("repo.maven.apache.org")
+@pytest.mark.toolchain("mvn")
+@pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
+@pytest.mark.skipif(not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME")
+def test_maven_setup_warms_a_cold_local_repository_without_running_tests(tmp_path: Path) -> None:
+    """Regression for PR #57 (shard 1 of 6): ``test -DskipTests`` skips surefire before it
+    resolves its test-framework provider, and the offline run had passed only because an
+    earlier test warmed the shared ``~/.m2``. The local repository here is EMPTY and private
+    to this test, so neither another test nor the host's warm cache can hide a cold provider
+    again. A repository launcher listener proves setup ran none of the repository's test
+    code with the network (docs/SECURITY.md T1), and the offline run is its positive control."""
+    root, _ = jvmrepo.build(tmp_path)
+    marker = tmp_path / "repository-test-code-ran"
+    _add_launcher_listener(root, marker)
+    m2 = f"-Dmaven.repo.local={tmp_path / 'm2'}"
+    base = jvmrepo.config(offline=True)
+    r = get_runner(dataclasses.replace(base, runner_opts={**base.runner_opts, "maven_flags": [m2]}))
+    env_dir = tmp_path / "env"
+    assert not r.environment_ready(root, env_dir)  # empty: nothing resolves offline
+    # the old warm-up leaves the provider cold, so it must not read ready
+    old = LocalExecutor().run(
+        Command(
+            ("mvn", "-q", "-B", m2, "test", "-DskipTests"),
+            root,
+            env={"JAVA_HOME": jvmrepo.java_home()},
+            timeout=900,
+            network=True,
+        )
+    )
+    assert old.ok, old.combined[-2000:]
+    assert not r.environment_ready(root, env_dir)
+    res = r.setup(LocalExecutor(), root, env_dir=env_dir, timeout=900)
+    assert res.ok, res.to_dict()
+    assert not marker.exists(), "setup ran repository test code with the network"
+    assert r.environment_ready(root, env_dir)
+    assert not marker.exists(), "the readiness probe ran repository test code"
+    run = r.run(LocalExecutor(), root, (), timeout=600)
+    assert run.green, run.tail
+    assert marker.exists()  # positive control: the listener does run once tests run
+    # a POM that keeps surefire in-process outranks -DforkCount: refused, nothing run
+    marker.unlink()
+    pom = root / "pom.xml"
+    pom.write_text(
+        pom.read_text(encoding="utf-8").replace(
+            "<version>3.5.6</version>",
+            "<version>3.5.6</version>\n        <configuration><forkCount>0</forkCount></configuration>",
+        ),
+        encoding="utf-8",
+    )
+    res = r.setup(LocalExecutor(), root, env_dir=env_dir, timeout=900)
+    assert not res.ok and "without running tests" in res.note, res.to_dict()
+    assert not r.environment_ready(root, env_dir)
+    assert not marker.exists(), "an in-process surefire ran repository test code"
 
 
 # --- cargo ---------------------------------------------------------------------------------

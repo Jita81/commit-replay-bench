@@ -91,7 +91,8 @@ Rules for the table:
   twice in one, which it missed until a wave used an id that was already taken. Ids are
   allocated from one register
   per band: pages `G-100`–`G-299`, journeys `G-300`–`G-499`, streams `G-500`–`G-599`, the
-  product `G-600`–`G-699`, and gaps shared across files `G-900`–`G-999`.
+  product `G-600`–`G-699`, the prevention register (`docs/PREVENTION.md`, §7) `G-700`–`G-799`,
+  and gaps shared across files `G-900`–`G-999`.
 
 ## 3. Evidence references (typed, resolvable)
 
@@ -145,7 +146,13 @@ person carrying data by hand), **MEASURE** (the product measures the stream's ow
 cost and counts and shows them), **AUTOMATION** (no step needs a person to type what the
 product already knows).
 
-The product adds: **IDENTITY** (one sentence, the same in README, Home and the book),
+The product adds, first, **VALUE** (the product produces working software and gets better
+the more data goes through it: working changes per pound on blind attempts is served with its
+interval, clean → working precision is served, each bug class's recurrence is served and the
+classes the loop removed are counted, every graded row's output is kept, and every change the
+loop makes is scored and retired by data — the operator's two instructions of 2026-09-25; its
+criteria head the product's table and the checker refuses a product artefact where they do
+not), then **IDENTITY** (one sentence, the same in README, Home and the book),
 **GO-LIVE** (every checklist line is proven by the product, not ticked by belief), **CLAIMS**
 (every public claim tagged with its evidence), **RELEASE** (a tagged, signed release exists
 per RELEASING.md), **POSTURE** (SECURITY §5 has no untagged gap), **SUPPORT** (the guides are
@@ -165,9 +172,11 @@ are named and exercised).
 - `GAP-ANALYSIS.md` lists, per level, the status, then the open criteria ranked by
   (level weight × count of criteria the gap blocks, capped at 3 × severity of the category ×
   the state factor), so the first line is the one that unblocks the most "done". The state
-  factor doubles `unmet` everywhere, and doubles `partial` too in TRUTH, CLAIMS, ROLES and
+  factor doubles `unmet` everywhere, and doubles `partial` too in VALUE, TRUTH, CLAIMS, ROLES and
   POSTURE: where the criterion is about telling the truth, built-wrong is not a lesser defect
-  than not-built. The first 25 rows are *the order of work*; *Open gaps by fan-out* repeats
+  than not-built. An open VALUE criterion outranks every other open criterion in the tree —
+  its category weight is set so, and a test holds it — because the value is what the rest is
+  for. The first 25 rows are *the order of work*; *Open gaps by fan-out* repeats
   them as one row per gap, with how many criteria and which levels that one change closes.
 
 ## 6. What this is for
@@ -176,3 +185,34 @@ The next feature is the top of `GAP-ANALYSIS.md`, or it is not the next feature.
 request that adds a screen without a page artefact, or a stream step without its criterion,
 fails the `dod` CI job. When a gap closes, the author changes the criterion's `state` and
 evidence in the artefact in the same PR; the checker verifies the evidence resolves.
+
+## 7. A defect is closed only with the artefact that fails if its class recurs
+
+The product's learning loop exists to turn every bug it observes into a change of process or
+context that removes the bug's class. We build the product by the same rule. When a gate, a
+test, a reviewer or the live stack finds a bug in our own work, fixing the instance is half the
+job; the other half is the **artefact that fails if the class comes back** — a test, a CI job,
+a walkthrough spec — and a row in the register, `docs/PREVENTION.md`:
+
+| column | what it holds |
+|---|---|
+| `id` | `P-nnn`, never reused |
+| `bug` | what happened, in one or two sentences |
+| `class` | the family the bug belongs to (`served-code-stale`, `harness:runner-tool-missing`) — the thing the artefact must stop, not only this instance |
+| `first seen` | the evidence of when it bit us: a run id, a pull request, a review, a date |
+| `artefact` | typed evidence references (§3), or `pending` |
+| `level` | `construction` › `gate` › `mistake-proofing` › `advisory` — the strongest the class admits |
+| `status` | `closed` or `pending` |
+| `gap` | for `pending`: a `G-7nn` defined under the register's `## Gaps` (with its owner layer) or a backlog id |
+
+`scripts/dod_check.py --check` (the `dod` job) refuses: a register that is missing; a row
+without a bug, a class or a first-seen; an unknown level or status; a duplicate id; a reference
+that does not resolve; a `closed` row with no reference that can **fail** (`test:`, `vitest:`,
+`spec:` or `ci:` — a `code:` reference proves a thing exists, not that it works); a `closed` row
+whose level is `advisory` (a sentence cannot fail when the class recurs, so an advisory fix
+stays `pending` with a gap toward a gate); and a `pending` row with no gap. The register's
+counts and every pending row are rendered into `GAP-ANALYSIS.md`.
+
+A pull request that fixes a bug says which row it adds or closes
+(`.github/pull_request_template.md`). The artefact is shown to fail: remove or break the
+prevention, run its test, see it fail, restore it.

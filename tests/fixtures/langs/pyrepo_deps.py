@@ -20,13 +20,15 @@ What it is:   The Python fixture with a locked third-party dependency whose vers
               commit bumps.
 What it does: Builds the two-commit repository whose parent and gold locks select different
               sealed site sets, for the Python recipe's daemon test.
-How:          ``two_commit_repo`` over inline sources; the gold's hash from ``pkgmirror.wheel_hash``.
+How:          ``two_commit_repo`` over inline sources; the gold's hash from
+              ``pkgmirror.wheel_hash``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   tests/fixtures/pkgmirror.py (the wheels it pins), tests/fixtures/langs/__init__.py
               (the two-commit shape), tests/test_provision_python.py (the consumer)
 Tested by:    tests/test_provision_python.py
-Touch when:   the Python recipe needs another lock shape (an include, a marker).
+Touch when:   never for a new repository; the Python recipe needs another lock shape (an include, a
+              marker).
 """
 
 from __future__ import annotations
