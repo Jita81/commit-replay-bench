@@ -91,8 +91,8 @@ does one that denies, forbids or refuses the claim, or sits in a section headed 
 meaning: "our pipeline is ISO-aligned" passes, and a reader still has to read.
 
 **How a file opts in.** Add its repository-relative path, or a glob for its folder, to
-``ALLOWLIST`` below and make it pass in the same change. The list only grows: a page that has been cleaned never leaves it,
-because leaving is how a gate quietly stops gating.
+``ALLOWLIST`` below and make it pass in the same change. The list only grows: a page that
+has been cleaned never leaves it, because leaving is how a gate quietly stops gating.
 
 Navigation
 ----------

@@ -48,9 +48,10 @@ Rules:
   "never for a new repository; …".
 - Prose above the block: keep it. Do not restate the block. Do not pad. A reader should be able
   to read the summary line, the block, and know whether to open the file.
-- Wrap at 100 columns **[aspiration — the standard's rule; ruff's formatter wraps code at 100
-columns but not a docstring, and the long-line lint rule is off, so nothing checks a header's
-width]**. British English. No marketing.
+- Wrap at 100 columns **[measured — n = 1 limit of 100 columns; method: `tests/test_header_width.py`
+counts the header lines wider than that in each scope and fails when a count rises above its
+recorded baseline, so older long lines are tolerated until someone wraps them; apparatus
+n/a]**. British English. No marketing.
 
 ## Python example (tail of the module docstring)
 
