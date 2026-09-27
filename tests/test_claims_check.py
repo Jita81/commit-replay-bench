@@ -159,6 +159,7 @@ def test_a_missing_allowlisted_file_is_itself_a_finding(tree: Path) -> None:
         "Each rate carries a 95% confidence interval.\n",  # the level, written the other way
         "Each rate carries a 95% CI.\n",  # and abbreviated
         "Each rate is quoted at a confidence of 95%.\n",  # the percentage IS the confidence
+        "Each share carries its bounds (Wilson 95 %).\n",  # "Wilson 95%" names the interval
         "Rule DL-0052 covers stopped items.\n",  # a leading zero is an identifier, not 52
         "The June 2026 v1 contents are tagged and frozen.\n",  # a year is not a count
         "Exactly one process reaches the model endpoint.\n",  # "one" never counts a plural
@@ -168,6 +169,10 @@ def test_a_missing_allowlisted_file_is_itself_a_finding(tree: Path) -> None:
         "The table is in EVIDENCE-AND-CLAIMS §9 carries it.\n",
         "PR #48 reviews closed the finding.\n",
         "G-674 entries name the gap.\n",
+        # a number after a naming noun is which one, not how many
+        "Belt 3 subtracts the in-posture baseline.\n",
+        "Stage 3 mines tasks and Wave 2 closes gaps.\n",
+        "ADR-0026 item 11 names characteristics.\n",
     ],
 )
 def test_prose_that_makes_no_claim_is_not_flagged(tree: Path, body: str) -> None:
@@ -894,3 +899,14 @@ def test_an_allowlist_glob_reads_every_page_it_matches_and_no_generated_one(tree
         ("docs/A.md", "no claim tag"),
         ("docs/dod/B.md", "no claim tag"),
     ]
+
+
+def test_a_sentence_listed_as_what_must_never_be_said_is_not_a_claim(tree: Path) -> None:
+    """EVIDENCE-AND-CLAIMS §7 quotes the sentences nobody may say ("Delivers unseen software
+    correctly 97.5% of the time"). Quoting a forbidden claim in order to forbid it is not
+    making it; the same sentence under any other heading is."""
+    forbidden = "- Delivers unseen software correctly 97.5% of the time.\n"
+    _write(tree, "README.md", f"# t\n\n## 7. What must never be said\n\n{forbidden}")
+    assert cc.check_tree(tree, ("README.md",)) == []
+    _write(tree, "README.md", f"# t\n\n## 7. What we found\n\n{forbidden}")
+    assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]

@@ -31,11 +31,13 @@ thereby tagged the sentence around it.
   matter, and the text of a link to a heading on the same page (a contents line);
 - a gap register line (``**G-nnn** — what is missing · what closes it``, or a backlog id
   such as ``**F42**``) is taken as its own ``[gap]`` tag: its form names what is absent and
-  what would close it, which is what the tag must cite;
+  what would close it, which is what the tag must cite; and a sentence under a heading
+  that lists what must never be said is quoted in order to forbid it, not claimed;
 - a percentage that is itself the confidence level ("Wilson 95% interval", "95% CI") — a
   result standing beside one ("65% passed (Wilson 95% interval)") *is* caught — a four-digit
   year, and a number written with a leading zero, which is an identifier ("ADR-0011"), or
-  written after ``§``, ``#`` or a lettered prefix and a hyphen ("§9", "PR #48", "G-674");
+  written after ``§``, ``#``, a lettered prefix and a hyphen ("§9", "PR #48", "G-674") or a
+  noun that names one member of a numbered series ("belt 3", "stage 3", "item 11");
 - whether the tag is the *right* one, and whether a ``[measured]`` figure is true: it checks
   that ``n``, a method and an apparatus version are *present*, never that they are sound.
   Only a person reading the ledger can do that;
@@ -360,7 +362,8 @@ _INTERVAL_NOUN = r"(?:confidence\s+(?:interval|level)|interval)"
 _CONFIDENCE_PERCENT_RE = re.compile(
     rf"{_PERCENT}\s+(?:{_INTERVAL_NOUN}|ci)\b"
     rf"|\b{_INTERVAL_NOUN}(?:\s+(?:of|at|is|was))?\s+{_PERCENT}"
-    rf"|\bconfidence\s+(?:of|at|is|was)\s+{_PERCENT}",
+    rf"|\bconfidence\s+(?:of|at|is|was)\s+{_PERCENT}"
+    rf"|\bWilson[\s-]+{_PERCENT}",
     re.I,
 )
 _TAG_RE = re.compile(r"\[(" + "|".join(TAGS) + r")\b([^\]]*)\]", re.I)
@@ -368,6 +371,19 @@ _N_RE = re.compile(r"\bn\s*(?:=|≥|>=|of)\s*\d|\b\d[\d,]*\s*(?:/|of)\s*\d", re.
 _APPARATUS_RE = re.compile(r"apparatus\s+(?:\d+\.\d+|n/a|none|[a-z0-9.-]+)", re.I)
 _CODE_RE = re.compile(r"`[^`]*`")
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+#: A section that lists what must never be said (EVIDENCE-AND-CLAIMS §7): its sentences are
+#: quoted in order to forbid them, not claimed.
+_FORBIDDEN_SECTION_RE = re.compile(
+    r"\bmust\s+never\s+be\s+said\b|\bmust\s+not\s+be\s+said\b|\bnever\s+be\s+said\b", re.I
+)
+#: A noun that names a member of a numbered series: the cardinal after it says which one
+#: ("belt 3", "stage 3", "Wave 2", "item 11", "rank 23"), not how many.
+_NAMING_NOUN_RE = re.compile(
+    r"\b(?:belt|step|stage|wave|item|rank|phase|rung|round|tier|level|section|table|figure|"
+    r"chapter|appendix|arm|action|question|finding|column|row|line|page|version|mutation|"
+    r"migration|revision|criterion|slice|batch|pass)\s+$",
+    re.I,
+)
 _ANCHOR_LINK_RE = re.compile(r"\[[^\]]*\]\(#[^)]*\)")
 #: A definition-of-done gap register line: ``**G-nnn** — what is missing · what closes it``
 #: (also a backlog id, ``**F42**``, ``**B-9**``). Its form is a [gap] tag: it names what is
@@ -540,6 +556,8 @@ def claim_numbers(sentence: str) -> list[str]:
         before = text[: match.start(1)]
         if before.endswith(("§", "#")) or re.search(r"[A-Za-z]-$", before):
             continue  # "§9", "PR #48", "G-674" — a section, a pull request, an id: not a count
+        if _NAMING_NOUN_RE.search(before):
+            continue  # "belt 3", "stage 3", "item 11" — which one, not how many
         digits = cardinal.replace(",", "")
         if digits.replace(".", "").isdigit():
             if digits.startswith("0") and not digits.startswith("0."):
@@ -599,6 +617,8 @@ def check_text(rel: str, text: str) -> list[Finding]:
             continue
         if _GAP_LINE_RE.match(block.text):
             continue  # a gap register line is its own [gap] tag
+        if _FORBIDDEN_SECTION_RE.search(block.heading):
+            continue  # a sentence quoted in order to forbid it is not a claim
         defects = tag_defects(block.cover)
         reasons = ["no claim tag"] if defects is None else defects
         for reason in reasons:
