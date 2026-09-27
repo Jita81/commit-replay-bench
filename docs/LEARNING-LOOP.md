@@ -210,13 +210,15 @@ operator's identity (`docs/API.md#learn-the-learning-loop--three-derivations-thr
 ```
 POST /api/v1/learn/refusals/accept?repo=…    {group_id, verdict: honest|refuse, note, command?, prefix?}
 POST /api/v1/learn/strengthen/register?repo=… {item_ids: ["strengthen-…"], by?, since?}
-POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", mode?, apparatus?}
+POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", mode?}
 ```
 
 * **accept** appends through the same `apply_triage` the CLI calls, so the API and the host
   write the same bytes and refuse the same things (a truncated class with no full command, a
   line that contradicts the other corpus, a `tamper` offered as a shell refusal). It is
-  idempotent: a line already present is reported, not written twice. The corpus directory is
+  idempotent: a line already present is reported, not written twice. The note is one line —
+  it is written as the provenance comment, so a note with a line break is refused rather than
+  allowed to write a corpus line nobody decided. The corpus directory is
   `CRB_LEARN_CORPUS_DIR`, else `<CRB_HOME>/learn/corpus` — this deployment's own record of
   what its operators decided, served back with the report as `decisions`. **A deployment
   running from a source checkout should set `CRB_LEARN_CORPUS_DIR` to that checkout's
@@ -229,8 +231,12 @@ POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", m
   after a re-score therefore chains; it never overwrites (F32). It is refused while a factory
   run is in flight, because the backlog that run verifies against cannot change under it.
 * **queue** sends the plan's own `POST /runs` bodies for ONE cell, each re-validated before it is
-  enqueued, with the operator as every run's actor. The response repeats the plan's estimate with
-  `cost_known` honoured, so an unknown cost is never read as zero.
+  enqueued, with the operator as every run's actor. Every run meets the same submit gate as
+  `POST /runs` before any is enqueued, so a cell whose builder has no credential is refused
+  whole with nothing queued (`builder_credential_missing`). A what-if plan (an `apparatus`
+  other than the running one) is refused: its runs would grade under the running apparatus
+  and could never clear the plan they were queued from. The response repeats the plan's
+  estimate with `cost_known` honoured, so an unknown cost is never read as zero.
 
 All three read the ledger the way `crb route` does: `--path <ledger.jsonl>` or
 `<workdir>/ledger.jsonl` (`--workdir` / `$CRB_HOME`). `--policy-json` overrides the routing

@@ -984,9 +984,9 @@ export const HINTS = {
     'Only these tasks, as commit shas separated by commas. Blank means every task. A hand-off from Learn fills it with the tasks its item names, so a re-score or a re-qualify reaches exactly those.',
   'text.run_new.learn_step':
     'Where this run sits in the learning loop: the Learn report handed the reader here with the kind and the task filled in, and queueing it is still a person’s act.',
-  'col.tasks.requalify':
-    'Walks a task that is not gold-clean again, without re-mining the history, after the runner or the repository’s configuration changed. Only an operator sees this column.',
-  'link.tasks.requalify':
+  'col.tasks.recheck_gold':
+    'Re-checks the gold of a task that is not gold-clean, without re-mining the history, after the runner or the repository’s configuration changed. This is not qualifying a posture: that is a qualify run. Only an operator sees this column.',
+  'link.tasks.recheck_gold':
     'Opens the Runs dialog with a mine run for this task’s commit filled in. It re-checks RED at the parent and GREEN with the commit, and queueing it is still your decision.',
   'field.run_new.pool':
     'Limit the run to the standard or the hard pool of tasks.',
@@ -1455,7 +1455,7 @@ export const HINTS = {
   'field.learn.verdict':
     'Honest means the guard was wrong and this command must be allowed. Refused means the guard was right and must keep refusing it.',
   'field.learn.note':
-    'One line saying why, written into the corpus file as a comment above the line, for whoever reads it next.',
+    'One line saying why, written into the corpus file as a comment above the line, for whoever reads it next. It stays one line: a line break would end the comment.',
   'field.learn.command':
     'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line.',
   'field.learn.prefix':

@@ -297,9 +297,32 @@ def normalise_reason(reason: str) -> str:
     return " ".join(text.split())
 
 
+#: Every character ``str.splitlines`` ends a line at — the way the corpus files are read
+#: (``_existing_lines``, ``tests/test_builders_guard_corpus.py``). Free text written into a
+#: corpus file must carry none of them, or one decision writes lines nobody decided (P-054).
+LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+_LINE_BREAK_RE = re.compile("[" + re.escape("".join(sorted(LINE_BREAKS))) + "]")
+
+
+def has_line_break(text: str) -> bool:
+    """True when ``text`` would take more than one line of a corpus file."""
+    return _LINE_BREAK_RE.search(text) is not None
+
+
+def one_line(text: str) -> str:
+    """Free text as one line of a corpus-file comment: every line break (and a CRLF pair)
+    becomes one space, so a note or a name can never end the comment it is written into."""
+    return _LINE_BREAK_RE.sub(" ", text.replace("\r\n", "\n"))
+
+
 def encode_corpus_line(command: str) -> str:
-    """A command as one corpus line (``\\n`` for a newline; secrets redacted)."""
-    return redact(command.replace("\r\n", "\n")).replace("\n", "\\n").strip()
+    """A command as one corpus line (``\\n`` for a newline, a lone CR read as one; secrets
+    redacted). Any other line break is written as its escape (``\\x0b``, ``\\u2028``) —
+    the line stays one line and still says which character the command carried (P-054)."""
+    text = redact(command.replace("\r\n", "\n").replace("\r", "\n")).replace("\n", "\\n")
+    return _LINE_BREAK_RE.sub(
+        lambda m: m.group().encode("unicode_escape").decode("ascii"), text
+    ).strip()
 
 
 @dataclass(frozen=True)
@@ -603,8 +626,9 @@ def _provenance(group: RefusalGroup, *, verdict: str, who: str, date: str, note:
     """``# learned <date> from <repo>/<task> row <hash> (<verdict>→<who>) — <note>``."""
     where = ", ".join(group.tasks[:3]) + (" …" if len(group.tasks) > 3 else "")
     rows = ", ".join(h[:12] for h in group.rows[:3]) + (" …" if len(group.rows) > 3 else "")
-    tail = f" — {note}" if note else ""
-    return f"# learned {date} from {where} row {rows} ({verdict}→{who}){tail}"
+    tail = f" — {one_line(note)}" if note else ""
+    # the name and the note are free text inside a one-line comment (P-054)
+    return f"# learned {date} from {where} row {rows} ({verdict}→{one_line(who)}){tail}"
 
 
 def apply_triage(
@@ -1584,6 +1608,7 @@ __all__ = [
     "CORPUS_REFUSED_PREFIXES",
     "DECISIONS_SCHEMA",
     "GUARD_PREFIXES",
+    "LINE_BREAKS",
     "REFUSALS_SCHEMA",
     "REMEASURE_SCHEMA",
     "STRENGTHEN_REASONS",
@@ -1608,10 +1633,12 @@ __all__ = [
     "apply_triage",
     "dumps",
     "encode_corpus_line",
+    "has_line_break",
     "load_decisions",
     "load_oracle_scores",
     "normalise_command",
     "normalise_reason",
+    "one_line",
     "parse_violations",
     "remeasure_plan",
     "render_refusals",

@@ -63,7 +63,7 @@ describe('RepoDetail', () => {
     setup(VIEWER, `/repos/${REPO.name}?tab=nonsense`)
     await waitFor(() => expect(screen.getAllByRole('tab', { name: 'Overview' }).at(-1)).toHaveAttribute('aria-selected', 'true'))
   })
-  it('an operator re-qualifies a task that is not gold-clean from its row, the Runs dialog pre-filled (G-431)', async () => {
+  it('an operator re-checks the gold of a task that is not gold-clean from its row, the Runs dialog pre-filled (G-431)', async () => {
     const task = (id: string, gold: boolean | null) => ({ task_id: id, repo: REPO.name, subject: `s ${id.slice(0, 4)}`, authored: '2026-09-20T00:00:00Z', test_files: [], src_files: [], target_tests: [], belt_scope: [], pool: 'standard', src_churn: 3, size: 'S', capability_class: 'bug.fix', language: 'python', baseline_failing: [], red_checked: true, gold_clean: gold, gold_note: gold === false ? 'a runner error' : '', labels: {} })
     const failed = 'f'.repeat(40)
     const clean = 'c'.repeat(40)
@@ -76,13 +76,17 @@ describe('RepoDetail', () => {
       'GET /health': { status: 'ok', probes: [] },
     })
     renderApp(<RepoDetail />, { route: `/repos/${REPO.name}?tab=tasks`, path: '/repos/:name' })
-    const links = await screen.findAllByRole('link', { name: 'Re-qualify' })
+    const links = await screen.findAllByRole('link', { name: 'Re-check gold' })
     // only the task that is not gold-clean is offered it; the re-walk is `mine` with its sha
     expect(links).toHaveLength(1)
     expect(links[0]).toHaveAttribute('href', `/runs?repo=${REPO.name}&new=mine&tasks=${failed}`)
+    // "Re-qualify" is posture qualification (ADR-0019, kind qualify, offered on Learn): the
+    // mine hand-off never borrows its name, so one label never starts two acts (P-056)
+    expect(screen.queryByRole('link', { name: /re-qualify/i })).toBeNull()
+    expect(screen.getByRole('columnheader', { name: /Re-check gold/ })).toBeInTheDocument()
   })
 
-  it('a viewer is offered no re-qualify link', async () => {
+  it('a viewer is offered no re-check link', async () => {
     mockApi({
       'GET /auth/me': VIEWER,
       [`GET /repos/${REPO.name}`]: REPO,
@@ -93,6 +97,6 @@ describe('RepoDetail', () => {
     })
     renderApp(<RepoDetail />, { route: `/repos/${REPO.name}?tab=tasks`, path: '/repos/:name' })
     await screen.findByText('failed')
-    expect(screen.queryByRole('link', { name: 'Re-qualify' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Re-check gold' })).toBeNull()
   })
 })

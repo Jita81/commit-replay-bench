@@ -26,7 +26,8 @@
  *               component each with tiles + `DataTable` + its action; the note the server
  *               attaches is shown verbatim under each table. The two decisions that need
  *               more than a click open a `Dialog` (a verdict needs a reason; queueing runs
- *               spends money, so it is confirmed against the plan's own estimate); the
+ *               spends money, so it is confirmed against the plan's own estimate); the note is a
+ *               one-line field, since it is written into the corpus as a comment (P-054); the
  *               outcome is a green `NotificationBanner` with a `role="status"` line naming
  *               what was written, so a screen reader is told as it lands.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -58,7 +59,7 @@ import { DataTable, type Column } from '../../components/DataTable'
 import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
-import { SelectField, TextArea, TextField } from '../../components/Field'
+import { SelectField, TextField } from '../../components/Field'
 import { NotificationBanner, WarningButton } from '../../components/govuk'
 import { DocLink, Term } from '../../components/Help'
 import { PageHeader } from '../../components/PageHeader'
@@ -406,12 +407,14 @@ function DecideDialog({ repo, group, onClose }: { repo: string; group: RefusalGr
               <option value="honest">Honest — the guard should not have refused it</option>
               <option value="refuse">Refused — the guard was right</option>
             </SelectField>
-            <TextArea
+            {/* P-054 — one line by construction: the note is written into the corpus as a
+                comment, and a line break would end it and write the rest as a corpus line */}
+            <TextField
               label="Why (written into the corpus as a comment)"
               hint="field.learn.note"
-              rows={2}
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              maxLength={400}
+              onChange={(e) => setNote(e.target.value.replace(/[\n\r\v\f\u001c-\u001e\u0085\u2028\u2029]+/g, ' '))}
               description="One line a later reader can act on, such as “.git inside a quoted argument”."
             />
             {needsCommand && (

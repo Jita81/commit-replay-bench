@@ -11,7 +11,8 @@
  *               is in `TERMS`; (4) copy lint — purpose / next / numbers use "cell",
  *               "apparatus", "belt", "Wilson", "false-Q1" or "oracle" only when that term is
  *               in the screen's `terms[]`; every string is plain (no exclamation mark) and
- *               `next.viewer` always exists.
+ *               `next.viewer` always exists; (5) the /learn About block says the product
+ *               decides nothing on its own, in the words its DoD criteria cite.
  * How:          Reads `ui/src/App.tsx` and the eight guides as `?raw` text so the ratchet
  *               needs no React; `matchPath` through `helpFor`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -119,6 +120,13 @@ describe('HELP ratchet', () => {
       for (const id of ids) expect(TERMS[id], `${h.route}: unknown term ${id}`).toBeDefined()
       expect(new Set(ids).size, `${h.route}: repeated term`).toBe(ids.length)
     }
+  })
+
+  it('the /learn About block names the register and the three reports and says the product decides nothing on its own', () => {
+    const learn = helpFor('/learn')!
+    expect(learn.purpose).toContain('the prevention register lists every bug class')
+    expect(learn.purpose).toMatch(/three reports list refusals .* weak oracles .* evidence that has gone stale/)
+    expect(learn.purpose).toContain('The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.')
   })
 
   it('copy lint: a term word appears only when the term is on the screen; plain English throughout', () => {

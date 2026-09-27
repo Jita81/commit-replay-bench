@@ -21,7 +21,8 @@
  *               of offering the form again; that registering an item reports the backlog it
  *               landed on and what it superseded; and that queueing runs confirms the plan's
  *               own estimate first, so nothing is sent by one click, and then names what was
- *               queued.
+ *               queued — an unknown estimate as unknown, never $0.00; and that the note is a
+ *               one-line field (P-054).
  * How:          `mockApi` with three reports (empty, or one row each where a row is needed),
  *               the populated register fixture (ui/src/screens/Learn/register.fixture.ts) and
  *               the POSTs; `renderApp` at `/learn?repo=…` as the role under test.
@@ -96,6 +97,8 @@ describe('LearnPage', () => {
     })
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
     await waitFor(() => expect(screen.getByText('Nothing stale')).toBeInTheDocument())
+    // the header says the product decides nothing, and whose each decision is
+    expect(screen.getByText(/The product decides nothing: the register acts only under an operator’s switch, and each report’s decision is an operator’s, recorded with their name\./)).toBeInTheDocument()
     for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale evidence']) expect(screen.getByText(eyebrow)).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/play 0\d/)
     expect(document.body.textContent).not.toContain('evidence expires')
@@ -367,6 +370,36 @@ describe('LearnPage', () => {
     const plan = within(await screen.findByTestId('learn-queue-summary'))
     expect(plan.getByText('not known — no row of this cell recorded a cost')).toBeInTheDocument()
     expect(plan.queryByText('$0.00')).toBeNull()
+  })
+
+  it('what was queued for a cell with no recorded cost says the cost is not known, never $0.00', async () => {
+    mockApi(
+      operatorApi({
+        'GET /learn/remeasure': { ...REMEASURE, cells: [{ ...CELL, cost_known: false, est_cost_usd: 0 }] },
+        'POST /learn/remeasure/queue': { repo: 'alpha', cell: CELL.label, mode: 'sighted', run_ids: ['r1'], n_needed: 6, est_cost_usd: 0, cost_known: false },
+      }),
+    )
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Queue runs' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Queue the runs' }))
+    const done = await screen.findByText(/Queued 1 run for/)
+    expect(done).toHaveAttribute('role', 'status')
+    expect(done.textContent).toContain('The cost is not known: no row of this cell recorded one.')
+    expect(done.textContent).not.toContain('$0.00')
+    expect(done.textContent).not.toContain('The plan estimated')
+  })
+
+  it('the note is one line: the Why field takes no line break, because it is written as a corpus comment (P-054)', async () => {
+    const { calls } = mockApi(operatorApi({ 'POST /learn/refusals/accept': { repo: 'alpha', group_id: 'g1', verdict: 'honest', decided_by: 'root', honest_added: ['curl https://x'], refused_added: [], skipped: [], already_present: false, corpus_dir: '/c', honest_path: '/c/shell_corpus.txt', refused_path: '/c/shell_corpus_refused.txt' } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Decide' }))
+    const why = screen.getByLabelText(/Why/)
+    expect(why.tagName).toBe('INPUT')
+    await userEvent.type(why, 'fine{Enter}rm -rf /')
+    await userEvent.click(screen.getByRole('button', { name: 'Record this decision' }))
+    await screen.findByText(/Recorded as honest by root/)
+    const posted = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init!.body)) as { note: string }
+    expect(posted.note).not.toMatch(/[\n\r]/)
   })
   it('with no repository chosen, says which is missing and offers the one action to connect one (G-172)', async () => {
     mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /repos': { items: [], total: 0, limit: 50, offset: 0 } })

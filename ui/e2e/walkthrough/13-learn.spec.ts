@@ -11,7 +11,9 @@
  *    controls escape (or a weak oracle) holds it — so the strengthen report has a row.
  *  - The operator (`walk-operator`, a real operator account) reads the loop's position line,
  *    the register card with the refused class on it, the refusal tile with its n and
- *    interval, the refusal row, the strengthening row and the re-measurement plan; decides
+ *    interval, the refusal row, the strengthening row and the re-measurement plan; closes
+ *    the Decide dialog by Cancel, its close button and Escape and finds focus back on
+ *    Decide each time (P-055); decides
  *    the refusal (refused, with a note) and reads what it wrote and under whose name;
  *    registers the strengthening item and follows the Factory link to the item it
  *    registered; follows the Re-score hand-off to a Runs dialog with the kind and the task
@@ -187,6 +189,24 @@ test.describe('13 learn: the loop acts from the page', () => {
     await expect(planRow).toBeVisible()
     await expect(planRow).toContainText(/\S+\|\S+/)
     await expect(plan.getByRole('button', { name: 'Queue runs' })).toHaveCount(0)
+  })
+
+  test('a decision dialog closed by Cancel, the close button or Escape gives focus back to Decide (P-055)', async ({ browser }) => {
+    const page = await personaPage(browser, 'operator')
+    await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
+    const row = page.getByRole('table', { name: /Refusal classes/ }).getByRole('row').filter({ hasText: 'git log' }).first()
+    const decide = row.getByRole('button', { name: 'Decide' })
+    const dialog = page.getByRole('dialog', { name: 'Decide this refusal class' })
+    for (const close of ['Cancel', 'Close dialog', 'Escape']) {
+      await decide.click()
+      await expect(dialog).toBeVisible()
+      // the note is one line by construction (P-054): the field is an input, not a text area
+      await expect(dialog.getByLabel(/Why/)).toHaveJSProperty('tagName', 'INPUT')
+      if (close === 'Escape') await page.keyboard.press('Escape')
+      else await dialog.getByRole('button', { name: close, exact: true }).click()
+      await expect(dialog).toHaveCount(0)
+      await expect(decide).toBeFocused()
+    }
   })
 
   test('the operator decides the refusal class and reads what it wrote, under their name', async ({ browser }) => {

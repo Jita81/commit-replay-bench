@@ -34,7 +34,8 @@ the request body, so a decision cannot be filed under somebody else's name:
   first, **evolve** the rest, so a re-registered item supersedes rather than
   overwrites); event ``learn.strengthen.registered``;
 * ``POST /learn/remeasure/queue`` — the plan's own ``POST /runs`` bodies enqueued for
-  one cell; event ``learn.remeasure.queued``.
+  one cell, each through the submit gate ``POST /runs`` applies (``submit_refusals``)
+  before any is enqueued, and never for a what-if plan; event ``learn.remeasure.queued``.
 
 Nothing about *which* decision is right moves into the product: the item bodies and the
 run bodies are re-derived here from the ledger, never taken from the caller, so a write
@@ -65,8 +66,9 @@ Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` 
               session's CSRF token before it reaches a route), src/crb/server/factory_state.py
               (``FactoryHome.register_backlog`` / ``register_evolution`` — the one
               registration path), src/crb/server/routes/runs.py (``new_run``,
-              ``require_jobs``, ``append_system_event`` — how a run is queued and how an
-              event is chained), src/crb/server/routes/factory.py
+              ``submit_refusals``, ``require_jobs``, ``append_system_event`` — how a run is
+              built, refused at submit, queued, and how an event is chained),
+              src/crb/server/routes/factory.py
               (``_refuse_if_run_active``, ``_next_item_id`` — the backlog write's own
               guards, shared rather than copied), src/crb/cli/commands/learn.py (the CLI
               twin), docs/LEARNING-LOOP.md (what loops mechanically, what a human decides),
@@ -85,7 +87,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -98,6 +100,7 @@ from crb.core.learn import (
     StrengthenBacklog,
     StrengthenItem,
     apply_triage,
+    has_line_break,
     load_oracle_scores,
     remeasure_plan,
     strengthening_backlog,
@@ -114,7 +117,13 @@ from crb.server.routes.capability import CHECKS_CURRENT, rows_for_arm
 from crb.server.routes.factory import _next_item_id, _refuse_if_run_active
 from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict
 from crb.server.routes.repos import get_repo_or_404
-from crb.server.routes.runs import append_system_event, new_run, require_jobs, system_trace_id
+from crb.server.routes.runs import (
+    append_system_event,
+    new_run,
+    require_jobs,
+    submit_refusals,
+    system_trace_id,
+)
 from crb.server.schemas import RunCreateRequest
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Task
@@ -352,6 +361,15 @@ class RefusalAcceptIn(BaseModel):
     note: str = Field(default="", max_length=400)
     command: str = Field(default="", max_length=2000)
     prefix: str = Field(default="", max_length=32)
+
+    @field_validator("note")
+    @classmethod
+    def _note_is_one_line(cls, v: str) -> str:
+        """The note becomes a provenance COMMENT in a line-oriented corpus file: a line break
+        would end the comment and write the rest as a corpus line nobody decided (P-054)."""
+        if has_line_break(v):
+            raise ValueError("a note is one line: it is written into the corpus as a comment")
+        return v
 
 
 class RefusalAcceptOut(BaseModel):
@@ -677,11 +695,12 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
     responses={401: _ERR, 403: _ERR, 404: _ERR, 422: _ERR, 503: _ERR},
     summary="Queue the re-measurement runs the plan computed for ONE cell (the bodies are the plan's, never the caller's)",
 )
-def queue_remeasurement(
+def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + query
     body: RemeasureQueueIn,
     operator: OperatorDep,
     db: DbDep,
     factory: SessionFactoryDep,
+    settings: SettingsDep,
     repo: str = Query(min_length=1, max_length=64),
 ) -> RemeasureQueueOut:
     """The hand-off the operator used to make by posting the plan's JSON by hand (G-532).
@@ -690,11 +709,25 @@ def queue_remeasurement(
     plan's own ``POST /runs`` requests (each re-validated as a
     :class:`~crb.server.schemas.RunCreateRequest` before it is enqueued — a body the plan
     could not build is our defect), and the response repeats what the plan said it would
-    cost with ``cost_known`` honoured. **422** for a cell that is not in the plan, or for a
-    label the plan holds in both modes with no ``mode`` given; **503
-    ``queue_unavailable``** when this server has no queue.
+    cost with ``cost_known`` honoured. **422** for a cell that is not in the plan, for a
+    label the plan holds in both modes with no ``mode`` given, and for a what-if plan (an
+    ``apparatus`` other than the running one: its runs would grade under the running
+    apparatus and could never clear the plan they were queued from); **422
+    ``builder_credential_missing``** (and every other submit refusal ``POST /runs`` makes)
+    when any run of the cell would meet it — checked for every run before any is enqueued,
+    through the same :func:`~crb.server.routes.runs.submit_refusals`, so the whole cell is
+    refused with nothing queued; **503 ``queue_unavailable``** when this server has no queue.
     """
     get_repo_or_404(db, repo)
+    if body.apparatus != APPARATUS_VERSION:
+        raise ApiError(
+            422,
+            "validation_error",
+            f"a what-if plan queues nothing: apparatus {body.apparatus!r} is not the running "
+            f"apparatus {APPARATUS_VERSION!r}, so its runs would grade under "
+            f"{APPARATUS_VERSION!r} and could never clear the plan they were queued from",
+            detail={"apparatus": body.apparatus, "running": APPARATUS_VERSION},
+        )
     plan = derive_remeasure(db, factory, repo, apparatus=body.apparatus)
     matches = [
         c
@@ -719,7 +752,9 @@ def queue_remeasurement(
         )
     cell = matches[0]
     api = require_jobs()
-    run_ids: list[str] = []
+    # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
+    # whole or not at all (P-053 — the gate is the one POST /runs applies)
+    runs = []
     for request in cell.requests:
         payload = {k: v for k, v in request.to_dict().items() if k != "note"}
         try:
@@ -728,7 +763,10 @@ def queue_remeasurement(
             raise ApiError(
                 422, "validation_error", f"the plan's run body does not validate: {exc}"
             ) from exc
-        run_ids.append(api.enqueue(factory, new_run(validated, actor=operator.id)).id)
+        run = new_run(validated, actor=operator.id)
+        submit_refusals(db, settings, validated, run)
+        runs.append(run)
+    run_ids = [api.enqueue(factory, run).id for run in runs]
     append_system_event(
         db,
         trace_id=learn_trace_id(repo),

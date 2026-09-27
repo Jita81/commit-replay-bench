@@ -257,14 +257,15 @@ function TasksTab({ name }: { name: string }) {
             {
               // G-431 — a task that is not gold-clean after a configuration change is walked
               // again (`mine` + its sha) without re-mining the history; the dialog arrives
-              // pre-filled and queueing it is still the operator's act
-              key: 'requalify',
-              header: 'Re-qualify',
-              hint: 'col.tasks.requalify' as const,
+              // pre-filled and queueing it is still the operator's act. It re-checks the
+              // gold; "Re-qualify" is posture qualification (ADR-0019), a different act (P-056)
+              key: 'recheck_gold',
+              header: 'Re-check gold',
+              hint: 'col.tasks.recheck_gold' as const,
               cell: (t: TaskSpec) =>
                 t.gold_clean === true ? null : (
-                  <Hint as={Link} id="link.tasks.requalify" to={`/runs?repo=${encodeURIComponent(name)}&new=mine&tasks=${t.task_id}`} className="text-xs">
-                    Re-qualify
+                  <Hint as={Link} id="link.tasks.recheck_gold" to={`/runs?repo=${encodeURIComponent(name)}&new=mine&tasks=${t.task_id}`} className="text-xs">
+                    Re-check gold
                   </Hint>
                 ),
             },

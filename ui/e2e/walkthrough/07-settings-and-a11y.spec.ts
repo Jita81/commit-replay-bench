@@ -21,7 +21,8 @@
  *               page; and that axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a run
  *               detail with real rows, Capability, Ledger and Sign-off — against the live
  *               data the earlier specs produced.
- * How:          `AxeBuilder` with the WCAG tags per screen; the fake token is shape-valid and
+ * How:          `AxeBuilder` with the WCAG tags per screen, run only once every finite CSS
+ *               transition has finished (P-059); the fake token is shape-valid and
  *               deliberately not real.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -43,6 +44,11 @@ const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 
 async function axeClean(page: Page, where: string): Promise<void> {
+  // P-059 — axe reads the colours painted NOW: a button whose variant flipped as the page's
+  // data landed (Connection's Baseline turns filled when every stage is done) is caught
+  // mid-transition at 1.3:1 and fails at random. Wait for every finite CSS transition and
+  // animation to finish first; an infinite one (a spinner, a pulse) never blocks.
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity), undefined, { timeout: 10_000 })
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
   expect(results.violations, `${where}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([])
 }
