@@ -22,9 +22,13 @@ line that does not read "what is missing · the smallest change that closes it �
 whose owner is not one of ui/server/factory/docs/deploy; the same gap id carrying two
 different lines in two files (one id is one piece of work); a gap line that no criterion of
 its file cites (or, in the register, no pending row); a ``PLAN.md`` wave item that is not a
-gap id the record defines or has retired; an evidence reference that does not resolve; and a
-``GAP-ANALYSIS.md`` or a ``status:`` line that differs from what the artefacts generate. It
-never edits a criterion.
+gap id the record defines or has retired; a gap among the order of work's first ``TOP`` rows
+that no wave names; a retired id that neither the artefacts' git history nor the base
+branch's committed gap analysis shows was a gap (the generated file never vouches for
+itself); an evidence reference that does not resolve; and a ``GAP-ANALYSIS.md`` or a
+``status:`` line that differs from what the artefacts generate. It never edits a criterion.
+
+    python scripts/dod_check.py --check --base origin/integration/next   # another base branch
 
 Navigation
 ----------
@@ -36,7 +40,8 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               code symbols, doc anchors, CI jobs, ADRs, decision-log rows), computes the
               four-level roll-up and writes docs/dod/GAP-ANALYSIS.md (the order of work, the
               gaps by fan-out, the gap ids retired, and every open criterion); refuses a gap
-              line nothing cites and a PLAN.md wave item that is not a gap; --check exits
+              line nothing cites, a PLAN.md wave item that is not a gap, a top-ranked gap in
+              no wave, and a retired id that git history does not vouch for; --check exits
               non-zero on any defect or drift.
 How:          Walk docs/dod/{pages,journeys,streams}/*.md + product.md → parse front matter
               and the criteria table → resolve evidence (one resolver per prefix) → demote
@@ -48,8 +53,9 @@ Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYS
               a gap may cite), ui/src/App.tsx and ui/src/components/Layout.tsx (the routes
               and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
-              .github/workflows/ci.yml (the dod job that runs --check), docs/dod/PLAN.md
-              (its wave items must be gap ids)
+              .github/workflows/ci.yml (the dod job that runs --check, with full history and
+              the pull request's base), docs/dod/PLAN.md (its wave items must be gap ids),
+              git (the artefacts' history vouches for each retired id)
 Tested by:    tests/test_dod_check.py
 Touch when:   a level or category is added to the standard (update CATEGORIES / LEVELS and the
               standard together); a new evidence prefix is needed (add a resolver and a row to
@@ -61,6 +67,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -880,9 +887,137 @@ def previous_ids(text: str) -> tuple[set[str], set[str]]:
 def retired_ids(previous: str, defined: set[str]) -> list[str]:
     """Every id the order of work once carried that nothing defines any more — closed, or
     merged into another id. It only grows (an id defined again leaves it), so a wave that
-    closes a gap never breaks the plan that named it."""
+    closes a gap never breaks the plan that named it.
+
+    It is carried forward from the previous gap analysis; ``main`` keeps only the ids that
+    ``history_gap_ids`` or ``base_gap_analysis_ids`` vouch for, so that file never vouches
+    for itself."""
     open_ids, retired = previous_ids(previous)
     return sorted((open_ids | retired) - defined, key=_gap_key)
+
+
+#: Where a gap id is defined or cited by hand: the artefacts and the register — never the
+#: generated gap analysis, the plan or the standard's examples.
+HISTORY_PATHS: tuple[str, ...] = (
+    "docs/dod/pages",
+    "docs/dod/journeys",
+    "docs/dod/streams",
+    "docs/dod/product.md",
+    "docs/PREVENTION.md",
+)
+_HIST_GAP_LINE = re.compile(r"^\+\s*- \*\*(G-\d{3}|F\d+[a-z]?|B-\d+[a-z]?)\*\*\s*\u2014")
+#: The branch whose committed gap analysis is trusted, when ``--base`` is not given.
+DEFAULT_BASE = "origin/main"
+
+
+def _git(root: Path, *args: str) -> str | None:
+    """``git -C root …``'s stdout, or None when git fails or is missing."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def _own_work_tree(root: Path) -> bool:
+    """True only when ``root`` is itself the top of a git work tree. ``git -C`` walks up to the
+    nearest repository, and a parent's history must never vouch for this tree's ids."""
+    top = _git(root, "rev-parse", "--show-toplevel")
+    return top is not None and Path(top.strip()).resolve() == root.resolve()
+
+
+def history_gap_ids(root: Path) -> set[str]:
+    """Every gap id that a commit reachable from ``HEAD`` added to an artefact or the register:
+    a gap line (``- **G-nnn** — …``), or the gap cell of a criterion or pending register row
+    (the only way a backlog ``F``/``B`` id becomes a gap). Merges are read against their first
+    parent, so a line written while resolving a merge counts too. Empty when ``root`` is not
+    its own work tree or has no commits."""
+    if not _own_work_tree(root):
+        return set()
+    log = _git(
+        root,
+        "log",
+        "-p",
+        "--no-color",
+        "--no-ext-diff",
+        "--diff-merges=first-parent",
+        "--format=",
+        "HEAD",
+        "--",
+        *HISTORY_PATHS,
+    )
+    ids: set[str] = set()
+    for line in (log or "").split("\n"):
+        m = _HIST_GAP_LINE.match(line)
+        if m:
+            ids.add(m.group(1))
+        elif line.startswith("+|"):
+            cells = [c.strip() for c in line[1:].strip().strip("|").split("|")]
+            if cells and _GAP_RE.match(cells[-1]):
+                ids.add(cells[-1])
+    return ids
+
+
+def base_gap_analysis_ids(root: Path, base: str) -> set[str]:
+    """The ids — open or retired — in the gap analysis committed at the merge-base of ``HEAD``
+    and ``base``. That file passed this check on the pull request that wrote it, and it is
+    where an id opened and closed inside a squash-merged branch survives (the squash drops the
+    branch's own artefact commits). Empty when the base does not resolve."""
+    if not _own_work_tree(root):
+        return set()
+    mb = _git(root, "merge-base", "HEAD", base)
+    if mb is None:
+        return set()
+    rel = (
+        OUT.relative_to(root).as_posix() if OUT.is_relative_to(root) else "docs/dod/GAP-ANALYSIS.md"
+    )
+    text = _git(root, "show", f"{mb.strip()}:{rel}")
+    if text is None:
+        return set()
+    open_ids, retired = previous_ids(text)
+    return open_ids | retired
+
+
+def validate_retired(bad: list[str], base: str, root: Path) -> list[str]:
+    """A retired id must have been a gap somewhere a person wrote it: in the artefacts' own
+    history, or in the base branch's committed gap analysis. The generated file cannot vouch
+    for itself: ``bad`` are the ids it carries that nothing else vouches for — the generator
+    drops them, and ``--check`` names each one."""
+    if not bad:
+        return []
+    hint = ""
+    if not _own_work_tree(root):
+        hint = " (this tree is not a git work tree, so no history can vouch for any id)"
+    elif (_git(root, "rev-parse", "--is-shallow-repository") or "").strip() == "true":
+        hint = " (the clone is shallow: fetch the full history, e.g. fetch-depth: 0)"
+    return [
+        f"docs/dod/GAP-ANALYSIS.md retires {gid}, but no artefact or register row in the git "
+        f"history ever defined it and the gap analysis at the merge-base with {base} never "
+        f"carried it{hint} — the list is generated: never edit docs/dod/GAP-ANALYSIS.md by "
+        "hand; restore it (git checkout) and run scripts/dod_check.py"
+        for gid in bad
+    ]
+
+
+def validate_plan_covers_the_top(
+    ranked_gaps: list[str], items: list[tuple[int, str]], top: int = TOP
+) -> list[str]:
+    """STANDARD.md §6: the plan batches the order of work, so every gap among its first
+    ``top`` rows is in some wave (the plan once left rank 1, G-653, in none)."""
+    planned = {gid for _n, gid in items}
+    errors: list[str] = []
+    seen: set[str] = set()
+    for rank, gid in enumerate(ranked_gaps[:top], start=1):
+        if not gid or gid in planned or gid in seen:
+            continue
+        seen.add(gid)
+        errors.append(
+            f"docs/dod/PLAN.md: gap {gid} is rank {rank} in the order of work but in no wave — "
+            "add it to the wave that will close it"
+        )
+    return errors
 
 
 def plan_items(path: Path) -> tuple[list[tuple[int, str]], list[str]]:
@@ -1093,8 +1228,10 @@ def render(
             "",
             "Ids the order of work once carried that no artefact, register row or backlog row "
             "defines any more: each was closed, or merged into another id. `PLAN.md` may go on "
-            "naming one; an id that was never a gap fails the check. Carried forward from the "
-            "previous gap analysis by the generator.",
+            "naming one; an id that was never a gap fails the check. Carried forward by the "
+            "generator, and kept only while the git history of the artefacts, or the gap "
+            "analysis committed on the base branch, shows the id was a gap — never because "
+            "this file says so.",
             "",
             ", ".join(retired) if retired else "none",
             "",
@@ -1148,6 +1285,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="validate and fail on any defect or drift; write nothing",
     )
+    ap.add_argument(
+        "--base",
+        default=DEFAULT_BASE,
+        help="the branch whose committed gap analysis may vouch for a retired id "
+        f"(default {DEFAULT_BASE}; CI passes the pull request's base)",
+    )
     args = ap.parse_args(argv)
     arts: list[Artefact] = []
     errors: list[str] = []
@@ -1176,11 +1319,24 @@ def main(argv: list[str] | None = None) -> int:
     cited_rows = {c.gap for a in arts for c in a.criteria} | pending_gaps
     defined = {g for a in arts for g in a.gaps} | set(pgaps) | (set(backlog) & cited_rows)
     previous = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
-    retired = retired_ids(previous, defined)
+    carried = retired_ids(previous, defined)
+    # the previous file cannot vouch for itself: an id stays retired only while the artefacts'
+    # history or the base's committed gap analysis shows it was a gap (P-060)
+    vouched = history_gap_ids(ROOT) | base_gap_analysis_ids(ROOT, args.base)
+    retired = [gid for gid in carried if gid in vouched]
+    unvouched = validate_retired([g for g in carried if g not in vouched], args.base, ROOT)
     items, plan_errors = plan_items(PLAN)
     errors.extend(plan_errors)
     errors.extend(validate_plan(items, defined | set(retired)))
+    if args.check:
+        errors.extend(unvouched)
+    else:
+        for note in unvouched:
+            print(f"dropped from the retired list: {note}")
     roll_up(arts)
+    if PLAN.is_file():
+        ranked_gaps = [c.gap for _s, _f, _a, c in _rank(arts)]
+        errors.extend(validate_plan_covers_the_top(ranked_gaps, items))
     rendered = render(arts, (prevention, pgaps), retired)
     if args.check:
         errors.extend(status_drift(arts))

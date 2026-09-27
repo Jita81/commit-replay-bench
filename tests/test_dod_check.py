@@ -22,11 +22,15 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               gap, an unknown level or status, a duplicate id and a missing first-seen; that a
               gap line no criterion (or pending row) cites is refused; and that a PLAN.md wave
               item must be a gap id, while a gap the wave closes stays a valid item through the
-              generated "Gap ids retired" list.
+              generated "Gap ids retired" list; that a retired id is admitted only when the
+              artefacts' git history (never the generated file, never a parent repository)
+              or the base branch's committed gap analysis vouches for it; and that a gap
+              among the order of work's first rows must sit in some wave.
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
-              ``main([...])`` in-process; the fixture carries a minimal PLAN.md.
+              ``main([...])`` in-process; the fixture carries a minimal PLAN.md, and the
+              retired-list tests commit the tree to a throwaway git repository.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   scripts/dod_check.py (under test), docs/dod/STANDARD.md (the format),
@@ -602,6 +606,9 @@ def test_a_backlog_row_that_names_a_pair_or_a_range_resolves_every_id_it_names(
     )
     for cited in ("B-51", "F80", "F90", "F91", "F92"):
         _write_all(root, ng_state="unmet", ng_gap=cited)
+        (root / "docs/dod/PLAN.md").write_text(
+            PLAN.replace("G-701", f"G-701, {cited}"), encoding="utf-8"
+        )
         assert mod.main([]) == 0, cited
         out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
         title = "Merge outcome as evidence" if cited in ("B-51", "F80") else "Shippable-state gaps"
@@ -619,6 +626,7 @@ def test_a_backlog_gap_must_be_a_row_in_the_ordered_backlog_and_the_ranking_name
     assert mod.main(["--check"]) == 1
     assert "gap F99 is in no backlog row under" in capsys.readouterr().out
     _write_all(root, ng_state="unmet", ng_gap="F23")
+    (root / "docs/dod/PLAN.md").write_text(PLAN.replace("G-701", "G-701, F23"), encoding="utf-8")
     assert mod.main([]) == 0
     out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
     assert "backlog F23 — User lifecycle · S" in out
@@ -802,14 +810,16 @@ def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     """docs/PREVENTION.md P-051: nothing checked that PLAN.md's wave items were gaps at all, so
     the plan and the order of work drifted apart unseen. Every item in a
     wave table's ``gaps`` column must be a gap id the record defines: an artefact's gap, a
-    register gap, or a backlog row that a criterion or a pending row cites. A gap the wave CLOSES stays a valid item — the generator
-    carries each id that leaves the order of work into GAP-ANALYSIS.md's retired list — while
+    register gap, or a backlog row that a criterion or a pending row cites. A gap the wave
+    CLOSES stays a valid item — the generator carries each id that leaves the order of work
+    into GAP-ANALYSIS.md's retired list, once the artefacts' history shows it was a gap — while
     an id that was never a gap fails."""
     mod, root = tree
     plan = root / "docs/dod/PLAN.md"
     _write_all(root, ng_state="unmet", ng_gap="G-001")
     plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
     assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    _commit(root, "G-001 is a gap")  # a retired id must be one the history defined (P-060)
     capsys.readouterr()
     # a backlog row is a gap only while a criterion cites it: F23 is a row, but nothing
     # here asks for it (the old plan's "B-9", a backlog id no criterion cited, was this case)
@@ -820,6 +830,7 @@ def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     )
     _write_all(root, ng_state="unmet", ng_gap="F23")
     assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    _commit(root, "a criterion cites F23")
     capsys.readouterr()
     _write_all(root, ng_state="unmet", ng_gap="G-001")
     plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
@@ -857,3 +868,149 @@ def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     plan.unlink()
     assert mod.main(["--check"]) == 1
     assert "docs/dod/PLAN.md is missing" in capsys.readouterr().out
+
+
+def _git(root: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=dod-test",
+            "-c",
+            "user.email=dod-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _commit(root: Path, message: str) -> str:
+    if not (root / ".git").exists():
+        _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--allow-empty", "-m", message)
+    return _git(root, "rev-parse", "HEAD")
+
+
+def _retire_by_hand(root: Path, gid: str) -> None:
+    """Edit the GENERATED file the way an agent chasing a red ``dod`` job might: insert an id
+    into the retired list, in sorted position, so the drift check sees nothing wrong."""
+    out = root / "docs/dod/GAP-ANALYSIS.md"
+    text = out.read_text(encoding="utf-8")
+    head, tail = text.split("## Gap ids retired", 1)
+    lines = tail.split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith(("G-", "F", "B-", "none")):
+            ids = [] if line == "none" else line.split(", ")
+            lines[i] = ", ".join(sorted([*ids, gid]))
+            break
+    out.write_text(head + "## Gap ids retired" + "\n".join(lines), encoding="utf-8")
+
+
+def test_a_retired_id_must_have_been_a_gap_in_the_artefacts_history(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-060: the retired list was read back from the generated file itself,
+    so an id hand-inserted there (in sorted position) became a valid PLAN.md item and
+    ``--check`` still reported the analysis current. A retired id is now admitted only when
+    the git history of the artefacts (never of the generated file) once defined it, or the
+    base branch's committed gap analysis carried it (a squash merge drops a branch's own
+    commits, so the base is where an id closed inside a merged branch survives)."""
+    mod, root = tree
+    plan = root / "docs/dod/PLAN.md"
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
+    assert mod.main([]) == 0
+    _commit(root, "G-001 is a gap")
+    assert mod.main(["--check"]) == 0
+    capsys.readouterr()
+    # the wave closes G-001: history defined it, so it retires and the plan stays valid
+    _write_all(root)
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+    out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
+    assert "G-001" in out.split("## Gap ids retired", 1)[1].split("##", 1)[0]
+    _commit(root, "close G-001")
+    capsys.readouterr()
+    # a hand edit to the generated file: G-123 was never a gap anywhere
+    _retire_by_hand(root, "G-123")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701, G-123"), encoding="utf-8")
+    assert mod.main(["--check"]) == 1
+    said = capsys.readouterr().out
+    assert "docs/dod/GAP-ANALYSIS.md retires G-123, but no artefact" in said
+    # ... and regenerating does not launder it: the generator carries it, the check refuses it
+    assert mod.main([]) == 1
+    assert mod.main(["--check"]) == 1
+    capsys.readouterr()
+    # a fan-out row forged by hand is the same attack one step earlier: regenerate retires it
+    _git(root, "checkout", "-q", "--", "docs/dod/GAP-ANALYSIS.md")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
+    assert mod.main(["--check"]) == 0
+    capsys.readouterr()
+    # an id closed inside a branch that was squash-merged: no artefact commit on this history
+    # defines it, but the base's committed gap analysis carried it, and that file passed this
+    # check on the pull request that wrote it
+    _retire_by_hand(root, "G-555")
+    base = _commit(root, "squash of a branch that opened and closed G-555")
+    _git(root, "branch", "-q", "base-under-test", base)
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701, G-555"), encoding="utf-8")
+    assert mod.main(["--check"]) == 1  # the default base (origin/main) does not exist here
+    assert "retires G-555" in capsys.readouterr().out
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0
+    capsys.readouterr()
+
+
+def test_the_retired_list_never_reads_another_repositorys_history(tmp_path: Path) -> None:
+    """``git -C <dir>`` walks up to the nearest repository; a tree that is not itself a work
+    tree must not borrow an enclosing repository's history to vouch for its retired ids (the
+    editable-install false pass, one level down)."""
+    mod = _load()
+    outer = tmp_path / "outer"
+    inner = outer / "inner"
+    (inner / "docs/dod/pages").mkdir(parents=True)
+    (inner / "docs/dod/pages/x.md").write_text(
+        "## Gaps\n- **G-321** \u2014 a gap the enclosing repository committed \u00b7 x \u00b7 ui\n",
+        encoding="utf-8",
+    )
+    (inner / "docs/dod/GAP-ANALYSIS.md").write_text(
+        "## Gap ids retired\n\nG-322\n", encoding="utf-8"
+    )
+    _commit(outer, "the enclosing repository holds a copy of a tree")
+    # the history is there, one directory up — and it must not be read
+    assert "G-321" in _git(outer, "log", "-p", "--format=", "--", "inner/docs/dod/pages")
+    assert mod.history_gap_ids(inner) == set()
+    assert mod.base_gap_analysis_ids(inner, "HEAD") == set()
+
+
+def test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-051: the plan left the top-ranked gaps (G-653, G-660 to G-664) in
+    no wave while it planned lower ones. Every gap among the order of work's first ``TOP`` rows
+    is named by some wave."""
+    mod, root = tree
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    assert mod.main([]) == 1
+    said = capsys.readouterr().out
+    assert "docs/dod/PLAN.md: gap G-001 is rank 1 in the order of work but in no wave" in said
+    assert mod.main(["--check"]) == 1
+    (root / "docs/dod/PLAN.md").write_text(PLAN.replace("G-701", "G-701, G-001"), encoding="utf-8")
+    assert mod.main([]) == 0 and mod.main(["--check"]) == 0
+
+
+def test_the_ci_job_reads_the_full_history_and_the_pull_requests_base() -> None:
+    """The retired list is vouched for by git history (P-060): a shallow checkout would refuse
+    ids a squash merge carried, and a missing ``--base`` would ignore the base branch's gap
+    analysis. The ``dod`` job must fetch everything and name the base."""
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job = ci.split("\n  dod:\n", 1)[1].split("\n  claims:\n", 1)[0]
+    assert "fetch-depth: 0" in job
+    assert "DOD_BASE: origin/${{ github.base_ref || 'main' }}" in job
+    assert 'python scripts/dod_check.py --check --base "$DOD_BASE"' in job

@@ -202,9 +202,19 @@ cell of a wave table's `gaps` column is a list of gap ids and nothing else, and 
 an artefact or the register defines, a backlog row that a criterion or a pending register row
 cites, or one the order of work has retired. A wave that closes a gap therefore never breaks
 the plan that named it, while an id that was never a gap (a typo, an id no artefact defines, a
-backlog row nothing asks for) fails the `dod` job. The check reads ids, not meaning: a real
-gap's id written against another gap's change still passes, so a reviewer reads each wave row
-against the lines its ids carry.
+backlog row nothing asks for) fails the `dod` job. Every gap among the first 25 rows of the
+order of work must also sit in some wave, so the plan cannot skip the top of the list.
+
+The retired list is carried forward by the generator, but the generated file never vouches
+for itself: an id stays retired only while the git history of the artefacts and the register
+shows it was once a gap, or the gap analysis committed on the base branch (`--base`, by default
+`origin/main`; CI passes the pull request's base) carried it. The base is there because a
+squash merge drops a branch's own commits. An id inserted into `GAP-ANALYSIS.md` by hand is
+dropped by the generator and named by `--check`. The `dod` job therefore needs the full
+history (`fetch-depth: 0`); a shallow clone can only refuse more, never admit more.
+
+The check reads ids, not meaning: a real gap's id written against another gap's change still
+passes, so a reviewer reads each wave row against the lines its ids carry.
 
 ## 7. A defect is closed only with the artefact that fails if its class recurs
 

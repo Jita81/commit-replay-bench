@@ -8,7 +8,9 @@ What it does: Says which gaps travel together, on which branch, and what "done" 
               scripts/dod_check.py refuses one that is not.
 How:          One table per wave; its `gaps` column holds gap ids and nothing else (the checker
               reads it); the other columns say what ships and why. Ids a wave closes stay
-              valid here because the generator lists them under "Gap ids retired".
+              valid here because the generator lists them under "Gap ids retired" once the
+              artefacts' git history shows they were gaps; every gap among the order of
+              work's first 25 rows must sit in some wave.
 Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none (DL-063 records the rule the checker enforces on this file)
 Works with:   docs/dod/GAP-ANALYSIS.md (the order of work this batches), docs/dod/STANDARD.md
@@ -16,7 +18,9 @@ Works with:   docs/dod/GAP-ANALYSIS.md (the order of work this batches), docs/do
               (refuses a wave item that is not a gap id), docs/PREVENTION.md (P-051, the class
               this rule closes), docs/reviews/2026-09-25-external-assessment.md (the source of
               the "trustworthy when" criteria Wave 2 closes)
-Tested by:    tests/test_dod_check.py::test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid
+Tested by:    tests/test_dod_check.py::test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid,
+              ::test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave,
+              ::test_a_retired_id_must_have_been_a_gap_in_the_artefacts_history
 Touch when:   a wave lands (say so and move to the next), a gap is opened that belongs in a
               wave, or the order of work changes which gap is first.
 -->
@@ -33,8 +37,11 @@ be built that no artefact names, the artefact is wrong: add the criterion and it
 then plan it. `scripts/dod_check.py` holds this file to the rule: every cell of a table's
 `gaps` column is a list of gap ids and nothing else, and each is a gap an artefact or the
 prevention register defines, a backlog row a criterion cites, or one the order of work has
-retired (closed or merged). A wave that closes a gap never breaks this plan; a typo does. The check reads ids, not
-meaning, so a reviewer still reads each row against the lines its ids carry.
+retired (closed or merged). An id is retired only when the artefacts' git history, or the base
+branch's committed gap analysis, shows it was a gap, so editing the generated file cannot
+admit one. A wave that closes a gap never breaks this plan; a typo does. Every gap among the
+order of work's first 25 rows must also sit in some wave. The check reads ids, not meaning, so
+a reviewer still reads each row against the lines its ids carry.
 
 **How every wave works.** One pull request per stream, merged onto one branch, attacked by
 adversarial verifiers, then merged to `main` by the operator. Each pull request flips the
@@ -51,23 +58,24 @@ from the integration tree: Wave 0 on `feat/ns1-d`; Wave 1 on `feat/ns1-m`, `feat
 
 | stream | gaps | what ships |
 |---|---|---|
-| D0 · the artefacts | G-930, G-661, G-662, G-663, G-664, G-703, G-403, G-480, G-500, G-548, G-907, G-976, G-977, G-978, G-979 | `product.evidence.6` met on a dated reading of branch protection; criteria 202 to 205 `partial`, citing what landed, each gap line cut to what remains; P-008 closed with #56's tests; the external assessment vendored as `docs/reviews/2026-09-25-external-assessment.md`; F42 and F43 given their own backlog rows and F5b re-scoped against the assessment's C8; the orphan gap lines (G-931, G-940 to G-944, the stray copies of G-905) deleted and G-605 folded into G-929; each duplicated change that no other stream owns carried by one id; the non-goals that contradicted a gap rewritten; the Results throughput copy, README's status paragraph and the `/health` probe list in the guides corrected; this plan rewritten |
+| D0 · the artefacts | G-930, G-661, G-662, G-663, G-664, G-703, G-403, G-480, G-500, G-548, G-907, G-976, G-977, G-978, G-979 | `product.evidence.6` kept `partial` on G-930, cut to what remains: `scripts/check_branch_protection.py` compares the required-check list with ci.yml's jobs, and a daily workflow runs it once the operator provisions its token; criteria 202 to 205 `partial`, citing what landed, each gap line cut to what remains; P-008 closed with #56's tests; the external assessment vendored as `docs/reviews/2026-09-25-external-assessment.md`; F42 and F43 given their own backlog rows and F5b re-scoped against the assessment's C8; the orphan gap lines (G-931, G-940 to G-944, the stray copies of G-905) deleted and G-605 folded into G-929; each duplicated change that no other stream owns carried by one id; the non-goals that contradicted a gap rewritten; the Results throughput copy, README's status paragraph and the `/health` probe list in the guides corrected; this plan rewritten |
 | D0 · registered, not yet closed | G-970, G-971, G-972 | the docker-wait flake class, the five executor and mining defects (the assessment's B5) and the append-only probe (A5(c)) registered in `docs/PREVENTION.md`, each pending with its gap |
 | D0 · the criteria Wave 2 needs | G-973, G-974, G-975 | the criteria the assessment's A3 (`lint_status`), A6 (`mutation.v2`) and C4 (the delivered change's own cell) need before Wave 2 may build them, added `unmet` |
 
-D1, the checker, closes in the same change the register row that names it (P-051, "the record
-drifts from the order of work"), so it carries no gap id: `dod_check.py` refuses a gap line no
-criterion cites and a wave item here that is not a gap id, and keeps a closed gap nameable
-(DL-063).
+D1, the checker, closes in the same change the register rows that name it (P-051, "the record
+drifts from the order of work", and P-060, "the generated file vouches for itself"), so it
+carries no gap id: `dod_check.py` refuses a gap line no criterion cites, a wave item here that
+is not a gap id, and a gap among the first 25 of the order of work that no wave names; and it
+keeps a closed gap nameable only while the history vouches for it (DL-063, DL-064).
 
 Outside the waves, and not DoD work: carrying the four commits that exist only on the
 integration tree (`770adbb`, `79f4597`, `27f2171`, `8d15f12`) to `main` in one pull request
 after #57 lands. Their criterion is on the record already: `sign-off-a-cell.truth.22`, met
 (a sign-off lifts only a cell read in the posture class its evidence was graded in).
 
-**Done when:** `dod_check.py --check` passes with its two new refusals; `GAP-ANALYSIS.md` shows
-`product.evidence.6` met, criteria 202 to 205 partial, P-008 closed and no orphan gap line;
-every wave item here is a gap id.
+**Done when:** `dod_check.py --check` passes with its new refusals; `GAP-ANALYSIS.md` shows
+`product.evidence.6` partial on G-930 alone (the operator's token), criteria 202 to 205
+partial, P-008 closed and no orphan gap line; every wave item here is a gap id.
 
 ## Wave 1 — finish what was built (autonomous; in flight): ranks 3 to 20
 
@@ -161,6 +169,7 @@ These are not wave items; each unblocks the work named beside it.
 | sign in through a live identity provider | F43 (go-live.16) | Wave 4 or later |
 | cut 2.0.0b1: the tag, the chart as an OCI artifact, a `v*` tag-protection ruleset | G-604 (release.22) | after Wave 4 |
 | a penetration test | F46, named in G-317's line | before go-live |
+| add a fine-grained token with Administration: read as the secret `BRANCH_PROTECTION_TOKEN` | G-930 (`product.evidence.6`): the daily `branch-protection` workflow goes green | any time |
 
 ## After Wave 4, in gap order
 
