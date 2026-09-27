@@ -11,7 +11,9 @@ store-level checks:
   the Service, and the go-live checklist may point here truthfully; the revisions are in
   the detail where applicable (an empty store has none). A ``create_all`` store whose
   schema equals the head (a ``crb serve`` without ``crb migrate``) is ``degraded``, not
-  down: complete, but unstamped until ``crb migrate`` runs.
+  down: complete, but unstamped until ``crb migrate`` runs. A store AT head is compared
+  with the models too (pilot D7): ``ok`` only when they are equal, ``degraded`` naming each
+  difference (``drift``) when the schema was changed outside the migrations.
 * ``append_only`` — the ledger triggers exist AND an ``UPDATE`` on ``grades`` is refused
   (:func:`crb.store.ledger.assert_append_only`). Missing triggers = ``down``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
@@ -25,14 +27,21 @@ store-level checks:
   in (named, with its age); when a running run's ``heartbeat`` is older than
   ``worker_heartbeat_stale_s``; or when a worker's row says it is still reaping a
   container whose ``docker kill`` the daemon never confirmed (``unconfirmed_containers``
-  > 0 — src/crb/server/reaper.py; the container may still be running on that host);
-  ``ok`` otherwise with the workers listed. The worker is
+  > 0 — src/crb/server/reaper.py; the container may still be running on that host); or
+  when an alive worker's metrics listener is ``degraded`` (it could not bind its port —
+  pilot D5; each worker's listener, read from its ``worker.metrics`` event, is in
+  ``data.workers[].metrics``); ``ok`` otherwise with the workers listed. The worker is
   a dependency the API pod does not own: ``/health`` is the API's readiness probe, and a
   503 for a crashed worker would take every API pod out of the Service — exactly when
   the person needs to read "no worker has checked in" (the same rule as the sandbox
   probe for the ``api`` role). Before the table existed the probe read running runs'
   heartbeats only, so a crashed worker with three queued runs answered ``ok "idle, 3
   queued"``.
+* ``builders``    — which builder credentials are present AND, for each present login with a
+  verify, whether it works: ``verified`` / ``unverified`` / ``invalid`` from the recorded
+  verifications with its age (pilot D1, src/crb/server/builder_login.py) — never ``ok`` from
+  presence alone, never a model call; ``degraded`` (never ``down``) naming the login and
+  where to fix it.
 * ``sandbox``     — the docker daemon answers (``docker`` executor) — **role-aware**:
   the sandbox is the WORKER's instrument. A process whose role is ``api`` (the
   ``serve`` container: no docker socket, by design — see ``deploy/Dockerfile``)
@@ -74,7 +83,8 @@ What it does: Readiness aggregates the store probes (db, migrations at head, app
               triggers proven live, ledger false-Q1 = 0, worker check-ins from the ``workers``
               table) and the served-commit ``build`` probe (``served`` + ``stale``) with the
               observability probes
-              (sandbox — skipped for the ``api`` role — toolchains, builders) and answers
+              (sandbox — skipped for the ``api`` role — toolchains, builders with each
+              present login's verification state) and answers
               503 when any is ``down``, and serves the deployment's ``posture`` beside them
               (where tests and the builder run, and whether production runs unsealed under
               ``CRB_ALLOW_UNSEALED_PROD``, ADR-0023); a read that raises is ``down`` with
@@ -96,6 +106,8 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
               ``failure_detail`` and ``aggregate``), src/crb/observability/build_stamp.py
               (the ``build`` probe and the ``served`` block),
+              src/crb/server/builder_login.py (the ``builders`` probe's login state),
+              src/crb/server/worker_metrics.py (each worker's listener state),
               src/crb/store/migrate.py (``head_status_on`` — the one head check; the ledger
               probe calls ``assert_append_only`` in src/crb/store/ledger.py),
               src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``
@@ -137,13 +149,22 @@ from crb.core.secrets_file import SecretsError
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import build_stamp, metrics, probes
+from crb.observability.metrics import EXPOSITION_DEGRADED
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.provision.probe import probe_provision
+from crb.server.builder_login import (
+    FIX_WHERE,
+    LOGIN_VERIFIERS,
+    STATE_INVALID,
+    STATE_UNVERIFIED,
+    login_state,
+)
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.flow_record import stamp_first_healthy
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
-from crb.server.secrets import SecretsFile
+from crb.server.secrets import SecretsFile, secrets_dir_for
 from crb.server.settings import Settings
+from crb.server.worker_metrics import exposition_by_worker
 from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
 from crb.store.models import (
@@ -218,13 +239,26 @@ MIGRATE_FIX = "run `crb migrate` (the migrate Job / `python -m crb.store.migrate
 
 def migrations_result(st: HeadStatus) -> ProbeResult:
     """``migrations`` from a :class:`HeadStatus` — shared with ``crb doctor`` so the two
-    surfaces cannot disagree. ``ok`` at head; ``degraded`` for a ``create_all`` schema that
-    equals the head but carries no ``alembic_version`` (complete; ``crb migrate`` stamps it);
+    surfaces cannot disagree. ``ok`` at head with a schema that matches the models;
+    ``degraded`` at head with a schema that differs (named — pilot D7) and for a
+    ``create_all`` schema that equals the head but carries no ``alembic_version``
+    (complete; ``crb migrate`` stamps it);
     ``down`` otherwise — behind, ahead, empty or an older unversioned schema — naming the
     revisions where applicable and the fix."""
     data = st.to_dict()
-    if st.at_head:
+    if st.at_head and st.matches_models:
         return ProbeResult("migrations", OK, f"database at {st.head} = code head", data)
+    if st.at_head:
+        # pilot D7 (P-207): at head by its stamp, but compared with the models it differs —
+        # a schema changed outside the migrations; the revision number alone is not "ok"
+        return ProbeResult(
+            "migrations",
+            DEGRADED,
+            f"database at {st.head} = code head, but its schema differs from the models: "
+            f"{'; '.join(st.drift) or 'unnamed difference'} — it was changed outside the "
+            "migrations; compare it with a fresh `crb migrate` store and restore it",
+            data,
+        )
     if st.database is not None:
         return ProbeResult(
             "migrations",
@@ -362,9 +396,12 @@ def _age_s(stamp: str, now: _dt.datetime) -> float | None:
     return None if ts is None else round((now - ts).total_seconds(), 1)
 
 
-def _worker_view(row: WorkerRow, now: _dt.datetime) -> dict[str, Any]:
+def _worker_view(
+    row: WorkerRow, now: _dt.datetime, exposition: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """One worker for ``data.workers`` (and the UI): its check-in age against the
-    staleness it promised, whether it is alive, what it holds, and a clean stop."""
+    staleness it promised, whether it is alive, what it holds, a clean stop, and what its
+    metrics listener did at start (``metrics``: ``None`` when it recorded nothing)."""
     age = _age_s(row.heartbeat, now)
     stale_after = float(row.heartbeat_s or 0) * WORKER_ALIVE_HEARTBEATS
     alive = not row.stopped and age is not None and stale_after > 0 and age <= stale_after
@@ -382,6 +419,7 @@ def _worker_view(row: WorkerRow, now: _dt.datetime) -> dict[str, Any]:
         "stopped": row.stopped or None,
         "alive": alive,
         "unconfirmed_containers": int(row.unconfirmed_containers or 0),
+        "metrics": dict(exposition) if exposition else None,
     }
 
 
@@ -426,11 +464,14 @@ def probe_worker(
                     .order_by(WorkerRow.worker_id)
                 ).scalars()
             )
-        workers = [
-            _worker_view(r, now)
+        listed = [
+            r
             for r in rows
             if not r.stopped or (_age_s(r.heartbeat, now) or 0.0) <= WORKER_FORGET_AFTER_S
         ]
+        # what each listed worker's metrics listener did at start (pilot D5)
+        listeners = exposition_by_worker(factory, [r.worker_id for r in listed])
+        workers = [_worker_view(r, now, listeners.get(r.worker_id)) for r in listed]
         alive = [w for w in workers if w["alive"]]
         stale_runs: list[str] = []
         for run_id, _worker, heartbeat in running:
@@ -491,6 +532,17 @@ def probe_worker(
                 "worker",
                 DEGRADED,
                 "no worker has checked in yet — queued runs will not start",
+                data,
+            )
+        deaf = [w for w in alive if (w["metrics"] or {}).get("state") == EXPOSITION_DEGRADED]
+        if deaf:
+            # pilot D5 (P-206): the worker runs and measures, but its series go nowhere
+            w = deaf[0]
+            return ProbeResult(
+                "worker",
+                DEGRADED,
+                f"worker {w['worker_id']} is running but its metrics listener is not: "
+                f"{w['metrics'].get('reason') or 'no reason recorded'}",
                 data,
             )
         if unconfirmed:
@@ -714,6 +766,55 @@ def probe_intake(
     return probes.run_probe("intake", _read, request_id=request_id)
 
 
+def probe_builder_logins(
+    factory: sessionmaker[Session], settings: Settings, *, request_id: str = ""
+) -> ProbeResult:
+    """``builders``: which builder credentials are PRESENT (``probes.probe_builders``) and, for
+    each builder with a verify whose credential is present under the deployment's default auth
+    mode, whether the login WORKS — ``verified``, ``unverified`` or ``invalid`` from the recorded
+    verifications with its age (pilot D1, P-205). Never ``ok`` from presence alone, and never
+    a model call: the cache is refreshed by a submit that finds it stale and by Verify on the
+    Settings screen. ``degraded`` (never ``down`` — a dead login is the operator's to fix, and
+    the API must stay reachable for them to fix it) when a present login is invalid or not
+    verified, naming it, its age, the outcome and where to fix it."""
+
+    def _read() -> ProbeResult:
+        base = probes.probe_builders()
+        ttl = settings.builder.login_ttl_s
+        logins: list[dict[str, Any]] = []
+        with factory() as s:
+            for name, verifier in sorted(LOGIN_VERIFIERS.items()):
+                auth = verifier.default_auth()
+                present = not verifier.missing(auth, secrets_dir=secrets_dir_for(settings))
+                state = login_state(s, name, auth, ttl_s=ttl)
+                logins.append({**state.to_dict(), "present": present, "sentence": state.sentence()})
+        data = {**base.data, "logins": logins}
+        live = [x for x in logins if x["present"]]
+        bad = [x for x in live if x["state"] == STATE_INVALID]
+        if bad:
+            return ProbeResult(
+                "builders",
+                DEGRADED,
+                f"login invalid — {bad[0]['sentence']}; no run on it will be queued until it is "
+                f"fixed under {FIX_WHERE}",
+                data,
+            )
+        unknown = [x for x in live if x["state"] == STATE_UNVERIFIED]
+        if unknown:
+            return ProbeResult(
+                "builders",
+                DEGRADED,
+                f"login not verified — {unknown[0]['sentence']}; press Verify under {FIX_WHERE} "
+                "(a run's submit also verifies it once before queuing)",
+                data,
+            )
+        verified = "; ".join(x["sentence"] for x in live)
+        detail = f"{base.detail}; {verified}" if verified else base.detail
+        return ProbeResult("builders", base.status, detail, data)
+
+    return probes.run_probe("builders", _read, request_id=request_id)
+
+
 #: ``collect_health`` without the app's mounted UI directory (a caller outside a request):
 #: the probe then resolves the candidates itself.
 UI_DIST_UNKNOWN: Any = object()
@@ -771,7 +872,7 @@ def collect_health(
         ),
         probes.run_probe("provision", lambda: probe_provision_role(settings, role), request_id=rid),
         probes.run_probe("toolchains", probes.probe_toolchains, request_id=rid),
-        probes.run_probe("builders", probes.probe_builders, request_id=rid),
+        probe_builder_logins(factory, settings, request_id=rid),
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
         probe_intake(factory, settings, request_id=rid),
         probe_served(settings, request_id=rid, ui_dist=ui_dist),

@@ -319,3 +319,38 @@ describe('ClaudeCodeLoginCard', () => {
     expect(open()).toEqual([])
   })
 })
+
+describe('ClaudeCodeLoginCard — the login runs use (pilot D1)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const OPERATOR: Principal = { ...PRINCIPAL, role: 'operator' }
+  const INVALID_LOGIN = { builder: 'claude_code', auth: 'cli', state: 'invalid', status: 'invalid', detail: 'authentication failed (HTTP 401)', source: 'keychain', fingerprint: '', cli_version: '2.1.275', checked_at: '2026-09-27T15:47:02+00:00', age_s: 42, ttl_s: 600, trigger: 'submit', reason: '' }
+  const VERIFIED_LOGIN = { ...INVALID_LOGIN, state: 'verified', status: 'ok', detail: 'pong', age_s: 1, trigger: 'settings' }
+
+  it('shows an invalid login as refusing runs, with its age and source, and Verify records a new answer', async () => {
+    const user = userEvent.setup()
+    let current: unknown = INVALID_LOGIN
+    const { calls } = setup(OPERATOR, {
+      'GET /settings/secrets': VIEWER_LIST,
+      'GET /builders/logins': () => json({ items: [current] }),
+      'POST /builders/claude_code/login/verify': () => {
+        current = VERIFIED_LOGIN
+        return json(VERIFIED_LOGIN)
+      },
+    })
+    const line = await screen.findByTestId('claude-runs-login')
+    expect(line).toHaveAttribute('data-state', 'invalid')
+    expect(screen.getByTestId('claude-runs-login-state')).toHaveTextContent('invalid — runs are refused')
+    expect(screen.getByTestId('claude-runs-login-meta')).toHaveTextContent('auth: cli · keychain · checked 42 s ago')
+    expect(screen.getByTestId('claude-runs-login-why')).toHaveTextContent('No run on this login will be queued until it works')
+    await user.click(screen.getByTestId('claude-runs-login-verify'))
+    await waitFor(() => expect(screen.getByTestId('claude-runs-login')).toHaveAttribute('data-state', 'verified'))
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/builders/claude_code/login/verify')).toHaveLength(1)
+  })
+
+  it('a viewer reads the state but has no Verify', async () => {
+    setup(VIEWER, { 'GET /settings/secrets': VIEWER_LIST, 'GET /builders/logins': { items: [INVALID_LOGIN] } })
+    await screen.findByTestId('claude-runs-login')
+    expect(screen.queryByTestId('claude-runs-login-verify')).not.toBeInTheDocument()
+  })
+})

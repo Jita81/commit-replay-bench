@@ -12,7 +12,8 @@
  * What it is:   The hooks and types for the operator-supplied Claude Code token:
  *               `useSecrets` (statuses), `useSaveClaudeCodeToken` (PUT), `useRemoveClaudeCodeToken`
  *               (DELETE), `useVerifyClaudeCodeToken` (one no-tool Haiku turn through the
- *               builder's own environment).
+ *               builder's own environment), and the login runs use: `useBuilderLogins`
+ *               (`GET /builders/logins`) and `useVerifyBuilderLogin` (its Verify — pilot D1).
  * What it does: Mirrors a contract in which the API never returns a token value — every
  *               response is a `SecretStatus` (presence, at most the last four characters, who
  *               and when), a viewer's `SecretPresence` (`{name, present}` only) or a
@@ -184,5 +185,40 @@ export function useClaudeLoginSession(id: string | null): UseQueryResult<LoginSe
     enabled: id !== null,
     retry: false,
     refetchInterval: (q) => (q.state.data && LOGIN_TERMINAL.has(q.state.data.state) ? false : 1000),
+  })
+}
+
+/** `LoginState` (docs/API.md "Builders") — the login a run would use, as the run preflight and
+ *  `/health` read it (pilot D1). Never a token: `fingerprint` is at most four characters. */
+export interface BuilderLoginState {
+  builder: string
+  auth: string
+  state: 'verified' | 'unverified' | 'invalid'
+  status: string
+  detail: string
+  source: string
+  fingerprint: string
+  cli_version: string
+  checked_at: string | null
+  age_s: number | null
+  ttl_s: number
+  trigger: string
+  reason: string
+}
+
+const builderLoginsKey = ['builders', 'logins'] as const
+
+/** `GET /builders/logins` — read from the recorded verifications; never calls a model. */
+export function useBuilderLogins(): UseQueryResult<{ items: BuilderLoginState[] }, ApiError> {
+  return useQuery({ queryKey: builderLoginsKey, queryFn: () => api<{ items: BuilderLoginState[] }>('/builders/logins') })
+}
+
+/** `POST /builders/{builder}/login/verify` — one no-tool Haiku turn, recorded for the next run. */
+export function useVerifyBuilderLogin(): UseMutationResult<BuilderLoginState, ApiError, string> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (builder: string) =>
+      api<BuilderLoginState>(`/builders/${encodeURIComponent(builder)}/login/verify`, { method: 'POST', timeoutMs: VERIFY_TIMEOUT_MS }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: builderLoginsKey }),
   })
 }

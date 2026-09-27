@@ -15,7 +15,8 @@
  *               ladder with three object rungs at 25 → 50 → 100 tool calls, that object rungs
  *               follow the labels with provider and typed caps only, and that an empty
  *               ladder or an incomplete rung blocks submit; and that a submit the server
- *               refuses for a builder with no credential (`builder_credential_missing`,
+ *               refuses for a builder with no credential (`builder_credential_missing`, and
+ *               `builder_login_invalid` with its link to the Settings login card — pilot D1,
  *               docs/PREVENTION.md P-003) shows the refusal with its fix and creates nothing.
  * How:          `mockApi` records the POST body; `userEvent` drives the form; assertions on
  *               the body and the field errors.
@@ -119,6 +120,36 @@ describe('RunNewDialog', () => {
     expect(within(alert).getByText('No credential for this builder — nothing was queued')).toBeInTheDocument()
     expect(within(alert).getByText(/needs ANTHROPIC_API_KEY/)).toBeInTheDocument()
     expect(within(alert).getByText(/builder_credential_missing/)).toBeInTheDocument()
+    expect(onCreated).not.toHaveBeenCalled()
+  })
+
+  it('a submit refused on a login that does not work says so, names the login and links to where it is fixed', async () => {
+    // pilot D1 (docs/PREVENTION.md P-205): a canary was queued on a Claude Code login that
+    // answered HTTP 401; POST /runs now refuses before anything is queued or spent
+    const user = userEvent.setup()
+    const onCreated = vi.fn()
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'POST /runs': () =>
+        json(
+          {
+            error: {
+              code: 'builder_login_invalid',
+              message: 'the claude_code login a blind run would use does not work: claude_code (auth cli, keychain): invalid 42 s ago — authentication failed (HTTP 401). Nothing was queued and nothing was spent — fix the login under Settings → Claude Code login (sign in again or store a new token, then Verify), and submit again',
+              detail: { builder: 'claude_code', auth: 'cli', source: 'keychain', state: 'invalid', status: 'invalid', age_s: 42, fix: 'Settings → Claude Code login', fix_path: '/settings#claude-code-login' },
+            },
+          },
+          422,
+        ),
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" onCreated={onCreated} />)
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByText('The builder’s login does not work — nothing was queued')).toBeInTheDocument()
+    expect(within(alert).getByText(/authentication failed \(HTTP 401\)/)).toBeInTheDocument()
+    expect(within(alert).getByTestId('error-login-fix')).toHaveAttribute('href', '/settings#claude-code-login')
     expect(onCreated).not.toHaveBeenCalled()
   })
 

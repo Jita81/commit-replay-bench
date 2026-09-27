@@ -1040,3 +1040,38 @@ def test_live_claude_code_cli_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert session.get("model") == cc.DEFAULT_MODEL
     assert not out.violated
     ws.remove()
+
+
+def test_verify_login_in_api_key_mode_probes_the_key_a_build_would_forward(
+    secrets_home: Path, tmp_path: Path
+) -> None:
+    """Pilot D1 (P-205): the run preflight verifies the login a run would use, in either auth
+    mode. In ``api_key`` mode that is ``--bare`` with the worker's key forwarded — exactly the
+    build's own environment — and the check names the source ``env`` with at most four
+    characters of the key, never the key."""
+    ok = [ev_init(), ev_result(num_turns=1, cost=0.0, result="pong")]
+    spawn = FakeSpawn(ok)
+    check = cc.verify_login(auth=cc.AUTH_API_KEY, binary="/x/claude", spawn=spawn, cwd=tmp_path)
+    assert check.status == cc.VERIFY_OK and check.source == cc.TOKEN_SOURCE_ENV
+    assert "--bare" in spawn.argv and cc.CLI_OAUTH_TOKEN_ENV not in spawn.env
+    key = spawn.env["ANTHROPIC_API_KEY"]
+    assert check.fingerprint == key[-4:] and key not in json.dumps(check.to_dict())
+    cli = FakeSpawn(ok)
+    cc.verify_login(auth=cc.AUTH_CLI, binary="/x/claude", spawn=cli, cwd=tmp_path)
+    assert "--bare" not in cli.argv and "ANTHROPIC_API_KEY" not in cli.env
+    with pytest.raises(ValueError, match="auth"):
+        cc.verify_login(auth="password", binary="/x/claude", spawn=FakeSpawn(ok), cwd=tmp_path)
+
+
+def test_login_resolution_names_where_a_build_would_take_its_login(
+    secrets_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the preflight compares a cached verification against, read without calling a
+    model: the source label and at most four characters — a changed token is a new login."""
+    assert cc.login_resolution(cc.AUTH_CLI) == (cc.TOKEN_SOURCE_KEYCHAIN, "")
+    _store(secrets_home)
+    assert cc.login_resolution(cc.AUTH_CLI) == (cc.TOKEN_SOURCE_SECRETS_FILE, "FILE")
+    source, fp = cc.login_resolution(cc.AUTH_API_KEY)
+    assert source == cc.TOKEN_SOURCE_ENV and len(fp) == 4
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert cc.login_resolution(cc.AUTH_API_KEY) == (cc.TOKEN_SOURCE_NONE, "")

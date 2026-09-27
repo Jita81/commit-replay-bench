@@ -216,6 +216,9 @@ export function beltDisplay(value: boolean | null | undefined, name?: string): D
 export const ACTION_HELP: Record<string, string> = {
   // system — the run itself, the clone and the probe
   'run.claimed': 'A worker took the run from the queue and will execute it.',
+  'builder.login.verified': 'The builder’s login was checked by running it once with no tools; the answer is what the next run and the health page read.',
+  'builder.login.refused': 'A run was refused before it was queued because its builder’s login did not work; nothing was spent.',
+  'worker.metrics': 'A worker started and recorded whether its metrics listener is serving, and on which port.',
   'run.executor': 'The run states which test executor it uses (docker or local); only docker counts as evidence.',
   'run.error': 'The run stopped on an error; nothing already graded is lost.',
   'run.finish_refused': 'The run could not be marked finished because its state had changed underneath it.',

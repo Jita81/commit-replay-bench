@@ -75,13 +75,16 @@ Navigation
 ----------
 What it is:   The Claude Code adapter — ``ClaudeCodeBuilder`` drives ``claude -p`` as a
               subprocess and ``StreamStats`` reads its stream-json — plus the login probes
-              ``crb doctor`` and the admin route use.
+              ``crb doctor``, the admin route and the run preflight use.
 What it does: Runs the census's measured agentic path with a restricted, pre-approved tool
               set, deny rules, a minimal child environment and no session persistence;
               meters turns, tool uses, tokens and reported cost from the stream; applies the
               test-file and shell guards post hoc (a hit is a recorded ``tamper:`` /
               ``archaeology:`` / ``network:`` error, never silently dropped); stops early on
               an authentication failure the CLI would otherwise retry for minutes.
+              ``verify_login`` proves a login works in either auth mode (one no-tool Haiku
+              turn) and ``login_resolution`` names where a build would take it without a
+              model call — the run preflight's two inputs (pilot D1).
 How:          ``argv`` (prompt + flags) → ``env`` (``api_key``: key required and forwarded;
               ``cli``: the operator's login via env / secrets file / keychain) → ``spawn`` →
               ``StreamStats.feed`` per line (usage, tool uses, bash commands through the
@@ -94,7 +97,8 @@ Works with:   src/crb/builders/base.py (brief, budget, outcome and the two guard
               src/crb/builders/container.py (sets ``workdir_alias`` and the spawn for the
               sealed path), src/crb/core/secrets_file.py (the owner-only token file),
               src/crb/builders/__init__.py (registered as ``"claude_code"``),
-              src/crb/server/routes/admin.py (the verify-login route)
+              src/crb/server/routes/admin.py (the verify-login route),
+              src/crb/server/builder_login.py (the run preflight and the verification cache)
 Tested by:    tests/test_builders_claude_code.py, tests/test_builders_container.py
 Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are per-run or
               per-worker settings — docs/OPERATOR.md); a new CLI flag or a changed stream
@@ -1174,8 +1178,26 @@ def credential_missing(auth: str = "", *, secrets_dir: Path | None = None) -> st
     return ""
 
 
-def verify_argv(binary: str, *, model: str = VERIFY_MODEL) -> list[str]:
-    """One turn, no tools, cheapest model, the same hygiene flags as a ``cli`` build."""
+def login_resolution(auth: str = "") -> tuple[str, str]:
+    """Where a build under ``auth`` would take its login, read WITHOUT calling a model:
+    ``(source, fingerprint)`` — ``env`` / ``secrets_file`` / ``keychain`` / ``none``, with at
+    most four trailing characters of the token or key (never more). The run preflight
+    compares a cached verification against it, so a replaced token is verified again rather
+    than trusted on the old one's result (pilot D1). Raises ``PermissionError`` like
+    :func:`token_source` when the secrets file must not be read."""
+    auth = auth.strip() or default_auth()
+    if auth == AUTH_API_KEY:
+        key = os.environ.get(API_KEY_ENV, "").strip()
+        return (TOKEN_SOURCE_ENV, fingerprint(key)) if key else (TOKEN_SOURCE_NONE, "")
+    source, fp = token_source()
+    if source == TOKEN_SOURCE_ENV:
+        return source, fingerprint(os.environ.get(CLI_OAUTH_TOKEN_ENV, "").strip())
+    return (source, fp) if source else (TOKEN_SOURCE_KEYCHAIN, "")
+
+
+def verify_argv(binary: str, *, model: str = VERIFY_MODEL, bare: bool = False) -> list[str]:
+    """One turn, no tools, cheapest model, the same hygiene flags as a build — ``--bare``
+    (API-key authentication only, as an ``api_key`` build runs) when ``bare``."""
     return [
         binary,
         "-p",
@@ -1195,11 +1217,13 @@ def verify_argv(binary: str, *, model: str = VERIFY_MODEL) -> list[str]:
         "--disable-slash-commands",
         "--setting-sources",
         CLI_SETTING_SOURCES,
+        *(["--bare"] if bare else []),
     ]
 
 
 def verify_login(
     *,
+    auth: str = AUTH_CLI,
     token: str = "",
     binary: str = "",
     model: str = VERIFY_MODEL,
@@ -1214,9 +1238,17 @@ def verify_login(
     resolution). Stops at the first ``api_retry`` 401/403 (the CLI would otherwise
     retry for ~90 s) → ``invalid``; a ``result`` that is not an error → ``ok``;
     no CLI → ``cli_missing``; the deadline → ``timeout``; anything else → ``error``
-    with the redacted tail. Spend: one Haiku turn (``$0`` on a subscription)."""
+    with the redacted tail. Spend: one Haiku turn (``$0`` on a subscription).
+
+    ``auth`` is the mode probed: ``cli`` (default — the resolution above) or ``api_key``
+    (``--bare`` with the worker's key forwarded, exactly as an ``api_key`` build runs; the
+    run preflight verifies whichever mode the run will use — pilot D1)."""
+    if auth not in AUTH_MODES:
+        raise ValueError(f"claude_code: auth must be one of {AUTH_MODES}, not {auth!r}")
     started = time.monotonic()
-    if token:
+    if auth == AUTH_API_KEY:
+        source, fp = login_resolution(AUTH_API_KEY)
+    elif token:
         source, fp = "explicit", fingerprint(token)
     else:
         try:
@@ -1230,10 +1262,10 @@ def verify_login(
             VERIFY_CLI_MISSING, "the 'claude' CLI was not found on PATH", source, fp, model
         )
     try:
-        env = ClaudeCodeBuilder.env(AUTH_CLI)
+        env = ClaudeCodeBuilder.env(auth)
     except PermissionError as exc:
         return LoginCheck(VERIFY_ERROR, redact_and_cap(str(exc), max_chars=400), source, fp, model)
-    if token:
+    if token and auth == AUTH_CLI:
         env[CLI_OAUTH_TOKEN_ENV] = token
     version = cli_version(found)
     stats = StreamStats(GitArchaeologyGuard())
@@ -1255,7 +1287,9 @@ def verify_login(
     with tempfile.TemporaryDirectory(prefix="crb-verify-") as scratch:
         workdir = cwd or Path(scratch)
         try:
-            handle = spawn_fn(verify_argv(found, model=model), env, workdir, timeout_s)
+            handle = spawn_fn(
+                verify_argv(found, model=model, bare=auth == AUTH_API_KEY), env, workdir, timeout_s
+            )
             for line in handle.lines():
                 stats.feed(line, keep=False)
                 if stats.auth_failed:
@@ -1324,6 +1358,7 @@ __all__ = [
     "credential_missing",
     "default_auth",
     "default_model",
+    "login_resolution",
     "subprocess_spawn",
     "system_rules",
     "task_prompt",

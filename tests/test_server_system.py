@@ -249,6 +249,62 @@ class TestHealth:
         assert worker["data"]["stale_after_s"] == 120
         assert worker["data"]["workers"][0]["current_run_id"] == "run-fresh"
 
+    def test_worker_probe_names_a_metrics_listener_that_could_not_bind(
+        self, client: TestClient, factory: sessionmaker[Session]
+    ) -> None:
+        """Pilot D5 (P-206): a second stack's worker found 9464 taken, kept running and said
+        so only in its log, while ``/health`` read the worker ``ok``. The worker now records
+        what its listener did; the probe shows each worker's listener and reads ``degraded``,
+        naming the worker, the reason and the fix, when one that is alive asked for a
+        listener and has none — and shows the port an ``auto`` listener chose."""
+        from crb.observability.metrics import (
+            EXPOSITION_DEGRADED,
+            EXPOSITION_LISTENING,
+            Exposition,
+        )
+        from crb.server.worker_metrics import record_exposition
+
+        now = _dt.datetime.now(_dt.UTC)
+        fresh = (now - _dt.timedelta(seconds=2)).isoformat(timespec="seconds")
+        with factory() as s:
+            for wid in ("w-a", "w-b"):
+                s.add(
+                    WorkerRow(
+                        worker_id=wid,
+                        hostname="h",
+                        executor="local",
+                        kinds=[],
+                        started=fresh,
+                        heartbeat=fresh,
+                        heartbeat_s=10.0,
+                    )
+                )
+            s.commit()
+        record_exposition(
+            factory, "w-a", Exposition(EXPOSITION_LISTENING, "127.0.0.1", 50123, "auto")
+        )
+        worker = _probe(client.get(f"{API_PREFIX}/health").json(), "worker")
+        assert worker["status"] == "ok"
+        views = {w["worker_id"]: w for w in worker["data"]["workers"]}
+        assert views["w-a"]["metrics"]["state"] == "listening"
+        assert views["w-a"]["metrics"]["port"] == 50123
+        assert views["w-a"]["metrics"]["requested"] == "auto"
+        assert views["w-b"]["metrics"] is None  # nothing recorded: said as unknown, not ok
+
+        reason = "could not bind 127.0.0.1:9464: Address already in use — set CRB_METRICS_PORT=auto"
+        record_exposition(
+            factory, "w-b", Exposition(EXPOSITION_DEGRADED, "127.0.0.1", 0, "9464", reason)
+        )
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200  # a dashboard gap never takes the API out of rotation
+        worker = _probe(r.json(), "worker")
+        assert worker["status"] == "degraded"
+        assert "w-b" in worker["detail"] and "metrics listener" in worker["detail"]
+        assert (
+            "Address already in use" in worker["detail"]
+            and "CRB_METRICS_PORT=auto" in (worker["detail"])
+        )
+
     def test_worker_probe_reads_the_workers_table(
         self, client: TestClient, factory: sessionmaker[Session]
     ) -> None:
@@ -422,6 +478,7 @@ class TestHealth:
             "at_head": False,
             "unversioned_at": head,
             "matches_models": True,
+            "drift": [],
         }
 
     def test_migrations_probe_is_ok_at_head_and_down_when_behind(
@@ -439,6 +496,7 @@ class TestHealth:
             m = _probe(r.json(), "migrations")
             assert m["status"] == "ok" and m["detail"] == f"database at {head} = code head"
             assert m["data"]["database"] == head and m["data"]["at_head"] is True
+            assert m["data"]["matches_models"] is True  # pilot D7: compared, not assumed
 
             command.stamp(migrate.alembic_config(url), migrate.INITIAL_REVISION)
             r = c.get(f"{API_PREFIX}/health")
@@ -454,6 +512,24 @@ class TestHealth:
             assert m["data"]["database"] == migrate.INITIAL_REVISION
             # liveness never reads the migration head: a pod behind stays up to be migrated
             assert c.get(f"{API_PREFIX}/health/live").status_code == 200
+
+    def test_migrations_result_reads_a_store_at_head_by_its_comparison_with_the_models(
+        self,
+    ) -> None:
+        """Pilot D7 (P-207): at head the probe reads ``ok`` only when the schema matches the
+        models, and ``degraded`` naming the difference when it does not — never ``ok`` on a
+        revision number alone, and never a ``matches_models: false`` beside an ``ok``."""
+        same = migrations_result(migrate.HeadStatus("0012", "0012", True, matches_models=True))
+        assert same.status == "ok" and same.data["matches_models"] is True
+        drifted = migrations_result(
+            migrate.HeadStatus(
+                "0012", "0012", True, matches_models=False, drift=("remove_index ix_runs_status",)
+            )
+        )
+        assert drifted.status == "degraded"
+        assert "differs from the models" in drifted.detail
+        assert "remove_index ix_runs_status" in drifted.detail
+        assert drifted.data["drift"] == ["remove_index ix_runs_status"]
 
     def test_migrations_result_names_an_empty_and_an_older_store(self) -> None:
         """The shared renderer (``crb doctor`` uses it too): an empty store and an older
