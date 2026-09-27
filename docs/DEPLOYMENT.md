@@ -271,6 +271,15 @@ Make such a rule preferred, or use a ReadWriteMany claim. A worker on the dedica
 the api with it (the example in §3.1), or the store moves to a ReadWriteMany claim on a file system that keeps POSIX
 permissions (the store refuses a directory that its group can read).
 The claim has no `keep` policy, so a stored credential does not outlive the release.
+The kept patches, the evidence packs and the retained transcripts live in `evidenceStore`:
+one claim that the worker, which writes them at grade time, and the API, which serves them
+at `/grades/{row_hash}/patch` and `/grades/{row_hash}/transcript`, both mount at
+`$CRB_HOME/evidence` and `$CRB_HOME/transcripts` (P-045). It follows the secrets store's
+placement rule: a ReadWriteOnce claim pins both pods to one node, and only ReadWriteMany
+claims for both stores lift the pin (`evidenceStore.existingClaim`,
+`evidenceStore.accessMode: ReadWriteMany`). Unlike the secrets store it carries
+`helm.sh/resource-policy: keep`: the kept patches are the product's retained output, so
+delete the claim explicitly.
 The chart also refuses an `api.podLabels`, `worker.podLabels`, `api.podAnnotations` or
 `worker.podAnnotations` key that it sets itself (the pin's `crb.dev/secrets-store` label,
 the selector labels, `checksum/config`): the pod would carry the key twice.
@@ -463,8 +472,11 @@ bound (2 CPU / 2 GB per sandbox by default): size the pool for the concurrency y
 
 State: the database (everything that matters, including the append-only `grades` /
 `events` / `signoffs` / `evidence` tables), the worker's work volume (`worker.workDir`;
-reproducible from the repositories, convenient to keep) and the secrets store
-(`secretsStore`: the stored Claude Code login and the tracker token, §3.2).
+reproducible from the repositories, convenient to keep), the evidence store
+(`evidenceStore`: the kept patches and the retained transcripts the API serves, §3.2; back
+it up with the database — a row whose patch is gone can no longer be re-read or reviewed)
+and the secrets store (`secretsStore`: the stored Claude Code login and the tracker token,
+§3.2).
 
 * **Secrets store**: choose one of two, and write the choice down.
   * Back the claim up with a volume snapshot (or a copy of `/srv/crb-secrets/store`) held
@@ -492,12 +504,12 @@ There is one restore order for each choice. In both, ledger verify and the healt
 come after the pods start.
 
 Restore order when the secrets store is restored: database (on an *empty* target) → work
-volume → secrets store → `migrate` (no-op at head; it re-asserts the triggers) → start the
+volume → evidence store → secrets store → `migrate` (no-op at head; it re-asserts the triggers) → start the
 api and the worker → ledger verify → the `migrations` and `append_only` probes on
 `/api/v1/health`.
 
 Restore order when the credentials are supplied again: database (on an *empty* target) →
-work volume → `migrate` (no-op at head; it re-asserts the triggers) → start the api alone
+work volume → evidence store → `migrate` (no-op at head; it re-asserts the triggers) → start the api alone
 (`worker.replicaCount: 0`) → supply the credentials again through Settings → start the
 worker (`worker.replicaCount` back to its value) → ledger verify → the `migrations` and
 `append_only` probes on `/api/v1/health`.

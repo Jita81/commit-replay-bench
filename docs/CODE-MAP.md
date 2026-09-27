@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-626 files with a header · 1 exempt (listed at the end).
+627 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -271,7 +271,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py) | a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (222 files)
+## `tests` (223 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -341,6 +341,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_code_map.py`](../tests/test_code_map.py) | Unit tests for the code-map generator (the file-header gate). | [`tests/test_code_map.py`](../tests/test_code_map.py) | the standard gains or renames a key (update REQUIRED_KEYS and these cases together). |
 | [`tests/test_conftest_langs.py`](../tests/test_conftest_langs.py) | Unit tests for the warm-up policy in [`tests/conftest_langs.py`](../tests/conftest_langs.py). | [`tests/test_conftest_langs.py`](../tests/test_conftest_langs.py) | the warm-up policy changes shape (a new unavailable reason, a new strict mode), or a helper gains another subprocess call that could raise after the probe. |
 | [`tests/test_core_is_stdlib_only.py`](../tests/test_core_is_stdlib_only.py) | The positive form of ADR-0008's first rule: every ``import`` in ``[`src/crb/core`](../src/crb/core)`` resolves to the standard library or to ``crb.core`` itself. | [`tests/test_core_is_stdlib_only.py`](../tests/test_core_is_stdlib_only.py) | a stdlib module is intentionally shadowed by a vendored copy under ``crb.core`` (add it to ``ALLOWED_EXTRA``), never to let a third-party package into the core. |
+| [`tests/test_deploy_evidence_store.py`](../tests/test_deploy_evidence_store.py) | The chart suite that pins one evidence store for the API and the worker pods. | [`tests/test_deploy_evidence_store.py`](../tests/test_deploy_evidence_store.py) | the API or the worker reads or writes another directory under ``$CRB_HOME`` that the other pod must see; never give the two pods separate evidence stores. |
 | [`tests/test_deploy_health_probes.py`](../tests/test_deploy_health_probes.py) | The deploy artefacts' probe test suite — liveness at ``/health/live``, readiness at ``/health``, roles per pod. | [`tests/test_deploy_health_probes.py`](../tests/test_deploy_health_probes.py) | a probe endpoint or a pod role is added (the template and this suite together); never point liveness at the deep probe. |
 | [`tests/test_deploy_secrets_store.py`](../tests/test_deploy_secrets_store.py) | The chart suite that pins one secrets store for the API and the worker pods. | [`tests/test_deploy_secrets_store.py`](../tests/test_deploy_secrets_store.py) | a pod that reads or writes the secrets store is added to the chart, or the store's resolution changes in [`src/crb/core/secrets_file.py`](../src/crb/core/secrets_file.py); never give the API and the worker separate stores. |
 | [`tests/test_deps_seam.py`](../tests/test_deps_seam.py) | The contract tests for ``crb.core.deps`` and the four call-site contracts the qualification and provisioning streams both code to. | [`tests/test_deps_seam.py`](../tests/test_deps_seam.py) | the seam's shape changes — both streams code to it, so a change here is a change to ADR-0019's contract. |

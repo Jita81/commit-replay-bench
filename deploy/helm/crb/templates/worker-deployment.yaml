@@ -104,6 +104,7 @@ spec:
             - name: work
               mountPath: /srv/crb
             {{- include "crb.secretsStore.mount" . | nindent 12 }}
+            {{- include "crb.evidenceStore.mount" . | nindent 12 }}
             {{- if eq $mode "dind" }}
             - name: docker-sock
               mountPath: /var/run/docker
@@ -155,6 +156,7 @@ spec:
       volumes:
         {{- include "crb.scratchVolumes" . | nindent 8 }}
         {{- include "crb.secretsStore.volume" . | nindent 8 }}
+        {{- include "crb.evidenceStore.volume" . | nindent 8 }}
         - name: work
           {{- if eq .Values.worker.workDir.type "pvc" }}
           persistentVolumeClaim:

@@ -126,6 +126,22 @@ secretsStore:
   accessMode: ReadWriteOnce
 
 # ---------------------------------------------------------------------------------------
+# The evidence store ($CRB_HOME/evidence and $CRB_HOME/transcripts): the kept patches, the
+# evidence packs and the retained transcripts. The worker WRITES them at grade time; the api
+# SERVES them (/grades/{row_hash}/patch and /transcript). Both pods mount this ONE claim —
+# an api emptyDir there could never find what the worker kept (docs/PREVENTION.md P-045).
+evidenceStore:
+  # A claim you manage (e.g. ReadWriteMany on Azure Files, EFS or NFS). Empty = the chart
+  # makes <release>-crb-evidence, which `helm uninstall` keeps (delete it explicitly).
+  existingClaim: ""
+  size: 10Gi
+  storageClassName: ""
+  # The same placement rule as secretsStore: ReadWriteOnce pins the api and the worker to
+  # one node (and refuses a placement the api cannot follow); ReadWriteMany on BOTH stores
+  # lifts the pin (docs/DEPLOYMENT.md §3.2).
+  accessMode: ReadWriteOnce
+
+# ---------------------------------------------------------------------------------------
 postgresql:
   # external: CRB_DATABASE_URL in the existing Secret points at a managed server
   #           (Azure Database for PostgreSQL Flexible Server with a private endpoint, …).
