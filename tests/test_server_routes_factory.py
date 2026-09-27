@@ -48,6 +48,7 @@ from crb.factory.evidence import (
     EV_DELIVERY_UPDATED,
     EV_GAP_SIGNOFF,
     EV_ITEM_OUTCOME,
+    EV_PROBE_WAIVED,
 )
 from crb.factory.loop import STATUS_ORACLE_NEEDS_STRENGTHENING
 from crb.factory.readiness import ROUTE_HUMAN
@@ -66,6 +67,7 @@ PATHS: list[tuple[str, str, str]] = [
     ("GET", f"/factory/{ALPHA}/evidence", "viewer"),
     ("POST", f"/factory/{ALPHA}/backlog/evolutions", "operator"),
     ("POST", f"/factory/{ALPHA}/outcomes/sync", "operator"),
+    ("POST", f"/factory/{ALPHA}/items/I-1/probe-waiver", "approver"),
 ]
 
 #: What the loop writes when it refuses a rebuild against an unchanged oracle (DL-045 rule 3).
@@ -459,6 +461,33 @@ def test_gap_signoff_lands_in_ledger_and_evidence_value_slots_refused(env: Env) 
         f"/factory/{ALPHA}/tasks/I-9/signoff-gap", json={"slot": "reproduction", "answer": "x"}
     )
     assert r.status_code == 404
+
+
+def test_a_probe_waiver_is_an_approvers_act_bound_to_the_red_proofs_bytes(env: Env) -> None:
+    """ADR-0025 item 12: the waiver names the test the item's latest RED proof carries —
+    another sha256 is refused 409 ``probe_waiver_stale`` — and lands on the chain as
+    ``review.probe_waived`` naming the approver, the reason and the bytes."""
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    home.evidence(actor="worker").record_red_proof({"item_id": "I-1", "test_sha256": "a" * 64})
+    login(env.client, "approver")
+    url = f"/factory/{ALPHA}/items/I-1/probe-waiver"
+    r = env.post(url, json={"reason": "a constant table", "test_sha256": "b" * 64})
+    assert r.status_code == 409 and envelope(r)["code"] == "probe_waiver_stale"
+    r = env.post(url, json={"reason": "a constant table", "test_sha256": "a" * 64})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["approver"] and body["test_sha256"] == "a" * 64
+    (waived,) = home.evidence().events_for("I-1", EV_PROBE_WAIVED)
+    assert waived.payload["reason"] == "a constant table"
+    assert waived.payload["approver"] == body["approver"]
+    assert (
+        env.post(
+            f"/factory/{ALPHA}/items/I-9/probe-waiver",
+            json={"reason": "x", "test_sha256": "a" * 64},
+        ).status_code
+        == 404
+    )
 
 
 def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:

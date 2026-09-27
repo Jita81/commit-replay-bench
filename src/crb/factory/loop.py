@@ -9,6 +9,8 @@
     build ladder → grade (pack + ledger row, process_step=factory)
       ▼ not clean / disqualified ──▶ not_clean / disqualified
     review (independent identity, probes) → verdict RECORDED before any edit
+      │ the required strength probe could not score the test (no waiver for its
+      │ bytes) ──▶ oracle_not_scoreable (routed human; nothing pushed)
       ▼ accept_with_edit ──▶ rework: edit permitted → RED proof → build → grade
       │     │                 → a fresh verdict on the rebuilt change (nothing delivered)
       │     └─ a weak_oracle finding with no test author, or one that returns the
@@ -36,7 +38,9 @@ What it is:   The governed loop — one backlog item end to end, every step evid
               step skippable.
 What it does: Sequences readiness (where the capability map's route for the item's cell
               is read once, before any build) → RED proof (authored or test-first rung) →
-              build ladder → independent review → rework (edit permitted only after a
+              build ladder → independent review (an unscoreable oracle with no approver's
+              waiver for its bytes stops ``oracle_not_scoreable`` before any push) → rework
+              (edit permitted only after a
               recorded verdict; bounded by ``max_rework``; a ``weak_oracle`` verdict never
               rebuilds against an unchanged oracle — DL-045 rule 3) → optional delivery
               (default OFF, fails closed, gated on that route, and reached ONLY by an
@@ -107,6 +111,7 @@ from crb.factory.evidence import (
     EV_BACKLOG_FROZEN,
     EV_DELIVERY,
     EV_DELIVERY_UPDATED,
+    EV_PROBE_WAIVED,
     OUTCOME_CLOSED,
     FactoryEvent,
     FactoryEvidence,
@@ -120,15 +125,18 @@ from crb.factory.readiness import (
     assess,
 )
 from crb.factory.review import (
+    FINDING_PROBE_WAIVED,
     FINDING_WEAK_ORACLE,
     SEVERITY_BLOCKING,
     SEVERITY_MAJOR,
     MechanicalReviewer,
     Probe,
+    ProbeWaiver,
     Reviewer,
     ReviewVerdict,
     permit_edit,
     review,
+    unscoreable,
 )
 from crb.factory.testfirst import (
     AuthoredTest,
@@ -158,6 +166,10 @@ STATUS_REWORK_EXHAUSTED = "rework_exhausted"
 #: can be had — no test author, or the author returned the same bytes: a rebuild would only
 #: let the builder find another way to pass the same test (B-1b finding 3, DL-045 rule 3).
 STATUS_ORACLE_NEEDS_STRENGTHENING = "oracle_needs_strengthening"
+#: The required strength probe could not score the authored test and no approver waived
+#: it for those bytes (ADR-0025 item 12): no rework, no delivery — the way forward is a
+#: superseding item with a scoreable test, or an approver's waiver for this test.
+STATUS_ORACLE_NOT_SCOREABLE = "oracle_not_scoreable"
 STATUS_BLOCKED = "blocked_on_dependency"
 STATUS_ERROR = "error"
 STATUSES: tuple[str, ...] = (
@@ -172,6 +184,7 @@ STATUSES: tuple[str, ...] = (
     STATUS_REJECTED,
     STATUS_REWORK_EXHAUSTED,
     STATUS_ORACLE_NEEDS_STRENGTHENING,
+    STATUS_ORACLE_NOT_SCOREABLE,
     STATUS_BLOCKED,
     STATUS_ERROR,
 )
@@ -324,6 +337,13 @@ def _route_summary(route: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if route is None:
         return None
     return {k: route[k] for k in _ROUTE_SUMMARY_KEYS if k in route}
+
+
+def _waiver_notes(verdict: ReviewVerdict) -> tuple[str, ...]:
+    """Every waiver the accepted verdict went through, as the pull request states it."""
+    return tuple(
+        f.detail for p in verdict.probes for f in p.findings if f.kind == FINDING_PROBE_WAIVED
+    )
 
 
 class _Stop(Exception):
@@ -610,6 +630,7 @@ class FactoryLoop:
                 after_verdict=after_verdict,
                 verdict=verdict.verdict,
                 repo_id=self.credentials_key,
+                waivers=_waiver_notes(verdict),
             )
         except DeliveryError as exc:
             s.evidence.record_delivery_refused(
@@ -647,12 +668,63 @@ class FactoryLoop:
         self._emit("delivery.opened", item.id, branch=d.branch, base=d.base, pr=d.pr_ref)
         return d, d.pr_ref
 
+    def _probe_waiver(self, item: BacklogItem, test_sha256: str) -> ProbeWaiver | None:
+        """The newest approver's waiver of the strength probe on the item's chain that is
+        bound to exactly ``test_sha256`` (ADR-0025 item 12); ``None`` when there is none —
+        a waiver for other bytes is not a waiver."""
+        found: ProbeWaiver | None = None
+        for ev in self.spec.evidence.events_for(item.id, EV_PROBE_WAIVED):
+            w = ProbeWaiver(
+                approver=str(ev.payload.get("approver", "")),
+                reason=str(ev.payload.get("reason", "")),
+                test_sha256=str(ev.payload.get("test_sha256", "")),
+                event_id=ev.event_id,
+            )
+            if w.applies_to(test_sha256):
+                found = w
+        return found
+
+    def _require_scoreable(
+        self,
+        item: BacklogItem,
+        verdict: ReviewVerdict,
+        oracle: AuthoredTest,
+        *,
+        open_pr: DeliveryResult | None = None,
+    ) -> None:
+        """Stop the item ``oracle_not_scoreable`` when the required strength probe could
+        not score its test and nobody waived it for these bytes (ADR-0025 item 12): the
+        verdict is already on the record; nothing is reworked or pushed, an open pull
+        request an earlier run opened is closed, and the reason carries the way forward."""
+        probe = unscoreable(verdict)
+        if probe is None:
+            return
+        why = redact_and_cap_head(probe.detail, max_chars=_FINDING_HEAD_CHARS)
+        reason = (
+            f"the strength probe could not score the authored test ({why}): register a "
+            "superseding item whose test exercises the changed lines, or ask an approver "
+            f"to waive the probe for this test's exact bytes (sha256 {oracle.sha256[:12]})"
+        )
+        self.spec.evidence.record_route(
+            item.id,
+            ROUTE_HUMAN,
+            reason,
+            reason_code=STATUS_ORACLE_NOT_SCOREABLE,
+            after_verdict=verdict.verdict,
+            verdict_event=verdict.event_id,
+            oracle_sha256=oracle.sha256,
+        )
+        self._emit("route.decided", item.id, route=ROUTE_HUMAN, reason=reason)
+        self._withdraw(item, open_pr, verdict, reason)
+        raise _Stop(STATUS_ORACLE_NOT_SCOREABLE, error=reason)
+
     def _review(
         self, item: BacklogItem, final: BuildResult, proof: RedProof, pr_ref: str = ""
     ) -> ReviewVerdict:
         """Step 4: independent review of the built change BEFORE anything leaves the
         factory (ADR-0021) — ``pr_ref`` is empty, no pull request exists yet; the verdict
-        is on the ledger before this returns."""
+        is on the ledger before this returns. An approver's strength-probe waiver for the
+        build's own oracle bytes is handed to the review (ADR-0025 item 12)."""
         s = self.spec
         v = review(
             final,
@@ -669,6 +741,7 @@ class FactoryLoop:
             probes=s.probes,
             timeout=s.timeout,
             on_event=self._cb(item.id),
+            waiver=self._probe_waiver(item, final.oracle.test_sha256),
         )
         self._emit("review.recorded", item.id, verdict=v.verdict, event=v.event_id)
         return v
@@ -843,6 +916,7 @@ class FactoryLoop:
             # request exists while the build is under review
             verdict = self._review(item, final, proof)
             verdicts.append(verdict)
+            self._require_scoreable(item, verdict, oracle, open_pr=open_pr)
             while verdict.rework_required and reworks < s.max_rework:
                 # DL-045 rule 3: a `weak_oracle` finding asks for a stronger TEST; rebuilding
                 # against the same one only lets the builder find another way to pass it
@@ -892,6 +966,7 @@ class FactoryLoop:
                     raise _Stop(STATUS_NOT_CLEAN)
                 verdict = self._review(item, final, proof)
                 verdicts.append(verdict)
+                self._require_scoreable(item, verdict, oracle, open_pr=open_pr)
             if verdict.accepted:
                 # the ONLY path to a pull request: the final, accepted, reviewed build
                 delivery, _ = self._deliver(
@@ -1039,6 +1114,7 @@ __all__ = [
     "STATUS_NOT_RED",
     "STATUS_NO_ORACLE",
     "STATUS_ORACLE_NEEDS_STRENGTHENING",
+    "STATUS_ORACLE_NOT_SCOREABLE",
     "STATUS_REJECTED",
     "STATUS_REWORK_EXHAUSTED",
     "STATUS_ROUTED_HUMAN",

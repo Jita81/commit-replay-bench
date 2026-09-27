@@ -102,6 +102,16 @@ EV_VERDICT = "review.verdict"
 EV_EDIT = "edit.permitted"
 EV_CHECKPOINT = "horizon.checkpoint"
 EV_ITEM_OUTCOME = "item.outcome"
+#: An approver's waiver of the strength probe for one authored test's exact bytes
+#: (ADR-0025 item 12): the approver, the reason and the test's SHA-256.
+EV_PROBE_WAIVED = "review.probe_waived"
+#: The entry gate stopped the item before any spend (ADR-0026 item 8): the stop code
+#: (``no_proven_standard``, ``needs_context``, ``unsigned_cell``, ``granularize``,
+#: ``not_licensed``), what was read and what the ticket must carry.
+EV_ENTRY_REFUSED = "entry.refused"
+#: An approver funded ONE calibration build of an item the entry gate stopped (ADR-0026
+#: item 8): who, why, and the stop it answers. A calibration build never delivers.
+EV_CALIBRATION_FUNDED = "calibration.funded"
 #: Intake (ADR-0017): what the listener did with a ticket. These sit on the SAME chain as
 #: the manufacture steps on purpose — "who read this ticket, when, at which revision, and
 #: what it wrote back" is evidence of the same kind as "who built it", and a reader
@@ -146,6 +156,9 @@ EVENT_KINDS: tuple[str, ...] = (
     EV_EDIT,
     EV_CHECKPOINT,
     EV_ITEM_OUTCOME,
+    EV_PROBE_WAIVED,
+    EV_ENTRY_REFUSED,
+    EV_CALIBRATION_FUNDED,
     *INTAKE_EVENT_KINDS,
 )
 #: The two ways a delivered pull request ends; the sync records exactly one of them.
@@ -539,6 +552,32 @@ class FactoryEvidence:
         """The loop's final status for an item (the last event of its run)."""
         return self.append(EV_ITEM_OUTCOME, item_id, **outcome)
 
+    def record_probe_waiver(
+        self, item_id: str, *, approver: str, reason: str, test_sha256: str
+    ) -> FactoryEvent:
+        """An approver's waiver of the strength probe, bound to ``test_sha256``."""
+        if not approver.strip() or not reason.strip() or len(test_sha256) != 64:
+            raise ValueError("a probe waiver needs an approver, a reason and the test's sha256")
+        return self.append(
+            EV_PROBE_WAIVED, item_id, approver=approver, reason=reason, test_sha256=test_sha256
+        )
+
+    def record_entry_refused(
+        self, item_id: str, code: str, reason: str, **extra: Any
+    ) -> FactoryEvent:
+        """The entry gate's stop, before any spend (ADR-0026 item 8)."""
+        return self.append(EV_ENTRY_REFUSED, item_id, code=code, reason=reason, **extra)
+
+    def record_calibration(
+        self, item_id: str, *, approver: str, reason: str, answers: str = ""
+    ) -> FactoryEvent:
+        """An approver funds one calibration build of ``item_id`` (never delivers)."""
+        if not approver.strip() or not reason.strip():
+            raise ValueError("a calibration build needs an approver and a reason")
+        return self.append(
+            EV_CALIBRATION_FUNDED, item_id, approver=approver, reason=reason, answers=answers
+        )
+
     # --- queries -----------------------------------------------------------------
     def verdict_for(self, item_id: str, pack_hash: str = "") -> FactoryEvent | None:
         """The LATEST verdict for the item (optionally for one build)."""
@@ -586,6 +625,7 @@ __all__ = [
     "EV_BACKLOG_EVOLVED",
     "EV_BACKLOG_FROZEN",
     "EV_BUILD",
+    "EV_CALIBRATION_FUNDED",
     "EV_CHECKPOINT",
     "EV_DELIVERY",
     "EV_DELIVERY_CLOSED",
@@ -593,8 +633,10 @@ __all__ = [
     "EV_DELIVERY_REFUSED",
     "EV_DELIVERY_UPDATED",
     "EV_EDIT",
+    "EV_ENTRY_REFUSED",
     "EV_GAP_SIGNOFF",
     "EV_ITEM_OUTCOME",
+    "EV_PROBE_WAIVED",
     "EV_READINESS",
     "EV_RED_PROOF",
     "EV_RED_REFUSED",

@@ -219,6 +219,7 @@ export const ACTION_HELP: Record<string, string> = {
   'run.executor': 'The run states which test executor it uses (docker or local); only docker counts as evidence.',
   'run.error': 'The run stopped on an error; nothing already graded is lost.',
   'run.finish_refused': 'The run could not be marked finished because its state had changed underneath it.',
+  'run.credential_refused': 'The worker checked the builder’s credential again when it picked the run up and found it gone, so nothing was built and nothing was spent.',
   'run.finished': 'The run reached its final status with its counts and duration.',
   'run.outage_stop': 'The run stopped because the sandbox or a service became unavailable; it can be started again later.',
   'run.escalation_stopped': 'A failed attempt did not climb to the next rung, because earlier retries in the same cell came back clean too rarely to pay; the rule and the yield are on the row.',

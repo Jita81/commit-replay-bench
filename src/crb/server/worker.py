@@ -109,7 +109,9 @@ Honesty properties
 Navigation
 ----------
 What it is:   The worker process — the only thing that executes a run (the API never does).
-What it does: Polls the job queue, claims one run, dispatches by kind (setup, probe, mine,
+What it does: Polls the job queue, claims one run — re-checking a build run's builder
+              credential by presence when it claims it, and failing it before any attempt
+              with the submit check's code when it is gone (P-050) — dispatches by kind (setup, probe, mine,
               label, replay, blind, oracle, controls, factory), streams StepEvents, writes
               grade rows through the append-only ledger with the run's labels stamped,
               records the apparatus, and marks the run succeeded / failed / cancelled
@@ -172,6 +174,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -262,6 +265,7 @@ from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
+from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
 from crb.server.github_app import GitHubApp, GitHubAppError
@@ -290,6 +294,7 @@ from crb.server.routes.capability import (
 )
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
+from crb.server.routes.runs import credential_refusal
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
     FactorySettings,
@@ -1148,8 +1153,16 @@ class Worker:
         counts: dict[str, Any] = {}
         started = time.monotonic()
         try:
+            refused = "" if self.queue.is_cancel_requested(run.id) else self._credential_gone(run)
             if self.queue.is_cancel_requested(run.id):
                 status, error = STATUS_CANCELLED, ""
+            elif refused:
+                # P-050: the credential went between submit and claim — stop before any
+                # attempt with the submit check's own code (presence only, nothing read)
+                emitter.emit(
+                    "system", "run.credential_refused", status=StepStatus.ERROR, error=refused
+                )
+                status, error = STATUS_FAILED, refused
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1199,6 +1212,22 @@ class Worker:
             final_status=status,
             counts=counts,
         )
+
+    def _credential_gone(self, run: Run) -> str:
+        """P-050 / G-707: the submit-time credential check (``POST /runs``'s
+        ``credential_refusal``), run again when the worker CLAIMS a build run — queued or
+        reclaimed — because a credential present at submit can be gone by then. PRESENCE
+        ONLY: the check names the variable or the file, never reads a value into anything
+        this returns. ``""`` when every builder the run would call has its credential."""
+        try:
+            credential_refusal(run, SimpleNamespace(home=self.home))
+        except ApiError as exc:
+            why = exc.message.removesuffix(" — nothing was queued")
+            return (
+                f"{exc.code}: {why} — the worker checked again when it claimed the run; "
+                "nothing was built"
+            )
+        return ""
 
     # --- repo / harness ----------------------------------------------------------
     def _github_installation(self, cfg: Mapping[str, Any]) -> int | None:

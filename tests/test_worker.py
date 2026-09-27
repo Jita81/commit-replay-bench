@@ -2294,3 +2294,22 @@ def test_repository_checks_and_run_overrides_reach_the_row_and_belt_six(
     assert done.apparatus_json["extra"]["checks"]["sources"]["api_stable"] == "repo"
     belts = [e for e in harness.events(run.id) if e.action == "grade.belt"]
     assert [e.payload["belt"] for e in belts][-1] == "api_stable"
+
+
+def test_a_run_whose_builder_credential_went_after_it_was_queued_stops_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-050 / G-707: the submit check passed, then the key went (a restore without the
+    secrets store, a token removed in Settings). The worker re-checks the credential's
+    PRESENCE when it claims the run — never reading the secret — and fails it before any
+    attempt with the submit check's code: no row, no builder call."""
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    run = h.enqueue("replay", ladder_json=["editblock:m"], builder="editblock", model="m")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_credential_missing: ")
+    assert "nothing was built" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    claimed = [e.action for e in h.events(run.id) if e.stage == "system"]
+    assert "run.credential_refused" in claimed
