@@ -11,18 +11,22 @@ What it does: Discovers every endpoint-shaped setting (the ``Settings`` model wa
               ``NOT_EGRESS`` with its reason; fails when the SECURITY.md boundary table's
               rows and ``FLOWS`` are not one to one, when a flow's row does not name the
               settings that point it, or when the table, DEPLOYMENT §1 or DEPLOYMENT §7
-              omits a flow; pins that the provisioning row says what a fetch sends and what
-              it never sends.
-How:          ``pydantic`` field walk plus a regular expression over ``src/crb``; the
-              statements are sliced out of the Markdown by their opening words; a regular
-              expression per flow.
+              omits a flow; fails when the statement under the table names a different set
+              of writers from the rows whose "What is sent" cell names a write (P-107);
+              pins that a setting name is found whatever quote it is written in (P-110);
+              pins that the provisioning row says what a fetch sends and what it never
+              sends.
+How:          ``pydantic`` field walk plus a regular expression over ``src/crb`` that reads
+              a whole string literal in either quote; the statements are sliced out of the
+              Markdown by their opening words and the table's end; a regular expression per
+              flow, and one for the verbs that change something outside.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md (the provisioning flow),
               docs/adr/0014-github-app-is-the-connection.md (the GitHub API flow)
 Works with:   docs/SECURITY.md (the boundary table), docs/DEPLOYMENT.md (§1 and §7),
               src/crb/server/settings.py (``Settings``, the walked model),
               src/crb/provision/fetch.py (the fetch the provisioning row describes),
-              docs/PREVENTION.md (row P-103)
+              docs/PREVENTION.md (rows P-103, P-107 and P-110)
 Tested by:    tests/test_egress_inventory.py
 Touch when:   the product gains or loses a flow that leaves the deployment, or a setting
               that points at an address — the discovery test fails until the setting has a
@@ -115,7 +119,12 @@ NOT_EGRESS: dict[str, str] = {
 
 #: The last word of a setting that holds an address or an image reference.
 _SHAPE = r"(?:URL|ENDPOINT|ISSUER|HOSTS?|REGISTRY|INDEX|PROXY|SUMDB|IMAGE)"
-_SOURCE_NAME = re.compile(rf'"((?:CRB|AZURE_OPENAI|OPENAI|ANTHROPIC)_[A-Z0-9_]*{_SHAPE})"')
+#: A setting name as a whole string literal, in either quote: ruff format normalises source
+#: to double quotes, but a name that holds a double quote, or a file ruff skips, keeps its
+#: single ones, and the inventory must not depend on the formatter (PR #61 review).
+_SOURCE_NAME = re.compile(
+    rf"""(['"])((?:CRB|AZURE_OPENAI|OPENAI|ANTHROPIC)_[A-Z0-9_]*{_SHAPE})\1"""
+)
 
 
 def _model_names(model: type[BaseModel], prefix: str) -> Iterator[str]:
@@ -130,7 +139,7 @@ def _model_names(model: type[BaseModel], prefix: str) -> Iterator[str]:
 
 def _names_in_source(text: str) -> set[str]:
     """Every endpoint-shaped setting name a Python source text reads as a string literal."""
-    return set(_SOURCE_NAME.findall(text))
+    return {m.group(2) for m in _SOURCE_NAME.finditer(text)}
 
 
 def _discovered() -> set[str]:
