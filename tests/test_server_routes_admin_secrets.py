@@ -506,6 +506,7 @@ _RECORDERS = {
     "_stored",
     "_removed",
     "_record_login_stored",
+    "record_stored_logins",
     "_record_secret_change",
     "append_system_event",
 }

@@ -17,7 +17,8 @@
   implementation the admin routes and the ``crb users`` break-glass CLI share: a password
   is hashed here and never logged; the last active admin can never be deactivated or
   demoted, by any path (``409 last_admin``; :func:`would_orphan_admins`, which the OIDC
-  upsert asks too); an OIDC account never gains a local password (``409 not_local``).
+  upsert asks too), nor — through the API or the claims — the last one who can sign in
+  (:class:`SignInPaths`); an OIDC account never gains a local password (``409 not_local``).
 * **CSRF** — a token bound to the session: ``HMAC(secret, uid, cv)``
   (:func:`csrf_token_for`), served in the non-HttpOnly ``crb_csrf`` cookie
   (``__Host-crb_csrf`` when secure) and required as the ``X-CSRF-Token`` header on every
@@ -59,7 +60,8 @@ What it does: Verifies passwords in constant time (an unknown user pays for a ve
               burst cannot outrun it), seeds the bootstrap admin only while the users table
               is empty, and owns the account lifecycle primitives (``set_password``,
               ``set_user_active`` — deactivation ends the sessions — and
-              ``would_orphan_admins``, the one last-admin rule) the admin routes, the OIDC
+              ``would_orphan_admins``, the one last-admin rule, which counts only admins who
+              can sign in by ``SignInPaths``) the admin routes, the OIDC
               callback and the ``crb users`` CLI share. Never logs or returns a password or
               token.
 How:          argon2id via ``argon2-cffi``; ``itsdangerous`` timed serialisers with a salt
@@ -312,15 +314,62 @@ def count_active_admins(db: Session) -> int:
     )
 
 
-def would_orphan_admins(db: Session, user: User, *, role: str, active: bool) -> bool:
-    """Whether giving ``user`` ``role`` and ``active`` would leave no active admin — the ONE
-    last-admin rule every path that changes an existing account's role or active flag asks
-    (the role route, :func:`set_user_active`, and :func:`upsert_oidc_user` under
-    ``role_from_claims=always``; AUTH-2 found the third path had none). The caller holds
-    :func:`lock_users_table` and has re-read ``user`` under it, so the count cannot move
-    between this answer and the write."""
+def _issuer_key(issuer: str) -> str:
+    """An issuer as compared: trimmed, without a trailing slash."""
+    return issuer.strip().rstrip("/")
+
+
+@dataclass(frozen=True)
+class SignInPaths:
+    """Which accounts can sign in to this deployment now: a local account while local
+    sign-in is on, an OIDC account whose issuer is one this deployment accepts. The
+    last-admin rule counts only these (AUTH-2's residual: with local sign-in off and the
+    bootstrap admin left active, that admin was counted though nobody could use it)."""
+
+    local: bool
+    oidc_issuers: frozenset[str]
+
+    @classmethod
+    def of(cls, settings: Settings, *also: str) -> SignInPaths:
+        """This deployment's paths; ``also`` adds an issuer just proven (the OIDC callback
+        passes the ``iss`` of the token it validated)."""
+        issuers = {settings.oidc.issuer, *also} if settings.oidc.enabled else set()
+        return cls(
+            local=settings.local_auth_enabled,
+            oidc_issuers=frozenset(_issuer_key(i) for i in issuers if i.strip()),
+        )
+
+    def admits(self, user: User) -> bool:
+        """Whether ``user`` could sign in by one of these paths (``active`` aside)."""
+        if is_local_account(user):
+            return self.local
+        return _issuer_key(user.issuer or "") in {_issuer_key(i) for i in self.oidc_issuers}
+
+
+def would_orphan_admins(
+    db: Session, user: User, *, role: str, active: bool, sign_in: SignInPaths | None
+) -> bool:
+    """Whether giving ``user`` ``role`` and ``active`` would leave no active admin, or no
+    active admin who can sign in — the ONE last-admin rule every path that changes an
+    existing account's role or active flag asks (the role route, :func:`set_user_active`,
+    and :func:`upsert_oidc_user` under ``role_from_claims=always``; AUTH-2 found the third
+    path had none). ``sign_in`` is the deployment's :class:`SignInPaths`: an admin it does
+    not admit (a local one with local sign-in off, an OIDC one from another issuer) is never
+    the admin that keeps the deployment administrable. ``None`` — the break-glass CLI, run
+    without the service's settings by someone with host access — counts every active admin.
+    The caller holds :func:`lock_users_table` and has re-read ``user`` under it, so the
+    count cannot move between this answer and the write."""
     loses_admin = user.role == "admin" and user.active and (role != "admin" or not active)
-    return loses_admin and count_active_admins(db) <= 1
+    if not loses_admin:
+        return False
+    admins = list(
+        db.execute(select(User).where(User.role == "admin", User.active.is_(True))).scalars()
+    )
+    if len(admins) <= 1:
+        return True
+    if sign_in is None or not sign_in.admits(user):
+        return False
+    return sum(1 for a in admins if sign_in.admits(a)) <= 1
 
 
 def credential_version(user: User) -> str:
@@ -385,11 +434,12 @@ def set_account_active(user: User, active: bool) -> None:
     user.active = active
 
 
-def set_user_active(db: Session, user: User, active: bool) -> bool:
+def set_user_active(db: Session, user: User, active: bool, *, sign_in: SignInPaths | None) -> bool:
     """Activate or deactivate ``user``; the caller commits. Returns whether the flag changed.
 
-    Deactivating the last active admin is refused with 409 ``last_admin`` — a deployment
-    can never reach a state nobody can administer. The lock is taken FIRST and ``user`` is
+    Deactivating the last active admin — or the last one who can sign in by ``sign_in``
+    (:func:`would_orphan_admins`) — is refused with 409 ``last_admin``: a deployment can
+    never reach a state nobody can administer. The lock is taken FIRST and ``user`` is
     re-read under it (:func:`lock_users_table`, then ``Session.refresh``): the caller loaded
     ``user`` before the lock, and a role change committed in between (promote this account,
     demote the other admin) would otherwise let a guard that trusted the stale snapshot
@@ -408,7 +458,7 @@ def set_user_active(db: Session, user: User, active: bool) -> bool:
     db.refresh(user)
     if user.active == active:
         return False
-    if would_orphan_admins(db, user, role=user.role, active=active):
+    if would_orphan_admins(db, user, role=user.role, active=active, sign_in=sign_in):
         raise ApiError(
             409,
             "last_admin",
@@ -976,14 +1026,16 @@ def upsert_oidc_user(
     claims: Mapping[str, Any],
     role: str,
     role_from_claims: str = "first_login",
+    sign_in: SignInPaths | None,
 ) -> User:
     """Find-or-create by ``(issuer, subject)``; refresh the profile fields from the IdP.
 
     ``role`` (the claims' mapping) is set on a NEW account. On an existing one it replaces
     the stored role only when ``role_from_claims == "always"`` — otherwise an admin's
     change would be silently reverted at the account's next sign-in — and never when it
-    would demote the last active admin (:func:`would_orphan_admins`, under the users lock
-    taken here: AUTH-2): the stored role is kept. The caller compares the role before and
+    would demote the last active admin, or the last one who can sign in by ``sign_in``
+    (:func:`would_orphan_admins`, under the users lock taken here: AUTH-2): the stored
+    role is kept. The caller compares the role before and
     after with the mapped one and records ``user.role_overridden`` or
     ``user.role_override_refused``."""
     subject = str(claims.get("sub") or "")
@@ -1010,7 +1062,7 @@ def upsert_oidc_user(
         user.email = email or user.email
         user.display_name = display or user.display_name
         if role_from_claims == "always" and not would_orphan_admins(
-            db, user, role=role, active=user.active
+            db, user, role=role, active=user.active, sign_in=sign_in
         ):
             user.role = role
     db.flush()
@@ -1133,6 +1185,7 @@ __all__ = [
     "OidcClient",
     "OidcState",
     "OperatorDep",
+    "SignInPaths",
     "ViewerDep",
     "authenticate_local",
     "bootstrap_admin_if_empty",

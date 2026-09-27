@@ -74,6 +74,7 @@ from crb.server.auth import (
     LoginRateLimiter,
     OidcClient,
     OidcState,
+    SignInPaths,
     authenticate_local,
     clear_auth_cookies,
     credential_version,
@@ -459,7 +460,12 @@ def _complete_oidc(
             lock_users_table(db)
         before = _stored_role(db, issuer, claims)
         user = upsert_oidc_user(
-            db, issuer=issuer, claims=claims, role=role, role_from_claims=source
+            db,
+            issuer=issuer,
+            claims=claims,
+            role=role,
+            role_from_claims=source,
+            sign_in=SignInPaths.of(settings, issuer),  # this account just proved its issuer
         )
         if not user.active:
             raise _AccountDisabled(user.id)

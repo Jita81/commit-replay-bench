@@ -434,6 +434,87 @@ def test_routes_run_the_whole_flow_and_never_return_the_token(
         assert TOKEN not in str(ev.payload_json)
 
 
+def _login_events(app: Any) -> list[Any]:
+    from sqlalchemy import select
+
+    from crb.server.routes.admin import SECRETS_TRACE
+    from crb.store.models import Event
+
+    with app.state.session_factory() as s:
+        rows = list(
+            s.execute(
+                select(Event).where(Event.trace_id == SECRETS_TRACE).order_by(Event.seq)
+            ).scalars()
+        )
+        s.expunge_all()
+        return rows
+
+
+def _finish_unwatched(c: TestClient, tmp_path: Path, fake_claude: Path) -> tuple[str, str]:
+    """Start a sign-in through the API, then let the helper store the token with NO API
+    read of the session after it (the admin pasted the code and closed the tab); returns
+    ``(session id, the helper's stored_at)``."""
+    import json
+
+    r = c.post(LOGIN)
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    broker = cl.LoginBroker(tmp_path / "home" / "secrets", claude_binary=str(fake_claude))
+    broker.submit_code(sid, "good-code-1234#STATE1")  # the helper, not a route
+    assert _wait(broker, sid, {cl.STATE_DONE, cl.STATE_FAILED}).state == cl.STATE_DONE
+    status = json.loads((broker.session_dir(sid) / "status.json").read_text(encoding="utf-8"))
+    assert status["stored_at"], status  # the helper stamps the moment it stored the token
+    return sid, str(status["stored_at"])
+
+
+def test_a_stored_sign_in_nobody_read_back_is_recorded_by_the_secrets_list(
+    client: TestClient, tmp_path: Path, fake_claude: Path
+) -> None:
+    """EI-8's residual (the skeptic, 2026-09-27): a token the sign-in helper stored was
+    recorded only by the next read of ITS session — an admin who pasted the code and closed
+    the tab left it unrecorded until the next sign-in started, stamped with the time it was
+    recorded. ``GET /settings/secrets`` — which every role reads, and which Settings, Runs
+    and the builder checks load — records it too, naming the admin who started the sign-in
+    (not the reader) and carrying the helper's own ``stored_at``."""
+    _login(client)
+    admin_id = client.get(f"{API_PREFIX}/auth/me").json()["id"]
+    r = client.post(
+        f"{API_PREFIX}/users",
+        json={"username": "vera", "password": "a-long-viewer-password-1", "role": "viewer"},
+    )
+    assert r.status_code == 201, r.text
+    sid, stored_at = _finish_unwatched(client, tmp_path, fake_claude)
+    assert _login_events(client.app) == []  # nothing has read the session back
+    with TestClient(client.app) as viewer:
+        _login(viewer, "vera", "a-long-viewer-password-1")
+        for _ in range(2):  # once, however often it is read
+            assert viewer.get(f"{API_PREFIX}/settings/secrets").status_code == 200
+    (ev,) = _login_events(client.app)
+    assert ev.action == "settings.secret_set" and ev.actor == admin_id
+    assert ev.payload_json["session"] == sid and ev.payload_json["via"] == "login"
+    assert ev.payload_json["stored_at"] == stored_at
+    assert TOKEN not in str(ev.payload_json)
+
+
+def test_a_stored_sign_in_nobody_read_back_is_recorded_at_the_next_start(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    """…and a restart records it before any request, so a deployment that nobody opens
+    after the sign-in still has the event, with the helper's time, not the restart's."""
+    (tmp_path / "home" / "secrets").mkdir(parents=True, mode=0o700)
+    settings = make_settings(tmp_path, fake_claude)
+    with TestClient(create_app(settings)) as c:
+        _login(c)
+        admin_id = c.get(f"{API_PREFIX}/auth/me").json()["id"]
+        sid, stored_at = _finish_unwatched(c, tmp_path, fake_claude)
+        assert _login_events(c.app) == []
+    app = create_app(settings)
+    with TestClient(app):
+        (ev,) = _login_events(app)
+    assert ev.actor == admin_id and ev.payload_json["session"] == sid
+    assert ev.payload_json["stored_at"] == stored_at
+
+
 def test_login_routes_are_admin_only_and_cancel_works(client: TestClient) -> None:
     _login(client)
     # create a viewer, sign in as them: every login route is 403

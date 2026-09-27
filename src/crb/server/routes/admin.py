@@ -36,7 +36,8 @@ What it is:   The admin route module — ``/users`` (list, create, role, passwor
               sign out everywhere, self password, the account's events), ``/settings`` and
               ``/settings/secrets``.
 What it does: Lists and creates local accounts, changes roles and the active flag without
-              ever orphaning the last active admin (409 ``last_admin``), sets a password as
+              ever orphaning the last active admin, or the last one who can sign in by this
+              deployment's paths (409 ``last_admin``), sets a password as
               an admin or as oneself (current password required; 409 ``not_local`` for an
               OIDC account), records every account change as a ``system`` event with actor
               and target, serves each account's own ``user.*`` trail newest first
@@ -45,7 +46,9 @@ What it does: Lists and creates local accounts, changes roles and the active fla
               login token and the tracker token while answering only statuses (never a
               value) — every store and removal, and every token the sign-in helper stored,
               one ``settings.secret_set`` / ``settings.secret_deleted`` event naming the
-              admin (EI-8); a write that records nothing is named in the test that says why.
+              admin (EI-8; a helper-stored token is recorded by the next read of the secrets
+              list or of a sign-in, with the helper's ``stored_at``); a write that records
+              nothing is named in the test that says why.
 How:          Every handler takes ``AdminDep`` (the secrets status list takes ``ViewerDep``
               because a status is non-secret, and projects a viewer's copy down to
               presence; the self password change ``CurrentUser``); the lifecycle handlers call
@@ -92,6 +95,7 @@ from crb.server.auth import (
     CurrentUser,
     LoginRateLimited,
     LoginRateLimiter,
+    SignInPaths,
     ViewerDep,
     clear_auth_cookies,
     create_local_user,
@@ -364,7 +368,9 @@ def create_user(body: CreateUserRequest, admin: AdminDep, db: DbDep) -> UserOut:
     responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="Change a user's role (and optionally active flag); never orphans the last admin",
 )
-def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> UserOut:
+def set_role(
+    user_id: str, body: RoleChange, admin: AdminDep, db: DbDep, settings: SettingsDep
+) -> UserOut:
     """Change role and/or active flag; refuses the change that would leave no admin."""
     validate_role(body.role)
     # Count and update in one serialised transaction: two concurrent demotions of the two
@@ -373,7 +379,8 @@ def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> User
     lock_users_table(db)
     user = _get_user(db, user_id)
     new_active = user.active if body.active is None else body.active
-    if would_orphan_admins(db, user, role=body.role, active=new_active):
+    sign_in = SignInPaths.of(settings)
+    if would_orphan_admins(db, user, role=body.role, active=new_active, sign_in=sign_in):
         raise ApiError(
             409,
             "last_admin",
@@ -501,14 +508,16 @@ def revoke_user_sessions(
     responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="Activate or deactivate a user; never deactivates the last active admin",
 )
-def set_active(user_id: str, body: ActiveChange, admin: AdminDep, db: DbDep) -> UserOut:
+def set_active(
+    user_id: str, body: ActiveChange, admin: AdminDep, db: DbDep, settings: SettingsDep
+) -> UserOut:
     """Deactivating refuses every request of the account while it is inactive and ends every
     session it held for good (re-activating brings none back, AUTH-3); 409 ``last_admin``
-    when it would leave no active admin. Idempotent. The
+    when it would leave no active admin, or none who can sign in. Idempotent. The
     idempotency and last-admin decisions are ``set_user_active``'s, taken under the users
     lock on a re-read row — the ``user`` loaded here is only the handle."""
     user = _get_user(db, user_id)
-    if not set_user_active(db, user, body.active):
+    if not set_user_active(db, user, body.active, sign_in=SignInPaths.of(settings)):
         db.rollback()  # nothing to write: release the users lock now, not at teardown
         return _user_out(user)
     record_user_event(
@@ -644,13 +653,17 @@ def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatus
 
 
 def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> None:
-    """The sign-in helper stores the Claude token with no database, so the first API read
-    that sees its session ``done`` writes the event — once per session, decided under the
-    events lock — with the account that started the sign-in as actor (the reader's own
-    when an older session did not record one)."""
+    """The sign-in helper stores the Claude token with no database, so the API writes the
+    event when it next sees the session ``done`` — once per session, decided under the
+    events lock — with the account that started the sign-in as actor and the helper's own
+    ``stored_at``, so a late record still says when the token was stored. ``observer``
+    names the actor only for an older session that did not record who started it, and only
+    when the reader is an admin; otherwise (``""``) such a session waits for an admin read."""
     if st.state != STATE_DONE:
         return
     actor = str(broker.meta(st.id).get("started_by_id") or observer)
+    if not actor:
+        return
 
     def write() -> None:
         seen: list[Any] = list(
@@ -662,6 +675,7 @@ def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> No
         )
         if any(isinstance(p, dict) and p.get("session") == st.id for p in seen):
             return
+        stamp = {"stored_at": st.stored_at} if st.stored_at else {}
         _record_secret_change(
             db,
             removed=False,
@@ -670,9 +684,18 @@ def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> No
             fingerprint=st.fingerprint,
             via="login",
             session=st.id,
+            **stamp,
         )
 
     commit_audited(db, write)
+
+
+def record_stored_logins(db: Session, broker: Any, observer: str = "") -> None:
+    """Record every sign-in the helper finished that no read has recorded yet (EI-8): the
+    secrets list, a new sign-in and the API's start call this, so an admin who pasted the
+    code and closed the tab still leaves the event."""
+    for done in broker.done_sessions():
+        _record_login_stored(db, broker, done, observer)
 
 
 @router.get(
@@ -681,11 +704,15 @@ def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> No
     responses={401: _ERR},
     summary="Statuses of the operator-supplied secrets (never values); any signed-in role",
 )
-def list_secrets(user: ViewerDep, secrets: SecretsDep) -> SecretsStatusList:
+def list_secrets(
+    user: ViewerDep, secrets: SecretsDep, broker: LoginBrokerDep, db: DbDep
+) -> SecretsStatusList:
     """Readable by every role: a status is non-secret by construction (presence, at most
     four trailing characters, who set it when) and an operator needs it to know whether
     an ``auth: cli`` run can authenticate. A viewer gets presence only — exactly ``{name,
-    present}`` per item — and only admins learn the directory path."""
+    present}`` per item — and only admins learn the directory path. A token the sign-in
+    helper stored that nothing has recorded yet is recorded here first (EI-8)."""
+    record_stored_logins(db, broker, user.id if user.role == "admin" else "")
     statuses = secrets.statuses()
     items: list[SecretStatusOut] | list[SecretPresenceOut]
     if user.role == "viewer":
@@ -803,8 +830,7 @@ def start_claude_login(admin: AdminDep, broker: LoginBrokerDep, db: DbDep) -> Lo
     straight into the owner-only secrets store on the API host — it is never returned."""
     try:
         # a finished sign-in nobody read back is recorded before the sweep can remove it
-        for done in broker.done_sessions():
-            _record_login_stored(db, broker, done, admin.id)
+        record_stored_logins(db, broker, admin.id)
         broker.sweep()
         return _session_out(
             broker.start(started_by=admin.display_name or admin.id, started_by_id=admin.id)

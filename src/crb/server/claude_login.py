@@ -34,8 +34,9 @@ What it does: ``LoginBroker.start`` creates the owner-only session directory, sp
               detached and waits for the authorisation URL; ``state`` reads ``status.json``;
               ``submit_code`` validates the code's shape and writes ``code.txt``; ``cancel``
               signals the helper; ``meta`` serves who started a session (their account id
-              too) and ``done_sessions`` the ones whose token was stored, so the API can
-              record each stored token as an event naming that admin (EI-8). One session per
+              too) and ``done_sessions`` the ones whose token was stored, with the helper's
+              own ``stored_at``, so the API can record each stored token as an event naming
+              that admin and that time, however late it records it (EI-8). One session per
               deployment at a time (a second start while one is pending is refused);
               sessions expire after ``SESSION_TTL_S``.
 How:          Files under ``<secrets dir>/claude-code-login/<id>/`` with mode 0700/0600;
@@ -112,6 +113,9 @@ class SessionState:
     started_at: str
     expires_at: str
     fingerprint: str = ""
+    #: When the helper stored the token (``done`` only) — for the API's event (EI-8), which
+    #: may be written later than this; not served, so not in :meth:`to_dict`.
+    stored_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -262,6 +266,7 @@ class LoginBroker:
             started_at=str(meta.get("started_at", "")),
             expires_at=str(meta.get("expires_at", "")),
             fingerprint=str(status.get("fingerprint", "")),
+            stored_at=str(status.get("stored_at", "")),
         )
 
     def meta(self, session_id: str) -> dict[str, Any]:

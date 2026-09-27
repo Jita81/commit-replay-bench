@@ -13,7 +13,8 @@ session directory:
 * reads the token off the CLI's output, stores it through
   :class:`crb.core.secrets_file.SecretsStore` (owner-only file, same registry name the
   manual path uses), scrubs its buffer, writes ``status.json = done`` with the token's
-  four-character fingerprint; or ``failed`` with a redacted, capped detail.
+  four-character fingerprint and ``stored_at`` (the API's event carries that time, EI-8);
+  or ``failed`` with a redacted, capped detail.
 
 The token is never written anywhere but the secrets store; the pasted code is never
 written anywhere but the PTY. Terminal escape sequences are stripped before any text is
@@ -174,6 +175,7 @@ def run(session_dir: str) -> int:
     outcome = STATE_FAILED
     detail = "the claude CLI exited before printing a token"
     fingerprint = ""
+    stored_at = ""
     try:
         while True:
             if cancelled["flag"]:
@@ -199,6 +201,8 @@ def run(session_dir: str) -> int:
                 status = store.set(SECRET_NAME, token, set_by=f"login:{meta.get('started_by', '')}")
                 token = ""
                 fingerprint = status.fingerprint
+                # the API may record the event later; it carries this time (EI-8)
+                stored_at = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
                 outcome, detail = STATE_DONE, "token stored"
                 break
             if not url_sent:
@@ -252,7 +256,7 @@ def run(session_dir: str) -> int:
         shutil.rmtree(config_dir, ignore_errors=True)
         buf = ""
         typed = ""
-        _status(sdir, outcome, detail, fingerprint=fingerprint)
+        _status(sdir, outcome, detail, fingerprint=fingerprint, stored_at=stored_at)
     return 0 if outcome == STATE_DONE else 1
 
 

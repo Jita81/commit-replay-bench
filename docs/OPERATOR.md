@@ -919,7 +919,10 @@ host.
 security questions: the second door is the host, not the person's inbox. An account that signs
 in through your identity provider has no password here — it is disabled and reset at the
 provider. The last active admin cannot be deactivated or demoted, so its own toggle and role
-select are disabled with the reason as their hint, rather than refused after the attempt.
+select are disabled with the reason as their hint, rather than refused after the attempt. Nor
+can the last admin who can sign in: with `CRB_LOCAL_AUTH_ENABLED=false`, a local admin left
+active does not count, so the server refuses (`last_admin`) to take the only OIDC admin even
+while the screen, which does not know the sign-in settings, shows the controls enabled.
 
 The host verbs need no login: access to the host and the database is the credential. They read the
 database `crb serve` reads (`--database-url` → `CRB_DATABASE_URL` → `$CRB_HOME/crb.db`),
@@ -998,7 +1001,8 @@ time it signs in. After that the role is yours to change on the Settings screen,
 next sign-in does not undo it. If your organisation manages roles in the provider instead,
 set `CRB_OIDC__ROLE_FROM_CLAIMS=always`: every sign-in then applies the claims, and each time
 that changes a role the account's trail records `user.role_overridden`. The claims never
-demote the last active admin: that sign-in keeps the admin role and records
+demote the last active admin — nor the last who can sign in, so a local admin left active
+with local sign-in off does not count — that sign-in keeps the admin role and records
 `user.role_override_refused` — fix the claims at the provider, or add a second admin
 ([DEPLOYMENT §2.1](DEPLOYMENT.md#21-environment-reference)).
 

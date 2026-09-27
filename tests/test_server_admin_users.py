@@ -341,14 +341,14 @@ class TestActive:
             user = s.get(User, uid)
             assert user is not None
             nonce = user.session_nonce
-            assert set_user_active(s, user, False)
+            assert set_user_active(s, user, False, sign_in=None)
             assert user.session_nonce != nonce
             s.commit()
         with app.state.session_factory() as s:
             user = s.get(User, uid)
             assert user is not None
             nonce = user.session_nonce
-            assert set_user_active(s, user, True)
+            assert set_user_active(s, user, True, sign_in=None)
             assert user.session_nonce == nonce  # turning it on ends nothing more
             s.commit()
         r = target.get(f"{API_PREFIX}/auth/me")
@@ -448,7 +448,7 @@ class TestActive:
             b.get(User, y).role = "operator"
             b.commit()
             with pytest.raises(ApiError) as excinfo:
-                set_user_active(a, x_in_a, False)
+                set_user_active(a, x_in_a, False, sign_in=None)
             assert excinfo.value.status_code == 409 and excinfo.value.code == "last_admin"
             a.rollback()
             # Idempotency is decided on the refreshed row too: a snapshot that still says
@@ -458,8 +458,8 @@ class TestActive:
             assert z_in_a.active is True
             b.get(User, z).active = False
             b.commit()
-            assert set_user_active(a, z_in_a, False) is False
-            assert set_user_active(a, z_in_a, True) is True
+            assert set_user_active(a, z_in_a, False, sign_in=None) is False
+            assert set_user_active(a, z_in_a, True, sign_in=None) is True
             a.commit()
         finally:
             a.close()

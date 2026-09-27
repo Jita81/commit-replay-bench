@@ -1217,6 +1217,85 @@ class TestOidcRoleSource:
         (ev,) = _user_events(app, "user.role_overridden")
         assert ev.payload_json["from_role"] == "admin" and ev.payload_json["role"] == "viewer"
 
+    def test_an_admin_nobody_can_sign_in_as_never_counts_as_the_other_admin(
+        self, tmp_path: Path
+    ) -> None:
+        """AUTH-2's residual (the skeptic, 2026-09-27): the recommended production setup keeps
+        the bootstrap admin active with local sign-in off (DEPLOYMENT §8), so the last-admin
+        count saw two admins while only the OIDC one could sign in — and the claims, the
+        role route and the active route could each strip that one. The count is of admins
+        who can sign in to THIS deployment; the stranded local admin is not one of them."""
+        fake = FakeOidc({"sub": "entra-oid-1", "name": "Ada", "groups": ["grp-crb-admins"]})
+        settings = make_settings(
+            tmp_path,
+            local_auth_enabled=False,  # the bootstrap root stays active; nobody can use it
+            oidc={**OIDC_SETTINGS, "role_from_claims": "always"},
+        )
+        app = create_app(settings, oidc_client=fake)
+        first = _oidc_login(app, settings)
+        try:
+            me = first.get(f"{API_PREFIX}/auth/me").json()
+            assert me["role"] == "admin"
+            # the role route and the active route refuse to strip the one usable admin
+            for path, body in (
+                ("role", {"role": "viewer"}),
+                ("role", {"role": "admin", "active": False}),
+                ("active", {"active": False}),
+            ):
+                r = first.put(f"{API_PREFIX}/users/{me['id']}/{path}", json=body)
+                assert r.status_code == 409, (path, body, r.text)
+                assert r.json()["error"]["code"] == "last_admin"
+        finally:
+            first.__exit__(None, None, None)
+        fake.claims["groups"] = []  # the provider no longer says admin
+        again = _oidc_login(app, settings)
+        try:
+            assert again.get(f"{API_PREFIX}/auth/me").json()["role"] == "admin"
+            # deactivating the stranded local admin is no lockout, so it is allowed
+            users = again.get(f"{API_PREFIX}/users").json()["items"]
+            root = next(u for u in users if u["username"] == "root")
+            r = again.put(f"{API_PREFIX}/users/{root['id']}/active", json={"active": False})
+            assert r.status_code == 200, r.text
+        finally:
+            again.__exit__(None, None, None)
+        (ev,) = _user_events(app, "user.role_override_refused")
+        assert ev.payload_json["target"] == me["id"] and ev.payload_json["reason"] == "last_admin"
+        assert _user_events(app, "user.role_overridden") == []
+
+    def test_the_last_admin_rule_counts_only_admins_who_can_sign_in(self, tmp_path: Path) -> None:
+        """The unit under AUTH-2's residual: ``SignInPaths`` admits a local account only while
+        local sign-in is on and an OIDC account only from the configured issuer; the rule
+        refuses to take the last such admin, and still never leaves zero active admins."""
+        from sqlalchemy import select
+
+        from crb.server.auth import SignInPaths, local_subject, would_orphan_admins
+        from crb.store.models import User
+
+        app = create_app(make_settings(tmp_path))
+        with TestClient(app), app.state.session_factory() as db:
+            root = db.execute(
+                select(User).where(User.subject == local_subject("root"))
+            ).scalar_one()
+            ada = User(id="u-ada", subject="oid-ada", issuer=ISSUER + "/", role="admin")
+            old = User(id="u-old", subject="oid-old", issuer="https://old.example/t", role="admin")
+            db.add_all([ada, old])
+            db.flush()
+            oidc_only = SignInPaths(local=False, oidc_issuers=frozenset({ISSUER}))
+            local_only = SignInPaths(local=True, oidc_issuers=frozenset())
+            assert oidc_only.admits(ada) and not oidc_only.admits(root)
+            assert not oidc_only.admits(old) and local_only.admits(root)
+            # the one usable admin, whichever path it signs in by
+            assert would_orphan_admins(db, ada, role="viewer", active=True, sign_in=oidc_only)
+            assert would_orphan_admins(db, root, role="admin", active=False, sign_in=local_only)
+            # an admin nobody can sign in as can go; so can anyone while two can sign in
+            assert not would_orphan_admins(db, root, role="viewer", active=True, sign_in=oidc_only)
+            both = SignInPaths.of(make_settings(tmp_path, oidc=OIDC_SETTINGS))
+            assert both.admits(ada) and both.admits(root)
+            assert not would_orphan_admins(db, ada, role="viewer", active=True, sign_in=both)
+            # unknown paths (the break-glass CLI): every active admin counts, as before
+            assert not would_orphan_admins(db, ada, role="viewer", active=True, sign_in=None)
+            db.rollback()
+
     def test_every_role_change_path_uses_the_one_last_admin_guard(self) -> None:
         """Prevention (AUTH-2, AUTH-3): the last-admin rule lived in two places and the OIDC
         upsert, a third path that changes a role, had none; and the role route wrote the

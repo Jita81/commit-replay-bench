@@ -344,7 +344,13 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   a `settings.secret_set` / `settings.secret_deleted` event naming the admin, with the
   secret's name and fingerprint, never its value, so who removed a credential survives the
   removal (EI-8). [measured]
-  `tests/test_server_routes_admin_secrets.py::test_each_store_and_removal_is_one_event_naming_the_admin` The verify probe's stderr
+  `tests/test_server_routes_admin_secrets.py::test_each_store_and_removal_is_one_event_naming_the_admin`
+  The sign-in helper has no database, so the API records its token at the next read of the
+  secrets list or of a sign-in session, or at its next start, with the helper's own
+  `stored_at` — a late record still says when the token was stored; until one of those, the
+  event is not yet written. [measured]
+  `tests/test_server_claude_login.py::test_a_stored_sign_in_nobody_read_back_is_recorded_by_the_secrets_list`
+  The verify probe's stderr
   tail is redacted and capped before it is returned.
 - **Verify is metered.** `POST …/verify` runs one no-tool Haiku turn through the
   builder's exact environment and is limited to one call per 10 s per deployment
@@ -383,6 +389,13 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   recorded as `user.role_override_refused`, so a directory clean-up or a group-id typo
   cannot leave a deployment nobody can administer (AUTH-2). [measured]
   `tests/test_server_auth.py::TestOidcRoleSource::test_always_never_demotes_the_last_active_admin`
+  The last-admin rule counts only admins who can sign in: a local account only while local
+  sign-in is on, an OIDC account only from the configured issuer. The bootstrap admin kept
+  active with `CRB_LOCAL_AUTH_ENABLED=false` (DEPLOYMENT §8 allows it) therefore never
+  stands in for a second admin — the claims, the role route and the active route all refuse
+  to take the last OIDC admin. The break-glass `crb users` verbs run without the service's
+  settings and count every active admin; host access is itself the recovery. [measured]
+  `tests/test_server_auth.py::TestOidcRoleSource::test_an_admin_nobody_can_sign_in_as_never_counts_as_the_other_admin`
   [design — exercised with an injected fake provider in tests; not yet run against a live
   IdP]
 - Local accounts (argon2id, constant-time compare) exist for bootstrap and air-gapped

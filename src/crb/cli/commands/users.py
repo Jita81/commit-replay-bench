@@ -342,7 +342,9 @@ def _set_active(args: argparse.Namespace, active: bool) -> int:
         user = _local_user(db, args.username)
         # Idempotency and the last-admin guard are decided under the users lock on a
         # re-read row (set_user_active), not on the snapshot _local_user returned.
-        if not set_user_active(db, user, active):
+        # sign_in=None: run without the service's settings, so every active admin counts
+        # (the break-glass operator has host access, which is itself the recovery path)
+        if not set_user_active(db, user, active, sign_in=None):
             print(f"{args.username} is already {verb} in {where}")
             return EXIT_OK
         record_user_event(db, action=f"user.{verb}", actor=actor(), target=user)
