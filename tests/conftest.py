@@ -4,8 +4,8 @@ and a test that does need the network is skipped, with the reason, when it is no
 Navigation
 ----------
 What it is:   The pytest conftest of the hermetic core suite — five function-scoped fixtures
-              over the Python fixture repository, the setup gate for network tests, and one
-              autouse pin of a host fact.
+              over the Python fixture repository, the setup gate for network tests, one autouse
+              pin of a host fact and one autouse guard of the ``CRB_*`` environment.
 What it does: Builds a fresh ``pyrepo`` (three commits) per test and derives from it the
               ``runner`` (a real ``PytestRunner``), a ``LocalExecutor``, the mined
               ``feat_task`` and a sighted ``trial`` worktree that is removed afterwards. Nothing
@@ -18,15 +18,18 @@ How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``t
               ``pytest_runtest_setup`` hands the ``network`` marker's hosts to
               ``conftest_langs.require_network``. ``_no_host_claude_cli`` pins
               ``claude_cli_on_path`` to ``False`` for every test, so no test passes or fails on
-              whether this machine has the ``claude`` CLI (P-037).
+              whether this machine has the ``claude`` CLI (P-037). ``_no_crb_env_leak`` puts
+              every ``CRB_*`` variable back after each test, so no test (and no code under
+              test that writes one) hands a home or a setting to the next (P-128).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
+              tests/fixtures/env_guard.py (the environment guard),
               src/crb/core/runners/pytest_runner.py (``runner``), src/crb/core/execution.py
               (``executor``), src/crb/core/workspace.py (``trial``), tests/conftest_langs.py
               and tests/conftest_store.py (the deliberately separate helper modules)
 Tested by:    tests/test_grade.py, tests/test_mine.py, tests/test_workspace.py (every consumer),
-              tests/test_conftest_langs.py (the network gate)
+              tests/test_conftest_langs.py (the network gate), tests/test_env_guard.py
 Touch when:   never for a new repository; add a fixture here only when three or more core test
               modules need the same object — language, store and server fixtures live in their
               own helper modules so this file stays the core suite's.
@@ -44,6 +47,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.env_guard import crb_env_restored
 
 try:  # the same module object the test modules import (tests/ may or may not be a package)
     from tests import conftest_langs as langs
@@ -98,6 +102,15 @@ def trial(pyrepo: pr.PyRepo, tmp_path: Path) -> Iterator[Workspace]:
         yield ws
     finally:
         ws.remove()
+
+
+@pytest.fixture(autouse=True)
+def _no_crb_env_leak() -> Iterator[None]:
+    """Every test starts with the ``CRB_*`` environment the one before it started with: a
+    variable a test (or the code it drives) sets, changes or deletes is put back after it.
+    ``worker_main.settings_from_args`` sets ``CRB_HOME``; unguarded, one test's temporary
+    home reached every later test in the session (P-128)."""
+    yield from crb_env_restored()
 
 
 @pytest.fixture(autouse=True)
