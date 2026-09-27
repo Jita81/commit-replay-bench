@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-582 files with a header · 1 exempt (listed at the end).
+584 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -264,7 +264,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py) | a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (205 files)
+## `tests` (206 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -337,6 +337,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_deploy_secrets_store.py`](../tests/test_deploy_secrets_store.py) | The chart suite that pins one secrets store for the API and the worker pods. | [`tests/test_deploy_secrets_store.py`](../tests/test_deploy_secrets_store.py) | a pod that reads or writes the secrets store is added to the chart, or the store's resolution changes in [`src/crb/core/secrets_file.py`](../src/crb/core/secrets_file.py); never give the API and the worker separate stores. |
 | [`tests/test_deps_seam.py`](../tests/test_deps_seam.py) | The contract tests for ``crb.core.deps`` and the four call-site contracts the qualification and provisioning streams both code to. | [`tests/test_deps_seam.py`](../tests/test_deps_seam.py) | the seam's shape changes — both streams code to it, so a change here is a change to ADR-0019's contract. |
 | [`tests/test_dod_check.py`](../tests/test_dod_check.py) | The test suite for [`scripts/dod_check.py`](../scripts/dod_check.py), on a throwaway repository tree. | (this is a test file) | a category, level or evidence prefix is added to the standard — add the fixture and the assertion here in the same change. |
+| [`tests/test_e2e_axe_settles.py`](../tests/test_e2e_axe_settles.py) | The ratchet that routes every axe scan in [`ui/e2e`](../ui/e2e) through the settling helper. | (this is a test file) | a spec needs an axe option the helper does not offer (add it to the helper, never a second construction). |
 | [`tests/test_event_vocabulary.py`](../tests/test_event_vocabulary.py) | The documentation ratchet for event action names. | [`tests/test_event_vocabulary.py`](../tests/test_event_vocabulary.py) | an action is added or renamed — write its row in [`docs/API.md`](../docs/API.md) first. |
 | [`tests/test_evidence.py`](../tests/test_evidence.py) | The evidence pack's test suite — canonical JSON, the stable pack hash, verification and tamper detection. | [`tests/test_evidence.py`](../tests/test_evidence.py) | a field is added to the pack (it is hashed — add it to the mutation table and note the apparatus consequence in [`docs/EVIDENCE-AND-CLAIMS.md`](../docs/EVIDENCE-AND-CLAIMS.md)). |
 | [`tests/test_execution.py`](../tests/test_execution.py) | The executors' test suite: ``LocalExecutor`` on real subprocesses and ``DockerExecutor`` through a fake ``docker`` binary and an injected runner. | [`tests/test_execution.py`](../tests/test_execution.py) | a hardening flag is added or removed (the argv test lists every one; update [`docs/SECURITY.md`](../docs/SECURITY.md) with it); a new executor kind is registered in ``make_executor``. |
@@ -474,10 +475,11 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_works_with.py`](../tests/test_works_with.py) | The "Works with" ratchet over every file header in src/, scripts/, tests/ and [`ui/src`](../ui/src). | [`tests/test_works_with.py`](../tests/test_works_with.py) | you fix a listed header (delete its line from the known file). |
 | [`tests/test_workspace.py`](../tests/test_workspace.py) | The trial worktree's test suite — parent checkout, overlays, ``touched_files``, ``diff_stats`` and the integrity checks on the fixture repository. | [`tests/test_workspace.py`](../tests/test_workspace.py) | a new way to hide or fake a change from git is found (add the case here and its disqualification in [`tests/test_grade.py`](../tests/test_grade.py)); a post-create hook kind is added. |
 
-## `ui/e2e` (17 files)
+## `ui/e2e` (18 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
+| [`ui/e2e/axe.ts`](../ui/e2e/axe.ts) | The shared axe helper for [`ui/e2e`](../ui/e2e) (the mocked smoke and the live walkthrough). | [`tests/test_e2e_axe_settles.py`](../tests/test_e2e_axe_settles.py), [`ui/e2e/walkthrough/07-settings-and-a11y.spec.ts`](../ui/e2e/walkthrough/07-settings-and-a11y.spec.ts) | a scan needs another axe option (add it here, never a second `AxeBuilder`). |
 | [`ui/e2e/smoke.spec.ts`](../ui/e2e/smoke.spec.ts) | The hermetic Playwright smoke suite (`npm run e2e`) over the built bundle served by `vite preview`. | [`ui/e2e/smoke.spec.ts`](../ui/e2e/smoke.spec.ts) | the login page, the shell's nav, the index route or the auth redirect changes; never for a new repository. |
 | [`ui/e2e/walkthrough/01-login.spec.ts`](../ui/e2e/walkthrough/01-login.spec.ts) | Walkthrough spec 01 (login), the first of the serial story. | [`ui/e2e/walkthrough/01-login.spec.ts`](../ui/e2e/walkthrough/01-login.spec.ts) | a health probe is renamed or the login flow changes. |
 | [`ui/e2e/walkthrough/02-repo-onboard.spec.ts`](../ui/e2e/walkthrough/02-repo-onboard.spec.ts) | Walkthrough spec 02 (repo onboarding), for every tier target. | [`ui/e2e/walkthrough/02-repo-onboard.spec.ts`](../ui/e2e/walkthrough/02-repo-onboard.spec.ts) | the dialog's fields or the clone / probe event names change; a new tier-2 repository needs its target in [`ui/e2e/walkthrough/support.ts`](../ui/e2e/walkthrough/support.ts). |
