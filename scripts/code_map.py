@@ -14,7 +14,9 @@ with every path rendered as a link.
 ``--check`` fails on: a file with no block; a missing required key; a key out of order; a path
 in ``Layer``/``ADRs``/``Works with``/``Tested by``/``Touch when``/``Claims`` that does not exist
 in the repository (anchors are stripped before the check); a ``Tested by`` that is blank;
-a ``docs/CODE-MAP.md`` that differs from what the headers generate. Files listed in
+a ``Touch when`` whose first clause does not address onboarding a client repository (files
+older than that rule are listed in ``scripts/code_map_onboarding_baseline.txt``, which only
+shrinks); a ``docs/CODE-MAP.md`` that differs from what the headers generate. Files listed in
 ``EXEMPT`` (an explicit path → reason map; today only Vite's generated ambient types) are
 skipped and listed at the end of the map so the exemption is visible. There is no size- or
 name-based exemption: a thin ``__init__.py`` needs a block like every other file.
@@ -22,8 +24,9 @@ name-based exemption: a thin ``__init__.py`` needs a block like every other file
 Navigation
 ----------
 What it is:   The code-map generator and header gate (stdlib only; runs in CI's ``code-map`` job).
-What it does: Parses every source file's Navigation block, validates keys, order and links,
-              writes docs/CODE-MAP.md, and in --check mode exits non-zero on any defect or drift.
+What it does: Parses every source file's Navigation block, validates keys, order, links and
+              that ``Touch when`` speaks to onboarding a client repository first, writes
+              docs/CODE-MAP.md, and in --check mode exits non-zero on any defect or drift.
 How:          Walk the source roots → extract the docstring / leading comment per language →
               parse ``Key: value`` lines (continuations indented) → resolve every path against
               the repository → render Markdown tables grouped by top-level package.
@@ -32,8 +35,9 @@ ADRs:         none
 Works with:   docs/FILE-HEADER-STANDARD.md (the format it enforces), docs/CODE-MAP.md (its
               output), .github/workflows/ci.yml (the code-map job that runs --check)
 Tested by:    tests/test_code_map.py
-Touch when:   a new source root or language is added; a key is added to the standard (update
-              REQUIRED_KEYS, the standard and every header together).
+Touch when:   never for a new repository; a new source root or language is added; a key is
+              added to the standard (update REQUIRED_KEYS, the standard and every header
+              together).
 """
 
 from __future__ import annotations
@@ -69,6 +73,15 @@ KEYS: tuple[str, ...] = REQUIRED_KEYS + OPTIONAL_KEYS
 LINK_KEYS: tuple[str, ...] = ("Layer", "ADRs", "Works with", "Tested by", "Touch when", "Claims")
 _PATH_RE = re.compile(r"(?<![\w/.-])((?:src|tests|ui|docs|deploy|scripts|\.github)/[\w./-]+)")
 _KEY_RE = re.compile(r"^(" + "|".join(re.escape(k) for k in KEYS) + r"):\s*(.*)$")
+#: ``Touch when`` speaks first to the developer onboarding a client repository
+#: (docs/FILE-HEADER-STANDARD.md): its first clause — up to the first ``;``, sentence end,
+#: dash or bracket — names a repository or onboarding ("never for a new repository; …").
+_FIRST_CLAUSE_RE = re.compile(r";|\.\s|\s(?:—|\u2013|-)\s|\(")
+_ONBOARDING_RE = re.compile(r"\brepo(?:s|sitory|sitories|sitory's)?\b|\bonboard", re.I)
+#: Files whose ``Touch when`` is older than the onboarding check. The list only shrinks:
+#: a file that now addresses onboarding first must leave it, and an entry for a file that is
+#: gone fails ``--check`` (P-114).
+ONBOARDING_BASELINE = "scripts/code_map_onboarding_baseline.txt"
 
 
 @dataclass
@@ -158,6 +171,38 @@ def parse_block(comment: str) -> tuple[str, dict[str, str], list[str]]:
     return summary, fields, problems
 
 
+def addresses_onboarding(touch_when: str) -> bool:
+    """True when the first clause of ``Touch when`` names a repository or onboarding."""
+    return bool(_ONBOARDING_RE.search(_FIRST_CLAUSE_RE.split(touch_when, maxsplit=1)[0]))
+
+
+def onboarding_baseline() -> frozenset[str]:
+    path = ROOT / ONBOARDING_BASELINE
+    if not path.exists():
+        return frozenset()
+    lines = (ln.strip() for ln in path.read_text(encoding="utf-8").splitlines())
+    return frozenset(ln for ln in lines if ln and not ln.startswith("#"))
+
+
+def _onboarding_problems(rel: str, fields: dict[str, str], baseline: frozenset[str]) -> list[str]:
+    touch = fields.get("Touch when", "")
+    if not touch:
+        return []  # already reported as a missing or empty key
+    if rel in baseline:
+        if addresses_onboarding(touch):
+            return [
+                f"Touch when now addresses onboarding first: remove it from {ONBOARDING_BASELINE}"
+            ]
+        return []
+    if addresses_onboarding(touch):
+        return []
+    return [
+        "Touch when: its first clause does not address onboarding a client repository "
+        "(write 'never for a new repository; …' when nothing here changes for one — "
+        "docs/FILE-HEADER-STANDARD.md)"
+    ]
+
+
 def _paths_in(value: str) -> list[str]:
     return [p.split("#", 1)[0].rstrip(".,;:)") for p in _PATH_RE.findall(value)]
 
@@ -169,6 +214,7 @@ def read_header(path: Path) -> Header:
     if comment is None:
         return Header(rel, "", {}, ["no leading docstring / comment"])
     summary, fields, problems = parse_block(comment)
+    problems += _onboarding_problems(rel, fields, onboarding_baseline())
     for key in LINK_KEYS:
         for target in _paths_in(fields.get(key, "")):
             if not (ROOT / target).exists():
@@ -279,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         headers.append(read_header(p))
     bad = [h for h in headers if h.problems]
+    gone = sorted(onboarding_baseline() - {h.path for h in headers})
     if args.list_missing:
         for h in bad:
             print(f"{h.path}: {'; '.join(h.problems)}")
@@ -288,11 +335,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         for h in bad:
             print(f"{h.path}: {'; '.join(h.problems)}", file=sys.stderr)
+        for rel in gone:
+            print(f"{ONBOARDING_BASELINE}: {rel} is not a source file: remove it", file=sys.stderr)
         current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
         stale = current != rendered
         if stale:
             print(f"{OUT.relative_to(ROOT)} is stale: run scripts/code_map.py", file=sys.stderr)
-        return 1 if (bad or stale) else 0
+        return 1 if (bad or stale or gone) else 0
     OUT.write_text(rendered, encoding="utf-8")
     print(
         f"wrote {OUT.relative_to(ROOT)}: {len(headers) - len(bad)} files; {len(bad)} without a valid block"

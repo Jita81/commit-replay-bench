@@ -14,7 +14,8 @@ ADRs:         none
 Works with:   scripts/code_map.py (the code under test), docs/FILE-HEADER-STANDARD.md (the
               format these tests pin)
 Tested by:    tests/test_code_map.py
-Touch when:   the standard gains or renames a key (update REQUIRED_KEYS and these cases together).
+Touch when:   never for a new repository; the standard gains or renames a key (update
+              REQUIRED_KEYS and these cases together), or a header check is added.
 """
 
 from __future__ import annotations
@@ -127,3 +128,65 @@ def test_check_fails_on_a_stale_map_and_passes_after_a_write(repo: Path, capsys)
     assert cm.main(["--check"]) == 0
     _py(repo, "src/crb/core/thing.py", BLOCK.replace("A thing.", "A changed thing."))
     assert cm.main(["--check"]) == 1  # the map is stale
+
+
+@pytest.mark.parametrize(
+    ("touch", "refused"),
+    [
+        ("never for a new repository; a key is added.", False),
+        ("never for a new repository (configure the runner instead); a key is added.", False),
+        ("onboarding a repository whose tests need a service; a key is added.", False),
+        ("a client repository pins a lock format no recipe reads; a key is added.", False),
+        ("a key is added to the standard.", True),
+        ("a model is re-priced; never for a new repository.", True),
+        ("a model is re-priced. Never for a new repository.", True),
+        ("a model is re-priced — never for a new repository.", True),
+    ],
+)
+def test_touch_when_addresses_onboarding_a_client_repository_first(
+    repo: Path, touch: str, refused: bool
+) -> None:
+    """PR #61 review: three new test files' ``Touch when`` named contributor tasks only; the
+    standard puts the developer onboarding a client repository first (P-114)."""
+    block = BLOCK.replace("Touch when:   never for a new repository.", f"Touch when:   {touch}")
+    h = cm.read_header(_py(repo, "src/crb/core/thing.py", block))
+    assert any("onboarding" in p for p in h.problems) is refused, h.problems
+
+
+def test_the_onboarding_baseline_only_shrinks(repo: Path, capsys) -> None:
+    """Files older than the rule are listed in the baseline and pass; one that now addresses
+    onboarding first must leave it, and an entry for a file that is gone fails ``--check``."""
+    old = BLOCK.replace("never for a new repository.", "a key is added to the standard.")
+    (repo / "scripts").mkdir()
+    baseline = repo / cm.ONBOARDING_BASELINE
+    baseline.write_text("# older than the rule\nsrc/crb/core/old.py\n", encoding="utf-8")
+    assert cm.read_header(_py(repo, "src/crb/core/old.py", old)).problems == []
+    assert cm.read_header(_py(repo, "src/crb/core/new.py", old)).problems != []
+    fixed = cm.read_header(_py(repo, "src/crb/core/old.py", BLOCK))
+    assert any("remove it from" in p for p in fixed.problems), fixed.problems
+    (repo / "src/crb/core/new.py").unlink()
+    (repo / "src/crb/core/other.py").write_text(f'"""Other.\n\n{BLOCK}"""\n', encoding="utf-8")
+    (repo / "tests/test_thing.py").write_text(f'"""T.\n\n{BLOCK}"""\n', encoding="utf-8")
+    _py(repo, "src/crb/core/old.py", old)
+    assert cm.main([]) == 0
+    assert cm.main(["--check"]) == 0
+    baseline.write_text("src/crb/core/old.py\nsrc/crb/core/gone.py\n", encoding="utf-8")
+    assert cm.main(["--check"]) == 1
+    assert "src/crb/core/gone.py" in capsys.readouterr().err
+
+
+#: The size of ``scripts/code_map_onboarding_baseline.txt`` when the check was added (PR #61).
+#: Lower it as files leave the list; raising it is adding a file to the baseline, which the
+#: baseline exists to stop.
+BASELINE_CEILING = 373
+
+
+def test_the_real_onboarding_baseline_never_grows() -> None:
+    root = Path(__file__).resolve().parent.parent
+    lines = (root / cm.ONBOARDING_BASELINE).read_text(encoding="utf-8").splitlines()
+    entries = [ln for ln in lines if ln.strip() and not ln.startswith("#")]
+    assert entries == sorted(set(entries)), "keep the baseline sorted and without repeats"
+    assert len(entries) <= BASELINE_CEILING, (
+        f"{len(entries)} files in the onboarding baseline, above {BASELINE_CEILING}: a new "
+        "file's Touch when must address onboarding a client repository first"
+    )
