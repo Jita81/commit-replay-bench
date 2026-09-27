@@ -68,11 +68,12 @@ test.describe('13 recover an account', () => {
       await dialog.getByRole('button', { name: 'Close', exact: true }).click()
     }
     if ((await users.getByRole('cell', { name: PERSON, exact: true }).count()) === 0) {
-      await field(page, 'Username').fill(PERSON)
-      await field(page, 'Display name').fill('Walk recover')
-      await field(page, 'Email').fill(`${PERSON}@example.org`)
-      await field(page, 'Initial password').fill(first)
-      await page.getByRole('button', { name: 'Create local user' }).click()
+      const create = page.getByRole('form', { name: 'Create a local user' })
+      await field(create, 'Username').fill(PERSON)
+      await field(create, 'Display name').fill('Walk recover')
+      await field(create, 'Email').fill(`${PERSON}@example.org`)
+      await field(create, 'Initial password').fill(first)
+      await create.getByRole('button', { name: 'Create local user' }).click()
       await expect(page.getByTestId('users-created')).toContainText(`Account ${PERSON} created as viewer`)
     } else {
       await setPassword(first) // a rerun: the last run left the account on its own fresh password

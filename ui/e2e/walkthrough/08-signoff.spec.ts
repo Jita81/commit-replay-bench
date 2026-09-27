@@ -311,7 +311,7 @@ test.describe('08 sign-off policy', () => {
       const shown = page.getByTestId('invitation-link')
       await expect(shown).toContainText(`${INVITEE} is invited as approver`)
       await expect(shown).toContainText('shown once and cannot be recovered')
-      await expect(page.getByTestId(`invitation-state-${INVITEE}`)).toHaveText('Pending')
+      await expect(page.getByTestId(`invitation-state-${INVITEE}`)).toHaveText('waiting')
       const link = new URL(((await page.getByTestId('invitation-url').textContent()) ?? '').trim(), env.baseUrl)
       expect(link.pathname).toBe('/invite')
       expect(link.searchParams.get('token') ?? '').not.toBe('')
@@ -338,7 +338,7 @@ test.describe('08 sign-off policy', () => {
         await theirs.close()
       }
       await page.reload()
-      await expect(page.getByTestId(`invitation-state-${INVITEE}`)).toHaveText('Accepted')
+      await expect(page.getByTestId(`invitation-state-${INVITEE}`)).toHaveText('accepted')
     }
     // the API agrees: the invitation is spent, and the account it made is the second person
     const invitations = (await apiGet(page.request, '/invitations')) as { items: Array<{ username: string; state: string }> }
