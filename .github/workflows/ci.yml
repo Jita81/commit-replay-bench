@@ -163,7 +163,7 @@ jobs:
       - name: Artefacts valid, evidence resolves, docs/dod/GAP-ANALYSIS.md current
         env:
           DOD_BASE: origin/${{ github.base_ref || 'main' }}
-        run: python scripts/dod_check.py --check --base "$DOD_BASE"
+        run: python scripts/dod_check.py --check
 
   claims:
     name: claims (every quantified sentence on a covered page carries its tag)

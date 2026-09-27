@@ -29,6 +29,7 @@ itself); an evidence reference that does not resolve; and a ``GAP-ANALYSIS.md`` 
 ``status:`` line that differs from what the artefacts generate. It never edits a criterion.
 
     python scripts/dod_check.py --check --base origin/integration/next   # another base branch
+    DOD_BASE=origin/integration/next python scripts/dod_check.py --check  # the same (CI's form)
 
 Navigation
 ----------
@@ -54,8 +55,8 @@ Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYS
               and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
               .github/workflows/ci.yml (the dod job that runs --check, with full history and
-              the pull request's base), docs/dod/PLAN.md (its wave items must be gap ids),
-              git (the artefacts' history vouches for each retired id)
+              the pull request's base in DOD_BASE, since the artefacts' git history vouches
+              for each retired id), docs/dod/PLAN.md (its wave items must be gap ids)
 Tested by:    tests/test_dod_check.py
 Touch when:   a level or category is added to the standard (update CATEGORIES / LEVELS and the
               standard together); a new evidence prefix is needed (add a resolver and a row to
@@ -66,6 +67,7 @@ Touch when:   a level or category is added to the standard (update CATEGORIES / 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -1287,9 +1289,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--base",
-        default=DEFAULT_BASE,
+        default=os.environ.get("DOD_BASE") or DEFAULT_BASE,
         help="the branch whose committed gap analysis may vouch for a retired id "
-        f"(default {DEFAULT_BASE}; CI passes the pull request's base)",
+        f"(default $DOD_BASE, else {DEFAULT_BASE}; CI sets DOD_BASE to the pull request's base)",
     )
     args = ap.parse_args(argv)
     arts: list[Artefact] = []

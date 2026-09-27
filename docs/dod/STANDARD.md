@@ -207,8 +207,9 @@ order of work must also sit in some wave, so the plan cannot skip the top of the
 
 The retired list is carried forward by the generator, but the generated file never vouches
 for itself: an id stays retired only while the git history of the artefacts and the register
-shows it was once a gap, or the gap analysis committed on the base branch (`--base`, by default
-`origin/main`; CI passes the pull request's base) carried it. The base is there because a
+shows it was once a gap, or the gap analysis committed on the base branch (`--base`, else the
+`DOD_BASE` environment variable, else `origin/main`; CI sets `DOD_BASE` to the pull request's
+base) carried it. The base is there because a
 squash merge drops a branch's own commits. An id inserted into `GAP-ANALYSIS.md` by hand is
 dropped by the generator and named by `--check`. The `dod` job therefore needs the full
 history (`fetch-depth: 0`); a shallow clone can only refuse more, never admit more.

@@ -1007,10 +1007,34 @@ def test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave(
 
 def test_the_ci_job_reads_the_full_history_and_the_pull_requests_base() -> None:
     """The retired list is vouched for by git history (P-060): a shallow checkout would refuse
-    ids a squash merge carried, and a missing ``--base`` would ignore the base branch's gap
-    analysis. The ``dod`` job must fetch everything and name the base."""
+    ids a squash merge carried, and a missing base would ignore the base branch's gap
+    analysis. The ``dod`` job must fetch everything and name the base — through ``DOD_BASE``,
+    so the command it runs stays the one CONTRIBUTING tells a person to run."""
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     job = ci.split("\n  dod:\n", 1)[1].split("\n  claims:\n", 1)[0]
     assert "fetch-depth: 0" in job
     assert "DOD_BASE: origin/${{ github.base_ref || 'main' }}" in job
-    assert 'python scripts/dod_check.py --check --base "$DOD_BASE"' in job
+    assert "run: python scripts/dod_check.py --check\n" in job
+
+
+def test_the_base_comes_from_dod_base_unless_the_flag_names_one(
+    tree: tuple[ModuleType, Path],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CI sets ``DOD_BASE`` to the pull request's base; ``--base`` still wins when given."""
+    mod, root = tree
+    _write_all(root)
+    assert mod.main([]) == 0
+    _commit(root, "a tree")
+    _retire_by_hand(root, "G-555")
+    base = _commit(root, "squash of a branch that opened and closed G-555")
+    _git(root, "branch", "-q", "base-under-test", base)
+    capsys.readouterr()
+    monkeypatch.setenv("DOD_BASE", "base-under-test")
+    assert mod.main(["--check"]) == 0
+    assert mod.main(["--check", "--base", "no-such-branch"]) == 1
+    assert "merge-base with no-such-branch" in capsys.readouterr().out
+    monkeypatch.delenv("DOD_BASE")
+    assert mod.main(["--check"]) == 1
+    assert "merge-base with origin/main" in capsys.readouterr().out
