@@ -665,7 +665,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   const [ownBuilder, setOwnBuilder] = useState('')
   const [ownModel, setOwnModel] = useState('')
   // F5b — the run's own spend cap (blank = none): the worker stops the run before an item
-  // that could take its spend past it
+  // that could take its spend past it — a guard, not a guarantee (ADR-0043 §3)
   const [capText, setCapText] = useState('')
   const cap = Number(capText)
   const capSet = capText.trim() !== ''
@@ -759,7 +759,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             hint: 'summary.factory.budget_cap',
             value:
               capSet && capOk
-                ? `${usd(cap)} for the whole run: before each item the run counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass ${usd(cap)}`
+                ? `${usd(cap)} for the whole run: before each item the run counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass ${usd(cap)}. An attempt with no cost cap of its own, and a test author’s call, are counted at the dearest so far (nothing before the first), so a run can pass its cap by up to one item; it then stops and says so`
                 : 'none on the whole run — set one under Stop the run at; the builder’s ladder caps turns, tool calls and wall clock per attempt',
           },
         ]}

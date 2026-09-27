@@ -10,9 +10,14 @@ run's spend past it:
   summed over ``grades`` rows with this ``run_id``), so a reclaimed run counts the attempts
   its first claim made;
 * **the reserve** is the most the next attempt may cost: its own cost cap when it has one
-  (a guarantee: the builder stops at it), else the dearest attempt the run has made so far
-  (a guard, not a guarantee: nothing bounds a first attempt with no cost cap). A factory
-  item is reserved at every rung, once and again for each rework;
+  (the builder stops once its cost reaches it, so by at most the call that reached it),
+  else the dearest attempt the run has made so far (a guard, not a guarantee: nothing
+  bounds a first attempt with no cost cap, G-963). A factory item is reserved at every
+  rung, once and again for each rework, and at one authoring pass;
+* **a factory run's test author** spends too, and writes no row: each model call's cost is
+  on its ``author.attempt`` event, summed by :meth:`Spend.with_authoring`;
+* a run whose last attempt or item passed its cap ends ``failed`` the same way
+  (:meth:`SpendCap.passed`), never ``succeeded`` in silence;
 * the attempt is admitted while ``spent + reserve <= cap``; otherwise the run stops before
   it, ``failed`` with ``stopped_code: spend_cap`` and a ``run.spend_cap`` event naming what
   was spent, the cap and the reserve;
@@ -36,7 +41,9 @@ ADRs:         none
 Works with:   src/crb/server/worker.py (asks before each attempt or item),
               src/crb/core/run.py (``RunSpec.admit``), src/crb/server/routes/runs.py (stores
               ``params.max_cost_usd`` and refuses an unpriced capped run),
-              src/crb/builders/budget.py (``price_for``, ``budget_for_rung``)
+              src/crb/builders/budget.py (``price_for``, ``budget_for_rung``),
+              src/crb/factory/author.py (``RungTestAuthor.calls``, the author's metered
+              calls)
 Tested by:    tests/test_worker_spend_cap.py, tests/test_server_spend_cap.py
 Touch when:   a new kind of spend is recorded outside the run's ledger rows (count it in
               ``Spend``), or a new unit of work needs a reserve.
@@ -60,14 +67,19 @@ PRICED_WITHOUT_TABLE = frozenset({"fixture_gold"})
 _EPSILON = 1e-9
 
 
+#: The event a factory run's test author writes for each model call, with its cost.
+AUTHOR_ATTEMPT = "author.attempt"
+
+
 @dataclass(frozen=True)
 class Spend:
-    """What a run has spent: the total, its dearest attempt, and how many attempts had no
-    known cost."""
+    """What a run has spent: the total, its dearest attempt, how many attempts (or
+    authoring calls) had no known cost, and its dearest authoring call."""
 
     spent: float
     dearest: float
     unknown: int = 0
+    dearest_authoring: float = 0.0
 
     @classmethod
     def of_rows(cls, rows: Iterable[GradeRow]) -> Spend:
@@ -78,6 +90,20 @@ class Spend:
             dearest = max(dearest, r.cost_usd)
             unknown += int(not r.cost_known)
         return cls(spent, dearest, unknown)
+
+    def with_authoring(self, calls: Iterable[Mapping[str, Any]]) -> Spend:
+        """This spend plus a factory test author's model calls: each ``author.attempt``
+        (its ``cost_usd``, and ``cost_known`` — a call that does not say is unknown). The
+        author writes no ledger row, so without this its calls were spend no cap saw."""
+        spent, unknown, dearest = self.spent, self.unknown, self.dearest_authoring
+        for c in calls:
+            if c.get("action") != AUTHOR_ATTEMPT:
+                continue
+            cost = float(c.get("cost_usd") or 0.0)
+            spent += cost
+            dearest = max(dearest, cost)
+            unknown += int(c.get("cost_known") is not True)
+        return Spend(spent, self.dearest, unknown, dearest)
 
 
 @dataclass(frozen=True)
@@ -145,6 +171,29 @@ class SpendCap:
         )
         return Halt(reason, {**payload, "reserve_usd": round(reserve, 6), "reserve_from": source})
 
+    def passed(self, spend: Spend, *, unit: str = "attempt") -> Halt | None:
+        """A :class:`Halt` when the run has already spent more than its cap — the last
+        ``unit`` had no cost cap of its own, so its reserve was only the dearest so far (a
+        guard, not a guarantee) — else ``None``. The run then ends ``failed`` with the
+        amount, never ``succeeded`` in silence."""
+        if spend.spent <= self.cap_usd + _EPSILON:
+            return None
+        reason = (
+            f"spend cap: {_usd(spend.spent)} of {_usd(self.cap_usd)} spent; the last {unit} "
+            "had no cost cap of its own and passed the cap, so the run made nothing further"
+        )
+        return Halt(
+            reason,
+            {
+                "cap_usd": self.cap_usd,
+                "spent_usd": round(spend.spent, 6),
+                "unit": unit,
+                "reserve_usd": None,
+                "reserve_from": "passed",
+                "passed_by_usd": round(spend.spent - self.cap_usd, 6),
+            },
+        )
+
     def admit(
         self, spend: Spend, *, reserve: float, unit: str = "attempt", attempts: int = 1
     ) -> str:
@@ -154,13 +203,16 @@ class SpendCap:
 
 
 def item_reserve(
-    attempt_caps: Sequence[float], spend: Spend, *, max_rework: int
+    attempt_caps: Sequence[float], spend: Spend, *, max_rework: int, author_attempts: int = 0
 ) -> tuple[float, int]:
     """``(reserve, attempts)`` for one factory item: every rung, and every rung again for
-    each rework, each at its own cost cap or, without one, the dearest attempt so far."""
+    each rework, each at its own cost cap or, without one, the dearest attempt so far;
+    and, when the run has a test author, one authoring pass of ``author_attempts`` calls
+    at the dearest authoring call so far (the author has no cost cap of its own)."""
     per_pass = sum(c if c > 0 else spend.dearest for c in attempt_caps)
     passes = 1 + max(0, max_rework)
-    return per_pass * passes, len(attempt_caps) * passes
+    authoring = spend.dearest_authoring * max(0, author_attempts)
+    return per_pass * passes + authoring, len(attempt_caps) * passes
 
 
 def unpriced_rungs(
@@ -182,6 +234,7 @@ def unpriced_rungs(
 
 
 __all__ = [
+    "AUTHOR_ATTEMPT",
     "PRICED_WITHOUT_TABLE",
     "STOP_SPEND_CAP",
     "Halt",

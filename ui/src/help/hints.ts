@@ -348,17 +348,17 @@ export const HINTS = {
   'link.measure.every_knob':
     'Open the full run form on Runs to set the builder, model, ladder, budget caps and executor yourself.',
   'summary.measure.budget_cap':
-    'The most this run may spend, and how it keeps to it: before each attempt it counts what it has spent plus what that attempt could cost, and stops if the sum would pass the cap. An attempt with no cost cap of its own is counted at the dearest attempt so far.',
+    'The most this run may spend, and how it keeps to it: before each attempt it counts what it has spent plus what that attempt could cost, and stops if the sum would pass the cap. An attempt with no cost cap of its own is counted at the dearest attempt so far, nothing before the first, so a run can pass its cap by up to one attempt; it then stops and says so.',
   'field.measure.spend_cap':
-    'The most this measurement may spend, in US dollars. It starts at the top of the estimate; the run stops itself before an attempt that could take its spend past it.',
+    'The most this measurement should spend, in US dollars. It starts at the top of the estimate. The run stops before an attempt that could take its spend past it; an attempt with no cost cap of its own is counted at the dearest attempt so far, so the run can pass this amount by up to one attempt.',
   'banner.measure.spend_cap_stop':
-    'The last measurement stopped itself at its spend cap, before an attempt that could have passed it. The attempts it made are graded and kept; start another run to reach the tasks it did not.',
+    'The last measurement stopped at its spend cap: before an attempt that could have passed it, or after an attempt with no cost cap of its own passed it. The attempts it made are graded and kept; start another run to reach the tasks it did not.',
   'summary.measure.retention':
     'What this run will keep beyond grades and hashes, from the two boxes above.',
   'summary.measure.posture':
     'Whether the sandbox that runs the tests is sealed (docker) so the rows count as evidence, or a local executor whose rows are a development reading only.',
   'button.measure.start':
-    'Queue the measurement now. It stops itself at the spend cap shown, and you can cancel from Runs and pay only for attempts made.',
+    'Queue the measurement now. It stops at the spend cap shown, though one attempt with no cost cap of its own can take it past; you can cancel from Runs and pay only for attempts made.',
 
   // ── /results — Baseline (screens/Results/ResultsPage.tsx + MapTable.tsx)
   'field.shared.repo_picker':
@@ -574,9 +574,9 @@ export const HINTS = {
   'summary.factory.delivery':
     'Whether a clean build in a deliver cell will open a branch and pull request in the linked repository, and against which branch. Not linked means no pull request can be opened; the reason is under it.',
   'summary.factory.budget_cap':
-    'The most this run may spend, and how it keeps to it: before each item it counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass the cap.',
+    'The most this run may spend, and how it keeps to it: before each item it counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass the cap. An attempt with no cost cap of its own, and a test author’s call, are counted at the dearest so far, nothing before the first, so a run can pass its cap by up to one item; it then stops and says so.',
   'field.factory.spend_cap':
-    'The most this factory run may spend, in US dollars. The run stops itself before an item that could take its spend past it; blank means no cap on the whole run.',
+    'The most this factory run should spend, in US dollars. The run stops before an item that could take its spend past it, but an item whose attempts have no cost cap of their own can take it past by up to one item. Blank means no cap on the whole run.',
   'field.factory.deliver':
     'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
   'stat.factory.deliverable':
@@ -590,7 +590,7 @@ export const HINTS = {
   'field.factory.own_model':
     'Optional model id for that builder; blank uses the builder’s default.',
   'button.factory.run':
-    'Queue the factory run now. With a spend cap it stops itself before an item that could pass it; you can cancel and pay only for items built.',
+    'Queue the factory run now. With a spend cap it stops before an item that could pass it, though one item whose attempts have no cost cap of their own can take it past; you can cancel and pay only for items built.',
   'button.factory.started_run':
     'The factory run you just queued; open it to watch the loop work the backlog.',
   'item.factory.id':
@@ -1014,7 +1014,7 @@ export const HINTS = {
   'field.run_new.cli_login':
     'Run the builder on the operator’s own subscription login instead of an API key. Developer and evaluation use only; the repository’s CLAUDE.md is auto-discovered in this mode.',
   'field.run_new.spend_cap':
-    'The most the whole run may spend, in US dollars, summed over its attempts. The run stops itself before an attempt that could take its spend past it. Blank means no cap on the whole run.',
+    'The most the whole run should spend, in US dollars, summed over its attempts. The run stops before an attempt that could take its spend past it; an attempt with no cost cap of its own is counted at the dearest attempt so far, so it can take the run past the cap by up to one attempt. Blank means no cap on the whole run.',
   'field.run_new.budget':
     'The cap per attempt on turns, tool calls, tokens, cost and wall clock. Blank is the builder’s default (shown); 0 tokens or $0 means no cap. Every row is stamped with the tier it ran under.',
   'button.run_new.add_rung':

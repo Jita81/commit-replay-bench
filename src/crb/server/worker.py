@@ -300,6 +300,7 @@ from crb.server.settings import (
 )
 from crb.server.spend import SpendHooks, build_spend_hooks, pack_turns
 from crb.server.spend_cap import (
+    AUTHOR_ATTEMPT,
     STOP_SPEND_CAP,
     Halt,
     Spend,
@@ -308,7 +309,7 @@ from crb.server.spend_cap import (
 )
 from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
-from crb.store.events import DbEventSink, last_seq
+from crb.store.events import DbEventSink, events_of_action, last_seq
 from crb.store.jobs import (
     KIND_BLIND,
     KIND_CONTROLS,
@@ -2328,6 +2329,11 @@ class Worker:
         self._progress(ctx, summary.tasks, total)
         self._ledger_health()
         self._learning_tick(run.repo)
+        if cap is not None and not halted and not self._cancelled(ctx):
+            # the last attempt had no cost cap of its own and may have passed the run's
+            over = cap.passed(Spend.of_rows(self.ledger.rows(run_id=run.id)))
+            if over is not None:
+                halted.append(over)
         if halted and not self._cancelled(ctx):
             return self._spend_cap_stop(ctx, counts, halted[-1])
         if tripped() and not self._cancelled(ctx):
@@ -2730,17 +2736,40 @@ class Worker:
         # once more per rework, so it is reserved at all of them (``item_reserve``)
         cap = SpendCap.from_params(p)
         halted: list[Halt] = []
+        # the test author's model calls are the run's spend too, though they write no row:
+        # the ones a first claim made are on its events, this claim's on the author
+        authored_before = (
+            [
+                {
+                    **e.payload,
+                    "action": e.action,
+                    "cost_usd": e.cost_usd if e.cost_usd is not None else e.payload.get("cost_usd"),
+                }
+                for e in events_of_action(self.factory, run.id, AUTHOR_ATTEMPT)
+            ]
+            if cap is not None
+            else []
+        )
+
+        def spent_now() -> Spend:
+            calls = list(getattr(test_author, "calls", ()) or ())
+            return Spend.of_rows(self.ledger.rows(run_id=run.id)).with_authoring(
+                [*authored_before, *calls]
+            )
 
         def stop() -> bool:
             if self._cancelled(ctx):
                 return True
             if cap is None:
                 return False
-            spent = Spend.of_rows(self.ledger.rows(run_id=run.id))
+            spent = spent_now()
             reserve, attempts = item_reserve(
                 [budget_for_rung(r, budget).max_cost_usd for r in ladder.rungs],
                 spent,
                 max_rework=int(p.get("max_rework", 1)),
+                author_attempts=int(getattr(test_author, "attempts", 1) or 0)
+                if test_author is not None
+                else 0,
             )
             halt = cap.check(spent, reserve=reserve, unit="item", attempts=attempts)
             if halt is not None:
@@ -2759,6 +2788,10 @@ class Worker:
         self._ledger_health()
         if self._cancelled(ctx):
             return STATUS_CANCELLED, counts, ""
+        if not halted and cap is not None:
+            over = cap.passed(spent_now(), unit="item")  # the last item had no cap of its own
+            if over is not None:
+                halted.append(over)
         if halted:
             return self._spend_cap_stop(ctx, counts, halted[-1])
         return STATUS_SUCCEEDED, counts, ""

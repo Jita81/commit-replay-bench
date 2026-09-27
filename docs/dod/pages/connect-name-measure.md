@@ -18,7 +18,7 @@ updated: 2026-09-26
 **Entry → exit.** Arrive from Home task 5 "Measure — spends money" (`HomePage.tsx:176`, the only inbound link). Pick 10, 30 or 60 attempts, the two retention switches, read "Before you start" (estimated cost, builder, budget cap, retention, posture), set the spend cap (it starts at the top of the estimate), press the red button that names the estimate and the cap. On success the page posts `POST /runs {kind: replay, mode: sighted, builder, model, limit, retain, max_cost_usd}` and returns to `/connect/:name` with the run watched (`MeasurePage.tsx:151-166`). While a replay is already queued or running, a banner names it with "Open the run" (`/runs/:id`) and "Back to the walk"; the button and the estimate are withheld. When the last replay stopped itself at its spend cap, a banner gives the reason and opens that run. "Every knob" opens `/runs`; a repository with no gold-clean task is sent to `/repos/:name`.
 
 **Non-goals.** No blind mode, budget ladder, `preflight`, `outage_stop`, builder or model choice — the full run form at `/runs` has them. Does not show the run's rows or log (the run page does). Does not decide the posture — it reads the sandbox probe from `/health` and names it. It sets a
-spend cap for the whole run, which the run keeps (F5b), and no cap per attempt — the full run
+spend cap for the whole run, which the run keeps as a guard, not a guarantee (F5b, G-963), and no cap per attempt — the full run
 form has those.
 
 ## Definition of done

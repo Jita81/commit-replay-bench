@@ -227,6 +227,19 @@ def read_events(
         return [_from_model(m) for m in s.execute(q).scalars()]
 
 
+def events_of_action(factory: sessionmaker[Session], trace_id: str, action: str) -> list[StepEvent]:
+    """Every event of one trace with this ``action``, ascending by ``seq`` — not clamped:
+    a caller that sums them (a run's spend cap summing its test author's calls) needs all
+    of them, and one action of one trace is a small set."""
+    with factory() as s:
+        q = (
+            select(Event)
+            .where(Event.trace_id == trace_id, Event.action == action)
+            .order_by(Event.seq, Event.id)
+        )
+        return [_from_model(m) for m in s.execute(q).scalars()]
+
+
 def last_seq(factory: sessionmaker[Session], trace_id: str) -> int:
     """The highest ``seq`` stored for a trace (``0`` when none)."""
     with factory() as s:
@@ -315,6 +328,7 @@ __all__ = [
     "DbEventSink",
     "append_event",
     "count_events",
+    "events_of_action",
     "last_seq",
     "read_events",
 ]

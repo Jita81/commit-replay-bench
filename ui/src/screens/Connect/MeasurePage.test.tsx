@@ -188,7 +188,7 @@ describe('MeasurePage', () => {
     })
     const { container } = renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
     const banner = await screen.findByRole('region', { name: 'Stopped at its spend cap' })
-    await waitFor(() => expect(banner).toHaveTextContent('The last measurement of cobra stopped itself at its spend cap of $10.00: $9.20 spent over 11 attempts, before an attempt that could have passed it.'))
+    await waitFor(() => expect(banner).toHaveTextContent('The last measurement of cobra stopped at its spend cap of $10.00: $9.20 spent over 11 attempts. The reason below says whether it stopped before an attempt that could have passed the cap, or after one with no cost cap of its own passed it.'))
     expect(screen.getByTestId('measure-cap-stop-reason')).toHaveTextContent(reason)
     expect(within(banner).getByRole('link', { name: 'Open the run' })).toHaveAttribute('href', '/runs/run-9')
     expect(container.querySelector('[data-hint="banner.measure.spend_cap_stop"]')).not.toBeNull()

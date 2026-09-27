@@ -411,7 +411,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                 value={spendCap}
                 onChange={(e) => setSpendCap(e.target.value)}
                 placeholder="no cap"
-                description="Summed over every attempt. The run stops before an attempt that could pass it: at that attempt's own cost cap, or at the dearest attempt so far when it has none."
+                description="Summed over every attempt. The run stops before an attempt that could pass it: at that attempt's own cost cap, or at the dearest attempt so far when it has none, so an attempt with no cost cap of its own can take the run past the cap by up to one attempt."
                 error={spendCapOk ? undefined : 'Enter an amount above $0, or leave it blank for no cap on the run.'}
               />
             </fieldset>

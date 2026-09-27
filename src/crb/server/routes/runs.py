@@ -692,11 +692,27 @@ def run_rungs(run: Run) -> list[tuple[str, str]]:
     return list(dict.fromkeys(pair for pair in out if pair[0]))
 
 
-def spend_cap_refusal(run: Run) -> None:
+def author_rung(run: Run, body_author: str | None, deployment_author: str) -> tuple[str, str]:
+    """``(builder, model)`` of the test author a factory run will call — the run's
+    ``test_author`` over the deployment's ``CRB_FACTORY__TEST_AUTHOR``, as the worker
+    resolves it — or ``("", "")`` when it has none (``none`` declines one). A label that is
+    not a rung is returned whole as the builder, so the price check names it."""
+    if run.kind != KIND_FACTORY:
+        return "", ""
+    label = (body_author if body_author is not None else deployment_author or "").strip()
+    if not label or label.lower() == "none":
+        return "", ""
+    builder, _, rest = label.partition(":")
+    model = rest.split("@", 1)[0].split(":", 1)[0].strip()
+    return (builder.strip(), model) if model else (label, "")
+
+
+def spend_cap_refusal(run: Run, author: tuple[str, str] = ("", "")) -> None:
     """422 ``spend_cap_unpriced`` when a capped run could call a model with no known price:
-    its attempts would report no cost, so the cap (F5b) could never stop the run. The table
-    is the API's own (``CRB_PRICING_JSON`` over the defaults) — the compose and Helm give
-    the API and the worker the same; one that cannot be read refuses the cap too."""
+    its attempts — or its test author's calls (``author``, from :func:`author_rung`) —
+    would report no cost, so the cap (F5b) could never stop the run. The table is the
+    API's own (``CRB_PRICING_JSON`` over the defaults) — the compose and Helm give the API
+    and the worker the same; one that cannot be read refuses the cap too."""
     if not (run.params_json or {}).get("max_cost_usd"):
         return
     try:
@@ -708,7 +724,7 @@ def spend_cap_refusal(run: Run) -> None:
             f"the price table could not be read ({exc}), so no spend cap can be kept — "
             "nothing was queued",
         ) from exc
-    unpriced = unpriced_rungs(run_rungs(run), table)
+    unpriced = unpriced_rungs([*run_rungs(run), *([author] if author[0] else [])], table)
     if unpriced:
         named = ", ".join(f"{b}:{m}" for b, m in unpriced)
         raise ApiError(
@@ -731,10 +747,15 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
       (P-003; presence only);
     * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
       where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker;
-    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price (F5b).
+    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
+      run's test author included (F5b).
     """
     credential_refusal(run, settings)
-    spend_cap_refusal(run)
+    factory_settings = getattr(settings, "factory", None)
+    spend_cap_refusal(
+        run,
+        author_rung(run, body.test_author, str(getattr(factory_settings, "test_author", ""))),
+    )
     if body.qualify_first is False:
         repo_row = db.get(Repo, body.repo)
         if repo_row is None:

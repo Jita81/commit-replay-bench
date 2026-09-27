@@ -22,25 +22,34 @@ experiment. So a run cap must not be kept by quietly shrinking each attempt.
    (`crb.server.routes.runs.new_run`), serves it as `RunOut.max_cost_usd`, and refuses it on
    a kind that makes no attempt.
 2. **Spent is what the run's rows cost**, `cost_usd` summed over the run's `grades` rows, as
-   the run page shows it (`crb.server.spend_cap.Spend.of_rows`). A reclaimed run counts
-   what its first claim spent.
+   the run page shows it (`crb.server.spend_cap.Spend.of_rows`), **plus what a factory
+   run's test author spent** (`Spend.with_authoring`). The author writes no row: each of its
+   model calls carries its cost on its `author.attempt` event, and a call with no usage is a
+   cost the cap cannot see. A reclaimed run counts what its first claim spent, rows and
+   authoring events both.
 3. **Before every attempt the worker asks** (`RunSpec.admit` in `crb.core.run`, answered by
    `SpendCap.check`). It adds what the run has spent to the reserve for the next attempt.
-   The reserve is the attempt's own cost cap when it has one: the builder stops there, so a
-   run whose attempts are all capped never passes its cap. An attempt with no cost cap of
-   its own is reserved at the dearest attempt the run has made so far. That is a guard, not
-   a guarantee, and every page that names the cap says so. When the sum would pass the cap
+   The reserve is the attempt's own cost cap when it has one: the builder stops once its
+   cost reaches it, so such a run passes its cap by no more than the model call that reached
+   an attempt's cap. An attempt with no cost cap of its own is reserved at the dearest
+   attempt the run has made so far, nothing before the first. That is a guard, not a
+   guarantee, and every page that names the cap says so (the Measure and Factory pages, the
+   run form, and their hints). When the sum would pass the cap
    the run stops there. It stops before a worktree exists and before the builder is called.
 4. **A factory run asks before every item** (the factory loop's `stop`). An item may take
-   every rung, and every rung again for each rework, so it is reserved at all of them
-   (`item_reserve`). The factory loop itself is unchanged.
+   every rung, and every rung again for each rework, so it is reserved at all of them, and
+   at one authoring pass when the run has a test author (`item_reserve`). The factory loop
+   itself is unchanged.
 5. **A stopped run is `failed`**, like the other stops a run makes itself (`outage_stop`,
-   `env_stop`). It carries `counts.stopped_code: spend_cap`, the reason in `error` and
-   `counts.stopped_reason`, and a `system/run.spend_cap` event. The event names the cap,
-   what was spent, the reserve and where the reserve came from.
+   `env_stop`). So is a run whose last attempt or item, with no cost cap of its own, took
+   its spend past the cap (`SpendCap.passed`, `reserve_from: passed`): it never ends
+   `succeeded` above its cap in silence. It carries `counts.stopped_code: spend_cap`, the
+   reason in `error` and `counts.stopped_reason`, and a `system/run.spend_cap` event. The
+   event names the cap, what was spent, the reserve and where the reserve came from.
 6. **A cap that cannot see a cost cannot be kept.** `POST /runs` refuses a capped run with a
-   rung whose model has no known price: 422 `spend_cap_unpriced`, nothing queued
-   (`spend_cap_refusal`, `unpriced_rungs`). On the worker, an attempt whose cost was not
+   rung, or a factory test author (the run's `test_author`, else the deployment's), whose
+   model has no known price: 422 `spend_cap_unpriced`, nothing queued (`spend_cap_refusal`,
+   `author_rung`, `unpriced_rungs`). On the worker, an attempt whose cost was not
    known stops a capped run at once.
 7. **The pages name the cap they send.** The Measure page starts the cap at the top of its
    estimate and names it on the button. After a run stops at its cap, the page says so with
@@ -53,8 +62,10 @@ experiment. So a run cap must not be kept by quietly shrinking each attempt.
   (`journey-measure.recovery.14`, `factory.actions.8`, `journey-operate.actions.15`).
 - Near its cap a run stops early: it will not start an attempt whose own cap does not fit
   what is left. A run of uncapped attempts can pass its cap by the amount one attempt costs
-  above the dearest attempt the run had seen. Set a cost cap per attempt when the ceiling
-  must be exact.
+  above the dearest attempt the run had seen — the whole first attempt, since nothing is
+  known before it — and then ends `failed` saying so. Set a cost cap per attempt to narrow
+  it. A cap the run cannot pass needs every model call bounded before it is made; until
+  then `factory.actions.8` stays partial on G-963.
 - We must never keep the run cap by changing an attempt's own caps mid-run. The row's
   `budget_tier` would then describe an experiment that did not run.
 

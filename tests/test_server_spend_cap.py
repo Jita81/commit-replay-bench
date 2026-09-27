@@ -127,3 +127,34 @@ def test_a_run_the_cap_stopped_serves_the_stop_code(env: Env) -> None:
         assert out["max_cost_usd"] == 1.0
         assert out["counts"]["stopped_code"] == "spend_cap"
         assert out["counts"]["stopped_reason"] == reason
+
+
+def test_a_capped_factory_run_whose_test_author_is_unpriced_is_refused(
+    env: Env, jobs: FakeJobs
+) -> None:
+    """The test author calls a model too, and its calls are the run's spend: a capped
+    factory run whose author — named on the run, or the deployment's — has no known price
+    is refused like an unpriced rung, with nothing queued. A priced author passes this
+    gate (and meets the next one: no frozen backlog is registered here)."""
+    from crb.server.settings import FactorySettings
+
+    login(env.client, "operator")
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "gpt-oss-120b"}
+    r = env.post("/runs", json={**body, "max_cost_usd": 5, "test_author": "editblock:mystery"})
+    assert r.status_code == 422, r.text
+    err = envelope(r)
+    assert err["code"] == "spend_cap_unpriced" and "editblock:mystery" in err["message"]
+    assert jobs.enqueued == []
+    bare = env.post("/runs", json={**body, "max_cost_usd": 5, "test_author": "editblock:m"})
+    assert bare.status_code == 422 and "editblock:m " in envelope(bare)["message"]
+    ok = env.post(
+        "/runs", json={**body, "max_cost_usd": 5, "test_author": "openai_agent:gpt-oss-120b-x"}
+    )
+    assert envelope(ok)["code"] == "no_frozen_backlog", ok.text
+    env.settings.factory = FactorySettings(test_author="openai_agent:mystery")
+    r = env.post("/runs", json={**body, "max_cost_usd": 5})
+    assert r.status_code == 422 and "openai_agent:mystery" in envelope(r)["message"]
+    declined = env.post("/runs", json={**body, "max_cost_usd": 5, "test_author": "none"})
+    assert envelope(declined)["code"] == "no_frozen_backlog", declined.text
+    uncapped = env.post("/runs", json=body)
+    assert envelope(uncapped)["code"] == "no_frozen_backlog", uncapped.text

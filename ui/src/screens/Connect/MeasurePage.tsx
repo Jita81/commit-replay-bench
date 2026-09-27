@@ -195,7 +195,7 @@ export function MeasurePage() {
       {capStop && (
         <NotificationBanner title="Stopped at its spend cap">
           <Hint as="p" id="banner.measure.spend_cap_stop" className="m-0 mb-2 font-bold">
-            The last measurement of {name} stopped itself at its spend cap of {usd(capStop.max_cost_usd ?? 0)}: {usd(capStop.cost_usd)} spent over {capStop.counts.rows} attempts, before an attempt that could have passed it.
+            The last measurement of {name} stopped at its spend cap of {usd(capStop.max_cost_usd ?? 0)}: {usd(capStop.cost_usd)} spent over {capStop.counts.rows} attempts. The reason below says whether it stopped before an attempt that could have passed the cap, or after one with no cost cap of its own passed it.
           </Hint>
           <p className="m-0 mb-2" data-testid="measure-cap-stop-reason">{capStop.counts.stopped_reason}</p>
           <p className="m-0">
@@ -264,7 +264,7 @@ export function MeasurePage() {
               />
             </Hint>
             <p id="measure-cap-note" className="m-0 mt-2 text-[16px] text-on-surface-muted">
-              The run stops itself before an attempt that could take its spend past this amount. It starts at the top of the estimate.
+              The run stops before an attempt that could take its spend past this amount. An attempt with no cost cap of its own is counted at the dearest attempt so far (nothing before the first), so the run can pass this amount by up to one attempt; it then stops and says so. It starts at the top of the estimate.
             </p>
             {!capOk && (
               <p className="m-0 mt-2 text-[16px] font-bold text-status-red" data-testid="cap-invalid">
@@ -322,7 +322,7 @@ export function MeasurePage() {
               key: 'Budget cap',
               hint: 'summary.measure.budget_cap',
               value: capOk
-                ? `${usd(cap)} for the whole run. Before each attempt the run counts what it has spent plus what that attempt could cost, and stops if the sum would pass ${usd(cap)}; an attempt with no cost cap of its own is counted at the dearest attempt so far. You can also cancel at any point; attempts already made are still charged.`
+                ? `${usd(cap)} for the whole run. Before each attempt the run counts what it has spent plus what that attempt could cost, and stops if the sum would pass ${usd(cap)}; an attempt with no cost cap of its own is counted at the dearest attempt so far, so the run can pass the cap by up to one attempt and then stops and says so. You can also cancel at any point; attempts already made are still charged.`
                 : 'No valid cap yet: enter an amount above $0 under Spend cap.',
             },
             { key: 'Retention', hint: 'summary.measure.retention', value: retention },

@@ -415,6 +415,8 @@ describe('FactoryPage — the shipped contract', () => {
     await userEvent.clear(field)
     await userEvent.type(field, '2.5')
     expect(box).toHaveTextContent('$2.50 for the whole run: before each item the run counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass $2.50')
+    // a guard, not a guarantee (ADR-0043 §3): the page says so where it names the cap
+    expect(box).toHaveTextContent('so a run can pass its cap by up to one item; it then stops and says so')
     expect(field.closest('[data-hint]')).toHaveAttribute('data-hint', 'field.factory.spend_cap')
     await userEvent.click(screen.getByRole('button', { name: 'Run the factory — estimated $0.27 to $0.41, stops at $2.50' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))

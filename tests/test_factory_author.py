@@ -361,3 +361,20 @@ def test_different_models_pass_whatever_the_builder_names(
         ladder=(Rung("claude_code", "claude-opus-4-8"),),
     )
     assert spec.test_author is not None
+
+
+def test_the_author_meters_each_call_so_a_spend_cap_can_count_it() -> None:
+    """A run's spend cap counts the author's calls (F5b): the provider's reported cost
+    first, else the price table's for the reply's tokens; a reply with no usage, or a model
+    with no known price, is a cost nobody can see and says so."""
+    from crb.builders.budget import Pricing
+    from crb.builders.openai_client import ChatReply
+    from crb.factory.author import RungTestAuthor
+
+    table = {"known": Pricing(1.0, 2.0)}
+    priced = RungTestAuthor(name="editblock", model="known", pricing=table)
+    assert priced._cost(ChatReply("x", cost_usd=0.5)) == (0.5, True)
+    assert priced._cost(ChatReply("x", tokens_in=1_000_000, tokens_out=500_000)) == (2.0, True)
+    assert priced._cost("a bare string carries no usage") == (0.0, False)
+    unpriced = RungTestAuthor(name="editblock", model="mystery", pricing=table)
+    assert unpriced._cost(ChatReply("x", tokens_in=10, tokens_out=10)) == (0.0, False)

@@ -12,6 +12,11 @@ Navigation
 What it is:   The worker suite for the per-run spend cap and the pure rules behind it.
 What it does: Pins that a replay stops before the attempt whose own cost cap would pass the
               run's cap, with the reason, the code and the event, and never spends past it;
+              that a run whose last attempt or item, with no cost cap of its own, passed the
+              cap ends ``failed`` saying so (a guard, not a guarantee); that a factory run's
+              test author's calls count as its spend, a reclaim included, and an author
+              whose cost is not known stops a capped run; that every module that opens a
+              model chat is one the cap can see;
               that an attempt with no cost cap of its own is reserved at the dearest attempt
               the run has made; that an attempt whose cost was not known halts the run (the
               cap cannot be kept blind); that a run with no cap climbs every rung; that a
@@ -197,6 +202,141 @@ def test_a_factory_run_stops_before_an_item_whose_attempts_could_pass_the_cap(
     assert len(list(h.worker.ledger.rows(run_id=ok.id))) == 1
 
 
+@pytest.mark.parametrize("ladder", [["fake:m0"], LADDER], ids=["one_rung", "three_rungs"])
+def test_a_capped_run_of_attempts_with_no_cost_cap_is_a_guard_and_ends_failed_past_it(
+    h: Harness, ladder: list[str]
+) -> None:
+    """The pages send a run cap and no cost cap per attempt, so an attempt is counted at the
+    dearest attempt so far — nothing at first. A run capped at $0.10 whose first attempt,
+    with no cost cap of its own, costs $5.00 has passed its cap by then: a guard, not a
+    guarantee. It makes no further attempt, and whether or not one was left to make it
+    ends ``failed`` with ``stopped_code: spend_cap``, the amount and the event — never
+    ``succeeded`` in silence."""
+    PricedNoop.cost = 5.0
+    run = h.enqueue("replay", ladder_json=ladder, params_json={"max_cost_usd": 0.10})
+    done = h.run_one()
+    rows = list(h.worker.ledger.rows(run_id=run.id))
+    assert [r.cost_usd for r in rows] == [5.0]
+    assert done.status == STATUS_FAILED
+    assert done.counts_json["stopped_code"] == sc.STOP_SPEND_CAP
+    assert done.error.startswith("spend cap: $5.00 of $0.10 spent")
+    (event,) = _stopped(h, run.id)
+    assert event.payload["cap_usd"] == 0.10 and event.payload["spent_usd"] == 5.0
+
+
+def test_a_factory_run_whose_one_item_passed_its_cap_ends_failed_and_says_so(h: Harness) -> None:
+    """The first item is reserved at the dearest attempt so far, nothing, so it is built;
+    its $0.02 attempt passes a $0.01 cap, and the run says so rather than succeeding."""
+    _multiply_backlog(h)
+    run = h.enqueue("factory", ladder_json=["fake:m0"], params_json={"max_cost_usd": 0.01})
+    done = h.run_one()
+    assert [r.cost_usd for r in h.worker.ledger.rows(run_id=run.id)] == [0.02]
+    assert done.status == STATUS_FAILED and done.counts_json["stopped_code"] == sc.STOP_SPEND_CAP
+    assert done.error.startswith("spend cap: $0.02 of $0.01 spent")
+    assert "passed the cap" in done.error
+    (event,) = _stopped(h, run.id)
+    assert event.payload["reserve_from"] == "passed"
+
+
+def _authorless_backlog(h: Harness, n: int) -> None:
+    """``n`` items with no operator-authored test, so each one asks the test author."""
+    from crb.factory.backlog import KIND_CODE, BacklogItem
+    from crb.server.factory_state import FactoryHome
+
+    items = [
+        BacklogItem(
+            id=f"I-{i}",
+            title=f"Add multiply {i} to calc",
+            kind=KIND_CODE,
+            description="calc needs multiply(a, b).",
+            acceptance_criteria=("multiply(3, 4) == 12",),
+            capability_class="bug.fix",
+            size_estimate="XS",
+            structural_facts=(
+                "reproduction: `from calc import multiply` raises ImportError",
+                "expected_behaviour: calc exposes multiply(a: int, b: int) -> int",
+                "exact_value: multiply(3, 4) == 12",
+            ),
+        )
+        for i in range(1, n + 1)
+    ]
+    FactoryHome(h.home, pr.REPO_NAME).register_backlog(items, actor="tester")
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="multiply", **cfg)
+
+
+def _paid_author(monkeypatch: pytest.MonkeyPatch, reply: Any) -> None:
+    """The run's test author: a priced model whose every reply is ``reply`` (unusable, so
+    each item's authoring spends its attempts and stops the item)."""
+    from crb.factory.author import RungTestAuthor
+    from crb.server import worker as w
+
+    def author(self: Any, ctx: Any, ladder: Any) -> RungTestAuthor:
+        del self, ctx, ladder
+        return RungTestAuthor(
+            name="editblock", model="gpt-oss-120b", chat_fn=lambda _m: reply, attempts=2
+        )
+
+    monkeypatch.setattr(w.Worker, "_test_author", author)
+
+
+def test_a_factory_runs_test_author_spends_against_the_cap(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The test author makes model calls of its own. Each call's cost is on its
+    ``author.attempt`` event and counted as the run's spend, so a capped run stops before
+    the next item once authoring alone has spent the cap — and the next item's reserve
+    counts one authoring pass."""
+    from crb.builders.openai_client import ChatReply
+
+    _authorless_backlog(h, 2)
+    _paid_author(monkeypatch, ChatReply("no file line", cost_usd=0.03))
+    run = h.enqueue("factory", ladder_json=["fake:m0"], params_json={"max_cost_usd": 0.05})
+    done = h.run_one()
+    attempts = [e for e in h.events(run.id) if e.action == "author.attempt"]
+    assert [e.cost_usd for e in attempts] == [0.03, 0.03]
+    assert all(e.payload["cost_known"] is True for e in attempts)
+    assert done.status == STATUS_FAILED and done.counts_json["stopped_code"] == sc.STOP_SPEND_CAP
+    assert done.error.startswith("spend cap: $0.06 of $0.05 spent")
+
+
+def test_a_reclaimed_factory_run_counts_the_authoring_its_first_claim_spent(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The author's calls of a first claim are on the run's events, not on the author the
+    second claim builds: they are read back, so a reclaim cannot forget them."""
+    from crb.builders.openai_client import ChatReply
+    from crb.store.events import append_event
+
+    _authorless_backlog(h, 1)
+    _paid_author(monkeypatch, ChatReply("no file line", cost_usd=0.01))
+    run = h.enqueue("factory", ladder_json=["fake:m0"], params_json={"max_cost_usd": 0.05})
+    append_event(
+        h.factory,
+        trace_id=run.id,
+        stage="factory",
+        action="author.attempt",
+        payload={"cost_usd": 0.06, "cost_known": True},
+    )
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and done.counts_json["stopped_code"] == sc.STOP_SPEND_CAP
+    assert done.error.startswith("spend cap: $0.06 of $0.05 spent; the next item")
+    assert [e for e in h.events(run.id) if e.action == "author.start"] == []
+
+
+def test_a_test_author_whose_cost_is_not_known_stops_a_capped_factory_run(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reply that carries no usage is a call the cap cannot see: the run stops."""
+    _authorless_backlog(h, 2)
+    _paid_author(monkeypatch, "no file line")
+    run = h.enqueue("factory", ladder_json=["fake:m0"], params_json={"max_cost_usd": 5.0})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and done.counts_json["stopped_code"] == sc.STOP_SPEND_CAP
+    assert "cost was not known" in done.error
+    (attempt, *_) = [e for e in h.events(run.id) if e.action == "author.attempt"]
+    assert attempt.payload["cost_known"] is False
+
+
 # --- the rules ---------------------------------------------------------------------------
 
 
@@ -213,6 +353,22 @@ def test_the_admission_rule_counts_the_reserve_against_what_is_left() -> None:
         sc.Spend(0.1, 0.1, unknown=1), reserve=0.1, unit="attempt"
     )
     assert sc.SpendCap.from_params({}) is None
+    # a run that has already passed its cap, by an attempt no cap of its own bounded
+    assert cap.passed(sc.Spend(0.99, 0.5)) is None
+    over = cap.passed(sc.Spend(1.5, 1.5))
+    assert over is not None and over.payload["reserve_from"] == "passed"
+    assert over.reason.startswith("spend cap: $1.50 of $1.00 spent")
+    # authoring spend: every author.attempt event's cost, and one it could not see
+    events = [
+        {"action": "author.attempt", "cost_usd": 0.25, "cost_known": True},
+        {"action": "author.attempt", "cost_usd": 0.0, "cost_known": False},
+        {"action": "author.start"},
+    ]
+    authored = sc.Spend(0.5, 0.5).with_authoring(events)
+    assert authored.spent == 0.75 and authored.unknown == 1 and authored.dearest == 0.5
+    assert authored.dearest_authoring == 0.25
+    # an item's reserve counts one authoring pass at the dearest authoring call so far
+    assert sc.item_reserve([0.1], authored, max_rework=0, author_attempts=2) == (0.6, 1)
     assert sc.SpendCap.from_params({"max_cost_usd": 2}) == sc.SpendCap(2.0)
 
 
@@ -222,3 +378,30 @@ def test_a_rung_is_priced_when_its_model_has_a_known_price_or_it_is_the_fixture(
     assert sc.unpriced_rungs([("openai_agent", "known-model-v2")], table) == []  # prefix
     assert sc.unpriced_rungs([("openai_agent", "mystery")], table) == [("openai_agent", "mystery")]
     assert sc.unpriced_rungs([("fixture_gold", "fixture-gold")], table) == []
+
+
+#: Every module that opens a model chat (``make_chat``), and how that call's cost reaches a
+#: run's spend cap. A call site added without a way in is spend the cap cannot see (P-120).
+METERED = {
+    "src/crb/builders/editblock.py": "a build attempt: BuildOutcome.cost_usd on its row",
+    "src/crb/builders/openai_agent.py": "a build attempt: BuildOutcome.cost_usd on its row",
+    "src/crb/factory/author.py": "the test author: each call's cost on its author.attempt event",
+    "src/crb/builders/labeller.py": "label runs only, a kind that takes no spend cap",
+}
+
+
+def test_every_model_call_site_is_one_the_spend_cap_can_see() -> None:
+    root = Path(__file__).resolve().parent.parent
+    found = {
+        p.relative_to(root).as_posix()
+        for p in (root / "src" / "crb").rglob("*.py")
+        if "make_chat(" in (text := p.read_text(encoding="utf-8")) and "def make_chat(" not in text
+    }
+    assert found == set(METERED), (
+        "a module opens a model chat the spend cap was not told about — count its cost in "
+        "crb.server.spend_cap.Spend (or refuse a cap on its run kind) and add it to METERED: "
+        f"{sorted(found ^ set(METERED))}"
+    )
+    from crb.server.schemas import BUILD_KINDS
+
+    assert "label" not in BUILD_KINDS  # the labeller's runs cannot declare a cap
