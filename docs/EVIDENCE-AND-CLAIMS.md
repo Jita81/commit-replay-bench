@@ -143,29 +143,34 @@ stamp is an anecdote.
 
 The census ledger that seeds this product (`grades.jsonl`, **1,071 rows**) was produced by
 the upstream apparatus. **706 of the 1,071 rows were graded under three belts before belt 4
-(`source_changed`) existed; 365 carry all four.** `[measured]` from the file itself: the
-`source_changed` key is present on 365 rows and absent on 706.
+(`source_changed`) existed; 365 carry all four.** **[measured — n = 1,071 rows; method: from
+the file itself, the `source_changed` key is present on 365 rows and absent on 706; apparatus
+1.0-census]**
 
 The product handles this as follows and it is not configurable:
 
 - Legacy rows are imported with `belt_set = "v3-legacy"`, `apparatus_version = "1.0-census"`
-  and `provenance = "imported:…"`. The false-Q1 invariant is applied to the **three belts
-  they recorded** (`GradeRow.recorded_belts`); a clean legacy row with any of those three
-  belts not `True` is refused at import.
+  and `provenance = "imported:…"`. The false-Q1 invariant is applied to the **belts they
+  recorded** (`GradeRow.recorded_belts`); a clean legacy row with any of those belts not
+  `True` is refused at import.
 - Cells report legacy and v4 rows **separately**; `apparatus_versions` on a cell makes any
   mixture visible, and the UI does not combine them into one point estimate.
 - **No claim blends apparatus versions.** "Under apparatus 1.0-census, cell X was …" and
-  "under apparatus 2.0, cell X is …" are two statements.
+  "under apparatus 2.0, cell X is …" are separate statements.
 - The plan's P1 gate re-derives all 1,071 rows: `clean == all recorded belts True` and no
   clean row has a false belt. That gate proves the *mechanical* false-Q1 = 0 statement
   about the seed data; it says nothing about the fourth belt on the 706 rows, which is
-  simply unmeasured for them.
+  simply unmeasured for them **[measured — n = 1,071 rows; method: `tests/test_census_gate.py`
+  imports every row and applies the invariant on every pull request, and counts the 706
+  three-belt rows; apparatus 1.0-census]**.
 - The same caveat applies one belt on: rows written before apparatus 2.2 carry
   `belt_set = "v4"` and **belt 5 (`repo_lint_clean`) is unrecorded for them** — never
   re-derived, not hashed, not rendered ([ADR-0011](adr/0011-repo-lint-belt.md)). Rows
   written by 2.2 carry `belt_set = "v5"`; there belt 5 is `null` when the repository
   configures no linter (*not evaluated*), and that `null` is hashed. The belt sets are
-  three populations — `v3-legacy` (3 belts), `v4` (4), `v5` (5, with belt 5 optional) —
+  separate populations — `v3-legacy` (3 belts), `v4` (4), `v5` (5, with belt 5 optional)
+  **[measured — n = 3 belt sets; method: the belt-set constants of the ledger module and the
+  belts a row of each records, read at this commit; apparatus n/a]** —
   and `belt_sets` on a cell keeps them apart.
 
 ## 6. Permitted claim shapes, by maturity
@@ -220,10 +225,13 @@ Every word of that sentence is a field of the record (`policy_version`,
 `GET /signoffs/{id}`. Why the oracle clause has no knob: a human signing a cell whose
 oracle was never scored would be attesting to a number whose *meaning* was never
 measured — precisely the "a green suite proves correctness" claim §7 forbids, dressed as
-an attestation. `[measured 2026-09-14]` the NHS reading that earned the clause: an
-oracle of 0.36 on nhsuk-frontend with 2 of 6 tasks scoreable, and 4 of 10 clean rows
-failing their own repository's type check — a weak or unmeasured oracle is where a human
-sign-off is most likely to be wrong. What the sentence does **not** mean:
+an attestation. The NHS reading that earned the clause: an oracle of 0.36 on
+nhsuk-frontend with 2 of 6 tasks scoreable, and 4 of 10 clean rows failing their own
+repository's type check **[measured 2026-09-14 — n = 6 tasks and 10 clean rows; method: the
+oracle run and a type check of each clean row's patch in the NHS measurement
+(docs/reviews/2026-09-14-nhs-public-repos.md), whose rows are the operator's and not in this
+repository; apparatus 2.2]** — a weak or unmeasured oracle is where a human sign-off is most
+likely to be wrong. What the sentence does **not** mean:
 
 - that the cell is safe for autonomous delivery (§6 still applies: `deliver` is a
   high-confidence candidate under the published bar, not a safety claim);
@@ -236,7 +244,7 @@ sign-off is most likely to be wrong. What the sentence does **not** mean:
 A deployment may relax the numeric thresholds and the route / controls switches within
 the published bounds (`docs/API.md`, `/signoffs/policy`); a record then says so
 (`policy_thresholds` differs from the defaults, `relaxed: true` on the policy) and any
-quote of it must name the relaxed bar. Four clauses have no knob and never will: a
+quote of it must name the relaxed bar. These clauses have no knob and never will: a
 false-Q1 cell cannot be signed, a cell whose oracle was never measured cannot be signed
 (`oracle_unmeasured`, since v2), a sign-off without an attestation cannot be made, and
 the person who produced the evidence cannot sign it (`same_actor`, since v3 — a
@@ -261,7 +269,9 @@ sources, on repositories whose suite runs in the sandbox. Every rate from it is 
 **that** population. It says nothing about:
 
 - changes that were never encoded as a test (on our own repository 46 of 242 non-merge
-  commits are source-only — docs/reviews/2026-09-16-dogfood.md §3);
+  commits are source-only **[measured — n = 242 non-merge commits on `main` on 2026-09-16;
+  method: the files each commit touched, classed by the dogfood review's §3
+  (docs/reviews/2026-09-16-dogfood.md); apparatus n/a]**);
 - architecture, requirements ambiguity, migrations, operational and security design, UX and
   product judgement — work whose result is not a source+test commit;
 - the original engineering reasoning: a builder sees the commit's subject and description
