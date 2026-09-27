@@ -167,6 +167,9 @@ const flowStream = (stream: string, name: string, key: string) => ({
   spend_label: 'the replay and blind attempts graded for this repository',
   per_unit: null,
   per_unit_label: stream === 'manufacture-and-deliver' ? 'per merged pull request' : '',
+  per_unit_spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
+  per_unit_units: 0,
+  per_unit_reason: 'no merged pull request yet to divide by',
   counts: { graded_rows: 44 },
   not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of the guide’s “real work”', why: 'nothing here times the work a person does outside this product', gap: 'G-556' }] : [],
 })

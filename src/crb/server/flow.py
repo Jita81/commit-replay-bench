@@ -14,7 +14,8 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 |---|---|
 | connect-and-prove | repository registered → its first controls report that passed |
 | measure | run queued → its last row graded; a cell's first row → its tenth |
-| decide-and-license | a cell first routed ``deliver`` (recorded, ADR-0029) → the cell signed; |
+| decide-and-license | a cell first routed ``deliver`` in the sign-off's own scope (recorded, |
+| | ADR-0029 §6) → the cell signed; |
 | | the attested row graded clean (accepted) → the cell signed; and the |
 | | minutes each review took, as the reviewer stated them on ``POST /reviews`` |
 | manufacture-and-deliver | item registered → pull request opened → merged |
@@ -26,7 +27,14 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 (:func:`partition_rows`: a factory-built row is manufacture's, a row of a £0 proving run is
 connect's, every other row is measure's); the reading also serves the repository's cumulative
 spend, which the parts add up to. The sums use the product's one spend rule
-(``crb.core.flow.spend_of_rows``), which the value scorecard also uses.
+(``crb.core.flow.spend_of_rows``), which the value scorecard also uses. A cost per unit is the
+price of the rows that bought the unit (a cell's first ten rows; the factory's rows per merged
+pull request) and is withheld with the reason while any of them is unpriced, never divided
+over a floor (DL-067).
+
+**Who reads what.** Every figure is a viewer's except the platform stream's account counts
+and its recovery lead time, which are an admin's (ADR-0029 §7): anyone else reads the lead time
+as unmeasured with :data:`ADMIN_ONLY` and no account count.
 
 **What it refuses to invent.** Three figures those criteria ask for are not recorded anywhere,
 so they are served as :class:`~crb.core.flow.NotCaptured` — named, with why and with the gap
@@ -45,7 +53,9 @@ What it is:   The server-side gatherer behind ``GET /flow``: one function per st
 What it does: Reads runs, graded rows, system events, sign-offs, reviews, users and the
               factory's evidence chain for one repository; reduces them through
               ``crb.core.flow`` into a lead time, a spend (an unknown cost never counted as
-              zero) and counts per stream; and names the figures the product does not capture.
+              zero), a cost per unit (never over a floor) and counts per stream; pairs a
+              deliver stamp only with a signature of its own scope; serves the account
+              figures to an admin only; and names the figures the product does not capture.
 How:          SQLAlchemy selects over ``Run`` / ``Event`` / ``Signoff`` / ``Review`` / ``User``
               / ``Task``, the repository's ``GradeRow`` list as the caller loaded it, and
               ``FactoryHome.events()``; each stream's pairs go to ``lead_time`` and its rows to
@@ -59,10 +69,12 @@ Works with:   src/crb/core/flow.py (the arithmetic and the shapes this module fi
               match on), src/crb/server/routes/oracle.py (``CONTROLS_ACTION`` — the controls
               report this module looks for the FIRST passing one of),
               src/crb/store/models.py (``Run``, ``Event``, ``Signoff``, ``Review``, ``User``)
-Tested by:    tests/test_server_routes_flow.py, tests/test_flow.py
-Touch when:   a stream's milestone pair changes (change it here and in the stream's MEASURE
-              criterion together); a figure named in ``NOT_CAPTURED`` becomes recorded (remove
-              it here, close its gap, and flip the criterion in the same commit).
+Tested by:    tests/test_server_routes_flow.py, tests/test_flow.py,
+              tests/test_flow_known_answers.py (every served figure against a known answer)
+Touch when:   a stream's milestone pair changes (change it here, in the stream's MEASURE
+              criterion and in tests/test_flow_known_answers.py's ``KNOWN`` together); a
+              figure named in ``NOT_CAPTURED`` becomes recorded (remove it here, close its
+              gap, and flip the criterion in the same commit).
 """
 
 from __future__ import annotations
@@ -83,6 +95,7 @@ from crb.core.flow import (
     lead_time,
     parse_ts,
     per_unit,
+    per_unit_withheld,
     spend_of_rows,
     stated_durations,
 )
@@ -104,7 +117,9 @@ from crb.factory.evidence import (
 )
 from crb.server.flow_record import (
     MOMENT_OBSERVED,
+    DeliverStamp,
     deliver_moments,
+    deliver_stamps,
     inherited_cells,
     install_moments,
 )
@@ -276,7 +291,10 @@ def measure(
 ) -> StreamFlow:
     """Run queued → last row graded, a cell's first row → its tenth, what measuring spent (the
     replay and blind rows — the stream's own part of the repository's spend) and what one
-    routable cell has cost — the priced spend over the cells that reached the bar.
+    routable cell has cost — the price of each at-the-bar cell's FIRST TEN rows, divided by
+    the cells at the bar (never the stream's whole spend, which also pays for cells that never
+    reach the bar and for rows after the tenth). While any of those ten rows carried no price
+    the figure is withheld with the reason, never divided over a floor.
 
     A cell here is what the map keys a cell by before it routes: class and size WITHIN one
     apparatus version, one mode and one checks arm. Rows of two apparatus versions, of
@@ -298,11 +316,17 @@ def measure(
         key = (r.apparatus_version, r.mode, r.checks_arm, r.capability_class, r.size)
         by_cell.setdefault(key, []).append(r)
     bar_pairs: list[tuple[str, str]] = []
+    to_bar: list[GradeRow] = []
     for cell_rows in by_cell.values():
-        stamps = sorted(r.created for r in cell_rows)
-        if len(stamps) >= CELL_N_BAR:
-            bar_pairs.append((stamps[0], stamps[CELL_N_BAR - 1]))
+        # a cell's rows in the order they were graded; its first ten are what reaching the
+        # bar took — in time (first → tenth stamp) and in money (those ten rows' prices)
+        ordered = sorted(cell_rows, key=lambda r: r.created)
+        if len(ordered) >= CELL_N_BAR:
+            first_ten = ordered[:CELL_N_BAR]
+            bar_pairs.append((first_ten[0].created, first_ten[-1].created))
+            to_bar.extend(first_ten)
     spend = _costs(rows)
+    bar_spend = _costs(to_bar)
     counts = {
         "graded_rows": len(rows),
         "runs_graded": len(by_run),
@@ -333,8 +357,13 @@ def measure(
         ),
         spend=spend,
         spend_label="the replay and blind attempts graded for this repository",
-        per_unit=per_unit(spend, len(bar_pairs)),
-        per_unit_label=f"per cell that reached {CELL_N_BAR} rows",
+        per_unit=per_unit(bar_spend, len(bar_pairs)),
+        per_unit_label=f"per cell that reached {CELL_N_BAR} rows, over its first {CELL_N_BAR} rows",
+        per_unit_spend=bar_spend,
+        per_unit_units=len(bar_pairs),
+        per_unit_reason=per_unit_withheld(
+            bar_spend, len(bar_pairs), unit=f"cell that reached {CELL_N_BAR} rows"
+        ),
         counts=counts,
     )
 
@@ -364,21 +393,22 @@ def decide_and_license(
     ]
     stated = [int(m) for m in minutes if m is not None]
     moments = deliver_moments(session, repo)
+    stamps = deliver_stamps(session, repo)
     routed_pairs: list[tuple[str, str]] = []
     for rec in records:
         if rec.revoked:
             continue
-        # the latest first-deliver stamp of a matching cell at or before the signature: the
-        # transition this signature answered (a wildcard size matches every size)
+        # the latest first-deliver stamp of THIS cell, in THIS record's own scope, at or
+        # before the signature: the transition this signature answered (a wildcard size
+        # matches every size). A stamp of another apparatus, posture or checks arm is a cell
+        # this sign-off can never lift (apply_signoffs), so it never dates the decision.
         starts = [
-            ts
-            for (cls, size), stamps in moments.items()
-            if cls == rec.capability_class and rec.size in (size, WILDCARD)
-            for ts in stamps
-            if ts <= rec.verified_at
+            st.timestamp
+            for st in stamps
+            if answers(rec, st) and _before(st.timestamp, rec.verified_at)
         ]
         if starts:
-            routed_pairs.append((max(starts), rec.verified_at))
+            routed_pairs.append((max(starts, key=_instant), rec.verified_at))
     return StreamFlow(
         stream="decide-and-license",
         name=STREAM_NAMES["decide-and-license"],
@@ -420,6 +450,37 @@ def decide_and_license(
             "cells_at_deliver_before_recording": inherited_cells(session, repo),
         },
     )
+
+
+def answers(rec: SignoffRecord, stamp: DeliverStamp) -> bool:
+    """Could ``rec`` be the signature that answered ``stamp``? Only for the same cell (a
+    wildcard size matches every size) in the record's own scope: an apparatus the record was
+    stamped at, the record's posture class and its checks arm — the three things a sign-off
+    must cover to lift a cell (``SignoffRecord.covers_apparatus`` / ``covers_posture`` /
+    ``covers_arm``). A stamp or a record that names no scope matches nothing."""
+    versions = {v.strip() for v in rec.apparatus_version.split(",") if v.strip()}
+    return (
+        stamp.capability_class == rec.capability_class
+        and rec.size in (stamp.size, WILDCARD)
+        and bool(stamp.apparatus)
+        and stamp.apparatus in versions
+        and bool(stamp.posture_class)
+        and stamp.posture_class == rec.posture_class
+        and bool(stamp.checks_arm)
+        and stamp.checks_arm == rec.arm
+    )
+
+
+def _instant(ts: str) -> float:
+    parsed = parse_ts(ts)
+    return parsed.timestamp() if parsed is not None else float("-inf")
+
+
+def _before(ts: str, end: str) -> bool:
+    """``ts`` at or before ``end`` as instants (two stamps of different precision or offset
+    compare correctly); an unreadable stamp is never before anything."""
+    a, b = parse_ts(ts), parse_ts(end)
+    return a is not None and b is not None and a <= b
 
 
 def manufacture_and_deliver(events: Sequence[FactoryEvent], rows: Sequence[GradeRow]) -> StreamFlow:
@@ -475,6 +536,9 @@ def manufacture_and_deliver(events: Sequence[FactoryEvent], rows: Sequence[Grade
         spend_label="the graded rows the factory built for this repository",
         per_unit=per_unit(spend, len(merged)),
         per_unit_label="per merged pull request",
+        per_unit_spend=spend,
+        per_unit_units=len(merged),
+        per_unit_reason=per_unit_withheld(spend, len(merged), unit="merged pull request"),
         counts={
             "items_registered": len(registered),
             "pull_requests_opened": len(opened),
@@ -520,12 +584,24 @@ def learn(events: Sequence[FactoryEvent]) -> StreamFlow:
     )
 
 
-def run_the_platform(session: Session) -> StreamFlow:
+#: Why a caller below admin reads no account figure: the deployment's accounts are the
+#: admin's to see (``GET /admin/users`` refuses anyone else), and a recovery lead time of n = 1
+#: is one person's recovery, timed.
+ADMIN_ONLY = (
+    "shown to an admin only: the deployment's accounts, and how long a person's account "
+    "recovery took, are the admin's to see"
+)
+
+
+def run_the_platform(session: Session, *, admin: bool = False) -> StreamFlow:
     """An admin set an account's password → that account signed in again.
 
     This is the deployment's figure, not the repository's: the accounts are the deployment's.
     A recovery counts only when someone else set the password (an admin recovering a person,
-    not a person changing their own) and the account has signed in since.
+    not a person changing their own) and the account has signed in since. The account counts
+    and the recovery lead time are served only to an admin (``admin``); anyone else reads the
+    lead time as unmeasured with :data:`ADMIN_ONLY` and no account count at all — the same
+    line ``GET /admin/users`` draws.
     """
     users = list(session.execute(select(User)).scalars())
     last_login = {u.id: u.last_login for u in users}
@@ -553,6 +629,12 @@ def run_the_platform(session: Session) -> StreamFlow:
         set_at, back_at = parse_ts(ev.timestamp), parse_ts(back)
         if set_at is not None and back_at is not None and back_at >= set_at:
             pairs.append((ev.timestamp, back))
+    accounts = {
+        "accounts": len(users),
+        "accounts_active": sum(1 for u in users if u.active),
+        "admins_active": sum(1 for u in users if u.active and u.role == "admin"),
+        "recoveries_started": recovered,
+    }
     return StreamFlow(
         stream="run-the-platform",
         name=STREAM_NAMES["run-the-platform"],
@@ -560,8 +642,12 @@ def run_the_platform(session: Session) -> StreamFlow:
             lead_time(
                 "password_set_to_signed_in",
                 "Password reset by an admin → the person signed in again",
-                pairs,
-                reason="no account on this deployment has been recovered by an admin yet",
+                pairs if admin else [],
+                reason=(
+                    "no account on this deployment has been recovered by an admin yet"
+                    if admin
+                    else ADMIN_ONLY
+                ),
             ),
             lead_time(
                 "installed_to_healthy",
@@ -573,10 +659,7 @@ def run_the_platform(session: Session) -> StreamFlow:
         spend=Spend(),
         spend_label="no model spend: running the platform buys no attempts",
         counts={
-            "accounts": len(users),
-            "accounts_active": sum(1 for u in users if u.active),
-            "admins_active": sum(1 for u in users if u.active and u.role == "admin"),
-            "recoveries_started": recovered,
+            **(accounts if admin else {}),
             "install_recorded": 1 if observed else 0,
         },
         not_captured=(NOT_CAPTURED["go_live_lines"],),
@@ -615,8 +698,10 @@ def build_flow(
     signoffs: Sequence[SignoffRecord],
     factory_events: Sequence[FactoryEvent],
     apparatus: str = APPARATUS_VERSION,
+    admin: bool = False,
 ) -> FlowReading:
-    """Every stream's numbers for ``repo``, folded from what the stores already hold."""
+    """Every stream's numbers for ``repo``, folded from what the stores already hold;
+    ``admin`` says whether the caller may read the deployment's account figures."""
     runs = list(session.execute(select(Run).where(Run.repo == repo)).scalars())
     run_kinds = {r.id: r.kind for r in runs}
     run_created = {r.id: r.created for r in runs}
@@ -628,7 +713,7 @@ def build_flow(
         decide_and_license(session, repo, signoffs, rows),
         manufacture_and_deliver(factory_events, parts[PART_MANUFACTURE]),
         learn(factory_events),
-        run_the_platform(session),
+        run_the_platform(session, admin=admin),
     )
     return FlowReading(
         repo=repo,

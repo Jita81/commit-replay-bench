@@ -28,7 +28,8 @@ What it is:   The pure fold behind ``GET /flow``: ``LeadTime``, ``Spend``, ``Not
               spend rule (``spend_of_rows``) every reader of graded rows' money calls.
 What it does: Reduces (start, end) timestamp pairs to a lead time with n / median / min / max,
               reduces ``(cost_usd, cost_known)`` pairs to a spend that honours an unknown cost,
-              divides a known spend per unit, and names the figures the product does not
+              divides a known spend per unit (and says why when it will not: nothing priced,
+              no unit, or a floor), and names the figures the product does not
               capture so a screen can say so instead of inventing them.
 How:          ``datetime.fromisoformat`` (``Z`` accepted, a naive stamp read as UTC) → seconds
               → ``statistics.median``; dataclasses with ``to_dict`` for the API; stdlib only,
@@ -257,12 +258,30 @@ def spend_of_rows(rows: Iterable[PricedRow]) -> Spend:
 def per_unit(spend: Spend, units: int) -> float | None:
     """A known spend divided by ``units`` (the cost of one certified change), or ``None``.
 
-    ``None`` when nothing is priced or there are no units: a cost per change with no change
-    to divide by is not zero, it is unmeasured.
+    ``None`` when nothing is priced, when there are no units, or when any row of the spend
+    carried no price: a cost per unit with no unit to divide by is not zero, it is unmeasured,
+    and a cost per unit over a floor would understate it. This is the value scorecard's rule
+    for its per-pound figures too (DL-067): neither reading divides by a floor.
     """
-    if spend.usd is None or units <= 0:
+    if per_unit_withheld(spend, units):
         return None
+    assert spend.usd is not None
     return round(spend.usd / units, 6)
+
+
+def per_unit_withheld(spend: Spend, units: int, *, unit: str = "unit") -> str:
+    """Why :func:`per_unit` served ``None``, in words, or ``""`` when it served a figure."""
+    k = spend.rows_unpriced
+    if k:
+        return (
+            f"{k} row{'s' if k != 1 else ''} counted here reported no price, so the money is a "
+            f"floor and a cost per {unit} over it would understate; it is not served"
+        )
+    if spend.usd is None:
+        return "no row counted here is priced yet"
+    if units <= 0:
+        return f"no {unit} yet to divide by"
+    return ""
 
 
 @dataclass(frozen=True)
@@ -287,9 +306,10 @@ class StreamFlow:
 
     ``spend_label`` says in words WHICH rows the spend covers, because the streams do not all
     buy the same thing — one measures the £0 stages, one the whole repository's bill, and two
-    buy nothing at all and say so. ``per_unit`` is the spend divided by the thing the stream
-    delivers (a merged pull request), with ``per_unit_label`` naming the unit; it is ``None``
-    when either side is unmeasured.
+    buy nothing at all and say so. ``per_unit`` is ``per_unit_spend`` divided by
+    ``per_unit_units``, the things the stream delivers (a merged pull request, a cell that
+    reached the bar), with ``per_unit_label`` naming the unit; it is ``None`` when either side
+    is unmeasured or the spend is a floor, and ``per_unit_reason`` then says which.
     """
 
     stream: str
@@ -299,6 +319,11 @@ class StreamFlow:
     spend_label: str = ""
     per_unit: float | None = None
     per_unit_label: str = ""
+    #: What ``per_unit`` divided: the spend of the rows it covers and the number of units.
+    per_unit_spend: Spend = field(default_factory=Spend)
+    per_unit_units: int = 0
+    #: Why ``per_unit`` is ``None`` (:func:`per_unit_withheld`); ``""`` once it is served.
+    per_unit_reason: str = ""
     counts: Mapping[str, int] = field(default_factory=dict)
     not_captured: tuple[NotCaptured, ...] = ()
 
@@ -311,6 +336,9 @@ class StreamFlow:
             "spend_label": self.spend_label,
             "per_unit": self.per_unit,
             "per_unit_label": self.per_unit_label,
+            "per_unit_spend": self.per_unit_spend.to_dict(),
+            "per_unit_units": self.per_unit_units,
+            "per_unit_reason": self.per_unit_reason,
             "counts": dict(self.counts),
             "not_captured": [nc.to_dict() for nc in self.not_captured],
         }

@@ -69,6 +69,8 @@ const BELTS = ['tests_unmodified', 'target_green', 'no_new_failures', 'source_ch
 
 /** A StatTile's headline value (label / value / dl). */
 const tileValue = (tile: Locator) => tile.locator(':scope > div').nth(1)
+/** A StatTile's n: the `dd` beside its `n =` term. */
+const tileN = (tile: Locator) => tile.locator('dt', { hasText: /^n =$/ }).locator('xpath=following-sibling::dd[1]')
 
 test.describe(`05 replay (${BUILDER})`, () => {
   const t = primary()
@@ -198,7 +200,7 @@ test.describe(`05 replay (${BUILDER})`, () => {
     await expect(page.getByText('Wilson 95%').first()).toBeVisible()
   })
 
-  test('the Baseline carries the measure stream’s own flow: a lead time with its n, and a spend that is a floor', async ({ page }) => {
+  test('the Baseline carries the measure stream’s own flow: a lead time with its n, and a spend that says whether it is a floor', async ({ page }) => {
     await page.goto(`/results?repo=${encodeURIComponent(t.name)}`)
     const card = page.locator('#flow-measure')
     await expect(card).toBeVisible()
@@ -208,10 +210,17 @@ test.describe(`05 replay (${BUILDER})`, () => {
     const lead = page.getByTestId('flow-queued_to_graded')
     await expect(lead).toBeVisible()
     await expect(tileValue(lead)).not.toHaveText('—')
-    await expect(lead).toContainText('n =')
-    // the spend names which rows it covers and whether any reported no price
+    // its n is the runs that graded a row — the same number the counts list beside it
+    await expect(tileN(lead)).toHaveText(/^[1-9]\d*$/)
+    const runsGraded = card.locator('dt', { hasText: /^runs graded$/ }).locator('xpath=following-sibling::dd[1]')
+    expect(await tileN(lead).textContent()).toBe(await runsGraded.textContent())
+    // the spend names which rows it covers and whether any reported no price: a sum with an
+    // unpriced row says it is a floor; one without says every row was priced
     const spend = page.getByTestId('flow-spend-measure')
     await expect(spend).toContainText('the replay and blind attempts graded for this repository')
+    await expect(spend).toContainText(
+      /\d+ row\(s\) reported no price and are not counted as zero, so this is a floor\.|Every row counted here reported its own price\./,
+    )
     // and the repository's cumulative spend, every graded row once, stands beside it (DL-067)
     await expect(page.getByTestId('flow-spend-total')).toContainText('every graded row counted once')
     // and the counts are counts: the rows this repository has graded

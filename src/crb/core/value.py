@@ -60,8 +60,10 @@ What it is:   The value scorecard — pure functions from ledger rows and review
               the process-loss share, the learning curve and prospective routing precision.
 What it does: Reduces rows (``ValueRow``, adapted from ``GradeRow`` or read from an export) and
               verdicts to a ``ValueReport`` whose every rate carries k, n and a Wilson
-              interval, whose unmeasured figures are null, whose apparatus scope defaults to the
-              current version (pooling is explicit and flagged), whose headline reads one checks
+              interval, whose unmeasured figures are null (a sum of money with no priced row
+              included — never $0, as the flow reading serves it), whose apparatus scope
+              defaults to the current version (pooling is explicit and flagged), whose
+              headline reads one checks
               arm (named in ``checks``) and whose cells never pool two, and whose time-ordered
               measures use only prior data. Never writes, never calls a model.
 How:          ``select_rows`` (repo, apparatus) → the ``checks`` arm → ``north_star``
@@ -388,6 +390,12 @@ def _r(x: float | None, nd: int = 4) -> float | None:
     return None if x is None else round(x, nd)
 
 
+def _money(x: float | None) -> float | None:
+    """A sum of money to the cent, or ``None`` when nothing in it was priced: an unmeasured
+    spend is served as unmeasured (``null``), never as $0 — the flow reading's rule too."""
+    return None if x is None else round(x, 2)
+
+
 # --- the register seam ------------------------------------------------------------------
 
 
@@ -598,14 +606,15 @@ class NorthStar:
     usd_per_gbp: float
 
     @property
-    def spend_usd(self) -> float:
-        """The priced blind spend (0 when nothing is priced); unpriced rows are counted
-        apart in ``spend.rows_unpriced``, never here as zero."""
-        return self.spend.usd or 0.0
+    def spend_usd(self) -> float | None:
+        """The priced blind spend, or ``None`` when no blind attempt is priced (unmeasured, as
+        the flow reading serves it — never $0); unpriced rows are counted apart in
+        ``spend.rows_unpriced``."""
+        return self.spend.usd
 
     @property
-    def spend_gbp(self) -> float:
-        return self.spend_usd / self.usd_per_gbp
+    def spend_gbp(self) -> float | None:
+        return None if self.spend_usd is None else self.spend_usd / self.usd_per_gbp
 
     @property
     def per_pound_withheld(self) -> str:
@@ -635,8 +644,9 @@ class NorthStar:
         w = self._working()
         n = self.clean_rate.n
         per_pound = None
-        if w is not None and self.spend_usd > 0 and not self.per_pound_withheld:
-            per_pound = tuple(x * n / self.spend_gbp for x in w)
+        gbp = self.spend_gbp
+        if w is not None and gbp and not self.per_pound_withheld:
+            per_pound = tuple(x * n / gbp for x in w)
         return {
             "label": "working changes per pound, blind",
             "per_pound": _r(per_pound[0]) if per_pound else None,
@@ -663,8 +673,8 @@ class NorthStar:
             "clean_rate": self.clean_rate.to_dict(),
             "precision_basis": self.precision.basis,
             "precision": self.precision.chosen.to_dict(),
-            "spend_usd": round(self.spend_usd, 2),
-            "spend_gbp": round(self.spend_gbp, 2),
+            "spend_usd": _money(self.spend_usd),
+            "spend_gbp": _money(gbp),
             "spend_rows_priced": self.spend.rows_priced,
             "spend_rows_unpriced": self.spend.rows_unpriced,
             "per_pound_withheld": self.per_pound_withheld,
@@ -703,30 +713,38 @@ def north_star(
 
 @dataclass(frozen=True)
 class ProcessLoss:
-    kinds: dict[str, tuple[int, float]]
+    #: Per loss kind: its rows, and their priced dollars (``None`` when none of them is priced).
+    kinds: dict[str, tuple[int, float | None]]
     rows: int
-    usd_total: float
+    #: Every row's priced dollars, ``None`` when no row is priced — never $0.
+    usd_total: float | None
     valid_failures: int
     usd_per_gbp: float
     #: Rows whose cost is not a measurement: in ``rows`` but in no dollar sum.
     rows_unpriced: int = 0
 
+    def _gbp(self, usd: float | None) -> float | None:
+        return None if usd is None else usd / self.usd_per_gbp
+
     def to_dict(self) -> dict[str, Any]:
         lost_rows = sum(k for k, _ in self.kinds.values())
-        lost_usd = sum(u for _, u in self.kinds.values())
+        priced = [u for _, u in self.kinds.values() if u is not None]
+        lost_usd = sum(priced) if priced else None
         bp = sum(self.kinds[k][0] for k in (FAILURE_BUDGET, FAILURE_PROTOCOL))
         return {
             "kinds": {
-                k: {"rows": n, "usd": round(u, 2), "gbp": round(u / self.usd_per_gbp, 2)}
+                k: {"rows": n, "usd": _money(u), "gbp": _money(self._gbp(u))}
                 for k, (n, u) in self.kinds.items()
             },
             "rows": lost_rows,
             "rows_share": _r(lost_rows / self.rows) if self.rows else None,
-            "usd": round(lost_usd, 2),
-            "gbp": round(lost_usd / self.usd_per_gbp, 2),
-            "usd_share": _r(lost_usd / self.usd_total) if self.usd_total else None,
+            "usd": _money(lost_usd),
+            "gbp": _money(self._gbp(lost_usd)),
+            "usd_share": _r(lost_usd / self.usd_total)
+            if lost_usd is not None and self.usd_total
+            else None,
             "all_rows": self.rows,
-            "all_usd": round(self.usd_total, 2),
+            "all_usd": _money(self.usd_total),
             "valid_failures": self.valid_failures,
             "rows_unpriced": self.rows_unpriced,
             "budget_protocol_share_of_valid_failures": (
@@ -745,12 +763,12 @@ def process_loss(
     for r in rows:
         if r.failure_kind in by_kind:
             by_kind[r.failure_kind].append(r)
-    kinds = {k: (len(rs), spend_of_rows(rs).usd or 0.0) for k, rs in by_kind.items()}
+    kinds = {k: (len(rs), spend_of_rows(rs).usd) for k, rs in by_kind.items()}
     total = spend_of_rows(rows)
     return ProcessLoss(
         kinds=kinds,
         rows=len(rows),
-        usd_total=total.usd or 0.0,
+        usd_total=total.usd,
         valid_failures=sum(1 for r in rows if r.valid and not r.clean),
         usd_per_gbp=usd_per_gbp,
         rows_unpriced=total.rows_unpriced,
@@ -1073,7 +1091,7 @@ def _cells(rows: Sequence[ValueRow], usd_per_gbp: float) -> list[dict[str, Any]]
     ):
         rate = _rate(rs)
         cell_spend = spend_of_rows(rs)
-        usd = cell_spend.usd or 0.0
+        usd = cell_spend.usd
         out.append(
             {
                 "capability_class": cls,
@@ -1084,8 +1102,8 @@ def _cells(rows: Sequence[ValueRow], usd_per_gbp: float) -> list[dict[str, Any]]
                 "n_valid": rate.n,
                 "clean": rate.to_dict(),
                 "loss_rows": sum(1 for r in rs if r.failure_kind in LOSS_KINDS),
-                "spend_usd": round(usd, 2),
-                "spend_gbp": round(usd / usd_per_gbp, 2),
+                "spend_usd": _money(usd),
+                "spend_gbp": _money(None if usd is None else usd / usd_per_gbp),
                 "spend_rows_unpriced": cell_spend.rows_unpriced,
             }
         )

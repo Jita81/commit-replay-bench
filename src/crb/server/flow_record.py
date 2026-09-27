@@ -31,7 +31,8 @@ What it is:   The recorder of the three moments the flow reading needs and could
               and ``deployment.first_healthy`` — and the readers that fold them back.
 What it does: Writes each moment once as a system event in the caller's session (the caller
               commits), never back-dates one, marks a moment that passed before recording as
-              unknown, and reads them back for ``crb.server.flow``.
+              unknown, and reads them back for ``crb.server.flow`` — a deliver stamp with the
+              scope it was recorded in, so a reader pairs it only within that scope.
 How:          ``append_system_event`` on a deterministic trace per repository (or per
               deployment); the "already written?" checks are single ``select``s on
               ``Event.action``; the readers return plain stamps and cell keys.
@@ -52,6 +53,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func, select
@@ -164,6 +166,39 @@ def deliver_moments(session: Session, repo: str) -> dict[Cell, list[str]]:
     out: dict[Cell, list[str]] = {}
     for ev in _events(session, DELIVER_ROUTED, repo):
         out.setdefault(_cell_of(ev.payload_json or {}), []).append(ev.timestamp)
+    return out
+
+
+@dataclass(frozen=True)
+class DeliverStamp:
+    """One ``cell.routed_deliver`` stamp as written: the cell, when, and the scope it was
+    recorded in (``""`` for a field the stamp does not carry)."""
+
+    capability_class: str
+    size: str
+    timestamp: str
+    apparatus: str
+    posture_class: str
+    checks_arm: str
+
+
+def deliver_stamps(session: Session, repo: str) -> list[DeliverStamp]:
+    """Every observed first-deliver stamp of ``repo`` with its scope, oldest first — what a
+    reader needs to pair a stamp only with a decision of the same scope."""
+    out: list[DeliverStamp] = []
+    for ev in _events(session, DELIVER_ROUTED, repo):
+        p = ev.payload_json or {}
+        cls, size = _cell_of(p)
+        out.append(
+            DeliverStamp(
+                capability_class=cls,
+                size=size,
+                timestamp=ev.timestamp,
+                apparatus=str(p.get("apparatus", "") or ""),
+                posture_class=str(p.get("posture_class", "") or ""),
+                checks_arm=str(p.get("checks_arm", "") or ""),
+            )
+        )
     return out
 
 

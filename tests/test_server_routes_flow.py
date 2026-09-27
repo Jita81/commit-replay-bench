@@ -8,11 +8,14 @@ What it does: Pins the reading's shape (six streams, the apparatus, the method s
               measure stream's spend over the seed (an unpriced imported row is never counted
               as zero), the honest empties with their reasons, the connect stream's
               registration → first PASSED controls report (an escape does not count), the
-              decide stream's attested row → signature, the manufacture chain's
-              registered → opened → merged, an account recovery on the platform stream, the
-              reviewers' stated minutes, the spend counted once across the streams, the
-              figures served as not captured with their gap ids, and the 404 / 401 / 409
-              answers.
+              measure stream's exact run and bar times and its cost per cell over the first
+              ten rows (withheld over a floor), the decide stream's attested row → signature
+              and first-deliver → signature to the second (a stamp of another cell, scope,
+              repository or later moment never pairs), the account figures an admin's only,
+              the manufacture chain's registered → opened → merged, an account recovery on
+              the platform stream, the reviewers' stated minutes, the spend counted once
+              across the streams, the figures served as not captured with their gap ids, and
+              the 404 / 401 / 409 answers.
 How:          ``make_env`` over the synthetic seed; events and a factory evidence chain are
               written directly for the cases the seed has no data for; a deliberately
               false-Q1 row proves the read refuses untrusted rows like the map does.
@@ -39,7 +42,10 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from crb.core.flow import parse_ts
+from crb.core.ledger import LABEL_COST_KNOWN, GradeRow
 from crb.core.review import ReviewRecord
+from crb.core.signoff import SignoffRecord
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.evidence import (
     EV_BACKLOG_EVOLVED,
@@ -54,7 +60,9 @@ from crb.factory.evidence import (
 )
 from crb.server.app import API_PREFIX, create_app
 from crb.server.factory_state import FactoryHome
-from crb.server.flow import measure
+from crb.server.flow import ADMIN_ONLY, decide_and_license, measure
+from crb.server.flow_record import scope_key
+from crb.server.routes.signoffs import load_signoff_records
 from crb.store.ledger import DbLedger, DbReviewLedger
 from crb.store.models import Event, Grade, User
 from fixtures.server_seed import (
@@ -184,8 +192,54 @@ class TestMeasure:
 
     def test_prices_one_routable_cell_from_the_priced_rows(self, env: Env) -> None:
         s = stream(reading(env), "measure")
-        # $0.528 of priced rows over the one cell that reached ten rows
-        assert s["per_unit"] == 0.528 and s["per_unit_label"] == "per cell that reached 10 rows"
+        # the one cell at the bar (bug.fix|S, 40 rows at $0.012) cost $0.12 to reach its tenth
+        # row: its first ten rows only — not the stream's whole $0.528, not its rows after ten
+        assert s["per_unit"] == 0.12
+        assert s["per_unit_label"] == "per cell that reached 10 rows, over its first 10 rows"
+        assert s["per_unit_units"] == 1 and s["per_unit_reason"] == ""
+        assert s["per_unit_spend"]["rows_priced"] == 10
+        assert s["per_unit_spend"]["rows_unpriced"] == 0
+
+    def test_the_bar_is_timed_and_priced_to_the_cells_tenth_row_exactly(self, env: Env) -> None:
+        # one cell of twelve rows a minute apart: the tenth lands 9 minutes after the first;
+        # the eleventh reports no price and the twelfth cost $1, both AFTER the bar; a second
+        # cell of three $5 rows never reaches it. Only the first ten rows are the bar's money.
+        base = env.info.rows[0]
+        cell = [row_at(base, minute=i, cost=0.01, run_id="run-a") for i in range(10)]
+        cell += [row_at(base, minute=10, cost=None, run_id="run-a")]
+        cell += [row_at(base, minute=11, cost=1.0, run_id="run-a")]
+        thin = [
+            row_at(base, minute=20 + i, cost=5.0, run_id="run-b", capability_class="docs.update")
+            for i in range(3)
+        ]
+        flow = measure(cell + thin, {"run-a": "replay", "run-b": "replay"}, RUNS_QUEUED)
+        bar = next(lt for lt in flow.lead_times if lt.key == "first_row_to_bar")
+        assert (bar.n, bar.median_s, bar.min_s, bar.max_s) == (1, 540.0, 540.0, 540.0)
+        assert flow.per_unit == pytest.approx(0.10)
+        assert (flow.per_unit_units, flow.per_unit_reason) == (1, "")
+        assert (flow.per_unit_spend.rows_priced, flow.per_unit_spend.rows_unpriced) == (10, 0)
+        # the stream's own spend is still every priced row, and names the one unpriced
+        assert flow.spend.usd == pytest.approx(0.10 + 1.0 + 15.0)
+        assert flow.spend.rows_unpriced == 1
+
+    def test_queued_to_graded_runs_from_the_runs_stamp_to_its_last_row(self, env: Env) -> None:
+        # run-a was queued at 09:50 and its rows graded 10:00..10:11 → 21 minutes; run-b was
+        # queued at 10:15 and its three rows graded 10:20..10:22 → 7 minutes; median 14 min
+        base = env.info.rows[0]
+        a = [row_at(base, minute=i, cost=0.01, run_id="run-a") for i in range(12)]
+        b = [row_at(base, minute=20 + i, cost=0.01, run_id="run-b") for i in range(3)]
+        flow = measure(a + b, {"run-a": "replay", "run-b": "blind"}, RUNS_QUEUED)
+        lt = next(lt for lt in flow.lead_times if lt.key == "queued_to_graded")
+        assert (lt.n, lt.min_s, lt.max_s, lt.median_s) == (2, 420.0, 1260.0, 840.0)
+
+    def test_a_cost_per_cell_over_a_floor_is_withheld_with_the_reason(self, env: Env) -> None:
+        base = env.info.rows[0]
+        cell = [row_at(base, minute=i, cost=0.01, run_id="run-a") for i in range(9)]
+        cell += [row_at(base, minute=9, cost=None, run_id="run-a")]
+        flow = measure(cell, {"run-a": "replay"}, RUNS_QUEUED)
+        assert flow.per_unit is None
+        assert "1 row" in flow.per_unit_reason and "floor" in flow.per_unit_reason
+        assert flow.per_unit_spend.rows_unpriced == 1
 
     def test_counts_the_rows_the_graded_runs_and_the_cells_at_the_bar(self, env: Env) -> None:
         s = stream(reading(env), "measure")
@@ -230,6 +284,66 @@ class TestMeasure:
         }
         assert lead(s, "queued_to_graded")["median_s"] is None
         assert lead(s, "queued_to_graded")["reason"]
+
+
+#: The queued stamps of the two runs the exact-answer measure tests grade rows for.
+RUNS_QUEUED = {"run-a": "2026-09-01T09:50:00+00:00", "run-b": "2026-09-01T10:15:00+00:00"}
+
+
+def row_at(
+    base: GradeRow,
+    *,
+    minute: int,
+    cost: float | None,
+    run_id: str,
+    capability_class: str = "bug.fix",
+) -> GradeRow:
+    """A copy of ``base`` graded at 10:``minute`` on 2026-09-01 in ``capability_class``|S, with
+    a price (``cost``) or none (``None`` — the row reported no cost)."""
+    labels = {**base.labels, LABEL_COST_KNOWN: "false" if cost is None else "true"}
+    return dataclasses.replace(
+        base,
+        run_id=run_id,
+        capability_class=capability_class,
+        size="S",
+        created=f"2026-09-01T10:{minute:02d}:00+00:00",
+        cost_usd=cost or 0.0,
+        labels=labels,
+        row_hash=f"{run_id}-{minute:02d}".ljust(64, "0"),
+    )
+
+
+#: The deliver cell's (class, size) — the key the recorder stamps a cell by.
+DELIVER_CLS = (DELIVER_CELL["capability_class"], DELIVER_CELL["size"])
+
+
+def sign_the_deliver_cell(env: Env) -> SignoffRecord:
+    """Sign the seed's deliver cell as the approver, the honest way, and return the record."""
+    clear_policy(env)
+    login(env.client, "approver")
+    r = env.post("/signoffs", json=attested_body(env, DELIVER_CELL))
+    assert r.status_code == 201, r.text
+    with env.factory() as db:
+        (rec,) = load_signoff_records(db, ALPHA)
+    return rec
+
+
+def scope_of(rec: SignoffRecord, **override: str) -> dict[str, str]:
+    """The scope fields the recorder writes into a stamp, as the record's own scope, with any
+    field overridden — what the worker's ``_served_map`` hands ``record_deliver_transitions``."""
+    scope = {
+        "apparatus": rec.apparatus_version,
+        "posture_class": rec.posture_class,
+        "checks_arm": rec.arm,
+        **override,
+    }
+    return {"scope": scope_key(scope), **scope}
+
+
+def seconds_between(start: str, end: str) -> float:
+    a, b = parse_ts(start), parse_ts(end)
+    assert a is not None and b is not None
+    return (b - a).total_seconds()
 
 
 def add_factory_row(env: Env, *, cost: float) -> None:
@@ -341,29 +455,53 @@ class TestDecideAndLicense:
         assert s["spend"]["usd"] is None
 
     def test_a_cell_first_routing_deliver_to_its_signature_is_measured(self, env: Env) -> None:
-        clear_policy(env)
-        login(env.client, "approver")
-        r = env.post("/signoffs", json=attested_body(env, DELIVER_CELL))
-        assert r.status_code == 201, r.text
-        signed_at = r.json()["created"]
-        cell = {"capability_class": DELIVER_CELL["capability_class"], "size": DELIVER_CELL["size"]}
-        add_event(
-            env,
-            event_id="d" * 32,
-            trace_id="v" * 32,
-            seq=1,
-            timestamp="2026-01-01T09:00:00+00:00",
-            stage="system",
-            action="cell.routed_deliver",
-            status="ok",
-            repo=ALPHA,
-            payload_json={**cell, "moment": "observed", "scope": "x"},
-        )
+        rec = sign_the_deliver_cell(env)
+        # the true start: this cell, this repository, the record's own scope, before the
+        # signature. Every decoy is LATER, so a fold that took any of them as the start (the
+        # latest stamp at or before the signature wins) would serve a different number.
+        stamps = [
+            ("2026-01-01T09:00:00+00:00", ALPHA, DELIVER_CLS, scope_of(rec)),
+            # another cell of the same repository and scope
+            ("2026-01-02T09:00:00+00:00", ALPHA, ("docs.update", "S"), scope_of(rec)),
+            # the same cell stamped in an older apparatus, another posture, another arm
+            ("2026-01-03T09:00:00+00:00", ALPHA, DELIVER_CLS, scope_of(rec, apparatus="1.0")),
+            (
+                "2026-01-04T09:00:00+00:00",
+                ALPHA,
+                DELIVER_CLS,
+                scope_of(rec, posture_class="docker/gvisor/sealed"),
+            ),
+            ("2026-01-05T09:00:00+00:00", ALPHA, DELIVER_CLS, scope_of(rec, checks_arm="on")),
+            # a stamp with no scope at all (it cannot be matched to any signature)
+            ("2026-01-06T09:00:00+00:00", ALPHA, DELIVER_CLS, {"scope": "x"}),
+            # the same cell of ANOTHER repository
+            ("2026-01-07T09:00:00+00:00", BETA, DELIVER_CLS, scope_of(rec)),
+            # the same cell after the signature: no signature answers a later transition
+            ("2099-01-01T09:00:00+00:00", ALPHA, DELIVER_CLS, scope_of(rec)),
+        ]
+        for i, (ts, repo, (cls, size), scope) in enumerate(stamps):
+            add_event(
+                env,
+                event_id=f"{i + 1:032x}",
+                trace_id="v" * 32,
+                seq=i + 1,
+                timestamp=ts,
+                stage="system",
+                action="cell.routed_deliver",
+                status="ok",
+                repo=repo,
+                payload_json={
+                    "capability_class": cls,
+                    "size": size,
+                    "moment": "observed",
+                    **scope,
+                },
+            )
         add_event(
             env,
             event_id="c" * 32,
             trace_id="v" * 32,
-            seq=2,
+            seq=99,
             timestamp="2026-01-01T09:00:00+00:00",
             stage="system",
             action="flow.recorder_started",
@@ -373,11 +511,39 @@ class TestDecideAndLicense:
         )
         s = stream(reading(env), "decide-and-license")
         lt = lead(s, "routed_deliver_to_signed")
-        assert lt["n"] == 1 and lt["median_s"] is not None and lt["median_s"] > 0
-        assert lt["max_s"] == lt["min_s"]
-        assert s["counts"]["cells_routed_deliver"] == 1
+        expected = seconds_between("2026-01-01T09:00:00+00:00", rec.verified_at)
+        assert (lt["n"], lt["median_s"], lt["min_s"], lt["max_s"]) == (
+            1,
+            expected,
+            expected,
+            expected,
+        )
+        assert lt["dropped"] == 0 and lt["reason"] == ""
         assert s["counts"]["cells_at_deliver_before_recording"] == 1
-        assert signed_at > "2026-01-01T09:00:00+00:00"
+
+    def test_a_stamp_of_another_scope_never_dates_a_signature(self, env: Env) -> None:
+        rec = sign_the_deliver_cell(env)
+        # the verifier's case: an old apparatus's stamp of the signed cell, 634 days earlier,
+        # is the ONLY stamp — no signature of the current scope answers it
+        add_event(
+            env,
+            event_id="e" * 32,
+            trace_id="v" * 32,
+            seq=1,
+            timestamp="2025-01-01T00:00:00+00:00",
+            stage="system",
+            action="cell.routed_deliver",
+            status="ok",
+            repo=ALPHA,
+            payload_json={
+                "capability_class": DELIVER_CLS[0],
+                "size": DELIVER_CLS[1],
+                "moment": "observed",
+                **scope_of(rec, apparatus="1.0", posture_class="docker/gvisor/sealed"),
+            },
+        )
+        lt = lead(stream(reading(env), "decide-and-license"), "routed_deliver_to_signed")
+        assert lt["n"] == 0 and lt["median_s"] is None and lt["reason"]
 
     def test_the_reviewers_stated_minutes_are_shown_with_their_n(self, env: Env) -> None:
         s = stream(reading(env), "decide-and-license")
@@ -416,15 +582,27 @@ class TestDecideAndLicense:
         assert lead(s, "accepted_to_signed")["reason"]
 
     def test_the_attested_row_graded_clean_to_the_signature_is_measured(self, env: Env) -> None:
-        clear_policy(env)
-        login(env.client, "approver")
-        r = env.post("/signoffs", json=attested_body(env, DELIVER_CELL))
-        assert r.status_code == 201, r.text
-        s = stream(reading(env), "decide-and-license")
-        lt = lead(s, "accepted_to_signed")
-        assert lt["n"] == 1 and lt["median_s"] is not None
-        assert s["counts"]["signoffs"] == 1
-        assert s["counts"]["signoffs_without_an_attested_row"] == 0
+        rec = sign_the_deliver_cell(env)
+        attested = rec.attestation.reviewed_row_hash if rec.attestation else ""
+        # the rows as the fold receives them, each with a stamp this test chose: the attested
+        # row was graded at 08:00; every other row later, so pairing any other row — or the
+        # signature with itself — serves a different number
+        rows = [
+            dataclasses.replace(
+                r,
+                created="2026-01-01T08:00:00+00:00"
+                if r.row_hash == attested
+                else f"2026-01-0{2 + i % 7}T08:00:00+00:00",
+            )
+            for i, r in enumerate(env.info.rows)
+        ]
+        with env.factory() as db:
+            flow = decide_and_license(db, ALPHA, load_signoff_records(db, ALPHA), rows)
+        lt = next(lt for lt in flow.lead_times if lt.key == "accepted_to_signed")
+        expected = seconds_between("2026-01-01T08:00:00+00:00", rec.verified_at)
+        assert (lt.n, lt.median_s, lt.min_s, lt.max_s) == (1, expected, expected, expected)
+        assert flow.counts["signoffs"] == 1
+        assert flow.counts["signoffs_without_an_attested_row"] == 0
 
 
 class TestManufactureAndDeliver:
@@ -534,6 +712,39 @@ class TestRunThePlatform:
         s = stream(reading(env), "run-the-platform")
         assert s["counts"]["accounts"] == 4 and s["counts"]["admins_active"] == 1
         assert [nc["gap"] for nc in s["not_captured"]] == ["G-584"]
+
+    def test_the_account_figures_are_an_admins_only(self, env: Env) -> None:
+        # the admin-only user list (GET /users) is refused below admin; the same deployment's account
+        # counts and the timing of one person's recovery are refused on /flow too
+        add_event(
+            env,
+            event_id="a" * 32,
+            trace_id="b" * 32,
+            seq=1,
+            timestamp="2026-09-01T10:00:00+00:00",
+            stage="system",
+            action="user.password_set",
+            status="ok",
+            actor=user_id("root"),
+            payload_json={"target": user_id("viewer1")},
+        )
+        with env.factory() as db:
+            user = db.get(User, user_id("viewer1"))
+            assert user is not None
+            user.last_login = "2026-09-01T10:30:00+00:00"
+            db.commit()
+        # the env is signed in as the admin, who reads them (before viewer1 signs in again)
+        s = stream(reading(env), "run-the-platform")
+        assert s["counts"]["admins_active"] == 1 and s["counts"]["recoveries_started"] == 1
+        assert lead(s, "password_set_to_signed_in")["median_s"] == 1800.0
+        for role in ("viewer", "operator", "approver"):
+            login(env.client, role)
+            assert env.get("/users").status_code == 403
+            s = stream(reading(env), "run-the-platform")
+            assert set(s["counts"]) == {"install_recorded"}
+            lt = lead(s, "password_set_to_signed_in")
+            assert (lt["n"], lt["median_s"], lt["min_s"], lt["max_s"]) == (0, None, None, None)
+            assert lt["reason"] == ADMIN_ONLY
 
     def test_an_install_that_passed_before_recording_is_never_dated(self, env: Env) -> None:
         # the seeded database held rows before the server first started: the install moment

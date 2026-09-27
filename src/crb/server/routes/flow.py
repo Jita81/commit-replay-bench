@@ -18,7 +18,8 @@ What it is:   The ``/flow`` route module — the endpoint each screen reads its 
               time, spend and counts from.
 What it does: Resolves the repository (404 when unknown), loads its rows, sign-offs and factory
               events, folds them with ``build_flow``, and re-types the reading into
-              ``FlowOut``. A viewer may read it; nothing here writes.
+              ``FlowOut``. A viewer may read it; the deployment's account figures are
+              served to an admin only (as ``GET /admin/users`` is); nothing here writes.
 How:          ``get_repo_or_404`` → ``DbLedger(factory).rows(repo=…)`` →
               ``load_signoff_records`` → ``FactoryHome(settings.home, repo).events()`` →
               ``build_flow`` → ``FlowOut.model_validate(reading.to_dict())``.
@@ -49,6 +50,7 @@ from crb.server.flow import build_flow
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
 from crb.server.schemas_flow import FlowOut
+from crb.server.settings import ROLE_RANK
 from crb.store.ledger import DbLedger
 
 router = APIRouter(tags=["flow"])
@@ -68,7 +70,6 @@ def flow(
     settings: SettingsDep,
     repo: str = Query(min_length=1, max_length=64),
 ) -> FlowOut:
-    del viewer
     get_repo_or_404(db, repo)
     rows = list(DbLedger(factory).rows(repo=repo))
     reading = build_flow(
@@ -77,5 +78,6 @@ def flow(
         rows=rows,
         signoffs=load_signoff_records(db, repo),
         factory_events=FactoryHome(settings.home, repo).events(),
+        admin=ROLE_RANK.get(viewer.role, -1) >= ROLE_RANK["admin"],
     )
     return FlowOut.model_validate(reading.to_dict())

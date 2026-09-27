@@ -75,6 +75,9 @@ class StreamFlowOut(BaseModel):
     spend_label: str
     per_unit: float | None
     per_unit_label: str
+    per_unit_spend: SpendOut
+    per_unit_units: int
+    per_unit_reason: str
     counts: dict[str, int]
     not_captured: list[NotCapturedOut]
 

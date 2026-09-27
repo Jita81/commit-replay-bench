@@ -38,6 +38,7 @@ from crb.core.flow import (
     median,
     parse_ts,
     per_unit,
+    per_unit_withheld,
     spend_of,
     spend_of_rows,
     stated_durations,
@@ -191,6 +192,20 @@ class TestPerUnit:
     def test_no_units_or_no_known_spend_is_none(self) -> None:
         assert per_unit(Spend(usd=1.0, rows_priced=4, rows_unpriced=0), 0) is None
         assert per_unit(Spend(usd=None, rows_priced=0, rows_unpriced=3), 4) is None
+
+    def test_a_floor_is_never_divided(self) -> None:
+        # one row reported no price: the sum is a floor, and a cost per unit over it would
+        # understate — the value scorecard's per-pound rule (DL-067), in one place
+        assert per_unit(Spend(usd=1.0, rows_priced=3, rows_unpriced=1), 4) is None
+
+    def test_says_why_a_cost_per_unit_is_withheld(self) -> None:
+        floor = per_unit_withheld(Spend(usd=1.0, rows_priced=3, rows_unpriced=1), 4, unit="cell")
+        assert floor.startswith("1 row counted here reported no price") and "floor" in floor
+        none = per_unit_withheld(Spend(usd=None, rows_priced=0, rows_unpriced=0), 4, unit="cell")
+        assert none == "no row counted here is priced yet"
+        empty = per_unit_withheld(Spend(usd=1.0, rows_priced=4), 0, unit="merged pull request")
+        assert empty == "no merged pull request yet to divide by"
+        assert per_unit_withheld(Spend(usd=1.0, rows_priced=4), 4, unit="cell") == ""
 
 
 class TestNotCaptured:

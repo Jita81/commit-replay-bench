@@ -46,11 +46,27 @@ and dating an install from the oldest row in the database dates an upgrade as an
    the first green read follows the first green state by at most one probe period.
 5. **Observability, never a verdict.** A recorder failure is logged; the run, the start and
    the health answer stand. Nothing here changes a route, a grade or a sign-off.
+6. **A stamp is read only within its own scope** (amended 2026-09-27, after independent
+   verification found a stamp of an old apparatus dating a current signature). Every
+   `cell.routed_deliver` payload carries the apparatus, posture class and checks arm it was
+   recorded in. A signature is paired only with a stamp of its own cell whose apparatus is
+   one the record was stamped at, whose posture class is the record's and whose checks arm is
+   the record's — the three things a sign-off must cover to lift a cell at all
+   (`SignoffRecord.covers_apparatus` / `covers_posture` / `covers_arm`). A stamp or a record
+   that names no scope pairs with nothing. So a cell already at `deliver` when recording
+   began in the record's scope stays counted and never timed, whatever another scope
+   recorded.
+7. **The deployment's account figures are an admin's** (amended 2026-09-27). The platform
+   stream's account counts and its recovery lead time are served only to an admin, the line
+   `GET /users` already draws: with n = 1 the recovery lead time is one person's recovery,
+   timed. Anyone else reads the lead time as unmeasured with that reason, and no account
+   count.
 
 ## Consequences
 
 - The decide stream shows "cell first routed deliver → cell signed" per sign-off, pairing
-  each signature with the latest first-deliver stamp of its cell at or before it; the
+  each signature with the latest first-deliver stamp of its cell, in its own scope, at or
+  before it; the
   platform stream shows "installed → first green /health" when both are observed. G-557
   and G-558 close; how many go-live lines are proven stays open under G-584.
 - A deployment upgraded to this release shows its install as unknown, and cells already at
@@ -60,7 +76,8 @@ and dating an install from the oldest row in the database dates an upgrade as an
   for a factory run). A repository's first finished run writes one `flow.recorder_started`
   event.
 - Must never: back-date a moment from a neighbouring record; time an inherited or unknown
-  moment; let the recorder fail a run or a start.
+  moment; pair a stamp with a signature of another scope; serve the account figures below
+  admin; let the recorder fail a run or a start.
 
 ## Alternatives considered
 

@@ -7,7 +7,8 @@ What it is:   The agreement suite between ``GET /flow`` (``crb.server.flow``) an
 What it does: Folds one set of graded rows through both and pins that they agree: the blind
               spend the scorecard divides by is the measure stream's spend over the same rows
               (priced rows summed, unpriced rows counted apart and never as zero, in both),
-              and the clean attempts both count are the rows the ledger calls clean. If either
+              and the clean attempts both count are the rows the ledger calls clean; and where
+              no row is priced both serve the money as unmeasured (``null``), never $0. If either
               reader stops using THE spend rule (``crb.core.flow.spend_of_rows``) or its own
               idea of a clean row, a case here fails.
 How:          ``GradeRow`` built by the posture fixture — some priced, one unpriced (no builder
@@ -81,3 +82,18 @@ def test_both_count_the_rows_the_ledger_calls_clean(rows: list[GradeRow]) -> Non
     ns = value_report([value_row_from_grade(r) for r in rows], []).to_dict()["north_star"]
     assert ns["clean"] == sum(1 for r in rows if r.clean) == 3
     assert all(value_row_from_grade(r).clean == r.clean for r in rows)
+
+
+def test_nothing_priced_is_unmeasured_in_both_readings_never_zero() -> None:
+    # every blind attempt reported no price: the flow reading serves its spend as null, and
+    # the scorecard must too — in the north star, in the process loss and in every loss kind
+    unpriced = [row(i, clean=i < 2, cost=0.0) for i in range(6)]
+    assert not any(r.cost_known for r in unpriced)
+    flow = measure(unpriced, {"run-1": "blind"}, {"run-1": "2026-09-20T09:00:00+00:00"})
+    report = value_report([value_row_from_grade(r) for r in unpriced], []).to_dict()
+    ns, loss = report["north_star"], report["process_loss"]
+    assert flow.spend.usd is None
+    assert (ns["spend_usd"], ns["spend_gbp"], ns["spend_rows_unpriced"]) == (None, None, 6)
+    assert (loss["all_usd"], loss["rows_unpriced"]) == (None, 6)
+    assert all(k["usd"] is None and k["gbp"] is None for k in loss["kinds"].values())
+    assert all(c["spend_usd"] is None and c["spend_gbp"] is None for c in report["cells"])

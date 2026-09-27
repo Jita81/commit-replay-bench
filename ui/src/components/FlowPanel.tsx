@@ -10,8 +10,11 @@
  *               are unpriced), its counts, and — named, never derived — the figures its
  *               definition of done asks for that nothing records, each with the gap that would
  *               close it. An unmeasured duration reads as a dash with the reason underneath,
- *               never as a zero. On the measure stream it also shows the repository's
- *               cumulative spend — every graded row once, which the streams' spends partition.
+ *               never as a zero; a cost per unit names its unit, its n and what it divided, and
+ *               is a dash with the server's reason when the money is a floor; a refused read
+ *               is a card that says so, never an empty space. On the measure stream it also
+ *               shows the repository's cumulative spend — every graded row once, which the
+ *               streams' spends partition.
  * How:          `useFlow(repo)` once per repository (five panels, one request) → the stream's
  *               entry → a `StatTile` per lead time and one for the spend, a definition list of
  *               counts, and the not-captured list; `fmtDuration` / `fmtUsd` do the formatting
@@ -67,6 +70,11 @@ function pricedOf(spend: Spend): string {
     : 'Every row counted here reported its own price.'
 }
 
+/** What a served cost per unit divided, and whether every row of it was priced. */
+function perUnitOf(spend: Spend): string {
+  return `${fmtUsd(spend.usd)} over ${fmtInt(spend.rows_priced)} priced row(s), divided by n. ${pricedOf(spend)}`
+}
+
 /** `graded_rows` → `graded rows` — the counts are read, not parsed. */
 function words(key: string): string {
   return key.replace(/_/g, ' ')
@@ -91,11 +99,22 @@ interface FlowPanelProps {
 
 /**
  * One stream's flow figures. Renders nothing while the query is in flight or the stream is
- * absent from the reading, so a screen never shows a half-built card; an error is left to the
- * screen's own boundary — this panel never invents a number to fill a gap.
+ * absent from the reading, so a screen never shows a half-built card. A refused or failed read
+ * is a card that says so with the server's own message — the hook does not throw, so nothing
+ * would reach a boundary, and a panel that silently vanished would read as "no figures". This
+ * panel never invents a number to fill a gap.
  */
 export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
   const q = useFlow(repo)
+  if (q.isError) {
+    return (
+      <Card title={title ?? 'How this flows'} eyebrow="Derived from the records this product already keeps" eyebrowHint="flow.reading" id={`flow-${stream}`} className="mt-6">
+        <Hint as="p" id="flow.refused" className="m-0 text-[13px] text-on-surface-muted" data-testid={`flow-refused-${stream}`}>
+          These figures are not shown: the product refused to fold them. {q.error.message}
+        </Hint>
+      </Card>
+    )
+  }
   const reading = q.data
   const s: StreamFlow | undefined = reading?.streams.find((x) => x.stream === stream)
   if (!reading || !s) return null
@@ -146,10 +165,10 @@ export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
           <StatTile
             label={`Cost ${s.per_unit_label}`}
             value={fmtUsd(s.per_unit)}
-            n={s.spend.rows_priced}
-            apparatus={`apparatus ${reading.apparatus} · the priced rows divided by the deliveries`}
+            n={s.per_unit_units}
+            apparatus={`apparatus ${reading.apparatus} · the price of the rows it covers, divided by n${versionsOf(s.per_unit_spend)}`}
             hint="flow.per_unit"
-            footer={s.per_unit === null ? 'Unmeasured: either nothing is priced yet or nothing has been delivered.' : s.spend_label}
+            footer={s.per_unit === null ? `${s.per_unit_reason}.` : perUnitOf(s.per_unit_spend)}
             data-testid={`flow-per-unit-${stream}`}
           />
         )}

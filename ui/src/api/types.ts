@@ -1777,8 +1777,9 @@ export interface ValueNorthStar {
   clean_rate: ValueRate
   precision_basis: 'review' | 'review_pooled' | 'proxy' | 'none'
   precision: ValueRate
-  spend_usd: number
-  spend_gbp: number
+  /** The priced blind spend; `null` when no blind attempt is priced — unmeasured, never $0. */
+  spend_usd: number | null
+  spend_gbp: number | null
   /** Blind attempts whose cost is a measurement, and those with no price (never summed as zero). */
   spend_rows_priced?: number
   spend_rows_unpriced?: number
@@ -1851,9 +1852,16 @@ export interface StreamFlow {
   spend: Spend
   /** Which rows the spend covers, in words — the streams do not all buy the same thing. */
   spend_label: string
-  /** The spend divided by the thing the stream delivers, or `null` when either side is unmeasured. */
+  /**
+   * `per_unit_spend` divided by `per_unit_units` (the things the stream delivers), or `null` when
+   * either side is unmeasured or the spend is a floor; `per_unit_reason` then says which.
+   */
   per_unit: number | null
   per_unit_label: string
+  /** What `per_unit` divided: the spend of the rows it covers. */
+  per_unit_spend: Spend
+  per_unit_units: number
+  per_unit_reason: string
   counts: Record<string, number>
   not_captured: NotCaptured[]
 }

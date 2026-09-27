@@ -138,13 +138,15 @@ export const HINTS = {
   'flow.installed_to_healthy':
     'From this deployment’s install to the first time /health read green. The install is dated only when the server was first started on an empty database; a deployment upgraded to this release shows a dash with the reason rather than a guessed date.',
   'flow.password_set_to_signed_in':
-    'From an admin setting someone else’s password to that person signing in again: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted.',
+    'From an admin setting someone else’s password to that person signing in again: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted. Only an admin sees it, as only an admin sees the accounts.',
   'flow.spend':
     'What this stream spent, summing only the rows whose cost is a measurement. A row that reported no price is never counted as zero, so the figure is a floor and the line underneath says how many rows are missing from it.',
   'flow.spend_total':
     'Everything this repository has spent, every graded row counted once: measuring, the factory and any stream that buys attempts. Each stream’s own spend is a part of this figure, so the parts never add up to more than it.',
   'flow.per_unit':
-    'The priced spend divided by what the stream delivered, so a reader can price one certified change. It is a dash whenever either side is unmeasured, because a cost per change with no change to divide by is not zero.',
+    'The price of the rows this figure covers divided by what the stream delivered (n), so a reader can price one unit — a merged pull request, or a cell that reached the bar over its first ten rows. It is a dash whenever either side is unmeasured, or when a row it covers reported no price: a cost over a floor would understate.',
+  'flow.refused':
+    'The product refused to fold these figures, and the message says why — most often a graded row that fails its own belts, which the ledger will not load. Nothing is shown rather than a number built on rows the product does not trust.',
   'flow.counts':
     'The plain counts behind the durations above: what entered this stream, what came out and what stopped. They are counts, not rates — no interval belongs on them.',
   'flow.not_captured':
@@ -1675,6 +1677,7 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.spend',
   'flow.spend_total',
   'flow.per_unit',
+  'flow.refused',
   'flow.counts',
   'flow.not_captured',
 ]

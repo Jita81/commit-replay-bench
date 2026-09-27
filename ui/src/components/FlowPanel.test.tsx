@@ -27,8 +27,14 @@ import { screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Flow } from '../api/types'
 import { unhinted } from '../help/hints-collector'
-import { PRINCIPAL, mockApi, renderApp } from '../test/utils'
+import { PRINCIPAL, envelope, mockApi, renderApp } from '../test/utils'
 import { FlowPanel } from './FlowPanel'
+
+/** The n a tile shows — the text of the `dd` beside its `n =` term, nothing else in the tile. */
+function nOf(tile: HTMLElement): string {
+  const term = Array.from(tile.querySelectorAll('dt')).find((dt) => dt.textContent === 'n =')
+  return term?.nextElementSibling?.textContent ?? ''
+}
 
 const MANUFACTURE: Flow['streams'][number] = {
   stream: 'manufacture-and-deliver',
@@ -37,7 +43,7 @@ const MANUFACTURE: Flow['streams'][number] = {
     {
       key: 'registered_to_pr',
       label: 'Item registered → pull request opened',
-      n: 3,
+      n: 7,
       median_s: 7500,
       min_s: 3600,
       max_s: 280_800,
@@ -59,6 +65,9 @@ const MANUFACTURE: Flow['streams'][number] = {
   spend_label: 'the graded rows the factory built for this repository',
   per_unit: null,
   per_unit_label: 'per merged pull request',
+  per_unit_spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.2', '2.3'] },
+  per_unit_units: 0,
+  per_unit_reason: '6 rows counted here reported no price, so the money is a floor and a cost per merged pull request over it would understate; it is not served',
   counts: { items_registered: 4, pull_requests_opened: 3, merged: 0 },
   not_captured: [
     {
@@ -103,8 +112,7 @@ describe('FlowPanel', () => {
     const tile = await screen.findByTestId('flow-registered_to_pr')
     expect(tile.textContent).toContain('Item registered → pull request opened')
     expect(tile.textContent).toContain('2 h 5 min')
-    expect(tile.textContent).toContain('n =')
-    expect(tile.textContent).toContain('3')
+    expect(nOf(tile)).toBe('7')
     expect(tile.textContent).toContain('fastest 1 h 0 min, slowest 3 days 6 h')
     expect(tile.textContent).toContain('apparatus 2.2')
     expect(tile.textContent).toContain('derived from the stored')
@@ -150,11 +158,43 @@ describe('FlowPanel', () => {
     expect(screen.queryByTestId('flow-spend-total')).toBeNull()
   })
 
-  it('a cost per delivery with nothing priced is a dash that says why', async () => {
+  it('a cost per unit over a floor is a dash with the server’s reason, never a divided floor', async () => {
     mount()
     const tile = await screen.findByTestId('flow-per-unit-manufacture-and-deliver')
     expect(tile.textContent).toContain('Cost per merged pull request')
-    expect(tile.textContent).toContain('Unmeasured: either nothing is priced yet or nothing has been delivered.')
+    expect(tile.textContent).toContain('—')
+    expect(tile.textContent).toContain('6 rows counted here reported no price, so the money is a floor')
+  })
+
+  it('a served cost per unit names its unit, its n and whether every row it covers was priced', async () => {
+    const measure: Flow['streams'][number] = {
+      ...MEASURE,
+      per_unit: 0.12,
+      per_unit_label: 'per cell that reached 10 rows, over its first 10 rows',
+      per_unit_spend: { usd: 0.24, rows_priced: 20, rows_unpriced: 0, apparatus_versions: ['2.3'] },
+      per_unit_units: 2,
+      per_unit_reason: '',
+    }
+    mount('measure', { ...FLOW, streams: [measure] })
+    const tile = await screen.findByTestId('flow-per-unit-measure')
+    expect(tile.textContent).toContain('Cost per cell that reached 10 rows, over its first 10 rows')
+    expect(tile.textContent).toContain('$0.1200')
+    expect(nOf(tile)).toBe('2')
+    expect(tile.textContent).toContain('$0.2400 over 20 priced row(s), divided by n')
+    expect(tile.textContent).toContain('Every row counted here reported its own price.')
+    expect(tile.textContent).not.toContain('deliveries')
+  })
+
+  it('a refused reading says so with the server’s message, and never vanishes', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /flow': () => envelope(409, 'false_q1_refused', 'a clean row of alpha failed a belt: the ledger refuses to load it'),
+    })
+    renderApp(<FlowPanel stream="run-the-platform" repo="alpha" />, { route: '/posture', path: '*' })
+    const card = await screen.findByTestId('flow-refused-run-the-platform')
+    expect(card.textContent).toContain('a clean row of alpha failed a belt: the ledger refuses to load it')
+    expect(card.textContent).toContain('These figures are not shown')
+    expect(unhinted(card)).toEqual([])
   })
 
   it('the counts read as words, not keys', async () => {
