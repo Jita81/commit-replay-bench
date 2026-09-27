@@ -29,6 +29,7 @@ Touch when:   a readiness gap kind is added (a punch-list case); the forecast's 
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import pytest
 
@@ -52,6 +53,7 @@ def _row(
     latency: float = 0.0,
     oracle_strength: float | None = None,
     task_id: str = "0123456789abcdef",
+    **kw: Any,
 ) -> GradeRow:
     return posture_row(
         repo="todo",
@@ -71,6 +73,7 @@ def _row(
         latency_s=latency,
         oracle_strength=oracle_strength,
         evidence_pack_hash=PACK if clean else "",
+        **kw,
     )
 
 
@@ -206,7 +209,11 @@ def test_forecast_class_only_key_uses_class_projection() -> None:
 
 
 def test_forecast_uncosted_cells_are_reported_not_priced() -> None:
-    f = fc.forecast_build({"bug.fix/S": 2}, _cell_rows("bug.fix", "S", cost=0.0, latency=0.0))
+    # uncosted = no cost was ever reported (an imported row), not a builder-reported $0,
+    # which is a known $0 and prices at $0 (P-051: test_economics.py pins that side)
+    rows = _cell_rows("bug.fix", "S", cost=0.0, latency=0.0, provenance="imported:census")
+    assert not any(r.cost_known for r in rows)
+    f = fc.forecast_build({"bug.fix/S": 2}, rows)
     assert f.measured_components == 2 and f.costed_components == 0 and f.timed_components == 0
     assert f.total_cost_mean == 0.0 and f.total_build_minutes == 0.0
     assert f.per_component[0].unit_cost_usd is None and f.per_component[0].unit_minutes is None

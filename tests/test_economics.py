@@ -9,17 +9,24 @@ What it does: Pins that a known $0 is $0 and enters the mean, that an unknown co
               interval match hand-computed values, that a lower bound is floored at 0, that
               rows from more than one apparatus version, posture class (ADR-0019) or checks
               arm (ADR-0024) are refused, and that a measured cell and the served
-              ``cost_usd_mean`` agree with the fold.
+              ``cost_usd_mean`` agree with the fold. Then P-051 across its class: the
+              abstract export, the re-measure price and the forecast keep a known $0, and a
+              ratchet fails when any reader in ``src/crb`` or ``ui/src`` decides a cost is
+              unknown by comparing it with zero.
 How:          Hand-built ``GradeRow`` lists (``posture_row``: a current-apparatus row carries
               its posture labels); expected numbers computed by hand in the test
               (textbook t values), never by calling the module's own helpers.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/core/economics.py (under test), src/crb/core/ledger.py (``GradeRow``,
-              ``cost_known``), src/crb/core/capability.py (``measure_cell`` attaches the
-              fold), src/crb/core/stats.py (``t_975``)
+              ``cost_known``, ``CellStats.n_cost_known``), src/crb/core/capability.py
+              (``measure_cell`` attaches the fold), src/crb/core/stats.py (``t_975``),
+              src/crb/core/federated.py (the abstract export keeps a known $0),
+              src/crb/core/learn.py (the re-measure price keeps it),
+              src/crb/core/forecast.py (the forecast prices it)
 Tested by:    tests/test_economics.py
-Touch when:   the interval method changes (pin the new method's textbook value here first).
+Touch when:   the interval method changes (pin the new method's textbook value here first), or
+              a new reader of a cost needs a place in ``_COST_ZERO_ALLOWED`` (say why there).
 """
 
 from __future__ import annotations
@@ -252,3 +259,75 @@ def test_a_measured_cell_carries_the_fold_and_agrees_with_its_mean() -> None:
     assert c.cost_known is True and c.latency_known is True
     assert c.to_dict()["economics"]["cost_known"] == 2
     assert cap.empty_cell(c.key, cap.PROJECTION_CLASS_SIZE).economics is None
+
+
+# --- every other reader of the same rows keeps a known $0 (P-051: the class, not one fold) ---
+
+
+def test_the_abstract_export_keeps_a_known_zero_cost() -> None:
+    from crb.core.federated import to_abstract_cell
+    from crb.core.ledger import cell_stats
+
+    rs = [row(cost=0.0, latency=3.0), row(cost=0.0, latency=4.0)]
+    assert all(r.cost_known for r in rs)
+    cell = to_abstract_cell(cell_stats(rs))
+    # a cell whose known costs are all $0 leaves the tenant as $0, never as "unknown"
+    assert cell.cost_usd_mean == 0.0
+    assert to_abstract_cell(cell_stats([unknown_cost(latency=3.0)])).cost_usd_mean is None
+
+
+def test_the_remeasure_price_keeps_a_known_zero_cost() -> None:
+    from crb.core import learn
+
+    stale = [
+        row(cost=0.0, latency=6.0, task_id=f"{i:040x}", apparatus_version="2.2") for i in range(4)
+    ]
+    plan = learn.remeasure_plan(stale, current_apparatus=APPARATUS_VERSION)
+    assert len(plan.cells) == 1
+    c = plan.cells[0]
+    # the price of re-measuring is a known $0, never "?"
+    assert c.cost_known is True and c.cost_usd_mean == 0.0 and c.est_cost_usd == 0.0
+
+
+def test_the_forecast_prices_a_known_zero_cost() -> None:
+    from crb.core.forecast import forecast_build
+
+    rs = [row(cost=0.0, latency=6.0, task_id=f"{i:040x}") for i in range(3)]
+    f = forecast_build({"bug.fix/S": 2}, rs)
+    assert f.costed_components == 2
+    assert f.per_component[0].unit_cost_usd == 0.0
+
+
+#: The only places a cost may be compared with zero: each is a rule about known-ness or a
+#: running total, never a filter that decides which costs a mean reads.
+_COST_ZERO_ALLOWED = {
+    # derive_cost_known: the rule that DECIDES known-ness (a positive cost is known)
+    ("src/crb/core/ledger.py", "if cost_usd > 0 or tokens_in > 0 or tokens_out > 0:"),
+    # the Factory's run banner: a run's running total, shown only once it has spent
+    (
+        "ui/src/screens/Factory/FactoryPage.tsx",
+        "{run.cost_usd > 0 ? ` ${usd(run.cost_usd)} so far.` : ''}",
+    ),
+}
+
+
+def test_no_reader_decides_a_cost_is_unknown_by_comparing_it_with_zero() -> None:
+    """P-051 as a gate: known-ness is ``GradeRow.cost_known`` (or the served fold's counts).
+    A ``cost_usd > 0`` / ``cost_usd_mean > 0`` filter drops a known $0 as if unknown — the
+    class found in the map, the abstract export, the re-measure price, the forecast and
+    the Measure and Factory estimates. A new one fails here."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    pattern = re.compile(r"\bcost_usd(?:_mean)?\s*(?:>|!=)\s*0\b")
+    found: set[tuple[str, str]] = set()
+    files = [*root.joinpath("src", "crb").rglob("*.py")]
+    ui = root.joinpath("ui", "src")
+    if ui.is_dir():
+        files += [p for p in ui.rglob("*.ts*") if ".test." not in p.name]
+    for p in files:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if pattern.search(line):
+                found.add((p.relative_to(root).as_posix(), line.strip()))
+    assert found - _COST_ZERO_ALLOWED == set()

@@ -969,6 +969,7 @@ export interface CapabilityCell {
   ci_low: number
   ci_high: number
   false_q1: number
+  /** Flat means over the known rows; they follow the map's filters, so `posture=all` / `apparatus=all` pools them (G-990). Quote `economics`, never these. */
   cost_usd_mean: number
   latency_s_mean: number
   /** Did any eligible row record a known cost (a known $0 counts) / a latency? */

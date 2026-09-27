@@ -3,9 +3,11 @@
  *
  * Navigation
  * ----------
- * What it is:   One function, `economicsTile`, that turns the server's `Economics` block (a
- *               cell's or the whole map's) into the four things a `StatTile` needs for cost
- *               per attempt, cost per clean attempt or latency per attempt.
+ * What it is:   `economicsTile`, which turns the server's `Economics` block (a cell's or the
+ *               whole map's) into the four things a `StatTile` needs for cost per attempt,
+ *               cost per clean attempt or latency per attempt; `economicsSpoken`, the grid
+ *               cell's spoken value or reason; and `measuredCostPerAttempt`,
+ *               the map fold's cost per attempt the Measure and Factory spend estimates read.
  * What it does: Uses the server's own denominators (attempts and clean attempts with a KNOWN
  *               value), its interval and its method string, and the apparatus versions the
  *               rows came from with their posture class — nothing is recomputed or averaged in
@@ -13,7 +15,9 @@
  *               checks arm) is the dash with the server's reason. An unknown
  *               value is the dash with the server's reason, never `$0`; a value with no
  *               interval shows "95% CI —" and says why; a response with no economics block
- *               says the server did not send one.
+ *               says the server did not send one. The spend estimates read the map's fold
+ *               (its value over the KNOWN count), never the cells' flat means filtered by
+ *               `> 0`, which dropped a known $0 and weighted by every attempt (P-051).
  * How:          A lookup of the figure's estimate and its counts; `fmtUsd` / `fmtSeconds`
  *               format the value and both ends of the interval.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -23,7 +27,8 @@
  *               ui/src/components/StatTile.tsx (`ci` + `ciFormat` render the interval),
  *               ui/src/screens/Results/ResultsPage.tsx (the Baseline's three tiles),
  *               ui/src/screens/Capability/CapabilityPage.tsx (the open cell's two tiles and
- *               the grid cell's cost and latency)
+ *               the grid cell's cost and latency), ui/src/screens/Connect/MeasurePage.tsx and
+ *               ui/src/screens/Factory/FactoryPage.tsx (the spend estimates)
  * Tested by:    ui/src/lib/economics.test.ts, ui/src/screens/Results/ResultsPage.test.tsx,
  *               ui/src/screens/Capability/CapabilityPage.test.tsx
  * Touch when:   the server adds an economics figure (add it to `EconomicsFigure` and its
@@ -74,4 +79,41 @@ export function economicsTile(e: Economics | undefined, figure: EconomicsFigure)
     ciFormat: format,
     apparatus: `${denominators(e, figure)} · ${est.reason || est.method} · ${apparatus}`,
   }
+}
+
+/**
+ * One figure as a screen reader hears it in the grid: the value, or "not shown:" and the
+ * server's reason — so a dash in the grid carries its reason too, not only the open cell.
+ */
+export function economicsSpoken(e: Economics | undefined, figure: EconomicsFigure): string {
+  if (!e) return 'not served'
+  const est = e[figure]
+  if (est.value === null) return `not shown: ${est.reason || e.pooled_reason}`
+  return (figure === 'latency_per_attempt' ? fmtSeconds : fmtUsd)(est.value)
+}
+
+/** The repository's measured cost per attempt, as the spend estimates quote it. */
+export interface MeasuredCost {
+  /** The fold's mean over the attempts with a known cost (a known $0 counts as $0). */
+  mean: number
+  /** Its denominator: the attempts with a known cost, never every attempt. */
+  n: number
+  /** The apparatus versions the rows came from. */
+  apparatus: string
+}
+
+/**
+ * The map fold's cost per attempt for a spend estimate, or `null` when there is none (no
+ * fold served, no known cost, or a pool the server refused). Nothing is averaged here.
+ */
+export function measuredCostPerAttempt(e: Economics | undefined): MeasuredCost | null {
+  const est = e?.cost_per_attempt
+  if (!e || !est || est.value === null) return null
+  return { mean: est.value, n: est.n, apparatus: e.apparatus_versions.join(', ') }
+}
+
+/** Why there is no measured cost per attempt: nothing measured yet, or the server's reason. */
+export function noMeasuredCostReason(e: Economics | undefined): string {
+  if (!e || e.n_attempts === 0) return 'n = 0 on the current apparatus'
+  return e.cost_per_attempt.reason || e.pooled_reason
 }

@@ -1195,9 +1195,9 @@ export const HINTS = {
   'map.cell.fq1':
     'The false-Q1 count for this cell. Must be 0.',
   'map.cell.cost':
-    'Mean builder-reported dollars per attempt in this cell.',
+    'Mean builder-reported dollars per attempt in this cell, over the attempts with a known cost (a known $0 counts as $0). A dash means none was recorded, or the rows span more than one apparatus version, posture class or checks arm, which are never pooled: open the cell for the reason, the n and the interval.',
   'map.cell.latency':
-    'Mean wall-clock time per attempt in this cell.',
+    'Mean wall-clock time per attempt in this cell, over the attempts with a known latency. A dash means none was recorded, or the rows span more than one apparatus version, posture class or checks arm, which are never pooled: open the cell for the reason, the n and the interval.',
   'map.cell.oracle':
     'Mean oracle strength of the tasks in this cell (faults caught over faults planted). Below the policy bar the cell routes to a human.',
   'map.cell.tier':

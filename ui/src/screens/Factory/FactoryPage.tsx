@@ -32,7 +32,7 @@
  *               active factory run) → `stepsFor(task)` → `<StepList>`; `builderChoice(health)`
  *               picks the builder exactly as Measure does (an operator may name another —
  *               the factory has no "every knob" form); `estimateFromMap` is Measure's
- *               row-weighted measured mean per attempt; `useSignGap` (POST signoff-gap),
+ *               reading of the map's economics fold; `useSignGap` (POST signoff-gap),
  *               `useRegisterBacklog` (POST backlog, the form or JSON in a dialog),
  *               `useCreateRun` (kind `factory`, `deliver` toggle gated by the backlog's
  *               delivery pre-flight; `deliver_override` for an approver); `EvidenceDrawer`
@@ -65,7 +65,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router'
 import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useRegisterBacklog, useRuns, useSignGap } from '../../api/hooks'
-import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
+import { isRunTerminal, type CapabilityMap, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Dialog } from '../../components/Dialog'
@@ -82,6 +82,7 @@ import { Details, NotificationBanner, SummaryList, WarningButton } from '../../c
 import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
 import { builderChoice } from '../../lib/builder'
+import { measuredCostPerAttempt, noMeasuredCostReason, type MeasuredCost } from '../../lib/economics'
 import { fmtDate, fmtInt, kOfN, shortId } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
 import { EvidenceDrawer } from '../Runs/EvidenceDrawer'
@@ -361,21 +362,13 @@ function statusLabel(t: FactoryTask): string {
 }
 
 /**
- * J-FAC-2 — the repository's own measured mean per attempt, when it has one: a
- * row-weighted mean over the map's measured cells (the map is served on the current
- * apparatus, so the versions are the same set on every cell), carrying the n it rests on
- * and that apparatus. The same calculation as Measure's; `null` when nothing is measured.
+ * J-FAC-2 — the repository's own measured cost per attempt, when it has one: the map's
+ * economics fold (F35) — its mean over the attempts with a KNOWN cost (a known $0 is $0),
+ * that count as n, and the apparatus. The same reading as Measure's; `null` when nothing
+ * is measured, nothing is known or the server refused the pool (P-051).
  */
-export function estimateFromMap(cells: CapabilityCell[]): { mean: number; n: number; apparatus: string } | null {
-  const measured = cells.filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0 && c.cost_usd_mean > 0)
-  if (measured.length === 0) return null
-  const n = measured.reduce((a, c) => a + c.n, 0)
-  const apparatus = Array.from(new Set(measured.flatMap((c) => c.apparatus_versions))).join(', ')
-  return {
-    mean: measured.reduce((a, c) => a + c.cost_usd_mean * c.n, 0) / n,
-    n,
-    apparatus,
-  }
+export function estimateFromMap(map: CapabilityMap | undefined): MeasuredCost | null {
+  return measuredCostPerAttempt(map?.economics)
 }
 
 //: the per-attempt planning band the onboarding guide (ONBOARDING-A-REPO) quotes for Claude Sonnet (not a
@@ -661,7 +654,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   const [ownBuilder, setOwnBuilder] = useState('')
   const [ownModel, setOwnModel] = useState('')
   const choice = builderChoice(health.data)
-  const measured = useMemo(() => estimateFromMap(map.data?.cells ?? []), [map.data])
+  const measured = useMemo(() => estimateFromMap(map.data), [map.data])
   // an API older than J-FAC-3 serves no pre-flight: say so rather than guess (never a white screen)
   const delivery: FactoryDeliveryPreflight = backlog.delivery ?? {
     can_deliver: false,
@@ -728,11 +721,11 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
               worked === 0 ? (
                 'nothing — no item can be worked'
               ) : measured ? (
-                `${usd(lo)} to ${usd(hi)} for ${worked} item${worked === 1 ? '' : 's'} at about ${usd(measured.mean)} each (this repository's measured mean over n = ${measured.n} attempts at apparatus ${measured.apparatus || '—'}; the band is a ±20 % planning range, not a measured interval)`
+                `${usd(lo)} to ${usd(hi)} for ${worked} item${worked === 1 ? '' : 's'} at about ${usd(measured.mean)} each (this repository's measured mean over n = ${measured.n} attempts with a known cost at apparatus ${measured.apparatus || '—'}; the band is a ±20 % planning range, not a measured interval)`
               ) : (
                 // no path literal here: an unbreakable token this long overflows the 375 px column (J-FAC-14)
                 <>
-                  {usd(lo)} to {usd(hi)} for {worked} item{worked === 1 ? '' : 's'} at about {usd(RANGE_LOW)}–{usd(RANGE_HIGH)} each — a planning range, not a measured interval: this repository has no measured mean yet (n = 0 on the current apparatus); the range is the per-attempt band the{' '}
+                  {usd(lo)} to {usd(hi)} for {worked} item{worked === 1 ? '' : 's'} at about {usd(RANGE_LOW)}–{usd(RANGE_HIGH)} each — a planning range, not a measured interval: this repository has no measured mean yet ({noMeasuredCostReason(map.data?.economics)}); the range is the per-attempt band the{' '}
                   <DocLink to="ONBOARDING-A-REPO">onboarding guide</DocLink> quotes for Claude Sonnet across earlier repositories, and carries no apparatus of its own
                 </>
               ),

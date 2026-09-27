@@ -32,6 +32,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'
+import { hintText } from '../../help/hints'
 import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { CapabilityPage } from './CapabilityPage'
@@ -144,6 +145,8 @@ describe('CapabilityPage', () => {
     // the grid line: the known cost, and a dash for the latency nobody recorded (not "0.0 s")
     expect(within(tile).getByTestId('cell-cost').textContent).toBe('$0.0120')
     expect(within(tile).getByTestId('cell-latency').textContent).toBe('—')
+    // in the grid too, a dash carries its reason: the cell's accessible name says it
+    expect(tile.getAttribute('aria-label')).toContain('cost $0.0120, latency not shown: no attempt recorded a known latency')
     fireEvent.click(tile)
     const cost = await screen.findByTestId('tile-cost')
     expect(cost).toHaveTextContent('n =38')
@@ -184,11 +187,21 @@ describe('CapabilityPage', () => {
     // the flat means still exist on the wire; the grid reads the refused fold, never them
     expect(within(tile).getByTestId('cell-cost').textContent).toBe('—')
     expect(within(tile).getByTestId('cell-latency').textContent).toBe('—')
+    expect(tile.getAttribute('aria-label')).toContain(`cost not shown: ${reason}, latency not shown: ${reason}`)
     fireEvent.click(tile)
     const latency = await screen.findByTestId('tile-latency')
     expect(latency).toHaveTextContent('95% CI—')
     expect(latency).toHaveTextContent('never pooled')
     expect(latency).toHaveTextContent('posture docker/copy/sealed, local/inplace/host-env')
+  })
+
+  it('the grid legend says cost and latency are means over the attempts with a known value, and what a dash means (F35)', () => {
+    for (const id of ['map.cell.cost', 'map.cell.latency'] as const) {
+      const text = hintText(id)
+      expect(text).toMatch(/over the attempts with a known (cost|latency)/)
+      expect(text).toContain('A dash means none was recorded, or the rows span more than one apparatus version, posture class or checks arm')
+      expect(text).toContain('open the cell for the reason')
+    }
   })
 
   it('shows the designed empty state when no repo is chosen; its action is Connection, not the repo list (J-HEL-14)', async () => {
@@ -340,7 +353,7 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
     const measured = screen.getByTestId('cell-measured')
     // the accessible label carries the whole claim: n, point, the Wilson interval and the
     // apparatus + belt-set provenance (CodeRabbit on PR #6)
-    expect(measured.getAttribute('aria-label')).toBe('bug.fix S: human, n 13, point 61.5%, 95% CI 35.5% to 82.3%, false-Q1 0, apparatus 2.0 · belts v4')
+    expect(measured.getAttribute('aria-label')).toBe('bug.fix S: human, n 13, point 61.5%, 95% CI 35.5% to 82.3%, false-Q1 0, apparatus 2.0 · belts v4, cost not served, latency not served')
     expect(measured.textContent).toContain('61.5%')
     expect(measured.textContent).toContain('clean 8/13')
     const model = measured.querySelector('[data-testid="model-point"]')!

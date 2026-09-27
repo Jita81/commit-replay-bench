@@ -1278,6 +1278,10 @@ class CellStats:
     n_api: int = 0
     #: The ``checks`` arm every row of the cell was graded under (ADR-0024) — one, always.
     checks_arm: str = ARM_OFF
+    #: Eligible rows whose cost is KNOWN (``GradeRow.cost_known``) — the denominator of
+    #: ``cost_usd_mean``. ``0`` means the mean is unknown, never ``$0``: a reader decides
+    #: known-ness from this count, never by comparing the mean with zero (P-051).
+    n_cost_known: int = 0
 
     @property
     def n_disqualified(self) -> int:
@@ -1380,6 +1384,7 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_lint_evaluated=split.lint_evaluated,
         n_api=split.api,
         checks_arm=arms[0],
+        n_cost_known=len(costs),
     )
 
 

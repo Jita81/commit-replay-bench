@@ -10,7 +10,8 @@
  *               refused with the versions named, that a pooled posture class is refused with
  *               the classes named, that the posture class stands beside the apparatus, that
  *               the denominators are the known counts, and that a response with no economics
- *               block says so.
+ *               block says so; and that the spend estimates' measured cost per attempt is
+ *               the map fold's own value over its known count (a known $0 is $0, P-051).
  * How:          Hand-built `Economics` objects; no rendering.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -21,7 +22,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Economics, EconomicsEstimate } from '../api/types'
-import { NO_ECONOMICS, economicsTile } from './economics'
+import { NO_ECONOMICS, economicsSpoken, economicsTile, measuredCostPerAttempt, noMeasuredCostReason } from './economics'
 
 const T_MEAN = 'Student-t 95% on the known rows (n-1 df), lower bound floored at 0'
 const est = (over: Partial<EconomicsEstimate>): EconomicsEstimate => ({ n: 0, value: null, ci_low: null, ci_high: null, method: T_MEAN, reason: '', ...over })
@@ -110,5 +111,38 @@ describe('economicsTile', () => {
   it('no economics block from the server says so', () => {
     const t = economicsTile(undefined, 'cost_per_clean')
     expect(t).toMatchObject({ value: '—', n: 0, ci: null, apparatus: NO_ECONOMICS })
+  })
+})
+
+describe('measuredCostPerAttempt — the spend estimates read the map fold, never the flat means (P-051)', () => {
+  it('is the fold value with its KNOWN count as n and the apparatus; a known $0 is $0, never dropped', () => {
+    expect(measuredCostPerAttempt(econ({}))).toEqual({ mean: 0.12, n: 36, apparatus: '2.3' })
+    // every attempt cost a known $0 (a fixture, a metered subscription): a measured $0 over n = 4
+    const zero = econ({ n_attempts: 5, cost_known: 4, cost_per_attempt: est({ n: 4, value: 0, ci_low: 0, ci_high: 0 }) })
+    expect(measuredCostPerAttempt(zero)).toEqual({ mean: 0, n: 4, apparatus: '2.3' })
+  })
+
+  it('is null when the server sent no fold, nothing was known or the pool was refused, and says why', () => {
+    expect(measuredCostPerAttempt(undefined)).toBeNull()
+    expect(noMeasuredCostReason(undefined)).toBe('n = 0 on the current apparatus')
+    const none = econ({ n_attempts: 0, n_clean: 0, cost_known: 0, cost_per_attempt: est({ reason: 'no attempt recorded a known cost' }) })
+    expect(measuredCostPerAttempt(none)).toBeNull()
+    expect(noMeasuredCostReason(none)).toBe('n = 0 on the current apparatus')
+    const unknown = econ({ n_attempts: 6, cost_known: 0, cost_per_attempt: est({ reason: 'no attempt recorded a known cost' }) })
+    expect(measuredCostPerAttempt(unknown)).toBeNull()
+    expect(noMeasuredCostReason(unknown)).toBe('no attempt recorded a known cost')
+    const reason = 'rows from 2 posture classes (docker/copy/sealed, local/inplace/host-env) — economics are never pooled across apparatus versions, posture classes or checks arms; read one of each'
+    const pooled = econ({ pooled: true, pooled_reason: reason, cost_per_attempt: est({ n: 36, reason }) })
+    expect(measuredCostPerAttempt(pooled)).toBeNull()
+    expect(noMeasuredCostReason(pooled)).toBe(reason)
+  })
+})
+
+describe('economicsSpoken — the grid cell says a value, or why it shows a dash', () => {
+  it('speaks the value (a known $0 too), the server\'s reason for a dash, or that nothing was served', () => {
+    expect(economicsSpoken(econ({}), 'cost_per_attempt')).toBe('$0.1200')
+    expect(economicsSpoken(econ({ cost_per_attempt: est({ n: 4, value: 0, ci_low: 0, ci_high: 0 }) }), 'cost_per_attempt')).toBe('$0.00')
+    expect(economicsSpoken(econ({ latency_per_attempt: est({ reason: 'no attempt recorded a known latency' }) }), 'latency_per_attempt')).toBe('not shown: no attempt recorded a known latency')
+    expect(economicsSpoken(undefined, 'cost_per_attempt')).toBe('not served')
   })
 })

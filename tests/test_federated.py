@@ -84,6 +84,10 @@ def _row(
     )
 
 
+#: A row that names a builder but never reported a cost: its cost is UNKNOWN (P-051).
+UNREPORTED = "imported:acme"
+
+
 def _cell(n: int = 1, clean: int | None = None, **kw: object) -> fed.AbstractCell:
     k = n if clean is None else clean
     rows = [_row(clean=i < k, task_id=f"{i:016x}", **kw) for i in range(n)]  # type: ignore[arg-type]
@@ -153,8 +157,11 @@ def test_from_dict_refuses_non_allowlisted_fields() -> None:
 
 
 def test_unmeasured_axes_become_none_not_zero() -> None:
-    c = _cell()
+    # an unmeasured cost is an UNKNOWN one (an imported row names a builder but never
+    # reported a cost), not a $0: a builder-reported $0 is a known $0 and leaves as $0 (P-051)
+    c = _cell(provenance=UNREPORTED)
     assert c.cost_usd_mean is None and c.latency_s_mean is None
+    assert _cell().cost_usd_mean == 0.0
     c2 = _cell(cost=0.1, latency=2.0)
     assert c2.cost_usd_mean == 0.1 and c2.latency_s_mean == 2.0
 
@@ -221,7 +228,7 @@ def test_pooled_aggregation_is_exact() -> None:
 
 def test_unmeasured_axis_stays_none_and_does_not_drag_the_mean() -> None:
     costed = _cell(2, cost=0.5)
-    uncosted = _cell(2)
+    uncosted = _cell(2, provenance=UNREPORTED)  # unknown cost, not a known $0 (P-051)
     sc = fed.aggregate_abstract_cells(
         {"a": (costed,), "b": (uncosted,), "c": (costed,)}, min_cohort_k=3
     )[0]

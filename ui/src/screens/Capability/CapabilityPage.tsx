@@ -69,7 +69,7 @@ import { VerdictPill } from '../../components/VerdictPill'
 import { apiUrl } from '../../api/client'
 import { currentData } from '../../api/hooks'
 import { useAuth } from '../../lib/auth'
-import { economicsTile } from '../../lib/economics'
+import { economicsSpoken, economicsTile } from '../../lib/economics'
 import { fmtInt, fmtPct, fmtRatio, wilson } from '../../lib/format'
 import { tierDisplay } from '../../lib/verdict'
 import { controlsDisplay, useCapabilityMapWithControls, type CapabilityCellSplit as CapabilityCell, type ControlsVerdict } from './contract'
@@ -175,7 +175,7 @@ function CellBox({ cell, policy, onOpen, dim }: { cell: CapabilityCell | undefin
       type="button"
       onClick={onOpen}
       data-testid={bad ? 'cell-false-q1' : 'cell-measured'}
-      aria-label={`${cell.capability_class} ${cell.size}${dim ? ` ${dim}` : ''}: ${cell.route}, n ${cell.n}, point ${fmtPct(cell.point)}, 95% CI ${fmtPct(cell.ci_low)} to ${fmtPct(cell.ci_high)}, false-Q1 ${cell.false_q1}, apparatus ${provenance(cell)}`}
+      aria-label={`${cell.capability_class} ${cell.size}${dim ? ` ${dim}` : ''}: ${cell.route}, n ${cell.n}, point ${fmtPct(cell.point)}, 95% CI ${fmtPct(cell.ci_low)} to ${fmtPct(cell.ci_high)}, false-Q1 ${cell.false_q1}, apparatus ${provenance(cell)}, cost ${economicsSpoken(cell.economics, 'cost_per_attempt')}, latency ${economicsSpoken(cell.economics, 'latency_per_attempt')}`}
       aria-describedby={CELL_LEGEND_ID}
       className={`flex h-full min-h-[92px] w-full flex-col gap-1 rounded-[var(--radius-control)] border px-2 py-2 text-left hover:bg-surface-high ${
         bad ? 'border-status-red bg-status-red-soft' : 'border-border bg-surface-container'
