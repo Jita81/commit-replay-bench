@@ -61,7 +61,8 @@ Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/dod/STANDARD.md (the format it enforces, and the ``## Operator values``
               table a Proposed ADR under docs/adr/ carries, as ADR-0026 does),
-              docs/dod/GAP-ANALYSIS.md (its output), docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog
+              docs/dod/GAP-ANALYSIS.md (its output),
+              docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog
               a gap may cite), ui/src/App.tsx and ui/src/components/Layout.tsx (the routes
               and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),

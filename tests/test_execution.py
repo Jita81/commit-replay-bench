@@ -844,8 +844,9 @@ def test_docker_stream_kill_confirmation_is_bounded_and_warns(
 ) -> None:
     """A daemon that never reports the container stopped cannot hang the reader: the
     poll gives up at ``KILL_CONFIRM_S``, ``kill_confirmed`` is False, and a warning names
-    the container."""
-    monkeypatch.setattr(ex.DockerStream, "KILL_CONFIRM_S", 0.3)
+    the container. The bound (1 s) leaves room for two inspect spawns on a loaded machine,
+    and the upper limit only has to tell "bounded" from "never ends" (P-014)."""
+    monkeypatch.setattr(ex.DockerStream, "KILL_CONFIRM_S", 1.0)
     monkeypatch.setattr(ex.DockerStream, "KILL_CONFIRM_STEP_S", 0.05)
     docker, calls = _fake_docker_stream(tmp_path, inspect="always-true")
     h = _stream(docker, timeout_s=1)
@@ -856,8 +857,8 @@ def test_docker_stream_kill_confirmation_is_bounded_and_warns(
     assert out == ["hello"]
     assert h.timed_out and not h.cancelled
     assert h.kill_confirmed is False
-    assert 1.3 <= elapsed < 5  # the wall clock, then the whole bound — and no longer
-    assert calls.read_text().split().count("inspect") >= 3
+    assert 2.0 <= elapsed < 10  # the wall clock, then the whole bound — and no longer
+    assert calls.read_text().split().count("inspect") >= 2  # the loop kept asking
     assert any(
         "crb-test" in r.message and "not confirmed stopped" in r.message for r in caplog.records
     )
@@ -949,12 +950,13 @@ def test_wait_container_stopped_never_exceeds_its_budget_across_inspect_calls(
     """Each ``inspect`` gets only the REMAINING budget: a daemon that answers slowly (here:
     never — every call sleeps past the bound) cannot stretch the wait to ``timeout_s`` plus a
     whole inspect timeout, and an answer that arrives after the bound is not waited for."""
-    docker = _scripted_inspect(tmp_path, "sleep 5; echo false")
+    docker = _scripted_inspect(tmp_path, "sleep 10; echo false")
     t0 = time.monotonic()
     with caplog.at_level("WARNING", logger="crb.core.execution"):
         assert ex.wait_container_stopped(docker, "slow", timeout_s=0.5, step_s=0.02) is False
     elapsed = time.monotonic() - t0
-    assert 0.5 <= elapsed < 2.0, elapsed  # the bound, not the bound + 5 s
+    # the bound, not the bound + 10 s; the gap tolerates a loaded machine (P-014)
+    assert 0.5 <= elapsed < 5.0, elapsed
     assert any("slow" in r.message and "not confirmed" in r.message for r in caplog.records)
 
 
@@ -1020,9 +1022,10 @@ def test_docker_run_cancel_unconfirmed_kill_is_reported_and_bounded(
     ``KILL_CONFIRM_S``, ``kill_confirmed`` is False on the result, the kill is on
     ``unconfirmed_kills`` and handed to ``on_kill_unconfirmed`` BEFORE ``run`` returns
     (the worker records and reaps it), a warning names the container — and a callback
-    that raises is logged, never the command's result."""
+    that raises is logged, never the command's result. The bound (1 s) leaves room for two
+    inspect spawns on a loaded machine (it failed at 0.3 s under load: P-014)."""
     monkeypatch.setattr(ex, "_CANCEL_POLL_S", 0.05)
-    monkeypatch.setattr(DockerExecutor, "KILL_CONFIRM_S", 0.3)
+    monkeypatch.setattr(DockerExecutor, "KILL_CONFIRM_S", 1.0)
     monkeypatch.setattr(DockerExecutor, "KILL_CONFIRM_STEP_S", 0.05)
     docker, calls = _fake_docker_stream(tmp_path, inspect="always-true")
     flag = {"cancel": False}
@@ -1038,12 +1041,12 @@ def test_docker_run_cancel_unconfirmed_kill_is_reported_and_bounded(
     with caplog.at_level("WARNING", logger="crb.core.execution"):
         r = e.run(Command(("sleep", "60"), tmp_path, timeout=60))
     elapsed = time.monotonic() - t0
-    assert 0.5 <= elapsed < 5  # the cancel, then the whole bound — and no longer
+    assert 1.2 <= elapsed < 10  # the cancel, then the whole bound — and no longer
     assert r.cancelled and r.returncode == 130 and r.kill_confirmed is False
     assert r.container.startswith("crb-")
-    assert reports == [ex.UnconfirmedKill(container=r.container, bound_s=0.3)]
+    assert reports == [ex.UnconfirmedKill(container=r.container, bound_s=1.0)]
     assert e.unconfirmed_kills == reports
-    assert calls.read_text().split().count("inspect") >= 3
+    assert calls.read_text().split().count("inspect") >= 2  # the loop kept asking
     messages = [rec.message for rec in caplog.records]
     assert any(r.container in m and "not confirmed stopped" in m for m in messages)
     assert any("on_kill_unconfirmed failed" in m for m in messages)

@@ -23,6 +23,10 @@ Invariants:
   never reached are left untouched for the next poll. A daemon that answers nothing therefore
   costs the idle loop at most the budget per poll — the worker's check-in that follows is
   never later than its own liveness bound (``3 × heartbeat_s``).
+* **Clocked by injection.** The pass reads its time from ``clock`` (``time.monotonic`` by
+  default) and asks its inspect question through ``stopped`` (``container_stopped``), so a
+  test drives the budget arithmetic with a fake daemon that advances a fake clock, never by
+  timing real process spawns on a loaded machine (docs/PREVENTION.md P-014).
 * **Visible.** :meth:`ContainerReaper.pending_count` is what the worker stamps on its
   ``workers`` row (``unconfirmed_containers``) so the ``/health`` worker probe reports it and
   reads ``degraded`` while it is above zero.
@@ -119,11 +123,15 @@ class ContainerReaper:
         docker: str = "docker",
         max_attempts: int = MAX_ATTEMPTS,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        clock: Callable[[], float] = time.monotonic,
+        stopped: Callable[..., bool | None] = container_stopped,
     ) -> None:
         self.path = Path(path)
         self.docker = docker
         self.max_attempts = max(1, int(max_attempts))
         self._runner = runner
+        self._clock = clock
+        self._stopped = stopped
         self._lock = threading.Lock()
 
     # --- state ---------------------------------------------------------------------
@@ -191,7 +199,7 @@ class ContainerReaper:
         ended this pass — reaped, or failed at the bound — so the caller can put each on
         its run's trace. Entries still pending stay in the file with ``attempts``
         incremented; entries the budget never reached stay untouched."""
-        deadline = None if budget_s is None else time.monotonic() + max(0.0, float(budget_s))
+        deadline = None if budget_s is None else self._clock() + max(0.0, float(budget_s))
         with self._lock:
             entries = self._read()
             if not entries:
@@ -199,7 +207,7 @@ class ContainerReaper:
             keep: list[Unconfirmed] = []
             ended: list[ReapResult] = []
             for i, entry in enumerate(entries):
-                if deadline is not None and time.monotonic() >= deadline:
+                if deadline is not None and self._clock() >= deadline:
                     left = entries[i:]
                     _LOG.info(
                         "reaper: pass budget (%.1fs) exhausted with %d entr%s waiting",
@@ -234,23 +242,23 @@ class ContainerReaper:
         why not, in one line. Every docker call is capped to the time left before
         ``deadline`` (a monotonic instant; ``None`` = uncapped), and a step the budget
         does not reach is reported as :data:`BUDGET_EXHAUSTED` rather than attempted."""
-        left = _left(deadline, INSPECT_TIMEOUT_S)
+        left = _left(deadline, INSPECT_TIMEOUT_S, self._clock)
         if left is None:
             return f"container state unknown ({BUDGET_EXHAUSTED})"
-        before = container_stopped(self.docker, container, timeout_s=left)
-        left = _left(deadline, RM_TIMEOUT_S)
+        before = self._stopped(self.docker, container, timeout_s=left)
+        left = _left(deadline, RM_TIMEOUT_S, self._clock)
         if left is None:
             state = "not running" if before is True else "state unknown"
             return f"container {state}; docker rm -f not attempted ({BUDGET_EXHAUSTED})"
         rm_error = self._rm(container, timeout_s=left)
         if before is True and rm_error is None:
             return None
-        left = _left(deadline, INSPECT_TIMEOUT_S)
+        left = _left(deadline, INSPECT_TIMEOUT_S, self._clock)
         if left is None:
             return f"container state unknown ({BUDGET_EXHAUSTED})" + (
                 f"; {rm_error}" if rm_error else ""
             )
-        after = container_stopped(self.docker, container, timeout_s=left)
+        after = self._stopped(self.docker, container, timeout_s=left)
         if after is True:
             return None
         state = "still running" if after is False else "state unknown (daemon not answering)"
@@ -272,12 +280,15 @@ class ContainerReaper:
         return f"docker rm -f failed (rc={r.returncode}): {(r.stderr or '').strip()[-200:]}"
 
 
-def _left(deadline: float | None, cap: float) -> float | None:
+def _left(
+    deadline: float | None, cap: float, clock: Callable[[], float] = time.monotonic
+) -> float | None:
     """How long the next docker call may take: ``cap`` when the pass is unbudgeted, else
-    the smaller of ``cap`` and the time to ``deadline`` — ``None`` once that is gone."""
+    the smaller of ``cap`` and the time to ``deadline`` on ``clock`` — ``None`` once that is
+    gone."""
     if deadline is None:
         return cap
-    remaining = deadline - time.monotonic()
+    remaining = deadline - clock()
     if remaining <= 0:
         return None
     return min(cap, remaining)
