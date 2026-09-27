@@ -289,3 +289,89 @@ def test_an_endpoint_read_is_discovered_whatever_quote_it_uses(source: str) -> N
 
 def test_a_name_that_is_not_an_endpoint_is_not_discovered() -> None:
     assert _names_in_source("os.getenv('CRB_HOME'); os.getenv(\"CRB_BUDGET_USD\")") == set()
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "opens a pull request against the default branch",
+        "creates an issue",
+        "posts a comment on the ticket",
+        "updates the work item's state",
+        "merges the pull request",
+        "deletes the branch",
+        "a PATCH of the ticket",
+        "a POST to `/issues`",
+        "a PUT of the file",
+        "re-points the branch to a new commit",
+        "a force-push of the branch",
+        "writes to the tracker",
+    ],
+)
+def test_a_row_that_writes_in_any_of_the_usual_words_counts_as_a_writer(cell: str) -> None:
+    """PR #61 adversarial check: the verb list read only push, comment, close, label and
+    transition, so a new row whose only write was 'opens a pull request' (or creates,
+    posts, updates, merges, deletes) would not have counted as a writer, and prose that
+    left it out would still have passed."""
+    assert _WRITE_VERB.search(cell), cell
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "the task brief, the source files the builder reads in its worktree, the diff it writes",
+        "a read of a repository's metadata and of a delivered pull request's state",
+        "requests for the installations, one installation's repositories",
+        "the image references (name, tag or digest)",
+    ],
+)
+def test_a_row_that_only_sends_and_reads_is_not_a_writer(cell: str) -> None:
+    """The other half of the verb list's contract: widening it may not make a flow that
+    only sends a request and reads the answer count as a writer (the builder's 'the diff it
+    writes' is content sent to the model, not a write outside the deployment)."""
+    assert not _WRITE_VERB.search(cell), cell
+
+
+#: Each write seam of ``crb.factory.delivery`` (its ``#: ``<name>_fn(`` seam comments) and
+#: the words the delivery paragraph under the boundary table must use for it. A new seam
+#: fails the test below until it has an entry here and the paragraph says what it does.
+_DELIVERY_WRITES: dict[str, tuple[str, ...]] = {
+    "push_fn": ("pushes",),
+    "open_pr_fn": ("opens a pull request", "opens the pull request"),
+    "comment_pr_fn": ("comment",),
+    "close_pr_fn": ("close",),
+}
+
+#: The re-delivery lease in ``deliver()``: a push with ``expected=`` moves an existing
+#: branch — and so the pull request's content — to a new commit.
+_REDELIVERY_LEASE = "expected=previous.commit_sha"
+
+
+def _delivery_paragraph() -> str:
+    security = (DOCS / "SECURITY.md").read_text(encoding="utf-8")
+    return " ".join(_slice(security, "Factory delivery writes to", "\n\n").split())
+
+
+def test_the_delivery_paragraph_names_every_write_delivery_makes() -> None:
+    """PR #61 adversarial check (the P-107 class, prose naming fewer writes than the code
+    makes): the paragraph said that after opening the pull request delivery writes to it
+    'only to post a comment when it re-delivers it', but a re-delivery first moves the same
+    branch to a new commit with a force-with-lease push, which changes the pull request."""
+    source = (SRC / "factory" / "delivery.py").read_text(encoding="utf-8")
+    seams = set(re.findall(r"^#: ``(\w+_fn)\(", source, re.MULTILINE))
+    assert "push_fn" in seams, seams  # the seam reader still reads the module
+    unmapped = sorted(seams - set(_DELIVERY_WRITES))
+    assert unmapped == [], f"delivery has write seams {unmapped} this test does not map"
+    text = _delivery_paragraph().lower()
+    missing = [s for s in sorted(seams) if not any(w in text for w in _DELIVERY_WRITES[s])]
+    assert missing == [], f"the delivery paragraph does not say what {missing} write"
+    assert _REDELIVERY_LEASE in source, "the re-delivery lease moved: re-read deliver()"
+    assert "re-point" in text and "force-with-lease" in text, (
+        "a re-delivery re-points the same branch with a force-with-lease push; the delivery "
+        "paragraph does not say so"
+    )
+
+
+def test_the_git_remote_row_says_a_re_delivery_re_points_the_branch() -> None:
+    row = next(r for r in _table_rows() if r[0].startswith("Repository clone and fetch"))
+    assert "re-point" in row[2], row[2]
