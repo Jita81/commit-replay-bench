@@ -46,6 +46,7 @@ Works with:   src/crb/server/auth.py (``dev_autologin_refusal``, the session pri
               src/crb/server/main.py (``serve``), src/crb/server/routes/system.py
               (``probe_dev_autologin``, ``/health``, ``/version``), src/crb/server/app.py
               (the start-up warning), docs/SECURITY.md#38-automatic-sign-in-on-a-development-stack
+              (the threat model these cases hold)
 Tested by:    tests/test_server_dev_autologin.py
 Touch when:   never for a new repository; the conditions for an automatic sign-in change (a
               case here for each one, and the threat-model row in docs/SECURITY.md); never to

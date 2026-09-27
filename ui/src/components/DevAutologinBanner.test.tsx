@@ -21,10 +21,11 @@
  *               between tests stands in for a fresh page load.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0027-dev-autologin-on-loopback.md
- * Works with:   ui/src/components/DevAutologinBanner.tsx, ui/src/api/hooks.ts (`useMe`,
- *               `useLogout`, `resetDevAutologin`), ui/src/components/Layout.tsx,
- *               ui/src/screens/Login/LoginPage.tsx, ui/src/help/hints.ts
- *               (`banner.shell.dev_autologin`)
+ * Works with:   ui/src/components/DevAutologinBanner.tsx (the banner under test),
+ *               ui/src/api/hooks.ts (`useMe`, `useLogout`, `resetDevAutologin`),
+ *               ui/src/components/Layout.tsx (mounts it on every signed-in page),
+ *               ui/src/screens/Login/LoginPage.tsx (mounts it on the sign-in page),
+ *               ui/src/help/hints.ts (`banner.shell.dev_autologin`)
  * Tested by:    ui/src/components/DevAutologinBanner.test.tsx
  * Touch when:   never for a new repository (nothing here reads a client repository); when the
  *               banner's sentence changes (docs/OPERATOR.md quotes it) or the conditions under

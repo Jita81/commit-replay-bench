@@ -98,8 +98,8 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md (the ``posture`` key),
               docs/adr/0027-dev-autologin-on-loopback.md (the ``dev_autologin`` field)
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
-              ``failure_detail`` and ``aggregate``), src/crb/observability/build_stamp.py
-              (the ``build`` probe and the ``served`` block),
+              ``failure_detail`` and ``aggregate``; its sibling build_stamp.py is the
+              ``build`` probe and the ``served`` block),
               src/crb/server/auth.py (``dev_autologin_refusal`` — who is told automatic
               sign-in is on),
               src/crb/store/migrate.py (``head_status_on`` — the one head check; the ledger

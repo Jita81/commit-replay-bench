@@ -19,7 +19,8 @@
  * ADRs:         docs/adr/0027-dev-autologin-on-loopback.md
  * Works with:   ui/vite.config.ts (registers it), src/crb/server/auth.py
  *               (`dev_autologin_refusal` refuses any request carrying a forwarding header),
- *               docs/SECURITY.md#38-automatic-sign-in-on-a-development-stack
+ *               docs/SECURITY.md#38-automatic-sign-in-on-a-development-stack (why a proxied
+ *               request must never be signed in)
  * Tested by:    ui/src/dev/apiProxy.test.ts
  * Touch when:   never for a new repository; the dev proxy changes; never to drop the mark for a
  *               client that is not on this machine.

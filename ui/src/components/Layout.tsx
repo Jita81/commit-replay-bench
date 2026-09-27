@@ -33,8 +33,8 @@
  *               automatic sign-in strip at the top of the header), ui/src/components/Help.tsx
  *               (`AboutThisScreen`, mounted once here), ui/src/components/PageHeader.tsx
  *               (defaults its eyebrow to `journeyEyebrow`), ui/src/lib/auth.tsx (the
- *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
- *               ui/src/lib/verdict.ts (`probeDisplay` for the health pill)
+ *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`; the
+ *               health pill reads `probeDisplay` from ui/src/lib/verdict.ts)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx (every element of the
  *               shell carries a hint), ui/src/components/Layout.test.tsx (the steps, the eyebrow, Help, the About
  *               block), ui/e2e/smoke.spec.ts (the shell renders the nav),

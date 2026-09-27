@@ -24,8 +24,9 @@ unauthenticated production deployment.
 2. **Refused where it may not run, with no override.** `Settings` refuses to construct with
    it set unless `CRB_ENV=dev` and `CRB_BIND_HOST` is a loopback address
    (`dev_autologin_refusal_for`), and refuses it with `CRB_LOCAL_AUTH_ENABLED=false`: it signs
-   in a local account, and that setting turns local accounts away. `crb.server.main.serve` checks the address it is about to
-   bind again, because `crb serve --host` never passes through the settings. `prod`, and any
+   in a local account, and that setting turns local accounts away. `crb.server.main.serve`
+   checks the address it is about to bind again, because `crb serve --host` never passes
+   through the settings. `prod`, and any
    other value of `CRB_ENV`, refuses. The container entrypoint refuses to run any role with the
    variable set: a container is never a development stack on one machine. A process manager
    that runs `uvicorn --factory` itself binds an address `crb` never sees; there the start-up

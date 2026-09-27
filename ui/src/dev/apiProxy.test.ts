@@ -15,8 +15,9 @@
  *               a stand-in proxy (records and emits events) and stand-in requests.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0027-dev-autologin-on-loopback.md
- * Works with:   ui/src/dev/apiProxy.ts, ui/vite.config.ts, src/crb/server/auth.py
- *               (`dev_autologin_refusal`, which refuses any request carrying the header)
+ * Works with:   ui/src/dev/apiProxy.ts (the marker under test), ui/vite.config.ts (the proxy
+ *               that registers it), src/crb/server/auth.py (`dev_autologin_refusal`, which
+ *               refuses any request carrying the header)
  * Tested by:    ui/src/dev/apiProxy.test.ts
  * Touch when:   never for a new repository; the dev proxy changes; never to drop the mark for a
  *               client that is not on this machine.
