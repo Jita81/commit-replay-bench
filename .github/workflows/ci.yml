@@ -456,8 +456,10 @@ jobs:
         # The same assertions run on both dialects. A skip here would hide a divergence, so
         # the step fails if the postgres parametrisation was skipped for any reason.
         run: |
+          # test_store_events_chain.py: the audit trail's chain, and the two-writer race that
+          # only PostgreSQL's concurrency can lose without the lock (ADR-0041)
           .venv/bin/pytest -q tests/test_store_db.py tests/test_store_ledger.py tests/test_store_migrate.py \
-            -rs --junitxml=store-postgres.xml
+            tests/test_store_events_chain.py -rs --junitxml=store-postgres.xml
           if grep -q 'CRB_TEST_POSTGRES_URL not set' store-postgres.xml; then
             echo '::error::postgres parametrisation was skipped'; exit 1
           fi

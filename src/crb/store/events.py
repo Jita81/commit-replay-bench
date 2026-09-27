@@ -18,26 +18,39 @@ Invariants
 * Out-of-band system events (a reclaim, a worker note) go through
   :func:`append_event`, which allocates the next ``seq`` under the same write
   lock the ledger uses, so they never collide with a live emitter's sequence.
+* **Every row is chained, by construction** (ADR-0041, F51). A ``before_flush`` hook on
+  every ``Session`` gives each new ``Event`` its ``prev_hash`` (the table's head) and
+  ``row_hash`` (:func:`crb.core.event_chain.event_row_hash`) under the events write lock,
+  in insertion order, overwriting anything the writer set. The sink, ``append_event``, the
+  routes' ``append_system_event`` and any plain ``add`` all flush, so none can skip it;
+  the unique index on ``prev_hash`` refuses a fork from a writer that bypassed the ORM.
 
 Navigation
 ----------
 What it is:   The database ``EventSink`` and the readers the SSE route and the worker use.
 What it does: Writes every ``StepEvent`` as one ``events`` row and never raises into the run
-              (drops are counted and logged); reads a trace's events in ``seq`` order with a
+              (drops are counted and logged); chains every new row of the table, from any
+              writer, in that writer's flush; reads a trace's events in ``seq`` order with a
               resume cursor; allocates the next ``seq`` for out-of-band system events under
-              the same write lock the ledger uses.
+              the same write lock the ledger uses; walks the whole chain and reads its head.
 How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one transaction
               with a per-row fallback; ``read_events`` = ``seq > after`` ordered by
               ``(seq, id)`` with a clamped limit; ``append_event`` = lock → ``max(seq)+1`` →
-              insert.
+              insert; ``_chain_new_events`` (``before_flush``) = lock → head → hash each new
+              row in insertion order; ``verify_events`` = keyset pages by id →
+              ``walk_event_chain``; ``events_head`` = count + last ``row_hash``.
 Layer:        store — docs/ARCHITECTURE.md#72-observability
-ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
+ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
+              docs/adr/0041-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/observability/events.py (``StepEvent`` / ``Emitter`` — the envelope
               and the sequence assigner), src/crb/store/models.py (the ``Event`` columns),
               src/crb/store/jobs.py (writes reclaim / cancel notes through ``append_event``),
               src/crb/server/worker.py (installs the sink and resumes from ``last_seq``),
-              src/crb/server/routes/runs.py (serves ``read_events`` over SSE)
-Tested by:    tests/test_store_events.py, tests/test_store_jobs.py, tests/test_server_routes_runs.py
+              src/crb/server/routes/runs.py (serves ``read_events`` over SSE),
+              src/crb/core/event_chain.py (the hash rule and the walk),
+              src/crb/server/routes/ledger.py (``/ledger/verify`` serves the walk and head)
+Tested by:    tests/test_store_events.py, tests/test_store_events_chain.py,
+              tests/test_store_jobs.py, tests/test_server_routes_runs.py
 Touch when:   never for a new repository; when ``StepEvent`` gains a field (a migration and
               both mappers change together); when a new out-of-band system action is
               introduced (use ``append_event``, never a raw insert — the ``seq`` cursor must
@@ -47,13 +60,16 @@ Touch when:   never for a new repository; when ``StepEvent`` gains a field (a mi
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import Column, func, select, text
+from sqlalchemy import event as sa_event
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.core.event_chain import GENESIS_HASH, EventChainReport, event_row_hash, walk_event_chain
 from crb.observability.events import StepEvent, StepStatus
 from crb.store.models import Event
 
@@ -113,13 +129,93 @@ def _from_model(m: Event) -> StepEvent:
     )
 
 
+#: The PostgreSQL advisory lock that serialises writers of ``events`` (7331 is grades,
+#: 7333 reviews): taken by ``seq`` allocation and by the chain's flush hook alike.
+EVENTS_LOCK_KEY = 7332
+
+
 def _lock(s: Session) -> None:
     """Serialise ``seq`` allocation the way :class:`crb.store.ledger.DbLedger` does."""
     dialect = s.get_bind().dialect.name
     if dialect == "sqlite":
         s.execute(text("BEGIN IMMEDIATE"))
     elif dialect == "postgresql":
-        s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
+        s.execute(text(f"SELECT pg_advisory_xact_lock({EVENTS_LOCK_KEY})"))  # events
+
+
+# ---------------------------------------------------------------------------
+# The chain (ADR-0041): every new ``events`` row is chained in its writer's own flush
+# ---------------------------------------------------------------------------
+
+#: The columns a row's hash covers, by attribute name (everything but the id and the chain).
+_HASHED_COLUMNS: dict[str, Any] = {
+    c.key: c for c in Event.__table__.columns if c.key not in ("id", "prev_hash", "row_hash")
+}
+
+
+def _take_chain_lock(session: Session) -> None:
+    """Hold the write lock before the head is read, so two writers cannot read one head.
+
+    PostgreSQL: the transaction-scoped advisory lock (re-entrant: ``append_event`` may hold
+    it already). SQLite: ``BEGIN IMMEDIATE`` when the connection has no transaction yet; a
+    connection already in one has written (pysqlite begins only before a write), so it holds
+    the database's write lock and reads the latest head."""
+    conn = session.connection()
+    dialect = conn.dialect.name
+    if dialect == "sqlite":
+        raw = conn.connection.dbapi_connection
+        if raw is not None and not getattr(raw, "in_transaction", True):
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
+    elif dialect == "postgresql":
+        conn.execute(text(f"SELECT pg_advisory_xact_lock({EVENTS_LOCK_KEY})"))
+
+
+def _column_default(col: Column[Any]) -> Any:
+    """The value the INSERT would give an unset column — applied before hashing, so the row
+    hashes as it will be stored (a Python-side default is otherwise filled in only when the
+    statement is compiled, after this hook)."""
+    d = col.default
+    if d is None:
+        return None
+    if getattr(d, "is_scalar", False):
+        return getattr(d, "arg", None)
+    if getattr(d, "is_callable", False):
+        return d.arg(None)  # type: ignore[attr-defined]
+    return None
+
+
+def _stored_values(obj: Event) -> dict[str, Any]:
+    for key, col in _HASHED_COLUMNS.items():
+        if getattr(obj, key) is None:
+            default = _column_default(col)
+            if default is not None:
+                setattr(obj, key, default)
+    return {key: getattr(obj, key) for key in _HASHED_COLUMNS}
+
+
+def _chain_new_events(session: Session, _flush_context: Any, _instances: Any) -> None:
+    """``before_flush``: give every pending ``Event`` its ``prev_hash`` and ``row_hash``,
+    in insertion order, onto the table's head — whatever the writer set, so no writer can
+    choose its own hashes and none can forget them."""
+    new = [o for o in session.new if isinstance(o, Event)]
+    if not new:
+        return
+    new.sort(key=lambda o: sa_inspect(o).insert_order or 0)
+    _take_chain_lock(session)
+    head = (
+        session.connection()
+        .execute(select(Event.row_hash).order_by(Event.id.desc()).limit(1))
+        .scalar_one_or_none()
+    )
+    prev = head or GENESIS_HASH
+    for obj in new:
+        obj.prev_hash = prev
+        obj.row_hash = event_row_hash(_stored_values(obj), prev)
+        prev = obj.row_hash
+
+
+if not sa_event.contains(Session, "before_flush", _chain_new_events):
+    sa_event.listen(Session, "before_flush", _chain_new_events)
 
 
 class DbEventSink:
@@ -309,12 +405,64 @@ def append_event(
         return None
 
 
+# ---------------------------------------------------------------------------
+# Verification and the head (F51, G-601)
+# ---------------------------------------------------------------------------
+
+VERIFY_BATCH = 1000
+
+
+def _chain_rows(s: Session, batch: int = VERIFY_BATCH) -> Iterator[dict[str, Any]]:
+    """Every ``events`` row in id order as a plain mapping, keyset-paged."""
+    last = 0
+    while True:
+        chunk = list(
+            s.execute(select(Event).where(Event.id > last).order_by(Event.id).limit(batch))
+            .scalars()
+            .all()
+        )
+        if not chunk:
+            return
+        for m in chunk:
+            row = {key: getattr(m, key) for key in _HASHED_COLUMNS}
+            row.update(id=m.id, prev_hash=m.prev_hash, row_hash=m.row_hash)
+            yield row
+        last = chunk[-1].id
+
+
+def verify_events_in(s: Session) -> EventChainReport:
+    """Walk the whole ``events`` chain on an open session (never raises on a break)."""
+    return walk_event_chain(_chain_rows(s))
+
+
+def verify_events(factory: sessionmaker[Session]) -> EventChainReport:
+    """Walk the whole ``events`` chain: an edited, a deleted or a moved row is reported by
+    id. What it cannot see — rows cut from the end, a table replaced wholesale — is what the
+    head recorded outside the store is for (docs/DEPLOYMENT.md §8)."""
+    with factory() as s:
+        return verify_events_in(s)
+
+
+def events_head(factory: sessionmaker[Session]) -> tuple[int, str]:
+    """``(rows, head row_hash)`` of the ``events`` chain; ``(0, "")`` when it is empty."""
+    with factory() as s:
+        n = int(s.execute(select(func.count(Event.id))).scalar_one())
+        head = s.execute(
+            select(Event.row_hash).order_by(Event.id.desc()).limit(1)
+        ).scalar_one_or_none()
+    return n, head or ""
+
+
 __all__ = [
     "DEFAULT_READ_LIMIT",
+    "EVENTS_LOCK_KEY",
     "MAX_READ_LIMIT",
     "DbEventSink",
     "append_event",
     "count_events",
+    "events_head",
     "last_seq",
     "read_events",
+    "verify_events",
+    "verify_events_in",
 ]

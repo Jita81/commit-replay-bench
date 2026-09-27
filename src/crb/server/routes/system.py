@@ -122,7 +122,7 @@ import datetime as _dt
 import os
 import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +144,7 @@ from crb.server.flow_record import stamp_first_healthy
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
 from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
+from crb.store.db import TRIGGER_KINDS, trigger_pairs
 from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
 from crb.store.models import (
@@ -261,41 +262,45 @@ def probe_migrations(factory: sessionmaker[Session], *, request_id: str = "") ->
     return probes.run_probe("migrations", _read, request_id=request_id)
 
 
+#: What the ``append_only`` probe says when it passes.
+APPEND_ONLY_OK_DETAIL = (
+    "triggers present on every append-only table; UPDATE and DELETE refused on each that "
+    "holds a row"
+)
+
+
 def _count_triggers(s: Session) -> int:
-    """How many of the expected ``<table>_no_update`` / ``_no_delete`` triggers exist."""
-    dialect = s.get_bind().dialect.name
-    names = [f"{t}_{kind}" for t in APPEND_ONLY_TABLES for kind in ("no_update", "no_delete")]
-    rows: Iterable[str]
-    if dialect == "sqlite":
-        rows = s.execute(text("SELECT name FROM sqlite_master WHERE type = 'trigger'")).scalars()
-    elif dialect == "postgresql":
-        rows = s.execute(text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")).scalars()
-    else:  # pragma: no cover — unsupported by policy
-        return 0
-    present: set[str] = set(rows)
-    return sum(1 for n in names if n in present)
+    """How many of the expected ``<table>_no_update`` / ``_no_delete`` triggers exist, each
+    on its own table in this database's schema."""
+    present = trigger_pairs(s)
+    return sum(
+        1 for t in APPEND_ONLY_TABLES for kind in TRIGGER_KINDS if (t, f"{t}_{kind}") in present
+    )
 
 
 def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
-    """``append_only``: every trigger present AND an UPDATE on ``grades`` refused —
-    counting alone would pass a trigger that exists but does not fire. An accepted UPDATE
-    is ``down`` in the ledger's own words (:class:`LedgerIntegrityError` names no
-    secret); a read that raises is ``down`` with the fixed ``failure_detail``."""
+    """``append_only``: every trigger present, counted first so the detail names how many
+    are missing, AND :func:`crb.store.ledger.assert_append_only` — an UPDATE and a DELETE
+    refused in the trigger's own words on every table that holds a row (counting alone
+    would pass a trigger that exists but does not fire). An accepted write is ``down`` in
+    the ledger's own words (:class:`LedgerIntegrityError` names no secret); any other error
+    — the probe no longer reads one as proof (P-058) — is ``down`` with the fixed
+    ``failure_detail``."""
     expected = 2 * len(APPEND_ONLY_TABLES)
 
     def _read() -> ProbeResult:
         with factory() as s:
             found = _count_triggers(s)
         data = {"triggers": found, "expected": expected}
-        try:
-            assert_append_only(factory)
-        except LedgerIntegrityError as exc:
-            return ProbeResult("append_only", DOWN, str(exc), data)
         if found < expected:
             return ProbeResult(
                 "append_only", DOWN, f"{found}/{expected} append-only triggers present", data
             )
-        return ProbeResult("append_only", OK, "triggers present; UPDATE on grades refused", data)
+        try:
+            assert_append_only(factory)
+        except LedgerIntegrityError as exc:
+            return ProbeResult("append_only", DOWN, str(exc), data)
+        return ProbeResult("append_only", OK, APPEND_ONLY_OK_DETAIL, data)
 
     return probes.run_probe("append_only", _read, request_id=request_id)
 

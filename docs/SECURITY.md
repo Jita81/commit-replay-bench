@@ -503,7 +503,14 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 
 - Grade rows, events and sign-offs are **append-only**: database triggers refuse `UPDATE`
   and `DELETE` (SQLite `RAISE(ABORT)`, PostgreSQL trigger function); `/health` proves the
-  triggers are live on every call (`assert_append_only`). [measured] `tests/test_store_*.py`
+  triggers are live on every call (`assert_append_only`: both triggers on every append-only
+  table, and an `UPDATE` and a `DELETE` refused in the trigger's own words on each table that
+  holds a row — any other error is not taken as proof, P-058). [measured] `tests/test_store_*.py`
+- The audit trail (`events`: sign-ins, account changes, sign-off decisions, cancels, the
+  unsealed override's starts) is hash-chained too, in id order, by a flush hook no writer can
+  skip; `GET /ledger/verify` and `crb ledger verify --store` report an edited, deleted or moved
+  event by id, and serve both chains' heads to be recorded outside the store (ADR-0041).
+  [measured] `tests/test_store_events_chain.py` tampers each way on SQLite and PostgreSQL
 - Every grade row carries `prev_hash` and `row_hash` (SHA-256 over canonical JSON); the chain
   verifies end to end (`crb ledger verify`, `GET /ledger/verify`); an exported JSONL verifies
   standalone without the database. [measured] 1,071-row census: chain verifies; a single
@@ -579,10 +586,18 @@ subject to a retention window.
   the operator's statement that what the deployment measures is a development reading: it is
   shown on `/health`, `/settings` and the Posture page, and stamped into every run's
   apparatus and every evidence pack as `unsealed_prod_override`, so a row produced under it
-  can always be told apart. `CRB_ENV=dev` keeps the host defaults. The refusal proves a
-  setting, not a measurement: no row has yet been produced on the sealed posture (below).
-  [measured — `tests/test_settings_posture.py` and `tests/test_worker.py` pin the refusal,
-  the override and the stamp; apparatus 2.2]
+  can always be told apart. In production the override must also name who set it and why
+  (`CRB_ALLOW_UNSEALED_PROD_BY`, an active admin's username, and
+  `CRB_ALLOW_UNSEALED_PROD_REASON`): each start of the API and of every worker checks the
+  name against the accounts, refuses to start for a name that is no active admin, and writes
+  a `posture.unsealed_override` event on the hash-chained audit trail naming that admin; the
+  run stamp carries the name as `acknowledged_by` (ADR-0023 as amended). The product cannot
+  prove the named admin set the variable, only that an existing admin was named at every
+  start on a trail that cannot be rewritten unseen. `CRB_ENV=dev` keeps the host defaults. The
+  refusal proves a setting, not a measurement: no row has yet been produced on the sealed
+  posture (below). [measured — `tests/test_settings_posture.py`, `tests/test_worker_start.py`
+  and `tests/test_worker.py` pin the refusal, the override, the named event and the stamp;
+  apparatus 2.3]
 - **Factory builds are not sealed** (ADR-0023 §5). The builder executor setting governs
   replay builds; a factory run hands its builder a host worktree and no container. A `prod`
   worker therefore refuses every factory run unless `CRB_ALLOW_UNSEALED_PROD=1`, and with it

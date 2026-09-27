@@ -15,6 +15,8 @@ What it does: Resolves the database URL (``CRB_DATABASE_URL`` → explicit → S
               relies on (WAL, foreign keys, ``synchronous=FULL``), and installs the
               ``UPDATE``/``DELETE``-refusing triggers on every append-only table. Refuses any
               dialect other than SQLite or PostgreSQL rather than run without the triggers.
+              Owns the one text the triggers raise (``append_only_error_text``) and reads the
+              catalogue's triggers per table (``trigger_pairs``) for the append-only probe.
 How:          ``database_url`` → ``make_engine`` (per-connection pragmas via an event
               listener) → ``init_db`` = ``create_all`` + ``install_append_only_triggers``;
               ``session_scope`` is the commit-or-rollback context for callers outside FastAPI.
@@ -116,21 +118,54 @@ def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
         s.close()
 
 
+#: What an append-only trigger raises, on both dialects: ``"<table> is append-only"``. The
+#: probe (:func:`crb.store.ledger.assert_append_only`) takes only this text as proof that
+#: the trigger fired, so it is defined once, here, beside the trigger SQL.
+APPEND_ONLY_SUFFIX = " is append-only"
+#: The two triggers every append-only table carries.
+TRIGGER_KINDS: tuple[str, ...] = ("no_update", "no_delete")
+
+
+def append_only_error_text(table: str) -> str:
+    """The text ``table``'s triggers raise (``"grades is append-only"``)."""
+    return f"{table}{APPEND_ONLY_SUFFIX}"
+
+
+def trigger_pairs(s: Session) -> set[tuple[str, str]]:
+    """``(table, trigger)`` for every user trigger in this database's schema — SQLite's
+    ``sqlite_master``; on PostgreSQL ``pg_trigger`` in ``current_schema()`` only (another
+    schema's triggers of the same name prove nothing about this one)."""
+    dialect = s.get_bind().dialect.name
+    if dialect == "sqlite":
+        q = "SELECT tbl_name, name FROM sqlite_master WHERE type = 'trigger'"
+    elif dialect == "postgresql":
+        q = (
+            "SELECT c.relname, t.tgname FROM pg_trigger t "
+            "JOIN pg_class c ON c.oid = t.tgrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE NOT t.tgisinternal AND n.nspname = current_schema()"
+        )
+    else:  # pragma: no cover — unsupported by policy
+        return set()
+    return {(str(t), str(n)) for t, n in s.execute(text(q)).all()}
+
+
 def _sqlite_trigger_sql(table: str) -> list[str]:
     # IF NOT EXISTS makes re-installation (init_db on an existing file, migrate.upgrade)
     # a no-op rather than an error.
+    msg = append_only_error_text(table)
     return [
         f"CREATE TRIGGER IF NOT EXISTS {table}_no_update BEFORE UPDATE ON {table} "
-        f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END;",
+        f"BEGIN SELECT RAISE(ABORT, '{msg}'); END;",
         f"CREATE TRIGGER IF NOT EXISTS {table}_no_delete BEFORE DELETE ON {table} "
-        f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END;",
+        f"BEGIN SELECT RAISE(ABORT, '{msg}'); END;",
     ]
 
 
-_PG_FUNCTION = """
+_PG_FUNCTION = f"""
 CREATE OR REPLACE FUNCTION crb_append_only() RETURNS trigger AS $$
 BEGIN
-  RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+  RAISE EXCEPTION '%{APPEND_ONLY_SUFFIX}', TG_TABLE_NAME;
 END;
 $$ LANGUAGE plpgsql;
 """

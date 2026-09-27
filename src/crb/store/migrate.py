@@ -106,6 +106,7 @@ REVISION_MARKERS: tuple[tuple[str, str, str], ...] = (
     ("0008", "workers", "unconfirmed_containers"),
     ("0009", "users", "session_nonce"),
     ("0012", "reviews", "minutes"),
+    ("0031", "events", "row_hash"),
 )
 #: ``(revision, table)`` — the TABLE each revision after the initial one ADDS. An older
 #: release's ``create_all`` schema lacks it and is still a complete schema *for its

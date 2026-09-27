@@ -16,7 +16,7 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               (409 ``last_admin``), that ``GET /users`` rows carry ``active`` and
               ``last_login``, that every change lands as one event with actor and target
               and never a password, that those events are ordinary ``events`` rows —
-              trigger-protected, not hash-chained (the chain is the ledger's) — and that a
+              trigger-protected and on the audit trail's own hash chain (ADR-0041) — and that a
               password set by any door rotates the session nonce, so the old sessions end
               even when the stored hash does not move (#52's revocation, P-082).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; a second
@@ -499,20 +499,31 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
     assert [e.action for e in events_for(app, root)] == ["user.login", "user.login"]
 
 
-def test_account_events_use_the_unchained_events_table(client: TestClient, app: Any) -> None:
+def test_account_events_are_on_the_hash_chained_audit_trail(client: TestClient, app: Any) -> None:
     """The ``user.*`` events are the same mechanism as every other system event
     (``repo.created``, ``run.cancel_requested``…): an ``events`` row, append-only by DB
-    trigger, with NO ``prev_hash`` / ``row_hash`` — the hash chain is the ledger's
-    (grades / sign-offs / reviews / factory evidence), ADR-0002 §5, ARCHITECTURE §7.3.
-    Chaining ``events`` is a repo-wide change (backlog F51), not an account-route one."""
+    trigger AND chained onto the audit trail's head (ADR-0041, F51) — so a reader can prove
+    no account change was edited or removed afterwards (``/ledger/verify``'s ``events``,
+    ``crb ledger verify --store``)."""
+    from crb.store.events import verify_events
+
     login(client, "root", ROOT_PW)
     uid = create(client, "frank", "operator")
     (ev,) = events_for(app, uid)
     assert ev.action == "user.created"
+    assert len(ev.prev_hash) == 64 and len(ev.row_hash) == 64 and ev.prev_hash != ev.row_hash
     for col in ("prev_hash", "row_hash"):
-        assert col not in Event.__table__.columns, f"events.{col} exists: update F51 + docs"
-        assert not hasattr(ev, col)
-        assert col in Grade.__table__.columns and col in Signoff.__table__.columns
+        assert col in Event.__table__.columns and col in Grade.__table__.columns
+        assert col in Signoff.__table__.columns
+    report = verify_events(app.state.session_factory)
+    assert (
+        report.ok and report.head == max((e for e in events_all(app)), key=lambda e: e.id).row_hash
+    )
+
+
+def events_all(app: Any) -> list[Event]:
+    with app.state.session_factory() as s:
+        return list(s.execute(select(Event)).scalars())
 
 
 # --- the account's audit trail is served ----------------------------------------------------

@@ -78,6 +78,7 @@ from crb.cli.commands.service import (
 from crb.cli.main import main
 from crb.core.secrets_file import SecretsStore
 from crb.observability import probes
+from crb.server.routes.system import APPEND_ONLY_OK_DETAIL
 from crb.server.settings import GitHubAppSettings, Settings
 from crb.store import migrate
 
@@ -632,7 +633,7 @@ class TestDoctorReport:
         assert list(rows) == list(DOCTOR_LINES)
         assert rows["settings"][0] == "ok" and rows["home"][0] == "warn"  # dev, under tmp
         assert rows["github_app"][0] == "skip"
-        assert rows["database"] == ("ok", "answers · triggers present; UPDATE on grades refused")
+        assert rows["database"] == ("ok", f"answers · {APPEND_ONLY_OK_DETAIL}")
         assert rows["migrations"] == ("ok", f"database at {migrate.head_revision()} = code head")
         # no worker has ever checked in on this fresh store: /health's worker probe says so
         # (degraded, never down); doctor renders it as warn

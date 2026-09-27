@@ -1317,6 +1317,17 @@ class SignoffRevokeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class EventsVerifyOut(BaseModel):
+    """The audit trail's chain (``events``, ADR-0041): ``broken_at`` is an event id."""
+
+    rows: int
+    chain_ok: bool
+    broken_at: int | None
+    detail: str
+    #: The last event's ``row_hash`` (``""`` when there is none) — to record outside the store.
+    head_row_hash: str
+
+
 class LedgerVerifyOut(BaseModel):
     rows: int
     ok: bool
@@ -1326,6 +1337,10 @@ class LedgerVerifyOut(BaseModel):
     detail: str
     clean_without_pack: int
     verified_at: str
+    #: The grade ledger's last ``row_hash`` (``""`` when empty) — to record outside the
+    #: store, so a chain replaced wholesale reads another head (G-601).
+    head_row_hash: str = ""
+    events: EventsVerifyOut
 
 
 class LedgerImportOut(BaseModel):

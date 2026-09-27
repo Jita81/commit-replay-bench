@@ -25,7 +25,13 @@ builder (``CRB_BUILDER__EXECUTOR``) to ``docker``; in ``dev`` to ``local`` and `
 ``prod`` worker with the local executor or the host builder does not start unless
 ``CRB_ALLOW_UNSEALED_PROD=1`` (the same :func:`crb.server.settings.unsealed_prod_refusal` the API
 applies); with it, every run's apparatus carries the override, and without it the worker also
-refuses a run that asks for the local executor in its own parameters.
+refuses a run that asks for the local executor in its own parameters. In ``prod`` the override
+must name who set it and why (``CRB_ALLOW_UNSEALED_PROD_BY`` / ``_REASON``, G-663):
+:func:`announce_start` checks the name is an active admin and writes the audit event, or the
+worker exits 2 without taking a run.
+
+**At every start the worker logs both chains' heads** (G-601): the grade ledger's and the audit
+trail's last ``row_hash``, so the log store holds a copy outside the database.
 
 The worker serves its own Prometheus exposition on ``CRB_METRICS_HOST:CRB_METRICS_PORT``
 before it starts polling (not with ``--once``): the build / grade / cost series are
@@ -45,17 +51,22 @@ What it is:   ``crb worker`` — the argument parser and process entry point for
 What it does: Turns flags and ``CRB_*`` fallbacks into ``WorkerSettings``, refuses unknown run
               kinds and, in ``prod``, the unsealed posture without ``CRB_ALLOW_UNSEALED_PROD``
               (ADR-0023), builds a ``Worker`` (a bad database URL is reported and exits 2), then
-              either processes one run (``--once``; exit 3 when idle) or polls until a stop
-              signal arrives.
+              announces its start (the override's audit event, both chains' heads in the log),
+              then either processes one run (``--once``; exit 3 when idle) or polls until a
+              stop signal arrives.
 How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for the builders'
               secrets lookup; reads ``CRB_GITHUB__*`` / ``CRB_METRICS_*`` through a
               pydantic-settings view of the same environment the API reads) → ``Worker`` →
-              ``metrics.start_worker_exposition`` → ``run_once`` | ``run_forever(stop)``.
+              ``announce_start`` → ``metrics.start_worker_exposition`` → ``run_once`` |
+              ``run_forever(stop)``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
-              docs/adr/0023-production-refuses-the-unsealed-posture.md
+              docs/adr/0023-production-refuses-the-unsealed-posture.md,
+              docs/adr/0041-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — everything this
               file configures), src/crb/store/jobs.py (``RUN_KINDS`` for ``--kinds``),
+              src/crb/server/unsealed_override.py (the override's start-up event),
+              src/crb/store/events.py (``events_head``),
               src/crb/observability/metrics.py (the worker's exposition server),
               src/crb/cli/commands/service.py (``crb worker`` forwards its argv here),
               deploy/entrypoint.sh (the container's ``worker`` role), deploy/docker-compose.yml
@@ -63,7 +74,7 @@ Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — ever
               expose the metrics port), src/crb/server/settings.py (``SandboxSettings`` — the
               API's reading of the same keys), src/crb/core/execution.py (``DockerSettings``
               for ``--image``), deploy/sandbox/README.md (the reference images ``--image`` names)
-Tested by:    tests/test_worker.py, tests/test_settings_posture.py
+Tested by:    tests/test_worker.py, tests/test_settings_posture.py, tests/test_worker_start.py
 Touch when:   never for a new repository (the sandbox image is per repository, set in its
               config); adding a worker flag means adding it to ``WorkerSettings`` and to the
               ``crb worker`` forwarding table in src/crb/cli/commands/service.py.
@@ -74,6 +85,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import logging
 import os
 import signal
 import sys
@@ -84,6 +96,7 @@ from typing import Any
 
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import func, select
 
 from crb.core.execution import SANDBOX_TREES, TREE_COPY, DockerSettings, SandboxUnavailable
 from crb.observability import metrics
@@ -98,10 +111,16 @@ from crb.server.settings import (
     IntakeSettings,
     RetentionSettings,
     default_builder_executor,
+    unsealed_override_ack_refusal,
     unsealed_prod_refusal,
 )
+from crb.server.unsealed_override import OverrideRefused, record_unsealed_override
 from crb.server.worker import Worker, WorkerSettings
+from crb.store.events import events_head as events_head_of
 from crb.store.jobs import RUN_KINDS
+from crb.store.models import Grade
+
+log = logging.getLogger(__name__)
 
 EXIT_OK = 0
 EXIT_ERROR = 2
@@ -224,6 +243,24 @@ def settings_from_args(
     refusal = unsealed_prod_refusal(shared.env, executor, builder, allow=shared.allow_unsealed_prod)
     if refusal:
         raise ValueError(refusal)
+    # G-663: in prod the override names who set it and why; the name is checked against the
+    # store and written to the audit trail at start (announce_start)
+    ack_refusal = unsealed_override_ack_refusal(
+        shared.env,
+        allow=shared.allow_unsealed_prod,
+        by=shared.allow_unsealed_prod_by,
+        reason=shared.allow_unsealed_prod_reason,
+    )
+    if ack_refusal:
+        raise ValueError(ack_refusal)
+    ack = (
+        {
+            "by": shared.allow_unsealed_prod_by.strip(),
+            "reason": shared.allow_unsealed_prod_reason.strip(),
+        }
+        if shared.env == "prod" and shared.allow_unsealed_prod
+        else {}
+    )
     sealed = executor == SEALED_EXECUTOR and builder == SEALED_EXECUTOR
     override = (
         {
@@ -232,6 +269,7 @@ def settings_from_args(
             "builder_executor": builder,
             "override": ALLOW_UNSEALED_PROD_ENV,
             "adr": "0023",
+            "acknowledged_by": ack.get("by", ""),
         }
         if shared.env == "prod" and not sealed
         else {}
@@ -277,6 +315,7 @@ def settings_from_args(
         builder_executor=builder,
         refuse_unsealed=shared.env == "prod" and not shared.allow_unsealed_prod,
         unsealed_override=override,
+        unsealed_override_ack=ack,
         env=shared.env,
         # CRB_PROVISION__* — the same variables the API validates (ADR-0019); off by default
         provision=ProvisionConfig.from_env(e, home=home),
@@ -300,6 +339,9 @@ class _SharedWithApi(BaseSettings):
     #: one environment gives both processes one posture rule (ADR-0023).
     env: Env = "prod"
     allow_unsealed_prod: bool = False
+    #: ``CRB_ALLOW_UNSEALED_PROD_BY`` / ``_REASON`` — who set the override and why (G-663).
+    allow_unsealed_prod_by: str = ""
+    allow_unsealed_prod_reason: str = ""
     github: GitHubAppSettings = GitHubAppSettings()
     factory: FactorySettings = FactorySettings()
     #: The tracker this deployment takes work from (``CRB_INTAKE__*``, ADR-0017). The
@@ -367,6 +409,60 @@ def _run_summary(run: Any) -> dict[str, Any]:
     }
 
 
+def announce_start(worker: Worker) -> dict[str, Any]:
+    """What a worker does once, before it takes a run; returns the heads it logged.
+
+    1. **The unsealed override names who set it** (G-663). Under
+       ``CRB_ALLOW_UNSEALED_PROD`` in prod, the named admin is checked against the store and
+       one ``posture.unsealed_override`` event is written naming them and the reason;
+       :class:`~crb.server.unsealed_override.OverrideRefused` (nothing written) when the name
+       is not one active admin — the caller must not start.
+    2. **Both chains' heads go to the log** (G-601): the grade ledger's and the audit
+       trail's last ``row_hash``, with their row counts, in one line the log store keeps
+       outside the database — so a store replaced wholesale can be told from the one these
+       heads came from (docs/DEPLOYMENT.md §8)."""
+    s = worker.settings
+    ack = dict(s.unsealed_override_ack)
+    if ack:
+        record_unsealed_override(
+            worker.factory,
+            by=ack.get("by", ""),
+            reason=ack.get("reason", ""),
+            process="worker",
+            posture={
+                "env": s.env,
+                "sandbox_executor": s.executor,
+                "builder_executor": s.builder_executor,
+            },
+            extra={"worker_id": worker.worker_id},
+        )
+    with worker.factory() as db:
+        grades_rows = int(db.execute(select(func.count(Grade.seq))).scalar_one())
+        grades_head = (
+            db.execute(
+                select(Grade.row_hash).order_by(Grade.seq.desc()).limit(1)
+            ).scalar_one_or_none()
+            or ""
+        )
+    events_rows, events_head = events_head_of(worker.factory)
+    heads = {
+        "grades_rows": grades_rows,
+        "grades_head": grades_head,
+        "events_rows": events_rows,
+        "events_head": events_head,
+    }
+    log.info(
+        "ledger heads at worker start: grades %s (%d rows) · events %s (%d rows) — record them "
+        "outside the store (docs/DEPLOYMENT.md §8)",
+        grades_head or "-",
+        grades_rows,
+        events_head or "-",
+        events_rows,
+        extra={"worker_id": worker.worker_id, **heads},
+    )
+    return heads
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Process entry point; see the module docstring for the exit codes."""
     parser = build_parser()
@@ -379,6 +475,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         worker = Worker(settings)
     except Exception as exc:  # DB unreachable, bad URL: say so and stop
+        print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}), file=sys.stderr)
+        return EXIT_ERROR
+    try:
+        announce_start(worker)
+    except OverrideRefused as exc:  # the override names no active admin: do not start
         print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}), file=sys.stderr)
         return EXIT_ERROR
 
@@ -408,7 +509,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     return EXIT_OK
 
 
-__all__ = ["EXIT_ERROR", "EXIT_IDLE", "EXIT_OK", "build_parser", "main", "settings_from_args"]
+__all__ = [
+    "EXIT_ERROR",
+    "EXIT_IDLE",
+    "EXIT_OK",
+    "announce_start",
+    "build_parser",
+    "main",
+    "settings_from_args",
+]
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -78,10 +78,48 @@ class TestVerify:
             "detail",
             "clean_without_pack",
             "verified_at",
+            "head_row_hash",
+            "events",
         }
         assert d["rows"] == 50 and d["ok"] is True and d["false_q1_total"] == 0
         assert d["chain_ok"] is True and d["broken_at"] is None and d["clean_without_pack"] == 0
         assert d["detail"] == "50 rows, chain intact, false_q1=0"
+
+    def test_the_heads_are_served_to_be_recorded_outside_the_store(self, env: Env) -> None:
+        """G-601: the last ``row_hash`` of the grade ledger and of the audit trail are served,
+        so an operator can copy them out; a store replaced wholesale then reads another
+        head, which the chain alone could never show."""
+        d = env.get("/ledger/verify").json()
+        with env.factory() as s:
+            grades_head = s.execute(
+                text("SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1")
+            ).scalar_one()
+            events_head = s.execute(
+                text("SELECT row_hash FROM events ORDER BY id DESC LIMIT 1")
+            ).scalar_one()
+            n_events = s.execute(text("SELECT COUNT(*) FROM events")).scalar_one()
+        assert d["head_row_hash"] == grades_head and len(grades_head) == 64
+        assert d["events"] == {
+            "rows": n_events,
+            "chain_ok": True,
+            "broken_at": None,
+            "detail": f"{n_events} events, chain intact",
+            "head_row_hash": events_head,
+        }
+        assert n_events > 0
+
+    def test_a_tampered_audit_event_is_reported_and_fails_the_verification(self, env: Env) -> None:
+        """F51: a reader proves the audit trail was not altered — an account event edited
+        underneath its trigger reads ``ok: false`` with the event's id."""
+        with env.factory() as s:
+            s.execute(text("DROP TRIGGER events_no_update"))
+            first = s.execute(text("SELECT MIN(id) FROM events")).scalar_one()
+            s.execute(text("UPDATE events SET actor = 'mallory' WHERE id = :i"), {"i": first})
+            s.commit()
+        d = env.get("/ledger/verify").json()
+        assert d["chain_ok"] is True and d["ok"] is False
+        assert d["events"]["chain_ok"] is False and d["events"]["broken_at"] == first
+        assert "events" in d["detail"] and "edited" in d["detail"]
 
     def test_tampered_row_reports_broken_at(self, env: Env) -> None:
         _drop_triggers(env)

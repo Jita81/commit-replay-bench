@@ -19,8 +19,8 @@ instrument did not grade for that row cannot be written.
 Navigation
 ----------
 What it is:   The database ledgers — ``DbLedger`` for ``grades`` (+ the ``evidence`` packs)
-              and ``DbReviewLedger`` for ``reviews`` — plus ``assert_append_only`` for
-              ``/health``.
+              and ``DbReviewLedger`` for ``reviews`` — plus ``assert_append_only``, the
+              append-only probe of every table for ``/health``, ``crb doctor`` and start-up.
 What it does: Appends hash-chained rows under a per-table write lock, re-asserting the
               false-Q1 invariant before every insert; reads rows back as the core's
               dataclasses; imports foreign JSONL rows by re-chaining them (source hash kept
@@ -29,7 +29,9 @@ What it does: Appends hash-chained rows under a per-table write lock, re-asserti
 How:          ``append`` = lock → last ``row_hash`` → ``GradeRow.chained`` → insert → commit;
               ``verify`` re-walks the chain with the core's ``verify_chain``;
               ``DbReviewLedger.append`` resolves the reviewed row and its stored pack, runs
-              ``check_review_anchor``, then chains and inserts the same way.
+              ``check_review_anchor``, then chains and inserts the same way;
+              ``assert_append_only`` = catalogue check per table → a rolled-back UPDATE and
+              DELETE of one row per table, matched against the trigger's own text.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md
@@ -57,7 +59,8 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import EvidencePack
@@ -78,7 +81,8 @@ from crb.core.review import (
     pack_is_authentic,
     verify_review_chain,
 )
-from crb.store.models import EvidencePackRow, Grade, Review
+from crb.store.db import TRIGGER_KINDS, append_only_error_text, trigger_pairs
+from crb.store.models import APPEND_ONLY_TABLES, Base, EvidencePackRow, Grade, Review
 
 # Column lists are DERIVED from the core dataclasses so a field added there cannot be
 # silently dropped here; the one field each holds as JSON is excluded and mapped by hand.
@@ -355,20 +359,54 @@ class DbReviewLedger:
         return verify_review_chain(self.records())
 
 
-def assert_append_only(factory: sessionmaker[Session]) -> None:
-    """Prove the triggers are live: an UPDATE on grades must fail. Used by /health."""
+def assert_append_only(
+    factory: sessionmaker[Session], tables: tuple[str, ...] = APPEND_ONLY_TABLES
+) -> None:
+    """Prove every append-only table refuses a rewrite. Used by ``/health``, ``crb doctor``
+    and the API's start-up.
+
+    1. **Every table carries both triggers**, read from the catalogue — so an empty table,
+       where no row can be probed, is still checked.
+    2. **Where a table holds a row, an UPDATE and a DELETE of it are refused with the
+       trigger's own text** (:func:`crb.store.db.append_only_error_text`), each in its own
+       rolled-back transaction. A write that goes through is a missing or non-firing
+       trigger (:class:`LedgerIntegrityError`); a write refused for any OTHER reason — a lost
+       connection, a missing table, another trigger's error — is not proof, and propagates
+       to the caller (P-058: the probe used to read any exception as the trigger firing).
+    """
     with factory() as s:
-        first = s.execute(select(Grade).order_by(Grade.seq).limit(1)).scalar_one_or_none()
-        if first is None:
-            return
+        present = trigger_pairs(s)
+    for t in tables:
+        missing = [f"{t}_{k}" for k in TRIGGER_KINDS if (t, f"{t}_{k}") not in present]
+        if missing:
+            raise LedgerIntegrityError(
+                f"{t}: append-only triggers are missing ({', '.join(missing)})"
+            )
+    for t in tables:
+        table = Base.metadata.tables[t]
+        (pk,) = tuple(table.primary_key.columns)
+        with factory() as s:
+            key: Any = s.execute(select(pk).limit(1)).scalar_one_or_none()
+        if key is None:
+            continue
+        # a no-op UPDATE (pk = pk) and a DELETE of the same row: a live trigger aborts each
+        _probe_write(factory, t, "UPDATE", update(table).where(pk == key).values({pk.name: pk}))
+        _probe_write(factory, t, "DELETE", delete(table).where(pk == key))
+
+
+def _probe_write(factory: sessionmaker[Session], table: str, verb: str, stmt: Any) -> None:
+    """Run ``stmt`` and roll it back: return when the trigger refused it in its own words,
+    re-raise any other database error, and raise :class:`LedgerIntegrityError` when the
+    write went through (the rollback undoes it)."""
+    with factory() as s:
         try:
-            # A no-op UPDATE (actor = actor): a live trigger aborts it; a missing one lets
-            # it through, the rollback undoes the harmless write, and we report the gap.
-            s.execute(text("UPDATE grades SET actor = actor WHERE seq = :seq"), {"seq": first.seq})
+            s.execute(stmt)
+        except DBAPIError as exc:
             s.rollback()
-        except Exception:
-            s.rollback()
-            return
-        raise LedgerIntegrityError(
-            "grades table accepted an UPDATE — append-only triggers are missing"
-        )
+            if append_only_error_text(table) in str(exc.orig):
+                return
+            raise
+        s.rollback()
+    raise LedgerIntegrityError(
+        f"{table} accepted an {verb} — append-only triggers are missing or do not fire"
+    )

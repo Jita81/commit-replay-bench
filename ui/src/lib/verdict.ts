@@ -355,6 +355,7 @@ export const ACTION_HELP: Record<string, string> = {
   'intake.approved': 'An operator registered a ticket’s draft on the frozen backlog, as they read it at the revision named; the event names who approved it.',
   'intake.listener.switched': 'An operator switched this repository’s intake listener on or off; the event names who did it, because the switch is the consent to write on that board’s tickets.',
   'learn.prevention.recorded': 'The prevention loop recorded one act on this repository’s chain: a switch thrown, a change applied or reverted, a decision taken, an item filed or registered, or a fix linked — hash-chained and naming who did it.',
+  'posture.unsealed_override': 'A production process started with the host builder or the local test executor allowed; the event names the admin who set the override and their reason.',
   'signoff.created': 'An approver signed off a cell; the attested row’s hash is recorded.',
   'signoff.refused': 'A sign-off was refused by the policy; the refusal names the clause.',
   'signoff.revoked': 'A sign-off was revoked.',

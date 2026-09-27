@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from crb.core.evidence import verify_pack
 from crb.core.grade import FalseQ1Violation
@@ -46,6 +47,7 @@ from crb.core.ledger import (
 )
 from crb.store.db import init_db, install_append_only_triggers, make_session_factory
 from crb.store.ledger import DbLedger, assert_append_only
+from crb.store.models import APPEND_ONLY_TABLES
 
 try:
     from tests.conftest_store import (
@@ -174,6 +176,95 @@ def test_assert_append_only_passes_with_triggers_and_raises_without(
 
     install_append_only_triggers(backend.engine)
     assert_append_only(backend.factory)
+
+
+# P-058 (the external assessment's A5(c)): the probe proved `grades` only and read ANY
+# exception from its UPDATE as the trigger firing — a lost connection or a missing table
+# read as "append-only proven". It now proves every table and matches the trigger's text.
+
+
+def _drop_trigger(backend: Backend, name: str, table: str) -> None:
+    on = f" ON {table}" if backend.dialect == "postgresql" else ""
+    with backend.engine.begin() as c:
+        c.execute(text(f"DROP TRIGGER IF EXISTS {name}{on}"))
+
+
+def _replace_update_trigger(backend: Backend, table: str, body: str) -> None:
+    """Swap ``<table>_no_update`` for one whose body is ``body`` ("pass" = lets the UPDATE
+    through; anything else = raises that text)."""
+    _drop_trigger(backend, f"{table}_no_update", table)
+    with backend.engine.begin() as c:
+        if backend.dialect == "sqlite":
+            action = "SELECT 1;" if body == "pass" else f"SELECT RAISE(ABORT, '{body}');"
+            c.execute(
+                text(
+                    f"CREATE TRIGGER {table}_no_update BEFORE UPDATE ON {table} BEGIN {action} END;"
+                )
+            )
+        else:
+            action = "RETURN NEW;" if body == "pass" else f"RAISE EXCEPTION '{body}';"
+            c.execute(
+                text(
+                    f"CREATE OR REPLACE FUNCTION crb_probe_test() RETURNS trigger AS $$ "
+                    f"BEGIN {action} END; $$ LANGUAGE plpgsql;"
+                )
+            )
+            c.execute(
+                text(
+                    f"CREATE TRIGGER {table}_no_update BEFORE UPDATE ON {table} "
+                    "FOR EACH ROW EXECUTE FUNCTION crb_probe_test();"
+                )
+            )
+
+
+def _one_event(backend: Backend) -> None:
+    from crb.observability.events import StepEvent
+    from crb.store.events import DbEventSink
+
+    DbEventSink(backend.factory).emit(StepEvent(trace_id="t", stage="system", action="a", seq=1))
+
+
+@pytest.mark.parametrize("table", APPEND_ONLY_TABLES)
+@pytest.mark.parametrize("kind", ["no_update", "no_delete"])
+def test_the_probe_finds_a_missing_trigger_on_every_append_only_table(
+    backend: Backend, ledger: DbLedger, table: str, kind: str
+) -> None:
+    """Every table, both triggers — even on an empty table, where no row can be probed."""
+    assert_append_only(backend.factory)
+    _drop_trigger(backend, f"{table}_{kind}", table)
+    with pytest.raises(LedgerIntegrityError, match=f"{table}: append-only triggers are missing"):
+        assert_append_only(backend.factory)
+
+
+def test_the_probe_proves_update_and_delete_refused_on_every_table_that_holds_a_row(
+    backend: Backend, ledger: DbLedger
+) -> None:
+    ledger.append(grade_row())
+    _one_event(backend)
+    assert_append_only(backend.factory)
+    # a trigger that exists but lets the write through is caught on the table's own row
+    _replace_update_trigger(backend, "events", "pass")
+    with pytest.raises(LedgerIntegrityError, match="events accepted an UPDATE"):
+        assert_append_only(backend.factory)
+    assert verify_after_probe(backend) == 1  # the probe's write was rolled back
+
+
+def verify_after_probe(backend: Backend) -> int:
+    from crb.store.events import verify_events
+
+    report = verify_events(backend.factory)
+    assert report.ok, report.detail
+    return report.rows
+
+
+def test_the_probe_lets_any_other_error_propagate(backend: Backend, ledger: DbLedger) -> None:
+    """Only the trigger's own text is proof. A write refused for any other reason — here a
+    trigger raising something else; in life a lost connection — is not "append-only
+    proven": it reaches the caller (``/health`` reports it ``down``)."""
+    _one_event(backend)
+    _replace_update_trigger(backend, "events", "the disk is full")
+    with pytest.raises(DBAPIError, match="the disk is full"):
+        assert_append_only(backend.factory)
 
 
 # ---------------------------------------------------------------------------

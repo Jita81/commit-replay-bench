@@ -4,8 +4,10 @@
 recomputes every ``row_hash`` from the STORED columns (the same canonical body
 :class:`~crb.core.ledger.GradeRow` hashes, without constructing one — a tampered
 or false-Q1 row must be REPORTED, not hidden behind an exception), checks each
-``prev_hash`` link, and counts false-Q1 over the stored belts. ``ok`` is
-``chain_ok and false_q1_total == 0 and clean_without_pack == 0``.
+``prev_hash`` link, and counts false-Q1 over the stored belts. It walks the audit
+trail's own chain too (``events``, ADR-0041) and serves both heads — the last
+``row_hash`` of each — as values an operator records outside the store (G-601). ``ok``
+is ``chain_ok and false_q1_total == 0 and clean_without_pack == 0 and events.chain_ok``.
 
 ``/ledger/export`` streams the stored rows verbatim (chain fields included), so an
 UNFILTERED JSONL export verifies standalone with
@@ -21,9 +23,10 @@ Navigation
 What it is:   The ``/ledger/*`` route module — verify the chain, export it, export the
               abstract cells, import crb JSONL rows.
 What it does: ``verify`` walks the stored rows recomputing every hash from the columns (a
-              tampered or false-Q1 row is REPORTED, never hidden behind an exception) and
-              re-counts false-Q1 in SQL; ``export`` streams rows verbatim as JSONL (verifies
-              standalone when unfiltered) or formula-safe CSV; ``export/abstract`` emits
+              tampered or false-Q1 row is REPORTED, never hidden behind an exception),
+              re-counts false-Q1 in SQL, walks the ``events`` chain and serves both heads;
+              ``export`` streams rows verbatim as JSONL (verifies standalone when
+              unfiltered) or formula-safe CSV; ``export/abstract`` emits
               only the allowlisted cell fields; ``import`` re-chains foreign rows, skips
               ones already held, and refuses census rows (they need tasks and configs).
 How:          Batched ``select(Grade)`` by ``seq`` → ``row_hash_from_stored`` (belt-set
@@ -31,9 +34,11 @@ How:          Batched ``select(Grade)`` by ``seq`` → ``row_hash_from_stored`` 
               → ``StreamingResponse``; import = ``parse_import`` → dedupe → ``import_rows``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0007-abstract-cell-export-only.md, docs/adr/0011-repo-lint-belt.md
+              docs/adr/0007-abstract-cell-export-only.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0041-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this must mirror),
               src/crb/store/ledger.py (``import_rows`` / ``count``),
+              src/crb/store/events.py (``verify_events_in`` — the audit trail's walk),
               src/crb/core/federated.py (``export_abstract`` and its allowlist),
               src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``),
               src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
@@ -79,7 +84,8 @@ from crb.server.auth import AdminDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.routes.grades import ROW_FIELDS, grade_to_dict
 from crb.server.routes.signoffs import FALSE_Q1_PREDICATE
-from crb.server.schemas import LedgerImportOut, LedgerVerifyOut
+from crb.server.schemas import EventsVerifyOut, LedgerImportOut, LedgerVerifyOut
+from crb.store.events import verify_events_in
 from crb.store.ledger import DbLedger
 from crb.store.models import Grade
 
@@ -166,15 +172,20 @@ def verify_ledger(session: Session) -> LedgerVerifyOut:
         detail = f"{rows} rows, chain intact, false_q1=0"
     elif chain_ok:
         detail = f"chain intact but false_q1={fq1}, clean_without_pack={no_pack}"
+    events = verify_events_in(session)
+    if not events.ok:
+        detail = f"{detail}; events chain broken — {events.detail}"
     return LedgerVerifyOut(
         rows=rows,
-        ok=chain_ok and fq1 == 0 and no_pack == 0,
+        ok=chain_ok and fq1 == 0 and no_pack == 0 and events.ok,
         false_q1_total=fq1,
         chain_ok=chain_ok,
         broken_at=broken_at,
         detail=detail,
         clean_without_pack=no_pack,
         verified_at=_now(),
+        head_row_hash=prev if rows else "",
+        events=EventsVerifyOut(**events.to_dict()),
     )
 
 

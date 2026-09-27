@@ -1987,7 +1987,12 @@ def test_a_prod_worker_under_the_override_stamps_every_factory_run(
     _multiply_backlog(h)
     _sealed_sandbox_stand_in(h, monkeypatch)
     h.worker.settings = replace(
-        h.settings, env="prod", executor="docker", builder_executor="docker", unsealed_override={}
+        h.settings,
+        env="prod",
+        executor="docker",
+        builder_executor="docker",
+        unsealed_override={},
+        unsealed_override_ack={"by": "root", "reason": "evaluation"},
     )
     h.enqueue("factory", ladder_json=["fake:m0"])
     done = h.run_one()
@@ -1995,6 +2000,8 @@ def test_a_prod_worker_under_the_override_stamps_every_factory_run(
     stamp = done.apparatus_json["unsealed_prod_override"]
     assert stamp["builder_executor"] == "host" and stamp["run_kind"] == "factory"
     assert stamp["override"] == "CRB_ALLOW_UNSEALED_PROD" and stamp["adr"] == "0023"
+    # G-663: the admin who set the override is named beside it on every run it admits
+    assert stamp["acknowledged_by"] == "root"
 
 
 def test_a_dev_worker_stamps_no_override_on_a_factory_run(

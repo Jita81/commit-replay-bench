@@ -158,6 +158,7 @@ from crb.core.signoff import (
     verifier_kind_for_issuer,
 )
 from crb.core.version import APPARATUS_VERSION
+from crb.observability import metrics
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep
@@ -970,6 +971,7 @@ def _refuse(
         payload={"cell": scope.to_dict(), "envelope_code": code, **detail},
     )
     db.commit()
+    metrics.record_signoff("refused")  # G-924: the counter mirrors the committed event
     return ApiError(
         409,
         code,
@@ -1460,6 +1462,7 @@ def create_signoff(
         },
     )
     db.commit()
+    metrics.record_signoff("created")
     return signoff_out(
         db,
         row,
@@ -1527,6 +1530,7 @@ def revoke_signoff(
         },
     )
     db.commit()
+    metrics.record_signoff("revoked")
     return signoff_out(
         db,
         row,

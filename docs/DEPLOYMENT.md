@@ -108,7 +108,9 @@ server and never appear in logs or `/settings`.
 | `CRB_SANDBOX__EXECUTOR` | api, worker | `docker` (default in `prod`, fail-closed) or `local` (development; the worker's default in `dev`). Read by the API (`/settings`, `/health`) and by the worker (`crb worker`; its short form `CRB_EXECUTOR` is read when this is absent). `local` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` (below) |
 | `CRB_BUILDER__EXECUTOR` | api, worker | where the builder runs: `docker` — the sealed container of ADR-0012 (an exported checkout that cannot contain the gold commit, one allowlisting egress sidecar) — or `host` (development). Empty means the env's default: `docker` in `prod`, `host` in `dev`. Compose and Helm pass one value to both the API and the worker (empty by default), so `/health` describes the builds the worker runs. `host` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` (below). Factory builds are not covered: they always run on the host (below) |
 | `CRB_BUILDER__IMAGE` | worker | the builder image (`deploy/Dockerfile.builder`), in the daemon's store. An explicit `CRB_BUILDER__EXECUTOR=docker` without it fails at start-up; the `prod` default without it fails each build closed (`sandbox unavailable`), never on the host |
-| `CRB_ALLOW_UNSEALED_PROD` | api, worker | `1` lets `prod` start with the host builder or the local test executor — **for an evaluation you have decided not to count as evidence**. Without it both processes refuse to start and say which setting is unsealed. With it the API logs a warning, `/health` and `/settings` report `posture.unsealed_prod_override: true`, the Posture page says so to every viewer, and the worker stamps `unsealed_prod_override` into every run's apparatus and every evidence pack (ADR-0023). Without it a `prod` worker also refuses a run that asks for the local executor in its own parameters, and refuses every **factory** run: a factory build hands the builder a host worktree and no container, so it is never sealed (`posture.factory_builds: refused`). With it a factory run builds on the host and its apparatus carries the override (`run_kind: factory`) |
+| `CRB_ALLOW_UNSEALED_PROD` | api, worker | `1` lets `prod` start with the host builder or the local test executor — **for an evaluation you have decided not to count as evidence**. Without it both processes refuse to start and say which setting is unsealed. In `prod` it must name who set it and why (`CRB_ALLOW_UNSEALED_PROD_BY`, `CRB_ALLOW_UNSEALED_PROD_REASON`, below), or neither process starts. With it the API logs a warning, `/health` and `/settings` report `posture.unsealed_prod_override: true`, the Posture page says so to every viewer, and the worker stamps `unsealed_prod_override` into every run's apparatus and every evidence pack (ADR-0023). Without it a `prod` worker also refuses a run that asks for the local executor in its own parameters, and refuses every **factory** run: a factory build hands the builder a host worktree and no container, so it is never sealed (`posture.factory_builds: refused`). With it a factory run builds on the host and its apparatus carries the override (`run_kind: factory`) |
+| `CRB_ALLOW_UNSEALED_PROD_BY` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: the username of the admin who decided to run unsealed (a local username, the identity provider's subject or the account's email). At every start each process checks it names exactly one active admin — otherwise it refuses to start and writes nothing (the worker exits 2) — and writes one `posture.unsealed_override` event on the audit trail whose actor is that admin, with the reason, the process, the host and the posture it admits ([API.md § Event vocabulary](API.md#event-vocabulary); ADR-0023 as amended). The worker stamps the name beside the override (`unsealed_prod_override.acknowledged_by`) on every run it admits. Name a person with an admin account: a deployment whose only admin is the bootstrap account names that account |
+| `CRB_ALLOW_UNSEALED_PROD_REASON` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: why, in the admin's words — written into the same event |
 | `CRB_METRICS_ENABLED` | api, worker | `true` (default). `false` → the api's `/metrics` answers 404 and the worker starts no exposition |
 | `CRB_METRICS_HOST` | worker | the address the worker's exposition binds (default `127.0.0.1`, like `CRB_BIND_HOST`: the series name repositories, builders and installations, so a bare `crb worker` on a host offers them to nobody else). Compose and Helm set `0.0.0.0` inside the container, where only the compose network / the NetworkPolicy's scraper can reach the port (§9.1) |
 | `CRB_METRICS_PORT` | worker | the worker's own Prometheus exposition port (default `9464`; `0` = off) — the build / grade / cost / delivery series live here, not on the api (§9) |
@@ -635,16 +637,23 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
 - [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
       `database at <rev> = code head` — its contract is
       [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
-      line. `append_only` proves an
-      UPDATE refused, `ledger` reads `false_q1=0`, `builders`
+      line. `append_only` proves both triggers on every append-only table and an
+      UPDATE and a DELETE refused, in the trigger's own words, on each table that holds a row, `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
       worker owns it; prove it with `crb doctor` on the worker host).
 - [ ] `crb doctor` on the API host and on the worker host: every line `ok`, or `warn` for a
       reason you have written down; no `fail`. It covers what `/health` cannot see from
       inside a pod — the GitHub App's installations, the secrets directory mode, the
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
-- [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
-      (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
+- [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0` with `events.chain_ok:
+      true` (the audit trail's own chain, ADR-0041), and both heads it serves —
+      `head_row_hash` (the grade ledger's last `row_hash`) and `events.head_row_hash` — are
+      recorded out of band: in the change record for go-live, and after that from the
+      `ledger heads at worker start` line every worker start writes to the log store (§9.4).
+      To check a store later, a recorded head must still be the `row_hash` of a row in the
+      same chain (`GET /api/v1/ledger/export` for grades; `crb ledger verify --store --json`
+      on the API host prints both heads) and the chain must verify: a store cut at its end
+      or replaced wholesale fails this, though its own walk reads intact.
 - [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
       bootstrap admin password has been rotated (`PUT /users/{id}/password`, or
       `crb users set-password <admin>` on the API host) or the account deactivated
@@ -677,10 +686,10 @@ table). Logs are JSON and redacted. Nothing here leaves the tenant.
 ### 9.1 Metrics — which process carries which series
 
 The Prometheus registry is process-wide, so a series lives in the process that records it.
-The api records the HTTP series and the ledger gauges; **the worker records everything
-else and serves its own exposition** on `CRB_METRICS_PORT` (default 9464). A deployment
-that scrapes the api alone sees `crb_false_q1_total`, `crb_ledger_rows` and the HTTP
-series — every cost, run, belt and delivery counter reads as absent. Scrape both:
+The api records the HTTP series, the ledger gauges and the sign-off counter; **the worker
+records everything else and serves its own exposition** on `CRB_METRICS_PORT` (default 9464). A deployment
+that scrapes the api alone sees `crb_false_q1_total`, `crb_ledger_rows`,
+`crb_signoffs_total` and the HTTP series — every cost, run, belt and delivery counter reads as absent. Scrape both:
 
 | Shape | api | worker |
 |---|---|---|
@@ -702,6 +711,7 @@ the module defines that is not here, or is here under other labels, fails the su
 | `crb_build_latency_seconds` | histogram | `builder` | worker | wall-clock seconds for one builder attempt |
 | `crb_sandbox_unavailable_total` | counter | — | worker | runs that stopped because the sandbox failed closed (ADR-0005) |
 | `crb_deliveries_total` | counter | `repo, outcome` | worker | factory deliveries: `opened` (branch pushed, PR opened), `withheld` (the route gate refused), `failed` (the push or the PR call errored). Metered from the run's own `delivery.*` events |
+| `crb_signoffs_total` | counter | `outcome` | api | sign-off decisions the API committed: `created` (an attestation written), `refused` (the policy refused it — the 409 an approver sees), `revoked` (a revocation row appended). One count per `signoff.*` event, taken after the event is committed, so the counter and the audit trail agree; a refused revoke (already revoked, unknown id) writes no event and counts nothing |
 | `crb_github_tokens_minted_total` | counter | `installation` | worker | GitHub App installation tokens actually minted (a cache hit does not count). The label is the installation id; the token is never a label, never logged |
 | `crb_queue_depth` | gauge | — | worker | queued runs, as the worker last saw them on check-in (every `heartbeat_s`) |
 | `crb_false_q1_total` | gauge | — | api (recounted on every scrape and every `/health`) and worker (after every run) | clean ledger rows with a failed belt. **Must be 0** — a stop condition ([OPERATOR §8](OPERATOR.md#8-stop-conditions)) |
@@ -747,7 +757,11 @@ one-word pill in the header, so read `/health` itself when that pill is not `ok`
 
 ### 9.4 Logs
 
-Both processes log one JSON object per line (`CRB_LOG_FORMAT=json`, the default): `ts`,
+Every worker start writes one `ledger heads at worker start` line with the grade ledger's and
+the audit trail's head `row_hash` and row counts (as `grades_head`, `grades_rows`,
+`events_head`, `events_rows` in the JSON form) — the copy of both heads the log store keeps
+outside the database (§8). Both processes log one JSON object per line
+(`CRB_LOG_FORMAT=json`, the default): `ts`,
 `level`, `logger`, `msg`, any structured extras, and `exc` for a traceback. Every record —
 message, `%`-arguments, extras and the traceback — passes the same redaction as evidence
 packs before a handler sees it (`src/crb/core/redact.py`; the commitment is
@@ -761,8 +775,9 @@ after 20 passes ([API.md](API.md#runs), `POST /runs/{id}/cancel`); while it is n
 
 ### 9.5 Events
 
-Every step of a run is a `StepEvent` in the `events` table (append-only, hash-ordered by
-`seq`), streamed live as SSE from `GET /runs/{id}/events` and paged from
+Every step of a run is a `StepEvent` in the `events` table (append-only, ordered by `seq`
+within a trace, and hash-chained over the whole table in id order — ADR-0041; `/ledger/verify`
+walks the chain), streamed live as SSE from `GET /runs/{id}/events` and paged from
 `GET /runs/{id}/events/log`. The complete vocabulary — stage, action, status, payload keys,
 emitter, consumer — is [API.md § Event vocabulary](API.md#event-vocabulary), kept in step
 with the code by `tests/test_event_vocabulary.py`. Retention: the table is append-only and

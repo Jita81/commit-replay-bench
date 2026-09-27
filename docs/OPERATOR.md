@@ -76,7 +76,7 @@ Run it on the API host and on the worker host after installing, after changing a
 | `settings` | the server would start with this environment (`CRB_SECRET_KEY`, bootstrap password, `CRB_HOME`, …) | the first refusal, in the server's own words |
 | `home` | `CRB_HOME` is a persistent path, and the secrets directory is mode `0700` and owned by the user running `crb` | a temporary `CRB_HOME` in `prod` (`warn` in `dev`); a group-readable secrets directory, or one another user owns (the store refuses both) |
 | `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
-| `database` | the store answers and is initialised, every append-only trigger is present and they fire (an UPDATE on `grades` is refused) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
+| `database` | the store answers and is initialised, every append-only trigger is present and they fire (an UPDATE and a DELETE are refused, in the trigger's own words, on every append-only table that holds a row) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
 | `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead, empty or an older unversioned schema, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
 | `worker` | the workers' check-ins (the `workers` table), the queue depth and running runs' heartbeats, as `/health` reads them | `warn` when no worker has checked in yet, one stopped checking in (named, with its age), runs are queued and no worker is alive, or a running run's heartbeat is stale (an idle queue with a live worker is `ok`) |
 | `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
@@ -775,6 +775,15 @@ crb ledger export --repo myrepo -o myrepo.jsonl   # chain preserved; legacy rows
 For an audit: export, run `crb ledger verify` on the export, and record the last
 `row_hash` out of band (for example in the audit report). Anyone with the file can re-run
 the verification.
+
+On the API host, `crb ledger verify --store` verifies the database itself: the grade ledger
+and the audit trail (the `events` table — every sign-in, account change, sign-off decision
+and cancel — which is hash-chained too, ADR-0041). It exits 1 if either chain is broken and
+names the first bad row or event; it prints both heads, the values to record out of band.
+`GET /api/v1/ledger/verify` serves the same to any signed-in reader, and every worker start
+writes both heads to its log. A chain cannot show that rows were cut from its end or that
+the whole store was replaced; a head you recorded earlier can — it must still be in the
+chain ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)).
 
 ## 7. When the sandbox is unavailable
 

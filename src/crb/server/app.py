@@ -4,7 +4,8 @@ Responsibilities (and nothing else — domain routes live in :mod:`crb.server.ro
 
 * **Lifespan**: open the database, create tables, prove the append-only triggers are
   live (:func:`crb.store.ledger.assert_append_only`), seed the bootstrap admin when the
-  users table is empty.
+  users table is empty, and — in production under ``CRB_ALLOW_UNSEALED_PROD`` — write the
+  audit event naming the admin who set it, or refuse to start (G-663).
 * **Middleware** (outermost first): CORS (only when origins are configured) → request id
   → access log + HTTP metrics → security headers → session-bound CSRF → domain-error
   envelope. All are pure ASGI so SSE streams (W2-B) pass through unbuffered.
@@ -24,7 +25,9 @@ Navigation
 What it is:   The FastAPI application factory — ``create_app`` and the pure-ASGI middleware
               stack, error envelope and router seam it assembles.
 What it does: Opens the store in the lifespan and refuses to start unless the append-only
-              triggers are provably live; seeds the bootstrap admin once; wraps every
+              triggers are provably live; seeds the bootstrap admin once; under the unsealed
+              production override, writes the event naming who set it or refuses to start
+              (``record_unsealed_override``); wraps every
               request in request-id, access-log + metrics, security headers, CSRF and
               domain-error middleware; converts every failure into the one error envelope;
               mounts each ``crb.server.routes.*`` router under ``/api/v1`` and the built UI
@@ -40,9 +43,11 @@ Works with:   src/crb/server/deps.py (``ApiError`` and the envelope this renders
               src/crb/server/settings.py (everything the factory reads), src/crb/store/db.py
               + src/crb/store/ledger.py (``init_db`` and ``assert_append_only`` at boot),
               src/crb/server/routes/__init__.py (the mounting contract),
+              src/crb/server/unsealed_override.py (the override's start-up event),
               src/crb/server/http_metrics.py (the middleware's metrics sink), docs/API.md
               (the envelope and the reserved codes)
-Tested by:    tests/test_server_app.py, tests/test_server_auth.py, tests/test_server_system.py
+Tested by:    tests/test_server_app.py, tests/test_server_auth.py, tests/test_server_system.py,
+              tests/test_settings_posture.py
 Touch when:   never for a new repository; adding a middleware means deciding its position in
               the stack (comment the order) and keeping it pure ASGI so SSE is not buffered;
               mapping a new engine exception to a reserved code means adding its NAME to the
@@ -92,6 +97,7 @@ from crb.server.auth import (
 from crb.server.deps import ApiError, client_ip, error_body
 from crb.server.flow_record import stamp_install
 from crb.server.settings import Settings
+from crb.server.unsealed_override import record_unsealed_override
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.ledger import assert_append_only
 
@@ -495,6 +501,17 @@ def _lifespan_factory(
         # so a database that held nothing reads as this start being the install
         stamp_install(factory)
         bootstrap_admin_if_empty(factory, settings)
+        # G-663: a production start under the unsealed override names the admin who set it,
+        # on the audit trail, before any request is served — or does not start
+        ack = settings.unsealed_override_ack
+        if ack:
+            record_unsealed_override(
+                factory,
+                by=ack["by"],
+                reason=ack["reason"],
+                process="api",
+                posture=settings.posture(),
+            )
         # Mounted at startup (not in the factory) so routes a caller adds after
         # create_app() still take precedence over the catch-all SPA mount.
         if not getattr(app.state, "ui_mounted", False):

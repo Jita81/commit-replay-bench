@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Audit you can prove: the audit trail is hash-chained, and the unsealed override names who set it**
+  (north-star Wave 2, stream I; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-i)).
+  Every `events` row is chained as it is written, and revision 0031 chains the rows already
+  there (ADR-0041, DL-103); `GET /ledger/verify` and `crb ledger verify --store` walk it and
+  serve both chains' heads, which every worker start also logs. In production the override
+  needs `CRB_ALLOW_UNSEALED_PROD_BY` (an active admin) and `_REASON`, and every start writes
+  an event naming that admin (DL-102). The append-only probe proves every table (DL-104), and
+  `crb_signoffs_total{outcome}` counts sign-offs.
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

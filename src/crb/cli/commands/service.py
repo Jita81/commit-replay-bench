@@ -549,9 +549,9 @@ def probe_served(settings: Settings | None) -> ProbeResult:
 def probe_database(engine: Engine, factory: sessionmaker[Session], url: str) -> ProbeResult:
     """``database``: the store answers and is initialised (``grades`` exists), and the
     append-only guarantee holds the way ``/health`` proves it — ``probe_append_only``:
-    every trigger present (counted against ``APPEND_ONLY_TABLES``) AND an UPDATE on
-    ``grades`` refused. ``assert_append_only`` alone returns on an empty ``grades`` table,
-    which would pass a store whose triggers were never installed."""
+    every trigger present (counted against ``APPEND_ONLY_TABLES``) AND an UPDATE and a
+    DELETE refused, in the trigger's own words, on every append-only table that holds a
+    row (P-058)."""
     from sqlalchemy import inspect
 
     from crb.observability import probes

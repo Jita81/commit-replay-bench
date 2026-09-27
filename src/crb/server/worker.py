@@ -536,6 +536,11 @@ class WorkerSettings:
     #: ADR-0023: a prod worker running unsealed under the override — stamped into every
     #: run's apparatus and every pack; empty when sealed or in dev.
     unsealed_override: Mapping[str, Any] = field(default_factory=dict)
+    #: G-663: ``{"by", "reason"}`` when this prod worker starts under the override — the
+    #: admin who set it and why. ``announce_start`` writes them into an audit event (and
+    #: refuses the start for a name that is not an active admin); every factory run's stamp
+    #: carries the name. Empty when the override is not set or in dev.
+    unsealed_override_ack: Mapping[str, str] = field(default_factory=dict)
     #: ``CRB_ENV`` as the entrypoint read it. A factory build is never sealed (its builder is
     #: handed a host worktree), so in ``prod`` a factory run is refused unless the override is
     #: set, and one run under it is stamped (ADR-0023, ``_run_factory``).
@@ -1633,6 +1638,7 @@ class Worker:
         on a worker whose replay posture is sealed and stamps nothing else."""
         if self.settings.env != "prod":
             return {}
+        ack = dict(self.settings.unsealed_override_ack)
         stamp = {
             "env": "prod",
             "sandbox_executor": self.settings.executor,
@@ -1641,6 +1647,7 @@ class Worker:
             "run_kind": "factory",
             "override": ALLOW_UNSEALED_PROD_ENV,
             "adr": "0023",
+            **({"acknowledged_by": ack["by"]} if ack.get("by") else {}),
         }
         return {"unsealed_prod_override": stamp}
 
