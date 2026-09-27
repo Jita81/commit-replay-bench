@@ -50,11 +50,13 @@ regressed, narrows a gap it only half closes, and regenerates `GAP-ANALYSIS.md`.
 their files; the shared registries (`hints.ts`, `help.ts`, `types.ts`, `API.md`,
 `CHANGELOG.md`, `CODE-MAP.md`, `docs/dod/**`) are additive and resolved once, at the merge.
 
-**In flight.** Wave 0 and Wave 1 are being built now, on the `feat/ns1-*` branches, each cut
-from the integration tree: Wave 0 on `feat/ns1-d`; Wave 1 on `feat/ns1-m`, `feat/ns1-l`,
-`feat/ns1-u`, `feat/ns1-e`, `feat/ns1-a1` and `feat/ns1-a2`. Waves 2 to 4 have not started.
+**Integrated.** Wave 0 (`feat/ns1-d`) and Wave 1 (`feat/ns1-m`, `feat/ns1-l`, `feat/ns1-u`,
+`feat/ns1-e`, `feat/ns1-a1` and `feat/ns1-a2`) are merged onto one branch, `feat/ns1`, cut
+from the integration tree, with every stream's ids renumbered to follow the base in merge
+order. It awaits the operator's merge. The gaps the streams opened are placed in Waves 2 and 4
+below. Waves 2 to 4 have not started.
 
-## Wave 0 — correct the record (autonomous; in flight on `feat/ns1-d`)
+## Wave 0 — correct the record (autonomous; integrated on `feat/ns1`)
 
 | stream | gaps | what ships |
 |---|---|---|
@@ -77,7 +79,7 @@ after #57 lands. Their criterion is on the record already: `sign-off-a-cell.trut
 `product.evidence.6` partial on G-930 alone (the operator's token), criteria 202 to 205
 partial, P-008 closed and no orphan gap line; every wave item here is a gap id.
 
-## Wave 1 — finish what was built (autonomous; in flight): ranks 3 to 20
+## Wave 1 — finish what was built (autonomous; integrated on `feat/ns1`): ranks 3 to 20
 
 The gaps ranked 3 to 20, plus the smaller gaps on the same screens that finish an artefact.
 Five of these streams restart work parked on 25 September (`feat/w2-m`, `feat/w2-l`,
@@ -110,9 +112,9 @@ apparatus bump to 2.4 with `routing.v2`.
 | R · `routing.v2` | G-661, G-540, G-973, G-974 | one ADR; apparatus 2.4; a distinct-task minimum; `calibrate` on an unmeasured oracle; the sealed-posture clause; `lint_status` and `mutation.v2` in the same bump; the map and `/value` split by learn label |
 | F · factory | G-662, G-538, G-707, G-975 | the required, scoreable strength probe and the `oracle_not_scoreable` stop; factory builds get the loop's overlay and labels; the worker re-checks the builder credential when it claims a run; a pull request opens only when the delivered change's own cell routes `deliver` |
 | I · audit | G-663, F51, G-601, G-924, G-972 | an audit event naming who set the unsealed override; the `events` table hash-chained and verified; the head `row_hash` served and logged at worker start; `crb_signoffs_total`; the append-only probe on every table |
-| H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970, G-971 | `uv.lock`, CI installing from it, and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap (the assessment's C8 re-scoped to it); the reaper test on a fake clock; the Helm API and worker share the evidence directories; the docker-wait sites and their ratchet; the executor and mining edge cases |
+| H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970, G-971, G-987 | `uv.lock`, CI installing from it, and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap (the assessment's C8 re-scoped to it); the reaper test on a fake clock; the Helm API and worker share the evidence directories; the docker-wait sites and their ratchet; the executor and mining edge cases; one retrying helper for every system event's trace seq |
 | E2 · economics in one scope | G-990, G-991, G-989 | a cell's flat cost and latency means, the Pareto frontier, the best config and the forecast's price read one apparatus version and one posture class or are withheld; `GET /value` filters by posture class and refuses to pool two; a help-copy ratchet ties "not yet served" sentences to the API's fields (opened by Wave 1's stream E) |
-| C · claims | G-929, G-660 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the README routing bar generated and checked |
+| C · claims | G-929, G-660, G-994, G-996 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the README routing bar generated and checked; a scheduled mutation pass that proves the evidence of a met criterion or a closed prevention row can fail, and a check that a criterion flipped to met kept its words |
 
 The builder-endpoint work parked on `feat/w3-x` joins this wave when its criteria reach the
 record; until then it is not a wave item.
@@ -148,7 +150,7 @@ posture.23 and go-live.18 read met.
 |---|---|---|
 | S · the second person · `feat/w2-s` | G-517, G-518, G-516, G-477, G-476, G-478, G-479, G-480, G-481, G-284, G-285, G-286 | a signed cell licenses delivery by default (ADR-0018); an approver is invited with a one-time link; Home task 7 reads the real two-person readiness; a decision carries its age; the sign-off gate shows the evidence's posture |
 | P · posture and go-live · new | G-317, G-316, G-318, G-319, G-580, G-581, G-583, G-584, G-582, G-212, G-213, G-214, G-215, G-320, G-321, G-950, G-951, G-966 | `/posture` lists each go-live line as proven, attested or unproven; each posture row names its source and the page prints; the go-live walkthrough; mirror credentials; the remaining lock formats sealed; a damaged sealed set quarantined |
-| T · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control |
+| T · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952, G-992, G-993 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control; the walkthrough presses Sign off, Revoke sign-off, Freeze and Run by Tab and Enter |
 
 **Done when:** an invited approver can accept, sign in and sign a cell on the walkthrough stack;
 the factory refuses an unsigned cell by default; `/posture` shows each go-live line's state; the
