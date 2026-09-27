@@ -4,7 +4,7 @@ axe computes contrast from the colours the page shows at that instant. A control
 colours change with a CSS transition (the Connection screen's "baseline" link turns from
 outlined to filled when the last stage finishes, with ``transition-colors``) is read half
 way, as a blend that fails WCAG 2.1 AA although neither end state does. Walkthrough spec 07
-failed this way twice in a row on 2026-09-27 (docs/PREVENTION.md P-063), and spec 11 had
+failed this way twice in a row on 2026-09-27 (docs/PREVENTION.md P-130), and spec 11 had
 already met the same class for a fading hint bubble and fixed it only in its own file. So one
 helper, ``ui/e2e/axe.ts``, waits for every running CSS transition to finish before it runs
 axe, and no spec may build an ``AxeBuilder`` itself.
@@ -22,10 +22,10 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   ui/e2e/axe.ts (the helper under test), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
               and ui/e2e/walkthrough/11-screens.spec.ts (the sweeps that met the class),
-              docs/PREVENTION.md (P-063)
+              docs/PREVENTION.md (P-130)
 Tested by:    (this is a test file)
-Touch when:   a spec needs an axe option the helper does not offer (add it to the helper,
-              never a second construction).
+Touch when:   never for a new repository; a spec needs an axe option the helper does not offer (add
+              it to the helper, never a second construction).
 """
 
 from __future__ import annotations

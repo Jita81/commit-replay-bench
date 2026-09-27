@@ -11,16 +11,22 @@
 #   (commit-subjects lives in commit-subjects.yml: it must re-run when a pull request's
 #             title is edited, and an edit should not re-run this whole workflow)
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
-#   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
+#   test-shard     the hermetic suite (pytest -m "not sandbox_images") split six ways per Python
+#                  version (3.12, 3.13) by scripts/ci_test_shards.py — whole test files,
+#                  longest-first over the measured seconds in scripts/ci_test_weights.json, so
+#                  every shard computes the same partition and the six are balanced. Each shard
+#                  uploads its report (every id it collected, the ids it ran) and its coverage
+#                  data. The shards are not required contexts
+#   test           the required contexts "test (py3.12)" and "test (py3.13)": an aggregator per
+#                  version that passes only when every shard passed, the six reports prove every
+#                  collected test ran in exactly one non-empty shard (`ci_test_shards.py verify`),
+#                  and the shards' combined coverage is >= 70 — the single job's gate, on the
+#                  same data. It ran as one job per version until py3.13 took 58 of its 60
+#                  minutes on PR #57 (docs/PREVENTION.md P-053)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
-#             waiting for someone to run the gates by hand before a release. Both UI jobs run
-#             on every pull request, and a red one must be fixed like any other gate — but
-#             neither context is on main's required-checks list yet, so its failure does not
-#             by itself stop a merge. Only a repository administrator can add them; both
-#             contexts belong on that list alongside `container` (docs/DEPLOYMENT.md §3.4
-#             names the branch-protection call, README.md "Status" records the current list)
+#             waiting for someone to run the gates by hand before a release
 #   ui-smoke  the mocked Playwright smoke spec (ui/e2e/smoke.spec.ts) over the built bundle:
 #             the axe sweep of /login, the index redirect signed in and signed out, and the
 #             end-to-end 404. No server and no model — `page.route` answers every API call
@@ -38,17 +44,35 @@
 #                  the sandbox + sealed-builder suites on the python one, and the dependency
 #                  provisioning suites (ADR-0019: a real fetch from an offline mirror into a
 #                  sealed set, then each fixture offline on its image); a skip in the
-#                  smoke fails the job. Always runs, and is not on main's required-checks list
-#                  yet, so its failure does not by itself stop a merge: the context
-#                  "sandbox-images (build + hadolint + smoke each reference sandbox image)"
-#                  belongs on that list alongside `container`
-#                  (docs/DEPLOYMENT.md §3.4 names the branch-protection call). The `test` job
-#                  deselects the `sandbox_images` marker: these tests build images, and this
-#                  job builds each exactly once with the GHA layer cache
-#   walkthrough    the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack that
-#                  scripts/walkthrough.sh boots in a temp dir — tier 1: hermetic, no network,
-#                  no model (fixture repo over file://, test-only fixture_gold builder); the
-#                  Playwright report + traces are uploaded on failure
+#                  smoke fails the job. Always runs, and blocks a merge like `container`. The
+#                  `test-shard` jobs deselect the `sandbox_images` marker: these tests build
+#                  images, and this job builds each exactly once with the GHA layer cache
+#   walkthrough    the required context "walkthrough (browser, live stack, tier 1)": an aggregator
+#                  that passes only when `walkthrough-story` and every `walkthrough-screens`
+#                  shard passed (a failed, cancelled or skipped part fails it), so the whole
+#                  walkthrough stays under the one context main already requires
+#   walkthrough-story  the full-browser walkthrough (ui/e2e/walkthrough) against a LIVE stack
+#                  that scripts/walkthrough.sh boots in a temp dir — tier 1: hermetic, no
+#                  network, no model (fixture repo over file://, test-only fixture_gold
+#                  builder); the Playwright report + traces are uploaded on failure. It runs the
+#                  stateful story — every spec except 11-screens, in order
+#   walkthrough-screens  11-screens (every route x persona x width) split four ways by persona
+#                  (CRB_E2E_SCREENS_SHARD=k/4), each shard on a stack of its own that the
+#                  spec seeds through the API; the four run in parallel beside the story
+#   job budget     `test-shard`, `test`, `walkthrough-story` and `walkthrough-screens` start a
+#                  clock in their first step and end with scripts/ci_job_budget.py: past 80 % of
+#                  the job's own timeout-minutes it writes an alarm into the job summary and the
+#                  job fails — a job that creeps to its timeout blocks every merge, so it is
+#                  split before it gets there (docs/PREVENTION.md P-051, P-053). No guard only
+#                  warns: tests/test_ci_job_budget.py fails the build if one does
+#
+# Required contexts: every job in this file except `test-shard`, `walkthrough-story` and
+# `walkthrough-screens` (the parts behind the `test` and `walkthrough` aggregators) is on main's
+# required-checks list — lint, types, code-map, dod, claims, layers, test (py3.12), test (py3.13),
+# ui-unit, ui-smoke, security, sbom, test-postgres, container, sandbox-images and walkthrough:
+# 16 contexts, read from the repository setting on 2026-09-27. The list is a repository setting
+# only an administrator can change (docs/DEPLOYMENT.md §3.4 names the call); a part of a split
+# job is never added to it — its name changes with the split, the aggregator's does not.
 #
 # Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
 # mypy and ruff are pinned exactly in the dev extra and moved by the same Dependabot; the
@@ -136,11 +160,19 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # --changed-since diffs the pull request against its base branch
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Headers present, links resolve, map current
         run: python scripts/code_map.py --check
+      # On a pull request, a file in scripts/code_map_onboarding_baseline.txt that the change
+      # edits must leave it, and no path may join it (P-114); a push has no base to diff.
+      - name: No edited or added onboarding-baseline entry
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/code_map.py --check --changed-since "origin/$BASE_REF"
 
   # GitHub truncates a check-run name at 100 characters, and branch protection matches the
   # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Every
@@ -155,7 +187,7 @@ jobs:
         with:
           persist-credentials: false
           # the artefacts' history vouches for each retired gap id, and the base branch's
-          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-060)
+          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-127)
           fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
@@ -206,22 +238,32 @@ jobs:
       - name: lint-imports (crb.core stdlib-only; layers downward only)
         run: .venv/bin/lint-imports
 
-  test:
-    name: test (py${{ matrix.python }})
+  test-shard:
+    # The hermetic suite, split six ways per Python version. It ran as one job per version
+    # until py3.13 took 58 of its 60 minutes on PR #57 (P-053). Each shard runs the SAME
+    # command the single job ran — `-m "not sandbox_images"` and nothing else deselected —
+    # plus the shard plugin, which keeps only this shard's test files: longest-first over the
+    # measured per-file seconds in scripts/ci_test_weights.json, so the six are balanced and
+    # every shard computes the same partition. ~9 min of tests + ~2 min setup per shard,
+    # estimated from PR #57's two test-job logs: under half of this budget. No shard enforces
+    # coverage (a sixth of the suite covers less than the whole): `test (py…)` combines the
+    # six shards' coverage data and fails under 70 % on the union, exactly as the single job
+    # did. The shards are not required contexts — the `test` aggregators are.
+    name: test shard (py${{ matrix.python }}, ${{ matrix.shard }} of 6)
     runs-on: ubuntu-latest
-    # the hermetic suite takes 23–29 min on the hosted runner (py3.13 is the slower); 30 tipped
-    # over twice on 2026-09-17 at 98 % — headroom until the suite is split and parallelised
-    # a job-time budget, not a quality gate: py3.13 hit 45 min at 98% (run 36212115018); no test is skipped or weakened
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       # A toolchain warm-up (npm install, Maven resolution, docker build) that fails here
       # is a repository defect, not missing infrastructure: fail, never skip.
       CRB_TEST_STRICT_WARMUP: "1"
     steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -247,13 +289,97 @@ jobs:
       - uses: azure/setup-helm@v5
         with:
           version: v3.16.4
-      - name: pytest (coverage >= 70)
+      - name: pytest (this shard's test files; coverage data for the union)
         # `sandbox_images` builds the reference sandbox images; the sandbox-images job builds
         # each once (cached) and runs exactly those tests on it — nothing is skipped in CI.
+        # --cov-fail-under=0 only because the threshold is the union's, enforced in `test`.
+        # The shard options take `=`: pytest reads its config file before it loads the
+        # plugin, so a value after a space would be taken for a test path (the plugin refuses).
+        env:
+          PYTHONPATH: scripts
         run: >-
           .venv/bin/pytest -q -m "not sandbox_images"
-          --cov=crb --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
-          --cov-fail-under=70
+          -p ci_test_shards --shard=${{ matrix.shard }}/6
+          --shard-report=shard-report/shard-${{ matrix.shard }}.json
+          --cov=crb --cov-branch --cov-report= --cov-fail-under=0
+      - name: Keep this shard's report and coverage data for `test (py${{ matrix.python }})`
+        if: always()
+        run: |
+          mkdir -p shard-report
+          if [ -f .coverage ]; then mv .coverage "shard-report/shard-${{ matrix.shard }}.coverage"; fi
+          ls -la shard-report
+      # not continue-on-error: without every shard's report and coverage data the aggregator
+      # can prove neither the partition nor the 70 %, and it fails
+      - name: Upload the shard report + coverage data
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-shard-py${{ matrix.python }}-${{ matrix.shard }}
+          path: shard-report
+          if-no-files-found: error
+          retention-days: 1
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 30 --mode fail
+
+  test:
+    # The required contexts "test (py3.12)" and "test (py3.13)": branch protection matches the
+    # name character for character, so the split shards report under names of their own and
+    # this job carries the required one. It passes only when (1) every shard succeeded — a
+    # failed, cancelled or skipped shard fails it; `needs` on a matrix job waits for every
+    # leg of BOTH versions, so a red py3.13 shard also fails `test (py3.12)`: stricter, never
+    # looser; (2) this version's six reports prove the shards are one exact partition of the
+    # collected suite — every test in exactly one shard, none empty, all six collecting the
+    # same suite (scripts/ci_test_shards.py verify); (3) the six shards' coverage data,
+    # combined, is at least 70 % — the single job's gate, on the same data. `if: always()`
+    # so it runs, and fails, when a shard failed or was cancelled: a skipped required check
+    # does not block a merge. tests/test_ci_test_shards.py holds all of this in place.
+    name: test (py${{ matrix.python }})
+    needs: [test-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Every shard passed (both Python versions)
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'to_entries | length > 0 and all(.value.result == "success")'
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Install (dev extras — the coverage the shards measured with)
+        run: |
+          uv venv -q .venv --python ${{ matrix.python }}
+          uv pip install -q -e '.[dev]' --python .venv/bin/python
+      - name: Download every shard's report + coverage data (this Python version)
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-shard-py${{ matrix.python }}-*
+          path: shards
+          merge-multiple: true
+      - name: Every test ran in exactly one shard (the partition proof)
+        run: >-
+          python3 scripts/ci_test_shards.py verify --shards 6 --python ${{ matrix.python }}
+          shards/shard-1.json shards/shard-2.json shards/shard-3.json
+          shards/shard-4.json shards/shard-5.json shards/shard-6.json
+      - name: coverage >= 70 on the union of the shards
+        run: |
+          .venv/bin/coverage combine --keep shards/shard-*.coverage
+          .venv/bin/coverage report --fail-under=70
+          .venv/bin/coverage xml -o coverage.xml
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -263,6 +389,9 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
           retention-days: 7
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 10 --mode fail
 
   ui-unit:
     name: ui-unit (tsc -b + vitest, the hint ratchet included)
@@ -653,16 +782,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  walkthrough:
-    name: walkthrough (browser, live stack, tier 1)
+  walkthrough-story:
+    name: walkthrough story (browser, live stack, tier 1)
     runs-on: ubuntu-latest
-    # The tier-1 walk is 56 specs and grows with the product: this wave added the hint sample
-    # on every route x persona x width (11-screens) and the two-person sign-off walk, taking it
-    # past the old 25-minute budget on a GitHub runner (run 35741391422 was cancelled at 25m18s
-    # with the walk still running). 40 leaves headroom; if a future wave needs more, split the
-    # job rather than raising this again — a gate nobody can finish is not a gate.
+    # The tier-1 walk grew past its budget twice: 25 minutes (run 35741391422, cancelled at
+    # 25m18s) and then 40 (PR #57, cancelled twice at 40 minutes with every spec so far
+    # passing) — 11-screens alone was ~34 of them (8 persona x width passes at ~4.3 min each).
+    # So the job was split, not raised: this one runs the stateful story (every spec but
+    # 11-screens, ~9-12 min on a hosted runner) and `walkthrough-screens` runs 11-screens as
+    # four parallel shards; `walkthrough` below keeps the required context and passes only
+    # when all of them did. The guard at the end fails the job past 80 % of this budget; if
+    # a future wave needs more, split again — a gate nobody can finish is not a gate.
     timeout-minutes: 40
     steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -693,14 +827,15 @@ jobs:
           git config --global user.email "ci@crb.invalid"
           git config --global user.name "crb ci"
           git config --global init.defaultBranch main
-      - name: Walkthrough — boot a fresh stack, drive it through the browser, tear it down
+      - name: Walkthrough — the stateful story (every spec but 11-screens), on a fresh stack
         # Hermetic: no network (file:// fixture, pinned interpreter), no model (fixture_gold),
         # a temp CRB_HOME + SQLite on a free port. The report is pointed into ui/ for upload.
+        # --grep-invert matches the file name, so a spec added later runs here by default.
         env:
           CI: "1"
           CRB_E2E_REPORT_DIR: ${{ github.workspace }}/ui/playwright-report-walkthrough
           CRB_E2E_OUTPUT_DIR: ${{ github.workspace }}/ui/test-results-walkthrough
-        run: scripts/walkthrough.sh
+        run: scripts/walkthrough.sh --grep-invert '11-screens\.spec\.ts'
       - name: Upload the Playwright report + traces
         if: failure()
         uses: actions/upload-artifact@v7
@@ -712,3 +847,96 @@ jobs:
             ui/test-results-walkthrough
           if-no-files-found: ignore
           retention-days: 7
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 40 --mode fail
+
+  walkthrough-screens:
+    # 11-screens, every route x persona x width, one persona per shard (k/4 takes every 4th
+    # persona from the k-th, so the four shards are every persona by construction). Each shard
+    # boots its own stack and the spec's first test seeds the primary repository through the
+    # API (onboard, probe, mine, oracle, controls, a two-task fixture_gold replay) — it never
+    # assumes state the `walkthrough-story` job made. ~8.5 min of passes + ~1.5 min seed + ~1 min
+    # setup on a hosted runner, estimated from PR #57's log: under half of this budget.
+    name: walkthrough screens (browser, live stack, tier 1, shard ${{ matrix.shard }} of 4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install crb (server + dev extras)
+        run: |
+          uv venv -q .venv --python 3.12
+          uv pip install -q -e '.[server,dev]' --python .venv/bin/python
+      - name: Install the UI + Playwright Chromium (with system deps)
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund --legacy-peer-deps
+          npx playwright install --with-deps chromium
+      - name: Build the UI bundle the API serves
+        working-directory: ui
+        run: npm run build
+      - name: Configure git identity for the fixture repository
+        run: |
+          git config --global user.email "ci@crb.invalid"
+          git config --global user.name "crb ci"
+          git config --global init.defaultBranch main
+      - name: 11-screens for this shard's personas, on a fresh stack the spec seeds
+        env:
+          CI: "1"
+          CRB_E2E_SCREENS_SHARD: ${{ matrix.shard }}/4
+          CRB_E2E_REPORT_DIR: ${{ github.workspace }}/ui/playwright-report-walkthrough
+          CRB_E2E_OUTPUT_DIR: ${{ github.workspace }}/ui/test-results-walkthrough
+        run: scripts/walkthrough.sh e2e/walkthrough/11-screens.spec.ts
+      - name: Upload the Playwright report + traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        continue-on-error: true  # a full artifact-storage quota is not a build failure
+        with:
+          name: walkthrough-screens-playwright-report-${{ matrix.shard }}
+          path: |
+            ui/playwright-report-walkthrough
+            ui/test-results-walkthrough
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 25 --mode fail
+
+  walkthrough:
+    # The required context. Main's branch protection lists "walkthrough (browser, live stack,
+    # tier 1)" and nothing else for the walkthrough, so the split parts report under names of
+    # their own and this job carries the required one: it passes only when every part passed.
+    # `if: always()` so it runs — and fails — when a part failed or was cancelled: a skipped
+    # job would leave the required context skipped, and a skipped required check does not
+    # block a merge. tests/test_ci_job_budget.py holds `needs` equal to every job that runs
+    # scripts/walkthrough.sh, so a part added later cannot run outside the required check.
+    name: walkthrough (browser, live stack, tier 1)
+    needs: [walkthrough-story, walkthrough-screens]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every part of the walkthrough passed (story + every screens shard)
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'to_entries | length > 0 and all(.value.result == "success")'

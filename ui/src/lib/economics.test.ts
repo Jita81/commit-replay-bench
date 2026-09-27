@@ -11,14 +11,15 @@
  *               the classes named, that the posture class stands beside the apparatus, that
  *               the denominators are the known counts, and that a response with no economics
  *               block says so; and that the spend estimates' measured cost per attempt is
- *               the map fold's own value over its known count (a known $0 is $0, P-064).
+ *               the map fold's own value over its known count (a known $0 is $0, P-131).
  * How:          Hand-built `Economics` objects; no rendering.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/lib/economics.ts (under test), ui/src/api/types.ts (`Economics`),
  *               src/crb/core/economics.py (the reasons and method strings copied here)
  * Tested by:    ui/src/lib/economics.test.ts
- * Touch when:   an economics figure or its denominator sentence changes.
+ * Touch when:   never for a new repository; an economics figure or its denominator sentence
+ *               changes.
  */
 import { describe, expect, it } from 'vitest'
 import type { Economics, EconomicsEstimate } from '../api/types'
@@ -112,9 +113,14 @@ describe('economicsTile', () => {
     const t = economicsTile(undefined, 'cost_per_clean')
     expect(t).toMatchObject({ value: '—', n: 0, ci: null, apparatus: NO_ECONOMICS })
   })
+
+  it('with no block served, a headline tile still names the apparatus its page was graded under (PR #56 review)', () => {
+    const t = economicsTile(undefined, 'cost_per_attempt', 'apparatus 2.3')
+    expect(t).toMatchObject({ value: '—', n: 0, ci: null, apparatus: `${NO_ECONOMICS} · apparatus 2.3` })
+  })
 })
 
-describe('measuredCostPerAttempt — the spend estimates read the map fold, never the flat means (P-064)', () => {
+describe('measuredCostPerAttempt — the spend estimates read the map fold, never the flat means (P-131)', () => {
   it('is the fold value with its KNOWN count as n and the apparatus; a known $0 is $0, never dropped', () => {
     expect(measuredCostPerAttempt(econ({}))).toEqual({ mean: 0.12, n: 36, apparatus: '2.3' })
     // every attempt cost a known $0 (a fixture, a metered subscription): a measured $0 over n = 4

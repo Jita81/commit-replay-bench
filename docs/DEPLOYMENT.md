@@ -29,7 +29,14 @@ The two container shapes run the same image and the same four things: PostgreSQL
 the **api** (HTTP + UI) and the **worker** (queue consumer that mines, builds, grades and
 appends to the ledger). Both enforce the same invariants: the append-only tables carry DB
 triggers, every verdict is hash-chained, the sandbox fails closed, and the only permitted
-egress is the model endpoint (worker) and the OIDC issuer (api).
+egress is the model endpoint (worker), the OIDC issuer (api), the repository's git remote
+(clone, fetch and factory delivery), the GitHub API (api and worker: the GitHub App's
+installations and tokens, and a delivery's pull request), the image registry your images
+come from, and two flows that are off by default: the tracker the intake watches
+(`CRB_INTAKE__TRACKER`) and, with dependency provisioning on (`CRB_PROVISION__ENABLED=true`,
+§3.4), the fetch sidecar to your package mirror or registry —
+which receives only the package names and versions the task's lockfiles pin
+([SECURITY.md](SECURITY.md) has the complete table, with what each flow sends).
 
 ### 1.1 Single host without containers (evaluation)
 
@@ -358,23 +365,25 @@ is not measured yet **[hypothesis — about 1 to 3 minutes per cobra task with a
 build cache, extrapolated from run `0c44ff24…`'s attempt latencies; the first live qualify
 run replaces this with a measured figure]**.
 
-Every job in `.github/workflows/ci.yml` blocks a merge to `main` only while its check name is
+Every check `.github/workflows/ci.yml` reports blocks a merge to `main` only while its name is
 on the branch's required-status-checks list, which is a repository setting, not a workflow
-file. The list names every job, `sandbox-images` and `sbom` among them, and is strict (a
-branch must be up to date) **[measured 2026-09-27 — n = 16 required checks against 16 check
-names the workflow renders, method: `scripts/check_branch_protection.py` against
+file. The list names every job's check but the parts an aggregator stands for (below) —
+`sandbox-images`, which has no `continue-on-error` and fails on any skipped smoke test exactly
+as `container` does, and `sbom` among them — and is strict (a branch must be up to date)
+**[measured 2026-09-27 — n = 16 required checks against the 16 gating check names the
+workflow renders, method: `scripts/check_branch_protection.py` against
 `GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
 apparatus 2.3; the same list was read on 2026-09-26]**.
 
 `scripts/check_branch_protection.py` compares the two both ways. It fails on a required check
 that no job reports (every pull request would wait on it for ever), a job that no required
-check names (it could fail and the change still merge), a setting that is not strict, and a
-job name of 100 characters or more. The daily `branch-protection` workflow
-(`.github/workflows/branch-protection.yml`) runs it against the live setting. Reading the
-setting needs a token with Administration: read, which a workflow's own `GITHUB_TOKEN` can
-never be given, so an administrator adds a fine-grained token with that one permission on
-this repository as the secret `BRANCH_PROTECTION_TOKEN`. Until then the workflow fails, by
-design (G-930).
+check names (it could fail and the change still merge), a required check that is a part of an
+aggregator, a setting that is not strict, and a job name of 100 characters or more. The daily
+`branch-protection` workflow (`.github/workflows/branch-protection.yml`) runs it against the
+live setting. Reading the setting needs a token with Administration: read, which a workflow's
+own `GITHUB_TOKEN` can never be given, so an administrator adds a fine-grained token with that
+one permission on this repository as the secret `BRANCH_PROTECTION_TOKEN`. Until then the
+workflow fails, by design (G-930).
 
 When a pull request adds or renames a job, the administrator changes the list before it
 merges (a renamed job leaves its old name required, so the pull request waits until then).
@@ -390,7 +399,34 @@ python scripts/check_branch_protection.py --repo Jita81/commit-replay-bench   # 
 ```
 
 Then save the new reading as `tests/fixtures/branch_protection_main.json`: the test that
-compares the last reading with ci.yml fails on every pull request until the two agree.
+compares the last reading with ci.yml fails on every pull request until the two agree. To
+re-create the list from nothing, send the whole set:
+
+```bash
+gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
+  --input - <<'JSON'
+{"strict": true, "contexts": ["lint (ruff)", "types (mypy --strict)", "layers (import-linter)",
+ "code-map (every file has a valid header; docs/CODE-MAP.md is current)",
+ "test (py3.12)", "test (py3.13)", "test-postgres (store suite on PostgreSQL 16)",
+ "security (gitleaks + pip-audit)", "container (docker build + smoke + helm lint)",
+ "walkthrough (browser, live stack, tier 1)",
+ "ui-unit (tsc -b + vitest, the hint ratchet included)",
+ "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
+ "dod (every route, journey and stream has its definition of done; evidence resolves)",
+ "claims (every quantified sentence on a covered page carries its tag)",
+ "sandbox-images (build + hadolint + smoke each reference sandbox image)",
+ "sbom (CycloneDX)"]}
+JSON
+```
+
+`test (py3.12)`, `test (py3.13)` and `walkthrough (browser, live stack, tier 1)` are
+aggregators — each a job that `needs` its parts and runs `if: always()`: the work runs in
+parallel parts (`test shard (py3.12, 1 of 6)` …, the walkthrough story and its screens
+shards) and the aggregator passes only when every part passed (a failed, cancelled or skipped
+part fails it), the suite's parts together ran every test exactly once, and the union's
+coverage is at least 70 % (P-051, P-053). Never add a part to the list — its name changes
+whenever the job is split differently, and the aggregator's does not;
+`scripts/check_branch_protection.py` refuses a part on the list.
 
 A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
 characters — a `name:` longer than that can never satisfy the context it is required under
@@ -614,8 +650,12 @@ Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up 
 
 crb never bundles a model and never phones home: no telemetry, no update checks, no
 run-time pulls by the worker itself. The complete outbound list is: worker → model endpoint;
-api → OIDC issuer; (`dind` only) sidecar → your registry; (provisioning on, §3.4) worker
-fetch sidecar → your package mirror. Sandboxes run with `--network=none`; a `file://`
+api → OIDC issuer; api and worker → the repository's git remote (clone, fetch, factory
+delivery); api and worker → the GitHub API (the GitHub App's installations and tokens, a
+delivery's pull request); (intake on) → the tracker it watches; the container runtime (the `dind`
+sidecar in the chart) → your image registry;
+(provisioning on, §3.4) worker fetch sidecar → your package mirror, sent only the package
+names and versions the lockfiles pin. Sandboxes run with `--network=none`; a `file://`
 mirror makes the fetch network-less too. To operate fully inside the tenant:
 
 1. point the builder at an in-tenant endpoint — Azure OpenAI with a private endpoint (§4.3)

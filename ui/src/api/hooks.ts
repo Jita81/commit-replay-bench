@@ -45,9 +45,9 @@
  *               ui/src/screens/Capability/CapabilityPage.test.tsx (`currentData`, with the
  *               source ratchet that refuses a `<query>.data` read on those pages)
  *               (every screen test exercises its hooks through `mockApi`)
- * Touch when:   an endpoint is added or its path / params change (docs/API.md) — add the type
- *               in ui/src/api/types.ts, the key in `keys` and the hook here, then the screen;
- *               never for a new repository.
+ * Touch when:   never for a new repository; an endpoint is added or its path / params change
+ *               (docs/API.md) — add the type in ui/src/api/types.ts, the key in `keys` and the hook
+ *               here, then the screen.
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -142,7 +142,10 @@ export const keys = {
   repo: (name: string) => ['repos', name] as const,
   repoProfile: (name: string) => ['repos', name, 'profile'] as const,
   repoPool: (name: string) => ['repos', name, 'pool'] as const,
-  repoPosture: (name: string) => ['repos', name, 'posture'] as const,
+  /** Every executor's posture reading for `name` — the prefix a finished run invalidates. */
+  repoPostures: (name: string) => ['repos', name, 'posture'] as const,
+  /** One executor's reading (`''` = the deployment's default executor). */
+  repoPosture: (name: string, executor = '') => ['repos', name, 'posture', executor] as const,
   repoTasks: (name: string, p?: PageParams) => ['repos', name, 'tasks', p ?? {}] as const,
   runs: (p?: RunListParams) => ['runs', p ?? {}] as const,
   run: (id: string) => ['runs', id] as const,
@@ -284,7 +287,7 @@ export function useRepo(name: string): UseQueryResult<RepoDetail, ApiError> {
  * baseline in front of them (`POST /repos/{name}/baseline-read` → a `repo.baseline_read`
  * event, once per person). The Baseline screen calls it when the map of a repository with
  * rows has loaded; the repository is then re-read, so Home's task 6 "Read the baseline"
- * completes on a recorded read rather than only on a sign-off (G-165, DL-074). A failed record
+ * completes on a recorded read rather than only on a sign-off (G-165, DL-075). A failed record
  * changes nothing the reader sees — Home keeps reading the task as not yet done.
  */
 export function useRecordBaselineRead(repo: string, ready: boolean): void {
@@ -321,11 +324,15 @@ export function useProbeRepo(): UseMutationResult<Run, ApiError, string> {
   })
 }
 
-/** `GET /repos/{name}/posture` — qualified N of M in the posture last recorded (ADR-0019). */
-export function useRepoPosture(name: string): UseQueryResult<RepoPosture, ApiError> {
+/**
+ * `GET /repos/{name}/posture[?executor=]` — qualified N of M in the posture last recorded
+ * (ADR-0019) for `executor` (`''` = the deployment's default). The executor is in the key,
+ * so a reading for one executor is never shown for another.
+ */
+export function useRepoPosture(name: string, executor = ''): UseQueryResult<RepoPosture, ApiError> {
   return useQuery({
-    queryKey: keys.repoPosture(name),
-    queryFn: () => api<RepoPosture>(`/repos/${enc(name)}/posture`),
+    queryKey: keys.repoPosture(name, executor),
+    queryFn: () => api<RepoPosture>(`/repos/${enc(name)}/posture${executor ? `?executor=${enc(executor)}` : ''}`),
     enabled: name.length > 0,
     retry: false,
   })
@@ -337,7 +344,8 @@ export function useQualifyRepo(): UseMutationResult<Run, ApiError, string> {
   return useMutation({
     mutationFn: (name) => api<Run>('/runs', { method: 'POST', body: { repo: name, kind: 'qualify' } }),
     onSuccess: (_run, name) => {
-      qc.invalidateQueries({ queryKey: keys.repoPosture(name) })
+      // queued, not finished: RunDetailPage refreshes the reading again when the run ends
+      qc.invalidateQueries({ queryKey: keys.repoPostures(name) })
       qc.invalidateQueries({ queryKey: ['runs'] })
     },
   })

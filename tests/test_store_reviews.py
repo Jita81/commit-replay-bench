@@ -19,8 +19,8 @@ Works with:   src/crb/store/ledger.py (``DbReviewLedger`` under test), src/crb/c
               (the record and refusal codes), tests/test_review.py (the JSONL twin),
               tests/test_server_routes_reviews.py (the write as HTTP), tests/conftest_store.py
 Tested by:    tests/test_store_reviews.py
-Touch when:   the anchor rule changes (both ledgers and the route together); a review column is
-              added (a migration and the parity case).
+Touch when:   never for a new repository; the anchor rule changes (both ledgers and the route
+              together); a review column is added (a migration and the parity case).
 """
 
 from __future__ import annotations

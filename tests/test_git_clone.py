@@ -19,8 +19,8 @@ Works with:   src/crb/core/git.py (under test), tests/fixtures/remote.py (the ba
               tests/test_cli_repo_url.py and tests/test_worker_clone.py (the same policy at the
               CLI and worker), docs/SECURITY.md (the credential rules)
 Tested by:    tests/test_git_clone.py
-Touch when:   a URL scheme or host policy is added (a case in the accepted and refused tables);
-              the clone options change (``--no-tags``, depth).
+Touch when:   never for a new repository; a URL scheme or host policy is added (a case in the
+              accepted and refused tables); the clone options change (``--no-tags``, depth).
 """
 
 from __future__ import annotations

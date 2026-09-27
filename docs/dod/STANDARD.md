@@ -206,7 +206,7 @@ backlog row nothing asks for) fails the `dod` job. Every gap the order of work r
 also sit in some table of the plan — a wave, or the list after the waves — so the plan can
 neither skip the top of the list nor leave a newly opened gap unplanned; and no heading of
 the plan quotes a rank, because the order of work is the generated file and a copied rank
-reads false as soon as the order moves (P-122).
+reads false as soon as the order moves (P-189).
 
 The retired list is carried forward by the generator, but the generated file never vouches
 for itself: an id stays retired only while the git history of the artefacts and the register

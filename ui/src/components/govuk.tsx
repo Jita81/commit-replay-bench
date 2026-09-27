@@ -39,7 +39,8 @@
  *               ui/src/screens/Posture/PosturePage.tsx (SummaryList; the other consumers are
  *               in docs/CODE-MAP.md), ui/src/components/Layout.tsx (the shell these sit in)
  * Tested by:    ui/src/components/govuk.test.tsx, ui/src/help/hints-ratchet.test.tsx (the hint contract)
- * Touch when:   a pattern is added (name it after the GOV.UK/NHS component it is).
+ * Touch when:   never for a new repository (these are the product's own patterns); a pattern
+ *               is added (name it after the GOV.UK/NHS component it is).
  */
 
 import type { ReactNode } from 'react'
@@ -58,9 +59,14 @@ const TAG: Record<TagTone, string> = {
   pale: 'bg-surface-high text-on-surface',
 }
 
-/** The solid status label — uppercase, bold, one of six tones; `hint` makes it the trigger for what the status means. */
-export function Tag({ tone, children, className = '', hint, ...rest }: { tone: TagTone; children: ReactNode; className?: string; hint?: HintId; 'aria-label'?: string; 'data-testid'?: string }) {
-  const cls = `inline-block rounded-[4px] px-2 py-1 text-[13px] font-bold uppercase leading-tight tracking-[.05em] whitespace-nowrap ${TAG[tone]} ${className}`
+/**
+ * The solid status label — uppercase, bold, one of six tones; `hint` makes it the trigger for
+ * what the status means. `wrap` lets a long label break onto a second line instead of pushing
+ * its row past the viewport (a task list's "No cell routes deliver yet" scrolled Home sideways
+ * at 375 px on a deployment with no deliver cell — found by 11-screens on a stack of its own).
+ */
+export function Tag({ tone, children, className = '', hint, wrap = false, ...rest }: { tone: TagTone; children: ReactNode; className?: string; hint?: HintId; wrap?: boolean; 'aria-label'?: string; 'data-testid'?: string }) {
+  const cls = `inline-block rounded-[4px] px-2 py-1 text-[13px] font-bold uppercase leading-tight tracking-[.05em] ${wrap ? 'whitespace-normal' : 'whitespace-nowrap'} ${TAG[tone]} ${className}`
   if (hint) {
     return (
       <Hint id={hint} className={cls} data-component="pill" {...rest}>
@@ -100,7 +106,7 @@ export function TaskList({ tasks, completed, label = 'Tasks', summary }: { tasks
             <>
               <span className="min-w-[1.6em] text-[19px] leading-[1.47] text-on-surface-muted">{t.num}</span>
               <span className="flex-1 text-[19px] leading-[1.47] text-primary underline">{t.name}</span>
-              <Tag tone={t.tone} hint={t.hint}>
+              <Tag tone={t.tone} hint={t.hint} wrap>
                 {t.status}
               </Tag>
             </>

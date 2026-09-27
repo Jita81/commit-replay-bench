@@ -43,8 +43,9 @@
  *               (the secrets and user routes), ui/e2e/walkthrough/08-signoff.spec.ts (signs in
  *               as the persona this spec sets the password of)
  * Tested by:    ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a screen is added (add it to the axe sweep), the settings fields change, or an
- *               account act is added to the Users card.
+ * Touch when:   never for a new repository (it sweeps the product's own screens); a screen is
+ *               added (add it to the axe sweep), the settings fields change, or an account act
+ *               is added to the Users card.
  */
 import { axeViolations } from '../axe'
 import type { Page } from '@playwright/test'

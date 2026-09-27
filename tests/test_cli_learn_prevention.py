@@ -13,7 +13,8 @@ ADRs:         docs/adr/0020-a-bug-is-closed-by-prevention.md
 Works with:   src/crb/cli/commands/learn.py (under test), src/crb/core/prevention.py (the
               register and the tick), tests/prevention_fixtures.py (the ladder's rows)
 Tested by:    tests/test_cli_learn_prevention.py
-Touch when:   the verb gains an option or the register's text rendering changes.
+Touch when:   never for a new repository; the verb gains an option or the register's text rendering
+              changes.
 """
 
 from __future__ import annotations

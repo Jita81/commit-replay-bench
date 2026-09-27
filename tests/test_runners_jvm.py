@@ -43,8 +43,8 @@ Works with:   src/crb/core/runners/jvm_runner.py (under test), tests/fixtures/la
               tests/test_runners_parsers.py (the surefire parser on canned output),
               docs/CONTRIBUTING.md (how to add a runner)
 Tested by:    tests/test_runners_jvm.py
-Touch when:   the maven runner's goals or parser change; a Gradle runner is added (a new
-              module, not an option here).
+Touch when:   never for a new repository; the maven runner's goals or parser change; a Gradle runner
+              is added (a new module, not an option here).
 """
 
 from __future__ import annotations

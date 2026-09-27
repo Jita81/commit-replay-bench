@@ -21,8 +21,8 @@ Works with:   src/crb/core/deps.py (under test), src/crb/core/execution.py (``ro
               and ``TestRun.env_error``), src/crb/core/runners/go_runner.py (the offline
               probe), src/crb/provision/__init__.py (``make_deps_provider``)
 Tested by:    tests/test_deps_seam.py
-Touch when:   the seam's shape changes — both streams code to it, so a change here is a change
-              to ADR-0019's contract.
+Touch when:   never for a new repository; the seam's shape changes — both streams code to it, so a
+              change here is a change to ADR-0019's contract.
 """
 
 from __future__ import annotations

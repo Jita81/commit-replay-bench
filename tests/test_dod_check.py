@@ -26,7 +26,7 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               artefacts' git history (never the generated file, never a parent repository)
               or the base branch's committed gap analysis vouches for it; that every gap the
               order of work ranks, not only the first rows, sits in some table of the plan;
-              and that no plan heading quotes a rank (P-122).
+              and that no plan heading quotes a rank (P-189).
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
@@ -37,8 +37,8 @@ ADRs:         none
 Works with:   scripts/dod_check.py (under test), docs/dod/STANDARD.md (the format),
               docs/dod/TEMPLATE.md (the shape the fixtures copy)
 Tested by:    (this is a test file)
-Touch when:   a category, level or evidence prefix is added to the standard — add the fixture
-              and the assertion here in the same change.
+Touch when:   never for a new repository; a category, level or evidence prefix is added to the
+              standard — add the fixture and the assertion here in the same change.
 """
 
 from __future__ import annotations
@@ -778,7 +778,7 @@ def test_two_streams_numbering_the_same_criterion_id_are_refused(
 def test_a_gap_line_that_no_criterion_cites_is_refused(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """docs/PREVENTION.md P-051: a gap line no criterion cites never reaches the gap
+    """docs/PREVENTION.md P-118: a gap line no criterion cites never reaches the gap
     analysis, so it names work nobody is asked to do and hides work that was done (G-931,
     G-940 to G-944 and six stray copies of G-905 sat in the tree for a wave). An artefact's
     gap is cited by a criterion of the same file; a register gap by a pending row."""
@@ -808,7 +808,7 @@ def test_a_gap_line_that_no_criterion_cites_is_refused(
 def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """docs/PREVENTION.md P-051: nothing checked that PLAN.md's wave items were gaps at all, so
+    """docs/PREVENTION.md P-118: nothing checked that PLAN.md's wave items were gaps at all, so
     the plan and the order of work drifted apart unseen. Every item in a
     wave table's ``gaps`` column must be a gap id the record defines: an artefact's gap, a
     register gap, or a backlog row that a criterion or a pending row cites. A gap the wave
@@ -820,7 +820,7 @@ def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     _write_all(root, ng_state="unmet", ng_gap="G-001")
     plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
     assert mod.main([]) == 0 and mod.main(["--check"]) == 0
-    _commit(root, "G-001 is a gap")  # a retired id must be one the history defined (P-060)
+    _commit(root, "G-001 is a gap")  # a retired id must be one the history defined (P-127)
     capsys.readouterr()
     # a backlog row is a gap only while a criterion cites it: F23 is a row, but nothing
     # here asks for it (the old plan's "B-9", a backlog id no criterion cited, was this case)
@@ -919,7 +919,7 @@ def _retire_by_hand(root: Path, gid: str) -> None:
 def test_a_retired_id_must_have_been_a_gap_in_the_artefacts_history(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """docs/PREVENTION.md P-060: the retired list was read back from the generated file itself,
+    """docs/PREVENTION.md P-127: the retired list was read back from the generated file itself,
     so an id hand-inserted there (in sorted position) became a valid PLAN.md item and
     ``--check`` still reported the analysis current. A retired id is now admitted only when
     the git history of the artefacts (never of the generated file) once defined it, or the
@@ -993,7 +993,7 @@ def test_the_retired_list_never_reads_another_repositorys_history(tmp_path: Path
 def test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """docs/PREVENTION.md P-051: the plan left the top-ranked gaps (G-653, G-660 to G-664) in
+    """docs/PREVENTION.md P-118: the plan left the top-ranked gaps (G-653, G-660 to G-664) in
     no wave while it planned lower ones. Every gap among the order of work's first ``TOP`` rows
     is named by some wave."""
     mod, root = tree
@@ -1007,7 +1007,7 @@ def test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave(
 
 
 def test_every_open_gap_is_in_the_plan_not_only_the_top() -> None:
-    """docs/PREVENTION.md P-122: the plan said every gap the streams opened was placed, and
+    """docs/PREVENTION.md P-189: the plan said every gap the streams opened was placed, and
     one (G-556, rank 73) sat in no table; the check only read the first ``TOP`` rows. Every
     gap the order of work ranks must now sit in some table of the plan, whatever its rank."""
     mod = _load()
@@ -1019,7 +1019,7 @@ def test_every_open_gap_is_in_the_plan_not_only_the_top() -> None:
 
 
 def test_a_plan_heading_never_quotes_a_rank(tmp_path: Path) -> None:
-    """P-122: the wave headings quoted ranks ("ranks 23 to 50") of the tree the plan was
+    """P-189: the wave headings quoted ranks ("ranks 23 to 50") of the tree the plan was
     written on, and read false on the branch whose order had moved. The order of work is
     the generated file; the plan names gaps, never their ranks."""
     mod = _load()
@@ -1038,7 +1038,7 @@ def test_a_plan_heading_never_quotes_a_rank(tmp_path: Path) -> None:
 
 
 def test_the_ci_job_reads_the_full_history_and_the_pull_requests_base() -> None:
-    """The retired list is vouched for by git history (P-060): a shallow checkout would refuse
+    """The retired list is vouched for by git history (P-127): a shallow checkout would refuse
     ids a squash merge carried, and a missing base would ignore the base branch's gap
     analysis. The ``dod`` job must fetch everything and name the base — through ``DOD_BASE``,
     so the command it runs stays the one CONTRIBUTING tells a person to run."""

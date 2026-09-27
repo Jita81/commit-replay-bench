@@ -32,8 +32,8 @@ Works with:   docs/API.md (the human-readable contract), ui/src/api/types.ts (th
               (repo config), src/crb/server/schemas_capability.py and
               src/crb/server/schemas_signoff.py (the map and sign-off shapes)
 Tested by:    tests/test_server_routes_runs.py, tests/test_server_routes_repos.py, tests/test_server_app.py
-Touch when:   any API field changes — update docs/API.md and ui/src/api/types.ts in the
-              same change; never for a new repository.
+Touch when:   never for a new repository; any API field changes — update docs/API.md and
+              ui/src/api/types.ts in the same change.
 
 """
 
@@ -208,7 +208,7 @@ class RepoSummary(BaseModel):
 
 class BaselineRead(BaseModel):
     """The first recorded read of a repository's baseline — the ``repo.baseline_read`` event
-    ``POST /repos/{name}/baseline-read`` appends. Home task 6 completes on it (DL-074)."""
+    ``POST /repos/{name}/baseline-read`` appends. Home task 6 completes on it (DL-075)."""
 
     at: str
     by: str

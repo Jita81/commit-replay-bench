@@ -16,8 +16,8 @@ Works with:   src/crb/core/evidence.py (under test), src/crb/core/ledger.py (the
               carries ``evidence_pack_hash``), src/crb/core/version.py (the apparatus stamp),
               tests/test_server_routes_grades.py (the pack served and re-verified by the API)
 Tested by:    tests/test_evidence.py
-Touch when:   a field is added to the pack (it is hashed — add it to the mutation table and note
-              the apparatus consequence in docs/EVIDENCE-AND-CLAIMS.md).
+Touch when:   never for a new repository; a field is added to the pack (it is hashed — add it to the
+              mutation table and note the apparatus consequence in docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations

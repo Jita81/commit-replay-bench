@@ -13,7 +13,7 @@
  * ADRs:         none
  * Works with:   ui/src/screens/NotFoundPage.tsx (under test)
  * Tested by:    ui/src/screens/NotFoundPage.test.tsx
- * Touch when:   the way back changes.
+ * Touch when:   never for a new repository; the way back changes.
  */
 import { screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'

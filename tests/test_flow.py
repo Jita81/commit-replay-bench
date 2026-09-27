@@ -19,8 +19,8 @@ Works with:   src/crb/core/flow.py (under test — every function here is one of
               tests/test_server_routes_flow.py (the same rules seen through the endpoint),
               docs/dod/streams/measure.md (the MEASURE criterion this arithmetic serves)
 Tested by:    tests/test_flow.py
-Touch when:   a stream is added to ``STREAM_NAMES``; the unmeasured contract changes (a median
-              of an empty set must stay ``None``, never 0).
+Touch when:   never for a new repository; a stream is added to ``STREAM_NAMES``; the unmeasured
+              contract changes (a median of an empty set must stay ``None``, never 0).
 """
 
 from __future__ import annotations
@@ -195,7 +195,7 @@ class TestPerUnit:
 
     def test_a_floor_is_never_divided(self) -> None:
         # one row reported no price: the sum is a floor, and a cost per unit over it would
-        # understate — the value scorecard's per-pound rule (DL-066), in one place
+        # understate — the value scorecard's per-pound rule (DL-067), in one place
         assert per_unit(Spend(usd=1.0, rows_priced=3, rows_unpriced=1), 4) is None
 
     def test_says_why_a_cost_per_unit_is_withheld(self) -> None:

@@ -25,8 +25,10 @@ Works with:   src/crb/factory/author.py (under test), src/crb/factory/testfirst.
               src/crb/factory/loop.py (``FactorySpec`` — where the refusal fires),
               tests/test_worker_test_author.py (the served deployment's wiring)
 Tested by:    tests/test_factory_author.py
-Touch when:   the reply format changes; another authoring process is added; the identity rule
-              changes (then docs/adr/0004-builder-registry-sighted-and-blind.md and the loop’s docstring move with it).
+Touch when:   never for a new repository; the reply format changes; another authoring process is
+              added; the identity rule changes (then
+              docs/adr/0004-builder-registry-sighted-and-blind.md and the loop’s docstring move with
+              it).
 """
 
 from __future__ import annotations

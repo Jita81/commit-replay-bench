@@ -25,8 +25,8 @@
  *               mode that consumes the stored token)
  * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a `LoginCheckStatus` is added on the server (src/crb/server/secrets.py) —
- *               add its `CHECK_DISPLAY` row; never for a new repository.
+ * Touch when:   never for a new repository; a `LoginCheckStatus` is added on the server
+ *               (src/crb/server/secrets.py) — add its `CHECK_DISPLAY` row.
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Button } from '../../components/Button'

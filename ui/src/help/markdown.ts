@@ -7,7 +7,7 @@
  * horizontal rules, links, emphasis, strong and inline code. Anything else — an HTML tag,
  * an image, a footnote — is shown as the text it is. Links: another bundled guide becomes an
  * in-app link to /help/docs/…, and so does a bundled decision record (`adr/0015-….md` from a
- * guide, `0015-….md` from a sibling record, `../OPERATOR.md` from a record — DL-073); an
+ * guide, `0015-….md` from a sibling record, `../OPERATOR.md` from a record — DL-074); an
  * in-page `#anchor` stays; `http(s)` gets `rel="noopener noreferrer"`; any other relative
  * path (a source file) renders as text because the UI has no target for it.
  *
@@ -32,8 +32,8 @@
  *               (`isAdrName`, `adrHref` for a decision record's link), ui/src/help/help.ts
  *               (the `readMore` anchors whose slugs the headings rendered here must satisfy)
  * Tested by:    ui/src/help/markdown.test.tsx
- * Touch when:   a guide uses a construct this does not render (add it here with a test);
- *               never for a new repository.
+ * Touch when:   never for a new repository; a guide uses a construct this does not render (add it
+ *               here with a test).
  */
 import { createElement, Fragment, type ReactNode } from 'react'
 import { Link } from 'react-router'

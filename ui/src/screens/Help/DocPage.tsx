@@ -12,7 +12,7 @@
  *               `location.hash` once the text is in. The page has one h1, its header: the
  *               file's own headings render one level down (`headingOffset`), so the `#`
  *               title is the article's h2 — two h1s made the walkthrough's heading query
- *               ambiguous and gave a screen reader two page titles (P-109). Under the header
+ *               ambiguous and gave a screen reader two page titles (P-176). Under the header
  *               it states what the page is not: a build-time, read-only copy of the
  *               repository's file (G-150). Three
  *               stops, each told apart: an unknown name renders the empty state with a way
@@ -22,7 +22,7 @@
  * How:          `useParams` → `isDocName` / `isAdrName` → `loadDoc` / `loadAdr` in an effect
  *               keyed on the name and a retry counter → `renderMarkdown`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-073)
+ * ADRs:         none (DL-074)
  * Works with:   ui/src/help/docs.ts (`loadDoc`, `DOC_TITLES`), ui/src/help/adrs.ts (`loadAdr`,
  *               the record titles), ui/src/help/markdown.ts (the renderer),
  *               ui/src/screens/Help/HelpPage.tsx (the index this returns to),
@@ -31,7 +31,8 @@
  *               (the route), ui/src/help/help.ts (the About block's `/help/docs/:name` entry)
  * Tested by:    ui/src/screens/Help/HelpPage.test.tsx, ui/e2e/walkthrough/13-orient.spec.ts
  *               (all eight guides and a record opened on the live stack)
- * Touch when:   the guides gain a construct the renderer lacks (fix the renderer, not this page).
+ * Touch when:   never for a new repository; the guides gain a construct the renderer lacks (fix the
+ *               renderer, not this page).
  */
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useParams } from 'react-router'

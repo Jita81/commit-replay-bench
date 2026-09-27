@@ -4,7 +4,7 @@
  * axe reads the colours the page shows at that instant, so a control part way through a
  * `transition-colors` change (an outlined link turning filled) is measured as a blend that
  * fails WCAG 2.1 AA although neither end state does. Walkthrough spec 07 failed this way twice
- * on 2026-09-27 (docs/PREVENTION.md P-063). This helper waits for the running transitions
+ * on 2026-09-27 (docs/PREVENTION.md P-130). This helper waits for the running transitions
  * first; tests/test_e2e_axe_settles.py refuses a spec that builds its own `AxeBuilder`.
  *
  * Navigation
@@ -22,10 +22,11 @@
  * Works with:   ui/e2e/smoke.spec.ts and ui/e2e/walkthrough/*.spec.ts (the scans that call it),
  *               tests/test_e2e_axe_settles.py (keeps every scan on this path),
  *               ui/src/components/Button.tsx (the `transition-colors` that met the class),
- *               docs/PREVENTION.md (P-063, P-085, P-099, P-100 — one class, met by four streams)
+ *               docs/PREVENTION.md (P-130, P-152, P-166, P-167 — one class, met by four streams)
  * Tested by:    tests/test_e2e_axe_settles.py, tests/test_walkthrough_axe_scan.py,
  *               tests/test_walkthrough_axe_settles.py, ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a scan needs another axe option (add it here, never a second `AxeBuilder`).
+ * Touch when:   never for a new repository; a scan needs another axe option (add it here, never a
+ *               second `AxeBuilder`).
  */
 import AxeBuilder from '@axe-core/playwright'
 import type { Page } from '@playwright/test'
@@ -37,10 +38,10 @@ type Violations = Awaited<ReturnType<AxeBuilder['analyze']>>['violations']
 /**
  * Wait until the page has settled, so a scan reads the colours a person sees rather than a
  * frame in between. Three streams met this class in parallel and each wait is kept: the
- * running CSS transitions and finite animations are awaited to their `finished` (P-063,
- * P-085; a cancelled one counts as settled, and an infinite one — a spinner — is never waited
+ * running CSS transitions and finite animations are awaited to their `finished` (P-130,
+ * P-152; a cancelled one counts as settled, and an infinite one — a spinner — is never waited
  * on); then, because on 2026-09-27 that wait returned, the stage answered and a transition
- * began during the scan (3.19:1, P-100), the settle also waits, bounded, for the network to go
+ * began during the scan (3.19:1, P-167), the settle also waits, bounded, for the network to go
  * idle and for a quiet window of `quietMs` in which no transition runs and nothing in the DOM
  * changes. A page still changing after `timeoutMs` is left to axe, which reports what it reads.
  */

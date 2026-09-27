@@ -14,7 +14,8 @@ ADRs:         none
 Works with:   scripts/code_map.py (the code under test), docs/FILE-HEADER-STANDARD.md (the
               format these tests pin)
 Tested by:    tests/test_code_map.py
-Touch when:   the standard gains or renames a key (update REQUIRED_KEYS and these cases together).
+Touch when:   never for a new repository; the standard gains or renames a key (update
+              REQUIRED_KEYS and these cases together), or a header check is added.
 """
 
 from __future__ import annotations
@@ -127,3 +128,122 @@ def test_check_fails_on_a_stale_map_and_passes_after_a_write(repo: Path, capsys)
     assert cm.main(["--check"]) == 0
     _py(repo, "src/crb/core/thing.py", BLOCK.replace("A thing.", "A changed thing."))
     assert cm.main(["--check"]) == 1  # the map is stale
+
+
+@pytest.mark.parametrize(
+    ("touch", "refused"),
+    [
+        ("never for a new repository; a key is added.", False),
+        ("never for a new repository (configure the runner instead); a key is added.", False),
+        ("onboarding a repository whose tests need a service; a key is added.", False),
+        ("a client repository pins a lock format no recipe reads; a key is added.", False),
+        ("a key is added to the standard.", True),
+        ("a model is re-priced; never for a new repository.", True),
+        ("a model is re-priced. Never for a new repository.", True),
+        ("a model is re-priced — never for a new repository.", True),
+        ("a Go repository needs cgo or a pinned ``go`` binary; a key is added.", False),
+        ("THIS is the verb a new repository starts with; a key is added.", False),
+        ("a stage is added to onboarding; a key is added.", False),
+        # A repository named only as a thing the file handles is not onboarding one (P-116).
+        ("`GET /repos/{name}` gains a field a reader needs; a key is added.", True),
+        ("``GET /repos`` gains a column; a key is added.", True),
+        ("the image repository, issuer or signing identity changes.", True),
+        ("the repository layer gains a table.", True),
+        ("a key is added to src/crb/server/routes/repos.py.", True),
+        ("an `OptKind` is added to ui/src/screens/Repos/runnerOpts.ts.", True),
+        ("a column is added to the list or the role rule for Add repo changes.", True),
+    ],
+)
+def test_touch_when_addresses_onboarding_a_client_repository_first(
+    repo: Path, touch: str, refused: bool
+) -> None:
+    """The first clause of ``Touch when`` speaks about onboarding a client repository — a new,
+    client or language-named repository, or onboarding itself — so that developer reads first
+    whether the file concerns them. A repository in a code span, a path or a phrase such as
+    "the image repository" does not count (P-114, P-116)."""
+    block = BLOCK.replace("Touch when:   never for a new repository.", f"Touch when:   {touch}")
+    h = cm.read_header(_py(repo, "src/crb/core/thing.py", block))
+    assert any("onboarding" in p for p in h.problems) is refused, h.problems
+
+
+def test_the_onboarding_baseline_only_shrinks(repo: Path, capsys) -> None:
+    """Files older than the rule are listed in the baseline and pass; one that now addresses
+    onboarding first must leave it, and an entry for a file that is gone fails ``--check``."""
+    old = BLOCK.replace("never for a new repository.", "a key is added to the standard.")
+    (repo / "scripts").mkdir()
+    baseline = repo / cm.ONBOARDING_BASELINE
+    baseline.write_text("# older than the rule\nsrc/crb/core/old.py\n", encoding="utf-8")
+    assert cm.read_header(_py(repo, "src/crb/core/old.py", old)).problems == []
+    assert cm.read_header(_py(repo, "src/crb/core/new.py", old)).problems != []
+    fixed = cm.read_header(_py(repo, "src/crb/core/old.py", BLOCK))
+    assert any("remove it from" in p for p in fixed.problems), fixed.problems
+    (repo / "src/crb/core/new.py").unlink()
+    (repo / "src/crb/core/other.py").write_text(f'"""Other.\n\n{BLOCK}"""\n', encoding="utf-8")
+    (repo / "tests/test_thing.py").write_text(f'"""T.\n\n{BLOCK}"""\n', encoding="utf-8")
+    _py(repo, "src/crb/core/old.py", old)
+    assert cm.main([]) == 0
+    assert cm.main(["--check"]) == 0
+    baseline.write_text("src/crb/core/old.py\nsrc/crb/core/gone.py\n", encoding="utf-8")
+    assert cm.main(["--check"]) == 1
+    assert "src/crb/core/gone.py" in capsys.readouterr().err
+
+
+#: The size of ``scripts/code_map_onboarding_baseline.txt`` when the check was added (PR #61).
+#: Lower it as files leave the list; raising it is adding a file to the baseline, which the
+#: baseline exists to stop.
+BASELINE_CEILING = 357
+
+
+def test_the_real_onboarding_baseline_never_grows() -> None:
+    root = Path(__file__).resolve().parent.parent
+    lines = (root / cm.ONBOARDING_BASELINE).read_text(encoding="utf-8").splitlines()
+    entries = [ln for ln in lines if ln.strip() and not ln.startswith("#")]
+    assert entries == sorted(set(entries)), "keep the baseline sorted and without repeats"
+    assert len(entries) <= BASELINE_CEILING, (
+        f"{len(entries)} files in the onboarding baseline, above {BASELINE_CEILING}: a new "
+        "file's Touch when must address onboarding a client repository first"
+    )
+
+
+def test_a_change_may_not_edit_a_baseline_file_or_add_to_the_baseline() -> None:
+    """Under ``--changed-since``, a file in the baseline that the change edits must leave it
+    (its ``Touch when`` fixed first), and no path may join the baseline — removals only."""
+    baseline = frozenset({"src/a.py", "src/b.py", "src/new.py"})
+    before = frozenset({"src/a.py", "src/b.py", "src/c.py"})
+    found = cm.baseline_violations(baseline, {"src/a.py", "docs/x.md"}, before)
+    assert any(f.startswith("src/a.py:") and "edited" in f for f in found), found
+    assert any(f.startswith("src/new.py:") and "added" in f for f in found), found
+    assert not any(f.startswith("src/b.py") for f in found), found
+    assert cm.baseline_violations(baseline, set(), None) == []  # the baseline's first change
+
+
+def _git(repo: Path, *args: str) -> None:
+    import subprocess
+
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_check_with_changed_since_refuses_an_edited_baseline_file(repo: Path, capsys) -> None:
+    old = BLOCK.replace("never for a new repository.", "a key is added to the standard.")
+    (repo / "scripts").mkdir()
+    (repo / cm.ONBOARDING_BASELINE).write_text("src/crb/core/old.py\n", encoding="utf-8")
+    _py(repo, "src/crb/core/old.py", old)
+    (repo / "src/crb/core/other.py").write_text(f'"""Other.\n\n{BLOCK}"""\n', encoding="utf-8")
+    (repo / "tests/test_thing.py").write_text(f'"""T.\n\n{BLOCK}"""\n', encoding="utf-8")
+    assert cm.main([]) == 0
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    assert cm.main(["--check", "--changed-since", "main"]) == 0  # nothing edited
+    _py(repo, "src/crb/core/old.py", old, prose="Summary line.\n\nEdited prose.\n\n")
+    assert cm.main([]) == 0
+    _git(repo, "commit", "-q", "-am", "edit")
+    assert cm.main(["--check"]) == 0  # without the base the edit is not seen
+    assert cm.main(["--check", "--changed-since", "main~1"]) == 1
+    assert "src/crb/core/old.py" in capsys.readouterr().err
+    assert cm.main(["--check", "--changed-since", "no-such-ref"]) == 1  # fails closed

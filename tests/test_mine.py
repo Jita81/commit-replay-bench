@@ -24,8 +24,9 @@ Works with:   src/crb/core/mine.py (under test), tests/fixtures/pyrepo.py (the h
               src/crb/core/spec.py (``POOL_*`` and ``RepoConfig``), tests/conftest.py,
               tests/fixtures/leakage.py (the sha-fragment scan)
 Tested by:    tests/test_mine.py
-Touch when:   the candidate rule changes (what counts as coupled source + test, the pools); the
-              gold check gains a belt; a new repository layout needs a support-file rule.
+Touch when:   never for a new repository; the candidate rule changes (what counts as coupled source
+              + test, the pools); the gold check gains a belt; a new repository layout needs a
+              support-file rule.
 """
 
 from __future__ import annotations

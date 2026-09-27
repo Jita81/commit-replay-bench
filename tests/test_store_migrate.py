@@ -42,8 +42,9 @@ Works with:   src/crb/store/migrate.py (under test), src/crb/store/migrations/en
               src/crb/store/db.py (``init_db``), tests/conftest_store.py, docs/DEPLOYMENT.md
               (upgrade, §6)
 Tested by:    tests/test_store_migrate.py
-Touch when:   a model changes (write the revision, add its marker to ``REVISION_MARKERS``, and
-              let the parity case prove head == ``create_all``); never edit a shipped revision.
+Touch when:   never for a new repository; a model changes (write the revision, add its marker to
+              ``REVISION_MARKERS``, and let the parity case prove head == ``create_all``); never
+              edit a shipped revision.
 """
 
 from __future__ import annotations
@@ -943,7 +944,7 @@ def _insert_review(conn: Any, *, n: int, minutes: int | None = None) -> None:
 def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     backend: Backend,
 ) -> None:
-    """Revision 0012 (DL-067) adds ``reviews.minutes`` — the reviewer's own time on a review.
+    """Revision 0012 (DL-068) adds ``reviews.minutes`` — the reviewer's own time on a review.
     Every existing review reads NULL (not stated, so its hash is unchanged); the append-only
     triggers still refuse an UPDATE; a downgrade is refused while any review states its
     minutes, and otherwise drops the column. A ``create_all`` schema from the release before

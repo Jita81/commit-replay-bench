@@ -28,8 +28,9 @@
  *               ui/src/screens/Results/ResultsPage.test.tsx (a ratchet that reads through it),
  *               ui/src/screens/Capability/CapabilityPage.test.tsx (another ratchet)
  * Tested by:    ui/src/test/source-ratchets.test.ts
- * Touch when:   a syntax for reading a property is found that the matcher misses (add the
- *               case to the test first), or a new screen adopts the ratchet.
+ * Touch when:   never for a new repository; a syntax for reading a property is found that the
+ *               matcher misses (add the case to the test first), or a new screen adopts the
+ *               ratchet.
  */
 
 import * as ts from 'typescript'

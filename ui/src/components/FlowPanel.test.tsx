@@ -21,7 +21,8 @@
  *               (`unhinted`), ui/src/test/utils.tsx (`mockApi`, `renderApp`),
  *               tests/test_server_routes_flow.py (the server side of the same contract)
  * Tested by:    ui/src/components/FlowPanel.test.tsx
- * Touch when:   a stream gains a milestone pair or a figure leaves `not_captured`.
+ * Touch when:   never for a new repository; a stream gains a milestone pair or a figure leaves
+ *               `not_captured`.
  */
 import { screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'

@@ -45,7 +45,7 @@
  *               every knob), src/crb/server/routes/runs.py (the request it submits)
  * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
- * Touch when:   the run request grows a field the walk should expose.
+ * Touch when:   never for a new repository; the run request grows a field the walk should expose.
  */
 
 import { useMemo, useState } from 'react'
@@ -117,7 +117,7 @@ export function MeasurePage() {
 
   // the repository's own measured cost per attempt, when it has one: the map's economics
   // fold (F35) — its mean over the attempts with a KNOWN cost (a known $0 is $0), that
-  // count as n, and the apparatus; never the cells' flat means filtered by > 0 (P-064)
+  // count as n, and the apparatus; never the cells' flat means filtered by > 0 (P-131)
   const measured = useMemo(() => measuredCostPerAttempt(map.data?.economics), [map.data])
   const measuredMean = measured?.mean ?? null
   const gold = repo.data?.task_counts.gold_clean ?? 0

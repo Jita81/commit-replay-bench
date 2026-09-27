@@ -17,7 +17,8 @@
  *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the configured / error cases),
  *               ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Settings/GitHubAppCard.test.tsx
- * Touch when:   the permissions delivery needs change (src/crb/server/routes/github.py `can_deliver`).
+ * Touch when:   never for a new repository; the permissions delivery needs change
+ *               (src/crb/server/routes/github.py `can_deliver`).
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

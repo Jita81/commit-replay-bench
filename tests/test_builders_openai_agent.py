@@ -23,8 +23,9 @@ Works with:   src/crb/builders/openai_agent.py (under test), src/crb/builders/op
               (the transport), src/crb/builders/base.py (guards and budget),
               src/crb/builders/budget.py (the caps), tests/fixtures/builders_repo.py
 Tested by:    tests/test_builders_openai_agent.py
-Touch when:   a tool is added to the loop (a schema case, a guard case if it can write or run,
-              and a cap case if it counts); a provider's error shape changes the retry rule.
+Touch when:   never for a new repository; a tool is added to the loop (a schema case, a guard case
+              if it can write or run, and a cap case if it counts); a provider's error shape changes
+              the retry rule.
 """
 
 from __future__ import annotations

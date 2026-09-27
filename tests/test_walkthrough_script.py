@@ -3,7 +3,7 @@
 ``scripts/walkthrough.sh`` starts ``crb serve`` and ``crb worker`` from an interpreter it is
 given. With a shared virtual environment whose editable install points at another checkout,
 ``import crb`` resolved to THAT checkout, so a walkthrough run from a worktree tested another
-tree's code and passed or failed on it (docs/PREVENTION.md P-061; reproduced on 2026-09-26: two
+tree's code and passed or failed on it (docs/PREVENTION.md P-128; reproduced on 2026-09-26: two
 specs failed on the shared checkout's pre-ADR-0022 intake and passed 68 of 68 on the
 branch's own code). The script now puts its own ``src`` first on ``PYTHONPATH`` and refuses
 to start when any ``crb`` module the stack loads comes from elsewhere.
@@ -19,11 +19,11 @@ How:          ``subprocess.run(["bash", script])`` with ``CRB_PYTHON`` set to th
               and ``CRB_HOME``/``CRB_DATABASE_URL`` removed from the environment.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   scripts/walkthrough.sh (under test), docs/PREVENTION.md (P-061),
+Works with:   scripts/walkthrough.sh (under test), docs/PREVENTION.md (P-128),
               .github/workflows/ci.yml (the walkthrough job that runs the whole script)
 Tested by:    (this is a test file)
-Touch when:   the walkthrough starts another process that imports crb (add it to the guard's
-              module list).
+Touch when:   never for a new repository; the walkthrough starts another process that imports crb
+              (add it to the guard's module list).
 """
 
 from __future__ import annotations

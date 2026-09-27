@@ -19,8 +19,8 @@
  * Works with:   ui/src/components/StatTile.tsx (the code under test), ui/src/lib/format.ts
  *               (the guards whose output is asserted), ui/src/help/hints.ts (the hint text)
  * Tested by:    ui/src/components/StatTile.test.tsx
- * Touch when:   the tile gains a line (e.g. a belt set) — assert it here so no variant can
- *               drop it.
+ * Touch when:   never for a new repository; the tile gains a line (e.g. a belt set) — assert it
+ *               here so no variant can drop it.
  */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'

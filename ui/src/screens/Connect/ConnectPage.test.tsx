@@ -22,7 +22,7 @@
  *               ui/src/help/hints.ts (the copy the hover tests expect),
  *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx
- * Touch when:   a stage or its action changes.
+ * Touch when:   never for a new repository; a stage or its action changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'

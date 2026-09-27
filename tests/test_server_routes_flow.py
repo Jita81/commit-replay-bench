@@ -27,8 +27,8 @@ Works with:   src/crb/server/routes/flow.py (under test), src/crb/server/flow.py
               tests/fixtures/signoff_seed.py (the attested sign-off),
               docs/dod/streams/measure.md (the MEASURE criteria this endpoint answers)
 Tested by:    tests/test_server_routes_flow.py
-Touch when:   a stream's milestone pair changes; a figure moves out of ``not_captured``
-              (assert it is measured here and close its gap in the same commit).
+Touch when:   never for a new repository; a stream's milestone pair changes; a figure moves out of
+              ``not_captured`` (assert it is measured here and close its gap in the same commit).
 """
 
 from __future__ import annotations
@@ -282,7 +282,7 @@ class TestMeasure:
 
     @pytest.mark.parametrize("axis", NEVER_POOL_AXES)
     def test_every_never_pool_axis_splits_a_cell(self, env: Env, axis: str) -> None:
-        """P-117: the flow keyed a cell without the posture class, the one never-pool axis a
+        """P-184: the flow keyed a cell without the posture class, the one never-pool axis a
         parallel stream added, and nothing named the axes in one place. Every axis in
         ``NEVER_POOL_AXES`` now splits ten rows into two cells of five here — a new axis is
         covered the moment it is named, and :func:`split_on` refuses an axis it cannot split."""
@@ -496,7 +496,7 @@ class TestConnectAndProve:
 class TestDecideAndLicense:
     def test_the_decisions_start_and_its_cost_are_not_invented(self, env: Env) -> None:
         s = stream(reading(env), "decide-and-license")
-        # both halves are recorded now (ADR-0028, DL-067): nothing is served as missing,
+        # both halves are recorded now (ADR-0028, DL-068): nothing is served as missing,
         # and with nothing recorded yet each reads unmeasured with its reason, never zero
         assert s["not_captured"] == []
         lt = lead(s, "routed_deliver_to_signed")

@@ -30,8 +30,8 @@ Works with:   scripts/claims_check.py (the code under test), markdown-it-py (the
               (the claims job that runs --check), docs/CONTRIBUTING.md (the DL-053 rules),
               docs/dod/product.md (G-929 states the gated-page count)
 Tested by:    (this is a test file)
-Touch when:   a tag is added to the policy, the heuristic changes, or a file joins the
-              allowlist (add the case here in the same change).
+Touch when:   never for a new repository; a tag is added to the policy, the heuristic changes, or a
+              file joins the allowlist (add the case here in the same change).
 """
 
 from __future__ import annotations

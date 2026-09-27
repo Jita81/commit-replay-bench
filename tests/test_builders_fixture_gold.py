@@ -183,7 +183,7 @@ def test_a_refused_attempt_grades_as_a_protocol_row_not_a_clean_one(
     """Through the grader and the ledger's one failure rule: the refused attempt's grade is
     not clean, so the row's kind is ``protocol``. The first walkthrough of the Learn spec
     found the opposite — the gold was overlaid after the refusal, the grade came back clean
-    and a clean grade outranks the refusal — so no protocol row reached the report (P-092)."""
+    and a clean grade outranks the refusal — so no protocol row reached the report (P-159)."""
     from crb.builders.adapter import attempt_error
     from crb.core.ledger import FAILURE_PROTOCOL, derive_failure_kind
 

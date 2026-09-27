@@ -14,9 +14,12 @@ How:          A store under ``tmp_path``; stages filled by hand; threads for the
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   src/crb/provision/store.py (under test), src/crb/core/deps.py (``BundleMount``,
-              ``validate_mount``), tests/test_provision.py (the keys a store is addressed by)
+              ``validate_mount``), tests/test_provision.py (the keys a store is addressed by),
+              tests/fixtures/tmptree.py (``permissions_bind``: a refused write is expected only
+              where the mode bits bind — P-108)
 Tested by:    tests/test_provision_store.py
-Touch when:   the store's layout, manifest schema or sealing rule changes.
+Touch when:   never for a new repository; the store's layout, manifest schema or sealing rule
+              changes.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ import pytest
 
 from crb.core.deps import BundleMount, ProvisionRefused, validate_mount
 from crb.provision.store import MANIFEST, BundleStore, output_digest
+from fixtures.tmptree import permissions_bind
 
 KEY = "dep_" + "1" * 64
 KEY2 = "dep_" + "2" * 64
@@ -63,8 +67,9 @@ def test_seal_is_atomic_and_read_only(tmp_path: Path) -> None:
         for name in [*dirnames, *filenames]:
             assert not _writable(Path(dirpath) / name), Path(dirpath) / name
     assert not _writable(sealed.path)
-    with pytest.raises(PermissionError):
-        (sealed.path / "gomod" / "c.txt").write_bytes(b"tampered")
+    if permissions_bind():  # uid 0 with CAP_DAC_OVERRIDE writes anyway; the bits hold above
+        with pytest.raises(PermissionError):
+            (sealed.path / "gomod" / "c.txt").write_bytes(b"tampered")
     # the store hands out a read-only mount that validates at use
     m = store.mount(KEY, "go", "gomod", "/deps/gomod")
     validate_mount(m)

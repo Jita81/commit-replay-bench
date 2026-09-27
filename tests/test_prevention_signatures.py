@@ -19,8 +19,8 @@ Works with:   src/crb/core/prevention.py (under test), tests/prevention_fixtures
               src/crb/core/lint.py (the tools the plan runs — the formatter list must be a
               subset), src/crb/core/review.py (the standing review)
 Tested by:    tests/test_prevention_signatures.py
-Touch when:   a family rule changes: bump ``SIGNATURE_RULES`` and regenerate the golden
-              (``CRB_REGEN_GOLDEN=1``) in the same change.
+Touch when:   never for a new repository; a family rule changes: bump ``SIGNATURE_RULES`` and
+              regenerate the golden (``CRB_REGEN_GOLDEN=1``) in the same change.
 """
 
 from __future__ import annotations

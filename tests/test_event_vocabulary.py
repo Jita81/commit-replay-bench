@@ -11,7 +11,7 @@ Navigation
 ----------
 What it is:   The documentation ratchet for event action names.
 What it does: Extracts every action literal from the emit call sites in ``src/crb`` — a
-              literal or a module-level string constant passed in its place (P-107) — (emitter
+              literal or a module-level string constant passed in its place (P-174) — (emitter
               ``emit`` / ``error`` / ``timed``, the core's ``_emit(on_event, "…")`` helpers,
               plain ``on_event("…", …)`` callbacks, ``append_event(action=…)``, the factory
               loop's ``self._emit("…", item_id)``, the account trail's
@@ -21,7 +21,7 @@ What it does: Extracts every action literal from the emit call sites in ``src/cr
               action has its plain sentence in the UI's ``ACTION_HELP``
               (ui/src/lib/verdict.ts) — so the Python half alone fails when a row is added
               without the sentence the live log shows — and that any function forwarding an
-              ``action`` parameter to an emitter is itself walked (P-084).
+              ``action`` parameter to an emitter is itself walked (P-151).
 How:          ``ast`` over ``src/crb/**/*.py``; a regex over the vocabulary section of the doc.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
@@ -29,7 +29,8 @@ Works with:   docs/API.md (the table), src/crb/observability/events.py (the enve
               ``timed`` suffixes), src/crb/builders/adapter.py (``BUILDER_EVENT_PREFIX``),
               src/crb/server/worker.py and src/crb/factory/loop.py (the largest emitters)
 Tested by:    tests/test_event_vocabulary.py
-Touch when:   an action is added or renamed — write its row in docs/API.md first.
+Touch when:   never for a new repository; an action is added or renamed — write its row in
+              docs/API.md first.
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ EMITTERS = {
     "append_event",
     "append_system_event",
     # the account trail's writer (src/crb/server/routes/admin.py): it forwards ``action`` to
-    # ``append_system_event``, so its callers name the ``user.*`` actions (P-084)
+    # ``append_system_event``, so its callers name the ``user.*`` actions (P-151)
     "record_user_event",
 }
 #: Functions that forward an ``action`` parameter to an emitter but are only ever handed on
@@ -77,7 +78,7 @@ def _literals(node: ast.AST, consts: dict[str, str] | None = None) -> list[str]:
 
 def _module_constants(tree: ast.Module) -> dict[str, str]:
     """``NAME = "a.b"`` / ``NAME: str = "a.b"`` at module level — a name an emit call may pass
-    as its action (P-107: such an action escaped the ratchet while it read literals only)."""
+    as its action (P-174: such an action escaped the ratchet while it read literals only)."""
     out: dict[str, str] = {}
     for stmt in tree.body:
         if isinstance(stmt, ast.Assign):
@@ -192,7 +193,7 @@ def test_the_vocabulary_table_names_no_ghost_action() -> None:
 
 
 def test_every_function_that_forwards_an_action_is_walked() -> None:
-    """P-084: ``record_user_event(db, action=…)`` forwards its ``action`` to
+    """P-151: ``record_user_event(db, action=…)`` forwards its ``action`` to
     ``append_system_event``, but the walker did not know its name, so every ``user.*`` action
     was emitted with no row in the table and no test noticed. Any function that takes an
     ``action`` parameter and hands it to an emitter is itself an emitter: it must be in
@@ -238,7 +239,7 @@ def test_the_walker_sees_every_emit_shape() -> None:
 def test_an_action_named_by_a_module_constant_is_seen(tmp_path: Path) -> None:
     """``action=SOME_CONSTANT`` is how a module names an action it also queries by; the walker
     read literals only, so such an action escaped the table entirely (found 2026-09-26 while
-    adding ``repo.baseline_read``: the ratchet stayed green with no row — P-107)."""
+    adding ``repo.baseline_read``: the ratchet stayed green with no row — P-174)."""
     src = tmp_path / "mod.py"
     src.write_text(
         'READ: str = "demo.read"\n'

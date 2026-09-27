@@ -26,8 +26,8 @@
  *               index route's `RequireAuth`), ui/src/App.tsx (the `<Route index>` this
  *               visits), .github/workflows/ci.yml (the `ui-smoke` job that runs this)
  * Tested by:    ui/e2e/smoke.spec.ts
- * Touch when:   the login page, the shell's nav, the index route or the auth redirect
- *               changes; never for a new repository.
+ * Touch when:   never for a new repository; the login page, the shell's nav, the index route or the
+ *               auth redirect changes.
  */
 import { axeViolations } from './axe'
 import { expect, test, type Page } from '@playwright/test'

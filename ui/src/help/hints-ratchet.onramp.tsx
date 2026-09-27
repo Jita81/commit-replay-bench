@@ -25,8 +25,8 @@
  *               ui/src/screens/Decisions/DecisionsPage.tsx, ui/src/screens/Signoff/SignoffPage.tsx
  *               (the screens rendered under these fixtures)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
- * Touch when:   an on-ramp screen gains a data state that renders a new element — extend the
- *               fixture so the element is on the page and the ratchet sees it.
+ * Touch when:   never for a new repository; an on-ramp screen gains a data state that renders a new
+ *               element — extend the fixture so the element is on the page and the ratchet sees it.
  */
 import type { ReactElement } from 'react'
 import type { Role } from '../api/types'

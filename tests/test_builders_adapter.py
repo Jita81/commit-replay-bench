@@ -26,9 +26,9 @@ Works with:   src/crb/builders/adapter.py (under test), src/crb/builders/base.py
               adapter feeds), src/crb/core/ledger.py (the rows and chain asserted),
               tests/fixtures/pyrepo.py, tests/test_worker.py (the same adapter under the worker)
 Tested by:    tests/test_builders_adapter.py
-Touch when:   adding a builder (its outcome shapes must map to these error rules — add a case
-              per new stop reason); the brief gains a field (the no-leakage cases must still
-              hold in both modes).
+Touch when:   never for a new repository; adding a builder (its outcome shapes must map to these
+              error rules — add a case per new stop reason); the brief gains a field (the no-leakage
+              cases must still hold in both modes).
 """
 
 from __future__ import annotations

@@ -2,7 +2,14 @@
  * 11-screens — every route × persona × width, captured, the About block on every one, and the
  * hints: a sample opens on hover (or tap at phone width), axe stays clean with one open.
  *
- * Runs after 01–09 so the stack carries the data they produced. For each persona (viewer /
+ * Its own CI jobs run it on a stack of its own (the tier-1 walk is split so each part finishes
+ * inside its budget), so it never assumes state another spec made: its first test SEEDS the
+ * primary repository through the API — onboard, probe, mine, oracle, controls, a two-task
+ * `fixture_gold` replay, the same runs 02–05 queue through the UI — unless the repository is
+ * already there (run after 01–10 in one invocation, it reuses what they made and seeds
+ * nothing). `CRB_E2E_SCREENS_SHARD=k/n` runs every n-th persona from the k-th, so the n
+ * parallel jobs cover every persona by construction; unset, it runs all four.
+ * For each persona (viewer /
  * operator / approver / admin) it visits every route at desktop (1280×900) and phone
  * (375×812) widths, waits for the page to settle (load + bounded network-idle + the main
  * heading), writes a full-page PNG named `<persona>__<route-slug>__<width>.png` under
@@ -41,7 +48,9 @@
  * ----------
  * What it is:   Walkthrough spec 11 (screens) — the visual record of every route for every
  *               role at two widths, and the About-block ratchet on the live stack.
- * What it does: Creates the three non-admin accounts if missing (and, for one that exists,
+ * What it does: Seeds the primary repository's history through the API when the stack has
+ *               none (a stack of its own, in CI), selects the personas of its shard,
+ *               creates the three non-admin accounts if missing (and, for one that exists,
  *               asserts the stable password signs into it), finds a finished run and a
  *               task to anchor the detail routes, then for each persona × width first
  *               checks /login signed out (`loginChecks`: no sideways scroll and Sign in on
@@ -59,16 +68,10 @@
  *               asserts each bubble shows and axe stays clean with it open; tabs the route
  *               itself at 1280 for the keyboard path; opens the Add-a-repository dialog
  *               once (operator, 1280) for the top-layer, typing and Escape checks a jsdom
- *               test cannot make. Five keyboard steps (G-905) then drive, by Tab and keys
- *               alone, a map cell and its reason code (/capability), a reason code on
- *               Routes, a term on Oracle (each opening and closing with `aria-expanded`),
- *               the sign-off form to an enabled Sign off and the revoke confirmation to an
- *               enabled Revoke sign-off, left by Cancel (/signoff), and the freeze dialog
- *               with focus in and back (/factory); a negative control takes the map cells
- *               out of the tab order and asserts the keyboard step then fails. It presses
- *               neither Sign off, Revoke sign-off, Freeze nor Run (G-992, G-993), so it
- *               changes no data; the fixture context goes into the test's annotations,
- *               never stdout.
+ *               test cannot make. It changes no data beyond its seed; the fixture context
+ *               goes into the test's annotations, never stdout. The five keyboard steps that
+ *               OPERATE controls (G-905) are 11b-keyboard's: they need the signed cell and
+ *               the backlog the story makes, which a screens shard's stack has not got.
  * How:          Playwright; `signIn` from support.ts; the routes list is built from the
  *               primary repo, the run and the task found through the API as the admin;
  *               axe with the WCAG tags (ui/e2e/axe.ts); the bubble is found through the
@@ -76,26 +79,54 @@
  *               src.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/e2e/walkthrough/support.ts (`env`, `signIn`, `primary`),
+ * Works with:   ui/e2e/walkthrough/support.ts (`env`, `signIn`, `primary`, the seeding helpers),
+ *               ui/e2e/walkthrough/keyboard.ts (`settle`, `bubbleOf`, `escapeUntil`,
+ *               `focusedIs`, shared with 11b-keyboard),
+ *               .github/workflows/ci.yml (the `walkthrough-screens` jobs, one per shard,
+ *               under the required `walkthrough` aggregator),
  *               ui/src/components/Help.tsx (the About block this asserts),
  *               ui/src/components/Hint.tsx (the `data-hint` triggers and `role="tooltip"`
  *               bubbles this opens), ui/src/components/Layout.tsx (mounts the About block
  *               once; its nav is always in the sample), ui/src/App.tsx (the routes this list
  *               must cover), ui/e2e/walkthrough/README.md (the spec table)
  * Tested by:    ui/e2e/walkthrough/11-screens.spec.ts (this file; run by scripts/walkthrough.sh)
- * Touch when:   a screen is added (add its route and slug to `routes()`); a persona is added.
+ * Touch when:   never for a new repository (it reads the primary tier target); a screen is
+ *               added (add its route and slug to `routes()`); a persona is added (the shards
+ *               pick it up; a fifth persona makes one shard run two).
  */
 import { axeViolations } from '../axe'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { env, personaPassword, primary, signIn } from './support'
+import { bubbleOf, escapeUntil, focusedIs, settle } from './keyboard'
+import { apiPost, env, personaPassword, primary, signIn, startRunApi, waitRunApi } from './support'
 
 const OUT = join(process.env.CRB_E2E_OUTPUT_DIR ?? 'test-results-walkthrough', 'screens')
 mkdirSync(OUT, { recursive: true })
 
 const PERSONAS = ['viewer', 'operator', 'approver', 'admin'] as const
 type Persona = (typeof PERSONAS)[number]
+
+/**
+ * The personas this run covers. `CRB_E2E_SCREENS_SHARD=k/n` takes every n-th persona starting
+ * at the k-th (1-based), so shards 1/n … n/n are disjoint and together are every persona — a
+ * persona added to `PERSONAS` lands in a shard with no list to update. CI runs one job per
+ * shard, in parallel (.github/workflows/ci.yml `walkthrough-screens`). Unset: all of them. A
+ * malformed value, or a shard that would select nobody, throws at load, so a job can never
+ * pass having covered no persona.
+ */
+function personasOfShard(spec: string, all: readonly Persona[] = PERSONAS): readonly Persona[] {
+  if (!spec) return all
+  const m = /^([1-9]\d*)\/([1-9]\d*)$/.exec(spec.trim())
+  if (!m) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec}: expected k/n, for example 2/4`)
+  const k = Number(m[1])
+  const n = Number(m[2])
+  if (k > n) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec}: shard ${k} of ${n} does not exist`)
+  const chosen = all.filter((_, i) => i % n === k - 1)
+  if (chosen.length === 0) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec} selects no persona (there are ${all.length})`)
+  return chosen
+}
+const SHARD_PERSONAS = personasOfShard(process.env.CRB_E2E_SCREENS_SHARD ?? '')
 const VIEWPORTS = [
   { width: 1280, height: 900 },
   { width: 375, height: 812 },
@@ -132,26 +163,6 @@ interface Ctx {
 
 const ctx: Ctx = { repo: primary().name, runId: '', taskId: '' }
 
-/** The repository 08 seeds and the approver signs (`SIGNABLE_NAME` in 08-signoff): it has an active attestation to revoke. */
-const SIGNED_REPO = 'walk-signable'
-
-/**
- * Choose the first real option of the focused `<select>` from the keyboard, by typing the start
- * of its label — the type-ahead a closed select answers on every platform (ArrowDown changes the
- * value on Linux but opens the picker on macOS, so it would prove a different thing on each) —
- * and assert the value changed, so a select a keyboard person cannot operate fails.
- */
-async function chooseByKeyboard(page: Page, where: string): Promise<void> {
-  const { before, prefix } = await page.evaluate(() => {
-    const sel = document.activeElement as HTMLSelectElement | null
-    const first = sel ? Array.from(sel.options).find((o) => o.value !== '') : undefined
-    return { before: sel?.value ?? '', prefix: (first?.textContent ?? '').trim().split(/\s/)[0] ?? '' }
-  })
-  expect(prefix, `${where}: the focused control is not a select with an option to choose`).not.toBe('')
-  await page.keyboard.type(prefix)
-  await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLSelectElement | null)?.value ?? ''), { message: `${where}: typing "${prefix}" did not choose an option` }).not.toBe(before)
-}
-
 /** Every authenticated route; `about: false` would mark a route with no About block — since G-926 there is none. */
 function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
   const r = c.repo
@@ -185,19 +196,6 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     ['/nowhere/at/all', 'not-found'],
   ]
   return list.map(([path, slug, about]) => ({ path, slug, about: about ?? true }))
-}
-
-/** load → bounded network-idle (pages that poll never go idle) → main heading → a beat. */
-async function settle(page: Page): Promise<void> {
-  await page.waitForLoadState('load').catch(() => undefined)
-  await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => undefined)
-  await page
-    .getByRole('heading', { level: 1 })
-    .first()
-    .waitFor({ state: 'visible', timeout: 6000 })
-    .catch(() => undefined)
-  // let TanStack Query paint the first response and any skeletons resolve
-  await page.waitForTimeout(700)
 }
 
 async function shot(page: Page, persona: string, slug: string, width: number): Promise<void> {
@@ -277,13 +275,6 @@ function sample(n: number, k: number): number[] {
   const out = new Set<number>()
   for (let i = 0; i < k; i += 1) out.add(Math.round((i * (n - 1)) / (k - 1)))
   return Array.from(out).sort((a, b) => a - b)
-}
-
-/** The `role="tooltip"` a hinted element's `aria-describedby` names (the last id: a field lists its description first). */
-async function bubbleOf(page: Page, el: Locator): Promise<Locator> {
-  const ids = ((await el.getAttribute('aria-describedby')) ?? '').split(' ').filter(Boolean)
-  expect(ids.length, 'a hinted element carries aria-describedby').toBeGreaterThan(0)
-  return page.locator(`#${ids[ids.length - 1]!.replace(/([:.])/g, '\\$1')}`)
 }
 
 /**
@@ -411,54 +402,6 @@ async function keyboardPass(page: Page, where: string, want = 2, maxTabs = 12): 
 }
 
 /**
- * Keyboard only: press Tab (or Shift+Tab, `backwards`) until the focused element matches
- * `selector` — never `focus()`, never a click, so the control is proven REACHABLE by a keyboard
- * person, not only operable once something else put focus on it. `fromTop` (the default, for
- * the first call after a page load) starts the way a keyboard person starts: the first Tab
- * must land on the skip link, and Enter follows it (the sequential-focus starting point moves
- * to `<main>`); otherwise it carries on from wherever focus is. Fails, naming where focus
- * went, if `maxTabs` presses never reach it: a control that cannot take focus
- * (`tabindex="-1"`, a `div` with an `onClick`) fails here, which the negative-control test
- * below proves. Returns the number of presses it took.
- */
-async function tabTo(page: Page, selector: string, where: string, opts: { fromTop?: boolean; backwards?: boolean; maxTabs?: number } = {}): Promise<number> {
-  const { fromTop = true, backwards = false, maxTabs = 120 } = opts
-  if (fromTop) {
-    await page.keyboard.press('Tab')
-    expect(await page.evaluate(() => document.activeElement?.textContent?.trim()), `${where}: the first Tab after the page loaded did not land on the skip link`).toBe('Skip to content')
-    await page.keyboard.press('Enter')
-  }
-  const trail: string[] = []
-  for (let i = 1; i <= maxTabs; i += 1) {
-    await page.keyboard.press(backwards ? 'Shift+Tab' : 'Tab')
-    const at = await page.evaluate((sel) => {
-      const el = document.activeElement as HTMLElement | null
-      if (!el || el === document.body) return { hit: false, what: '(body)' }
-      const what = `<${el.tagName.toLowerCase()}${el.getAttribute('data-hint') ? ` data-hint=${el.getAttribute('data-hint')}` : ''}> ${(el.getAttribute('aria-label') ?? el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40)}`
-      return { hit: el.matches(sel), what }
-    }, selector)
-    if (at.hit) return i
-    trail.push(at.what)
-  }
-  throw new Error(`${where}: ${maxTabs} ${backwards ? 'Shift+Tab' : 'Tab'} presses never reached ${selector}; focus went: ${trail.slice(-8).join(' → ')}`)
-}
-
-/**
- * Press Escape until `done` holds, at most `max` times. One Escape closes the innermost open
- * thing: a hint bubble the focus opened is closed first (Hint spends that press), then the
- * disclosure, menu or dialog behind it — so a keyboard person needs one press per layer, and
- * never more than two here.
- */
-async function escapeUntil(page: Page, done: () => Promise<boolean>, max = 2): Promise<void> {
-  for (let i = 0; i < max && !(await done()); i += 1) await page.keyboard.press('Escape')
-}
-
-/** Whether focus is on `locator`'s element or inside it (a dialog, a menu, a confirmation). */
-async function focusedIs(locator: Locator): Promise<boolean> {
-  return locator.evaluate((el) => el === document.activeElement || el.contains(document.activeElement))
-}
-
-/**
  * /login, the screen a person signs in from, gets the checks every other route gets — before
  * sign-in, at both widths (G-192): at 375 the page does not scroll sideways and the Sign in
  * button is on the first screen (the page renders outside the shell, so it has no top bar to
@@ -494,7 +437,7 @@ async function loginChecks(page: Page, where: string, width: number): Promise<vo
 async function phoneMenu(page: Page, where: string): Promise<boolean> {
   const button = page.getByTestId('shell-menu-button')
   const primaryNav = page.getByRole('navigation', { name: 'Primary' })
-  const signOut = page.getByRole('button', { name: 'Sign out', exact: true }) // not a Users card's "Sign out everywhere" (P-114)
+  const signOut = page.getByRole('button', { name: 'Sign out', exact: true }) // not a Users card's "Sign out everywhere" (P-181)
   await expect(button, `${where}: no Menu button at 375 px`).toBeVisible()
   await expect(button).toHaveAttribute('aria-expanded', 'false')
   await expect(primaryNav, `${where}: the journey nav is not folded while the menu is closed`).toBeHidden()
@@ -566,6 +509,42 @@ async function hintSample(page: Page, where: string, width: number): Promise<voi
 }
 
 test.describe('11-screens: every route × persona × width, with the About block', () => {
+  test('the primary repository has a probed, mined, measured and replayed history (seeded through the API on a stack of its own)', async ({ page }) => {
+    const t = primary()
+    test.setTimeout(t.probeTimeoutMs + t.mineTimeoutMs + 12 * 60_000)
+    await signIn(page)
+    const existing = await page.request.get(`${env.baseUrl}/api/v1/repos/${encodeURIComponent(t.name)}`)
+    if (existing.ok()) {
+      test.info().annotations.push({ type: 'note', description: `${t.name} exists: the specs before this one made its history; nothing seeded` })
+      return
+    }
+    expect(existing.status(), `GET /repos/${t.name} → ${existing.status()}`).toBe(404)
+    // tier 2 onboards public repositories with their own presets and installs (02/03): seeding
+    // them here would be a second, unreviewed onboarding path
+    expect(env.publicTier, 'tier 2: run 11-screens after 02 and 03 in the same invocation; it seeds only the tier-1 fixture').toBe(false)
+    // the fields 02's "Add a repository" dialog sends for the python-src-layout preset
+    await apiPost(page, '/repos', {
+      name: t.name,
+      language: 'python',
+      runner: 'pytest',
+      url: t.url,
+      src_prefix: 'src/',
+      test_prefix: 'tests/',
+      ext: '.py',
+      belt_scope: t.beltScope,
+      probe: t.probe,
+      runner_opts: t.runnerOpts,
+    })
+    const probe = await apiPost(page, `/repos/${encodeURIComponent(t.name)}/probe`, {})
+    await waitRunApi(page, String(probe.id), t.probeTimeoutMs)
+    // the runs 03, 04 and 05 queue through the dialog, with their limits
+    await startRunApi(page, { repo: t.name, kind: 'mine', limit: t.mineLimit }, t.mineTimeoutMs)
+    await startRunApi(page, { repo: t.name, kind: 'oracle', limit: 1 }, 4 * 60_000)
+    await startRunApi(page, { repo: t.name, kind: 'controls', limit: 1 }, 4 * 60_000)
+    await startRunApi(page, { repo: t.name, kind: 'replay', builder: 'fixture_gold', model: 'gold', limit: 2 }, 4 * 60_000)
+    test.info().annotations.push({ type: 'note', description: `${t.name} seeded through the API: probe, mine ${t.mineLimit}, oracle, controls, replay fixture_gold 2` })
+  })
+
   test('accounts exist and the run / task anchors are known (admin, via the API)', async ({ page, request }) => {
     await signIn(page)
     const headers = await csrfHeaders(page)
@@ -601,10 +580,13 @@ test.describe('11-screens: every route × persona × width, with the About block
       const tj = (await tasks.json()) as { items: Array<{ task_id?: string; id?: string }> }
       ctx.taskId = (tj.items[0]?.task_id ?? tj.items[0]?.id ?? '') as string
     }
-    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} accounts_reused=${reused} out=${OUT}` })
+    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} accounts_reused=${reused} personas=${SHARD_PERSONAS.join(',')} out=${OUT}` })
+    // the detail routes are anchored to a real run and a real task, or they would sweep the 404
+    expect(ctx.runId, 'no finished run to anchor /runs/:id').not.toBe('')
+    expect(ctx.taskId, `no task of ${ctx.repo} to anchor /tasks/:repo/:taskId`).not.toBe('')
   })
 
-  for (const persona of PERSONAS) {
+  for (const persona of SHARD_PERSONAS) {
     for (const vp of VIEWPORTS) {
       test(`${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen`, async ({ page }) => {
         test.setTimeout(6 * 60_000)
@@ -666,171 +648,4 @@ test.describe('11-screens: every route × persona × width, with the About block
       })
     }
   }
-
-  // ─── the per-screen keyboard steps (G-905) ──────────────────────────────────────────────
-  // The route loop above proves every screen's first hinted controls take focus. These prove
-  // the five controls a keyboard person has to OPERATE, each reached by Tab alone from the
-  // skip link (`tabTo`) and driven by Enter, Space, typing and Escape — no click, no focus().
-  // They change no data: the sign-off form is filled to an enabled Sign off and the revoke
-  // confirmation filled to an enabled Revoke sign-off, then left by Cancel; the freeze dialog
-  // is opened and closed. Pressing those buttons is proven by 08 and 10, on the same native
-  // `<button>`, whose Enter/Space activation the browser guarantees.
-
-  test('keyboard: a map cell opens from the keyboard, and the reason code in it opens and closes (/capability)', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
-    await page.goto(`/capability?repo=${encodeURIComponent(ctx.repo)}`)
-    await settle(page)
-    const where = 'operator @ 1280 /capability'
-    await tabTo(page, 'button[data-hint="map.cell.tile"]', where)
-    // the cell explains itself on focus, like every hinted control
-    const cell = page.locator(':focus')
-    await expect(await bubbleOf(page, cell), `${where}: the focused cell's hint did not open`).toBeVisible({ timeout: 1000 })
-    await page.keyboard.press('Enter')
-    await expect(page.getByTestId('cell-reason'), `${where}: Enter on a cell did not open its detail`).toBeVisible()
-    // the reason code in the detail card is the next thing a reader wants: reach it by Tab too
-    const reason = 'main [data-testid="cell-reason"] button[aria-expanded]'
-    await tabTo(page, reason, `${where} (reason code)`, { fromTop: false })
-    const disclosure = page.locator(reason)
-    await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
-    await page.keyboard.press('Enter')
-    await expect(disclosure, `${where}: Enter did not open the reason code`).toHaveAttribute('aria-expanded', 'true')
-    await expect(page.locator(`[id="${await disclosure.getAttribute('aria-controls')}"]`)).toHaveAttribute('role', 'note')
-    await escapeUntil(page, async () => (await disclosure.getAttribute('aria-expanded')) === 'false')
-    await expect(disclosure, `${where}: Escape did not close the reason code`).toHaveAttribute('aria-expanded', 'false')
-    expect(await focusedIs(disclosure), `${where}: closing the reason code lost focus`).toBe(true)
-  })
-
-  test('keyboard: a reason-code button on Routes is reached by Tab and opens and closes with aria-expanded (/routing)', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
-    await page.goto(`/routing?repo=${encodeURIComponent(ctx.repo)}`)
-    await settle(page)
-    const where = 'operator @ 1280 /routing'
-    const sel = 'main button[aria-expanded]:has([data-testid="reason-code"])'
-    await expect(page.locator(sel).first(), `${where}: no reason code on the page — the stack has no route decisions`).toBeVisible()
-    await tabTo(page, sel, where)
-    const disclosure = page.locator(':focus')
-    await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
-    await page.keyboard.press('Enter')
-    await expect(disclosure, `${where}: Enter did not open the reason code`).toHaveAttribute('aria-expanded', 'true')
-    await expect(page.getByRole('note').filter({ hasText: 'glossary' }).first()).toBeVisible()
-    await escapeUntil(page, async () => (await disclosure.getAttribute('aria-expanded')) === 'false')
-    await expect(disclosure, `${where}: Escape did not close the reason code`).toHaveAttribute('aria-expanded', 'false')
-    expect(await focusedIs(disclosure), `${where}: closing the reason code lost focus`).toBe(true)
-  })
-
-  test('keyboard: a term on Oracle opens and closes with aria-expanded (/oracle)', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
-    await page.goto(`/oracle?repo=${encodeURIComponent(ctx.repo)}`)
-    await settle(page)
-    const where = 'operator @ 1280 /oracle'
-    const sel = 'main button[aria-expanded][aria-controls]'
-    await tabTo(page, sel, where)
-    const term = page.locator(':focus')
-    const name = ((await term.textContent()) ?? '').trim()
-    await expect(term).toHaveAttribute('aria-expanded', 'false')
-    await page.keyboard.press('Space')
-    await expect(term, `${where}: Space did not open the term "${name}"`).toHaveAttribute('aria-expanded', 'true')
-    const note = page.locator(`[id="${await term.getAttribute('aria-controls')}"]`)
-    await expect(note, `${where}: the term "${name}" opened no definition`).toHaveAttribute('role', 'note')
-    await expect(note).toBeVisible()
-    await escapeUntil(page, async () => (await term.getAttribute('aria-expanded')) === 'false')
-    await expect(term, `${where}: Escape did not close the term "${name}"`).toHaveAttribute('aria-expanded', 'false')
-    await expect(note).toHaveCount(0)
-    expect(await focusedIs(term), `${where}: closing the term lost focus`).toBe(true)
-  })
-
-  test('keyboard: the sign-off form is filled, and the revoke confirmation opened, filled and left, from the keyboard (/signoff)', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.approver, PASSWORDS.approver)
-    await page.goto(`/signoff?repo=${SIGNED_REPO}`)
-    await settle(page)
-    const where = 'approver @ 1280 /signoff'
-    // the form: choose the cell, name an accepted row, affirm, write the statement — by keyboard
-    await tabTo(page, '#signoff-form select', `${where} (Cell)`)
-    await chooseByKeyboard(page, `${where} (Cell)`)
-    const rowSelect = page.getByTestId('attest-row')
-    await expect.poll(async () => (await rowSelect.locator('option').count()) - 1, { message: `${where}: the chosen cell offers no accepted row` }).toBeGreaterThanOrEqual(1)
-    await expect(rowSelect).toBeEnabled()
-    await tabTo(page, 'select[data-testid="attest-row"]', `${where} (Accepted row)`, { fromTop: false, maxTabs: 30 })
-    await chooseByKeyboard(page, `${where} (Accepted row)`)
-    await tabTo(page, 'input[data-testid="attest-read"]', `${where} (I have read)`, { fromTop: false, maxTabs: 10 })
-    await page.keyboard.press('Space')
-    await expect(page.getByTestId('attest-read')).toBeChecked()
-    await tabTo(page, 'textarea[data-testid="attest-statement"]', `${where} (statement)`, { fromTop: false, maxTabs: 30 })
-    await page.keyboard.type('walkthrough 11: filled from the keyboard; not submitted.')
-    // Sign off sits in the gate above the form: Shift+Tab back up to it, reachable and enabled
-    // now the form is complete. It is NOT pressed — 08 records the attestation; this spec
-    // changes no data.
-    await tabTo(page, 'button[form="signoff-form"]', `${where} (Sign off)`, { fromTop: false, backwards: true })
-    await expect(page.locator(':focus'), `${where}: Sign off is not enabled once the form is filled`).toBeEnabled()
-    await expect(page.locator(':focus')).toHaveText('Sign off')
-
-    // the revoke confirmation: Revoke opens it and focus moves INTO it; it is filled, its
-    // confirm button reached, then Cancel leaves it and focus comes back to Revoke
-    await tabTo(page, 'button[data-hint="button.signoff.revoke"]', `${where} (Revoke)`, { fromTop: false, maxTabs: 200 })
-    const revokeId = await page.locator(':focus').getAttribute('data-revoke-id')
-    await page.keyboard.press('Enter')
-    const confirm = page.getByTestId('revoke-confirm')
-    await expect(confirm).toBeVisible()
-    expect(await focusedIs(confirm), `${where}: focus did not move into the revoke confirmation when it opened`).toBe(true)
-    await page.keyboard.type('walkthrough 11: reached from the keyboard; not confirmed.')
-    await page.keyboard.press('Tab')
-    await expect(page.locator(':focus'), `${where}: Tab from the reason did not reach Revoke sign-off`).toHaveText('Revoke sign-off')
-    await expect(page.locator(':focus')).toBeEnabled()
-    await page.keyboard.press('Tab')
-    await expect(page.locator(':focus')).toHaveText('Cancel')
-    await page.keyboard.press('Enter')
-    await expect(confirm).toBeHidden()
-    const back = page.locator(`button[data-revoke-id="${revokeId}"]`)
-    expect(await focusedIs(back), `${where}: Cancel did not return focus to the Revoke button that opened the confirmation`).toBe(true)
-  })
-
-  test('keyboard: the freeze dialog takes focus when it opens and gives it back when it closes (/factory)', async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
-    await page.goto(`/factory?repo=${encodeURIComponent(ctx.repo)}`)
-    await settle(page)
-    const where = 'operator @ 1280 /factory'
-    const opener = 'button[data-hint="button.factory.freeze"], button[data-hint="button.factory.freeze_revised"]'
-    await tabTo(page, opener, where)
-    const label = ((await page.locator(':focus').textContent()) ?? '').trim()
-    await page.keyboard.press('Enter')
-    const dialog = page.getByRole('dialog', { name: /^Freeze a (revised )?backlog$/ })
-    await expect(dialog, `${where}: Enter on "${label}" did not open the freeze dialog`).toBeVisible()
-    expect(await focusedIs(dialog), `${where}: focus did not move into the freeze dialog when it opened`).toBe(true)
-    // Tab stays inside a modal dialog
-    for (let i = 0; i < 6; i += 1) {
-      await page.keyboard.press('Tab')
-      expect(await focusedIs(dialog), `${where}: Tab ${i + 1} left the modal dialog`).toBe(true)
-    }
-    await escapeUntil(page, async () => !(await dialog.isVisible()))
-    await expect(dialog, `${where}: Escape did not close the freeze dialog`).toBeHidden()
-    await expect(page.locator(':focus'), `${where}: focus did not return to "${label}" when the dialog closed`).toHaveText(label)
-  })
-
-  test('keyboard: the pass fails when a control cannot take focus (negative control)', async ({ page }) => {
-    // A pass that cannot fail proves nothing. Take every map cell out of the tab order — the
-    // defect a keyboard person meets when a control is a div with an onClick, or carries
-    // tabindex="-1" — and `tabTo` must fail on the same page it passes above.
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
-    await page.goto(`/capability?repo=${encodeURIComponent(ctx.repo)}`)
-    await settle(page)
-    const cells = await page.evaluate(() => {
-      const all = Array.from(document.querySelectorAll<HTMLElement>('button[data-hint="map.cell.tile"]'))
-      for (const el of all) el.tabIndex = -1
-      return all.length
-    })
-    expect(cells, 'the negative control needs a measured cell on the page').toBeGreaterThan(0)
-    let failed = ''
-    try {
-      await tabTo(page, 'button[data-hint="map.cell.tile"]', 'negative control', { maxTabs: 60 })
-    } catch (e) {
-      failed = String(e)
-    }
-    expect(failed, 'tabTo reached a map cell that cannot take focus — the keyboard pass cannot fail').toContain('never reached')
-  })
 })

@@ -24,8 +24,8 @@
  *               ui/src/test/utils.tsx, tests/test_server_routes_admin_secrets.py (the
  *               server-side half of the same property)
  * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx
- * Touch when:   a status field or a verify outcome is added — extend the fixtures and keep
- *               the "never a value" assertion on every case.
+ * Touch when:   never for a new repository; a status field or a verify outcome is added — extend
+ *               the fixtures and keep the "never a value" assertion on every case.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

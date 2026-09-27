@@ -23,7 +23,6 @@ src/crb/server/worker.py#b3156f75fbed
 src/crb/server/worker.py#d4c88bbcfaaa
 tests/fixtures/pyrepo.py#6a9c8e7bfb13
 tests/test_deploy_health_probes.py#005251726312
-tests/test_factory_author.py#8ebc528e734f
 tests/test_factory_outcomes.py#74a4714b1734
 tests/test_server_routes_repos.py#0e2f54fd4abc
 tests/test_server_routes_signoffs.py#c047cf2db085
@@ -78,7 +77,6 @@ ui/src/screens/Runs/RunsPage.tsx#82efca604ded
 ui/src/screens/Runs/contract.ts#f426196ad6e0
 ui/src/screens/Runs/telemetry.ts#1de53e96bc91
 ui/src/screens/Runs/telemetry.ts#b1056a3f5425
-ui/src/screens/Settings/GitHubAppCard.test.tsx#cbb445f85a50
 ui/src/screens/Settings/GitHubAppCard.tsx#ae2dc528ca4f
 ui/src/screens/Settings/SettingsPage.test.tsx#bb4c380ff276
 ui/src/screens/Signoff/SignoffPage.tsx#569371a3da89

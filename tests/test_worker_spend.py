@@ -23,7 +23,8 @@ Works with:   src/crb/server/worker.py (``_spend_hooks``, ``_RunLedger._stamp``)
               src/crb/core/run.py (the replay the hooks sit in),
               src/crb/builders/adapter.py (``budget_for_task``), tests/test_spend.py (the rules)
 Tested by:    tests/test_worker_spend.py
-Touch when:   a spend label or the apparatus record changes; the gate moves out of ``run_task``.
+Touch when:   never for a new repository; a spend label or the apparatus record changes; the gate
+              moves out of ``run_task``.
 """
 
 from __future__ import annotations

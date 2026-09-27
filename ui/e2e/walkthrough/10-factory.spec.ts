@@ -33,9 +33,9 @@
  *               (the fold it reads), src/crb/factory/loop.py (the refusals it asserts),
  *               src/crb/builders/fixture_gold.py (the builder), ui/e2e/walkthrough/README.md
  * Tested by:    scripts/walkthrough.sh (runs it, tier 1)
- * Touch when:   a step is added to the loop; the freeze dialog's labels change; the fixture
- *               builder learns to build a factory item (then I-1 grades clean and the
- *               delivery step, not the build step, is the one to assert).
+ * Touch when:   never for a new repository; a step is added to the loop; the freeze dialog's labels
+ *               change; the fixture builder learns to build a factory item (then I-1 grades clean
+ *               and the delivery step, not the build step, is the one to assert).
  */
 import { env, expect, primary, runIdFromUrl, signIn, test, waitForRun } from './support'
 

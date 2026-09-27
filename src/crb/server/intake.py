@@ -77,8 +77,8 @@ Works with:   src/crb/intake/client.py (the six verbs and the stop reasons),
               it; the Register act), src/crb/store/models.py (``WorkerRow`` — the lease row)
 Tested by:    tests/test_intake_service.py, tests/test_server_routes_intake.py,
               tests/test_intake_worker.py
-Touch when:   a fifth label or a new stop reason appears (publish it in docs/API.md
-              first); never to widen what is written to a ticket without the ADR.
+Touch when:   never for a new repository; a fifth label or a new stop reason appears (publish it in
+              docs/API.md first); never to widen what is written to a ticket without the ADR.
 """
 
 from __future__ import annotations

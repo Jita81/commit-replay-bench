@@ -46,8 +46,8 @@
  *               ui/src/screens/Signoff/SignoffPage.tsx (the screens under test); the
  *               Baseline's flow card is checked in 06b, after the read 06b must see first
  * Tested by:    ui/e2e/walkthrough/05-replay-fake.spec.ts
- * Touch when:   a screen's test ids change, or the thin-cell refusal wording changes (08
- *               asserts on the same cell's n).
+ * Touch when:   never for a new repository; a screen's test ids change, or the thin-cell refusal
+ *               wording changes (08 asserts on the same cell's n).
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'

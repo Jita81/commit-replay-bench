@@ -31,8 +31,9 @@
  *               success sentence, the 409 `not_local` path),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (an admin sets a persona's
  *               password and that persona signs in with it)
- * Touch when:   `MIN_PASSWORD_LENGTH` changes (src/crb/server/settings.py) — the floor here
- *               and the two hints that state it move with it.
+ * Touch when:   never for a new repository; `MIN_PASSWORD_LENGTH` changes
+ *               (src/crb/server/settings.py) — the floor here and the two hints that state it move
+ *               with it.
  */
 import { useState, type FormEvent } from 'react'
 import { useSetUserPassword } from '../../api/hooks'

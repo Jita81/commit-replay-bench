@@ -400,7 +400,7 @@ redaction as evidence packs (message, arguments, extras and tracebacks). `/healt
 the readiness probes the `GET /health` row of [API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface)
 lists, one per dependency (the `worker` probe reads the `workers` table every worker upserts
 each `heartbeat_s`, idle or not), and `/health/live` one (`db`); the list is named here only
-by reference, because a copy of it drifted (docs/PREVENTION.md P-059).
+by reference, because a copy of it drifted (docs/PREVENTION.md P-126).
 
 ### 7.3 Data model (store, P4)
 

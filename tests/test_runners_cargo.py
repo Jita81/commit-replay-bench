@@ -38,8 +38,8 @@ Works with:   src/crb/core/runners/cargo_runner.py (under test), tests/fixtures/
               (the fixture), tests/conftest_langs.py (the probes), tests/test_runners_parsers.py
               (the parser on canned output), docs/CONTRIBUTING.md (how to add a runner)
 Tested by:    tests/test_runners_cargo.py
-Touch when:   the cargo runner's argv or parser changes; onboarding a Rust workspace whose
-              layout the scope mapping cannot address.
+Touch when:   never for a new repository; the cargo runner's argv or parser changes; onboarding a
+              Rust workspace whose layout the scope mapping cannot address.
 """
 
 from __future__ import annotations

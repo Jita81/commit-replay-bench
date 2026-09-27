@@ -44,9 +44,9 @@ Works with:   src/crb/server/worker.py (stamps deliver transitions after every f
               src/crb/server/flow.py (reads the moments into the decide and platform streams),
               src/crb/server/routes/runs.py (``append_system_event`` — the one event writer)
 Tested by:    tests/test_flow_record.py, tests/test_server_routes_flow.py, tests/test_worker.py
-Touch when:   a stream's MEASURE criterion needs a moment the store does not keep (add its
-              writer here, its reader beside it, and an ADR-0028 amendment); never to derive a
-              moment from a neighbouring one.
+Touch when:   never for a new repository; a stream's MEASURE criterion needs a moment the store does
+              not keep (add its writer here, its reader beside it, and an ADR-0028 amendment); never
+              to derive a moment from a neighbouring one.
 """
 
 from __future__ import annotations

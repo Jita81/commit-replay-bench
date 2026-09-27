@@ -55,15 +55,16 @@
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (whose n = 2 cell this spec relies on)
  * Tested by:    ui/e2e/walkthrough/08-signoff.spec.ts
- * Touch when:   a refusal clause or a policy default changes (src/crb/core/signoff.py) — the
+ * Touch when:   never for a new repository (the seeded repository is this spec's own fixture);
+ *               a refusal clause or a policy default changes (src/crb/core/signoff.py) — the
  *               expected clause list and the 18-row seed must follow.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { APIRequestContext, Locator, Page } from '@playwright/test'
-import { env, expect, field, personaPassword, primary, signIn, test } from './support'
+import type { Locator } from '@playwright/test'
+import { apiGet, apiPost, csrf, ensurePersona, env, expect, field, personaPassword, primary, signIn, startRunApi, test, waitRunApi } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -73,52 +74,6 @@ const MIN = 60_000
 /** The second person: the same persona account 11-screens uses, so a rerun reuses it. */
 const APPROVER = 'walk-approver'
 const APPROVER_PASS = personaPassword(APPROVER)
-
-/** Create the approver persona unless an earlier run did (its stable password must then open it). */
-async function ensureApprover(page: Page): Promise<void> {
-  const users = (await apiGet(page.request, '/users')) as { items: Array<{ username: string }> }
-  if (users.items.some((u) => u.username === APPROVER)) {
-    const login = await page.context().request.post(`${env.baseUrl}/api/v1/auth/login`, { data: { username: APPROVER, password: APPROVER_PASS } })
-    expect(login.status(), `POST /auth/login as existing ${APPROVER} with the stable password → ${login.status()}`).toBe(200)
-    return
-  }
-  await apiPost(page, '/users', { username: APPROVER, password: APPROVER_PASS, role: 'approver', display_name: 'Walk approver' })
-}
-
-/** The CSRF header the API requires on writes (double-submit cookie `crb_csrf`). */
-async function csrf(page: Page): Promise<Record<string, string>> {
-  const cookie = (await page.context().cookies()).find((c) => c.name === 'crb_csrf')
-  if (!cookie) throw new Error('no crb_csrf cookie — is the page signed in?')
-  return { 'X-CSRF-Token': cookie.value }
-}
-
-async function apiPost(page: Page, path: string, data: unknown): Promise<Record<string, unknown>> {
-  const res = await page.request.post(`${env.baseUrl}/api/v1${path}`, { data, headers: await csrf(page) })
-  expect(res.status(), `POST ${path} → ${res.status()} ${await res.text()}`).toBeLessThan(300)
-  return (await res.json()) as Record<string, unknown>
-}
-
-async function apiGet(req: APIRequestContext, path: string): Promise<Record<string, unknown>> {
-  const res = await req.get(`${env.baseUrl}/api/v1${path}`)
-  expect(res.ok(), `GET ${path} → ${res.status()}`).toBeTruthy()
-  return (await res.json()) as Record<string, unknown>
-}
-
-/** Poll the run until terminal; assert it succeeded. */
-async function waitRun(page: Page, runId: string, timeoutMs: number): Promise<void> {
-  await expect
-    .poll(async () => String((await apiGet(page.request, `/runs/${runId}`)).status), { timeout: timeoutMs, intervals: [500, 1000, 2000], message: `run ${runId} did not finish` })
-    .toMatch(/^(succeeded|failed|cancelled)$/)
-  const run = await apiGet(page.request, `/runs/${runId}`)
-  expect(run.status, `run ${runId} (${run.kind}) ended ${run.status}: ${run.error ?? ''}`).toBe('succeeded')
-}
-
-async function startRunApi(page: Page, body: Record<string, unknown>, timeoutMs: number): Promise<string> {
-  const run = await apiPost(page, '/runs', body)
-  const id = String(run.id)
-  await waitRun(page, id, timeoutMs)
-  return id
-}
 
 /**
  * A calculator repo whose per-commit tests are parametrised — the negative control
@@ -248,7 +203,7 @@ test.describe('08 sign-off policy', () => {
       runner_opts: runnerOpts,
     })
     const probe = await apiPost(page, `/repos/${SIGNABLE_NAME}/probe`, {})
-    await waitRun(page, String(probe.id), 3 * MIN)
+    await waitRunApi(page, String(probe.id), 3 * MIN)
     await startRunApi(page, { repo: SIGNABLE_NAME, kind: 'mine', limit: N_TASKS }, 4 * MIN)
     const tasks = await apiGet(page.request, `/repos/${SIGNABLE_NAME}/tasks?limit=100`)
     expect(Number(tasks.total)).toBeGreaterThanOrEqual(N_TASKS)
@@ -279,7 +234,7 @@ test.describe('08 sign-off policy', () => {
     expect(oracleCell, JSON.stringify(oracle.cells)).toBeTruthy()
     expect(Number(oracleCell.strength_mean), JSON.stringify(oracleCell)).toBeGreaterThanOrEqual(0.8)
     // the second person the sign-off will need (the admin queued every run above)
-    await ensureApprover(page)
+    await ensurePersona(page, APPROVER, 'approver')
   })
 
   test('the admin who queued the runs is refused by the two-person rule (same_actor) before trying', async ({ page }) => {

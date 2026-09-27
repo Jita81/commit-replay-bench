@@ -25,9 +25,9 @@ Works with:   src/crb/cli/main.py (under test), src/crb/cli/commands/repo.py,
               src/crb/cli/commands/ledger.py (the subcommands), tests/fixtures/cli_repo.py (the
               history), docs/OPERATOR.md (the operator's view of the same commands)
 Tested by:    tests/test_cli.py
-Touch when:   a subcommand or flag is added (a happy-path case and the exit code of its
-              negative verdict; update docs/OPERATOR.md); never so that a verdict-negative exit
-              becomes 0.
+Touch when:   never for a new repository; a subcommand or flag is added (a happy-path case and the
+              exit code of its negative verdict; update docs/OPERATOR.md); never so that a
+              verdict-negative exit becomes 0.
 """
 
 from __future__ import annotations

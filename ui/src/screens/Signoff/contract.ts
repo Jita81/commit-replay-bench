@@ -36,9 +36,9 @@
  *               ui/src/screens/Capability/contract.ts (`ControlsVerdict`, `FailureSplit`,
  *               `ReasonCode` reused in the snapshot), ui/src/api/types.ts (`Signoff`)
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/e2e/walkthrough/08-signoff.spec.ts
- * Touch when:   a refusal clause is added (src/crb/core/signoff.py; docs/API.md "POST
- *               /signoffs") — extend `RefusalCode` and `REFUSAL_DISPLAY` here and the gate
- *               row in ui/src/screens/Signoff/SignoffPage.tsx; never for a new repository.
+ * Touch when:   never for a new repository; a refusal clause is added (src/crb/core/signoff.py;
+ *               docs/API.md "POST /signoffs") — extend `RefusalCode` and `REFUSAL_DISPLAY` here and
+ *               the gate row in ui/src/screens/Signoff/SignoffPage.tsx.
  * Claims:       What a signed cell may be claimed to mean is fixed by the policy version
  *               stamped on the record
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
@@ -223,7 +223,7 @@ export const signoffKeys = {
  * The preview re-fetches as the approver's choices change (the cell, the named row):
  * it reflects exactly what the POST would do with the form as it stands — once it has
  * answered. While a newly named row of the same cell loads, `data` is the previous row's
- * answer and `isPlaceholderData` is true; a gate reads neither (P-102).
+ * answer and `isPlaceholderData` is true; a gate reads neither (P-169).
  */
 export function useSignoffPreview(repo: string, cell: Record<string, string> | null, reviewedRowHash = ''): UseQueryResult<SignoffPreview, ApiError> {
   const key = cell ?? {}
@@ -239,7 +239,7 @@ export function useSignoffPreview(repo: string, cell: Record<string, string> | n
     // the page — found by the walkthrough's keyboard step (G-905). A different cell or
     // repository starts empty: its rows and refusals are not the old cell's. The placeholder
     // is the previous ROW's answer, so no verdict may be read from it: a caller builds its
-    // gate from `isPlaceholderData ? undefined : data` (P-102, SignoffPage's `current`).
+    // gate from `isPlaceholderData ? undefined : data` (P-169, SignoffPage's `current`).
     placeholderData: (previous, previousQuery) => {
       const k = previousQuery?.queryKey
       return k && k[1] === repo && JSON.stringify(k[2]) === JSON.stringify(key) ? previous : undefined

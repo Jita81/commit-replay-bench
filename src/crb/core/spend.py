@@ -70,9 +70,9 @@ Works with:   src/crb/core/run.py (asks the escalation gate before a task climbs
               surface), src/crb/server/schemas.py (``budget_profile`` / ``escalation`` on
               ``POST /runs``), scripts/spend_from_export.py (the same functions over an export)
 Tested by:    tests/test_spend.py, tests/test_worker_spend.py
-Touch when:   a cap is added to ``Budget`` (add it to ``CAP_FIELDS`` and ``calibrate``); a bar
-              or a minimum n changes (an apparatus-visible change: the rule is on every row —
-              docs/API.md and docs/OPERATOR.md say the numbers).
+Touch when:   never for a new repository; a cap is added to ``Budget`` (add it to ``CAP_FIELDS`` and
+              ``calibrate``); a bar or a minimum n changes (an apparatus-visible change: the rule is
+              on every row — docs/API.md and docs/OPERATOR.md say the numbers).
 Claims:       A calibrated cap is what clean completions USED, not what an attempt NEEDS:
               the slowest clean completions can still be cut short, and where the cap was
               binding (p90 at the cap) the data is censored. The benefit is a hypothesis

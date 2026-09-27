@@ -16,14 +16,14 @@
  *               the run — never a second spend (J-ONR-4); and that every field, row and the
  *               button carry a hint, with the attempts radio opening on hover; and that the
  *               estimate reads the map's economics fold, so a known $0 is quoted as $0.00
- *               over the attempts with a known cost, never dropped for the planning range (P-064).
+ *               over the attempts with a known cost, never dropped for the planning range (P-131).
  * How:          `mockApi` + `renderApp` with `path` for `useParams`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
  * Works with:   ui/src/screens/Connect/MeasurePage.tsx, ui/src/help/hints.ts (the copy the
  *               hover test expects), ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx
- * Touch when:   the run request or the estimate changes.
+ * Touch when:   never for a new repository; the run request or the estimate changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
@@ -80,7 +80,7 @@ describe('MeasurePage', () => {
     expect(box).toHaveTextContent('the operator’s own CLI login (development and evaluation only)')
   })
 
-  it('quotes a known $0 as $0.00 over the attempts with a known cost, never the planning range (P-064)', async () => {
+  it('quotes a known $0 as $0.00 over the attempts with a known cost, never the planning range (P-131)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/cobra': REPO,

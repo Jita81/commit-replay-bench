@@ -22,8 +22,8 @@ Works with:   src/crb/core/flow.py (``spend_of_rows`` — the one rule), src/crb
               tests/fixtures/posture.py (``posture_row``), docs/dod/streams/measure.md
               (the criterion this agreement closes)
 Tested by:    tests/test_flow_value_agree.py
-Touch when:   either reader changes what it sums or what it counts as clean — change both
-              together, never one.
+Touch when:   never for a new repository; either reader changes what it sums or what it counts as
+              clean — change both together, never one.
 """
 
 from __future__ import annotations

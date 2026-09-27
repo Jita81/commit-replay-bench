@@ -55,8 +55,8 @@
  *               be said to mean)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
- * Touch when:   a headline fact is added to the map summary; the wording of what `deliver`
- *               means changes (EVIDENCE-AND-CLAIMS §6 first).
+ * Touch when:   never for a new repository; a headline fact is added to the map summary; the
+ *               wording of what `deliver` means changes (EVIDENCE-AND-CLAIMS §6 first).
  */
 
 import { useMemo, type ReactNode } from 'react'
@@ -223,7 +223,7 @@ export function ResultsPage() {
   // ratchet in the page's test refuses any `<query>.data` read (PR #54 review)
   const mapData = currentData(map)
   // a person with the map of a repository with rows in front of them has read its baseline:
-  // the server records it once per person, and Home's task 6 completes on it (DL-074)
+  // the server records it once per person, and Home's task 6 completes on it (DL-075)
   useRecordBaselineRead(repo, (mapData?.summary.n_total ?? 0) > 0)
   const controlsData = currentData(controls)
   const oracleData = currentData(oracle)
@@ -275,18 +275,21 @@ export function ResultsPage() {
     // counts as denominators, a t interval with its method, the apparatus — never a mean of
     // cell means recombined here (an interval cannot be)
     const e = mapData?.economics
+    const graded = mapData ? `apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'}` : undefined
     return {
       n,
       clean,
-      perAttempt: economicsTile(e, 'cost_per_attempt'),
-      perClean: economicsTile(e, 'cost_per_clean'),
-      latency: economicsTile(e, 'latency_per_attempt'),
+      perAttempt: economicsTile(e, 'cost_per_attempt', graded),
+      perClean: economicsTile(e, 'cost_per_clean', graded),
+      latency: economicsTile(e, 'latency_per_attempt', graded),
     }
   }, [measured, mapData])
   const controlsNotRun = controls.isError && isApiError(controls.error) && controls.error.status === 404
   const oracleNotRun = oracle.isError && isApiError(oracle.error) && oracle.error.status === 404
   const verdict = controlsData?.verdict
-  const apparatus = mapData ? `apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'} · Wilson 95%` : '—'
+  // Every tile the map feeds names the apparatus its rows were graded under (PR #56 review).
+  const mapApparatus = mapData ? `apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'}` : 'apparatus —'
+  const apparatus = mapData ? `${mapApparatus} · Wilson 95%` : '—'
   const oracleMean = oracleData && oracleData.tasks.length > 0 ? oracleData.tasks.reduce((a, t) => a + (t.strength ?? 0), 0) / oracleData.tasks.length : null
   // the bar is the policy in force, never a constant; the apparatus is the report's own
   const oracleBar = mapData ? mapData.policy.min_oracle_strength : null
@@ -368,9 +371,10 @@ export function ResultsPage() {
                 label="Posture"
                 value={mapData.summary.posture_class || '—'}
                 n={mapData.summary.n_total}
-                apparatus={`every rate here was graded in this posture · ${mapData.summary.unqualified_posture ?? 0} unqualified-posture rows excluded`}
+                ci={null}
+                apparatus={`${mapApparatus} · every rate here was graded in this posture · ${mapData.summary.unqualified_posture ?? 0} unqualified-posture rows excluded`}
                 hint="stat.results.posture"
-                footer={mapData.summary.excluded_posture_divergent ? `${mapData.summary.excluded_posture_divergent} rows left out: their tests differ between postures` : undefined}
+                footer={`no interval: a posture and row counts, not a rate${mapData.summary.excluded_posture_divergent ? ` · ${mapData.summary.excluded_posture_divergent} rows left out: their tests differ between postures` : ''}`}
                 data-testid="tile-posture"
               />
             </div>
@@ -388,7 +392,7 @@ export function ResultsPage() {
                       label={<Term id={r}>{r}</Term>}
                       value={String(byRoute[r]?.cells ?? 0)}
                       n={byRoute[r]?.n ?? 0}
-                      apparatus={`${byRoute[r]?.cells ?? 0} of ${measured.length} measured cells`}
+                      apparatus={`${mapApparatus} · ${byRoute[r]?.cells ?? 0} of ${measured.length} measured cells`}
                       tone={r === 'deliver' ? 'green' : r === 'human' ? 'amber' : 'muted'}
                       hint={ROUTE_TILE_HINT[r]}
                     />
@@ -420,7 +424,7 @@ export function ResultsPage() {
                   <StatTile label="Cost per attempt" {...economics.perAttempt} hint="stat.results.cost_per_attempt" data-testid="tile-cost-per-attempt" />
                   <StatTile label="Cost per clean attempt" {...economics.perClean} hint="stat.results.cost_per_clean" data-testid="tile-cost-per-clean" />
                   <StatTile label="Latency per attempt" {...economics.latency} hint="stat.results.latency" data-testid="tile-latency" />
-                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} ci={economics.n ? wilson(economics.clean, economics.n) : null} apparatus={`${economics.clean} clean of ${economics.n} attempts, all cells · Wilson 95% · apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'} — never a routing input`} hint="stat.results.clean_rate" data-testid="tile-clean-rate" />
+                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} ci={economics.n ? wilson(economics.clean, economics.n) : null} apparatus={`${economics.clean} clean of ${economics.n} attempts, all cells · Wilson 95% · ${mapApparatus} — never a routing input`} hint="stat.results.clean_rate" data-testid="tile-clean-rate" />
                 </div>
                 <Hint as="div" id="banner.results.no_throughput">
                   <WarningCallout title="No throughput headline">

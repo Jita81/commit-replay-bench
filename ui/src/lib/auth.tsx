@@ -27,8 +27,8 @@
  * Tested by:    ui/src/lib/auth.test.tsx (the redirect's `next`),
  *               ui/src/test/utils.tsx (`renderApp` mounts the provider for every screen test),
  *               ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/smoke.spec.ts
- * Touch when:   a role is added to the ladder (docs/API.md "Conventions") — extend `Role` in
- *               ui/src/api/types.ts first; never for a new repository.
+ * Touch when:   never for a new repository; a role is added to the ladder (docs/API.md
+ *               "Conventions") — extend `Role` in ui/src/api/types.ts first.
  */
 
 import { createContext, useContext, type ReactNode } from 'react'

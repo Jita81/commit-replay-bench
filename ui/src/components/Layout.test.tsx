@@ -24,7 +24,7 @@
  *               ui/src/components/Hint.tsx (the menu button's hint spends the first Escape),
  *               ui/e2e/walkthrough/11-screens.spec.ts (the same menu at 375 px in Chromium)
  * Tested by:    ui/src/components/Layout.test.tsx
- * Touch when:   a journey step is added or the shell's chrome changes.
+ * Touch when:   never for a new repository; a journey step is added or the shell's chrome changes.
  */
 import { useEffect, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'

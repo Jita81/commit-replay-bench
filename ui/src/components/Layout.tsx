@@ -48,8 +48,8 @@
  *               ui/e2e/walkthrough/01-login.spec.ts
  *               (the role chip reads the bootstrap admin's role), ui/src/test/utils.tsx
  *               (`renderApp` mounts the shell for every screen test)
- * Touch when:   a screen is added — add its `NAV` entry here and its route in ui/src/App.tsx;
- *               never for a new repository.
+ * Touch when:   never for a new repository; a screen is added — add its `NAV` entry here and its
+ *               route in ui/src/App.tsx.
  */
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, matchPath, useLocation, useNavigate } from 'react-router'

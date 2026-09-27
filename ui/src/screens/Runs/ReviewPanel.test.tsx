@@ -26,8 +26,9 @@
  *               ui/src/screens/Runs/ReviewPanel.tsx (the code under test), ui/src/test/utils.tsx,
  *               ui/src/components/Hint.tsx (the hinted opener in the focus test)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx
- * Touch when:   a header, a refusal code or a finding kind is added (docs/API.md "Reviews",
- *               "/grades/{row_hash}/patch") — extend the fixture and the matching case.
+ * Touch when:   never for a new repository; a header, a refusal code or a finding kind is added
+ *               (docs/API.md "Reviews", "/grades/{row_hash}/patch") — extend the fixture and the
+ *               matching case.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

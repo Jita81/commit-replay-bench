@@ -26,7 +26,8 @@ Works with:   .github/workflows/ci.yml (the required contexts), .github/workflow
               docs/dod/STANDARD.md (the rule that a defect is closed only by an artefact that
               fails)
 Tested by:    (this is a test file)
-Touch when:   a workflow file is added (it is found by the glob); GitHub changes the limit.
+Touch when:   never for a new repository; a workflow file is added (it is found by the glob); GitHub
+              changes the limit.
 """
 
 from __future__ import annotations

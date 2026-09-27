@@ -3,7 +3,7 @@
 Navigation
 ----------
 What it is:   Revision 0012: ``reviews.minutes`` (``INTEGER NULL``) — how long a review took,
-              in whole minutes, as the reviewer stated it (DL-067, G-557).
+              in whole minutes, as the reviewer stated it (DL-068, G-557).
 What it does: Lets the decide stream show the reviewer minutes each decision cost, from a
               figure the reviewer gave rather than one derived from timestamps. Every existing
               review reads ``NULL`` (not stated), and a record that states nothing hashes
@@ -23,7 +23,7 @@ Works with:   src/crb/store/models.py (``Review.minutes`` is declared LAST so th
               ``("0012", "reviews", "minutes")``; the trigger helper),
               src/crb/server/routes/reviews.py (``POST /reviews`` takes the minutes)
 Tested by:    tests/test_store_migrate.py
-Touch when:   never — a released revision is immutable.
+Touch when:   never for a new repository; never — a released revision is immutable.
 """
 
 from __future__ import annotations

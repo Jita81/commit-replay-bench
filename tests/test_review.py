@@ -19,8 +19,8 @@ Works with:   src/crb/core/review.py (under test), src/crb/core/evidence.py (the
               tests/test_store_reviews.py (the same anchor in the database),
               tests/test_server_routes_reviews.py (the write as HTTP)
 Tested by:    tests/test_review.py
-Touch when:   a finding kind or verdict is added (the vocabulary and severity cases); the anchor
-              gains a field (both ledgers and the route together).
+Touch when:   never for a new repository; a finding kind or verdict is added (the vocabulary and
+              severity cases); the anchor gains a field (both ledgers and the route together).
 """
 
 from __future__ import annotations

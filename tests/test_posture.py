@@ -17,7 +17,8 @@ Works with:   src/crb/core/posture.py (under test), src/crb/core/execution.py (t
               and the command whose environment is hashed), src/crb/core/version.py (the
               apparatus version a posture carries)
 Tested by:    tests/test_posture.py
-Touch when:   a fact joins the posture (a field, a line here proving the id moves with it).
+Touch when:   never for a new repository; a fact joins the posture (a field, a line here proving the
+              id moves with it).
 """
 
 from __future__ import annotations

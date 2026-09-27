@@ -22,7 +22,7 @@
  *               ui/src/screens/Results/ResultsPage.tsx (mounts the table and the licence sentence),
  *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Results/MapTable.test.tsx
- * Touch when:   a cell line or the sentence's qualifiers change.
+ * Touch when:   never for a new repository; a cell line or the sentence's qualifiers change.
  */
 
 import { render, screen } from '@testing-library/react'

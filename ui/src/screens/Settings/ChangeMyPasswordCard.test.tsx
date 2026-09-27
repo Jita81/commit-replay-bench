@@ -19,7 +19,8 @@
  *               ui/src/test/utils.tsx (`mockApi` and `renderApp`, the mocked API and
  *               the app shell), tests/test_server_admin_users.py (the route's own tests)
  * Tested by:    ui/src/screens/Settings/ChangeMyPasswordCard.test.tsx
- * Touch when:   the limiter or the password floor changes — the hints state both.
+ * Touch when:   never for a new repository; the limiter or the password floor changes — the hints
+ *               state both.
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

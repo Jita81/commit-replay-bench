@@ -14,12 +14,13 @@
  * How:          `import.meta.glob(..., { eager: true, query: '?raw' })` over docs/adr — the
  *               same files the lazy glob in adrs.ts bundles.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-073)
+ * ADRs:         none (DL-074)
  * Works with:   ui/src/help/adrs.ts (the list under test), docs/adr/*.md (the records it
  *               must match), ui/src/screens/Help/HelpPage.tsx (the list it renders),
  *               ui/src/help/docs.test.ts (the guides' twin test)
  * Tested by:    ui/src/help/adrs.test.ts
- * Touch when:   never to make it pass — change `ADR_TITLES` (or the record) instead.
+ * Touch when:   never for a new repository; never to make it pass — change `ADR_TITLES` (or the
+ *               record) instead.
  */
 import { describe, expect, it } from 'vitest'
 import { ADR_TITLES, adrHref, adrNumber, adrTitle, isAdrName, loadAdr } from './adrs'

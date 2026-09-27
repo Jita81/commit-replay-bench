@@ -20,8 +20,9 @@ Works with:   src/crb/core/flow.py (the dataclasses these mirror), src/crb/serve
               (the only producer), ui/src/api/types.ts (the TypeScript twin),
               docs/API.md (the "Flow" section — the documented contract of these shapes)
 Tested by:    tests/test_server_routes_flow.py
-Touch when:   ``crb.core.flow`` gains a field — add it here in the same change, then
-              ui/src/api/types.ts and docs/API.md; never to give a nullable figure a default.
+Touch when:   never for a new repository; ``crb.core.flow`` gains a field — add it here in the same
+              change, then ui/src/api/types.ts and docs/API.md; never to give a nullable figure a
+              default.
 """
 
 from __future__ import annotations

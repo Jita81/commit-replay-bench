@@ -66,9 +66,9 @@
 #               imports; streams D and A1), tests/test_walkthrough_serves_this_tree.py (a foreign crb on the
 #               path is never served), ui/e2e/walkthrough/01-login.spec.ts,
 #               ui/e2e/walkthrough/05-replay-fake.spec.ts (the suite it drives; CI runs it end to end)
-# Touch when:   a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in
-#               the README); the server or worker CLI flags change; never to inherit an existing
-#               home, database or port.
+# Touch when:   never for a new repository; a spec needs another ``CRB_E2E_*`` variable (export it
+#               in step 4 and document it in the README); the server or worker CLI flags change;
+#               never to inherit an existing home, database or port.
 
 set -euo pipefail
 
@@ -103,7 +103,7 @@ fi
 # The stack must run THIS checkout's code. A venv shared between worktrees has an editable
 # install pointing at one checkout, and without this the server, the worker and the fixture
 # would import that checkout's crb while the specs come from this one — a run can then pass
-# or fail on code that is not under test (P-101: a qualify run refused 422 by another
+# or fail on code that is not under test (P-168: a qualify run refused 422 by another
 # checkout's server). PYTHONPATH puts this checkout first; the check below proves it did.
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 if ! "$PY" -c "import crb.server.app" 2>/dev/null; then
@@ -112,7 +112,7 @@ if ! "$PY" -c "import crb.server.app" 2>/dev/null; then
 fi
 # The stack must serve THIS checkout. An interpreter whose editable install points at another
 # checkout (a shared venv used from a worktree) would otherwise import that tree's crb, and the
-# walkthrough would pass or fail on code that is not under test (docs/PREVENTION.md P-061). This
+# walkthrough would pass or fail on code that is not under test (docs/PREVENTION.md P-128). This
 # checkout's src goes first on the path of everything started below, and any crb module the
 # server, worker or CLI loads from anywhere else stops the run.
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"

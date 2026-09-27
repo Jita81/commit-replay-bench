@@ -25,8 +25,8 @@
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx and
  *               ui/src/screens/Capability/CapabilityPage.test.tsx (a 409 and a 5xx as rendered),
  *               ui/e2e/walkthrough/01-login.spec.ts (the envelope on a wrong password)
- * Touch when:   a reserved error code is added to docs/API.md "Conventions" — add its heading
- *               to `CODE_TITLES`; never for a new repository.
+ * Touch when:   never for a new repository; a reserved error code is added to docs/API.md
+ *               "Conventions" — add its heading to `CODE_TITLES`.
  */
 import type { ReactNode } from 'react'
 import { ApiError } from '../api/client'

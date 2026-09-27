@@ -31,11 +31,14 @@ abstract cells, never code.
 > Status: **2.0.0a1 on `main`, 2.0.0b1 in preparation** (apparatus **2.3**, belt set v5) — a public, Apache-2.0
 > repository since 2026-09-16 with **CI green on `main`** — every job in
 > [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request, and
-> branch protection requires every one of them before anything merges: 16 required checks
-> (the `test` job once per Python version, `dod`, `claims`, `ui-unit`, `ui-smoke`,
-> `sandbox-images` and `sbom` among them), with a branch required to be up to date
+> branch protection requires the checks on its required list before anything merges: 16
+> required checks (the Python suite once per Python version and the tier-1 walkthrough, each
+> through an aggregator over its parallel parts, `dod`, `claims`, `ui-unit`, `ui-smoke`,
+> `sandbox-images` and `sbom` among them), with a branch required to be up to date; the list
+> is a repository setting only an administrator can change
+> ([docs/DEPLOYMENT.md §3.4](docs/DEPLOYMENT.md) names the call)
 > **[measured 2026-09-27 — the required-checks list read from the repository setting
-> (`gh api …/branches/main/protection`) and compared with the workflow's job names by
+> (`gh api …/branches/main/protection`) and compared with the workflow's check names by
 > `scripts/check_branch_protection.py`, n = 16 required checks and 2 readings (26 and 27
 > September); apparatus 2.3 — a repository setting, not a graded number, so no interval]**. One
 > workflow outside `ci.yml` is red by design: the daily `branch-protection` check fails until an

@@ -10,12 +10,12 @@ How:          One table per wave; its `gaps` column holds gap ids and nothing el
               reads it); the other columns say what ships and why. Ids a wave closes stay
               valid here because the generator lists them under "Gap ids retired" once the
               artefacts' git history shows they were gaps; every gap the order of work ranks
-              must sit in some table here, and no heading quotes a rank (P-122).
+              must sit in some table here, and no heading quotes a rank (P-189).
 Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         none (DL-063 records the rule the checker enforces on this file)
+ADRs:         none (DL-064 records the rule the checker enforces on this file)
 Works with:   docs/dod/GAP-ANALYSIS.md (the order of work this batches), docs/dod/STANDARD.md
               (§6: the next feature is the top of the gap analysis), scripts/dod_check.py
-              (refuses a wave item that is not a gap id), docs/PREVENTION.md (P-051, the class
+              (refuses a wave item that is not a gap id), docs/PREVENTION.md (P-118, the class
               this rule closes), docs/reviews/2026-09-25-external-assessment.md (the source of
               the "trustworthy when" criteria Wave 2 closes)
 Tested by:    tests/test_dod_check.py::test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid,
@@ -44,7 +44,7 @@ branch's committed gap analysis, shows it was a gap, so editing the generated fi
 admit one. A wave that closes a gap never breaks this plan; a typo does. Every gap the order
 of work ranks must also sit in some table here — a wave, or the list after the waves — and no
 heading quotes a rank: the order of work is `GAP-ANALYSIS.md`, and a rank copied here reads
-false as soon as the order moves (P-122). The check reads ids, not meaning, so a reviewer
+false as soon as the order moves (P-189). The check reads ids, not meaning, so a reviewer
 still reads each row against the lines its ids carry.
 
 **How every wave works.** One pull request per stream, merged onto one branch, attacked by
@@ -58,7 +58,7 @@ their files; the shared registries (`hints.ts`, `help.ts`, `types.ts`, `API.md`,
 `feat/ns1-e`, `feat/ns1-a1` and `feat/ns1-a2`) are merged onto one branch, `feat/ns1`, cut
 from the integration tree, with every stream's ids renumbered to follow the base in merge
 order. It awaits the operator's merge. The gaps the streams opened are placed in Wave 2, Wave 4
-or the list after Wave 4 below, and the checker now refuses a ranked gap in no table (P-122).
+or the list after Wave 4 below, and the checker now refuses a ranked gap in no table (P-189).
 Waves 2 to 4 have not started.
 
 Some ids the base carried are retired on this branch because they were **merged or narrowed,
@@ -78,11 +78,11 @@ criteria met; G-925 into G-556 (`connect-and-prove.measure.14`) and G-584
 | D0 · the integration's own links | G-997 | the changelog entries of this integration link GitHub's create-a-pull-request form (`pull/new/feat/ns1`), which never becomes the pull request's page; they are replaced with `pull/<n>` when the operator opens it, and the changelog test then refuses a create-form link |
 | D0 · the criteria Wave 2 needs | G-973, G-974, G-975 | the criteria the assessment's A3 (`lint_status`), A6 (`mutation.v2`) and C4 (the delivered change's own cell) need before Wave 2 may build them, added `unmet` |
 
-D1, the checker, closes in the same change the register rows that name it (P-051, "the record
-drifts from the order of work", and P-060, "the generated file vouches for itself"), so it
+D1, the checker, closes in the same change the register rows that name it (P-118, "the record
+drifts from the order of work", and P-127, "the generated file vouches for itself"), so it
 carries no gap id: `dod_check.py` refuses a gap line no criterion cites, a wave item here that
 is not a gap id, and a gap among the first 25 of the order of work that no wave names; and it
-keeps a closed gap nameable only while the history vouches for it (DL-063, DL-064).
+keeps a closed gap nameable only while the history vouches for it (DL-064, DL-065).
 
 Outside the waves, and not DoD work: carrying the four commits that exist only on the
 integration tree (`770adbb`, `79f4597`, `27f2171`, `8d15f12`) to `main` in one pull request

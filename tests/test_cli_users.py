@@ -12,7 +12,7 @@ What it does: Pins that the verbs resolve the same database as ``crb serve`` (an
               ``deactivate``, the ≥ 12 character rule, unknown accounts, a database that is
               not the server's (refused by name, never created), and that every change is
               one ``user.*`` event with actor ``cli:<os user>`` and never a password, with
-              the account's API sign-ins between them on the same trail (DL-068).
+              the account's API sign-ins between them on the same trail (DL-069).
 How:          ``crb migrate`` on a temp SQLite URL, ``main(argv)`` in-process with
               ``CRB_DATABASE_URL`` set and the password in a temp file; the API side is
               ``create_app`` over the same URL (no bootstrap admin) behind a ``TestClient``.
@@ -23,7 +23,8 @@ Works with:   src/crb/cli/commands/users.py (under test), src/crb/server/auth.py
               ``user_trace_id``), src/crb/store/db.py (``database_url`` resolution),
               docs/OPERATOR.md#9-users
 Tested by:    tests/test_cli_users.py
-Touch when:   a verb is added; the password source rule changes; the event shape changes.
+Touch when:   never for a new repository; a verb is added; the password source rule changes; the
+              event shape changes.
 """
 
 from __future__ import annotations
@@ -265,7 +266,7 @@ def test_lifecycle_end_to_end(
     assert not any("password_hash" in r for r in rows.values())
 
     # Every change is one event with the CLI actor and the target; never a password. The
-    # account's sign-ins share its trail (DL-068): each attempt above, in order, between them.
+    # account's sign-ins share its trail (DL-069): each attempt above, in order, between them.
     root = user_id(db_url, "root")
     trail = events_for(db_url, root)
     assert [(e.action, e.payload_json.get("reason", "")) for e in trail] == [

@@ -26,7 +26,8 @@ ADRs:         none
 Works with:   docs/FILE-HEADER-STANDARD.md (the 100-column rule), scripts/code_map.py (the
               header gate this complements), docs/PREVENTION.md (P-012)
 Tested by:    (this is a test file)
-Touch when:   you wrapped long header lines — lower ``BASELINE`` to the new count.
+Touch when:   never for a new repository; you wrapped long header lines — lower ``BASELINE`` to the
+              new count.
 """
 
 from __future__ import annotations
@@ -42,8 +43,9 @@ ROOT = Path(__file__).resolve().parent.parent
 WIDTH = 100
 #: Header lines over 100 columns per scope — src/ + scripts/ set on 2026-09-25 (24, one
 #: wrapped since); tests/ and ui/src added by the value merge at the count main carried,
-#: each one lower after the merge train rewrote one known line in each (integration/next).
-BASELINES: dict[str, int] = {"python": 23, "tests": 10, "ui": 52}
+#: each one lower after the merge train rewrote one known line in each (integration/next),
+#: and one lower again when the north-star branch took main in and rewrapped a Touch when.
+BASELINES: dict[str, int] = {"python": 23, "tests": 9, "ui": 51}
 #: The same lines by identity (path + a digest of the line), so a new long line cannot
 #: hide behind one wrapped elsewhere in the same count (the swap the value wave made).
 KNOWN = Path(__file__).parent / "fixtures" / "header_width_known.txt"

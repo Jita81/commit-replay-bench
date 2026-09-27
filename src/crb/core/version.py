@@ -25,10 +25,10 @@ Works with:   src/crb/core/ledger.py (``expected_belt_sets`` reads the apparatus
               (the package version's other home), deploy/helm/crb/Chart.yaml
               (``appVersion``), src/crb/server/app.py (``/version``)
 Tested by:    tests/test_version_consistency.py, tests/test_ledger.py
-Touch when:   a release (``__version__`` in the three places the test pins), or a change
-              to belt semantics, the size table, the taxonomy or the routing rule
-              (``APPARATUS_VERSION`` — with an ADR, a line in the history above, and the
-              belt-set rule in src/crb/core/ledger.py if a belt was added);
+Touch when:   never for a new repository; a release (``__version__`` in the three places the test
+              pins), or a change to belt semantics, the size table, the taxonomy or the routing rule
+              (``APPARATUS_VERSION`` — with an ADR, a line in the history above, and the belt-set
+              rule in src/crb/core/ledger.py if a belt was added);
               docs/ARCHITECTURE.md#74-versioning is the reader's page.
 """
 

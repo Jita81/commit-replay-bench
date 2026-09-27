@@ -5,7 +5,7 @@
  * Why bundle rather than link to the repository: a screen cites an ADR (ADR-0015 on the
  * sign-off, ADR-0016 on the two-person rule) and a reviewer following it must be able to read
  * it where they stand — the repository is private and a deployment may have no egress
- * (docs/SECURITY.md §2), exactly the reason the guides are bundled (DL-073).
+ * (docs/SECURITY.md §2), exactly the reason the guides are bundled (DL-074).
  *
  * Navigation
  * ----------
@@ -19,9 +19,9 @@
  * How:          The glob is resolved by Vite (`../../../docs/adr/…` is the repository's
  *               docs/adr); the dev server reads it through `server.fs.allow` (`../docs`), and
  *               the image build carries it because deploy/Dockerfile.dockerignore re-includes
- *               `docs/adr/*.md` (P-106 — before that the image shipped no guide at all).
+ *               `docs/adr/*.md` (P-173 — before that the image shipped no guide at all).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-073)
+ * ADRs:         none (DL-074)
  * Works with:   ui/src/screens/Help/HelpPage.tsx (lists `ADR_TITLES` as links),
  *               ui/src/screens/Help/DocPage.tsx (renders a record at /help/docs/ADR-nnnn),
  *               ui/src/help/markdown.ts (a guide's `adr/nnnn-….md` link becomes an in-app link),
@@ -31,8 +31,9 @@
  * Tested by:    ui/src/help/adrs.test.ts (the list is the directory: number and title, both
  *               ways — G-157), ui/src/screens/Help/HelpPage.test.tsx (rows link; a record
  *               renders)
- * Touch when:   an ADR is added, renamed or superseded — add or change its row here in the same
- *               change; adrs.test.ts fails until the list and docs/adr agree.
+ * Touch when:   never for a new repository; an ADR is added, renamed or superseded — add or change
+ *               its row here in the same change; adrs.test.ts fails until the list and docs/adr
+ *               agree.
  */
 
 /** Every record in docs/adr, by number, with the title its first heading gives (`# ADR-nnnn — <title>`). */

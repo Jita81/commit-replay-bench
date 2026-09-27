@@ -19,7 +19,8 @@ Works with:   src/crb/core/qualify.py (under test), src/crb/core/posture.py (the
               src/crb/core/spec.py (the projected ``TaskSpec``), tests/fixtures/pyrepo.py (the
               fixture repository)
 Tested by:    tests/test_qualify.py
-Touch when:   a qualification step or refusal code changes (ADR-0019's table and a case here).
+Touch when:   never for a new repository; a qualification step or refusal code changes (ADR-0019's
+              table and a case here).
 """
 
 from __future__ import annotations

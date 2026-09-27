@@ -18,7 +18,8 @@ Works with:   src/crb/server/routes/value.py (under test), src/crb/core/value.py
               tests/test_server_routes_reviews.py (``Retained``: a row a review can anchor to),
               tests/fixtures/server_seed.py (the seeded store), docs/API.md (the row it pins)
 Tested by:    tests/test_server_routes_value.py
-Touch when:   a scorecard field is added to the response (pin it here and in docs/API.md).
+Touch when:   never for a new repository; a scorecard field is added to the response (pin it here
+              and in docs/API.md).
 """
 
 from __future__ import annotations

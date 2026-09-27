@@ -14,7 +14,7 @@ Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0013-external-review-is-advisory-and-recorded.md (an outside review is
               advisory and recorded); ADR-0021, ADR-0022 and ADR-0023 answer C1–C3, C6 and B2
 Works with:   docs/dod/product.md (criteria 201 to 205 are its §F, one condition each),
-              docs/PREVENTION.md (P-053 to P-058 register its B5 and A5(c) defects),
+              docs/PREVENTION.md (P-120 to P-125 register its B5 and A5(c) defects),
               docs/dod/streams/measure.md (its A3 criterion), docs/dod/journeys/prove-the-instrument.md
               (its A6 criterion), docs/dod/streams/manufacture-and-deliver.md (its C4 criterion),
               docs/dod/PLAN.md (the waves that close what it found)

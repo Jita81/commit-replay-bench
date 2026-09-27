@@ -22,8 +22,8 @@ Works with:   src/crb/builders/adapter.py (under test), src/crb/core/formatting.
               src/crb/core/checks.py (the switchboard the run resolves), tests/fixtures/pyrepo.py
               (the repository graded for real)
 Tested by:    tests/test_builders_finish_gate.py
-Touch when:   the adapter's order of steps (build → format → gate → pre-flight → grade) or a
-              row label changes.
+Touch when:   never for a new repository; the adapter's order of steps (build → format → gate →
+              pre-flight → grade) or a row label changes.
 """
 
 from __future__ import annotations

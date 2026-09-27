@@ -27,7 +27,8 @@ ADRs:         none
 Works with:   tests/fixtures/pkgmirror.py (the wheels it pins), tests/fixtures/langs/__init__.py
               (the two-commit shape), tests/test_provision_python.py (the consumer)
 Tested by:    tests/test_provision_python.py
-Touch when:   the Python recipe needs another lock shape (an include, a marker).
+Touch when:   never for a new repository; the Python recipe needs another lock shape (an include, a
+              marker).
 """
 
 from __future__ import annotations

@@ -33,8 +33,8 @@ Works with:   src/crb/mcp/client.py (auth, CSRF, errors), src/crb/cli/commands/s
 Tested by:    tests/test_mcp_server.py — every tool called through ``MCPServer.call_tool``
               against the seeded app: RBAC refusals surface as errors, the sign-off tools do
               not exist, the instructions carry the claims policy
-Touch when:   a route is added that an assistant should reach (one function, one line);
-              never for a new repository.
+Touch when:   never for a new repository; a route is added that an assistant should reach (one
+              function, one line).
 Claims:       none of its own — it relays the API's numbers with their method fields.
 """
 

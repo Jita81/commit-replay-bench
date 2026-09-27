@@ -31,8 +31,8 @@ Works with:   src/crb/core/capability.py (under test), src/crb/core/routing.py (
               (``classify_commit`` / ``size_tier`` for the profile), tests/test_forecast.py (the
               forecast built on the map), tests/test_server_routes_capability.py (the map served)
 Tested by:    tests/test_capability.py
-Touch when:   a cell field is added (``CELL_FIELDS`` and every projection here); the config pick
-              gains a criterion; the profile classifier changes.
+Touch when:   never for a new repository; a cell field is added (``CELL_FIELDS`` and every
+              projection here); the config pick gains a criterion; the profile classifier changes.
 """
 
 from __future__ import annotations

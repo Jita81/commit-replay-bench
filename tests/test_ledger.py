@@ -23,9 +23,10 @@ Works with:   src/crb/core/ledger.py (under test), src/crb/core/grade.py (``Fals
               tests/test_store_ledger.py (the same chain in the database),
               docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp rule the coupling enforces)
 Tested by:    tests/test_ledger.py
-Touch when:   a field is added to ``GradeRow`` (it is hashed: pin the old rows still verify and
-              the new ones commit to it); a belt set or apparatus version is introduced (extend
-              ``expected_belt_sets`` and its table here); a failure kind is added.
+Touch when:   never for a new repository; a field is added to ``GradeRow`` (it is hashed: pin the
+              old rows still verify and the new ones commit to it); a belt set or apparatus version
+              is introduced (extend ``expected_belt_sets`` and its table here); a failure kind is
+              added.
 """
 
 from __future__ import annotations

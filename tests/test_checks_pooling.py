@@ -34,8 +34,8 @@ Works with:   src/crb/core/checks.py (the arm), src/crb/core/ledger.py (``checks
               served default), src/crb/core/signoff.py and src/crb/server/routes/signoffs.py
               (the sign-off's arm), src/crb/server/routes/value.py (the headline's arm)
 Tested by:    tests/test_checks_pooling.py
-Touch when:   a switch is added to ``RepoChecks`` (decide which side of the arm it is on, here
-              and in ADR-0024) or a new reader groups rows into cells.
+Touch when:   never for a new repository; a switch is added to ``RepoChecks`` (decide which side of
+              the arm it is on, here and in ADR-0024) or a new reader groups rows into cells.
 """
 
 from __future__ import annotations

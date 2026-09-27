@@ -31,8 +31,8 @@ Works with:   src/crb/intake/client.py (the protocol it satisfies),
               src/crb/intake/draft.py (``adf_to_text``), src/crb/intake/ado.py (the same
               six verbs over WIQL), src/crb/server/intake.py (builds it from settings)
 Tested by:    tests/test_intake_adapters.py
-Touch when:   Atlassian moves the search route again (it has), or a site needs a second
-              custom field read.
+Touch when:   never for a new repository; Atlassian moves the search route again (it has), or a site
+              needs a second custom field read.
 """
 
 from __future__ import annotations

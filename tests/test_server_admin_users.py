@@ -18,7 +18,7 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               and never a password, that those events are ordinary ``events`` rows —
               trigger-protected, not hash-chained (the chain is the ledger's) — and that a
               password set by any door rotates the session nonce, so the old sessions end
-              even when the stored hash does not move (#52's revocation, P-082).
+              even when the stored hash does not move (#52's revocation, P-149).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; a second
               ``TestClient`` on the started app (no second lifespan) where two sessions
               must be told apart; events read straight from the ``events`` table on the
@@ -30,7 +30,8 @@ Works with:   src/crb/server/routes/admin.py (under test), src/crb/server/auth.p
               binding in ``current_user``), src/crb/server/routes/auth.py (login issues the
               bound cookie), src/crb/store/models.py (``User``, ``Event``), docs/API.md#admin
 Tested by:    tests/test_server_admin_users.py
-Touch when:   a lifecycle route or a ``user.*`` event is added; the session binding changes.
+Touch when:   never for a new repository; a lifecycle route or a ``user.*`` event is added; the
+              session binding changes.
 """
 
 from __future__ import annotations

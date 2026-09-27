@@ -30,9 +30,9 @@
  *               ui/src/help/hints-ratchet.test.tsx (every element on every enforced route
  *               carries one of these ids), ui/src/help/hints-hover.instrument.test.tsx (one
  *               element per instrument screen opens its text on mouse-over)
- * Touch when:   an element is added to a screen (add its id here first; the ratchet fails
- *               until the screen renders it); copy changes meaning only with the apparatus or
- *               policy change that made it wrong.
+ * Touch when:   never for a new repository; an element is added to a screen (add its id here first;
+ *               the ratchet fails until the screen renders it); copy changes meaning only with the
+ *               apparatus or policy change that made it wrong.
  */
 
 export const HINTS = {

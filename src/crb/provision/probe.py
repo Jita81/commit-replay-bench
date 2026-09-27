@@ -22,7 +22,8 @@ Works with:   src/crb/provision/config.py (what it checks), src/crb/provision/st
               src/crb/server/routes/system.py (the worker-side ``/health`` probe),
               src/crb/observability/probes.py (``ProbeResult``)
 Tested by:    tests/test_cli_doctor.py, tests/test_server_system.py
-Touch when:   a new precondition of provisioning becomes checkable from the host.
+Touch when:   never for a new repository; a new precondition of provisioning becomes checkable from
+              the host.
 """
 
 from __future__ import annotations

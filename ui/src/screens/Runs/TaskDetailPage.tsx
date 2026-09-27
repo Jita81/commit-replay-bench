@@ -33,8 +33,8 @@
  *               ui/e2e/walkthrough/09-review.spec.ts (the task page shows the recorded
  *               verdict), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe on real
  *               grade rows; the table inside the phone at 375 px)
- * Touch when:   `TaskSpec` gains a field worth showing (src/crb/core/spec.py, then
- *               ui/src/api/types.ts); never for a new repository.
+ * Touch when:   never for a new repository; `TaskSpec` gains a field worth showing
+ *               (src/crb/core/spec.py, then ui/src/api/types.ts).
  */
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'

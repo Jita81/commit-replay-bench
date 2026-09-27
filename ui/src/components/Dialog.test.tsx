@@ -7,7 +7,7 @@
  * What it does: Pins that when a dialog closes — by being unmounted (Learn's Decide and Queue
  *               dialogs are mounted only while open) or by `open` turning false (the two
  *               "new …" forms stay mounted) — keyboard focus returns to the button that
- *               opened it rather than falling to the page body (P-095). A removed `<dialog>`
+ *               opened it rather than falling to the page body (P-162). A removed `<dialog>`
  *               is never closed by the platform, so nothing restores focus unless `Dialog`
  *               does it itself.
  * How:          A small host component with an opener button and each mounting pattern;
@@ -18,7 +18,8 @@
  *               (the unmounting consumers), ui/src/screens/Runs/RunNewDialog.tsx (a mounted
  *               consumer), ui/e2e/walkthrough/13-learn.spec.ts (the same return in Chromium)
  * Tested by:    ui/src/components/Dialog.test.tsx
- * Touch when:   the dialog gains a non-modal mode or a new way to close.
+ * Touch when:   never for a new repository; the dialog gains a non-modal mode or a new way to
+ *               close.
  */
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -54,7 +55,7 @@ function Mounted() {
   )
 }
 
-describe('Dialog focus return (P-095)', () => {
+describe('Dialog focus return (P-162)', () => {
   it('an unmounted dialog returns focus to the button that opened it, after Cancel or ✕', async () => {
     render(<Unmounting />)
     const opener = screen.getByRole('button', { name: 'Decide' })

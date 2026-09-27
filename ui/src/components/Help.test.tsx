@@ -26,7 +26,8 @@
  * Works with:   ui/src/components/Help.tsx, ui/src/help/help.ts, ui/src/help/glossary.ts,
  *               ui/src/help/hints.ts (the elements part), ui/src/components/Hint.tsx
  * Tested by:    ui/src/components/Help.test.tsx
- * Touch when:   the About block gains a part or `Term` changes its markup.
+ * Touch when:   never for a new repository; the About block gains a part or `Term` changes its
+ *               markup.
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

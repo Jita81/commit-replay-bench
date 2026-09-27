@@ -4,7 +4,7 @@
  *
  * Navigation
  * ----------
- * What it is:   A source-level ratchet (P-103) over `ui/src`: each non-test file that adds a
+ * What it is:   A source-level ratchet (P-170) over `ui/src`: each non-test file that adds a
  *               `keydown` listener to `document` or `window` is named here with its layer —
  *               `innermost` (spends the press: `preventDefault` and `stopPropagation`),
  *               `top` (a modal layer that holds focus) or `under` (a layer others open on
@@ -25,10 +25,11 @@
  *               `focusIsOnTheMenu`), ui/src/components/Hint.tsx (the bubble: `innermost`),
  *               ui/src/screens/Runs/EvidenceDrawer.tsx (the drawer: `top`),
  *               ui/src/components/Layout.test.tsx (the behaviour: a drawer's Escape leaves
- *               the menu open), docs/PREVENTION.md (row P-103)
+ *               the menu open), docs/PREVENTION.md (row P-170)
  * Tested by:    itself (the negative control below)
- * Touch when:   a component listens for keys on `document` or `window` — declare its layer
- *               below, and if others can open on top of it, check focus before it acts.
+ * Touch when:   never for a new repository; a component listens for keys on `document` or `window`
+ *               — declare its layer below, and if others can open on top of it, check focus before
+ *               it acts.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -70,7 +71,7 @@ function findings(sources: Record<string, string>, declared: Record<string, { la
   return out
 }
 
-describe('one Escape closes one layer (P-103)', () => {
+describe('one Escape closes one layer (P-170)', () => {
   it('finds the sources', () => {
     expect(Object.keys(SOURCES).length).toBeGreaterThan(50)
   })

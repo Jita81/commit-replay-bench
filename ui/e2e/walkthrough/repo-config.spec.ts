@@ -35,8 +35,8 @@
  *               (the code under test), src/crb/server/routes/repos.py (the PUT and the
  *               audit event)
  * Tested by:    ui/e2e/walkthrough/repo-config.spec.ts
- * Touch when:   a `RepoConfig` field is added (assert its round-trip here) or the audit
- *               event payload changes.
+ * Touch when:   never for a new repository; a `RepoConfig` field is added (assert its round-trip
+ *               here) or the audit event payload changes.
  */
 import { axeViolations } from '../axe'
 import type { Page, Request } from '@playwright/test'

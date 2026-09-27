@@ -21,7 +21,8 @@
  * Works with:   ui/src/help/help.ts, ui/src/App.tsx (the route table it reads),
  *               ui/src/help/glossary.ts, ui/src/help/docs.ts (`slugify`, `isDocName`)
  * Tested by:    ui/src/help/help.test.ts
- * Touch when:   a screen is added — it needs a `HELP` entry before this passes.
+ * Touch when:   never for a new repository; a screen is added — it needs a `HELP` entry before this
+ *               passes.
  */
 import { describe, expect, it } from 'vitest'
 import appSource from '../App.tsx?raw'

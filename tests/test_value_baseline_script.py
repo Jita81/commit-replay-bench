@@ -11,7 +11,7 @@ What it does: Pins that every row's failure kind is recomputed with the product'
               export's crude column; that a budget stop and a lint-only failure survive; that a
               review whose statement the operator marked as a flag defect is corrected in the
               reader and counted as corrected; that the critical-friend cobra reviews can be
-              left out; that an empty cost column is no price, never a known $0 (P-118); and
+              left out; that an empty cost column is no price, never a known $0 (P-185); and
               that the JSONL export reads through ``GradeRow`` unchanged.
 How:          Small export files written to ``tmp_path``; the script loaded as a module.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -20,8 +20,8 @@ Works with:   scripts/value_baseline.py (under test), src/crb/core/value.py (the
               feeds), src/crb/core/ledger.py (``derive_failure_kind`` — the rule it applies),
               docs/reviews/2026-09-25-value-baseline.md (the page it regenerates)
 Tested by:    tests/test_value_baseline_script.py
-Touch when:   the export's columns or error classes change (add the class to ``ERRCLASS`` and a
-              case here), or the review export gains a column.
+Touch when:   never for a new repository; the export's columns or error classes change (add the
+              class to ``ERRCLASS`` and a case here), or the review export gains a column.
 """
 
 from __future__ import annotations
@@ -118,11 +118,11 @@ def test_the_failure_kind_is_the_products_rule_not_the_exports(
 
 
 def test_an_empty_cost_is_unpriced_never_a_known_zero(vb: ModuleType, tmp_path: Path) -> None:
-    """DL-066: a row whose cost is not a measurement is counted apart, never as $0. The
+    """DL-067: a row whose cost is not a measurement is counted apart, never as $0. The
     pipe-separated reader turned an empty ``cost`` column into a KNOWN $0, so the baseline
     this script regenerates would have summed it as priced and served per-pound figures that
     must be withheld. ``ValueRow.cost_known`` has no default, so no adapter can claim a price
-    by leaving it out (P-118)."""
+    by leaving it out (P-185)."""
     p = tmp_path / "ledger.psv"
     p.write_text(
         "\n".join([HEADER, _row(1), _row(2, cost=""), _row(3, cost=" ")]) + "\n", encoding="utf-8"

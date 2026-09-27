@@ -15,8 +15,8 @@ ADRs:         docs/adr/0020-a-bug-is-closed-by-prevention.md
 Works with:   src/crb/core/prevention.py (``PreventionRegister``), tests/test_prevention_rule.py
               (the ladder), tests/prevention_fixtures.py (the rows)
 Tested by:    tests/test_prevention_register_seam.py
-Touch when:   stream S's protocol changes (the merge adds an equality test of the status
-              vocabularies beside these).
+Touch when:   never for a new repository; stream S's protocol changes (the merge adds an equality
+              test of the status vocabularies beside these).
 """
 
 from __future__ import annotations

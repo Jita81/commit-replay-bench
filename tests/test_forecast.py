@@ -22,8 +22,8 @@ Works with:   src/crb/core/forecast.py (under test), src/crb/core/capability.py 
               reads), src/crb/core/signoff.py (the overlay), src/crb/core/routing.py (the
               routes), tests/test_server_routes_forecast.py (the same numbers served)
 Tested by:    tests/test_forecast.py
-Touch when:   a readiness gap kind is added (a punch-list case); the forecast's cost model
-              changes (re-derive the known σ values).
+Touch when:   never for a new repository; a readiness gap kind is added (a punch-list case); the
+              forecast's cost model changes (re-derive the known σ values).
 """
 
 from __future__ import annotations
@@ -210,7 +210,7 @@ def test_forecast_class_only_key_uses_class_projection() -> None:
 
 def test_forecast_uncosted_cells_are_reported_not_priced() -> None:
     # uncosted = no cost was ever reported (an imported row), not a builder-reported $0,
-    # which is a known $0 and prices at $0 (P-064: test_economics.py pins that side)
+    # which is a known $0 and prices at $0 (P-131: test_economics.py pins that side)
     rows = _cell_rows("bug.fix", "S", cost=0.0, latency=0.0, provenance="imported:census")
     assert not any(r.cost_known for r in rows)
     f = fc.forecast_build({"bug.fix/S": 2}, rows)

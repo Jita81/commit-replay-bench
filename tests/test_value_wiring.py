@@ -31,8 +31,8 @@ Works with:   src/crb/server/prevention_state.py (``mechanisms`` — the seam un
               src/crb/core/spend.py (the surfaces the levers write), src/crb/server/worker.py
               (applies the overlay to a run)
 Tested by:    tests/test_value_wiring.py
-Touch when:   a stream's seam changes (a status, a writable switch, a shipped mechanism, the
-              register's inputs); never for a new repository.
+Touch when:   never for a new repository; a stream's seam changes (a status, a writable switch, a
+              shipped mechanism, the register's inputs).
 """
 
 from __future__ import annotations

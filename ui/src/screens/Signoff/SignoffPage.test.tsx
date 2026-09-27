@@ -31,8 +31,8 @@
  *               ui/src/test/utils.tsx, ui/src/help/hints.ts (the copy the hover test expects),
  *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx
- * Touch when:   a refusal clause is added — add a preview fixture that lists it and assert
- *               its gate row and clause.
+ * Touch when:   never for a new repository; a refusal clause is added — add a preview fixture that
+ *               lists it and assert its gate row and clause.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -503,7 +503,7 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(within(picker).getByRole('option', { name: /fix: task 3 · dddddddddd/ })).toBeInTheDocument()
   })
 
-  it('while a newly named row’s preview loads, the gate is pending and Sign off stays disabled: the previous row’s verdict is never shown as this row’s (P-102)', async () => {
+  it('while a newly named row’s preview loads, the gate is pending and Sign off stays disabled: the previous row’s verdict is never shown as this row’s (P-169)', async () => {
     let row2Asked = false
     mockApi({
       'GET /auth/me': PRINCIPAL,

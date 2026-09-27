@@ -11,7 +11,7 @@ What it does: Pins the list shape and order, filters and pagination, the queue l
               adapter; a ``claude_code`` auth with no credential refused at submit (422
               ``builder_credential_missing``, presence only, nothing queued — docs/PREVENTION.md
               P-003), and every server function that enqueues a run passing ``submit_refusals``
-              (P-093, an AST ratchet); the budget ladder (forwarded only as set, object rungs stored
+              (P-160, an AST ratchet); the budget ladder (forwarded only as set, object rungs stored
               as sent, mixed ladders, bounds and rung shape 422, repeated rungs refused unless the
               budget differs, ``labels.budget_tier`` on task rows); cancel RBAC / queue call /
               terminal 409 / 404; the task table and error rows; the paginated, redacted event log;
@@ -26,8 +26,9 @@ Works with:   src/crb/server/routes/runs.py (under test), src/crb/store/jobs.py 
               source), tests/test_worker_budget_ladder.py (the worker's half of the ladder),
               tests/fixtures/server_seed.py, docs/API.md (runs, SSE event shape)
 Tested by:    tests/test_server_routes_runs.py
-Touch when:   a run parameter is added (a create case, a 422 bound and the worker's reading of
-              it); a run kind is added (RUN_KINDS, the create cases and ui/src/api/types.ts).
+Touch when:   never for a new repository; a run parameter is added (a create case, a 422 bound and
+              the worker's reading of it); a run kind is added (RUN_KINDS, the create cases and
+              ui/src/api/types.ts).
 """
 
 from __future__ import annotations
@@ -707,7 +708,7 @@ class TestCredentialPresence:
         assert all(why.strip() for why in CREDENTIAL_EXEMPT.values())
 
     def test_every_function_that_enqueues_a_run_passes_the_submit_gate(self) -> None:
-        """P-093, the route half of P-003's class: a second route that queues runs (Learn's
+        """P-160, the route half of P-003's class: a second route that queues runs (Learn's
         re-measurement queue) enqueued them with no credential check, so a cell whose builder
         had no key was queued to fail at $0. Every function in the server that calls
         ``.enqueue(`` must call ``submit_refusals`` — the one gate ``POST /runs`` applies — or

@@ -8,9 +8,9 @@ What it does: Collects the probes the readiness route actually serves (every pro
               fail, so the test needs no database, no docker daemon and no network) and
               refuses a guide that omits one by name or states the wrong count — DEPLOYMENT
               §9.3 said seven probes while ``/health`` served eleven, and API.md said ten and
-              left out ``provision`` (G-403; docs/PREVENTION.md P-059). And refuses a §9.3
+              left out ``provision`` (G-403; docs/PREVENTION.md P-126). And refuses a §9.3
               that names other probes as raising a banner than the UI raises one for: every
-              UI reader of a probe is classified in ``BANNERS`` (P-121).
+              UI reader of a probe is classified in ``BANNERS`` (P-188).
 How:          ``collect_health`` over a session factory that raises and probe functions that
               raise, as tests/test_server_system.py's fixed-detail test does; the names come
               from the body; each guide's section is cut from the Markdown and searched for
@@ -24,9 +24,9 @@ Works with:   src/crb/server/routes/system.py (collect_health, the probe list un
               reads), tests/test_server_system.py (pins the same names against the served
               body), docs/dod/journeys/operate.md (G-403, which this closes)
 Tested by:    (this is a test file)
-Touch when:   a probe is added to or removed from ``collect_health`` — name it in both guides
-              and change the count there; this test tells you which guide is behind — or a
-              screen starts reading a probe by name (classify it in ``BANNERS``).
+Touch when:   never for a new repository; a probe is added to or removed from ``collect_health`` —
+              name it in both guides and change the count there; this test tells you which guide is
+              behind — or a screen starts reading a probe by name (classify it in ``BANNERS``).
 """
 
 from __future__ import annotations
@@ -145,7 +145,7 @@ def _ui_probe_readers() -> set[tuple[str, str]]:
 def test_the_guide_names_the_probes_that_raise_a_banner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """P-121: DEPLOYMENT §9.3 said only the ``sandbox`` probe raises a banner, while the shell
+    """P-188: DEPLOYMENT §9.3 said only the ``sandbox`` probe raises a banner, while the shell
     raises the red stop-condition banner on every screen for the ``ledger`` probe. Every probe
     the UI reads by name is classified in ``BANNERS``, and the sentences of §9.3 that speak of
     a banner name exactly the probes classified as raising one."""

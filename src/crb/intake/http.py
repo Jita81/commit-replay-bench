@@ -41,8 +41,8 @@ Works with:   src/crb/intake/client.py (the ``TrackerError`` and its reason word
               src/crb/intake/ado.py and src/crb/intake/jira.py (the two callers),
               src/crb/server/github_app.py (the same shape for the GitHub App)
 Tested by:    tests/test_intake_adapters.py
-Touch when:   a tracker needs an auth scheme other than basic (add it here, not in an
-              adapter); a status needs a different reason word.
+Touch when:   never for a new repository; a tracker needs an auth scheme other than basic (add it
+              here, not in an adapter); a status needs a different reason word.
 """
 
 from __future__ import annotations

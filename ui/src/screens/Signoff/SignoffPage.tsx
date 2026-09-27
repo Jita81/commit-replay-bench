@@ -19,7 +19,7 @@
  *               disabled until the preview says `signable` AND the approver has named a
  *               row, ticked "I have read this accepted diff" and written a statement; while
  *               a newly named row's preview loads, the gate is pending and the action
- *               disabled, never the previous row's verdict (P-102). Every
+ *               disabled, never the previous row's verdict (P-169). Every
  *               recorded sign-off carries a `verifier_kind` tag next to the approver (local
  *               account / identity provider / service — delegated, not a person / kind not
  *               recorded) with its meaning on hover. A 409
@@ -63,9 +63,9 @@
  *               (every element resolves to a registry id), ui/e2e/walkthrough/08-signoff.spec.ts
  *               (a thin cell refused with observed vs threshold; a policy-clearing cell
  *               signed with an attestation), ui/e2e/walkthrough/05-replay-fake.spec.ts
- * Touch when:   a refusal clause or a policy threshold is added (src/crb/core/signoff.py) —
- *               add the gate row in `criteriaFor` and the vocabulary in
- *               ui/src/screens/Signoff/contract.ts; never for a new repository.
+ * Touch when:   never for a new repository; a refusal clause or a policy threshold is added
+ *               (src/crb/core/signoff.py) — add the gate row in `criteriaFor` and the vocabulary in
+ *               ui/src/screens/Signoff/contract.ts.
  * Claims:       A sign-off lifts the verification tier, never the route; it is refused
  *               outright on any false-Q1 row
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
@@ -298,7 +298,7 @@ export function SignoffPage() {
   // `previewData` may be the previous row's preview, kept as a placeholder while the named
   // row's loads: it may keep the Accepted row select, its rows and the cell's evidence on
   // screen (G-905), never a verdict. The gate, the refusals and `signable` read `current`,
-  // which is the preview of the form as it stands or nothing (P-102).
+  // which is the preview of the form as it stands or nothing (P-169).
   const previewData = preview.data
   const current = preview.isPlaceholderData ? undefined : preview.data
   const attested = read && rowHash.length > 0 && statement.trim().length > 0

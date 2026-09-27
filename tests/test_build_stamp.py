@@ -26,8 +26,9 @@ Works with:   src/crb/observability/build_stamp.py (under test), ui/vite.config.
               deploy/README.md (the runbook sentence it checks), deploy/docker-compose.yml
               (the build argument it checks), docs/PREVENTION.md (P-002, P-044)
 Tested by:    (this is a test file)
-Touch when:   the stamp's file name or fields change (the plugin, the module and this file
-              change together); a probe status changes (the runbook's sentence changes with it).
+Touch when:   never for a new repository; the stamp's file name or fields change (the plugin, the
+              module and this file change together); a probe status changes (the runbook's sentence
+              changes with it).
 """
 
 from __future__ import annotations

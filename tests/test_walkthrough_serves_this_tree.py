@@ -2,7 +2,7 @@
 
 Navigation
 ----------
-What it is:   The regression test for P-090: the walkthrough driver served whatever tree the
+What it is:   The regression test for P-157: the walkthrough driver served whatever tree the
               interpreter's ``crb`` import resolved to, so a worktree run against a shared,
               editable venv walked the OTHER checkout's server and reported its results as
               this branch's.
@@ -18,12 +18,12 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   scripts/walkthrough.sh (the guard under test), .github/workflows/ci.yml (the
               ``walkthrough`` job runs the positive path on an editable install of this tree),
-              docs/PREVENTION.md (P-090, the row this test closes),
+              docs/PREVENTION.md (P-157, the row this test closes),
               tests/test_walkthrough_axe_settles.py (the other test that holds the
               walkthrough's own behaviour)
 Tested by:    tests/test_walkthrough_serves_this_tree.py
-Touch when:   the walkthrough's preflight changes order, or it gains another way to choose
-              the interpreter it serves with.
+Touch when:   never for a new repository; the walkthrough's preflight changes order, or it gains
+              another way to choose the interpreter it serves with.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_a_crb_from_another_tree_on_the_path_is_never_served(tmp_path: Path) -> None:
     """A foreign ``crb`` first on ``PYTHONPATH`` is never what the stack serves.
 
-    Streams U (P-090) and D (P-061) closed this class twice. The integrated script keeps D's
+    Streams U (P-157) and D (P-128) closed this class twice. The integrated script keeps D's
     remedy: it puts this checkout's ``src`` first and refuses only if a ``crb`` module still
     loads from elsewhere (tests/test_walkthrough_script.py holds the refusal). So the foreign
     tree here is overridden, and the preflight names this tree and never the fake.

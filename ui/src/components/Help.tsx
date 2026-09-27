@@ -13,7 +13,7 @@
  *               registry has no entry. Every link it offers leads behind `RequireAuth`, so on
  *               a definite "no session" (the sign-in page) it names the guides and the
  *               glossary as text and links nothing — a link would bounce the reader straight
- *               back to sign-in (P-110). "Elements on this screen" is generated when the block
+ *               back to sign-in (P-177). "Elements on this screen" is generated when the block
  *               opens: every `data-hint` on the page (deduplicated; the screen's own, under
  *               `<main>`, in DOM order, then the shell's under their own sub-heading) with
  *               the trigger's visible text and the registry sentence — the printable,
@@ -41,8 +41,8 @@
  *               `InlineDisclosure` client)
  * Tested by:    ui/src/components/Help.test.tsx, ui/e2e/walkthrough/11-screens.spec.ts (the
  *               block renders on every authenticated route on the live stack)
- * Touch when:   the About block gains a part (add it to the registry type first); never for
- *               a new repository.
+ * Touch when:   never for a new repository; the About block gains a part (add it to the registry
+ *               type first).
  */
 import { useId, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router'

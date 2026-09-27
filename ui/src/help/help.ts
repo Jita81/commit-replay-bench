@@ -23,8 +23,9 @@
  *               ui/src/components/Layout.tsx (mounts the About block once)
  * Tested by:    ui/src/help/help.test.ts (the ratchet: every route, every anchor, every term,
  *               copy lint), ui/src/components/Help.test.tsx (rendered per route and role)
- * Touch when:   a screen is added (it needs an entry before the ratchet passes) or a
- *               screen's numbers change meaning (an apparatus or policy change with its ADR).
+ * Touch when:   never for a new repository; a screen is added (it needs an entry before the ratchet
+ *               passes) or a screen's numbers change meaning (an apparatus or policy change with
+ *               its ADR).
  */
 import { matchPath } from 'react-router'
 import type { Role } from '../api/types'

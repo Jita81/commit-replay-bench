@@ -17,7 +17,7 @@
  *               interval shows "95% CI —" and says why; a response with no economics block
  *               says the server did not send one. The spend estimates read the map's fold
  *               (its value over the KNOWN count), never the cells' flat means filtered by
- *               `> 0`, which dropped a known $0 and weighted by every attempt (P-064).
+ *               `> 0`, which dropped a known $0 and weighted by every attempt (P-131).
  * How:          A lookup of the figure's estimate and its counts; `fmtUsd` / `fmtSeconds`
  *               format the value and both ends of the interval.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -31,8 +31,8 @@
  *               ui/src/screens/Factory/FactoryPage.tsx (the spend estimates)
  * Tested by:    ui/src/lib/economics.test.ts, ui/src/screens/Results/ResultsPage.test.tsx,
  *               ui/src/screens/Capability/CapabilityPage.test.tsx
- * Touch when:   the server adds an economics figure (add it to `EconomicsFigure` and its
- *               denominator sentence here); never for a new repository.
+ * Touch when:   never for a new repository; the server adds an economics figure (add it to
+ *               `EconomicsFigure` and its denominator sentence here).
  * Claims:       Every economics figure the UI shows carries n, an interval or the reason it
  *               has none, and the apparatus
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
@@ -64,10 +64,14 @@ function denominators(e: Economics, figure: EconomicsFigure): string {
   return `${fmtInt(e.latency_known)} of ${fmtInt(e.n_attempts)} attempts with a known latency`
 }
 
-/** The tile for one economics figure of a cell's or a map's `economics` block. */
-export function economicsTile(e: Economics | undefined, figure: EconomicsFigure): EconomicsTile {
+/**
+ * The tile for one economics figure of a cell's or a map's `economics` block. `mapApparatus`
+ * (`apparatus 2.3`) is named on the tile when the server serves no block, so a headline tile
+ * still says what its page was graded under (PR #56 review).
+ */
+export function economicsTile(e: Economics | undefined, figure: EconomicsFigure, mapApparatus?: string): EconomicsTile {
   const format = figure === 'latency_per_attempt' ? fmtSeconds : fmtUsd
-  if (!e) return { value: DASH, n: 0, ci: null, ciFormat: format, apparatus: NO_ECONOMICS }
+  if (!e) return { value: DASH, n: 0, ci: null, ciFormat: format, apparatus: mapApparatus ? `${NO_ECONOMICS} · ${mapApparatus}` : NO_ECONOMICS }
   const est = e[figure]
   const ci = est.value !== null && est.ci_low !== null && est.ci_high !== null ? { low: est.ci_low, high: est.ci_high } : null
   const posture = e.posture_classes.length ? ` · posture ${e.posture_classes.join(', ')}` : ''

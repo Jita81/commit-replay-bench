@@ -16,7 +16,7 @@
  * ADRs:         docs/adr/0010-polyglot-negative-controls.md
  * Works with:   ui/src/screens/Oracle/OraclePage.tsx (the code under test), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Oracle/OraclePage.test.tsx
- * Touch when:   a band, gate or empty state is added.
+ * Touch when:   never for a new repository; a band, gate or empty state is added.
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

@@ -15,7 +15,7 @@
  * Works with:   ui/src/screens/Repos/RepoDetail.tsx (the code under test),
  *               ui/src/screens/Repos/repoFixtures.ts (`REPO`), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Repos/RepoDetail.test.tsx
- * Touch when:   a Next step is added or the tab set changes.
+ * Touch when:   never for a new repository; a Next step is added or the tab set changes.
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -87,7 +87,7 @@ describe('RepoDetail', () => {
     expect(links).toHaveLength(1)
     expect(links[0]).toHaveAttribute('href', `/runs?repo=${REPO.name}&new=mine&tasks=${failed}`)
     // "Re-qualify" is posture qualification (ADR-0019, kind qualify, offered on Learn): the
-    // mine hand-off never borrows its name, so one label never starts two acts (P-096)
+    // mine hand-off never borrows its name, so one label never starts two acts (P-163)
     expect(screen.queryByRole('link', { name: /re-qualify/i })).toBeNull()
     expect(screen.getByRole('columnheader', { name: /Re-check gold/ })).toBeInTheDocument()
   })

@@ -30,7 +30,7 @@ What is measured, and the rule for each
   multiplies the two Wilson bounds (conservative; spend treated as known). The ledger records
   dollars; pounds use a fixed, stated conversion (:data:`DEFAULT_USD_PER_GBP`, a parameter).
   Money is summed by THE spend rule, ``crb.core.flow.spend_of_rows`` (the flow reading's too,
-  DL-066): a row whose cost is not a measurement is counted apart, never as $0, and while a
+  DL-067): a row whose cost is not a measurement is counted apart, never as $0, and while a
   blind attempt in scope is unpriced the per-pound figures are withheld with the reason —
   a figure per pound over a floor would overstate.
 * **Process loss** — rows and pounds lost to ``budget`` / ``protocol`` / ``harness`` /
@@ -175,7 +175,7 @@ class ValueRow:
     #: Is ``cost_usd`` a measurement (``GradeRow.cost_known``)? An unpriced row is never
     #: summed as zero: every money figure here goes through ``crb.core.flow.spend_of_rows``.
     #: Required, with no default: an adapter that forgot it would claim a price for every row
-    #: it read (the pipe-separated reader did, docs/PREVENTION.md P-118).
+    #: it read (the pipe-separated reader did, docs/PREVENTION.md P-185).
     cost_known: bool
     cost_usd: float = 0.0
     apparatus_version: str = APPARATUS_VERSION

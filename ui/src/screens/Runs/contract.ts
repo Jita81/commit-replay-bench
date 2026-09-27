@@ -34,9 +34,9 @@
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx (SHA-256 test vectors, the diff
  *               parser's counting rule, `deriveVerdict`, the anchor flow),
  *               ui/e2e/walkthrough/09-review.spec.ts (a real retained worktree end to end)
- * Touch when:   a finding kind or the anchor rule changes (src/crb/core/review.py,
- *               docs/API.md "Reviews") — change the vocabulary here and in
- *               ui/src/screens/Runs/ReviewPanel.tsx; never for a new repository.
+ * Touch when:   never for a new repository; a finding kind or the anchor rule changes
+ *               (src/crb/core/review.py, docs/API.md "Reviews") — change the vocabulary here and in
+ *               ui/src/screens/Runs/ReviewPanel.tsx.
  * Claims:       A review is a human's verdict on one row, anchored to the patch hash — it is
  *               not part of the grade and never changes `clean`
  *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
@@ -104,7 +104,7 @@ export interface Review {
   verdict: Verdict
   findings: Finding[]
   mergeable: boolean | null
-  /** The reviewer's own minutes on this review; null when not stated (DL-067). */
+  /** The reviewer's own minutes on this review; null when not stated (DL-068). */
   minutes?: number | null
   statement: string
   patch_sha256_reviewed: string

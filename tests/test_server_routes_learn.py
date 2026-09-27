@@ -22,10 +22,10 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               rest and supersedes a re-registered one; that an unknown id and an in-flight
               factory run are refused with nothing written; that queueing enqueues the PLAN's
               own run bodies, never the caller's, through the submit gate ``POST /runs`` applies
-              (a cell whose builder has no credential is refused whole — P-093), refuses a
-              what-if plan (P-098) and a cell whose queued runs are unfinished (P-115); that a
-              ``command`` only completes a cut example (P-116); that a note with a line break is
-              refused (P-094); that each write refuses a field it does not name; that the reads
+              (a cell whose builder has no credential is refused whole — P-160), refuses a
+              what-if plan (P-165) and a cell whose queued runs are unfinished (P-182); that a
+              ``command`` only completes a cut example (P-183); that a note with a line break is
+              refused (P-161); that each write refuses a field it does not name; that the reads
               and writes follow the repository's checks arm (ADR-0024); and that a viewer, a
               request with no CSRF token and one with another session's token are each refused
               with nothing written.
@@ -42,9 +42,9 @@ Works with:   src/crb/server/routes/learn.py (under test), src/crb/core/learn.py
               src/crb/server/factory_state.py (the backlog the register write moves),
               docs/LEARNING-LOOP.md (the contract these writes implement), docs/API.md
 Tested by:    tests/test_server_routes_learn.py
-Touch when:   a learn report gains a field (the CLI must read the export the same way — add the
-              parity case); the event shapes the reports read change; a fourth write path lands
-              (pin its role, its refusals and its event here).
+Touch when:   never for a new repository; a learn report gains a field (the CLI must read the export
+              the same way — add the parity case); the event shapes the reports read change; a
+              fourth write path lands (pin its role, its refusals and its event here).
 """
 
 from __future__ import annotations
@@ -788,7 +788,7 @@ def test_a_note_is_one_line_so_it_can_never_write_a_corpus_line(env: Env) -> Non
     """The note is written into the corpus as a provenance COMMENT. A line break in it would
     end the comment and put the rest of the note in the corpus as a line nobody decided and
     no event names — so the API refuses a note with any line break, before anything is
-    written (P-094)."""
+    written (P-161)."""
     _add_protocol_row(env)
     gid = _group(env, "archaeology")["group_id"]
     for brk in ("\n", "\r", "\r\n", "\u2028", "\x85", "\x0b"):

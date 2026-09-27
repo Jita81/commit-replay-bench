@@ -21,8 +21,8 @@
  * Tested by:    ui/src/screens/Repos/ReposPage.test.tsx (rows, probe pills, the empty state per
  *               role), ui/e2e/walkthrough/02-repo-onboard.spec.ts (Add repo → the repo page),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe)
- * Touch when:   a column is worth adding from `GET /repos` (docs/API.md); never for a new
- *               repository — it appears here once added.
+ * Touch when:   never for a new repository (it appears here once added); a column is worth
+ *               adding from `GET /repos` (docs/API.md).
  */
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'

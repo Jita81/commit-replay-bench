@@ -30,9 +30,9 @@
  *               eyebrow), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (builders as
  *               configured yes / no, sandbox mode, versions; axe; the recovery acts),
  *               ui/e2e/walkthrough/01-login.spec.ts (the health probes it relies on)
- * Touch when:   `GET /settings` gains a non-secret field (src/crb/server/routes/admin.py
- *               `get_settings_view`, docs/API.md "Admin") — type it in ui/src/api/types.ts
- *               and add its `<dt>`; never for a new repository.
+ * Touch when:   never for a new repository; `GET /settings` gains a non-secret field
+ *               (src/crb/server/routes/admin.py `get_settings_view`, docs/API.md "Admin") — type it
+ *               in ui/src/api/types.ts and add its `<dt>`.
  */
 import { useHealth, useSettings, useVersion } from '../../api/hooks'
 import { Card } from '../../components/Card'

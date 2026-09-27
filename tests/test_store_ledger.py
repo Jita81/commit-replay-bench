@@ -22,8 +22,8 @@ Works with:   src/crb/store/ledger.py (under test), src/crb/core/ledger.py (the 
               whose hashes must match), src/crb/store/db.py (the write lock and triggers),
               tests/conftest_store.py, tests/test_ledger.py (the core chain's own suite)
 Tested by:    tests/test_store_ledger.py
-Touch when:   a column is added to ``grades`` (the export must re-verify — pin it); the write
-              lock changes (the concurrency case is the proof).
+Touch when:   never for a new repository; a column is added to ``grades`` (the export must re-verify
+              — pin it); the write lock changes (the concurrency case is the proof).
 """
 
 from __future__ import annotations

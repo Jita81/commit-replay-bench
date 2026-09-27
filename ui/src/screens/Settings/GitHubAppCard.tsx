@@ -27,8 +27,8 @@
  *               guide link, the sync sentence),
  *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (configured and error
  *               states)
- * Touch when:   a field is added to `GitHubAppInfo`, or delivery needs a different permission
- *               pair (src/crb/server/routes/github.py `can_deliver`).
+ * Touch when:   never for a new repository; a field is added to `GitHubAppInfo`, or delivery needs
+ *               a different permission pair (src/crb/server/routes/github.py `can_deliver`).
  */
 
 import { useState } from 'react'

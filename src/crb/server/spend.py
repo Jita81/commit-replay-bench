@@ -32,8 +32,8 @@ Works with:   src/crb/core/spend.py (the rules), src/crb/server/worker.py (``_ru
               gate), src/crb/builders/adapter.py (``budget_for_task``), src/crb/store/models.py
               (``EvidencePackRow``, where the turns are)
 Tested by:    tests/test_worker_spend.py
-Touch when:   the observation a rule reads changes (turns, latency, a new cap); never for a
-              new repository — ``RepoConfig.spend`` is the per-repository switch.
+Touch when:   never for a new repository — ``RepoConfig.spend`` is the per-repository switch; the
+              observation a rule reads changes (turns, latency, a new cap).
 """
 
 from __future__ import annotations

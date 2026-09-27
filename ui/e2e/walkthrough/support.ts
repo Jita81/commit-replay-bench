@@ -1,9 +1,11 @@
 /**
  * Shared plumbing for the live-stack walkthrough.
  *
- * Everything the specs do goes THROUGH THE UI (forms, clicks, the status pill).
- * The one exception is `stackHealth()`, which reads `/api/v1/health` so a spec can
- * say WHY the stack is unusable (no worker, sandbox down) instead of timing out.
+ * Everything the specs ASSERT goes THROUGH THE UI (forms, clicks, the status pill).
+ * `stackHealth()` reads `/api/v1/health` so a spec can say WHY the stack is unusable (no
+ * worker, sandbox down) instead of timing out; the API helpers at the end (`apiPost`,
+ * `startRunApi`, `ensurePersona` …) only SEED state a spec needs and does not itself prove
+ * (08's second repository, the persona accounts, 11-screens on a stack of its own).
  *
  * Configuration comes from `CRB_E2E_*`, exported by `scripts/walkthrough.sh`:
  *
@@ -23,13 +25,17 @@
  * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
  *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
  *               `signIn`, `signOut`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
- *               `expectLogAction`, `stackHealth` (an axe sweep runs through ui/e2e/axe.ts).
- * What it does: Makes every spec drive a REAL stack through the UI only — sign-in through the
+ *               `expectLogAction`, `stackHealth` (an axe sweep runs through ui/e2e/axe.ts); the
+ *               seeding helpers `csrf`, `apiGet`, `apiPost`, `startRunApi`, `waitRunApi`,
+ *               `ensurePersona`.
+ * What it does: Makes every spec drive a REAL stack through the UI — sign-in through the
  *               form (never cookie injection), runs queued through the dialog, completion
  *               awaited by watching the status pill the page itself polls (never a fixed
- *               sleep). The one direct API read is `/health`, so a spec can say WHY the stack
- *               is unusable instead of timing out. `field()` matches a label exactly with or
- *               without the required marker so "Source" never matches "Source prefix".
+ *               sleep). `/health` is read directly so a spec can say WHY the stack is
+ *               unusable; the API helpers seed what a spec needs but does not prove, so no
+ *               spec relies on state another spec (or another CI job) created. `field()`
+ *               matches a label exactly with or without the required marker so "Source"
+ *               never matches "Source prefix".
  * How:          Playwright `test.extend` signs in before every test; helpers wrap the
  *               selectors documented in ui/e2e/walkthrough/README.md.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -45,11 +51,11 @@
  *               "signed in" is the chip OR that button and `signOut` opens the menu first),
  *               ui/src/screens/Runs/RunNewDialog.tsx (what `startRun` fills)
  * Tested by:    every spec under ui/e2e/walkthrough (they all import this)
- * Touch when:   a walkthrough variable, a tier target or a form label changes; for a new
- *               repository in tier 2, add a `RepoTarget` to `publicTargets()`.
+ * Touch when:   for a new repository in tier 2, add a `RepoTarget` to `publicTargets()`; a
+ *               walkthrough variable, a tier target or a form label changes.
  */
 
-import { expect, test as base, type Locator, type Page } from '@playwright/test'
+import { expect, request as playwrightRequest, test as base, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 import { createHmac } from 'node:crypto'
 
 export type BeltPolicy = 'TARGET_ONLY' | 'AFFECTED_DIRS' | 'BARE'
@@ -361,4 +367,68 @@ export async function startRun(page: Page, repo: string, opts: StartRunOptions):
   await dialog.getByRole('button', { name: 'Queue run' }).click()
   await page.waitForURL(/\/runs\/[0-9a-f]{32}$/)
   return runIdFromUrl(page)
+}
+
+// --- the API, for seeding (never for what a spec asserts about a screen) ------------------
+
+/** The CSRF header the API requires on writes (double-submit cookie `crb_csrf`). */
+export async function csrf(page: Page): Promise<Record<string, string>> {
+  const cookie = (await page.context().cookies()).find((c) => c.name === 'crb_csrf')
+  if (!cookie) throw new Error('no crb_csrf cookie — is the page signed in?')
+  return { 'X-CSRF-Token': cookie.value }
+}
+
+/** `POST /api/v1<path>` as the page's signed-in person; asserts a 2xx and returns the body. */
+export async function apiPost(page: Page, path: string, data: unknown): Promise<Record<string, unknown>> {
+  const res = await page.request.post(`${env.baseUrl}/api/v1${path}`, { data, headers: await csrf(page) })
+  expect(res.status(), `POST ${path} → ${res.status()} ${await res.text()}`).toBeLessThan(300)
+  return (await res.json()) as Record<string, unknown>
+}
+
+/** `GET /api/v1<path>`; asserts a 2xx and returns the body. */
+export async function apiGet(req: APIRequestContext, path: string): Promise<Record<string, unknown>> {
+  const res = await req.get(`${env.baseUrl}/api/v1${path}`)
+  expect(res.ok(), `GET ${path} → ${res.status()}`).toBeTruthy()
+  return (await res.json()) as Record<string, unknown>
+}
+
+/** Poll a run through the API until it is terminal; assert it succeeded. */
+export async function waitRunApi(page: Page, runId: string, timeoutMs: number): Promise<void> {
+  await expect
+    .poll(async () => String((await apiGet(page.request, `/runs/${runId}`)).status), { timeout: timeoutMs, intervals: [500, 1000, 2000], message: `run ${runId} did not finish` })
+    .toMatch(/^(succeeded|failed|cancelled)$/)
+  const run = await apiGet(page.request, `/runs/${runId}`)
+  expect(run.status, `run ${runId} (${run.kind}) ended ${run.status}: ${run.error ?? ''}`).toBe('succeeded')
+}
+
+/** Queue a run through the API (`POST /runs`) and wait for it to succeed; returns its id. */
+export async function startRunApi(page: Page, body: Record<string, unknown>, timeoutMs: number): Promise<string> {
+  const run = await apiPost(page, '/runs', body)
+  const id = String(run.id)
+  await waitRunApi(page, id, timeoutMs)
+  return id
+}
+
+/**
+ * Make a walkthrough persona account exist — `walk-viewer`, `walk-operator` or `walk-approver`
+ * with its stable `personaPassword` — as the admin signed in on `page`. When an earlier spec or
+ * run created it, the stable password must open it, so every spec that signs in as a persona
+ * owns that precondition instead of relying on the spec that happened to run before it (12's
+ * viewer relied on 11-screens until the two ran in different CI jobs).
+ */
+export async function ensurePersona(page: Page, username: string, role: 'viewer' | 'operator' | 'approver'): Promise<void> {
+  const password = personaPassword(username)
+  const users = (await apiGet(page.request, '/users')) as { items: Array<{ username: string }> }
+  if (users.items.some((u) => u.username === username)) {
+    // its own cookie jar: signing in here must not replace the admin session on `page`
+    const own = await playwrightRequest.newContext()
+    try {
+      const login = await own.post(`${env.baseUrl}/api/v1/auth/login`, { data: { username, password } })
+      expect(login.status(), `POST /auth/login as existing ${username} with the stable password → ${login.status()}`).toBe(200)
+    } finally {
+      await own.dispose()
+    }
+    return
+  }
+  await apiPost(page, '/users', { username, password, role, display_name: `Walk ${role}` })
 }

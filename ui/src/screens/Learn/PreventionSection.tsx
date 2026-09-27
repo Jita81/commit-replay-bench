@@ -24,8 +24,9 @@
  *               (the routes), ui/src/screens/Decisions/decisions.ts (the `prevention` rows that
  *               link here with `?class=`), docs/LEARNING-LOOP.md (§7, what the columns mean)
  * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
- * Touch when:   the register gains a field (mirror it in ui/src/api/types.ts) or the loop gains
- *               an operator act (a control here, with its status line and its hint).
+ * Touch when:   never for a new repository; the register gains a field (mirror it in
+ *               ui/src/api/types.ts) or the loop gains an operator act (a control here, with its
+ *               status line and its hint).
  */
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'

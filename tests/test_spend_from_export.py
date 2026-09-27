@@ -15,7 +15,7 @@ ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   scripts/spend_from_export.py (under test), src/crb/core/spend.py (the rules
               it applies), src/crb/core/ledger.py (``derive_failure_kind``)
 Tested by:    tests/test_spend_from_export.py
-Touch when:   the export's columns change.
+Touch when:   never for a new repository; the export's columns change.
 """
 
 from __future__ import annotations

@@ -20,7 +20,8 @@
  *               ui/src/screens/Factory/FactoryPage.tsx,
  *               ui/src/components/FlowPanel.tsx (the callers)
  * Tested by:    ui/src/lib/format.test.ts
- * Touch when:   the meaning of the progress number changes — it changes for every screen at once.
+ * Touch when:   never for a new repository; the meaning of the progress number changes — it changes
+ *               for every screen at once.
  */
 import { describe, expect, it } from 'vitest'
 import { fmtDuration, kOfN } from './format'

@@ -28,9 +28,9 @@
  *               dash for an absent value and the interval text),
  *               ui/src/screens/Capability/CapabilityPage.test.tsx (percentages and intervals as
  *               rendered)
- * Touch when:   the Wilson z or method changes in src/crb/core/stats.py (an apparatus change —
- *               docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires); never for a
- *               new repository.
+ * Touch when:   never for a new repository; the Wilson z or method changes in src/crb/core/stats.py
+ *               (an apparatus change —
+ *               docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires).
  * Claims:       Every rate the UI shows is accompanied by n and a Wilson interval
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */

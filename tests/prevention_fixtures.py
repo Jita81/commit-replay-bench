@@ -28,8 +28,8 @@ Works with:   src/crb/core/prevention.py (the loop under test), src/crb/core/led
               tests/test_prevention_gaming.py (the attacks built on the same rows)
 Tested by:    tests/test_prevention_rule.py, tests/test_prevention_gaming.py,
               tests/test_prevention_store.py, tests/test_prevention_signatures.py
-Touch when:   a failure kind or a belt is added (add its kind here so the register sees it);
-              never for a new repository.
+Touch when:   never for a new repository; a failure kind or a belt is added (add its kind here so
+              the register sees it).
 """
 
 from __future__ import annotations

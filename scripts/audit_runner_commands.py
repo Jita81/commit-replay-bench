@@ -35,8 +35,9 @@ Works with:   src/crb/core/lint.py (the belt-5 detectors), src/crb/core/formatti
               (the harness command), docs/reviews/2026-09-25-runner-commands-audit.md (its output
               on the six live repositories)
 Tested by:    tests/test_runner_audit.py
-Touch when:   a runner or detector learns a new tool — add the tool's evidence pattern and the
-              step names that cover it to ``TOOLS`` so the audit stops calling it a gap.
+Touch when:   never for a new repository; a runner or detector learns a new tool — add the tool's
+              evidence pattern and the step names that cover it to ``TOOLS`` so the audit stops
+              calling it a gap.
 """
 
 from __future__ import annotations

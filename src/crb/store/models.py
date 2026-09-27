@@ -310,7 +310,7 @@ class Review(Base):
     created: Mapped[str] = mapped_column(String(40), nullable=False)
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     row_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    # revision 0012 (DL-067): the reviewer's own minutes, NULL when not stated — declared
+    # revision 0012 (DL-068): the reviewer's own minutes, NULL when not stated — declared
     # LAST so the column order matches a migrated database
     minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

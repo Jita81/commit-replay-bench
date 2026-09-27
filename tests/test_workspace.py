@@ -20,8 +20,9 @@ Works with:   src/crb/core/workspace.py (under test), tests/fixtures/pyrepo.py (
               src/crb/core/git.py (the wrapper the workspace drives), tests/test_grade.py (the
               disqualifications these methods feed)
 Tested by:    tests/test_workspace.py
-Touch when:   a new way to hide or fake a change from git is found (add the case here and its
-              disqualification in tests/test_grade.py); a post-create hook kind is added.
+Touch when:   never for a new repository; a new way to hide or fake a change from git is found (add
+              the case here and its disqualification in tests/test_grade.py); a post-create hook
+              kind is added.
 """
 
 from __future__ import annotations

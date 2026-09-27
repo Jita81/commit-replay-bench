@@ -44,9 +44,10 @@
  *               ui/src/App.tsx (the route table), ui/src/components/Layout.tsx (the shell),
  *               ui/src/test/utils.tsx (`renderApp`, `mockApi`, `PRINCIPAL`)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
- * Touch when:   a screen is added — it needs a `SCREENS` entry (in the on-ramp or instrument
- *               sidecar) with its fixtures and roles before this passes; a `title=` is
- *               retired — lower its file's count; a route is put on `ALLOWLIST` — say why.
+ * Touch when:   never for a new repository; a screen is added — it needs a `SCREENS` entry (in the
+ *               on-ramp or instrument sidecar) with its fixtures and roles before this passes; a
+ *               `title=` is retired — lower its file's count; a route is put on `ALLOWLIST` — say
+ *               why.
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -238,7 +239,7 @@ describe('hint ratchet: the route table', () => {
         const misses = unhinted(container)
         expect(misses, `unhinted elements on ${pattern} as ${role}:\n  ${misses.join('\n  ')}`).toEqual([])
         // one page title: a second h1 (a rendered document's own `#`) made a walkthrough query
-        // ambiguous and gives a screen reader two titles (P-109)
+        // ambiguous and gives a screen reader two titles (P-176)
         expect(container.querySelectorAll('h1'), `${pattern} as ${role}: more than one h1`).toHaveLength(1)
       })
     }

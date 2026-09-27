@@ -18,8 +18,8 @@
  * Works with:   ui/src/screens/Routing/RoutingPage.tsx (the code under test),
  *               ui/src/screens/Capability/contract.ts (the fixture shapes), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx
- * Touch when:   a reason code or policy threshold is added — extend the fixture and the
- *               rule-text assertion.
+ * Touch when:   never for a new repository; a reason code or policy threshold is added — extend the
+ *               fixture and the rule-text assertion.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

@@ -33,8 +33,8 @@ Works with:   src/crb/server/flow.py (``build_flow`` — every rule lives there)
               ui/src/api/hooks.ts (``useFlow`` — the one client that reads it),
               docs/API.md (the "Flow" section — the contract this route serves)
 Tested by:    tests/test_server_routes_flow.py
-Touch when:   a stream's milestone pair changes (that is src/crb/server/flow.py and the
-              stream's MEASURE criterion, not this file); never for a new repository.
+Touch when:   never for a new repository; a stream's milestone pair changes (that is
+              src/crb/server/flow.py and the stream's MEASURE criterion, not this file).
 Claims:       Every duration and spend here is derived from records already written, with its n
               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
 """

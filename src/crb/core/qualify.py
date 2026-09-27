@@ -32,8 +32,9 @@ Works with:   src/crb/core/posture.py (the posture a record is keyed to), src/cr
               record carries), src/crb/core/mine.py (discovers the tasks this qualifies),
               src/crb/core/evidence.py (canonical JSON, timestamps)
 Tested by:    tests/test_qualify.py
-Touch when:   a fact the oracle rests on joins the record (add it to the fingerprint too);
-              a refusal code is added (``QUAL_TEXT`` and ADR-0019's table together).
+Touch when:   never for a new repository; a fact the oracle rests on joins the record (add it to the
+              fingerprint too); a refusal code is added (``QUAL_TEXT`` and ADR-0019's table
+              together).
 """
 
 from __future__ import annotations

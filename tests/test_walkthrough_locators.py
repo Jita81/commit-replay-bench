@@ -4,7 +4,7 @@ Playwright matches a role's accessible name as a substring unless ``exact: true`
 Stream U put a "Sign out everywhere" button on every row of Settings › Users; stream A1,
 built in parallel, looked for the shell's Sign out by ``{ name: 'Sign out' }``, so on the
 merged tree the phone-menu check on ``/settings`` matched four Users-card buttons and failed
-in strict mode (docs/PREVENTION.md P-114). A substring locator that happens to match one
+in strict mode (docs/PREVENTION.md P-181). A substring locator that happens to match one
 element today can match another stream's control tomorrow, or the wrong one. The first gate
 matched only the literal ``name: 'Sign out'``, so the same regression written with double
 quotes or a regex passed; it now reads every quote style and a regex name.
@@ -24,10 +24,10 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   ui/e2e/walkthrough/11-screens.spec.ts and ui/e2e/walkthrough/support.ts (the
               locators it holds), ui/src/screens/Settings/UsersCard.tsx ("Sign out
-              everywhere", the name that collided), docs/PREVENTION.md (P-114)
+              everywhere", the name that collided), docs/PREVENTION.md (P-181)
 Tested by:    (this is a test file)
-Touch when:   the shell's Sign out is renamed, or a control is named with another control's
-              name as its start (add the pair to ``PREFIX_NAMES``).
+Touch when:   never for a new repository; the shell's Sign out is renamed, or a control is named
+              with another control's name as its start (add the pair to ``PREFIX_NAMES``).
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def test_every_prefix_name_locator_is_exact() -> None:
     ],
 )
 def test_the_gate_catches_a_loose_locator_in_any_form(line: str) -> None:
-    """Negative controls: the defect P-114 fixed, written every way the gate must refuse."""
+    """Negative controls: the defect P-181 fixed, written every way the gate must refuse."""
     assert _loose(line, "Sign out")
 
 

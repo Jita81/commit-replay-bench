@@ -26,8 +26,8 @@ Works with:   src/crb/core/prevention.py (under test), tests/prevention_fixtures
               ledger and the ladder), src/crb/core/playbook.py (the line the ladder applies),
               docs/LEARNING-LOOP.md (§7 explains the numbers pinned here)
 Tested by:    tests/test_prevention_rule.py
-Touch when:   a threshold of the rule changes (bump ``DECISION_RULE`` with it and update the
-              expected numbers here).
+Touch when:   never for a new repository; a threshold of the rule changes (bump ``DECISION_RULE``
+              with it and update the expected numbers here).
 """
 
 from __future__ import annotations

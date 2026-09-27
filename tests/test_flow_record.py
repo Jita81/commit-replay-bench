@@ -19,7 +19,7 @@ Works with:   src/crb/server/flow_record.py (under test), src/crb/server/flow.py
               of these moments), tests/test_server_routes_flow.py (the same moments seen
               through ``GET /flow``), tests/fixtures/server_seed.py (``make_factory``)
 Tested by:    tests/test_flow_record.py
-Touch when:   a recorded moment is added or its once-only rule changes.
+Touch when:   never for a new repository; a recorded moment is added or its once-only rule changes.
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ What it does: Pins that a known $0 is $0 and enters the mean, that an unknown co
               interval match hand-computed values, that a lower bound is floored at 0, that
               rows from more than one apparatus version, posture class (ADR-0019) or checks
               arm (ADR-0024) are refused, and that a measured cell and the served
-              ``cost_usd_mean`` agree with the fold. Then P-064 across its class: the
+              ``cost_usd_mean`` agree with the fold. Then P-131 across its class: the
               abstract export, the re-measure price and the forecast keep a known $0, and a
               ratchet fails when any reader in ``src/crb`` or ``ui/src`` decides a cost is
               unknown by comparing it with zero.
@@ -25,8 +25,9 @@ Works with:   src/crb/core/economics.py (under test), src/crb/core/ledger.py (``
               src/crb/core/learn.py (the re-measure price keeps it),
               src/crb/core/forecast.py (the forecast prices it)
 Tested by:    tests/test_economics.py
-Touch when:   the interval method changes (pin the new method's textbook value here first), or
-              a new reader of a cost needs a place in ``_COST_ZERO_ALLOWED`` (say why there).
+Touch when:   never for a new repository; the interval method changes (pin the new method's textbook
+              value here first), or a new reader of a cost needs a place in ``_COST_ZERO_ALLOWED``
+              (say why there).
 """
 
 from __future__ import annotations
@@ -261,7 +262,7 @@ def test_a_measured_cell_carries_the_fold_and_agrees_with_its_mean() -> None:
     assert cap.empty_cell(c.key, cap.PROJECTION_CLASS_SIZE).economics is None
 
 
-# --- every other reader of the same rows keeps a known $0 (P-064: the class, not one fold) ---
+# --- every other reader of the same rows keeps a known $0 (P-131: the class, not one fold) ---
 
 
 def test_the_abstract_export_keeps_a_known_zero_cost() -> None:
@@ -312,7 +313,7 @@ _COST_ZERO_ALLOWED = {
 
 
 def test_no_reader_decides_a_cost_is_unknown_by_comparing_it_with_zero() -> None:
-    """P-064 as a gate: known-ness is ``GradeRow.cost_known`` (or the served fold's counts).
+    """P-131 as a gate: known-ness is ``GradeRow.cost_known`` (or the served fold's counts).
     A ``cost_usd > 0`` / ``cost_usd_mean > 0`` filter drops a known $0 as if unknown — the
     class found in the map, the abstract export, the re-measure price, the forecast and
     the Measure and Factory estimates. A new one fails here."""

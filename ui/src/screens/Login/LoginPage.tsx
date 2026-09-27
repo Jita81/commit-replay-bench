@@ -45,8 +45,8 @@
  *               ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
  *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
  *               the role chip), ui/src/components/Help.test.tsx (the About block mounts here)
- * Touch when:   the OIDC start path or the login body changes (docs/API.md "Auth"); never for
- *               a new repository.
+ * Touch when:   never for a new repository; the OIDC start path or the login body changes
+ *               (docs/API.md "Auth").
  */
 import { useState, type FormEvent } from 'react'
 import { Navigate, useSearchParams } from 'react-router'

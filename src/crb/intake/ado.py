@@ -38,8 +38,9 @@ Works with:   src/crb/intake/client.py (the protocol it satisfies),
               six verbs over JQL), src/crb/server/intake.py (builds it from settings and
               the stored credential)
 Tested by:    tests/test_intake_adapters.py
-Touch when:   Azure DevOps changes an api-version or a field name; a deployment needs a
-              board *column* rather than a state (that is a second query, not an edit here).
+Touch when:   never for a new repository; Azure DevOps changes an api-version or a field name; a
+              deployment needs a board *column* rather than a state (that is a second query, not an
+              edit here).
 """
 
 from __future__ import annotations

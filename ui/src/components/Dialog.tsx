@@ -8,7 +8,7 @@
  *               its accessible name, routes Esc through `onClose` (an Esc that closes an open
  *               hint bubble is default-prevented by `Hint` and never reaches here), returns
  *               keyboard focus to the control that opened it however it closes — by `open`
- *               or by being unmounted (P-095) — and
+ *               or by being unmounted (P-162) — and
  *               unmounts its content while closed so form state resets per opening. A modal
  *               dialog paints in the browser's top layer, so `Hint` portals its bubble into
  *               the dialog rather than `<body>`. No portal library.
@@ -24,7 +24,7 @@
  *               ui/src/screens/Repos/RepoNewDialog.test.tsx,
  *               ui/src/screens/Runs/RunNewDialog.test.tsx,
  *               ui/e2e/walkthrough/02-repo-onboard.spec.ts (the real modal in Chromium)
- * Touch when:   a dialog needs a size or a non-modal mode; never for a new repository.
+ * Touch when:   never for a new repository; a dialog needs a size or a non-modal mode.
  */
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Button } from './Button'
@@ -45,7 +45,7 @@ interface DialogProps {
  */
 export function Dialog({ open, title, onClose, children, footer, width = 'md' }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
-  // P-095 — the control that opened the dialog. The platform returns focus to it only when a
+  // P-162 — the control that opened the dialog. The platform returns focus to it only when a
   // modal is close()d; a dialog that is unmounted while open (Learn's Decide and Queue) is
   // just removed, and focus fell to the page body. Declared before the showModal effect so
   // the opener is read before focus moves into the dialog; an element already inside the

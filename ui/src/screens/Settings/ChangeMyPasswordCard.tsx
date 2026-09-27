@@ -27,8 +27,8 @@
  *               12-character floor are stated), src/crb/server/routes/admin.py
  *               (`change_own_password` — the route, the limiter and `not_local`)
  * Tested by:    ui/src/screens/Settings/ChangeMyPasswordCard.test.tsx
- * Touch when:   the local issuer name changes (src/crb/server/auth.py `LOCAL_ISSUER`) or the
- *               limiter's shape changes — the hint states it.
+ * Touch when:   never for a new repository; the local issuer name changes (src/crb/server/auth.py
+ *               `LOCAL_ISSUER`) or the limiter's shape changes — the hint states it.
  */
 import { useState, type FormEvent } from 'react'
 import { useChangeOwnPassword } from '../../api/hooks'

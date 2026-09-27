@@ -26,8 +26,8 @@
  *               kind; ?new= opens the dialog for an operator only), ui/e2e/walkthrough/03-mine.spec.ts (the Runs list shows the run, the
  *               progress bar reports the run's own counts), ui/e2e/walkthrough/06-cancel.spec.ts,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a run kind is added (src/crb/core/run.py, docs/API.md "Runs") — extend
- *               `RunKind` in ui/src/api/types.ts; never for a new repository.
+ * Touch when:   never for a new repository; a run kind is added (src/crb/core/run.py, docs/API.md
+ *               "Runs") — extend `RunKind` in ui/src/api/types.ts.
  */
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'

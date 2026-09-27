@@ -23,7 +23,8 @@ Works with:   docs/FILE-HEADER-STANDARD.md (the rule it holds), scripts/code_map
               gate this complements), tests/test_header_width.py (the same ratchet idiom for
               width), docs/PREVENTION.md (P-033, the class it stops)
 Tested by:    tests/test_works_with.py
-Touch when:   you fix a listed header (delete its line from the known file).
+Touch when:   never for a new repository; you fix a listed header (delete its line from the known
+              file).
 """
 
 from __future__ import annotations

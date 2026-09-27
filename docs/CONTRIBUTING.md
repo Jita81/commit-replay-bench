@@ -43,9 +43,12 @@ Every PR must pass all of these locally **and** in CI (`.github/workflows/ci.yml
 
 Each line is a command CI runs, word for word apart from CI's report-only `--cov-report`
 options; `tests/test_version_consistency.py` fails when one drifts from `ci.yml`. The pytest
-line is the one CI's `test` job runs: it measures branch coverage, as CI does, so the
-coverage floor means the same thing on both. `sandbox_images` is left out because it builds the
-reference sandbox images, and CI's `sandbox-images` job runs it on its own.
+line is the verdict CI's `test (py…)` jobs give: CI runs it in parallel shards per Python
+version (`test-shard`, the same command plus `scripts/ci_test_shards.py`'s shard options), then
+proves the shards ran every test exactly once and enforces the floor on their combined coverage
+— so the test, the branch coverage and the floor mean the same thing on both (P-053).
+`sandbox_images` is left out because it builds the reference sandbox images, and CI's
+`sandbox-images` job runs it on its own.
 
 CI additionally runs `gitleaks` (secrets), `pip-audit` (known vulnerabilities in the
 resolved environment) and produces a CycloneDX SBOM.
@@ -185,9 +188,9 @@ and the branch is deleted). A branch exists only while its PR is open: merged an
 PRs delete theirs. Feature branches
 `feat/<area>-<topic>` / `fix/<area>-<topic>` / `docs/<topic>`; one PR per file-disjoint
 workstream where possible. **Branch protection on `main` requires the CI jobs green and
-the branch up to date before a merge** (every job in `.github/workflows/ci.yml`: lint,
-types, layers, code-map, dod, claims, both pytest matrices, PostgreSQL, security, sbom,
-container, sandbox-images, walkthrough, ui-unit and ui-smoke;
+the branch up to date before a merge** (every gating check in `.github/workflows/ci.yml`:
+lint, types, layers, code-map, dod, claims, both pytest aggregators, PostgreSQL, security,
+sbom, container, sandbox-images, ui-unit, ui-smoke and the walkthrough aggregator;
 `scripts/check_branch_protection.py` compares the setting with the workflow — commands you can run
 locally: the five in [The gates](#the-gates), exactly as written there, and
 `python scripts/code_map.py --check`, `python scripts/dod_check.py --check`,

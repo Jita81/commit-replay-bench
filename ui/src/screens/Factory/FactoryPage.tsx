@@ -60,9 +60,9 @@
  *               ui/src/components/FlowPanel.tsx (the manufacture stream's lead time from item
  *               to merge), ui/src/screens/Decisions/decisions.ts (the inbox rows that link here)
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx, ui/e2e/walkthrough/10-factory.spec.ts
- * Touch when:   a step or a stop status is added to the loop (add it to `stepsFor` and the
- *               loop's docstring); a field is added to `FactoryTaskOut`; a refusal is
- *               recorded in a new shape.
+ * Touch when:   never for a new repository; a step or a stop status is added to the loop (add it to
+ *               `stepsFor` and the loop's docstring); a field is added to `FactoryTaskOut`; a
+ *               refusal is recorded in a new shape.
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
@@ -369,7 +369,7 @@ function statusLabel(t: FactoryTask): string {
  * J-FAC-2 — the repository's own measured cost per attempt, when it has one: the map's
  * economics fold (F35) — its mean over the attempts with a KNOWN cost (a known $0 is $0),
  * that count as n, and the apparatus. The same reading as Measure's; `null` when nothing
- * is measured, nothing is known or the server refused the pool (P-064).
+ * is measured, nothing is known or the server refused the pool (P-131).
  */
 export function estimateFromMap(map: CapabilityMap | undefined): MeasuredCost | null {
   return measuredCostPerAttempt(map?.economics)

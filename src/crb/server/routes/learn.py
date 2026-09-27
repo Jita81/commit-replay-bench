@@ -51,7 +51,7 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               and writes what a named operator accepts — a corpus line, the strengthening
               items, the re-measurement runs — re-deriving each body here so the caller
               can choose but never compose; a cell whose queued runs are unfinished is
-              refused and served with those runs, so money is never spent twice (P-115).
+              refused and served with those runs, so money is never spent twice (P-182).
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
               the writes go through ``apply_triage`` / ``FactoryHome.register_*`` /
@@ -403,7 +403,7 @@ class RefusalAcceptIn(BaseModel):
     @classmethod
     def _note_is_one_line(cls, v: str) -> str:
         """The note becomes a provenance COMMENT in a line-oriented corpus file: a line break
-        would end the comment and write the rest as a corpus line nobody decided (P-094)."""
+        would end the comment and write the rest as a corpus line nobody decided (P-161)."""
         if has_line_break(v):
             raise ValueError("a note is one line: it is written into the corpus as a comment")
         return v
@@ -805,7 +805,7 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
         )
     api = require_jobs()
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
-    # whole or not at all (P-093 — the gate is the one POST /runs applies)
+    # whole or not at all (P-160 — the gate is the one POST /runs applies)
     runs = []
     for request in cell.requests:
         payload = {k: v for k, v in request.to_dict().items() if k != "note"}

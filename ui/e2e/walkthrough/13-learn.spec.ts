@@ -13,7 +13,7 @@
  *    the register card with the refused class on it, the refusal tile with its n and
  *    interval, the refusal row, the strengthening row and the re-measurement plan; closes
  *    the Decide dialog by Cancel, its close button and Escape and finds focus back on
- *    Decide each time (P-095); decides
+ *    Decide each time (P-162); decides
  *    the refusal (refused, with a note) and reads what it wrote and under whose name;
  *    registers the strengthening item and follows the Factory link to the item it
  *    registered; follows the Re-score hand-off to a Runs dialog with the kind and the task
@@ -45,8 +45,8 @@
  *               src/crb/builders/fixture_gold.py (`attempt` — the real guard refusal),
  *               ui/e2e/walkthrough/11-screens.spec.ts (creates the same persona accounts)
  * Tested by:    scripts/walkthrough.sh (runs it, tier 1)
- * Touch when:   a Learn control's name or test id changes; the fixture's `attempt` changes; a
- *               persona is added.
+ * Touch when:   never for a new repository; a Learn control's name or test id changes; the
+ *               fixture's `attempt` changes; a persona is added.
  */
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -191,7 +191,7 @@ test.describe('13 learn: the loop acts from the page', () => {
     await expect(plan.getByRole('button', { name: 'Queue runs' })).toHaveCount(0)
   })
 
-  test('a decision dialog closed by Cancel, the close button or Escape gives focus back to Decide (P-095)', async ({ browser }) => {
+  test('a decision dialog closed by Cancel, the close button or Escape gives focus back to Decide (P-162)', async ({ browser }) => {
     const page = await personaPage(browser, 'operator')
     await page.goto(`/learn?repo=${encodeURIComponent(t.name)}`)
     const row = page.getByRole('table', { name: /Refusal classes/ }).getByRole('row').filter({ hasText: 'git log' }).first()
@@ -200,7 +200,7 @@ test.describe('13 learn: the loop acts from the page', () => {
     for (const close of ['Cancel', 'Close dialog', 'Escape']) {
       await decide.click()
       await expect(dialog).toBeVisible()
-      // the note is one line by construction (P-094): the field is an input, not a text area
+      // the note is one line by construction (P-161): the field is an input, not a text area
       await expect(dialog.getByLabel(/Why/)).toHaveJSProperty('tagName', 'INPUT')
       if (close === 'Escape') await page.keyboard.press('Escape')
       else await dialog.getByRole('button', { name: close, exact: true }).click()
@@ -310,7 +310,7 @@ test.describe('13 learn: the loop acts from the page', () => {
         const tip = page.locator(`#${ids[ids.length - 1]!.replace(/([:.])/g, '\\$1')}`)
         await expect(tip, `${where}: the tile's hint did not open`).toBeVisible({ timeout: 1000 })
         await expect(tip).toHaveCSS('opacity', '1')
-        const violations = await axeViolations(page) // settles transitions first (P-063)
+        const violations = await axeViolations(page) // settles transitions first (P-130)
         expect(violations, `${where}: ${JSON.stringify(violations, null, 2)}`).toEqual([])
         await page.keyboard.press('Escape')
         if (vp.width === 375) {

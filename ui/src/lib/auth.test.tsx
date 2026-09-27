@@ -15,7 +15,7 @@
  * Works with:   ui/src/lib/auth.tsx (`RequireAuth`), ui/src/screens/Login/LoginPage.tsx
  *               (`safeNext` reads the `next` this writes), ui/src/App.tsx (the routes it guards)
  * Tested by:    ui/src/lib/auth.test.tsx
- * Touch when:   the redirect's `next` changes shape.
+ * Touch when:   never for a new repository; the redirect's `next` changes shape.
  */
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'

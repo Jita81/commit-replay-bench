@@ -29,7 +29,8 @@
  *               `user.login_failed`), src/crb/server/auth.py (`set_password` rotates the
  *               session nonce), docs/OPERATOR.md#9-users (the timing it reports)
  * Tested by:    ui/e2e/walkthrough/13-recover-an-account.spec.ts
- * Touch when:   a step of the recovery journey changes, or the Users card's acts do.
+ * Touch when:   never for a new repository; a step of the recovery journey changes, or the Users
+ *               card's acts do.
  */
 import type { Browser } from '@playwright/test'
 import { axeViolations } from '../axe'
@@ -146,7 +147,7 @@ test.describe('13 recover an account', () => {
       await field(device.page, 'Password').fill('not-the-password-at-all')
       await device.page.getByRole('button', { name: 'Sign in', exact: true }).click()
       await expect(device.page.getByTestId('login-next-step')).toBeVisible()
-      const violations = await axeViolations(device.page) // settles transitions first (P-063, P-085)
+      const violations = await axeViolations(device.page) // settles transitions first (P-130, P-152)
       expect(violations, JSON.stringify(violations, null, 2)).toEqual([])
     } finally {
       await device.ctx.close()

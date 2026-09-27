@@ -27,8 +27,9 @@ Works with:   src/crb/core/qualify.py (``qualify_task``, ``context_for``, ``Gold
               replay, blind, oracle, controls), src/crb/core/run.py (``RunSpec.context_for``
               consumes the contexts)
 Tested by:    tests/test_worker.py, tests/test_run.py
-Touch when:   a run kind starts grading (give it the gate); a posture-level stop is added
-              (its code in ``crb.core.qualify`` and ADR-0019's table first).
+Touch when:   never for a new repository; a run kind starts grading (give it the gate); a
+              posture-level stop is added (its code in ``crb.core.qualify`` and ADR-0019's table
+              first).
 """
 
 from __future__ import annotations
@@ -128,6 +129,8 @@ class PostureGate:
         #: task id → the qualification in force for this posture (qualified or not)
         self.qualifications: dict[str, Qualification] = {}
         self._deps: dict[str, TaskDeps] = {}
+        #: sealed keys this gate has re-hashed and found intact (a failure is never added)
+        self._verified: set[str] = set()
         #: refusal code → how many tasks it kept out of the run
         self.refusals: Counter[str] = Counter()
 
@@ -368,7 +371,13 @@ class PostureGate:
                 f"{code_view(POSTURE_UNQUALIFIED)['fix']}"
             )
         deps = self.deps_for(task)
-        self.provider.verify(deps)
+        # Each sealed set is re-hashed once per run, on its first use: many tasks share one
+        # lockfile's set and it is read-only once sealed. A set that fails is never added,
+        # so every use of it stops the run BUNDLE_INTEGRITY; each mount's write bits are
+        # still re-checked at every use (``validate_mount``).
+        if any(k not in self._verified for k in deps.keys):
+            self.provider.verify(deps)  # raises BUNDLE_INTEGRITY (run scope)
+            self._verified.update(deps.keys)
         witness = GoldWitness(
             self.repo,
             self.config,

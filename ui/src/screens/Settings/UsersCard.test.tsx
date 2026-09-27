@@ -29,7 +29,7 @@
  *               ui/src/test/utils.tsx (`mockApi` and `renderApp`, the mocked API and
  *               the app shell), tests/test_server_admin_users.py (the routes' own tests)
  * Tested by:    ui/src/screens/Settings/UsersCard.test.tsx
- * Touch when:   an account act is added — it needs a case here.
+ * Touch when:   never for a new repository; an account act is added — it needs a case here.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

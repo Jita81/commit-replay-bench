@@ -18,7 +18,8 @@ Works with:   src/crb/core/checks.py (under test), src/crb/core/spec.py (``RepoC
               src/crb/server/schemas.py (the request shapes), src/crb/server/routes/repos.py and
               src/crb/server/routes/runs.py (the writers)
 Tested by:    tests/test_checks.py
-Touch when:   a switch is added to the surface or its resolution rule changes.
+Touch when:   never for a new repository; a switch is added to the surface or its resolution rule
+              changes.
 """
 
 from __future__ import annotations

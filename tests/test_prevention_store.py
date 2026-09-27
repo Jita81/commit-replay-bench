@@ -18,8 +18,8 @@ Works with:   src/crb/core/prevention.py (under test), tests/prevention_fixtures
               src/crb/server/prevention_state.py (the events-table store the same chain lives
               in on a stack), tests/test_server_routes_prevention.py (that store's round trip)
 Tested by:    tests/test_prevention_store.py
-Touch when:   a record kind or a record field is added (the chain must still verify after a
-              JSON round trip).
+Touch when:   never for a new repository; a record kind or a record field is added (the chain must
+              still verify after a JSON round trip).
 """
 
 from __future__ import annotations

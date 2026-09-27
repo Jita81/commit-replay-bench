@@ -21,12 +21,12 @@
  *               shapes), ui/src/screens/Factory/FactoryPage.tsx, ui/src/screens/Runs/RunDetailPage.tsx,
  *               ui/src/screens/Capability/CapabilityPage.tsx (the screens rendered)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
- * Touch when:   a screen of these routes gains a state that renders new elements — add the
- *               fixture that shows it; a route is added to the instrument row — add its entry.
- *               The `/settings` fixtures carry TWO accounts on purpose (F23): the last active
- *               admin, whose role select and active toggle render disabled with the reason as
- *               their hint, and an identity-provider account, whose Set-password button is
- *               disabled — so both states are walked, not only unit-tested.
+ * Touch when:   never for a new repository; a screen of these routes gains a state that renders new
+ *               elements — add the fixture that shows it; a route is added to the instrument row —
+ *               add its entry. The `/settings` fixtures carry TWO accounts on purpose (F23): the
+ *               last active admin, whose role select and active toggle render disabled with the
+ *               reason as their hint, and an identity-provider account, whose Set-password button
+ *               is disabled — so both states are walked, not only unit-tested.
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

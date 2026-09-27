@@ -1,10 +1,10 @@
 """Every axe sweep in the live-stack walkthrough reads a settled page — a ratchet.
 
-On 2026-09-26 (docs/PREVENTION.md P-085) the tier-1 walkthrough failed three runs in four on a
+On 2026-09-26 (docs/PREVENTION.md P-152) the tier-1 walkthrough failed three runs in four on a
 colour-contrast violation on `/connect/<repo>`: the Baseline button turns from outlined to
 filled when the walk's data lands, it carries ``transition-colors``, and axe read a frame in
 the middle of the transition (3.7:1). The page a person sees was fine; the sweep was reading a
-moment that does not last. Stream D met the same class (P-063) and gave the browser suites one
+moment that does not last. Stream D met the same class (P-130) and gave the browser suites one
 helper, ``ui/e2e/axe.ts``, whose ``axeViolations`` settles the page and then runs axe; the
 north-star integration moved every walkthrough sweep onto it, so this test now holds the
 walkthrough's sweeps to that helper.
@@ -26,9 +26,9 @@ ADRs:         none
 Works with:   ui/e2e/axe.ts (``settleTransitions`` and ``axeViolations`` — the wait and the
               sweep), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts and
               13-recover-an-account.spec.ts (sweeps that call it), tests/test_e2e_axe_settles.py
-              (no spec builds its own AxeBuilder), docs/PREVENTION.md (P-085, P-063)
+              (no spec builds its own AxeBuilder), docs/PREVENTION.md (P-152, P-130)
 Tested by:    (this is a test file)
-Touch when:   the axe helper is renamed or moves.
+Touch when:   never for a new repository; the axe helper is renamed or moves.
 """
 
 from __future__ import annotations
@@ -73,5 +73,5 @@ def test_every_axe_sweep_waits_for_a_settled_page() -> None:
     unsettled = _unsettled_analyses()
     assert not unsettled, (
         "an axe sweep reads the page before its transitions finish — run it through "
-        f"ui/e2e/axe.ts, which settles first (P-085, P-063): {unsettled}"
+        f"ui/e2e/axe.ts, which settles first (P-152, P-130): {unsettled}"
     )

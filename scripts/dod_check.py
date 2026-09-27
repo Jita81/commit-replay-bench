@@ -60,10 +60,10 @@ Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYS
               the pull request's base in DOD_BASE, since the artefacts' git history vouches
               for each retired id), docs/dod/PLAN.md (its wave items must be gap ids)
 Tested by:    tests/test_dod_check.py
-Touch when:   a level or category is added to the standard (update CATEGORIES / LEVELS and the
-              standard together); a new evidence prefix is needed (add a resolver and a row to
-              STANDARD.md §3); a route or journey step is added (write its artefact — the
-              check tells you which).
+Touch when:   never for a new repository; a level or category is added to the standard (update
+              CATEGORIES / LEVELS and the standard together); a new evidence prefix is needed (add a
+              resolver and a row to STANDARD.md §3); a route or journey step is added (write its
+              artefact — the check tells you which).
 """
 
 from __future__ import annotations
@@ -1011,7 +1011,7 @@ def validate_plan_covers_the_top(
     """STANDARD.md §6: the plan batches the order of work, so every gap the order ranks sits
     in some table of the plan — a wave, or the list after the waves (the plan once left rank
     1, G-653, in none; later a stream's new gap, G-556 at rank 73, sat in none while the plan
-    said every opened gap was placed, P-122). ``top`` limits the check to the first rows."""
+    said every opened gap was placed, P-189). ``top`` limits the check to the first rows."""
     planned = {gid for _n, gid in items}
     errors: list[str] = []
     seen: set[str] = set()
@@ -1031,7 +1031,7 @@ _RANK_RE = re.compile(r"\branks?\s+\d", re.I)
 
 def plan_headings_quote_no_rank(path: Path) -> list[str]:
     """A plan heading never quotes a rank: the order of work is the generated file, and a
-    rank copied into a heading reads false as soon as the order moves (P-122)."""
+    rank copied into a heading reads false as soon as the order moves (P-189)."""
     if not path.is_file():
         return []
     return [
@@ -1343,7 +1343,7 @@ def main(argv: list[str] | None = None) -> int:
     previous = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
     carried = retired_ids(previous, defined)
     # the previous file cannot vouch for itself: an id stays retired only while the artefacts'
-    # history or the base's committed gap analysis shows it was a gap (P-060)
+    # history or the base's committed gap analysis shows it was a gap (P-127)
     vouched = history_gap_ids(ROOT) | base_gap_analysis_ids(ROOT, args.base)
     retired = [gid for gid in carried if gid in vouched]
     unvouched = validate_retired([g for g in carried if g not in vouched], args.base, ROOT)

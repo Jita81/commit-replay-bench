@@ -17,7 +17,7 @@
  * Works with:   ui/src/screens/Decisions/decisions.ts, ui/src/screens/Decisions/DecisionsPage.tsx,
  *               ui/src/components/Layout.tsx (the badge), ui/src/api/hooks.ts
  * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx
- * Touch when:   a row source is added.
+ * Touch when:   never for a new repository; a row source is added.
  */
 
 import { useQueries, useQuery } from '@tanstack/react-query'

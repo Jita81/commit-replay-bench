@@ -42,10 +42,10 @@
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (a real cell with route `calibrate`),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   the class taxonomy changes (src/crb/core/taxonomy.py — mirror `ALL_CLASSES`
- *               here), a cell field is added to docs/API.md "/capability-map" (type it in
- *               ui/src/screens/Capability/contract.ts first), or the routing policy gains a
- *               threshold worth a tick; never for a new repository.
+ * Touch when:   never for a new repository; the class taxonomy changes (src/crb/core/taxonomy.py —
+ *               mirror `ALL_CLASSES` here), a cell field is added to docs/API.md "/capability-map"
+ *               (type it in ui/src/screens/Capability/contract.ts first), or the routing policy
+ *               gains a threshold worth a tick.
  * Claims:       The map shows measured cells only; coverage is `null` until the repo has a
  *               change profile (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
  */
@@ -405,7 +405,7 @@ export function CapabilityPage() {
                   hint="stat.capability.false_q1"
                   value={String(s.false_q1_total ?? 0)}
                   n={s.n_total ?? nTotal}
-                  apparatus="clean rows with a failed belt, across the map — must be 0"
+                  apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'} · clean rows with a failed belt, across the map — must be 0`}
                   tone={(s.false_q1_total ?? 0) > 0 || badCells > 0 ? 'red' : 'green'}
                   data-testid="tile-false-q1"
                 />
@@ -415,7 +415,9 @@ export function CapabilityPage() {
                   hint="stat.capability.posture"
                   value={s.posture_class || '—'}
                   n={s.n_total ?? nTotal}
-                  apparatus={`${fmtInt(s.unqualified_posture ?? 0)} unqualified-posture rows excluded · ${fmtInt(s.excluded_posture_divergent ?? 0)} rows left out where the task's tests differ between postures`}
+                  ci={null}
+                  apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'} · ${fmtInt(s.unqualified_posture ?? 0)} unqualified-posture rows excluded · ${fmtInt(s.excluded_posture_divergent ?? 0)} rows left out where the task's tests differ between postures`}
+                  footer="no interval: a posture and row counts, not a rate"
                   data-testid="tile-posture"
                 />
               </div>

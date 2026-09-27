@@ -23,8 +23,8 @@ Works with:   src/crb/server/routes/repos.py (under test), src/crb/core/spec.py
               tests/fixtures/server_seed.py, docs/API.md (repos), docs/OPERATOR.md (configuring
               a repository from the UI, §2.0)
 Tested by:    tests/test_server_routes_repos.py
-Touch when:   a ``RepoConfig`` field is added (a validation case and the redacted-diff case; the
-              UI form in ui/src/api/types.ts); a repo-level route is added.
+Touch when:   never for a new repository; a ``RepoConfig`` field is added (a validation case and the
+              redacted-diff case; the UI form in ui/src/api/types.ts); a repo-level route is added.
 """
 
 from __future__ import annotations

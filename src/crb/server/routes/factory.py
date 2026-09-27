@@ -72,8 +72,9 @@ Works with:   src/crb/server/factory_state.py (the state), src/crb/factory/backl
               ui/src/screens/Factory/IntakePage.tsx (the intake screen)
 Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py,
               tests/test_server_routes_intake.py
-Touch when:   a factory record gains a field the UI needs (extend TaskView + FactoryTask in
-              ui/src/api/types.ts together); a new write path (keep it append-only, role-gated).
+Touch when:   never for a new repository; a factory record gains a field the UI needs (extend
+              TaskView + FactoryTask in ui/src/api/types.ts together); a new write path (keep it
+              append-only, role-gated).
 """
 
 from __future__ import annotations

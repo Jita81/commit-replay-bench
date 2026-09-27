@@ -19,7 +19,7 @@
  *               ui/src/screens/Login/LoginPage.tsx and ui/src/components/Layout.tsx (the
  *               screens under test), src/crb/observability/probes.py (the probes asserted)
  * Tested by:    ui/e2e/walkthrough/01-login.spec.ts
- * Touch when:   a health probe is renamed or the login flow changes.
+ * Touch when:   never for a new repository; a health probe is renamed or the login flow changes.
  */
 import { expect, test } from '@playwright/test'
 import { env, field, signIn, stackHealth } from './support'

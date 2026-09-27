@@ -34,8 +34,8 @@ Works with:   src/crb/builders/adapter.py (calls it in ``build`` before the buil
               src/crb/core/ledger.py (``derive_failure_kind`` — the refusal is ``harness``),
               docs/PREVENTION.md (P-004 — the bug this closes)
 Tested by:    tests/test_builders_toolcheck.py
-Touch when:   a runner whose command does not start with its tool is added (teach this where
-              the tool is); never for a new repository.
+Touch when:   never for a new repository; a runner whose command does not start with its tool is
+              added (teach this where the tool is).
 """
 
 from __future__ import annotations

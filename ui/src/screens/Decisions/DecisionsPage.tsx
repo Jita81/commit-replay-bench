@@ -33,7 +33,8 @@
  *               ui/src/screens/Routing/RoutingPage.tsx (Read why)
  * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
- * Touch when:   a human act is added to the product (decisions.ts first).
+ * Touch when:   never for a new repository; a human act is added to the product (decisions.ts
+ *               first).
  */
 
 import { approverName } from '../../api/types'

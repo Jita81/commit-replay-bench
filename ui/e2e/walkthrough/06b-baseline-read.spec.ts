@@ -18,15 +18,15 @@
  *               nobody has read them, nobody has signed); opens the Baseline screen, which
  *               tells the server it was read (`POST /repos/{name}/baseline-read` answers 201
  *               with `recorded: true` — the first read by this person); and finds task 6
- *               Completed on that record (G-166, G-165, DL-074). Then it reads the Baseline's
+ *               Completed on that record (G-166, G-165, DL-075). Then it reads the Baseline's
  *               flow card for the measure stream (stream M, G-925): a measured lead time with
  *               its n and a spend that names the rows it covers. That check lived in 05 until
  *               the integration found it recorded the read before this spec could see it
- *               (P-113); tests/test_walkthrough_order.py now refuses a Baseline visit before 06b.
+ *               (P-180); tests/test_walkthrough_order.py now refuses a Baseline visit before 06b.
  * How:          support.ts's signed-in `test` (the bootstrap admin); `primary()`; the POST is
  *               awaited as the page's own response, never sent by the spec.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-074)
+ * ADRs:         none (DL-075)
  * Works with:   ui/src/screens/Home/HomePage.tsx (the task list), ui/src/screens/Results/
  *               ResultsPage.tsx (the page that records the read), src/crb/server/routes/repos.py
  *               (`record_baseline_read`, `baseline_read` on the detail), ui/e2e/walkthrough/
@@ -34,9 +34,9 @@
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (the first later spec to open
  *               the baseline — this one must run before it), ui/src/components/FlowPanel.tsx
  * Tested by:    scripts/walkthrough.sh (CI job `walkthrough`)
- * Touch when:   a task's derivation on Home changes, or a spec before 07 starts opening the
- *               primary repository's baseline (then this spec's "Incomplete first" no longer
- *               holds and must move earlier).
+ * Touch when:   never for a new repository; a task's derivation on Home changes, or a spec before
+ *               07 starts opening the primary repository's baseline (then this spec's "Incomplete
+ *               first" no longer holds and must move earlier).
  */
 import { expect, primary, test } from './support'
 import type { Locator, Page } from '@playwright/test'
@@ -72,7 +72,7 @@ test.describe('06b baseline read', () => {
     await expect(task(page, 6)).toContainText('Read the baseline')
     await expect(task(page, 6)).toContainText('Incomplete')
 
-    // open the baseline: the Baseline screen tells the server it was read, for the first time (DL-074)
+    // open the baseline: the Baseline screen tells the server it was read, for the first time (DL-075)
     const recorded = page.waitForResponse((r) => r.url().endsWith(`/api/v1/repos/${encodeURIComponent(repo)}/baseline-read`) && r.request().method() === 'POST')
     await page.goto(`/results?repo=${encodeURIComponent(repo)}`)
     const res = await recorded
@@ -106,7 +106,7 @@ test.describe('06b baseline read', () => {
     await expect(spend).toContainText(
       /\d+ row\(s\) reported no price and are not counted as zero, so this is a floor\.|Every row counted here reported its own price\./,
     )
-    // and the repository's cumulative spend, every graded row once, stands beside it (DL-066)
+    // and the repository's cumulative spend, every graded row once, stands beside it (DL-067)
     await expect(page.getByTestId('flow-spend-total')).toContainText('every graded row counted once')
     // and the counts are counts: the rows this repository has graded
     await expect(card).toContainText('graded rows')

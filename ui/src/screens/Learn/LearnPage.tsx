@@ -29,7 +29,7 @@
  *               attaches is shown verbatim under each table. The two decisions that need
  *               more than a click open a `Dialog` (a verdict needs a reason; queueing runs
  *               spends money, so it is confirmed against the plan's own estimate); the note is a
- *               one-line field, since it is written into the corpus as a comment (P-094); the
+ *               one-line field, since it is written into the corpus as a comment (P-161); the
  *               outcome is a green `NotificationBanner` with a `role="status"` line naming
  *               what was written, so a screen reader is told as it lands.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -48,8 +48,8 @@
  *               the terms, the register card and its operator controls, each action's
  *               success state, the viewer who is offered none); the derivations are pinned in
  *               tests/test_learn.py and the routes in tests/test_server_routes_learn.py
- * Touch when:   a report gains a field (src/crb/core/learn.py — mirror the interface here)
- *               or a fourth play is added to docs/LEARNING-LOOP.md; never for a new repository.
+ * Touch when:   never for a new repository; a report gains a field (src/crb/core/learn.py — mirror
+ *               the interface here) or a fourth play is added to docs/LEARNING-LOOP.md.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
@@ -415,7 +415,7 @@ function DecideDialog({ repo, group, onClose }: { repo: string; group: RefusalGr
               <option value="honest">Honest — the guard should not have refused it</option>
               <option value="refuse">Refused — the guard was right</option>
             </SelectField>
-            {/* P-094 — one line by construction: the note is written into the corpus as a
+            {/* P-161 — one line by construction: the note is written into the corpus as a
                 comment, and a line break would end it and write the rest as a corpus line */}
             <TextField
               label="Why (written into the corpus as a comment)"

@@ -23,7 +23,8 @@
  *               ui/src/test/utils.tsx, tests/test_server_routes_intake.py (the same journey
  *               against the real server)
  * Tested by:    ui/src/screens/Factory/IntakePage.test.tsx
- * Touch when:   an act is added to the screen; a field is added to the intake response.
+ * Touch when:   never for a new repository; an act is added to the screen; a field is added to the
+ *               intake response.
  */
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

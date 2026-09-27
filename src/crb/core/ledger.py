@@ -1280,7 +1280,7 @@ class CellStats:
     checks_arm: str = ARM_OFF
     #: Eligible rows whose cost is KNOWN (``GradeRow.cost_known``) — the denominator of
     #: ``cost_usd_mean``. ``0`` means the mean is unknown, never ``$0``: a reader decides
-    #: known-ness from this count, never by comparing the mean with zero (P-064).
+    #: known-ness from this count, never by comparing the mean with zero (P-131).
     n_cost_known: int = 0
 
     @property
@@ -1401,7 +1401,7 @@ def rows_for_checks(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
 #: another apparatus version, mode, checks arm (ADR-0024) or posture class (ADR-0019 §8) is
 #: another cell's evidence. A fold that keys cells by class and size keys them by
 #: :func:`pool_scope` too — so an axis added here reaches every such fold at once
-#: (``tests/test_server_routes_flow.py`` splits a cell on each axis; docs/PREVENTION.md P-117).
+#: (``tests/test_server_routes_flow.py`` splits a cell on each axis; docs/PREVENTION.md P-184).
 NEVER_POOL_AXES: tuple[str, ...] = ("apparatus_version", "mode", "checks_arm", "posture_class")
 
 

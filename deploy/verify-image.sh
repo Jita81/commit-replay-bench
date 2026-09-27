@@ -33,8 +33,9 @@
 #               tests/test_release_verify_image.py (pins the three agree), docs/DEPLOYMENT.md (the
 #               released image: name, signature, SBOM, §2.2), docs/SECURITY.md (supply chain, §3.7)
 # Tested by:    tests/test_release_verify_image.py
-# Touch when:   the image repository, issuer or identity pattern changes (change release.yml, the
-#               Helm values and this script together — the test enforces it); cosign's CLI changes.
+# Touch when:   never for a new repository; the image repository, issuer or identity pattern
+#               changes (change release.yml, the Helm values and this script together — the test
+#               enforces it); cosign's CLI changes.
 set -euo pipefail
 
 IMAGE="${CRB_IMAGE_REPOSITORY:-ghcr.io/jita81/commit-replay-bench}"

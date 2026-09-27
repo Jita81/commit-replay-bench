@@ -49,8 +49,9 @@
  *               for the CLI)
  * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element on /connect and /connect/:name resolves to a registry id)
- * Touch when:   a stage is added (connection.ts first); the API grows a GitHub App install
- *               flow (replace the URL field with the installation's repository picker).
+ * Touch when:   never for a new repository; a stage is added (connection.ts first); the API grows a
+ *               GitHub App install flow (replace the URL field with the installation's repository
+ *               picker).
  */
 
 import { useEffect, useState } from 'react'

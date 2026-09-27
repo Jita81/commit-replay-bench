@@ -18,7 +18,8 @@
  *               ui/src/help/hints-ratchet.instrument.tsx (the ratchet's /learn fixture),
  *               ui/src/api/types.ts (the shape), src/crb/core/prevention.py (the served shape)
  * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
- * Touch when:   the register's served shape changes (keep this a populated, valid body).
+ * Touch when:   never for a new repository; the register's served shape changes (keep this a
+ *               populated, valid body).
  */
 import type { PreventionEntry, PreventionRegister } from '../../api/types'
 

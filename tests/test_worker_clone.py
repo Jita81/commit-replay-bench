@@ -36,11 +36,11 @@ Works with:   src/crb/server/worker.py (under test), src/crb/core/git.py (``clon
               tests/fixtures/remote.py, tests/test_server_routes_w3b.py (the API's
               half), tests/test_git_clone.py (the policy's own suite), tests/test_worker.py
 Tested by:    tests/test_worker_clone.py
-Touch when:   the clone destination or the URL policy changes (mirror the route and CLI suites);
-              a builder gains a config key the worker must pass through; a new place opens a
-              stored clone path (add it to ``_USE_SITES``; any other git opener in
-              ``crb.server`` goes on ``_NOT_A_STORED_CLONE``, and a process that is not git
-              on ``_NOT_GIT``, each with its reason).
+Touch when:   never for a new repository; the clone destination or the URL policy changes (mirror
+              the route and CLI suites); a builder gains a config key the worker must pass through;
+              a new place opens a stored clone path (add it to ``_USE_SITES``; any other git opener
+              in ``crb.server`` goes on ``_NOT_A_STORED_CLONE``, and a process that is not git on
+              ``_NOT_GIT``, each with its reason).
 """
 
 from __future__ import annotations

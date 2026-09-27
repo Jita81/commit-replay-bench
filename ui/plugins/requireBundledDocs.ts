@@ -11,13 +11,13 @@
  *               (`nnnn-*.md`, ui/src/help/adrs.ts). A glob that matches nothing is not an error
  *               to Vite, so without this the bundle builds green and every guide reads as
  *               missing — what the image shipped while deploy/Dockerfile.dockerignore dropped
- *               `docs` (docs/PREVENTION.md P-106). An unreadable `DOC_NAMES` fails too, rather
+ *               `docs` (docs/PREVENTION.md P-173). An unreadable `DOC_NAMES` fails too, rather
  *               than checking nothing.
  * How:          `existsSync` / `readdirSync` over file URLs; `this.error` (Rollup's) to fail.
  *               The locations are parameters with this repository's paths as defaults, so the
  *               tests run it against temporary trees.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-073)
+ * ADRs:         none (DL-074)
  * Works with:   ui/vite.config.ts (runs it), ui/src/help/docs.ts (`DOC_NAMES`, read as text),
  *               ui/src/help/adrs.ts (the records' glob), deploy/Dockerfile.dockerignore (the
  *               context it guards), deploy/Dockerfile (the image's `npm run build`)
@@ -42,7 +42,7 @@ export function requireBundledDocs({
       const adrDir = new URL('adr/', docs)
       const adrs = existsSync(adrDir) ? readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f)) : []
       if (missing.length > 0 || adrs.length === 0) {
-        this.error(`the UI bundles repository docs, and the build cannot see them: missing ${[...missing.map((n) => `docs/${n}.md`), ...(adrs.length === 0 ? ['docs/adr/*.md'] : [])].join(', ')} — is docs/ in the build context? (deploy/Dockerfile.dockerignore, docs/PREVENTION.md P-106)`)
+        this.error(`the UI bundles repository docs, and the build cannot see them: missing ${[...missing.map((n) => `docs/${n}.md`), ...(adrs.length === 0 ? ['docs/adr/*.md'] : [])].join(', ')} — is docs/ in the build context? (deploy/Dockerfile.dockerignore, docs/PREVENTION.md P-173)`)
       }
     },
   }

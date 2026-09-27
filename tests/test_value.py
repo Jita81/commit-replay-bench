@@ -24,8 +24,8 @@ Works with:   src/crb/core/value.py (under test), src/crb/core/stats.py (the int
               src/crb/core/routing.py (the rule the prospective decisions replay),
               src/crb/core/ledger.py (the failure kinds and the row the adapter reads)
 Tested by:    tests/test_value.py
-Touch when:   a measure is added to the scorecard, the valid denominator changes, or the
-              register behind ``default_register`` changes (pin its statuses here).
+Touch when:   never for a new repository; a measure is added to the scorecard, the valid denominator
+              changes, or the register behind ``default_register`` changes (pin its statuses here).
 """
 
 from __future__ import annotations

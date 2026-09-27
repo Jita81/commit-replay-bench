@@ -34,9 +34,9 @@ Works with:   src/crb/core/oracle/controls.py (under test), tests/fixtures/oracl
               src/crb/core/routing.py (``ControlsVerdict`` the report becomes),
               tests/test_oracle_controls_go.py and tests/test_oracle_controls_js.py (the ports)
 Tested by:    tests/test_oracle_controls.py
-Touch when:   a control is added (a matrix case with its expected label, a pure-transform case,
-              and an ``expected_labels`` entry); a belt changes what catches a control (the
-              ``caught`` note must name the belt).
+Touch when:   never for a new repository; a control is added (a matrix case with its expected label,
+              a pure-transform case, and an ``expected_labels`` entry); a belt changes what catches
+              a control (the ``caught`` note must name the belt).
 Claims:       A passing report licenses "the instrument rejects these transforms on this
               repository"; a measured escape is a statement about the target tests, never about
               a builder (docs/EVIDENCE-AND-CLAIMS.md).

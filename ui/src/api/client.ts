@@ -33,9 +33,9 @@
  *               src/crb/server/auth.py (the cookie and CSRF names this file mirrors),
  *               src/crb/server/app.py (emits the error envelope)
  * Tested by:    ui/src/api/client.test.ts
- * Touch when:   the error envelope, the cookie names or the CSRF header change (docs/API.md
- *               "Conventions") — change src/crb/server/auth.py and this file together; never
- *               for a new repository.
+ * Touch when:   never for a new repository; the error envelope, the cookie names or the CSRF header
+ *               change (docs/API.md "Conventions") — change src/crb/server/auth.py and this file
+ *               together.
  */
 
 import type { ApiErrorEnvelope } from './types'

@@ -44,7 +44,7 @@
  *               ui/src/help/hints-collector.ts (`unhinted`),
  *               ui/src/test/source-ratchets.ts (`queryDataReads`)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx
- * Touch when:   a headline fact or the deliver wording changes.
+ * Touch when:   never for a new repository; a headline fact or the deliver wording changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
@@ -173,6 +173,22 @@ describe('ResultsPage', () => {
     expect(callout).toHaveTextContent('The ledger records no human hours')
     expect(callout).toHaveTextContent('merge outcomes only for the pull requests the factory opened')
     expect(callout).not.toHaveTextContent(/neither human hours nor merge outcomes/)
+  })
+
+  it('the posture tile carries its apparatus and says no interval applies; every map tile names the apparatus (PR #56 review)', async () => {
+    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, summary: { ...MAP.summary, posture_class: 'docker/copy/sealed', unqualified_posture: 2 } } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const posture = await screen.findByTestId('tile-posture')
+    expect(posture).toHaveTextContent('docker/copy/sealed')
+    expect(posture).toHaveTextContent('apparatus 2.2')
+    expect(posture).toHaveTextContent('95% CI—')
+    expect(posture).toHaveTextContent('no interval: a posture and row counts, not a rate')
+    // the class, not the instance: every headline tile on the page carries its apparatus
+    // (the pool tile is exempt by name: its dates come from git history, not a graded row)
+    const missing = [...document.querySelectorAll('[data-component="stat-tile"]')]
+      .filter((t) => t.getAttribute('data-testid') !== 'tile-pool-window' && !/apparatus 2\.2/.test(t.textContent ?? ''))
+      .map((t) => t.getAttribute('data-testid') ?? t.textContent)
+    expect(missing).toEqual([])
   })
 
   it('the bar in the oracle tile follows the policy in force, not a constant', async () => {
@@ -565,7 +581,7 @@ describe('ResultsPage', () => {
     const { calls } = mockApi({ ...ROUTES, 'POST /repos/alpha/baseline-read': { repo: 'alpha', at: '2026-09-26T09:00:00Z', by: 'u1', rows: 35, recorded: true } })
     const first = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/repos/alpha/baseline-read')).toHaveLength(1))
-    // the repository is re-read, so Home's task 6 sees the record (DL-074)
+    // the repository is re-read, so Home's task 6 sees the record (DL-075)
     await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.path === '/repos/alpha').length).toBeGreaterThan(1))
     first.unmount()
     vi.unstubAllGlobals()

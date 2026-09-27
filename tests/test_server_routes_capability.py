@@ -32,8 +32,8 @@ Works with:   src/crb/server/routes/capability.py (under test), src/crb/core/cap
               seed and its load-bearing counts), tests/fixtures/signoff_seed.py (the overlay
               case), src/crb/server/schemas_capability.py (the response shapes), docs/API.md
 Tested by:    tests/test_server_routes_capability.py
-Touch when:   a field is added to a cell response (the schema, this suite and
-              ui/src/api/types.ts together); the controls clause changes (mirror
+Touch when:   never for a new repository; a field is added to a cell response (the schema, this
+              suite and ui/src/api/types.ts together); the controls clause changes (mirror
               tests/test_routing.py).
 """
 

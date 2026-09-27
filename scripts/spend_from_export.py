@@ -44,7 +44,8 @@ ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/core/spend.py (the rules), src/crb/core/ledger.py (the failure rule),
               tests/test_spend_from_export.py (pins what this prints)
 Tested by:    tests/test_spend_from_export.py
-Touch when:   the export's columns change; a spend rule gains an input the export carries.
+Touch when:   never for a new repository; the export's columns change; a spend rule gains an input
+              the export carries.
 """
 
 from __future__ import annotations

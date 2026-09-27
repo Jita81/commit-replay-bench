@@ -21,8 +21,8 @@
  *               `terms[]` per route the lint checks against), ui/src/help/help.test.ts (the
  *               same `LINT` table), ui/src/App.tsx (the route table `MIN_HINTS` must cover)
  * Tested by:    ui/src/help/hints.test.ts
- * Touch when:   a screen is added (map its id segment to its route in `SEGMENT_ROUTE`); a
- *               term is added to `LINT` in help.test.ts (mirror it here).
+ * Touch when:   never for a new repository; a screen is added (map its id segment to its route in
+ *               `SEGMENT_ROUTE`); a term is added to `LINT` in help.test.ts (mirror it here).
  */
 import { describe, expect, it } from 'vitest'
 import appSource from '../App.tsx?raw'

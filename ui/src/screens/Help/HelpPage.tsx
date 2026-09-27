@@ -12,15 +12,15 @@
  * How:          `TERM_IDS` / `TERMS`, `DOC_NAMES` / `DOC_TITLES`, `ADR_TITLES`; on load it
  *               scrolls to `location.hash` so a term link lands on its entry.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-073)
+ * ADRs:         none (DL-074)
  * Works with:   ui/src/help/glossary.ts (the terms), ui/src/help/docs.ts (the guides),
  *               ui/src/help/adrs.ts (the decision records),
  *               ui/src/screens/Help/DocPage.tsx (where a guide link lands),
  *               ui/src/components/Help.tsx (`Term` links here), ui/src/components/Layout.tsx
  *               (Help in the top bar and footer), ui/src/App.tsx (the route)
  * Tested by:    ui/src/screens/Help/HelpPage.test.tsx
- * Touch when:   a guide, a term or a decision record is added (edit the registries —
- *               glossary.ts, docs.ts, adrs.ts — not this page).
+ * Touch when:   never for a new repository; a guide, a term or a decision record is added (edit the
+ *               registries — glossary.ts, docs.ts, adrs.ts — not this page).
  */
 import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router'

@@ -25,9 +25,9 @@
  *               src/crb/server/routes/reviews.py (the write boundary and its 422 codes),
  *               ui/src/lib/auth.tsx (`can('operator')`)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx, ui/e2e/walkthrough/09-review.spec.ts
- * Touch when:   a finding kind or a write-boundary rule is added (src/crb/core/review.py,
- *               docs/API.md "Reviews") — add the chip, the tone and the client-side blocker
- *               together; never for a new repository.
+ * Touch when:   never for a new repository; a finding kind or a write-boundary rule is added
+ *               (src/crb/core/review.py, docs/API.md "Reviews") — add the chip, the tone and the
+ *               client-side blocker together.
  * Claims:       A review is governance evidence about mergeability; it never alters the
  *               mechanical grade (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */

@@ -4,7 +4,7 @@
  *
  * Navigation
  * ----------
- * What it is:   A source-level ratchet (P-102) over `ui/src`: each file that gives a query
+ * What it is:   A source-level ratchet (P-169) over `ui/src`: each file that gives a query
  *               `placeholderData` (or `keepPreviousData`) is named here with the hook it
  *               exports, and every non-test file that calls that hook reads
  *               `isPlaceholderData`.
@@ -26,10 +26,11 @@
  *               without the placeholder), ui/src/screens/Signoff/SignoffPage.test.tsx (the
  *               behaviour: the gate is pending while a newly named row loads),
  *               ui/src/App.reachability.test.ts (the same raw-source pattern),
- *               docs/PREVENTION.md (row P-102)
+ *               docs/PREVENTION.md (row P-169)
  * Tested by:    itself (the negative control below)
- * Touch when:   a query is given `placeholderData` — declare it below with its hook and make
- *               every caller read `isPlaceholderData` before it builds a gate or a verdict.
+ * Touch when:   never for a new repository; a query is given `placeholderData` — declare it below
+ *               with its hook and make every caller read `isPlaceholderData` before it builds a
+ *               gate or a verdict.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -69,7 +70,7 @@ function findings(sources: Record<string, string>, declared: Record<string, { ho
   return out
 }
 
-describe('a placeholder is never a verdict (P-102)', () => {
+describe('a placeholder is never a verdict (P-169)', () => {
   it('finds the sources', () => {
     expect(Object.keys(SOURCES).length).toBeGreaterThan(50)
   })

@@ -20,7 +20,7 @@ Works with:   src/crb/server/routes/prevention.py (under test), src/crb/server/p
               (the store and the tick), src/crb/core/prevention.py (the records),
               tests/fixtures/server_seed.py (the seeded store and the four roles)
 Tested by:    tests/test_server_routes_prevention.py
-Touch when:   a route or a record kind of the loop is added.
+Touch when:   never for a new repository; a route or a record kind of the loop is added.
 """
 
 from __future__ import annotations

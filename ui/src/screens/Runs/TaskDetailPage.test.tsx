@@ -17,8 +17,8 @@
  *               ui/src/api/types.ts (`TaskSpec.labels`), src/crb/factory/build.py (the
  *               labels a factory task carries), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Runs/TaskDetailPage.test.tsx
- * Touch when:   the factory writes a different label for its items, or the task page's
- *               provenance sentence changes.
+ * Touch when:   never for a new repository; the factory writes a different label for its items, or
+ *               the task page's provenance sentence changes.
  */
 import { screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'

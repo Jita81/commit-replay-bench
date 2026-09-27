@@ -24,7 +24,8 @@ Works with:   src/crb/core/lint.py (the detectors), src/crb/core/finish_gate.py
               (``derived_commands``), scripts/audit_runner_commands.py (the audit),
               docs/reviews/2026-09-25-runner-commands-audit.md (the findings)
 Tested by:    tests/test_runner_audit.py
-Touch when:   a detector changes what it derives for one of the six repositories' shapes.
+Touch when:   never for a new repository; a detector changes what it derives for one of the six
+              repositories' shapes.
 """
 
 from __future__ import annotations

@@ -66,7 +66,7 @@ What it does: Derives a record's headline verdict from its findings by one rule 
               the reviewed row's pack ``diff_sha256`` or whose pack is not that row's own;
               chains records; joins the standing verdict per row onto cells so the map can
               show how many accepted rows a human read and how many had a defect. A record
-              may state the reviewer's own minutes (hashed only when stated, DL-067).
+              may state the reviewer's own minutes (hashed only when stated, DL-068).
               Records are kept forever.
 How:          ``ReviewRecord.__post_init__`` (vocabulary, ``derive_verdict``, hash shape,
               regression ⇒ not mergeable) → ``check_review_anchor`` (row match, pack
@@ -109,7 +109,7 @@ from crb.core.version import APPARATUS_VERSION
 
 REVIEW_SCHEMA = "crb.review.v1"
 #: The most minutes one review may state: a working day. A longer figure is a typing slip
-#: or several reviews in one, and either would skew the decide stream's median (DL-067).
+#: or several reviews in one, and either would skew the decide stream's median (DL-068).
 MAX_REVIEW_MINUTES = 480
 
 # --- verdicts (the vocabulary) ----------------------------------------------------
@@ -256,7 +256,7 @@ class ReviewRecord:
     evidence_pack_hash: str = ""
     #: How long the review took, in whole minutes, as the reviewer stated it (``None``: not
     #: stated). Hashed only when stated, so a record without it hashes as one written before
-    #: the field existed (DL-067).
+    #: the field existed (DL-068).
     minutes: int | None = None
     apparatus_version: str = APPARATUS_VERSION
     created: str = field(default_factory=utc_now_iso)

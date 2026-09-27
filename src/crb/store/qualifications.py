@@ -26,7 +26,8 @@ Works with:   src/crb/store/models.py (``TaskQualification``, ``Task``),
               src/crb/store/migrations/versions/v0011_task_qualifications.py (the table)
 Tested by:    tests/test_store_qualifications.py, tests/test_store_migrate.py,
               tests/test_worker.py
-Touch when:   a gate needs a new reading of the records (add it here, never an UPDATE).
+Touch when:   never for a new repository; a gate needs a new reading of the records (add it here,
+              never an UPDATE).
 """
 
 from __future__ import annotations

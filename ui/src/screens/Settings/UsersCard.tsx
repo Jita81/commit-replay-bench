@@ -40,8 +40,8 @@
  * Tested by:    ui/src/screens/Settings/UsersCard.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (an admin sets a persona's
  *               password, that persona signs in, then deactivate and reactivate)
- * Touch when:   a `user.*` act is added at the API — it needs a control here, a hint, and a
- *               line in the audit trail's empty state; never for a new repository.
+ * Touch when:   never for a new repository; a `user.*` act is added at the API — it needs a control
+ *               here, a hint, and a line in the audit trail's empty state.
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'

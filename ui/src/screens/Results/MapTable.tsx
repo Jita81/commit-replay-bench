@@ -35,7 +35,7 @@
  *               same sign-off state rules), ui/src/lib/auth.tsx (`can` — the role rule),
  *               docs/EVIDENCE-AND-CLAIMS.md §6 (the permitted claim shape)
  * Tested by:    ui/src/screens/Results/MapTable.test.tsx
- * Touch when:   a cell field is added that a reader needs on the grid.
+ * Touch when:   never for a new repository; a cell field is added that a reader needs on the grid.
  */
 
 import { Link } from 'react-router'

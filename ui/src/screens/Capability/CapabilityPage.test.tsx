@@ -26,8 +26,8 @@
  *               ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`),
  *               ui/src/test/source-ratchets.ts (`queryDataReads`, the `currentData` ratchet)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx
- * Touch when:   a cell field or controls state is added — extend the fixtures and assert its
- *               rendering here.
+ * Touch when:   never for a new repository; a cell field or controls state is added — extend the
+ *               fixtures and assert its rendering here.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -115,6 +115,24 @@ describe('CapabilityPage', () => {
     expect(screen.getAllByTestId('ci-bar')).toHaveLength(2)
     expect(screen.getByTestId('cell-measured').textContent).toContain('n=40')
     expect(screen.getByTestId('cell-measured').textContent).toContain('92.5%')
+  })
+
+  it('the posture tile carries its apparatus and says no interval applies; every tile names the apparatus (PR #56 review)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, summary: { ...MAP.summary, posture_class: 'docker/copy/sealed', unqualified_posture: 3, excluded_posture_divergent: 1 } },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const posture = await screen.findByTestId('tile-posture')
+    expect(posture).toHaveTextContent('docker/copy/sealed')
+    expect(posture).toHaveTextContent('apparatus 2.0')
+    expect(posture).toHaveTextContent('95% CI—')
+    expect(posture).toHaveTextContent('no interval: a posture and row counts, not a rate')
+    // the class, not the instance: every headline tile on the page carries the map's apparatus
+    for (const tile of document.querySelectorAll('[data-component="stat-tile"]')) {
+      expect(tile.textContent, tile.getAttribute('data-testid') ?? tile.textContent ?? '').toContain('apparatus 2.0')
+    }
   })
 
   it('the open cell: cost and latency carry the known count as n, the served interval and the apparatus; an unknown is a dash, never $0.00 (F35)', async () => {

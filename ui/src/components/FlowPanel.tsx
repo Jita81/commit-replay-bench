@@ -28,8 +28,8 @@
  *               src/crb/server/routes/flow.py (the endpoint), docs/dod/streams/measure.md
  *               (the MEASURE criteria these figures answer)
  * Tested by:    ui/src/components/FlowPanel.test.tsx, ui/src/help/hints-ratchet.test.tsx
- * Touch when:   a stream gains a milestone pair (add its `flow.<key>` hint — the panel picks the
- *               figure up on its own); never for a new repository.
+ * Touch when:   never for a new repository; a stream gains a milestone pair (add its `flow.<key>`
+ *               hint — the panel picks the figure up on its own).
  * Claims:       Every figure here is derived from stored records and carries its n
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */

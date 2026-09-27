@@ -18,7 +18,7 @@ What it does: Pins password hashing (short passwords refused), session round tri
               a disabled account) a redirect to ``/login?error=<code>`` with no provider words;
               that every sign-in and refused sign-in is a ``user.*`` event (a refused name that
               is no account recorded without the name; a lost ``seq`` race retried); and that
-              /login's session sentence matches ``session_ttl`` (P-081).
+              /login's session sentence matches ``session_ttl`` (P-148).
 How:          ``create_app(oidc_client=FakeOidc(...))`` — no network; a ``TestClient`` per
               settings variant.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
@@ -28,8 +28,9 @@ Works with:   src/crb/server/auth.py (under test), src/crb/server/routes/auth.py
               src/crb/store/models.py (the ``users`` table), docs/SECURITY.md (authentication
               and authorisation, §3.4), docs/DEPLOYMENT.md (Entra ID → ``CRB_OIDC__*``, §4.1)
 Tested by:    tests/test_server_auth.py
-Touch when:   a role is added to the ladder (the map and the RBAC matrices in every route
-              suite); the OIDC claims mapping changes; never so that a mutating route skips CSRF.
+Touch when:   never for a new repository; a role is added to the ladder (the map and the RBAC
+              matrices in every route suite); the OIDC claims mapping changes; never so that a
+              mutating route skips CSRF.
 """
 
 from __future__ import annotations
@@ -1022,7 +1023,7 @@ class TestSignInIsAudited:
     ) -> None:
         """Two sign-ins to one account can read the same last ``seq`` on its trail; the
         loser's commit breaks the unique ``(trace_id, seq)``. The sign-in rolls back and
-        writes again rather than answering a 500 (DL-068). The race is staged by adding a
+        writes again rather than answering a 500 (DL-069). The race is staged by adding a
         second row with the same ``(trace_id, seq)`` to the first attempt's transaction."""
         import crb.server.routes.auth as routes_auth
         from crb.server.routes.admin import record_user_event as real_record
@@ -1072,7 +1073,7 @@ class TestSignInIsAudited:
     def test_an_oidc_sign_in_that_loses_the_seq_race_is_retried_not_refused(
         self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """DL-068 (3) holds for the organisation door too: the callback's ``user.login`` is
+        """DL-069 (3) holds for the organisation door too: the callback's ``user.login`` is
         written through the retrying commit, so a lost race is written again, not a 500."""
         import crb.server.routes.auth as routes_auth
 
@@ -1093,7 +1094,7 @@ class TestSignInIsAudited:
     def test_an_oidc_sign_in_that_keeps_losing_returns_to_login_not_a_500(
         self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """DL-068 (4): every callback failure is a redirect. A race lost on every attempt
+        """DL-069 (4): every callback failure is a redirect. A race lost on every attempt
         lands on ``/login?error=oidc_failed`` with no session, never a raw 500."""
         import crb.server.routes.auth as routes_auth
 
@@ -1245,7 +1246,7 @@ class TestOidcFailureReturnsToLogin:
 
 
 def test_the_sign_in_page_states_the_session_length_the_server_sets(tmp_path: Path) -> None:
-    """P-081: /login told people a session "expires with the browser" while the cookie
+    """P-148: /login told people a session "expires with the browser" while the cookie
     carried ``Max-Age`` = ``session_ttl`` (8 hours). The page's sentence and the server's
     default are now held to each other: change one without the other and this fails."""
     import re
@@ -1301,7 +1302,7 @@ def test_the_recovery_hints_state_the_numbers_the_server_enforces() -> None:
 
 
 def test_every_sign_in_record_commits_through_the_retry() -> None:
-    """P-086: the retrying commit (DL-068) once covered local sign-in only; the organisation
+    """P-153: the retrying commit (DL-069) once covered local sign-in only; the organisation
     callback wrote ``user.login`` and called ``db.commit()`` itself, so a lost race answered a
     raw 500. In routes/auth.py a function that writes an audit event (directly, through a
     nested helper, or through ``_record_failed_login``) never commits by itself: it hands the

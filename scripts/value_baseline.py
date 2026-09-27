@@ -50,9 +50,9 @@ Works with:   src/crb/core/value.py (the report), src/crb/core/ledger.py (the fa
               docs/reviews/2026-09-25-value-baseline.md (the page it regenerates),
               docs/reviews/2026-09-13-critical-friend.md (the three cobra verdicts)
 Tested by:    tests/test_value_baseline_script.py
-Touch when:   the export gains a column or an error class (add it to ``ERRCLASS``); the
-              baseline page is regenerated after a campaign (run it, paste the output, keep
-              the tags).
+Touch when:   never for a new repository; the export gains a column or an error class (add it to
+              ``ERRCLASS``); the baseline page is regenerated after a campaign (run it, paste the
+              output, keep the tags).
 """
 
 from __future__ import annotations
@@ -141,7 +141,7 @@ def _psv_row(d: dict[str, str]) -> ValueRow:
         mode=d["mode"],
         clean=clean,
         failure_kind=kind,
-        # an empty cost column is no price, never a known $0 (DL-066; P-118)
+        # an empty cost column is no price, never a known $0 (DL-067; P-185)
         cost_usd=float((d.get("cost") or "").strip() or 0),
         cost_known=bool((d.get("cost") or "").strip()),
         apparatus_version=d["apparatus"],

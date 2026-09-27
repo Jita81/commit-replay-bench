@@ -30,7 +30,7 @@ spend, which the parts add up to. The sums use the product's one spend rule
 (``crb.core.flow.spend_of_rows``), which the value scorecard also uses. A cost per unit is the
 price of the rows that bought the unit (a cell's first ten rows; the factory's rows per merged
 pull request) and is withheld with the reason while any of them is unpriced, never divided
-over a floor (DL-066).
+over a floor (DL-067).
 
 **Who reads what.** Every figure is a viewer's except the platform stream's account counts
 and its recovery lead time, which are an admin's (ADR-0028 §7): anyone else reads the lead time
@@ -71,10 +71,10 @@ Works with:   src/crb/core/flow.py (the arithmetic and the shapes this module fi
               src/crb/store/models.py (``Run``, ``Event``, ``Signoff``, ``Review``, ``User``)
 Tested by:    tests/test_server_routes_flow.py, tests/test_flow.py,
               tests/test_flow_known_answers.py (every served figure against a known answer)
-Touch when:   a stream's milestone pair changes (change it here, in the stream's MEASURE
-              criterion and in tests/test_flow_known_answers.py's ``KNOWN`` together); a
-              figure named in ``NOT_CAPTURED`` becomes recorded (remove it here, close its
-              gap, and flip the criterion in the same commit).
+Touch when:   never for a new repository; a stream's milestone pair changes (change it here, in the
+              stream's MEASURE criterion and in tests/test_flow_known_answers.py's ``KNOWN``
+              together); a figure named in ``NOT_CAPTURED`` becomes recorded (remove it here, close
+              its gap, and flip the criterion in the same commit).
 """
 
 from __future__ import annotations
@@ -315,7 +315,7 @@ def measure(
     ]
     by_cell: dict[tuple[str, ...], list[GradeRow]] = {}
     for r in rows:
-        # every never-pool axis, from the one place they are named (P-117)
+        # every never-pool axis, from the one place they are named (P-184)
         key = (*pool_scope(r), r.capability_class, r.size)
         by_cell.setdefault(key, []).append(r)
     bar_pairs: list[tuple[str, str]] = []

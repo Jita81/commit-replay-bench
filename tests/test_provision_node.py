@@ -26,7 +26,7 @@ Works with:   src/crb/provision/node.py (under test), src/crb/core/runners/node_
               tests/fixtures/langs/noderepo_deps.py
               (the repository)
 Tested by:    tests/test_provision_node.py
-Touch when:   the Node recipe's plans or binding change.
+Touch when:   never for a new repository; the Node recipe's plans or binding change.
 """
 
 from __future__ import annotations

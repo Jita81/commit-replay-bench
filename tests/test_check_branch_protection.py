@@ -4,8 +4,9 @@ Navigation
 ----------
 What it is:   The tests for scripts/check_branch_protection.py.
 What it does: Pins that the workflow's jobs expand to the check names branch protection must
-              require (a matrix job once per value); that the comparison names a required
-              check no job reports, a job nobody requires, a non-strict setting and a job name
+              require (a matrix job once per combination, an aggregator's parts set aside);
+              that the comparison names a required check no job reports, a job nobody
+              requires, a required part of an aggregator, a non-strict setting and a job name
               GitHub would cut at 100 characters; that the last reading of the setting
               (tests/fixtures/branch_protection_main.json) still matches ci.yml, so renaming or
               adding a job fails here until the setting is read again; and that the scheduled
@@ -19,7 +20,8 @@ Works with:   scripts/check_branch_protection.py (under test), .github/workflows
               tests/fixtures/branch_protection_main.json (the last reading),
               docs/dod/product.md (product.evidence.6 cites these tests)
 Tested by:    (this is a test file)
-Touch when:   a job is added to or renamed in ci.yml (read the setting again after the
+Touch when:   never for a new repository (it pins this repository's own workflow and setting);
+              a job is added to or renamed in ci.yml (read the setting again after the
               administrator updates it, and save the reading in the fixture).
 """
 
@@ -112,6 +114,107 @@ def test_the_comparison_names_every_way_the_setting_and_the_workflow_disagree() 
     ]
 
 
+SPLIT_CI_TEXT = """name: ci
+jobs:
+  test-shard:
+    name: test shard (py${{ matrix.python }}, ${{ matrix.shard }} of 2)
+    strategy:
+      matrix:
+        python: ["3.12", "3.13"]
+        shard: [1, 2]
+  test:
+    name: test (py${{ matrix.python }})
+    needs: [test-shard]
+    if: always()
+    strategy:
+      matrix:
+        python: ["3.12", "3.13"]
+  story:
+    name: walkthrough story
+  walkthrough:
+    name: walkthrough
+    needs: [story]
+    if: always()
+  build:
+    name: build
+  deploy:
+    name: deploy
+    needs: build
+"""
+
+
+def test_a_multi_key_matrix_is_one_check_per_combination_and_an_aggregator_stands_for_its_parts() -> (
+    None
+):
+    mod = _load()
+    assert mod.job_contexts(SPLIT_CI_TEXT) == [
+        "test shard (py3.12, 1 of 2)",
+        "test shard (py3.12, 2 of 2)",
+        "test shard (py3.13, 1 of 2)",
+        "test shard (py3.13, 2 of 2)",
+        "test (py3.12)",
+        "test (py3.13)",
+        "walkthrough story",
+        "walkthrough",
+        "build",
+        "deploy",
+    ]
+    parts = mod.aggregated_parts(SPLIT_CI_TEXT)
+    assert parts == {
+        "test shard (py3.12, 1 of 2)": "test",
+        "test shard (py3.12, 2 of 2)": "test",
+        "test shard (py3.13, 1 of 2)": "test",
+        "test shard (py3.13, 2 of 2)": "test",
+        "walkthrough story": "walkthrough",
+    }
+    # `deploy` needs `build` without `if: always()`: a failed build SKIPS deploy, and a
+    # skipped required check does not block a merge — so `build` gates in its own name.
+    assert mod.gating_contexts(SPLIT_CI_TEXT) == [
+        "test (py3.12)",
+        "test (py3.13)",
+        "walkthrough",
+        "build",
+        "deploy",
+    ]
+
+
+def test_a_part_of_an_aggregator_is_never_required_in_its_own_name() -> None:
+    mod = _load()
+    gating = mod.gating_contexts(SPLIT_CI_TEXT)
+    parts = mod.aggregated_parts(SPLIT_CI_TEXT)
+    assert mod.compare(gating, list(gating), strict=True, parts=parts) == []
+    with_part = mod.compare(gating, [*gating, "walkthrough story"], strict=True, parts=parts)
+    assert with_part == [
+        "branch protection requires 'walkthrough story', a part of the aggregator job "
+        "'walkthrough': require the aggregator, never a part — a part's name changes whenever "
+        "the work is split differently"
+    ]
+    no_aggregator = mod.compare(
+        gating, [c for c in gating if c != "walkthrough"], strict=True, parts=parts
+    )
+    assert no_aggregator == [
+        "job 'walkthrough' runs on every pull request but branch protection does not require "
+        "it: it can fail and the change still merges"
+    ]
+
+
+def test_the_real_workflow_requires_its_aggregators_and_none_of_their_parts() -> None:
+    """Main's CI splits the suite into shards and the walkthrough into a story and screens
+    shards; the required contexts stay on the `test` and `walkthrough` aggregators."""
+    mod = _load()
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    parts = mod.aggregated_parts(ci)
+    assert set(parts.values()) == {"test", "walkthrough"}
+    assert sum(1 for c in parts if c.startswith("test shard (py")) == 12
+    assert "walkthrough story (browser, live stack, tier 1)" in parts
+    assert sum(1 for c in parts if c.startswith("walkthrough screens (")) == 4
+    gating = mod.gating_contexts(ci)
+    assert {"test (py3.12)", "test (py3.13)", "walkthrough (browser, live stack, tier 1)"} <= set(
+        gating
+    )
+    assert not set(gating) & set(parts)
+
+
 def test_the_last_reading_of_the_setting_still_matches_the_workflow() -> None:
     """A job renamed or added in ci.yml breaks the required-check list silently — the renamed
     check is never reported, and every pull request waits for ever. This fails first: read the
@@ -119,7 +222,15 @@ def test_the_last_reading_of_the_setting_still_matches_the_workflow() -> None:
     mod = _load()
     reading = json.loads(READING.read_text(encoding="utf-8"))
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert mod.compare(mod.job_contexts(ci), reading["contexts"], reading["strict"]) == []
+    assert (
+        mod.compare(
+            mod.gating_contexts(ci),
+            reading["contexts"],
+            reading["strict"],
+            mod.aggregated_parts(ci),
+        )
+        == []
+    )
     assert len(reading["contexts"]) == 16
 
 

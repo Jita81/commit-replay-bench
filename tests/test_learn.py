@@ -16,8 +16,8 @@ What it does: Pins the parser on the exact ``builder_error`` shapes the live row
               triage's counts, grouping and corpus-format candidates, that ``apply_triage``
               writes only a named human's decisions (idempotent; a contradiction with the other
               corpus is refused loudly; a line break in a note, a name or a command never adds a
-              corpus line of its own — P-094; a command only completes a cut example — P-116;
-              two deciders at once never leave a line in both corpora — P-119), that oracle-weak
+              corpus line of its own — P-161; a command only completes a cut example — P-183;
+              two deciders at once never leave a line in both corpora — P-186), that oracle-weak
               cells become ``test.add`` items that pass the factory's DoR gate, that only oracle
               reasons are flagged, that the re-measurement plan queues nothing, determinism
               (same rows → byte-identical output), and the ``rows_to_clear_bar`` Wilson minimum
@@ -32,8 +32,9 @@ Works with:   src/crb/core/learn.py (under test), src/crb/core/ledger.py (the fa
               tests/test_cli_learn.py (the same derivations at the CLI), docs/LEARNING-LOOP.md
               (the properties this file pins, §5)
 Tested by:    tests/test_learn.py
-Touch when:   a builder refusal shape changes (a parser case with the row verbatim); a
-              derivation gains an input; never so that the loop decides for a human.
+Touch when:   never for a new repository; a builder refusal shape changes (a parser case with the
+              row verbatim); a derivation gains an input; never so that the loop decides for a
+              human.
 """
 
 from __future__ import annotations
@@ -460,7 +461,7 @@ class TestApply:
     def test_free_text_never_adds_a_line_to_a_corpus_file(
         self, tmp_path: Path, corpus: Path, brk: str
     ) -> None:
-        """P-094: the corpus files are line-oriented, and three free-text fields are written
+        """P-161: the corpus files are line-oriented, and three free-text fields are written
         into them — the note and the decider's name into the provenance comment, and a
         hand-completed command as the line. Whatever line break any of them carries (every
         character ``str.splitlines`` ends a line at), one decision writes exactly one
@@ -1101,7 +1102,7 @@ class TestRemeasure:
     def test_unknown_cost_is_honest(self, tmp_path: Path) -> None:
         rows = _chained(
             # an unknown cost is one nobody reported (an imported row), not a builder's
-            # $0, which is a known $0 and prices at $0 (P-064: test_economics.py pins it)
+            # $0, which is a known $0 and prices at $0 (P-131: test_economics.py pins it)
             [
                 _clean(
                     task_id="1" * 40,

@@ -22,8 +22,8 @@
  * Works with:   ui/src/screens/Login/LoginPage.tsx, ui/src/help/hints.ts (the copy the
  *               hover test expects), ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Login/LoginPage.test.tsx
- * Touch when:   the strapline or the recovery sentence changes, a field or button is added
- *               to the form, or the callback gains a failure code.
+ * Touch when:   never for a new repository; the strapline or the recovery sentence changes, a field
+ *               or button is added to the form, or the callback gains a failure code.
  */
 
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'

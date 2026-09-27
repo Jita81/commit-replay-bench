@@ -19,7 +19,8 @@
  *               src/crb/server/worker.py (`_run_qualify`), src/crb/core/qualify.py
  *               (`qualify_task`, whose events are asserted)
  * Tested by:    ui/e2e/walkthrough/03b-qualify.spec.ts
- * Touch when:   the Posture panel's button or tile changes, or a qualify event is renamed.
+ * Touch when:   never for a new repository; the Posture panel's button or tile changes, or a
+ *               qualify event is renamed.
  */
 import { expect, expectLogAction, targets, test, waitForRun } from './support'
 

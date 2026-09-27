@@ -82,6 +82,7 @@ from crb.provision.config import (
     DEFAULT_NODE_IMAGE,
     DEFAULT_PYTHON_IMAGE,
     ProvisionConfig,
+    parse_host_list,
 )
 
 log = logging.getLogger("crb.server.settings")
@@ -363,7 +364,8 @@ class ProvisionSettings(BaseModel):
     pypi_index: str = "https://pypi.org/simple"
     pypi_files_host: str = "files.pythonhosted.org"
     npm_registry: str = "https://registry.npmjs.org"
-    #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string).
+    #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string);
+    #: read by :func:`crb.provision.config.parse_host_list`, the worker's own parser.
     extra_allow_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
     allow_public: bool = False
     egress_network: str = "bridge"
@@ -379,16 +381,14 @@ class ProvisionSettings(BaseModel):
     @field_validator("extra_allow_hosts", mode="before")
     @classmethod
     def _split_hosts(cls, v: Any) -> Any:
-        if isinstance(v, str):
-            raw = v.strip()
-            if raw.startswith("["):
-                return json.loads(raw)
-            return [p.strip() for p in raw.split(",") if p.strip()]
-        return v
+        # the worker's parser, not a copy of it: one value can never read two ways (PR #56)
+        return list(parse_host_list(v)) if isinstance(v, str) else v
 
-    def to_config(self, *, env: str, home: Path) -> ProvisionConfig:
+    def to_config(self, *, env: str, home: Path, builder_proxy_image: str = "") -> ProvisionConfig:
         """The worker-side configuration; its own validation (the allowlist parsed by the
-        egress proxy's ``parse_allow``, ``GO_PROXY`` never ``direct``) raises ``ValueError``."""
+        egress proxy's ``parse_allow``, ``GO_PROXY`` never ``direct``) raises ``ValueError``.
+        ``builder_proxy_image`` is ``CRB_BUILDER__PROXY_IMAGE``: an empty ``proxy_image``
+        falls back to it, as :meth:`ProvisionConfig.from_env` does in the worker."""
         return ProvisionConfig(
             enabled=self.enabled,
             store=Path(self.store) if self.store else Path(home) / "deps",
@@ -400,7 +400,7 @@ class ProvisionSettings(BaseModel):
             extra_allow_hosts=tuple(self.extra_allow_hosts),
             allow_public=self.allow_public,
             egress_network=self.egress_network,
-            proxy_image=self.proxy_image,
+            proxy_image=self.proxy_image.strip() or builder_proxy_image.strip(),
             go_image=self.go_image or DEFAULT_GO_IMAGE,
             python_image=self.python_image or DEFAULT_PYTHON_IMAGE,
             node_image=self.node_image or DEFAULT_NODE_IMAGE,
@@ -849,7 +849,9 @@ class Settings(BaseSettings):
     @property
     def provision_config(self) -> ProvisionConfig:
         """The worker-side provisioning configuration these settings describe."""
-        return self.provision.to_config(env=self.env, home=self.home)
+        return self.provision.to_config(
+            env=self.env, home=self.home, builder_proxy_image=self.builder.proxy_image
+        )
 
     @property
     def is_dev(self) -> bool:
