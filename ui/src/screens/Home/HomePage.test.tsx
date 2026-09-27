@@ -26,7 +26,12 @@
  *               "Get started" (G-911); that a recorded read of the baseline completes task 6
  *               with no sign-off (G-165); and that a failed read is an error envelope with
  *               Retry and "Unavailable" on the tasks that stand on it, never "no repository
- *               yet", "Cannot start yet" or "Incomplete" (G-164).
+ *               yet", "Cannot start yet" or "Incomplete" (G-164) — the GitHub App and the
+ *               factory runs included, so task 8 never reads "Backlog frozen" on a runs read
+ *               that failed; that every GET the page makes, failed alone, reaches the
+ *               envelope (a read added later cannot be missed); and that a failed read never
+ *               offers "Continue to the factory" — Continue stops at the task it could not
+ *               read (P-053).
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -394,6 +399,88 @@ describe('HomePage', () => {
     // the tasks that do not read the failed reads keep their honest status
     expect(rows[1]).toHaveTextContent('Completed')
     expect(rows[3]).toHaveTextContent('Completed')
+  })
+
+  it('a failed read of the GitHub App or of the factory runs is named in the envelope, and task 8 is "Unavailable", never "Backlog frozen"', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': () => envelope(500, 'internal', 'app unreadable'),
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 30, deliver_cells: 1 } },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /factory/alpha/backlog': { repo: 'alpha', hash: 'b'.repeat(64), frozen_at: '2026-09-17T10:00:00Z', items: [] },
+      'GET /factory/alpha/tasks': [FACTORY_TASK],
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /runs': () => envelope(500, 'internal', 'runs unreadable'),
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    const alert = await screen.findByRole('alert')
+    await waitFor(() => expect(alert).toHaveTextContent('the GitHub App'))
+    await waitFor(() => expect(alert).toHaveTextContent('the factory runs'))
+    const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('Unavailable')
+    // a status built on a read that failed is never shown: no run could be read, so none is claimed absent
+    expect(rows[7]).toHaveTextContent('Unavailable')
+    expect(rows[7]).not.toHaveTextContent('Backlog frozen')
+  })
+
+  it('a failed read never offers "Continue to the factory": Continue stops at the first task it could not read', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': { configured: true, app_slug: 'crb', install_url: 'x', api_url: 'y', installations: [{ id: 1, account_login: 'acme', account_type: 'Organization', repository_selection: 'selected', html_url: '', suspended: false, permissions: {}, can_deliver: true, recorded_by: '', updated: '' }] },
+      'GET /repos': () => envelope(500, 'internal', 'database unavailable'),
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    })
+    renderApp(<HomePage />, { route: '/home' })
+    await screen.findByRole('alert')
+    const rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
+    await waitFor(() => expect(rows[0]).toHaveTextContent('Completed'))
+    expect(rows[1]).toHaveTextContent('Unavailable')
+    expect(screen.queryByRole('link', { name: 'Continue to the factory' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Continue to task 2: Choose a repository' })).toHaveAttribute('href', '/connect')
+  })
+
+  it('every read Home makes, when it alone fails, is named in the error envelope — a read added later cannot be missed', async () => {
+    const app = { configured: true, app_slug: 'crb', install_url: 'x', api_url: 'y', installations: [{ id: 1, account_login: 'acme', account_type: 'Organization', repository_selection: 'selected', html_url: '', suspended: false, permissions: {}, can_deliver: true, recorded_by: '', updated: '' }] }
+    const ok: Record<string, unknown> = {
+      'GET /auth/me': { ...PRINCIPAL, role: 'admin' },
+      'GET /github/app': app,
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 30, deliver_cells: 1 } },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /users': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /factory/alpha/backlog': { repo: 'alpha', hash: 'b'.repeat(64), frozen_at: '2026-09-17T10:00:00Z', items: [] },
+      'GET /factory/alpha/tasks': [FACTORY_TASK],
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    }
+    // every GET the page makes when all is well: the session is the shell's, and the north-star
+    // tile reads /value and states its own failure (the tile's tests), so neither is Home's task list
+    const first = mockApi(ok)
+    const view = renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getByText(/You have completed \d of 8 tasks\./)).toBeInTheDocument())
+    await waitFor(() => expect(first.calls.some((c) => c.path === '/runs')).toBe(true))
+    const reads = [...new Set(first.calls.filter((c) => c.method === 'GET').map((c) => c.path))].filter((p) => p !== '/auth/me' && p !== '/value')
+    for (const p of Object.keys(ok).map((k) => k.slice(4))) if (p !== '/auth/me') expect(reads, `Home no longer reads ${p}`).toContain(p)
+    view.unmount()
+    vi.unstubAllGlobals()
+    for (const path of reads) {
+      mockApi({ ...ok, [`GET ${path}`]: () => envelope(500, 'internal', `${path} unreadable`) })
+      const one = renderApp(<HomePage />, { route: '/home' })
+      await waitFor(() => expect(screen.queryByRole('alert'), `a failed GET ${path} showed no error envelope`).toBeInTheDocument())
+      // and a task left unknown by it stops Continue: a failed read never skips on to the factory
+      expect(screen.queryByRole('link', { name: 'Continue to the factory' }), path).not.toBeInTheDocument()
+      one.unmount()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('every task tag, the kicker, the summary, the banner and Continue carry a hint; the Measure tag opens on hover with the registry copy', async () => {

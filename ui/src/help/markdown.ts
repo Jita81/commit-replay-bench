@@ -1,7 +1,8 @@
 /**
  * A subset markdown renderer for the bundled guides — React elements, never raw HTML.
  *
- * Supported: headings h1–h4 (deeper ones render as h4) with GitHub slug ids, paragraphs,
+ * Supported: headings h1–h4 (deeper ones render as h4; one level lower each under a page
+ * title, `headingOffset`) with GitHub slug ids, paragraphs,
  * bullet and numbered lists (nested by indentation), fenced code, tables, blockquotes,
  * horizontal rules, links, emphasis, strong and inline code. Anything else — an HTML tag,
  * an image, a footnote — is shown as the text it is. Links: another bundled guide becomes an
@@ -294,12 +295,12 @@ class Slugs {
   }
 }
 
-function renderBlocks(blocks: Block[], slugs: Slugs, keyPrefix: string): ReactNode[] {
+function renderBlocks(blocks: Block[], slugs: Slugs, keyPrefix: string, offset: number): ReactNode[] {
   return blocks.map((b, i) => {
     const key = `${keyPrefix}${i}`
     switch (b.kind) {
       case 'heading': {
-        const level = Math.min(b.level, 4)
+        const level = Math.min(b.level, 4) + offset
         return createElement(`h${level}`, { key, id: slugs.next(b.text) }, ...renderInline(b.text, `${key}.`))
       }
       case 'paragraph':
@@ -334,14 +335,18 @@ function renderBlocks(blocks: Block[], slugs: Slugs, keyPrefix: string): ReactNo
           b.ordered ? 'ol' : 'ul',
           { key },
           ...b.items.map((it, j) =>
-            createElement('li', { key: j }, ...renderInline(it.text, `${key}.${j}.`), ...(it.children ? renderBlocks(it.children, slugs, `${key}.${j}.c`) : [])),
+            createElement('li', { key: j }, ...renderInline(it.text, `${key}.${j}.`), ...(it.children ? renderBlocks(it.children, slugs, `${key}.${j}.c`, offset) : [])),
           ),
         )
     }
   })
 }
 
-/** The guide as React elements; heading ids are unique within one call. */
-export function renderMarkdown(src: string): ReactNode {
-  return createElement(Fragment, {}, ...renderBlocks(parseMarkdown(src), new Slugs(), 'b'))
+/**
+ * The guide as React elements; heading ids are unique within one call. `headingOffset` moves
+ * every heading down that many levels, for a page that already has its own h1 (DocPage passes
+ * 1, so the page keeps one h1 and the file's `#` title reads as an h2). The ids do not change.
+ */
+export function renderMarkdown(src: string, { headingOffset = 0 }: { headingOffset?: 0 | 1 } = {}): ReactNode {
+  return createElement(Fragment, {}, ...renderBlocks(parseMarkdown(src), new Slugs(), 'b', headingOffset))
 }

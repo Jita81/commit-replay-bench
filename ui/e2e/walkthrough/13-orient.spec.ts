@@ -4,14 +4,14 @@
  * Before this spec the journey was proven in pieces — sign-in in 01, the index redirect in the
  * mocked smoke, Home for axe in 07 and for capture in 11, one guide in 11 — with no path
  * between them (G-413), only OPERATOR of the eight guides was ever opened on the served bundle
- * (G-149), and Home's task tags were proven on mocks alone (G-166).
+ * (G-149), and Home's task tags were proven on mocks alone (G-166 — 06b-baseline-read now
+ * proves them on the live stack).
  *
  * Navigation
  * ----------
  * What it is:   Walkthrough spec 13 (orient: /login → / → /home → /help →
  *               /help/docs/:name → an unknown address → sign out), tier 1 and tier 2
- *               alike; it spends nothing, calls no model and writes nothing but a session
- *               and one baseline-read record.
+ *               alike; it spends nothing, calls no model and writes nothing but sessions.
  * What it does: (1) Walks the six steps in order as one persona (the bootstrap admin),
  *               starting signed out: `/` bounces to `/login?next=%2F`, whose About block says
  *               what the page is for; signing in returns to `/`, which replaces itself with
@@ -24,15 +24,14 @@
  *               quotes (G-414). (2) Opens all eight bundled guides on the served bundle and
  *               asserts each renders its own first heading, the file's, and never an error or
  *               "No guide with that name"; then opens a decision record from /help (G-149,
- *               G-156). (3) Reads Home's task tags for the repository 02–05 onboarded and
- *               measured — Choose a repository, Confirm its shape and Measure read Completed —
- *               then opens that repository's baseline and finds task 6 "Read the baseline"
- *               Completed on the server's record of the read (G-166, G-165).
+ *               G-156) — each page holding one h1, its header (P-054). Home's task tags on
+ *               the live stack, and the read that completes task 6, are 06b's: they must be
+ *               read before 07 opens the baseline.
  * How:          @playwright/test's own `test` (the journey starts signed out, so it does not
- *               use support.ts's signed-in fixture); `field` / `primary` / `env` from
+ *               use support.ts's signed-in fixture); `field` / `env` from
  *               support.ts; the guides' first headings read from docs/ with Node's `fs`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-077, DL-078)
+ * ADRs:         none (DL-077)
  * Works with:   ui/src/screens/Home/HomePage.tsx (the task list), ui/src/screens/Help/HelpPage.tsx
  *               and DocPage.tsx (the glossary, the guides and the records), ui/src/help/help.ts
  *               (the About blocks it asserts), ui/src/screens/Login/LoginPage.tsx (the About
@@ -44,7 +43,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
-import { env, field, primary } from './support'
+import { env, field } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -67,11 +66,6 @@ async function about(page: Page, purpose: string | RegExp): Promise<void> {
   const open = await block.locator('details').evaluate((d) => (d as HTMLDetailsElement).open)
   if (!open) await summary.click()
   await expect(block).toContainText(purpose)
-}
-
-/** A task row of Home's list, by its number (1–8). */
-function task(page: Page, n: number) {
-  return page.getByRole('list', { name: 'Tasks' }).getByRole('listitem').nth(n - 1)
 }
 
 test.describe('13 orient — sign in and find your way', () => {
@@ -156,7 +150,9 @@ test.describe('13 orient — sign in and find your way', () => {
       await page.goto(`/help/docs/${name}`)
       const article = page.getByRole('article')
       await expect(article, `${name}: the guide did not render`).toBeVisible()
-      await expect(article.getByRole('heading', { level: 1 }).first(), name).toHaveText(firstHeading(name))
+      // the page's one h1 is its header; the file's own `#` title is the article's h2 (P-054)
+      await expect(page.getByRole('heading', { level: 1 }), name).toHaveCount(1)
+      await expect(article.getByRole('heading', { level: 2 }).first(), name).toHaveText(firstHeading(name))
       await expect(page.getByText('No guide with that name'), name).toHaveCount(0)
       await expect(page.getByTestId('error-state'), name).toHaveCount(0)
     }
@@ -167,38 +163,8 @@ test.describe('13 orient — sign in and find your way', () => {
     await decisions.getByRole('link', { name: /^ADR-0015 — / }).click()
     await expect(page).toHaveURL(/\/help\/docs\/ADR-0015$/)
     await expect(page.getByRole('heading', { level: 1, name: /^ADR-0015 — A sign-off expires with the apparatus/ })).toBeVisible()
-    await expect(page.getByRole('article').getByRole('heading', { level: 1 }).first()).toContainText('ADR-0015')
-  })
-
-  test('Home’s task tags agree with the live stack, and reading the baseline completes task 6', async ({ page }) => {
-    const repo = primary().name
-    await page.goto('/login')
-    await field(page, 'Username').fill(env.user)
-    await field(page, 'Password').fill(env.pass)
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-    await expect(page.getByTestId('user-chip')).toBeVisible()
-
-    // 02 onboarded and probed the repository; 05 replayed it, so its map has rows
-    await page.goto(`/home?repo=${encodeURIComponent(repo)}`)
-    await expect(page.getByText(new RegExp(`^${repo} · measured$`))).toBeVisible()
-    await expect(task(page, 2)).toContainText('Choose a repository')
-    await expect(task(page, 2)).toContainText('Completed')
-    await expect(task(page, 3)).toContainText('Completed')
-    await expect(task(page, 5)).toContainText('Measure — spends money')
-    await expect(task(page, 5)).toContainText('Completed')
-    // rows exist, so the baseline can be read: never "Cannot start yet", never a failed read
-    await expect(task(page, 6)).not.toContainText('Cannot start yet')
-    await expect(task(page, 6)).not.toContainText('Unavailable')
-    await expect(page.getByTestId('error-state')).toHaveCount(0)
-
-    // open the baseline: the Baseline screen tells the server it was read (DL-078) ...
-    const recorded = page.waitForResponse((r) => r.url().endsWith(`/api/v1/repos/${encodeURIComponent(repo)}/baseline-read`) && r.request().method() === 'POST')
-    await page.goto(`/results?repo=${encodeURIComponent(repo)}`)
-    expect([200, 201]).toContain((await recorded).status())
-
-    // ... and Home's task 6 reads Completed on that record
-    await page.goto(`/home?repo=${encodeURIComponent(repo)}`)
-    await expect(task(page, 6)).toContainText('Read the baseline')
-    await expect(task(page, 6)).toContainText('Completed')
+    // wait for the record's text, then hold the page to one h1 — the header's, never the file's too
+    await expect(page.getByRole('article').getByRole('heading', { level: 2 }).first()).toContainText('ADR-0015')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
   })
 })

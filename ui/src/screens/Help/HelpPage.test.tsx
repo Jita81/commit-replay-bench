@@ -83,7 +83,7 @@ describe('DocPage', () => {
     mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
     renderApp(<DocPage />, { route: '/help/docs/DATA-RETENTION', path: '/help/docs/:name' })
     const article = await screen.findByRole('article')
-    await waitFor(() => expect(within(article).getByRole('heading', { level: 1 })).toHaveTextContent(/retention and privacy/))
+    await waitFor(() => expect(within(article).getByRole('heading', { level: 2 })).toHaveTextContent(/retention and privacy/))
     expect(document.getElementById('2-retention-defaults-zero-raw-retention')).not.toBeNull()
     expect(screen.getByRole('link', { name: 'Back to glossary and guides' })).toHaveAttribute('href', '/help')
     // the non-goals, where the reader stands (G-150)
@@ -95,9 +95,29 @@ describe('DocPage', () => {
     renderApp(<DocPage />, { route: '/help/docs/ADR-0016', path: '/help/docs/:name' })
     expect(await screen.findByRole('heading', { level: 1, name: 'ADR-0016 — The two-person rule is a policy clause, not an apparatus move' })).toBeInTheDocument()
     const article = await screen.findByRole('article')
-    await waitFor(() => expect(within(article).getByRole('heading', { level: 1 })).toHaveTextContent(/ADR-0016/))
+    await waitFor(() => expect(within(article).getByRole('heading', { level: 2 })).toHaveTextContent(/ADR-0016/))
     expect(screen.getByText(/A copy of the repository’s decision record/)).toHaveTextContent('Read-only')
     expect(screen.getByRole('link', { name: 'Back to glossary and guides' })).toHaveAttribute('href', '/help')
+  })
+
+  it('a guide and a decision record each carry exactly one h1 — the page title — with the file’s own title one level under it', async () => {
+    for (const [name, title] of [
+      ['DATA-RETENTION', /retention and privacy/],
+      ['ADR-0016', /ADR-0016/],
+    ] as const) {
+      mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+      const view = renderApp(<DocPage />, { route: `/help/docs/${name}`, path: '/help/docs/:name' })
+      const article = await screen.findByRole('article')
+      await waitFor(() => expect(within(article).getAllByRole('heading').length).toBeGreaterThan(1))
+      // one h1 per page: two made the walkthrough's heading query ambiguous (13-orient) and
+      // give a screen-reader two page titles
+      expect(document.querySelectorAll('h1'), name).toHaveLength(1)
+      expect(within(article).queryAllByRole('heading', { level: 1 }), name).toHaveLength(0)
+      expect(within(article).getAllByRole('heading')[0], name).toHaveTextContent(title)
+      expect(within(article).getAllByRole('heading')[0]!.tagName, name).toBe('H2')
+      view.unmount()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('a guide whose chunk fails to load says so with Retry — never "No guide with that name" — and Retry loads it', async () => {
@@ -110,7 +130,7 @@ describe('DocPage', () => {
     expect(screen.queryByText('No guide with that name')).not.toBeInTheDocument()
     await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
     const article = await screen.findByRole('article')
-    await waitFor(() => expect(within(article).getByRole('heading', { level: 1 })).toBeInTheDocument())
+    await waitFor(() => expect(within(article).getByRole('heading', { level: 2 })).toBeInTheDocument())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 

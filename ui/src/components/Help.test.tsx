@@ -12,8 +12,10 @@
  *               the read-more links and the glossary link; that the four shell screens —
  *               `/help`, a guide, an unknown address and `/login`, which mounts the block
  *               itself because it sits outside the shell — carry an entry of their own
- *               (G-926); that "Elements on this screen" lists every hinted element on
- *               the page when the block opens — deduplicated, the screen's own (under
+ *               (G-926), and that signed out the block offers no link into a screen that
+ *               needs a session (it names the guides as text); that "Elements on this screen"
+ *               lists every hinted element on the page when the block opens —
+ *               deduplicated, the screen's own (under
  *               `<main>`) in DOM order and the shell's after them under their own
  *               sub-heading, with the registry text and never a link; that `DocLink` builds
  *               the /help/docs href.
@@ -303,6 +305,19 @@ describe('AboutThisScreen', () => {
     const about = await screen.findByTestId('about-this-screen')
     expect(about).toHaveTextContent('This is where you sign in.')
     expect(about).toHaveTextContent('Accounts are not created or reset here.')
-    expect(within(about).getByRole('link', { name: 'Accounts, roles and password resets' })).toHaveAttribute('href', '/help/docs/OPERATOR#9-users')
+    // signed out, every screen the block could link to needs a session and would bounce the
+    // reader straight back here: it names the guides as text and offers no link at all
+    await waitFor(() => expect(about).toHaveTextContent('Accounts, roles and password resets'))
+    expect(about).toHaveTextContent('How sign-in and sessions are secured')
+    expect(about).toHaveTextContent('You can open these guides and the glossary once you have signed in.')
+    expect(within(about).queryAllByRole('link')).toEqual([])
+  })
+
+  it('signed in, the same entry links its guides at the section it names', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+    renderApp(<AboutThisScreen />, { route: '/login', path: '/login' })
+    const about = await screen.findByTestId('about-this-screen')
+    expect(await within(about).findByRole('link', { name: 'Accounts, roles and password resets' })).toHaveAttribute('href', '/help/docs/OPERATOR#9-users')
+    expect(within(about).getByRole('link', { name: 'Glossary and guides' })).toHaveAttribute('href', '/help')
   })
 })

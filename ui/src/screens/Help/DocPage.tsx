@@ -9,8 +9,12 @@
  *               repository is private and deployments may have no egress) and renders it
  *               through the subset markdown renderer, so every heading has the id its slug
  *               gives and the screens' `readMore` anchors land on the section. Scrolls to
- *               `location.hash` once the text is in. Under the header it states what the page
- *               is not: a build-time, read-only copy of the repository's file (G-150). Three
+ *               `location.hash` once the text is in. The page has one h1, its header: the
+ *               file's own headings render one level down (`headingOffset`), so the `#`
+ *               title is the article's h2 — two h1s made the walkthrough's heading query
+ *               ambiguous and gave a screen reader two page titles (P-054). Under the header
+ *               it states what the page is not: a build-time, read-only copy of the
+ *               repository's file (G-150). Three
  *               stops, each told apart: an unknown name renders the empty state with a way
  *               back to /help; a known name whose chunk fails to load renders the error
  *               envelope with Retry — the deployment failed, not the person's link (G-148);
@@ -56,7 +60,7 @@ export function DocPage() {
     setFailed(null)
     ;(guide ? loadDoc(name) : loadAdr(name))
       .then((text) => {
-        if (live) setBody({ name, nodes: renderMarkdown(text) })
+        if (live) setBody({ name, nodes: renderMarkdown(text, { headingOffset: 1 }) })
       })
       .catch((error: unknown) => {
         if (live) setFailed({ name, error })

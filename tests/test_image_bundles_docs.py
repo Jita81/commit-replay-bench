@@ -9,15 +9,17 @@ The unit tests and the walkthrough never saw it: both build from a checkout, whe
 is present. Found 2026-09-26 while bundling the decision records (G-156), by building the
 image's context and listing it.
 
-Two artefacts stop the class, and this suite pins both:
+Two artefacts stop the class; this suite pins the first:
 
 * the context rule: the ignore file re-includes ``docs/*.md`` and ``docs/adr/*.md`` after
   excluding ``docs`` — checked here against a model of Docker's matcher (last matching rule
   wins; a rule that matches a parent directory matches its contents; ``!`` re-includes), and
   the model is itself checked on the rule set that shipped the defect;
-* the build gate: ``requireBundledDocs`` in ``ui/vite.config.ts`` fails ``vite build`` when a
-  listed guide or the records are absent, so a context that loses them fails the ``container``
-  job instead of shipping.
+* the build gate: ``requireBundledDocs`` (ui/plugins/requireBundledDocs.ts, run by
+  ui/vite.config.ts) fails ``vite build`` when a listed guide or the records are absent, so a
+  context that loses them fails the ``container`` job instead of shipping. It is tested by
+  running it, in ui/plugins/requireBundledDocs.test.ts: a grep of the config that stood here
+  first survived the refusal being switched off, so it proved nothing.
 
 Navigation
 ----------
@@ -26,14 +28,15 @@ What it is:   The prevention test for the class "a build input the UI bundles is
 What it does: Reads ``DOC_NAMES`` from ui/src/help/docs.ts and the record files in docs/adr,
               applies deploy/Dockerfile.dockerignore through a model of Docker's pattern
               matcher, and asserts every one of them is in the context; proves the model
-              excludes them under the old rules; and asserts the Vite build carries the gate.
+              excludes them under the old rules.
 How:          A regex per ignore pattern (``**`` → any depth, ``*`` / ``?`` → within one path
               segment), evaluated against the path and each of its parent directories, last
               match wins — the rule moby's ``patternmatcher`` implements.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none (DL-077)
 Works with:   deploy/Dockerfile.dockerignore (the rule under test), deploy/Dockerfile (the UI
-              build stage copies the whole context), ui/vite.config.ts (``requireBundledDocs``),
+              build stage copies the whole context), ui/plugins/requireBundledDocs.ts (the build
+              gate, tested by ui/plugins/requireBundledDocs.test.ts),
               ui/src/help/docs.ts and ui/src/help/adrs.ts (what the UI bundles),
               .github/workflows/ci.yml (the ``container`` job runs that build)
 Tested by:    tests/test_image_bundles_docs.py
@@ -49,7 +52,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 IGNORE = ROOT / "deploy" / "Dockerfile.dockerignore"
 DOCS_TS = ROOT / "ui" / "src" / "help" / "docs.ts"
-VITE_CONFIG = ROOT / "ui" / "vite.config.ts"
 
 
 def _rules(text: str) -> list[tuple[bool, re.Pattern[str]]]:
@@ -129,14 +131,3 @@ def test_the_model_catches_the_rule_that_shipped_the_defect() -> None:
     assert not excluded("docs/OPERATOR.md", _rules("docs\n!docs/*.md\n"))
     assert excluded("docs/OPERATOR.md", _rules("!docs/*.md\ndocs\n"))
     assert excluded("a/b/c.pyc", _rules("**/*.pyc\n"))
-
-
-def test_the_ui_build_refuses_a_context_without_the_docs() -> None:
-    """The second line of defence: ``vite build`` itself fails when the docs are absent, so a
-    future ignore rule that loses them fails the ``container`` job instead of shipping."""
-    text = VITE_CONFIG.read_text()
-    assert "function requireBundledDocs(): Plugin" in text
-    assert re.search(r"plugins: \[[^\]]*requireBundledDocs\(\)[^\]]*\]", text), (
-        "the gate is not in the build's plugins"
-    )
-    assert "DOC_NAMES" in text and "adr/" in text and "this.error(" in text

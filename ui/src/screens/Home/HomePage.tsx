@@ -22,9 +22,13 @@
  *               run the factory" until a run exists, then "In progress — item k of n") decide
  *               them. A read that fails is never read as absence (G-164): one error envelope
  *               names every read that failed, with Retry, and each task that stands on one
- *               reads "Unavailable" rather than "Incomplete" or "Cannot start yet".
- *               Continue points at the first task that is neither Completed nor Cannot
- *               start yet, so the first press never lands on an empty screen. A viewer
+ *               reads "Unavailable" rather than "Incomplete" or "Cannot start yet" — the
+ *               GitHub App and the factory runs included, so task 8 never claims "Backlog
+ *               frozen — run the factory" on a runs read that failed. Continue points at the
+ *               first task `CONTINUE_STOPS` marks — one to act on now, or one that could not
+ *               be read — so the first press never lands on an empty screen and a failed read
+ *               never offers "Continue to the factory"; every status is a `HomeStatus`, so
+ *               one nobody classified fails the type check (P-053). A viewer
  *               (sponsor, auditor) and an approver get the same list read as a progress
  *               report — "Where this deployment is" — not as their to-do list: an approver
  *               outranks an operator but works none of the tasks, so the operators' view is
@@ -40,7 +44,8 @@
  *               `useCapabilityMap` → `stagesFor`; `useSignoffs` for task 6; `useUsers`
  *               (admin) or the principal's role for task 7; `useFactoryBacklog` +
  *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`; every
- *               query's error state feeds the one `ErrorState`.
+ *               query's error state (the App's and the runs' included) feeds the one
+ *               `ErrorState`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-042, DL-044, DL-078)
  * Works with:   ui/src/components/govuk.tsx (TaskList, NotificationBanner, InsetText),
@@ -72,7 +77,7 @@ import { type StageStatus, stageComplete, stagesFor } from '../Connect/connectio
 import { ValueTile } from './ValueTile'
 
 const TONE: Record<StageStatus, TagTone> = { done: 'pale', warn: 'pale', running: 'blue', todo: 'blue', failed: 'red', blocked: 'grey' }
-const LABEL: Record<StageStatus, string> = { done: 'Completed', warn: 'Completed', running: 'In progress', todo: 'Incomplete', failed: 'Failed', blocked: 'Cannot start yet' }
+const LABEL: Record<StageStatus, HomeStatus> = { done: 'Completed', warn: 'Completed', running: 'In progress', todo: 'Incomplete', failed: 'Failed', blocked: 'Cannot start yet' }
 
 function notRun(err: unknown): boolean {
   return isApiError(err) && err.status === 404
@@ -89,10 +94,48 @@ function inWords(items: string[]): string {
 }
 
 /** The tag of a task whose evidence could not be read: never "Incomplete" or "Cannot start yet". */
-const UNAVAILABLE = { status: 'Unavailable', tone: 'grey' as TagTone }
+const UNAVAILABLE: { status: HomeStatus; tone: TagTone } = { status: 'Unavailable', tone: 'grey' }
+
+/** Every status a task on Home can carry. A task's `status` is typed as one, so a new status
+ * cannot be shown until `CONTINUE_STOPS` says whether Continue stops at it (P-053). */
+export type HomeStatus =
+  | 'Completed'
+  | 'Incomplete'
+  | 'In progress'
+  | 'Failed'
+  | 'Cannot start yet'
+  | 'Unavailable'
+  | 'Checking'
+  | 'Optional'
+  | 'Not configured'
+  | 'Not known yet'
+  | 'Backlog frozen — run the factory'
+  | 'No cell routes deliver yet'
+
+/**
+ * Whether Continue stops at a task with this status — a Record over the whole union, so the
+ * type check refuses a status nobody classified (the class of G-164's regression: "Unavailable"
+ * was added to the tags and not to the set Continue read, so a failed read sent an operator on
+ * to "Continue to the factory"). A task that could not be read stops Continue: its state is
+ * unknown, so it is never skipped as if it were done.
+ */
+export const CONTINUE_STOPS: Record<HomeStatus, boolean> = {
+  Completed: false,
+  Incomplete: true,
+  'In progress': true,
+  Failed: true,
+  'Cannot start yet': false,
+  Unavailable: true,
+  Checking: false,
+  Optional: false,
+  'Not configured': false,
+  'Not known yet': false,
+  'Backlog frozen — run the factory': true,
+  'No cell routes deliver yet': false,
+}
 
 export type FactoryStatus = 'delivered' | 'running' | 'frozen' | 'ready' | 'no_deliver_cell' | 'blocked' | 'unknown'
-const FACTORY_LABEL: Record<FactoryStatus, string> = {
+const FACTORY_LABEL: Record<FactoryStatus, HomeStatus> = {
   delivered: 'Completed',
   running: 'In progress',
   frozen: 'Backlog frozen — run the factory',
@@ -118,9 +161,6 @@ export function factoryStatusFor(input: { measured: boolean; deliverCells: boole
   if (!input.measured) return 'blocked'
   return input.deliverCells ? 'ready' : 'no_deliver_cell'
 }
-
-/** The statuses a person can act on now — Continue goes to the first task carrying one. */
-const ACTIONABLE = new Set<string>(['Incomplete', 'In progress', 'Failed', FACTORY_LABEL.frozen])
 
 export function HomePage() {
   const { me, can } = useAuth()
@@ -157,7 +197,7 @@ export function HomePage() {
   // the connection task is about the App: configured AND at least one installation on record;
   // a repository connected by URL is a valid deployment, so with no App the task is optional
   const connected = gh.data?.configured === true && gh.data.installations.length > 0
-  const ghStatus: { status: string; tone: TagTone } = !gh.data
+  const ghStatus: { status: HomeStatus; tone: TagTone } = !gh.data
     ? gh.isError
       ? { status: 'Unavailable', tone: 'grey' }
       : { status: 'Checking', tone: 'grey' }
@@ -198,7 +238,8 @@ export function HomePage() {
   // "item k of n" from the run's own progress: k is the item in flight, never past n
   const progress = factoryRun.data?.progress
   const item = progress ? kOfN(progress.done, progress.total) : null
-  const factoryLabel = factoryStatus === 'running' && item ? `In progress — item ${item}` : FACTORY_LABEL[factoryStatus]
+  // the tag's words; the status Continue reads stays the union member ("In progress")
+  const factoryDetail = factoryStatus === 'running' && item ? `In progress — item ${item}` : undefined
   // every read the tasks stand on; one that failed is shown as failed (G-164), never as absence
   const reads = [
     { label: 'the repositories', q: repos, failed: repos.isError },
@@ -211,15 +252,17 @@ export function HomePage() {
     { label: 'the factory backlog', q: backlog, failed: failedRead(backlog) },
     { label: 'the factory items', q: factoryTasks, failed: factoryTasks.isError },
     { label: 'the deployment’s health', q: health, failed: health.isError },
+    { label: 'the GitHub App', q: gh, failed: gh.isError },
+    { label: 'the factory runs', q: factoryRun, failed: factoryRun.isError },
   ]
   const unread = reads.filter((r) => r.failed)
   const reposUnread = repos.isError
   const repoUnread = reposUnread || repo.isError
   const proveUnread = repoUnread || failedRead(oracle) || failedRead(controls)
   const mapUnread = repoUnread || map.isError
-  const tasks: TaskItem[] = [
+  const tasks: Array<Omit<TaskItem, 'status'> & { status: HomeStatus; label?: string }> = [
     { num: 1, name: 'Connect GitHub', status: ghStatus.status, tone: ghStatus.tone, to: '/connect', hint: 'task.home.connect_github' },
-    { num: 2, name: 'Choose a repository', ...(reposUnread ? UNAVAILABLE : { status: hasRepo ? 'Completed' : 'Incomplete', tone: hasRepo ? 'pale' : 'blue' }), to: '/connect', hint: 'task.home.choose_repo' },
+    { num: 2, name: 'Choose a repository', ...(reposUnread ? UNAVAILABLE : { status: hasRepo ? ('Completed' as const) : ('Incomplete' as const), tone: hasRepo ? ('pale' as const) : ('blue' as const) }), to: '/connect', hint: 'task.home.choose_repo' },
     { num: 3, name: 'Confirm its shape', ...(repoUnread ? UNAVAILABLE : { status: stage('probe') === 'done' ? 'Completed' : hasRepo ? LABEL[stage('probe') ?? 'todo'] : 'Cannot start yet', tone: stage('probe') === 'done' ? 'pale' : hasRepo ? TONE[stage('probe') ?? 'todo'] : 'grey' }), to: chosen ? `/repos/${encodeURIComponent(chosen)}` : '/connect', hint: 'task.home.confirm_shape' },
     { num: 4, name: 'Prove the instrument (£0)', ...(proveUnread ? UNAVAILABLE : { status: LABEL[proveStatus], tone: TONE[proveStatus] }), to: walk, hint: 'task.home.prove_instrument' },
     { num: 5, name: 'Measure — spends money', ...(mapUnread ? UNAVAILABLE : { status: measured ? 'Completed' : measuring ? 'In progress' : proveDone ? 'Incomplete' : 'Cannot start yet', tone: measured ? 'pale' : measuring || proveDone ? 'blue' : 'grey' }), to: measuring && chosen ? `/connect/${encodeURIComponent(chosen)}` : chosen ? `/connect/${encodeURIComponent(chosen)}/measure` : '/connect', hint: 'task.home.measure' },
@@ -229,12 +272,15 @@ export function HomePage() {
     // only an admin can invite; everyone else reads a state (not an instruction), is not sent
     // to a page that refuses them, and gets the note under the list
     { num: 7, name: 'Invite an approver', ...(users.isError ? UNAVAILABLE : { status: approverKnown === true ? 'Completed' : approverKnown === false ? 'Incomplete' : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey' }), to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
-    // the destination (DL-044): the factory delivers a change under the baseline the walk earned
-    { num: 8, name: 'Deliver your first change', ...(factoryStatus !== 'delivered' && (reposUnread || map.isError || failedRead(backlog) || factoryTasks.isError) ? UNAVAILABLE : { status: factoryLabel, tone: FACTORY_TONE[factoryStatus] }), to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory', hint: 'task.home.deliver' },
+    // the destination (DL-044): the factory delivers a change under the baseline the walk earned;
+    // the runs read decides only "frozen" against "running", so it leaves only a frozen backlog unknown
+    { num: 8, name: 'Deliver your first change', ...(factoryStatus !== 'delivered' && (reposUnread || map.isError || failedRead(backlog) || factoryTasks.isError || (factoryRun.isError && factoryStatus === 'frozen')) ? UNAVAILABLE : { status: FACTORY_LABEL[factoryStatus], label: factoryDetail, tone: FACTORY_TONE[factoryStatus] }), to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory', hint: 'task.home.deliver' },
   ]
   const completed = tasks.filter((t) => t.status === 'Completed').length
-  // the operator's next press: the first task they can act on now; all done → the factory
-  const nextTask = tasks.find((t) => ACTIONABLE.has(t.status) || t.status.startsWith('In progress'))
+  // the operator's next press: the first task they can act on now, or one that could not be
+  // read (never skipped as if done); only when every task is settled → the factory
+  const nextTask = tasks.find((t) => CONTINUE_STOPS[t.status])
+  const listed: TaskItem[] = tasks.map(({ label, ...t }) => ({ ...t, status: label ?? t.status }))
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
 
   return (
@@ -271,7 +317,7 @@ export function HomePage() {
         <ValueTile />
       </div>
       <div className="max-w-[44em]">
-        <TaskList tasks={tasks} completed={completed} summary={<Hint id="stat.home.completed">{operator ? `You have completed ${completed} of ${tasks.length} tasks.` : `The operators have completed ${completed} of ${tasks.length} tasks.`}</Hint>} />
+        <TaskList tasks={listed} completed={completed} summary={<Hint id="stat.home.completed">{operator ? `You have completed ${completed} of ${tasks.length} tasks.` : `The operators have completed ${completed} of ${tasks.length} tasks.`}</Hint>} />
         {approverKnown !== true && !can('admin') && (
           <p className="m-0 mt-2 text-[16px] text-on-surface-muted">
             <strong>Task 7.</strong> Only an admin can add users. Ask your admin to add someone with the approver role in Settings.

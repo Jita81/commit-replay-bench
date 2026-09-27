@@ -1,9 +1,9 @@
 /// <reference types="vitest/config" />
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { requireBundledDocs } from './plugins/requireBundledDocs'
 
 /**
  * Vite config for the crb UI.
@@ -24,7 +24,8 @@ import tailwindcss from '@tailwindcss/vite'
  *   passes it — an image context has no `.git` — else `git rev-parse HEAD`), so `/health` and
  *   `crb doctor` can say when the served bundle is not the served code
  *   (src/crb/observability/build_stamp.py; docs/PREVENTION.md P-002).
- * - Docs in the build: `requireBundledDocs` fails `vite build` when a guide `DOC_NAMES` lists,
+ * - Docs in the build: `requireBundledDocs` (ui/plugins/requireBundledDocs.ts, tested by
+ *   running it) fails `vite build` when a guide `DOC_NAMES` lists,
  *   or the decision records, are missing from `../docs` — the globs would otherwise resolve to
  *   nothing and ship a Help that cannot open a single guide, which is what the image did while
  *   `deploy/Dockerfile.dockerignore` dropped `docs` (docs/PREVENTION.md P-051).
@@ -61,31 +62,6 @@ function buildStamp(): Plugin {
   }
 }
 
-/**
- * Refuses a build without the docs the UI bundles: every guide `DOC_NAMES` lists
- * (ui/src/help/docs.ts, read as text so this list cannot drift from it) and at least one
- * decision record under docs/adr (ui/src/help/adrs.ts). A glob that matches nothing is not an
- * error to Vite, so without this the bundle builds green and every guide reads as missing.
- */
-function requireBundledDocs(): Plugin {
-  return {
-    name: 'crb-require-bundled-docs',
-    apply: 'build',
-    buildStart() {
-      const docs = new URL('../docs/', import.meta.url)
-      const registry = readFileSync(new URL('./src/help/docs.ts', import.meta.url), 'utf8')
-      const names = Array.from(/DOC_NAMES = \[([^\]]*)\]/.exec(registry)?.[1]?.matchAll(/'([^']+)'/g) ?? [], (m) => m[1]!)
-      const missing = names.filter((n) => !existsSync(new URL(`${n}.md`, docs)))
-      const adrDir = new URL('adr/', docs)
-      const adrs = existsSync(adrDir) ? readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f)) : []
-      if (names.length === 0) this.error('requireBundledDocs: could not read DOC_NAMES from ui/src/help/docs.ts')
-      if (missing.length > 0 || adrs.length === 0) {
-        this.error(`the UI bundles repository docs, and the build cannot see them: missing ${[...missing.map((n) => `docs/${n}.md`), ...(adrs.length === 0 ? ['docs/adr/*.md'] : [])].join(', ')} — is docs/ in the build context? (deploy/Dockerfile.dockerignore, docs/PREVENTION.md P-051)`)
-      }
-    },
-  }
-}
-
 export default defineConfig({
   plugins: [react(), tailwindcss(), buildStamp(), requireBundledDocs()],
   server: {
@@ -117,7 +93,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: false,
     setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    // the build plugins' tests run in node (each file says so): they read and write the disk
+    include: ['src/**/*.test.{ts,tsx}', 'plugins/**/*.test.ts'],
     css: false,
     // vitest's default is 5 s, which is a per-test budget the suite's `userEvent` cases do not
     // meet on a loaded machine: typing into a controlled React form re-renders on every

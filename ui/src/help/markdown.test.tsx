@@ -34,6 +34,14 @@ describe('renderMarkdown', () => {
     expect(screen.getAllByRole('heading', { level: 4 }).map((h) => h.id)).toEqual(['301-token', 'deep'])
   })
 
+  it('under a page title every heading moves one level down and keeps its id, so the page has no second h1', () => {
+    render(<MemoryRouter>{renderMarkdown('# Operator guide\n## 2. Configure a repository\n#### 3.0.1 Token\n##### deep', { headingOffset: 1 })}</MemoryRouter>)
+    expect(screen.queryAllByRole('heading', { level: 1 })).toHaveLength(0)
+    expect(screen.getByRole('heading', { level: 2, name: 'Operator guide' })).toHaveAttribute('id', 'operator-guide')
+    expect(screen.getByRole('heading', { level: 3 })).toHaveAttribute('id', '2-configure-a-repository')
+    expect(screen.getAllByRole('heading', { level: 5 }).map((h) => h.id)).toEqual(['301-token', 'deep'])
+  })
+
   it('duplicate headings get -1, -2 suffixes like GitHub', () => {
     mount('## Notes\n## Notes\n## Notes')
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.id)).toEqual(['notes', 'notes-1', 'notes-2'])

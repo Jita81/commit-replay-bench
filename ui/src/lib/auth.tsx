@@ -10,7 +10,9 @@
  * What it is:   The auth context (`AuthProvider` / `useAuth`) and the `RequireAuth` route guard.
  * What it does: Holds the logged-in principal from `GET /auth/me`, exposes `can(role)` for the
  *               RBAC ladder so screens hide or disable what the role cannot do, and redirects
- *               an unauthenticated visitor to `/login?next=…`. A 403 is NOT handled here —
+ *               an unauthenticated visitor to `/login?next=…` — the path, the query and the
+ *               fragment, so a link to a guide's section opens there after signing in. A 403
+ *               is NOT handled here —
  *               the screen that received it renders it — and a network / server error while
  *               checking the session is shown, not turned into a login redirect.
  * How:          `useMe` (a 401 → `null`) feeds a React context; `RequireAuth` reads it: loading
@@ -22,7 +24,8 @@
  *               (`Principal`, `Role`, `roleAtLeast`), ui/src/App.tsx (wraps the router in the
  *               provider and every shell route in the guard), ui/src/components/Layout.tsx (the
  *               role chip and sign-out), ui/src/screens/Login/LoginPage.tsx (honours `?next=`)
- * Tested by:    ui/src/test/utils.tsx (`renderApp` mounts the provider for every screen test),
+ * Tested by:    ui/src/lib/auth.test.tsx (the redirect's `next`),
+ *               ui/src/test/utils.tsx (`renderApp` mounts the provider for every screen test),
  *               ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/smoke.spec.ts
  * Touch when:   a role is added to the ladder (docs/API.md "Conventions") — extend `Role` in
  *               ui/src/api/types.ts first; never for a new repository.
@@ -84,7 +87,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   // not "logged out": the children render and the screen shows the error, so an API
   // outage never becomes a login loop.
   if (!me && !error) {
-    const next = encodeURIComponent(loc.pathname + loc.search)
+    // the fragment too: a link to a guide's section opens at that section after signing in
+    const next = encodeURIComponent(loc.pathname + loc.search + loc.hash)
     return <Navigate to={`/login?next=${next}`} replace />
   }
   return <>{children}</>
