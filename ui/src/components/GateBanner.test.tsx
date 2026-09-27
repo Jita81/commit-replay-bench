@@ -12,8 +12,9 @@
  * How:          `render` with plain criteria; `data-state` and the row text are read back.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/components/GateBanner.tsx, ui/src/screens/Signoff/SignoffPage.tsx (the
- *               posture row)
+ * Works with:   ui/src/components/GateBanner.tsx (the code under test),
+ *               ui/src/screens/Signoff/SignoffPage.tsx (the posture row),
+ *               ui/src/screens/Signoff/SignoffPage.test.tsx (the gate as the page draws it)
  * Tested by:    (this is a test file)
  * Touch when:   never for a new repository; the gate gains a row kind or a state.
  */

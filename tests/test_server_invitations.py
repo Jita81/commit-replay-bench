@@ -29,7 +29,7 @@ Works with:   src/crb/server/routes/invitations.py (under test),
               src/crb/store/models.py (``Invitation``, ``User``, ``Event``),
               src/crb/server/routes/admin.py (``record_user_event``, the account lifecycle),
               tests/test_server_admin_users.py (the sibling suite for the lifecycle routes),
-              docs/API.md#admin
+              docs/API.md#admin (the routes' contract)
 Tested by:    tests/test_server_invitations.py
 Touch when:   never for a new repository; an invitation state or route is added; the
               readiness rule changes.

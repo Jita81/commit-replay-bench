@@ -1677,8 +1677,12 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     assert refused[-1].payload["policy_version"] == "routing.v1"
     withheld = [e.action for e in h.events(gated.id) if e.stage == "factory"]
     assert "delivery.withheld" in withheld and "delivery.opened" not in withheld
-    # an approver's override reaches delivery — which then fails closed on the missing
-    # credentials, the next gate in line — and the override is on the evidence chain
+    # an approver's override lifts the sign-off clause and nothing else (ADR-0018 as amended
+    # by ADR-0026 item 8): on a cell that routes calibrate the route gate still withholds
+    # delivery, and no override is recorded because there was no sign-off clause to lift
+    before = len(
+        [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
+    )
     h.enqueue(
         "factory",
         ladder_json=["fake:m0"],
@@ -1686,12 +1690,12 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     )
     overridden = h.run_one()
     assert overridden.status == STATUS_SUCCEEDED
-    assert overridden.counts_json["by_status"] == {"delivery_failed": 1}
+    assert overridden.counts_json["by_status"] == {"accepted": 1}
+    actions = [e.action for e in h.events(overridden.id) if e.stage == "factory"]
+    assert "delivery.withheld" in actions
+    assert "delivery.opened" not in actions and "delivery.override" not in actions
     routes = [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
-    assert routes and routes[-1].payload["override_by"] == "approver:ada"
-    assert "delivery.override" in [
-        e.action for e in h.events(overridden.id) if e.stage == "factory"
-    ]
+    assert len(routes) == before
     # a run queued against a backlog that was re-registered before the worker claimed it
     # fails closed on the pinned hash (the API stamps params.backlog_hash at enqueue)
     h.enqueue("factory", ladder_json=["fake:m0"], params_json={"backlog_hash": "f" * 64})

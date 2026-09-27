@@ -18,8 +18,8 @@ What it does: Reads every ``ui/tsconfig*.json`` that sets ``tsBuildInfoFile`` an
 How:          ``json`` over the tsconfig files (they carry no comments); a path check.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   ui/tsconfig.app.json, ui/tsconfig.node.json, ui/.gitignore, docs/PREVENTION.md
-              (P-150)
+Works with:   ui/tsconfig.app.json and ui/tsconfig.node.json (where ``tsBuildInfoFile`` is
+              set), ui/.gitignore (ignores ``ui/.tsbuild/``), docs/PREVENTION.md (P-150)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (the UI's own build settings); a new tsconfig with
               build info is added, or the type-check stops being ``tsc -b``.

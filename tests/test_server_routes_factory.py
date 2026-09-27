@@ -519,7 +519,7 @@ def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:
 
 def test_factory_delivery_fields_and_the_approver_only_override(env: Env) -> None:
     """`deliver` / `max_rework` are stored on the run; `deliver_override` needs an approver
-    and stamps the caller's identity into `params.deliver_override_by` (the route gate's
+    and stamps the caller's identity into `params.deliver_override_by` (the sign-off clause's
     override is an approver's act, on the evidence chain — DL-038); none of them apply to
     a non-factory run."""
     login(env.client, "operator")

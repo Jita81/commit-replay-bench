@@ -33,7 +33,7 @@ Works with:   src/crb/server/decisions.py (the derivation and the clock),
               src/crb/server/factory_state.py (``FactoryHome.task_views``),
               src/crb/server/worker.py (the idle pass that keeps the clock running),
               ui/src/screens/Decisions/useDecisionCount.ts (joins these ages to its own
-              rows), docs/API.md#capability-routing-forecast-sign-off
+              rows), docs/API.md#capability-routing-forecast-sign-off (the routes' contract)
 Tested by:    tests/test_server_decisions.py
 Touch when:   a human act is added to the product (src/crb/server/decisions.py first).
 """

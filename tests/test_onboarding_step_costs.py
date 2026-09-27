@@ -16,7 +16,10 @@ How:          A regex split on the level-2 headings; plain substring checks.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0015-signoffs-expire-with-the-apparatus.md (why a re-sign follows a
               re-measurement)
-Works with:   docs/ONBOARDING-A-REPO.md, docs/dod/journeys/sign-off-a-cell.md (time-cost.17)
+Works with:   docs/ONBOARDING-A-REPO.md (the guide whose step sections it reads),
+              docs/dod/journeys/sign-off-a-cell.md (time-cost.17 cites it),
+              docs/adr/0015-signoffs-expire-with-the-apparatus.md (why a re-sign follows a
+              re-measurement)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; a step of the guide gains or loses a cost.
 """

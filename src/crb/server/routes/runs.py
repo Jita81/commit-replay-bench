@@ -744,8 +744,9 @@ def create_run(
             # that is also a rung on the ladder before anything is built
             params["test_author"] = body.test_author.strip()
         if body.deliver_override:
-            # the route gate's override is an APPROVER's act, stamped with their identity
-            # (external review 2026-09-16 point 36 → DL-038)
+            # the override is an APPROVER's act, stamped with their identity (external
+            # review 2026-09-16 point 36 → DL-038); it lifts only the sign-off clause for
+            # this run, never the route gate (ADR-0018 as amended by ADR-0026 item 8)
             require_role_now(operator, "approver")
             params["deliver_override_by"] = operator.id
         run.params_json = params

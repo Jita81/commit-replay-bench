@@ -56,9 +56,10 @@ Works with:   src/crb/store/models.py (``Invitation``, ``User``),
               account lifecycle and audit trail), src/crb/server/auth.py (the password and
               active primitives, the login limiter), src/crb/core/signoff.py (the
               two-person clause this readiness is about),
-              ui/src/screens/Settings/InviteApproverCard.tsx (the admin's surface),
-              ui/src/screens/Invite/AcceptInvitePage.tsx (the link's page),
-              ui/src/screens/Home/HomePage.tsx (task 7 reads the readiness), docs/API.md
+              ui/src/screens/Settings/InviteApproverCard.tsx and
+              ui/src/screens/Invite/AcceptInvitePage.tsx (the admin's surface and the link's
+              page), ui/src/screens/Home/HomePage.tsx (task 7 reads the readiness),
+              docs/API.md (the routes' contract)
 Tested by:    tests/test_server_invitations.py
 Touch when:   the role ladder changes (the readiness rule names the signing roles); never
               for a new repository.

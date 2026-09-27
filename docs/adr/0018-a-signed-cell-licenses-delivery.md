@@ -1,9 +1,9 @@
 # ADR-0018 — A signed cell licenses delivery: the gate reads the sign-off as well as the route
 
-**Status:** Accepted (wave 4, stream S; closes G-517). Decisions 1, 3 and 5 **as drafted** on
-2026-09-23 are superseded in part by [ADR-0026](0026-the-context-standard.md) item 8 before
-this ADR merged; the decisions below are the amended text, and each superseded draft is
-quoted under [What ADR-0026 supersedes](#what-adr-0026-supersedes).
+**Status:** Accepted (DL-120; wave 4, stream S; closes G-517). Decisions 1, 3 and 5
+**as drafted** on 2026-09-23 are superseded in part by [ADR-0026](0026-the-context-standard.md)
+item 8 before this ADR merged; the decisions below are the amended text, and each superseded
+draft is quoted under [What ADR-0026 supersedes](#what-adr-0026-supersedes).
 **Date:** 2026-09-23 (amended 2026-09-27, DL-120)
 **Apparatus impact:** none. This changes *which tickets the factory may build and deliver*, not
 what a grade means: no belt, no grader, no routing threshold, no ledger column and no sign-off
