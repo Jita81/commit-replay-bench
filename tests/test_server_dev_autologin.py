@@ -45,8 +45,9 @@ Works with:   src/crb/server/auth.py (``dev_autologin_refusal``, the session pri
               (``probe_dev_autologin``, ``/health``, ``/version``), src/crb/server/app.py
               (the start-up warning), docs/SECURITY.md#38-automatic-sign-in-on-a-development-stack
 Tested by:    tests/test_server_dev_autologin.py
-Touch when:   the conditions for an automatic sign-in change (a case here for each one, and
-              the threat-model row in docs/SECURITY.md); never to relax a refusal.
+Touch when:   never for a new repository; the conditions for an automatic sign-in change (a
+              case here for each one, and the threat-model row in docs/SECURITY.md); never to
+              relax a refusal.
 """
 
 from __future__ import annotations

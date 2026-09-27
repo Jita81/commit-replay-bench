@@ -11,7 +11,9 @@ What it does: Pins the pool caps, which commits are candidates (the feat commit,
               declared linter's verdict reaches the gold check only after the core belts hold,
               that support files under the test layout are overlaid but never targets
               (mesh-client, DL-023) and that three consecutive harness-errored candidates stop
-              the run instead of failing it. Toolchain cases pin gofmt / ruff on the gold.
+              the run instead of failing it. Toolchain cases pin gofmt / ruff on the gold, and
+              that the mining worktree's name carries no fragment of the candidate's sha (the
+              mapping is on the ``mine.candidate`` event; assessment 2026-09-25 B1).
 How:          ``iter_candidates`` / ``qualify`` / ``mine`` on ``pyrepo`` through the real
               ``PytestRunner`` and ``LocalExecutor``; a fake lint script stands in for the
               repository's linter.
@@ -19,7 +21,8 @@ Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
 Works with:   src/crb/core/mine.py (under test), tests/fixtures/pyrepo.py (the history and its
               opt-in green / bad-gold commits), src/crb/core/lint.py (the gold's belt 5),
-              src/crb/core/spec.py (``POOL_*`` and ``RepoConfig``), tests/conftest.py
+              src/crb/core/spec.py (``POOL_*`` and ``RepoConfig``), tests/conftest.py,
+              tests/fixtures/leakage.py (the sha-fragment scan)
 Tested by:    tests/test_mine.py
 Touch when:   the candidate rule changes (what counts as coupled source + test, the pools); the
               gold check gains a belt; a new repository layout needs a support-file rule.
@@ -47,6 +50,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import POOL_HARD, POOL_STANDARD, Language, RepoConfig
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.leakage import leaks
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -167,22 +171,23 @@ def test_qualify_produces_a_gold_clean_task(
     assert task.capability_class == "bug.fix" and task.class_source == "path"
     assert task.gold_clean is True
     assert task.gold_note == ""
-    assert task.labels == {}
+    # ADR-0019: the posture the facts were measured in, and nothing else
+    assert set(task.labels) == {"posture_id", "posture_class"}
     # the hand-built task the grade tests use is exactly what the miner measures
-    assert task == pyrepo.feat_task()
+    assert task.with_(labels={}) == pyrepo.feat_task()
     # the mining worktree is gone
     assert not (scratch / f"mine-{pr.REPO_NAME}-{pyrepo.feat_sha[:10]}").exists()
     kinds = [k for k, _ in events]
-    assert kinds == ["mine.candidate", "mine.red", "mine.gold"]
-    assert events[1][1] == {
+    assert kinds == ["mine.candidate", "qualify.task", "mine.red", "mine.gold"]
+    assert events[2][1] == {
         "sha": pyrepo.feat_sha,
         "size": "XS",
         "cls": "bug.fix",
         "baseline_failing": 1,
     }
-    assert events[2][1]["clean"] is True
+    assert events[3][1]["clean"] is True
     # no linter configured for the fixture: belt 5 was not evaluated on the gold
-    assert events[2][1]["lint"] is None
+    assert events[3][1]["lint"] is None
 
 
 def test_qualify_without_gold_leaves_gold_clean_unset(
@@ -275,7 +280,8 @@ def test_qualify_skips_on_baseline_timeout(
     )
     assert out.task is None
     assert out.skipped_reason == "baseline timeout"
-    assert calls == [(pr.TEST_SUBTRACT,), ("tests/",)]
+    # ADR-0019: the baseline is measured twice (the union and the flaky set)
+    assert calls == [(pr.TEST_SUBTRACT,), ("tests/",), ("tests/",)]
 
 
 def test_qualify_records_baseline_parse_error_as_label(
@@ -854,7 +860,7 @@ def test_mine_skips_a_candidate_whose_harness_errored_and_stops_after_three_in_a
     class Flaky(PytestRunner):
         calls = 0
 
-        def run_for(self, executor, root, scope, *, timeout=0, authored):  # type: ignore[override]
+        def run_for(self, executor, root, scope, *, timeout=0, authored, deps=None):  # type: ignore[override]
             Flaky.calls += 1
             raise RuntimeError("node era x: npm install rc=1")
 
@@ -896,5 +902,141 @@ def test_mine_skips_a_candidate_whose_harness_errored_and_stops_after_three_in_a
                 executor=executor,
                 scratch=tmp_path / "three",
                 only=frozenset(shas),
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
+# B1 (assessment 2026-09-25): the mining worktree is named by an opaque token
+# ---------------------------------------------------------------------------
+
+
+def test_the_mining_worktree_names_no_fragment_of_the_candidate_sha(
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    made: list[Path] = []
+    real = Workspace.create.__func__
+
+    def spy(cls: type[Workspace], repo: GitRepo, sha: str, dest: Path, **kw: Any) -> Workspace:
+        made.append(Path(dest))
+        return real(cls, repo, sha, dest, **kw)
+
+    monkeypatch.setattr(Workspace, "create", classmethod(spy))
+    events, on_event = _collector()
+    cand = _feat_candidate(pyrepo)
+    out = m.qualify(
+        pyrepo.repo,
+        pyrepo.config,
+        cand,
+        runner=runner,
+        executor=executor,
+        scratch=tmp_path / "scratch",
+        on_event=on_event,
+    )
+    assert out.task is not None and made
+    for dest in made:
+        assert leaks(cand.sha, str(dest)) == [], f"mining worktree {dest}"
+    # the mapping lives in the run's events, never in the path
+    (ev,) = [p for a, p in events if a == "mine.candidate"]
+    assert ev["sha"] == cand.sha and ev["worktree"] == made[0].name
+
+
+# ADR-0019: the mine qualifies in its own posture
+# ---------------------------------------------------------------------------
+
+
+def test_mine_writes_a_qualification_for_its_own_posture(
+    pyrepo: pr.PyRepo, runner: PytestRunner, executor: LocalExecutor, tmp_path: Path
+) -> None:
+    from crb.core.posture import resolve_posture
+
+    events, on_event = _collector()
+    (outcome,) = m.mine(
+        pyrepo.repo,
+        pyrepo.config,
+        runner=runner,
+        executor=executor,
+        scratch=tmp_path,
+        target_count=1,
+        on_event=on_event,
+        run_id="mine-run",
+    )
+    q = outcome.qualification
+    assert q is not None and q.is_qualified and q.run_id == "mine-run"
+    live = resolve_posture(executor, runner, deps_mode="host-env", root=pyrepo.path)
+    assert q.posture_id == live.posture_id and q.posture_class == "local/inplace/host-env"
+    task = outcome.task
+    assert task is not None
+    # the discovery fields ARE the qualification's
+    assert task.baseline_failing == tuple(sorted(q.baseline))
+    assert task.gold_clean is True and task.red_checked is True
+    assert task.labels["posture_id"] == q.posture_id
+    assert any(a == "qualify.task" and p["state"] == "qualified" for a, p in events)
+
+
+class _ProvisionOff:
+    def mode(self, config: Any, executor_name: str) -> str:
+        return "sealed"
+
+    def resolve(self, *a: Any, **k: Any) -> Any:
+        from crb.core.deps import PROVISION_DISABLED, ProvisionRefused, refusal
+
+        raise ProvisionRefused(refusal(PROVISION_DISABLED, "go.mod declares 2 modules"))
+
+    def verify(self, deps: Any) -> None:
+        return None
+
+
+def test_provision_disabled_stops_the_mine_with_the_fix(
+    pyrepo: pr.PyRepo, runner: PytestRunner, executor: LocalExecutor, tmp_path: Path
+) -> None:
+    with pytest.raises(RuntimeError) as exc:
+        list(
+            m.mine(
+                pyrepo.repo,
+                pyrepo.config,
+                runner=runner,
+                executor=executor,
+                scratch=tmp_path,
+                target_count=1,
+                deps=_ProvisionOff(),
+            )
+        )
+    msg = str(exc.value)
+    assert msg.startswith("PROVISION_DISABLED") and "CRB_PROVISION__ENABLED" in msg
+
+
+def test_three_unloadable_candidates_stop_the_mine_with_what_to_do(
+    pyrepo: pr.PyRepo, executor: LocalExecutor, tmp_path: Path
+) -> None:
+    from crb.core.execution import Command
+
+    class _Unloadable(PytestRunner):
+        def env_probe_command(
+            self, root: Path, scope: Any, *, executor: Any, timeout: int
+        ) -> Command:
+            return Command((sys.executable, "-c", "import sys; sys.exit(1)"), root, timeout=timeout)
+
+    for i in range(3):
+        pr._write(pyrepo.path, pr.SRC, pr.SRC_FEAT.replace("A tiny calculator.", f"Calc v{i}."))
+        pr._write(
+            pyrepo.path,
+            pr.TEST_CALC,
+            pr.TEST_CALC_SRC + f"\n\ndef test_add_zero_{i}():\n    assert add(0, 0) == 0\n",
+        )
+        pr._commit(pyrepo.path, f"refactor: docstring v{i}")
+    with pytest.raises(RuntimeError, match="switch provisioning on and qualify"):
+        list(
+            m.mine(
+                pyrepo.repo,
+                pyrepo.config,
+                runner=_Unloadable(pyrepo.config),
+                executor=executor,
+                scratch=tmp_path,
+                target_count=5,
             )
         )

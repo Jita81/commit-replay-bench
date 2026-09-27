@@ -1022,3 +1022,62 @@ class TestSse:
             return [chunk async for chunk in gen]
 
         assert asyncio.run(drive()) == []  # no events for the running run; client went away
+
+
+# --- ADR-0019: the submit-time posture gate ---------------------------------------------------
+
+
+def _record(env: Env, tid: str, *, state: str = "qualified", code: str = "") -> Any:
+    from crb.core.qualify import Qualification
+    from crb.store import qualifications as sq
+
+    q = Qualification(
+        qualification_id="",
+        repo=ALPHA,
+        task_id=tid,
+        posture_id="pst_" + "4" * 24,
+        posture={"executor": "local", "posture_class": "local/inplace/host-env"},
+        state=state,
+        code=code,
+    )
+    with env.factory() as s:
+        sq.append(s, q)
+    return q
+
+
+def test_replay_submit_refused_with_the_fix_when_no_task_is_qualified(
+    env: Env, jobs: FakeJobs
+) -> None:
+    login(env.client, "operator")
+    body = {"repo": ALPHA, "kind": "replay", "builder": "b", "model": "m", "qualify_first": False}
+    r = env.post("/runs", json=body)
+    assert r.status_code == 409, r.text
+    err = envelope(r)
+    assert err["code"] == "posture_unqualified"
+    assert err["detail"]["qualified"] == 0 and err["detail"]["unqualified"] > 0
+    assert err["detail"]["reasons"] == {"POSTURE_UNQUALIFIED": err["detail"]["unqualified"]}
+    assert "kind: qualify" in err["detail"]["fix"] and "no model spend" in err["detail"]["fix"]
+    assert jobs.enqueued == []  # nothing queued, nothing spent
+    # a recorded refusal is named by its own code
+    _record(env, task_id(1), state="unqualified", code="QUAL_ENV_UNLOADABLE")
+    r = env.post("/runs", json={**body, "task_ids": [task_id(1)]})
+    assert r.status_code == 409
+    assert envelope(r)["detail"]["reasons"] == {"QUAL_ENV_UNLOADABLE": 1}
+    # once one task is qualified in that posture, the same request is accepted
+    _record(env, task_id(1))
+    r = env.post("/runs", json={**body, "task_ids": [task_id(1)]})
+    assert r.status_code == 201, r.text
+    assert jobs.enqueued[-1].params_json["qualify_first"] is False
+
+
+def test_replay_submit_accepted_when_qualify_first_is_on(env: Env, jobs: FakeJobs) -> None:
+    login(env.client, "operator")
+    body = {"repo": ALPHA, "kind": "replay", "builder": "b", "model": "m", "env_stop": 3}
+    r = env.post("/runs", json=body)
+    assert r.status_code == 201, r.text
+    params = jobs.enqueued[-1].params_json
+    assert "qualify_first" not in params and params["env_stop"] == 3  # on by default
+    # the qualify kind needs no builder and is accepted as is
+    q = env.post("/runs", json={"repo": ALPHA, "kind": "qualify"})
+    assert q.status_code == 201, q.text
+    assert jobs.enqueued[-1].kind == "qualify" and jobs.enqueued[-1].builder == ""

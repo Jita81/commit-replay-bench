@@ -78,6 +78,7 @@ from crb.server.settings import Settings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Repo, Run, Task, User
+from fixtures.posture import posture_result, posture_row
 
 ROOT_PW = "correct-horse-battery-staple"
 USER_PW = "long-enough-password"
@@ -165,7 +166,7 @@ def _result(task: TaskSpec, *, clean: bool, error: str = "") -> GradeResult:
         belts = Belts(True, True, True, True)
     else:
         belts = Belts(True, False, True, True)
-    return GradeResult(
+    return posture_result(
         task_id=task.task_id,
         repo=task.repo,
         mode="sighted",
@@ -400,7 +401,7 @@ def seed(factory: sessionmaker[Session], *, clone_path: str = "") -> SeedInfo:
         pack_hash = sha256_text(canonical_json(pack))
         imported_packs.append((pack_hash, pack, task))
         rows.append(
-            GradeRow(
+            posture_row(
                 repo=ALPHA,
                 task_id=task.task_id,
                 clean=clean,

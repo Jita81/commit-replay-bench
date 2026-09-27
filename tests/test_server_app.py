@@ -25,8 +25,9 @@ Works with:   src/crb/server/app.py (under test), src/crb/server/settings.py (th
               (``require_role``), docs/API.md (conventions the envelope tests pin),
               docs/SECURITY.md
 Tested by:    tests/test_server_app.py
-Touch when:   a domain exception is mapped to a reserved code (a case here and docs/API.md); a
-              security header or middleware is added; a settings field gains validation.
+Touch when:   never for a new repository; a domain exception is mapped to a reserved code (a
+              case here and docs/API.md); a security header or middleware is added; a settings
+              field gains validation.
 """
 
 from __future__ import annotations
@@ -187,7 +188,8 @@ class TestSettings:
         assert d["secret_key_configured"] is True
         assert d["oidc"]["client_secret_configured"] is True
         assert d["bootstrap_admin"] == {"username": "root", "password_configured": True}
-        assert d["sandbox"] == {"executor": "local", "image": ""}
+        assert d["sandbox"] == {"executor": "local", "image": "", "tree": "copy", "work_size": "1g"}
+        assert d["provision"]["enabled"] is False and "ca_bundle_configured" in d["provision"]
 
 
 # --- factory + seam ---------------------------------------------------------------------
@@ -265,13 +267,13 @@ class TestFactory:
             assert r.json()["status"] == "down"
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "down"
-            assert probe["data"] == {"triggers": 8, "expected": 10}
+            assert probe["data"] == {"triggers": 10, "expected": 12}
         # init_db is idempotent: a restart reinstalls the missing triggers.
         with TestClient(create_app(make_settings(tmp_path), factory)) as c:
             r = c.get(f"{API_PREFIX}/health")
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "ok"
-            assert probe["data"] == {"triggers": 10, "expected": 10}
+            assert probe["data"] == {"triggers": 12, "expected": 12}
 
 
 # --- middleware --------------------------------------------------------------------------

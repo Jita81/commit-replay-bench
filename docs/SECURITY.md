@@ -46,18 +46,52 @@ credentials and the host, and **prove** that stored evidence has not been altere
 ```
 
 **What crosses the tenant boundary — the complete list.** Nothing leaves the deployment
-except these three flows, each to an endpoint the operator configures, and each carrying
-only what is named here:
+except the flows in this table, each to an endpoint the operator configures, and each carrying
+only what is named here (`tests/test_egress_inventory.py` fails if this table, DEPLOYMENT §1
+or DEPLOYMENT §7 leaves one out):
 
 | Flow | Endpoint | What is sent | What is never sent |
 |---|---|---|---|
-| Builder / labeller / reviewer calls | the model endpoint (`CRB_OPENAI_BASE_URL` / Azure / Anthropic) | the task brief, the source files the builder reads in its worktree, tool results, the diff it writes | the held-out tests, the ledger, credentials, other repositories |
-| Repository clone and fetch | the repository's git remote (`repos.url`) | the git protocol; the push token only on an `https://` / `ssh` remote and only for factory delivery (§3.4 / `crb.factory.delivery`) | anything not in the git protocol |
+| Builder / labeller / reviewer calls | the model endpoint: `CRB_OPENAI_BASE_URL`; Azure OpenAI at `CRB_AZURE_ENDPOINT` or `AZURE_OPENAI_ENDPOINT`; Anthropic, which the builder container reaches only through its allowlisting proxy (`CRB_BUILDER__ALLOW_HOSTS`, default `api.anthropic.com`) | the task brief, the source files the builder reads in its worktree, tool results, the diff it writes | the held-out tests, the ledger, credentials, other repositories |
+| Repository clone and fetch | the repository's git remote (`repos.url`) | the git protocol; for factory delivery only, the push of one `crb/<item>-<slug>` branch and, on each re-delivery, a force-with-lease push that re-points that same branch to a new commit, with the push token only on an `https://` / `ssh` remote (§3.4 / `crb.factory.delivery`) **[measured — n = 2 git writes (the first push, and the re-delivery's force-with-lease re-point, which a real bare repository refuses against a stale or wrong commit) and 3 clear-text remotes refused a push token; method: `tests/test_factory_delivery.py::test_lease_semantics_against_a_real_bare_repository`, `::test_redelivery_leases_on_the_previous_commit_updates_the_pr_and_comments`, `::test_credentials_never_leak_and_env_provider`, and `tests/test_egress_inventory.py::test_the_git_remote_row_says_a_re_delivery_re_points_the_branch`; apparatus 2.3]** | anything not in the git protocol |
+| GitHub API — the GitHub App (ADR-0014; only when the deployment has a GitHub App) and factory delivery (§3.4; **off by default**) | the GitHub API (`CRB_GITHUB__API_URL`, default `https://api.github.com`; a GitHub Enterprise Server's `/api/v3`) | the app's signed ten-minute JWT; requests for the installations, one installation's repositories and a short-lived installation token; a read of a repository's metadata and of a delivered pull request's state; and, for delivery only, the request that opens the pull request with its escaped title and redacted evidence-summary body, one comment per re-delivery or withdrawal, and the close of a withdrawn pull request (`src/crb/server/github_app.py`, `src/crb/factory/delivery.py`) | the app's private key, the source code (the branch travels by the git remote, not this API), raw builder output, the ledger, an evidence pack, any other repository's content |
 | Sign-in | the OIDC issuer (`CRB_OIDC__ISSUER`, https-only) | the authorisation code flow (PKCE), the ID-token validation against the issuer's JWKS | the session cookie, any repository content |
 | Intake — the watched column (ADR-0017; **off by default**, and off entirely unless `CRB_INTAKE__TRACKER` names one) | the tracker (`CRB_INTAKE__URL`, https-only): Azure DevOps `/_apis/wit/*` or Jira `/rest/api/3/*` | a WIQL or JQL query naming the configured project, column and area path; a read of the work items it returns; and, per ticket, up to four comments each marked as its own (what is missing, queued, the pull request, the stop), ONE `crb:` label, a link to the backlog item and a link to the pull request, and — only where `CRB_INTAKE__OUTCOME_MAP` configures it — ONE state transition **[measured — n = 1 ticket driven through a poll, a delivery, a stop and a configured transition: four distinct markers, two links, one label, one state change, and the same notes posted again add none; method: the real service over the shared fake board, `tests/test_intake_write_bound.py::test_the_whole_life_of_a_ticket_is_four_comments_two_links_one_label_one_transition`, with the renderer and verb count in `tests/test_intake_feedback.py::test_the_comment_counts_what_it_writes_rather_than_promising_it_writes_little`; release 2.0.0a1, apparatus 2.2]**. One pass reads at most `CRB_INTAKE__MAX_PER_POLL` tickets (200), and once `CRB_INTAKE__POLL_BUDGET_S` (60 s) has gone it starts no further tracker call: it serves what it read and says it stopped. That is a bound on how many calls are made, not a stopwatch on the pass — the call already running is not cancelled, so a pass takes the budget plus the verb in progress, not the budget exactly. A column therefore cannot become an unbounded egress **[measured — n = 2 bounds; method: a column of 5 against a bound of 4 reads not one ticket and stops `column_too_large`, and a pass whose budget goes serves what it read and records the stop, whether it goes between tickets or inside the last one (`tests/test_intake_service.py::test_a_column_bigger_than_one_pass_may_read_stops_rather_than_walking_it`, `::test_a_pass_that_runs_out_of_time_serves_what_it_has_and_says_so`, `::test_a_budget_that_runs_out_inside_a_ticket_starts_no_further_tracker_call`, `::test_a_budget_that_runs_out_inside_the_last_ticket_stops_the_pass_not_only_the_row`, `::test_the_default_bounds_are_the_settings_defaults`); release 2.0.0a1, apparatus 2.2]** | the source code, the diff, the ledger, an evidence pack, any other repository's content, any field of the ticket other than its own comment, its `crb:` label and the mapped state; the model endpoint's credentials |
+| Dependency provisioning (ADR-0019; **off by default**, and off entirely unless `CRB_PROVISION__ENABLED=true`) | the package mirror or registry `CRB_PROVISION__*` names (`GO_PROXY` / `GO_SUMDB`, `PYPI_INDEX` / `PYPI_FILES_HOST`, `NPM_REGISTRY`, plus `EXTRA_ALLOW_HOSTS`), reached only through the fetch's CONNECT-only allowlisting proxy; a `file://` mirror sends nothing | the package names and versions the task's lockfiles pin at the parent and at the gold (`go.sum`, `name==version` lines, `package-lock.json`), as the toolchain's own download requests for them, and — for Go, unless the checksum database is off — a lookup of each module version in it | the source code, the diff, the lockfile's other content, the ledger, an evidence pack, any credential (the fetch's environment is a fixed allowlist and a secret-looking name is refused, `tests/test_provision_fetch.py::test_fetch_argv_is_internal_network_proxy_only_no_worktree_no_secret`), `CRB_HOME`; no audit or update-check call (`npm_config_audit=false`, `npm_config_update_notifier=false`) |
+| Container images (pulled when a container first starts — by the host's container runtime, or by the `dind` sidecar in the Helm chart) | the image registry the image references name: `CRB_SANDBOX__IMAGE` (or `CRB_SANDBOX_IMAGE`), `CRB_BUILDER__IMAGE` and `PROXY_IMAGE`, `CRB_PROVISION__PROXY_IMAGE`, `GO_IMAGE`, `PYTHON_IMAGE` and `NODE_IMAGE` — or your mirror of them (DEPLOYMENT §7) | the image references (name, tag or digest) and the runtime's own registry credentials, if it has any | anything of the product's: the source code, the diff, the ledger, an evidence pack, a task |
 
-The intake flow is the only one that WRITES to a third-party system, and what it may write
-is bounded by the size of the protocol it has (`crb.intake.client.TrackerClient`: six verbs,
+**What the product writes outside the deployment.** Two features WRITE to a system the
+deployment does not own: factory delivery, through the git remote and the GitHub API, and
+intake, through the tracker. Every other flow in the table sends a request and reads the
+answer, and changes nothing **[measured — n = 7 flows in the table, 3 of whose rows name a
+write (a pushed or re-pointed branch; an opened pull request, a comment and a close; comments,
+a label and a transition); method:
+`tests/test_egress_inventory.py::test_the_write_statement_names_every_flow_whose_row_writes`
+reads the writers from the table's "What is sent" cells and fails when this statement names a
+different set; apparatus 2.3]**. The two features write under different conditions.
+
+Factory delivery writes to the customer's repository. It pushes a branch and opens a pull
+request only when all of these hold: the operator started the factory run with delivery on
+(it is off by default); the run's independent review accepted the item (ADR-0021); and the
+repository has delivery credentials — a GitHub App installation that grants
+`contents: write` and `pull_requests: write`, or a credential provider the operator
+configured (the default provider refuses, so delivery fails closed). It pushes one
+`crb/<item>-<slug>` branch, never the default or a protected branch, and opens the pull
+request against the default branch. After that it changes that pull request, in the
+repository it was opened in, in two ways only. When it re-delivers the item, it re-points the
+same `crb/` branch to a new commit with a force-with-lease push, which the remote refuses
+unless the branch still points at the commit delivery pushed before. That changes what the
+pull request contains, so delivery then posts a comment saying why the branch moved. When a
+later review does not accept the item, it posts a comment and closes the pull request. It
+never merges a pull request and never deletes one **[measured — n = 4 write seams in
+`crb.factory.delivery` (push, open, comment, close) and the re-delivery lease, each named in
+this paragraph; method:
+`tests/test_egress_inventory.py::test_the_delivery_paragraph_names_every_write_delivery_makes`
+reads the seams from the module and fails on a seam it does not map or this paragraph does not
+name; apparatus 2.3]** (`src/crb/factory/delivery.py`, `src/crb/factory/loop.py`).
+
+Intake writes to the tracker only when it is switched on (it is off by default), and what it may
+write is bounded by the size of the protocol it has (`crb.intake.client.TrackerClient`: six verbs,
 no more) rather than by a rule somebody has to remember **[measured — n = 6 verbs and 4
 renderers counted against the sentence the ticket itself carries; method:
 `tests/test_intake_feedback.py::test_the_comment_counts_what_it_writes_rather_than_promising_it_writes_little`
@@ -71,6 +105,28 @@ served intake view, the state file, the evidence chain and the settings body; me
 `tests/test_server_routes_intake.py::test_the_tracker_token_is_in_no_log_no_event_no_state_file_and_no_error`;
 release 2.0.0a1, apparatus 2.2]**.
 
+Since 2026-09-25 (assessment C6, ADR-0022) the intake boundary also holds four more rules.
+The credential is sent only to the tracker's own origin: a request URL whose scheme, host or
+port differ from the configured one is refused before the header is attached **[measured —
+n = 4 foreign URLs refused and never sent (another host, another scheme, another port, a
+lookalike host), the same origin served absolute and relative; method:
+`tests/test_intake_adapters.py::test_an_absolute_url_on_another_origin_is_refused_and_never_sent_the_credential`,
+an `httpx.MockTransport` that records every request; release 2.0.0a1, apparatus 2.2]**. What a
+ticket says reaches a customer's pull request only inside one fenced code block, the title
+is escaped to one inert line and the branch is `[a-z0-9-]` **[measured — n = 1 hostile title
+and 2 hostile criteria (a code span, emphasis, an HTML comment, a mention, a link, a fence and
+a heading, an image tag) and 5 item ids; method:
+`tests/test_factory_delivery.py::test_ticket_text_in_the_pr_body_is_fenced_and_cannot_become_markup`,
+`::test_the_pull_request_title_escapes_the_ticket_titles_markdown`,
+`::test_the_delivery_branch_is_lowercase_letters_digits_and_hyphens` (with
+`git check-ref-format`); release 2.0.0a1, apparatus 2.2]**. A ready ticket is registered only
+by an operator's evented Register act unless its author is on an explicit allowlist, and one
+pass per repository runs at a time under a lease row **[measured — n = 5 cases: a ready ticket
+waits, the act registers the draft read, a moved revision is refused, an allowlisted author
+bypasses and others wait, two overlapping passes register once; method:
+`tests/test_intake_service.py` (the C6 section) and `tests/test_server_routes_intake.py` (the
+same at the API); release 2.0.0a1, apparatus 2.2]**.
+
 There is no telemetry, no update check, no licence phone-home, and the opt-in federated
 export (ADR-0007) is a file the operator produces, never a call the product makes. With the
 builder in its container (ADR-0012) the model endpoint is reachable from exactly one
@@ -82,8 +138,9 @@ process — the egress sidecar — and only for the hosts on the allowlist.
 
 | Control | Implementation | Status |
 |---|---|---|
-| No network | `--network=none` on every test run; only an explicit dependency-install phase may request `--network=bridge`, and it still carries every other cap | [measured] `tests/test_execution.py` asserts the argv flag-by-flag |
-| Immutable root + worktree | `--read-only`, worktree bind-mounted `readonly`; writable scratch only at declared paths (`target/`, `.pytest_scratch`) and tmpfs `/tmp` with `noexec,nosuid,nodev` stated on the argv. **The one exception:** `exec` in place of `noexec` for a command whose toolchain runs the binaries it builds there — the Go runner declares `Command.exec_tmp` so `go test` can exec its test binaries; `nosuid,nodev` and every other flag hold, and the tmpfs dies with the container. The exception is **per toolchain** (a runner declares it in its `command()`), never per repository: no `RepoConfig` key, `runner_opts` or run request can set it | [measured] `tests/test_execution.py` asserts both tmpfs shapes token by token (`noexec` present / `exec` absent for an ordinary command, the reverse for `exec_tmp`) and that nothing else in the argv differs; `tests/test_sandbox_images_docker.py::test_tmp_is_noexec_unless_the_runner_declares_exec_tmp` reads `/proc/mounts` inside each shipped image and tries to run a script written under `/tmp` (`noexec` + `Permission denied` for the python and node runners' commands; `exec` + it runs only for the Go runner's, which is the only runner whose `command()` declares `exec_tmp`) — 3/3 images built from this tree (colima, Docker 29.5.2, 2026-09-22) and in CI's `sandbox-images` job on every pull request (PR #44 run 35678358686 on the merged head 4a64fe3); the read-only root, read-only worktree, writable `/tmp` and no-setuid proofs: 10 tests × 3 images, same suite; apparatus 2.2 |
+| No network | `--network=none` on every test run, with no exception: `Command.network=True` is **refused** under docker (`SandboxUnavailable`: "dependencies are provisioned per task, never installed in the sandbox") — a repository's dependencies arrive as read-only sealed sets fetched outside the test container (3.1.1, ADR-0019) | [measured] `tests/test_execution.py` asserts the argv flag-by-flag and `test_network_true_is_refused_under_docker` pins the refusal for both tree modes |
+| Immutable root + worktree; tests in a throwaway copy | `--read-only`; the worktree bind-mounted `readonly` at `/src` and every command run in a **throwaway copy** of it — a tmpfs at `/work` capped at `work_size`, owned by the container's uid (mode 0700), `exec,nosuid,nodev`, copied by GNU `tar` and gone with the container (ADR-0019 §7; the `readonly` tree keeps the worktree itself read-only at `/work`, a separate posture). A test that writes its own tree (cobra's `TestDeadcodeElimination`) behaves as on the host and nothing it writes reaches the host; a copy that fails is `env_error: tree_copy_failed`, never a verdict. The tree reaches the container whole whatever its host modes: the container's user owns nothing on the host, so before a container starts `grant_sandbox_read` adds read (and search, on a directory) for the owner and for others on every path the worker owns — what a git checkout under the default umask already has; never a write bit, never git's execute bit, never through a link (the command's own writable paths are left at `0733`). A path it cannot make readable fails the copy closed, and GNU tar's "removed before we read it" is fatal although tar exits 1 for it, so no path is ever silently left out of the copy (PR #56). Writable scratch only at declared paths (`target/`, `.pytest_scratch`) and tmpfs `/tmp` with `noexec,nosuid,nodev` stated on the argv. **The one exception:** `exec` in place of `noexec` for a command whose toolchain runs the binaries it builds there — the Go runner declares `Command.exec_tmp` so `go test` can exec its test binaries; `nosuid,nodev` and every other flag hold, and the tmpfs dies with the container. The exception is **per toolchain** (a runner declares it in its `command()`), never per repository: no `RepoConfig` key, `runner_opts` or run request can set it | [measured] `tests/test_execution.py::test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tmpfs_at_work` and `::test_readonly_tree_keeps_todays_argv` pin both tree shapes token by token; `tests/test_sandbox_docker.py::test_a_path_host_modes_hide_from_the_sandbox_uid_still_reaches_the_tests` (both trees), `::test_a_command_after_a_runner_wrote_its_scratch_still_copies_the_tree` and `::test_the_copy_fails_closed_on_a_path_it_cannot_read_never_drops_it` plant a mode-000 directory, a mode-600 file and a mode-000 file and read them from inside the container, and `tests/test_execution.py::test_docker_run_lets_the_sandbox_uid_read_the_tree_never_write_never_through_a_link` pins the exact modes the grant leaves **[measured — n = 4 docker tests + 2 unit cases, colima (Docker 29.5.2), 2026-09-26, apparatus 2.3; the Linux ownership case (a runner uid that is not the sandbox's) was reproduced once in a container before and after the grant, and CI's `sandbox-images` job is its standing check]**; `tests/test_sandbox_images_docker.py::test_a_test_can_write_its_tree_and_nothing_reaches_the_host` proves from inside each shipped image that `/src` refuses a write, `/work` accepts one and the host tree stays byte-identical (n = 3 images, colima, Docker 29.5.2, 2026-09-25, apparatus 2.2). `tests/test_execution.py` also asserts both tmpfs shapes token by token (`noexec` present / `exec` absent for an ordinary command, the reverse for `exec_tmp`) and that nothing else in the argv differs; `tests/test_sandbox_images_docker.py::test_tmp_is_noexec_unless_the_runner_declares_exec_tmp` reads `/proc/mounts` inside each shipped image and tries to run a script written under `/tmp` (`noexec` + `Permission denied` for the python and node runners' commands; `exec` + it runs only for the Go runner's, which is the only runner whose `command()` declares `exec_tmp`) — 3/3 images built from this tree (colima, Docker 29.5.2, 2026-09-22) and in CI's `sandbox-images` job on every pull request (PR #44 run 35678358686 on the merged head 4a64fe3); the read-only root, read-only worktree, writable `/tmp` and no-setuid proofs: 10 tests × 3 images, same suite; apparatus 2.2 |
+| Sealed dependency sets, read-only | A binding's `ro_mounts` are rendered `--mount …,readonly` only after `validate_mount` re-checks each one: inside a registered bundle store, under its `dep_<sha256>` key directory, nothing in it writable. A forged or unsealed mount is `SandboxUnavailable` | [measured] `tests/test_execution.py::test_a_bundle_mount_outside_the_store_is_refused`, `tests/test_provision_store.py::test_a_mount_outside_the_store_or_without_a_key_name_is_refused` |
 | Least privilege | `--cap-drop=ALL`, `--security-opt no-new-privileges`, non-root `--user=65534:65534` (root refused at construction) | [measured] |
 | Resource caps | `--memory`, `--cpus`, `--pids-limit`, `--stop-timeout`; wall-clock timeout returns `rc=124` and is graded as a failure, never a pass | [measured] |
 | Fail closed | No docker binary, unreachable daemon, root user, docker-socket or `$HOME` mount request, or a launch failure (exit 125) raise `SandboxUnavailable`; the **run stops** and is recorded `failed`. The product never degrades to in-process execution when the sandbox was requested. `--pull=never`: an image absent from the daemon's store is a launch failure, never a registry pull at run time | [measured] `tests/test_execution.py`, `tests/test_sandbox_docker.py` (skipped without a daemon), `tests/test_sandbox_images_docker.py` (an absent image is `SandboxUnavailable` against a real daemon, the match pinned to the daemon's no-pull wording `No such image` — dropping `--pull=never` reads `pull access denied` and fails the test; 3/3 images locally, 2026-09-22, and CI's `sandbox-images` job on every pull request) |
@@ -99,8 +156,8 @@ only (pytest hash-pinned; Go copied onto a slim base without gcc or git), `USER 
 OCI labels, hadolint-clean **[measured — `tests/test_sandbox_images_docker.py` reads `USER`
 and the six labels from each image's config; hadolint in CI]**. CI's `sandbox-images` job
 builds each on every pull request and proves the controls above from inside it through the
-real runner of that language **[measured — 10 tests × 3 images: uid 65534 by default and
-under the executor, `/usr` + `/work` read-only from inside, `/tmp` writable and `noexec`
+real runner of that language **[measured — 10 tests × 3 images before ADR-0019: uid 65534 by default and
+under the executor, `/usr` + `/work` read-only from inside (now `/src`, with `/work` the throwaway copy), `/tmp` writable and `noexec`
 except for the Go runner's command, no setuid/setgid file in the image, a network probe
 fails through the runner, an absent image is `SandboxUnavailable` without a pull, qualify +
 grade clean; 47 passed / 0 skipped with the sandbox and sealed-builder suites on the python
@@ -112,6 +169,26 @@ compose / Helm worker ran `local` while `/settings` said `docker` — and a repo
 `sandbox_image` wins over the deployment default **[measured — `tests/test_worker.py`
 `test_settings_from_args_env_fallbacks`, `test_docker_settings_resolution`]**. Selection,
 extension and the re-pin cadence: `deploy/sandbox/README.md`.
+
+#### 3.1.1 Dependency provisioning — `crb.core.deps`, `crb.provision` (ADR-0019)
+
+A task's dependencies are fetched **outside** the test container, sealed and mounted
+read-only. Provisioning is **off** until an operator switches it on
+(`CRB_PROVISION__ENABLED`); while it is off, a repository that declares dependencies is
+refused `PROVISION_DISABLED` under docker before any spend.
+
+| Control | Implementation | Status |
+|---|---|---|
+| Inputs from git objects only | The lockfiles at the parent and at the gold are read with `git cat-file blob <sha>:<path>`; no fetch path accepts a worktree, so nothing a builder writes can change what is fetched. `.npmrc`, `pip.conf`, `go.env` and `.pypirc` are never read; Python's lock is rewritten from the parsed pins, so no include, option or index line of the repository reaches pip | [measured] `tests/test_provision.py::test_lock_inputs_are_read_from_git_objects_not_the_worktree`, `::test_repository_config_files_are_never_read`, `tests/test_provision_python.py::test_pip_fetch_is_wheels_only_from_the_parsed_pins` |
+| Refused before any container starts | A URL, VCS, path or foreign-registry source, an unpinned version, `go.work`, yarn / pnpm / poetry / uv / pylock locks, npm lockfileVersion 1, an install script the repository did not name, JVM and Rust — each a `PROVISION_*` code with its fix | [measured] `tests/test_provision.py` (one test per refusal) |
+| The fetch container | Digest-pinned toolchain image (with CA certificates); the worker's non-root uid (root refused); `--read-only`, `--cap-drop=ALL`, `no-new-privileges`, memory / cpu / pid caps, `noexec` `/tmp`; it sees `/in` (the lockfiles, read-only) and `/out` only — never a worktree, the source, a secret or `CRB_HOME`; its environment is the recipe's fixed allowlist and a secret-looking name is refused at construction | [measured] `tests/test_provision_fetch.py::test_fetch_argv_is_internal_network_proxy_only_no_worktree_no_secret` pins every token; `::test_fetch_user_is_the_worker_and_never_root` |
+| Egress | The fetch's only network is an `--internal` bridge whose only way out is the CONNECT-only allowlisting proxy (`crb.builders.sidecar`, the same program as the builder's) to the configured registry hosts; a `file://` mirror runs with **no network and no sidecar**. `GOPROXY` is never `direct`, `GOVCS=*:off`, `GOTOOLCHAIN=local`; a denied host is named in the refusal | [measured] `tests/test_provision_fetch.py::test_an_airgapped_mirror_runs_with_no_network_and_no_sidecar`, `::test_a_denied_host_is_named_in_the_refusal` (a real daemon; the proxy refuses before any connection), `tests/test_provision_go.py::test_go_fetch_never_uses_direct_or_a_vcs` |
+| No repository code runs with a network | `go mod download`; `npm ci --ignore-scripts`; `pip download --only-binary=:all:`. A Python install and a named Node install script run in a **second** container with `--network=none` | [measured] `tests/test_provision_python.py`, `tests/test_provision_node.py` (the plans, and a daemon run of each) |
+| Integrity | Go checks every module against the committed `go.sum` (and the checksum database unless the mirror is air-gapped); npm checks every tarball against the lock's `integrity`; pip enforces `--require-hashes` when the lock carries hashes and the manifest records the fetched hash when it does not | [measured] the daemon tests of each recipe fetch against committed hashes (`tests/test_provision_go.py::test_go_fetch_puts_parent_and_gold_in_one_cache`) |
+| The store | Content-addressed (recipe, fetch image ID, lockfile blob hashes); built in a 0700 stage; sealed with a sha256 output digest in `bundle.json`, every write bit removed, renamed atomically; the only constructor of a mount; `crb deps verify` re-proves the digest (`BUNDLE_INTEGRITY`, run scope), and a run re-hashes each set it cites on its first use, before any builder call; a set that passes is not hashed again in that run, and a set that fails is never remembered as verified, so every later use hashes it again and is refused (`tests/test_worker.py::test_the_gate_hashes_each_sealed_set_once_and_fails_closed_on_first_use`) | [measured] `tests/test_provision_store.py`; the once-per-run hash **[measured — n = 3 uses of 1 sealed set by 2 tasks in one run, hashed once, and 2 uses of a set whose digest fails, refused `BUNDLE_INTEGRITY` at both; method: a counting provider behind the real `PostureGate`, `tests/test_worker.py::test_the_gate_hashes_each_sealed_set_once_and_fails_closed_on_first_use`; apparatus 2.3]** |
+| The host never follows what a container wrote | A named install or rebuild step runs package code with `/out` writable. Before the seal, a symlink that leaves the set (absolute, or escaping read as written or once resolved) or anything but a regular file at `bundle.json` is `PROVISION_UNSAFE_OUTPUT` (task scope) and the stage is discarded; the manifest is written as a new file with `O_EXCL \| O_NOFOLLOW`; removal never changes permissions through a link; a link to a directory inside a set is part of its digest, so `crb deps verify` sees it swapped | [measured] `tests/test_provision_fetch.py::test_links_a_fetch_plants_in_out_never_lead_the_host_out_of_the_stage` (a real daemon: the links planted from inside the container, the host file and directory unchanged), `tests/test_provision_store.py::test_a_link_planted_in_the_output_is_refused_and_never_followed`, `::test_removal_never_chmods_through_a_link`, `::test_a_directory_link_inside_the_set_is_in_the_digest` |
+| Limits | A watchdog kills a fetch past `CRB_PROVISION__MAX_BUNDLE_MB` (`PROVISION_TOO_LARGE`); the wall clock is `CRB_PROVISION__FETCH_TIMEOUT_S`; `crb deps gc` never removes a cited key, nor a stage a live fetch in any process still holds (each stage is leased with an exclusive `flock` the kernel drops with a crashed process; a lease counts only once it is locked and still the file at its path, and `gc` unlinks a lease only while it holds its lock) | [measured] `tests/test_provision_fetch.py::test_an_oversized_fetch_is_killed_and_refused`; `tests/test_provision_store.py::test_gc_never_removes_a_stage_a_fetch_is_still_filling`, `::test_a_gc_between_the_lease_and_its_lock_never_orphans_a_live_stage`, `::test_gc_removes_a_lease_only_while_it_holds_that_lease_itself` |
+| Production | A public registry is refused unless `CRB_PROVISION__ALLOW_PUBLIC`; a fetch image without `@sha256:` is refused — both at start-up | [measured] `tests/test_settings_provision.py` |
 
 ### 3.2 Builder containment — `crb.builders.base`
 
@@ -151,14 +228,15 @@ TCP, or any service listening on all host interfaces, would be reachable from th
 allowlist is exact-host, so a compromised builder can still talk to the model endpoint —
 that is the intended channel, and spend is bounded by the budget.
 
-**Residual risk (host mode, `CRB_BUILDER__EXECUTOR=host`, the default for development and
-evaluation):** the builder runs in a host worktree that shares the main clone's object
+**Residual risk (host mode, `CRB_BUILDER__EXECUTOR=host`, the default for development
+only — `CRB_ENV=dev`):** the builder runs in a host worktree that shares the main clone's object
 store (the gold commit is reachable, and only the guards stand in the way) with the
 worker's privileges and egress. Run the worker as a dedicated low-privilege user on a
 dedicated node with an egress policy allowing only the model endpoint (Helm ships a
 default-deny `NetworkPolicy`); do not onboard repositories you would not run locally; and
-use container mode for any measurement that will be relied on. The API logs a warning
-when `CRB_ENV=prod` and the builder executor is `host`.
+use container mode for any measurement that will be relied on. With `CRB_ENV=prod` the
+API and the worker refuse to start in host mode unless `CRB_ALLOW_UNSEALED_PROD=1`, and a run
+made under that override carries it in its apparatus (§5, ADR-0023).
 
 ### 3.3 Credentials
 
@@ -168,6 +246,18 @@ when `CRB_ENV=prod` and the builder executor is `host`.
   *whether* each is configured (`crb.server.settings.Settings.redacted_dict`). [measured]
 - Git delivery credentials (forward mode) come from an injected provider; the default
   `NullProvider` fails closed. [measured] `tests/test_factory_delivery.py`
+- The delivery **push** carries its one-shot `Authorization` header in the child's
+  environment (`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`,
+  `crb.core.git.git_config_env`), never on the argv; until 2026-09-25 it was a
+  `-c http.<remote>.extraheader=…` argument, readable in `/proc` and `ps` (assessment D1). A
+  `GitError` redacts every `extraheader` value and every credential shape from the argv and
+  stderr it keeps, whoever built the command line. [measured, n = 3 cases: the push argv
+  carries no header and the environment does, a `GitError` built from a header-bearing argv
+  carries no token, a push that times out raises a `GitError` with no token —
+  `tests/test_factory_delivery.py::test_the_push_token_travels_in_the_environment_never_on_the_argv`,
+  `::test_a_git_error_never_carries_an_auth_header_or_a_token`,
+  `::test_a_push_that_times_out_raises_a_git_error_without_the_token`; recording git doubles
+  and a hanging git binary, apparatus 2.2]
 - Repositories connected through the **GitHub App** (ADR-0014) are cloned — and, where the
   installation grants write, delivered to — with **installation tokens** the worker mints per
   use: scoped to the installation (one hour by GitHub's contract), cached in memory until
@@ -586,6 +676,14 @@ rebinding) arrives with its own name in `Host` and is refused.
 | T11c | Automatic sign-in (`CRB_AUTH__DEV_AUTOLOGIN`) is used from another machine, through a proxy, by a hostile web page, or left on in production | API | 3.8: refused at start-up outside `CRB_ENV=dev` and on a non-loopback bind (no override); the container entrypoint refuses any role with it set; per request only a loopback peer, arriving on a loopback address, with no forwarding header, a loopback `Host`, no foreign `Origin` and not `cross-site` — anything else is answered as "off"; the project's Vite dev and preview proxy adds `X-Forwarded-For` for any client not on this machine; an ordinary session — the same cookies, credential version (session nonce included) and session-bound CSRF token as a password sign-in, so sign-out and sign out everywhere end it and it never touches the login limiter; an audit event and a log line per sign-in; `crb doctor` and a banner on every page say it is on, and `/health` and `/version` say so only to a caller that could use it. Residual: every local user and process on the machine can use it; a same-host proxy or tunnel that strips forwarding headers would expose it; a process manager that runs `uvicorn --factory` binds an address `crb` cannot check at start-up, so only the per-request checks apply there |
 | T12 | Cross-organisation data leakage via the federated export | export | allowlist of abstract fields only, k-anonymity, opt-in; consumption not implemented (`crb.core.federated`) |
 | T13 | A weak oracle lets a semantically wrong patch pass | grade | not a mechanical false-Q1; measured and gated by oracle strength (`crb.core.oracle`), routed to `human` below 0.8 |
+| T14 | A dependency fetch runs untrusted code with a network (an install script, a source build) | provision | 3.1.1: wheels only, `npm ci --ignore-scripts`, `go mod download`; anything that must build runs in a second container with `--network=none`; a Python source distribution is refused |
+| T15 | A builder steers a fetch, or a repository injects fetch configuration (`.npmrc`, `pip.conf`, `go.env`, an index line) | provision | 3.1.1: inputs from git objects at the parent and the gold only, never a worktree; configuration files never read; Python's lock rewritten from the parsed pins; the argv, environment and allowlist are the recipe's, never a `RepoConfig`'s or a run request's |
+| T16 | Exfiltration or metadata disclosure through module paths or a fetch's requests | provision | 3.1.1: the fetch sees the lockfiles only (no source, no secret, no `CRB_HOME`); the proxy admits the configured registry hosts only; production points at the tenant's mirror; a private module behind a public proxy is refused before any request (`PROVISION_PRIVATE_MODULE`); at grade time the closure selector reads nothing outside the builder's tree — a linked manifest or a local `replace` that leaves the tree is a closure violation, so no file outside it is read or quoted (`tests/test_provision.py::test_a_trial_never_makes_the_selector_read_outside_its_tree`) |
+| T17 | A substituted artifact (a registry or mirror serves different bytes) | provision | 3.1.1 integrity: `go.sum` + the checksum database, npm `integrity`, pip hashes where committed (recorded where not — the residual) |
+| T18 | Tampering with or poisoning the store | provision / test run | 3.1.1: sealed read-only with a digest; `validate_mount` at every use; `crb deps verify` → `BUNDLE_INTEGRITY` stops the run; the key includes the fetch image's ID |
+| T19 | The fetch's proxy is used as a relay to another host | provision | the proxy is CONNECT-only to an exact host:port allowlist (`crb.builders.egress_proxy`); denials are logged and named in the refusal |
+| T20 | Resource exhaustion by a fetch or by the store | provision | memory / cpu / pid caps on the fetch; `MAX_BUNDLE_MB` watchdog; fetch wall clock; `MAX_TOTAL_GB` and `crb deps gc`; the throwaway tree capped at `work_size` |
+| T21 | Answer leakage through the builder's dependency set (the gold's module list is part of the answer) | build | 3.1.1 / ADR-0012 amendment: a sealed builder may be given the **parent's** set, never the gold's; the trial is graded with the set its own manifests select, and one outside the closure is disqualified |
 
 ## 5. What this document does not claim
 
@@ -594,15 +692,56 @@ rebinding) arrives with its own name in `Host` and is refused.
 - Container mode for the builder (3.2.1) is proven with a scripted builder and a mock
   endpoint plus a zero-spend TLS probe to the real endpoint; a full `claude -p` build
   through the sidecar with a live credential has not yet been run in CI (it needs a
-  credential and spend). Host mode remains the default until an operator sets
-  `CRB_BUILDER__EXECUTOR=docker`. [gap — measured on the fake-model path only]
-- Reference sandbox images ship and are proven in CI (3.1) **[measured — 10 tests × 3 images,
-  `tests/test_sandbox_images_docker.py` as the `sandbox-images` job's smoke step: 44 passed /
-  0 skipped on PR #44 run 35678358686, head 4a64fe3; 47 / 0 locally on images built from the
-  tree, colima / Docker 29.5.2, 2026-09-22; apparatus 2.2]**. Every *verdict* to date is on
-  the host executor posture: no ledger row has yet been produced under the docker posture,
-  and a live re-measurement with rows stamped `executor: docker` is pending [gap — the
-  images are measured, the posture's verdicts are not].
+  credential and spend). [gap — measured on the fake-model path only]
+- **Production refuses the unsealed posture** (ADR-0023). With `CRB_ENV=prod` the builder
+  defaults to its sealed container (`CRB_BUILDER__EXECUTOR=docker`), and the API and the
+  worker both refuse to start with `CRB_BUILDER__EXECUTOR=host` or
+  `CRB_SANDBOX__EXECUTOR=local` unless `CRB_ALLOW_UNSEALED_PROD=1` is set. That override is
+  the operator's statement that what the deployment measures is a development reading: it is
+  shown on `/health`, `/settings` and the Posture page, and stamped into every run's
+  apparatus and every evidence pack as `unsealed_prod_override`, so a row produced under it
+  can always be told apart. `CRB_ENV=dev` keeps the host defaults. The refusal proves a
+  setting, not a measurement: no row has yet been produced on the sealed posture (below).
+  [measured — `tests/test_settings_posture.py` and `tests/test_worker.py` pin the refusal,
+  the override and the stamp; apparatus 2.2]
+- **Factory builds are not sealed** (ADR-0023 §5). The builder executor setting governs
+  replay builds; a factory run hands its builder a host worktree and no container. A `prod`
+  worker therefore refuses every factory run unless `CRB_ALLOW_UNSEALED_PROD=1`, and with it
+  stamps the run's apparatus (`run_kind: factory`); `/health` reports this as
+  `posture.factory_builds`. [measured — `tests/test_worker.py`,
+  `tests/test_settings_posture.py::TestFactoryBuilds`] Sealing factory builds is not done.
+  [gap — factory builds run on the host]
+- **One builder posture for both processes.** Compose and Helm hand the API (which serves
+  `/health`) and the worker (which runs the builds) the same `CRB_BUILDER__EXECUTOR`.
+  [measured — `tests/test_settings_posture.py::TestHelmOneBuilderPosture` renders the chart]
+- **Worktree names carry nothing of the commit** (DL-055). Trial, mining, control and oracle
+  worktrees are named by a random token, and the mapping to the task is on the run's events,
+  so `pwd`, `basename`, the `.git` pointer and the prompt no longer hand the builder a prefix
+  of the held-out sha. On the host posture the builder can still read anything the worker
+  user can read, including the main clone's history, which is why production refuses it.
+  [measured — `tests/test_run.py`, `tests/test_builders_guard_corpus.py` scan with the
+  fixture's real sha; apparatus 2.2]
+- Reference sandbox images ship and are proven in CI (3.1) **[measured — n = 42 tests passed,
+  0 skipped, across `tests/test_sandbox_images_docker.py` (3 images) and
+  `tests/test_sandbox_docker.py`; method: a local run on colima, Docker 29.5.2, 2026-09-25;
+  apparatus 2.2]**. Every *verdict* to date is on the host executor posture. The first replay
+  in the docker posture (run `0c44ff24…`, cobra) graded its rows `builder_red` because the
+  sealed container could not load cobra's modules — an instrument failure charged to the
+  model **[measured — n = 3 or 4 rows, each `builder_red` with the target red; method: the
+  run's grade rows as read on 2026-09-25; apparatus 2.2. The count is disputed: 3 rows were
+  observed when the run was cancelled (the session's findings note), and stream D read 4 from
+  the deployment's ledger export, which is not committed — [gap] F42, settled only by the
+  stack's ledger]**. Dependency
+  provisioning and the throwaway tree (3.1, 3.1.1) now let the sealed posture run a Go, a
+  Python and a Node fixture with dependencies offline **[measured — n = 3 fixture
+  repositories, one per language, each parent and gold tree passing offline in the shipped
+  image against its sealed set; method: `tests/test_provision_{go,python,node}.py` against a
+  real daemon on colima, 2026-09-25; apparatus 2.2]**. The apparatus 2.3 read rule of ADR-0019
+  is in force: a docker row stamped before 2.3, such as each row of run `0c44ff24…`, is left
+  out of every rate and counted `unqualified_posture` **[measured — the DoD criterion
+  results.truth.17, `tests/test_server_routes_capability.py::test_pre_2_3_docker_rows_are_excluded_and_counted`;
+  apparatus 2.3]**. No real repository has yet been qualified in the sealed posture on a live
+  stack **[gap — F42]**.
 - Container escape is out of scope for the application layer.
 
 Report a vulnerability to the repository owner privately; do not open a public issue.

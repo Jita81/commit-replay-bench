@@ -26,8 +26,8 @@
  *               ui/src/screens/Help/DocPage.tsx, ui/src/screens/NotFoundPage.tsx (the
  *               screens rendered under these fixtures), ui/src/test/utils.tsx (`envelope`)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx
- * Touch when:   one of the four screens gains an element — add the fixture state that renders
- *               it and raise its `MIN_HINTS` floor.
+ * Touch when:   never for a new repository; one of the four screens gains an element — add
+ *               the fixture state that renders it and raise its `MIN_HINTS` floor.
  */
 import type { ReactElement } from 'react'
 import type { Role } from '../api/types'

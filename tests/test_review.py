@@ -60,6 +60,7 @@ from crb.core.review import (
     review_cell_stats,
     verify_review_chain,
 )
+from fixtures.posture import posture_row
 
 DIFF_SHA = "d" * 64
 ROW_HASH = "a" * 64
@@ -120,7 +121,7 @@ def grade_row(**kw: Any) -> GradeRow:
         "evidence_pack_hash": PACK_HASH,
     }
     base.update(kw)
-    return GradeRow(**base)
+    return posture_row(**base)
 
 
 # ---------------------------------------------------------------------------

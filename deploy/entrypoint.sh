@@ -33,9 +33,9 @@
 # Tested by:    tests/test_server_dev_autologin.py (the automatic sign-in refusal, with uvicorn
 #               and python stubbed); the container smoke in .github/workflows/ci.yml runs the
 #               ``migrate upgrade`` and ``migrate current`` roles through the built image
-# Touch when:   a role is added to the image (a ``case`` arm, docs/DEPLOYMENT.md and the Helm
-#               template that runs it); a uvicorn flag changes (keep ``--proxy-headers`` scoped to
-#               ``CRB_FORWARDED_ALLOW_IPS``).
+# Touch when:   never for a new repository; a role is added to the image (a ``case`` arm,
+#               docs/DEPLOYMENT.md and the Helm template that runs it); a uvicorn flag changes
+#               (keep ``--proxy-headers`` scoped to ``CRB_FORWARDED_ALLOW_IPS``).
 
 set -eu
 

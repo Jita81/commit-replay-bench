@@ -21,8 +21,8 @@
  *               (`dev_autologin_refusal` refuses any request carrying a forwarding header),
  *               docs/SECURITY.md#38-automatic-sign-in-on-a-development-stack
  * Tested by:    ui/src/dev/apiProxy.test.ts
- * Touch when:   the dev proxy changes; never to drop the mark for a client that is not on this
- *               machine.
+ * Touch when:   never for a new repository; the dev proxy changes; never to drop the mark for a
+ *               client that is not on this machine.
  */
 
 /** The parts of Node's incoming request the mark reads and writes. */

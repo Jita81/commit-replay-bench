@@ -27,8 +27,9 @@ Works with:   src/crb/builders/claude_code.py (under test), src/crb/builders/bas
               tests/fixtures/builders_repo.py (the parent + task), tests/test_cli_doctor.py (the
               same probe behind ``crb doctor``), docs/SECURITY.md (credentials, §3.3)
 Tested by:    tests/test_builders_claude_code.py
-Touch when:   the CLI's stream-json shape or flags change (a fake-transport case on the new
-              shape); an auth mode or token source is added (precedence and fail-closed cases).
+Touch when:   never for a new repository; the CLI's stream-json shape or flags change (a
+              fake-transport case on the new shape); an auth mode or token source is added
+              (precedence and fail-closed cases).
 """
 
 from __future__ import annotations
@@ -46,8 +47,8 @@ import pytest
 from crb.builders import base
 from crb.builders import claude_code as cc
 from crb.core.execution import LocalExecutor
-from crb.core.grade import grade
 from crb.core.runners import get_runner
+from fixtures.posture import grade_adhoc as grade
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 if str(_FIXTURES) not in sys.path:
@@ -475,7 +476,7 @@ def test_insecure_secrets_file_fails_closed_as_permission_error(secrets_home: Pa
     with pytest.raises(PermissionError, match="secrets file refused") as ei:
         cc.ClaudeCodeBuilder.env("cli")
     assert STORED not in str(ei.value)
-    with pytest.raises(PermissionError):
+    with pytest.raises(PermissionError, match="secrets file refused"):
         cc.token_source()
 
 

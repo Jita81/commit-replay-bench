@@ -68,8 +68,10 @@ What it does: Readiness aggregates the store probes (db, migrations at head, app
               table) with the
               observability probes
               (sandbox — skipped for the ``api`` role — toolchains, builders) and answers
-              503 when any is ``down``; a read that raises is ``down`` with the fixed
-              ``failure_detail`` naming the request id, the exception logged, never served;
+              503 when any is ``down``, and serves the deployment's ``posture`` beside them
+              (where tests and the builder run, and whether production runs unsealed under
+              ``CRB_ALLOW_UNSEALED_PROD``, ADR-0023); a read that raises is ``down`` with
+              the fixed ``failure_detail`` naming the request id, the exception logged, never served;
               liveness checks the database only; ``/metrics``
               refreshes the ledger gauges then renders the shared registry; ``/health`` and
               ``/version`` say whether automatic sign-in is on (never which account, and
@@ -85,6 +87,7 @@ How:          ``collect_health`` = the probe list, each under ``probes.run_probe
 Layer:        server — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate),
+              docs/adr/0023-production-refuses-the-unsealed-posture.md (the ``posture`` key),
               docs/adr/0027-dev-autologin-on-loopback.md (the ``dev_autologin`` field)
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
               ``failure_detail`` and ``aggregate``),
@@ -102,7 +105,7 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe
               docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface (the
               ``migrations`` contract the other documents copy)
 Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py,
-              tests/test_server_dev_autologin.py
+              tests/test_settings_posture.py, tests/test_server_dev_autologin.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
               (``skipped`` elsewhere), whether it may fail readiness, and putting its read
               under ``probes.run_probe`` (never an exception in a ``detail``); a new belt means
@@ -114,6 +117,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import threading
 import time
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -130,6 +134,7 @@ from crb.core.version import APPARATUS_VERSION, __version__
 from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
+from crb.provision.probe import probe_provision
 from crb.server.auth import dev_autologin_refusal
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
@@ -137,7 +142,15 @@ from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
 from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
-from crb.store.models import APPEND_ONLY_TABLES, Grade, Repo, Run, User, WorkerRow
+from crb.store.models import (
+    APPEND_ONLY_TABLES,
+    LEASE_ROW_PREFIX,
+    Grade,
+    Repo,
+    Run,
+    User,
+    WorkerRow,
+)
 
 try:  # pragma: no cover — extra installed in [server]
     from prometheus_client import CONTENT_TYPE_LATEST
@@ -401,7 +414,14 @@ def probe_worker(
             queued = int(
                 s.execute(select(func.count(Run.id)).where(Run.status == "queued")).scalar_one()
             )
-            rows = list(s.execute(select(WorkerRow).order_by(WorkerRow.worker_id)).scalars())
+            rows = list(
+                s.execute(
+                    select(WorkerRow)
+                    # a lease row (an intake pass holding its repository) is not a worker
+                    .where(~WorkerRow.worker_id.startswith(LEASE_ROW_PREFIX))
+                    .order_by(WorkerRow.worker_id)
+                ).scalars()
+            )
         workers = [
             _worker_view(r, now)
             for r in rows
@@ -518,6 +538,47 @@ def probe_sandbox(settings: Settings, role: str = ROLE_ALL, *, request_id: str =
         "local executor — test runs are NOT isolated (dev only)",
         {"executor": "local"},
     )
+
+
+#: How long ``/health`` reuses a worker's provisioning probe: it inspects three images and
+#: a network and starts a container, which a readiness poll every few seconds must not do
+#: each time (CodeRabbit on PR #56). A result that is not ``ok`` is reused for less, so a
+#: fixed store is seen soon; ``crb doctor`` always probes afresh.
+PROVISION_PROBE_TTL_S = 300.0
+PROVISION_PROBE_DOWN_TTL_S = 30.0
+_monotonic = time.monotonic
+_provision_cache: dict[str, tuple[float, ProbeResult]] = {}
+_provision_lock = threading.Lock()
+
+
+def probe_provision_role(settings: Settings, role: str = ROLE_ALL) -> ProbeResult:
+    """Dependency provisioning (ADR-0019), as seen from a process of ``role``: the worker
+    fetches, so an ``api`` process reports ``skipped``; a worker reports ``skipped`` when
+    provisioning is off, otherwise whether the store is visible to the daemon and the fetch
+    images and the egress network are present (``crb.provision.probe``) — reused for
+    :data:`PROVISION_PROBE_TTL_S` (``ok``) or :data:`PROVISION_PROBE_DOWN_TTL_S` (anything
+    else) per configuration."""
+    if role == ROLE_API:
+        return ProbeResult(
+            "provision",
+            SKIPPED,
+            f"not probed here: provisioning is the worker's ({ROLE_ENV}={ROLE_API})",
+            {"enabled": settings.provision.enabled, "role": role},
+        )
+    config = settings.provision_config
+    if not config.enabled:
+        return probe_provision(config)
+    key = repr(sorted(config.view().items(), key=lambda kv: kv[0]))
+    now = _monotonic()
+    with _provision_lock:
+        hit = _provision_cache.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+    result = probe_provision(config)
+    ttl = PROVISION_PROBE_TTL_S if result.status == OK else PROVISION_PROBE_DOWN_TTL_S
+    with _provision_lock:
+        _provision_cache[key] = (now + ttl, result)
+    return result
 
 
 def probe_intake(
@@ -718,6 +779,7 @@ def collect_health(
         probes.run_probe(
             "sandbox", lambda: probe_sandbox(settings, role, request_id=rid), request_id=rid
         ),
+        probes.run_probe("provision", lambda: probe_provision_role(settings, role), request_id=rid),
         probes.run_probe("toolchains", probes.probe_toolchains, request_id=rid),
         probes.run_probe("builders", probes.probe_builders, request_id=rid),
         probe_worker(factory, settings.worker_heartbeat_stale_s, request_id=rid),
@@ -725,6 +787,10 @@ def collect_health(
     ]
     out = _stamp(probes.aggregate(results), role)
     out["dev_autologin"] = dev_autologin_state(settings, request)
+    # ADR-0023: where tests and the builder run, and whether production runs unsealed under
+    # CRB_ALLOW_UNSEALED_PROD — a fact every viewer of the Posture page is owed, not a probe
+    # (it cannot fail; it is what this deployment was told)
+    out["posture"] = settings.posture()
     return out
 
 
@@ -819,6 +885,7 @@ __all__ = [
     "migrations_result",
     "probe_dev_autologin",
     "probe_migrations",
+    "probe_provision_role",
     "probe_worker",
     "process_role",
     "refresh_ledger_gauges",

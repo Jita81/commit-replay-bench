@@ -22,8 +22,8 @@
  * Works with:   ui/src/screens/Runs/RunNewDialog.tsx (the code under test),
  *               ui/src/lib/jsonObject.ts (the rules the JSON cases pin), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Runs/RunNewDialog.test.tsx
- * Touch when:   a field is added to `POST /runs` (docs/API.md) — assert its presence and
- *               absence in the body.
+ * Touch when:   never for a new repository; a field is added to `POST /runs` (docs/API.md) — assert
+ *               its presence and absence in the body.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -287,5 +287,68 @@ describe('RunNewDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Clear rungs' }))
     await user.type(ladder, 'r1')
     expect(submit).toBeEnabled()
+  })
+})
+
+describe('RunNewDialog — posture (ADR-0019)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('says how many tasks are qualified under this posture; switching qualify first off is sent as false', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'GET /repos/httpx/posture': { repo: 'httpx', executor: 'docker', image_ref: 'i', posture_id: 'pst_x', posture_class: 'docker/readonly/sealed', posture: {}, provisioning: {}, qualified: 4, total: 9, refusals_by_code: [], delta: [], stale_reason: '' },
+      'POST /runs': () => json({ id: 'run-9' }, 201),
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+    await waitFor(() => expect(screen.getByTestId('run-posture-line')).toHaveTextContent('Qualified 4 of 9 under this posture (docker/readonly/sealed).'))
+    const toggle = screen.getByLabelText(/Qualify first — no model spend/)
+    expect(toggle).toBeChecked()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'editblock')
+    await user.type(screen.getByLabelText(/^Model/), 'm')
+    await user.click(toggle)
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(api.calls)
+    expect(body.qualify_first).toBe(false)
+  })
+
+  it('reads the posture of the executor the operator picks, not the deployment default', async () => {
+    // CodeRabbit on PR #56: the count came from the default executor's posture whatever the
+    // dialog would submit, so it could say "qualified" for a run the worker then refuses.
+    const user = userEvent.setup()
+    const body = (executor: string, qualified: number) => ({ repo: 'httpx', executor, image_ref: '', posture_id: `pst_${executor}`, posture_class: `${executor}/copy/sealed`, posture: {}, provisioning: {}, qualified, total: 9, refusals_by_code: [], delta: [], stale_reason: '' })
+    const api = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'GET /repos/httpx/posture': (url: string) => {
+        const ex = new URL(url, 'http://x').searchParams.get('executor')
+        return json(ex === 'local' ? body('local', 2) : body('docker', 4))
+      },
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+    await waitFor(() => expect(screen.getByTestId('run-posture-line')).toHaveTextContent('Qualified 4 of 9 under this posture (docker/copy/sealed).'))
+    await user.selectOptions(screen.getByLabelText(/^Executor/), 'local')
+    await waitFor(() => expect(screen.getByTestId('run-posture-line')).toHaveTextContent('Qualified 2 of 9 under this posture (local/copy/sealed).'))
+    const urls = api.calls.filter((c) => c.path === '/repos/httpx/posture').map((c) => c.url)
+    expect(urls[0]).not.toContain('executor=')
+    expect(urls.at(-1)).toContain('executor=local')
+  })
+
+  it('leaves qualify_first out while it is on, and says so when nothing is qualified yet', async () => {
+    const user = userEvent.setup()
+    const api = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'GET /repos/httpx/posture': { repo: 'httpx', executor: 'local', image_ref: '', posture_id: '', posture_class: '', posture: {}, provisioning: {}, qualified: 0, total: 3, refusals_by_code: [], delta: [], stale_reason: 'x' },
+      'POST /runs': () => json({ id: 'run-9' }, 201),
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+    await waitFor(() => expect(screen.getByTestId('run-posture-line')).toHaveTextContent('No task is qualified under this posture yet (3 to measure).'))
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'editblock')
+    await user.type(screen.getByLabelText(/^Model/), 'm')
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(api.calls)
+    expect('qualify_first' in body).toBe(false)
   })
 })

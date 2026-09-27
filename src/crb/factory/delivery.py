@@ -1,18 +1,20 @@
 """Delivery — a graded change ships as a BRANCH + PR in the customer's repo, never main.
 
-The factory only ever *proposes*. A clean build is committed on a new branch
-``crb/<item_id>-<slug>`` and a pull request is opened against the customer's
-default branch; a human on the customer's side reviews and merges. The factory
-NEVER pushes to, nor opens a PR against, ``main`` / ``master`` / the configured
-default — :func:`assert_not_default_branch` is the hard invariant, checked
-before credentials are resolved or the remote is touched, and its test is a
-ratchet.
+The factory only ever *proposes*. A clean build the independent review ACCEPTED is
+committed on a new branch ``crb/<item_id>-<slug>`` and a pull request is opened
+against the customer's default branch; a human on the customer's side reviews and
+merges. The factory NEVER pushes to, nor opens a PR against, ``main`` / ``master`` /
+the configured default — :func:`assert_not_default_branch` is the hard invariant,
+checked before credentials are resolved or the remote is touched, and its test is a
+ratchet. Nor does it deliver a build the review did not accept: ``deliver`` takes the
+verdict and refuses anything but ``accept`` before a credential is read (ADR-0021).
 
 Credentials are BYOK behind :class:`GitCredentialsProvider`. The default is
 :class:`NullProvider`, which raises :class:`NoGitCredentialsError` — with no
 credentials wired, delivery **fails closed**, never a silent success-looking
-no-op. Tokens never reach ``.git/config``: the default push seam passes the
-token as a one-shot ``http.extraheader``; the PR seam is GitHub's REST API over
+no-op. Tokens never reach ``.git/config`` nor the argv: the default push seam passes
+the token as a one-shot ``http.extraheader`` in the child's environment
+(``GIT_CONFIG_COUNT``); the PR seam is GitHub's REST API over
 :mod:`urllib` (stdlib). Both are injectable so tests are hermetic; an Azure
 DevOps seam plugs in the same way.
 
@@ -20,48 +22,65 @@ The PR body is the evidence summary — belts, pack hash, apparatus, route
 decision, RED proof — and a link to the pack. It carries no secrets: every
 string passes through :mod:`crb.core.redact`.
 
-A **re-delivery** (a rework after ``accept_with_edit``) updates the pull request
-the first delivery opened instead of opening a second one: ``deliver`` is given
+A **re-delivery** (an item whose pull request an earlier run opened, accepted again)
+updates that pull request instead of opening a second one: ``deliver`` is given
 the earlier :class:`DeliveryResult` as ``previous``, the push leases against the
 commit that delivery pushed (``--force-with-lease=<branch>:<sha>`` — a bare lease
 has nothing to hold when the push goes to a URL, and git answers ``stale info``;
 B-1b, 2026-09-19), the PR url and number are carried over, and a short comment
-names the rework so the human reviewer sees why the branch moved. The comment is
-the OPTIONAL step and it runs AFTER the push has moved the remote branch: when it
-fails (a rate limit, a 5xx, a timeout) the result is still ``updated`` and carries
-the redacted failure as ``comment_error`` — the record must agree with the remote,
-never say "refused" of a branch the pull request already carries.
+says why the branch moved. The comment is the OPTIONAL step and it runs AFTER the
+push has moved the remote branch: when it fails (a rate limit, a 5xx, a timeout)
+the result is still ``updated`` and carries the redacted failure as
+``comment_error`` — the record must agree with the remote, never say "refused" of
+a branch the pull request already carries.
+
+A **close** (:func:`close_pull_request`) is the rework path for a delivered pull
+request a later review did NOT accept (ADR-0021): a comment names the verdict and
+why, then the pull request is closed — never merged, never deleted, a person may
+reopen it.
 
 Navigation
 ----------
-What it is:   Delivery — a clean build becomes a branch + pull request in the customer's
-              repository, never a write to its default branch.
+What it is:   Delivery — a clean, reviewed and ACCEPTED build becomes a branch + pull
+              request in the customer's repository, never a write to its default branch;
+              and the close of a delivered pull request a later review did not accept.
 What it does: Enforces the hard invariant first (``assert_not_default_branch``, before any
-              credential is read), then resolves BYOK credentials (the default provider
-              refuses — fail closed), commits the source diff plus the oracle on
-              ``crb/<item>-<slug>``, pushes with a one-shot auth header (the token never
-              touches ``.git/config``), and opens the PR whose body is the redacted evidence
-              summary. Push and PR are injectable seams.
-How:          ``deliver`` = invariant → credentials → deliverability → ``commit_on_branch``
-              → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``; with ``previous`` the
-              push leases against ``previous.commit_sha``, no PR is opened and
-              ``comment_pr_fn`` posts the rework note (``updated=True``; a failed note is
-              ``comment_error`` on the result, never a refusal of the moved branch).
+              credential is read), then the review (``verdict`` must be ``accept`` —
+              ADR-0021), then resolves BYOK credentials (the default provider refuses —
+              fail closed), commits the source diff plus the oracle on
+              ``crb/<item>-<slug>`` (``[a-z0-9-]`` only), pushes with a one-shot auth header
+              (never in ``.git/config``, never on the argv), and opens the PR whose body is
+              the redacted evidence summary with everything a ticket author wrote inside one
+              fence and whose title is escaped (C6b); ``close_pull_request`` comments the
+              verdict and closes. Push, PR, comment and close are injectable seams.
+How:          ``deliver`` = invariant → verdict → credentials → deliverability →
+              ``commit_on_branch`` → ``push_fn`` → ``open_pr_fn`` → ``DeliveryResult``; with
+              ``previous`` the push leases against ``previous.commit_sha``, no PR is opened
+              and ``comment_pr_fn`` posts the note (``updated=True``; a failed note is
+              ``comment_error`` on the result, never a refusal of the moved branch);
+              ``close_pull_request`` = refuse ``accept`` → refuse a blank ``repo_id`` →
+              credentials for that repository (the key a delivery resolves) →
+              ``close_comment`` → ``close_pr_fn`` (GitHub: comment, then
+              ``PATCH …/pulls/{n}``).
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md (the PR body is a
-              summary, never raw output)
+              summary, never raw output), docs/adr/0021-factory-review-before-delivery.md
+              (only an accepted build is delivered; a later non-accept closes the PR)
 Works with:   src/crb/factory/build.py (``BuildResult`` and its kept workspace),
-              src/crb/core/git.py (``GitRepo.run`` for checkout / commit / push),
-              src/crb/core/redact.py (every string in the PR body), src/crb/factory/loop.py
-              (``_deliver`` — opt-in, default off; hands the rework its ``previous``),
-              src/crb/factory/evidence.py (``record_delivery`` / ``record_delivery_updated`` /
-              ``record_delivery_refused``), docs/SECURITY.md#33-credentials
+              src/crb/core/git.py (``GitRepo.run`` for checkout / commit / push, and
+              ``git_config_env`` for the header), src/crb/core/redact.py (every string in
+              the PR body), src/crb/factory/loop.py (``_deliver`` — opt-in, default off,
+              reached only by an accepted verdict; ``_withdraw`` closes),
+              src/crb/factory/review.py (``VERDICT_ACCEPT``), src/crb/factory/evidence.py
+              (``record_delivery`` / ``record_delivery_updated`` /
+              ``record_delivery_refused`` / ``record_delivery_outcome``),
+              docs/SECURITY.md#33-credentials
 Tested by:    tests/test_factory_delivery.py, tests/test_factory_loop.py
 Touch when:   onboarding a repository hosted somewhere other than GitHub — add an
-              ``open_pr_fn`` + ``comment_pr_fn`` seam (Azure DevOps, GitLab) and a
-              credentials provider; NEVER
-              relax ``ALWAYS_PROTECTED_BRANCHES`` or the invariant's order (its test is a
-              ratchet — docs/CONTRIBUTING.md#the-never-weaken-a-gate-rule).
+              ``open_pr_fn`` + ``comment_pr_fn`` + ``close_pr_fn`` seam (Azure DevOps,
+              GitLab) and a credentials provider; NEVER relax ``ALWAYS_PROTECTED_BRANCHES``,
+              the verdict refusal or the invariant's order (their tests are ratchets —
+              docs/CONTRIBUTING.md#the-never-weaken-a-gate-rule).
 """
 
 from __future__ import annotations
@@ -78,10 +97,11 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from crb.core.evidence import sha256_text, utc_now_iso
-from crb.core.git import GitError, GitRepo
+from crb.core.git import GitError, GitRepo, git_config_env
 from crb.core.redact import redact
 from crb.factory.backlog import BacklogItem
 from crb.factory.build import FACTORY_IDENTITY, BuildResult
+from crb.factory.review import VERDICT_ACCEPT
 
 DELIVERY_BRANCH_PREFIX = "crb/"
 
@@ -241,6 +261,9 @@ def assert_not_default_branch(branch_name: str, target_default_branch: str) -> s
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+#: What a delivery branch may be made of after ``crb/`` (C6b): nothing a ticket author could
+#: use to build an invalid or surprising ref (``..``, ``.lock``, ``@{``, capitals, ``_``).
+DELIVERY_BRANCH_RE = re.compile(r"crb/[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
 def slugify(text: str, *, max_len: int = 40) -> str:
@@ -250,8 +273,45 @@ def slugify(text: str, *, max_len: int = 40) -> str:
 
 
 def delivery_branch_name(item: BacklogItem) -> str:
-    """``crb/<item id>-<title slug>`` — the branch a delivery opens."""
+    """``crb/<item id>-<title slug>``, both halves reduced to ``[a-z0-9-]`` — the branch a
+    delivery opens. An item id may carry capitals, ``.`` and ``_`` (a ticket's key and
+    revision become one: ``fake-4711.r2``), which git refuses in some shapes (``A..B``) and
+    which a ticket author controls; neither reaches a ref (assessment 2026-09-25, C6b)."""
+    branch = f"{DELIVERY_BRANCH_PREFIX}{slugify(item.id, max_len=64)}-{slugify(item.title)}"
+    if not DELIVERY_BRANCH_RE.fullmatch(branch):  # the shape is the contract; never guessed
+        raise DeliveryError(f"could not build a safe delivery branch for {item.id!r}")
+    return branch
+
+
+def legacy_delivery_branch_name(item: BacklogItem) -> str:
+    """The branch name deliveries used before C6b (``crb/<raw id>-<slug>``) — accepted ONLY
+    to update a pull request an earlier run opened under it."""
     return f"{DELIVERY_BRANCH_PREFIX}{item.id}-{slugify(item.title)}"
+
+
+#: CommonMark's backslash-escapable characters (every ASCII punctuation mark).
+_MD_PUNCT_RE = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>~^&\"'@=:;/?%$,])")
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def escape_markdown_line(text: str, *, max_len: int = 200) -> str:
+    """``text`` as ONE line of inert markdown: control characters and newlines collapse to
+    a space and every ASCII punctuation mark is backslash-escaped, so a ticket's title
+    cannot open a code span, emphasis, a link, an HTML tag or a mention (C6b)."""
+    one_line = " ".join(_CONTROL_RE.sub(" ", text).split())[:max_len]
+    return _MD_PUNCT_RE.sub(r"\\\1", one_line)
+
+
+def fenced(lines: list[str], *, info: str = "text") -> list[str]:
+    """``lines`` inside ONE fenced code block whose fence is longer than any run of
+    backticks in them (CommonMark: only a fence of the same character, at least as long,
+    closes it), so nothing inside can end the block and become markup (C6b)."""
+    body = "\n".join(
+        _CONTROL_RE.sub(lambda m: "\n" if "\n" in m.group() else " ", ln) for ln in lines
+    )
+    longest = max((len(r) for r in re.findall(r"`+", body)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [f"{fence}{info}", *body.split("\n"), fence]
 
 
 # ---------------------------------------------------------------------------
@@ -266,16 +326,28 @@ def pr_body(
     pack_link: str = "",
     route_decision: Mapping[str, Any] | None = None,
 ) -> str:
-    """The PR description: the evidence summary a reviewer needs, every string redacted."""
+    """The PR description: the evidence summary a reviewer needs, every string redacted.
+
+    Everything a ticket author wrote — the title and the acceptance criteria — is DATA,
+    not markup: it appears only inside one fenced block (:func:`fenced`), so it cannot add
+    a heading, a checkbox, a link, a mention or an HTML comment to the customer's pull
+    request (assessment 2026-09-25, C6b)."""
     belts = build.grade.belts.to_dict()
     proof = build.pack.notes.get("red_proof", {})
+    ticket_lines = [f"title: {item.title}"]
+    if item.acceptance_criteria:
+        ticket_lines += ["acceptance criteria:"] + [f"- {c}" for c in item.acceptance_criteria]
     lines = [
-        f"## {item.title}",
+        f"## crb factory: backlog item `{slugify(item.id, max_len=64)}`",
         "",
-        f"Automated proposal from crb factory for backlog item `{item.id}` "
+        f"Automated proposal from crb factory for backlog item `{slugify(item.id, max_len=64)}` "
         f"({item.kind}, {item.level}, class `{item.capability_class}`).",
         "",
         "This targets a NEW branch, never the default branch. A human reviews and merges.",
+        "",
+        "### What was asked (from the backlog item, shown as written)",
+        "",
+        *fenced(ticket_lines),
         "",
         "### Evidence",
         "",
@@ -296,8 +368,6 @@ def pr_body(
             f"- route: **{route_decision.get('route', '')}** — {route_decision.get('reason', '')} "
             f"(policy `{route_decision.get('policy_version', '')}`)"
         )
-    if item.acceptance_criteria:
-        lines += ["", "### Acceptance criteria", ""] + [f"- {c}" for c in item.acceptance_criteria]
     lines += ["", f"changed files: {', '.join(f'`{f}`' for f in build.changed_files) or '(none)'}"]
     return redact("\n".join(lines))
 
@@ -316,11 +386,18 @@ def rework_comment(
     moved (the rework number and the verdict it answers), from which commit to which, and
     the new build's evidence. Every string redacted."""
     belts = build.grade.belts.to_dict()
+    why = (
+        f"after the review verdict `{after_verdict}` asked for a rework and the rebuilt "
+        "change was accepted"
+        if after_verdict
+        else "in a later run whose review accepted the rebuilt change"
+    )
     lines = [
-        f"### Rework {rework_n} — after `{after_verdict or 'review'}`",
+        f"### Rework {rework_n} — after `{after_verdict}`"
+        if after_verdict
+        else "### Rebuilt by a later factory run — accepted by review",
         "",
-        f"The factory rebuilt `{item.id}` after the review verdict "
-        f"`{after_verdict or 'review'}` and moved `{previous.branch}` from "
+        f"The factory rebuilt `{item.id}` {why}, and moved `{previous.branch}` from "
         f"`{previous.commit_sha[:12]}` to `{commit_sha[:12]}` (force-with-lease against the "
         "previous commit; the pull request is the same).",
         "",
@@ -346,6 +423,9 @@ PushFn = Callable[..., None]
 OpenPrFn = Callable[..., tuple[str, int]]
 #: ``comment_pr_fn(*, remote, pr_number, body, credentials) -> None``
 CommentPrFn = Callable[..., None]
+#: ``close_pr_fn(*, remote, pr_number, body, credentials) -> None`` — post ``body`` on the
+#: pull request, then close it (ADR-0021: the rework path for a delivered PR later found weak).
+ClosePrFn = Callable[..., None]
 
 
 def force_with_lease_arg(branch: str, expected: str | None) -> str:
@@ -371,18 +451,23 @@ def git_push_fn(
     expected: str | None = None,
 ) -> None:
     """Push ``refspec`` (``branch:branch``, never ``HEAD``) with a one-shot auth
-    header. The token is never written to ``.git/config``. ``expected`` (a re-delivery)
-    is the commit the remote branch must still point at — see :func:`force_with_lease_arg`."""
+    header. The token is never written to ``.git/config`` and never put on the argv: the
+    header travels in the child's environment as ``GIT_CONFIG_COUNT`` /
+    ``GIT_CONFIG_KEY_n`` / ``GIT_CONFIG_VALUE_n`` (:func:`crb.core.git.git_config_env` — an
+    argv is readable by every user on the host through ``/proc`` and ``ps``; D1,
+    docs/SECURITY.md §3.3). ``expected`` (a re-delivery) is the commit the remote branch
+    must still point at — see :func:`force_with_lease_arg`."""
     src, _, dst = refspec.partition(":")
     if src != branch or dst != branch:
         raise DefaultBranchProtectionError(f"refspec {refspec!r} must be {branch}:{branch}")
     res = repo.run(
-        "-c",
-        f"http.{credentials.remote}.extraheader={credentials.basic_auth_header()}",
         "push",
         force_with_lease_arg(branch, expected),
         credentials.remote,
         refspec,
+        env=git_config_env(
+            {f"http.{credentials.remote}.extraheader": credentials.basic_auth_header()}
+        ),
     )
     if not res.ok:
         raise DeliveryError(
@@ -405,15 +490,90 @@ def owner_repo_from_remote(remote: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def repository_of(remote: str) -> str:
+    """``owner/name`` of a remote URL (or of an ``owner/name`` string), lower-cased because
+    GitHub's names are case-insensitive; ``""`` when it cannot be parsed."""
+    try:
+        owner, name = owner_repo_from_remote(remote)
+    except DeliveryError:
+        return ""
+    return f"{owner}/{name}".lower()
+
+
+#: GitHub's address of a pull request: ``https://<host>/<owner>/<name>/pull/<n>``.
+_PR_URL_RE = re.compile(r"^https://[^/\s]+/([^/\s]+)/([^/\s]+)/pull/\d+/?$")
+
+
+def recorded_repository(repository: str, pr_url: str) -> str:
+    """The repository a recorded pull request is in, as ``owner/name``: the ``repository``
+    its delivery recorded; for a delivery recorded before that field existed, the
+    repository in GitHub's address of the pull request; otherwise ``""``, which
+    :func:`repository_mismatch` never takes to match anything."""
+    if repository.strip():
+        return repository.strip().lower()
+    m = _PR_URL_RE.match(pr_url.strip())
+    return f"{m[1]}/{m[2]}".lower() if m else ""
+
+
+def delivered_repository(previous: DeliveryResult) -> str:
+    """:func:`recorded_repository` of an earlier delivery."""
+    return recorded_repository(previous.repository, previous.pr_url)
+
+
+def repository_mismatch(*, repository: str, pr_url: str, remote: str, where: str) -> str:
+    """Why a recorded pull request (``where`` names it) must not be touched through
+    ``remote``, or ``""`` when it is in that repository (PR #55 review).
+
+    A pull request number means nothing without its repository, and an operator may
+    re-link a row to another one (``POST /repos/{name}/github-link``): the same number
+    there is somebody else's pull request. Every path that reuses a recorded pull
+    request asks this first — the re-delivery's push and comment and the close
+    (:func:`assert_same_repository`), and the outcome sync. An unknown repository on
+    either side is a reason, never assumed to match."""
+    was, now = recorded_repository(repository, pr_url), repository_of(remote)
+    if not was or not now:
+        return (
+            f"cannot tell which repository {where} is in (delivered to {was or 'unknown'}, "
+            f"linked now to {now or 'unknown'}): it is not touched"
+        )
+    if was != now:
+        return (
+            f"{where} is in {was}, and this repository is now linked to {now}: the factory "
+            "never touches a pull request in another repository — close or merge it there "
+            "by hand"
+        )
+    return ""
+
+
+def assert_same_repository(previous: DeliveryResult, remote: str) -> None:
+    """Refuse (:class:`DeliveryError`) to touch an earlier delivery's pull request through
+    ``remote`` unless the pull request is in that repository (:func:`repository_mismatch`)."""
+    why = repository_mismatch(
+        repository=previous.repository,
+        pr_url=previous.pr_url,
+        remote=remote,
+        where=f"pull request #{previous.pr_number} of {previous.item_id!r}",
+    )
+    if why:
+        raise DeliveryError(why)
+
+
 def _github_post(
-    url: str, payload: Mapping[str, Any], credentials: GitCredentials, *, what: str, timeout: int
+    url: str,
+    payload: Mapping[str, Any],
+    credentials: GitCredentials,
+    *,
+    what: str,
+    timeout: int,
+    method: str = "POST",
 ) -> dict[str, Any]:
-    """One authenticated POST to the GitHub REST API (stdlib urllib); the decoded JSON
-    body, or a :class:`DeliveryError` naming ``what`` and the (redacted) refusal."""
+    """One authenticated call (``POST`` by default, ``PATCH`` to close) to the GitHub REST
+    API (stdlib urllib); the decoded JSON body, or a :class:`DeliveryError` naming
+    ``what`` and the (redacted) refusal."""
     req = urllib.request.Request(  # noqa: S310 — https API URL built from a parsed remote
         url,
         data=json.dumps(dict(payload)).encode("utf-8"),
-        method="POST",
+        method=method,
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {credentials.token}",
@@ -484,6 +644,40 @@ def github_comment_pr_fn(
     )
 
 
+def github_close_pr_fn(
+    *,
+    remote: str,
+    pr_number: int,
+    body: str,
+    credentials: GitCredentials,
+    api_base: str = "https://api.github.com",
+    timeout: int = 30,
+) -> None:
+    """Comment ``body`` on pull request ``pr_number``, then close it (``PATCH
+    /repos/{owner}/{repo}/pulls/{n}`` with ``state: closed``). The comment goes first so a
+    reader of the closed pull request sees why; a failure of either is a
+    :class:`DeliveryError`."""
+    owner, name = owner_repo_from_remote(remote)
+    if pr_number <= 0:
+        raise DeliveryError(f"cannot close pull request number {pr_number!r}")
+    github_comment_pr_fn(
+        remote=remote,
+        pr_number=pr_number,
+        body=body,
+        credentials=credentials,
+        api_base=api_base,
+        timeout=timeout,
+    )
+    _github_post(
+        f"{api_base}/repos/{owner}/{name}/pulls/{pr_number}",
+        {"state": "closed"},
+        credentials,
+        what="pulls",
+        timeout=timeout,
+        method="PATCH",
+    )
+
+
 # ---------------------------------------------------------------------------
 # deliver
 # ---------------------------------------------------------------------------
@@ -511,6 +705,9 @@ class DeliveryResult:
     previous_commit_sha: str = ""
     updated: bool = False
     comment_error: str = ""
+    #: ``owner/name`` of the repository the pull request is in (:func:`repository_of` of the
+    #: remote it was delivered through) — the number means nothing without it (PR #55 review).
+    repository: str = ""
 
     @property
     def pr_ref(self) -> str:
@@ -531,6 +728,7 @@ class DeliveryResult:
             "previous_commit_sha": self.previous_commit_sha,
             "updated": self.updated,
             "comment_error": self.comment_error,
+            "repository": self.repository,
         }
 
 
@@ -575,10 +773,13 @@ def deliver(
     previous: DeliveryResult | None = None,
     rework_n: int = 0,
     after_verdict: str = "",
+    verdict: str,
 ) -> DeliveryResult:
-    """Deliver a CLEAN build as a new branch + PR. Order of refusals is deliberate:
-    invariant first (before any credential is read), then credentials (fail
-    closed), then deliverability, then git, then the remote.
+    """Deliver a CLEAN, REVIEWED and ACCEPTED build as a new branch + PR. Order of
+    refusals is deliberate: invariant first (before any credential is read), then the
+    review (``verdict`` must be ``accept`` — ADR-0021: a pull request never opens on an
+    unreviewed or unaccepted build, whoever calls this), then credentials (fail closed),
+    then deliverability, then git, then the remote.
 
     With ``previous`` (the item's earlier delivery) this is a RE-delivery: the branch and
     base must be the previous ones, the push leases against ``previous.commit_sha``, no
@@ -587,10 +788,19 @@ def deliver(
     ``after_verdict`` it answers, the new pack hash and commit) is posted on it. The
     comment runs after the push has moved the remote branch, so its failure is NOT a
     delivery failure: the result is returned ``updated`` with ``comment_error`` set."""
-    branch = assert_not_default_branch(delivery_branch_name(item), target_default_branch)
+    wanted = delivery_branch_name(item)
+    if previous is not None and previous.branch == legacy_delivery_branch_name(item):
+        # a pull request an earlier run opened before C6b keeps its branch
+        wanted = previous.branch
+    branch = assert_not_default_branch(wanted, target_default_branch)
     base = _norm_branch(target_default_branch)
     if not base:
         raise DeliveryError("target_default_branch is required (it is the PR base)")
+    if verdict != VERDICT_ACCEPT:
+        raise DeliveryRefused(
+            f"build for {item.id} was not accepted by the review (verdict {verdict!r}) — "
+            "only an accepted, reviewed build is delivered (ADR-0021)"
+        )
     if previous is not None:
         if previous.item_id != item.id:
             raise DeliveryError(
@@ -605,6 +815,8 @@ def deliver(
             raise DeliveryError("previous delivery carries no commit to lease against")
     provider = creds if creds is not None else NullProvider()
     credentials = provider.resolve(repo_id or str(repo.path))
+    if previous is not None:
+        assert_same_repository(previous, credentials.remote)
     if not build.clean:
         raise DeliveryRefused(
             f"build for {item.id} is not clean (belts={build.grade.belts.to_dict()}) — not deliverable"
@@ -614,11 +826,14 @@ def deliver(
     push = push_fn if push_fn is not None else git_push_fn
     open_pr = open_pr_fn if open_pr_fn is not None else github_open_pr_fn
 
-    pr_title = title or f"{item.title} [{item.id}]"
+    # the title a ticket author wrote is escaped into ONE inert line (C6b): GitHub renders
+    # a pull request's title as inline markdown
+    pr_title = title or f"{escape_markdown_line(item.title)} [{item.id}]"
+    subject = " ".join(_CONTROL_RE.sub(" ", item.title).split())[:72] or item.id
     sha = commit_on_branch(
         build,
         branch,
-        message=f"{item.title}\n\ncrb factory item: {item.id}\nevidence pack: {build.pack_hash}\n"
+        message=f"{subject}\n\ncrb factory item: {item.id}\nevidence pack: {build.pack_hash}\n"
         f"oracle: {build.oracle.test_path} sha256 {build.oracle.test_sha256}",
     )
     # belt-and-braces: the refspec is branch:branch — never HEAD, never the base.
@@ -673,6 +888,7 @@ def deliver(
             previous_commit_sha=previous.commit_sha,
             updated=True,
             comment_error=comment_error,
+            repository=repository_of(credentials.remote),
         )
     body = pr_body(item, build, pack_link=pack_link, route_decision=route_decision)
     push(repo, branch=branch, refspec=f"{branch}:{branch}", credentials=credentials, expected=None)
@@ -693,12 +909,76 @@ def deliver(
         pr_number=pr_number,
         pack_hash=build.pack_hash,
         body_sha256=sha256_text(body),
+        repository=repository_of(credentials.remote),
     )
+
+
+def close_comment(previous: DeliveryResult, *, verdict: str, reason: str) -> str:
+    """The comment a close posts: which verdict, why, and that nothing was merged. Every
+    string redacted."""
+    lines = [
+        f"### Closed by the crb factory — review verdict `{verdict}`",
+        "",
+        f"A later factory run reviewed a rebuild of item `{previous.item_id}` and did not "
+        f"accept it (verdict `{verdict}`). The product no longer stands behind the change on "
+        f"`{previous.branch}`, so this pull request is closed rather than left open for "
+        "someone to merge.",
+        "",
+        f"- why: {reason}",
+        f"- last delivered commit: `{previous.commit_sha}` (evidence pack `{previous.pack_hash}`)",
+        "",
+        "Nothing was merged. The item's evidence chain records the close; a person may "
+        "reopen this pull request.",
+    ]
+    return redact("\n".join(lines))
+
+
+def close_pull_request(
+    previous: DeliveryResult,
+    *,
+    verdict: str,
+    reason: str,
+    creds: GitCredentialsProvider | None,
+    close_pr_fn: ClosePrFn | None = None,
+    repo_id: str,
+) -> str:
+    """Close a pull request the factory opened, because a later review of the item did
+    NOT accept it (ADR-0021) — the rework path for a delivered pull request later found
+    weak. Refuses ``verdict == accept`` (an accepted build is delivered, never closed), a
+    delivery with no pull request, and a blank ``repo_id``; credentials fail closed like a
+    delivery's. ``repo_id`` is REQUIRED and is the key a delivery of the same repository
+    resolves its credentials with (the loop passes the one it holds) — never the item id,
+    which a provider keyed on the repository would resolve wrongly (PR #55 review). A pull
+    request in another repository than those credentials name is refused before the
+    forge is called (:func:`assert_same_repository`). Returns the comment posted (the
+    caller records it)."""
+    if verdict == VERDICT_ACCEPT:
+        raise DeliveryError("an accepted build is delivered, never closed")
+    if previous.pr_number <= 0:
+        raise DeliveryError(f"delivery of {previous.item_id!r} has no pull request to close")
+    if not repo_id.strip():
+        raise DeliveryError(
+            f"close of {previous.item_id!r} names no repository to resolve credentials for"
+        )
+    provider = creds if creds is not None else NullProvider()
+    credentials = provider.resolve(repo_id)
+    assert_same_repository(previous, credentials.remote)
+    body = close_comment(previous, verdict=verdict, reason=reason)
+    close = close_pr_fn if close_pr_fn is not None else github_close_pr_fn
+    close(
+        remote=credentials.remote,
+        pr_number=previous.pr_number,
+        body=body,
+        credentials=credentials,
+    )
+    return body
 
 
 __all__ = [
     "ALWAYS_PROTECTED_BRANCHES",
     "DELIVERY_BRANCH_PREFIX",
+    "DELIVERY_BRANCH_RE",
+    "ClosePrFn",
     "CommentPrFn",
     "DefaultBranchProtectionError",
     "DeliveryError",
@@ -713,15 +993,26 @@ __all__ = [
     "PushFn",
     "StaticProvider",
     "assert_not_default_branch",
+    "assert_same_repository",
+    "close_comment",
+    "close_pull_request",
     "commit_on_branch",
     "deliver",
+    "delivered_repository",
     "delivery_branch_name",
+    "escape_markdown_line",
+    "fenced",
     "force_with_lease_arg",
     "git_push_fn",
+    "github_close_pr_fn",
     "github_comment_pr_fn",
     "github_open_pr_fn",
+    "legacy_delivery_branch_name",
     "owner_repo_from_remote",
     "pr_body",
+    "recorded_repository",
+    "repository_mismatch",
+    "repository_of",
     "rework_comment",
     "slugify",
 ]

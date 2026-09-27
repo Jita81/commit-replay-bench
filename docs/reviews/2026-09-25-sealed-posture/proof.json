@@ -1,0 +1,187 @@
+{
+ "broken": {
+  "files_removed": 257,
+  "left": [],
+  "sealed_set": "$CRB_HOME/deps/go/dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6"
+ },
+ "events": {
+  "counts": {
+   "build.done": 1,
+   "build.start": 1,
+   "grade.belt": 7,
+   "grade.control": 1,
+   "ledger.append": 1,
+   "prep.start": 1,
+   "provision.reuse": 3,
+   "qualify.task": 1,
+   "run.done": 1,
+   "run.start": 2
+  }
+ },
+ "gate_refuses": {
+  "builder_calls": 0,
+  "refusal": {
+   "code": "BUNDLE_INTEGRITY",
+   "doc": "docs/DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately",
+   "fix": "a sealed dependency set no longer matches its digest: run `crb deps verify`; every qualification that cites the set is revoked and the set is fetched again",
+   "message": "go/dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6: digest sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 does not match the sealed sha256:0338fa2960a873a2ae7270d97092700f6c6b07158cc8074303d2a580a2fef102",
+   "scope": "run"
+  },
+  "rows_written": 0
+ },
+ "gold_replay": {
+  "admitted": [
+   "746ef07158728502482cea9f880a6f4b21ef29a9"
+  ],
+  "builder_calls": 1,
+  "rows": [
+   {
+    "builder": "fixture_gold",
+    "clean": true,
+    "error": "",
+    "failure_kind": "",
+    "labels": {
+     "posture_class": "docker/copy/sealed",
+     "posture_id": "pst_9108b668d829d89d832eaaad",
+     "qualification_id": "4a9ba053542c42d88ffaf73bd6e95de4",
+     "rung": "r1"
+    },
+    "no_new_failures": true,
+    "target_green": true
+   }
+  ],
+  "seconds": 21.2,
+  "summary": {
+   "clean": 1,
+   "disqualified": 0,
+   "duration_s": 21.175,
+   "errors": 0,
+   "first_pass_clean": 1,
+   "rows": 1,
+   "run_id": "proof-223132-gold",
+   "stopped_reason": "",
+   "tasks": 1
+  }
+ },
+ "grade_past_the_gate": {
+  "blamed": false,
+  "clean": false,
+  "error": "environment: gold control red in pst_9108b668d829d89d832eaaad: belt 2: target not green: go: github.com/cpuguy83/go-md2man/v2@v2.0.6: module lookup disabled by GOPROXY=off",
+  "failure_kind": "harness",
+  "witness": null
+ },
+ "posture": {
+  "posture": {
+   "apparatus_version": "2.3",
+   "deps_mode": "sealed",
+   "executor": "docker",
+   "image_id": "sha256:0e796b7e21a0d6dc7dde96e95420f0f6928a77b3e6d1ede1190b05266157f69c",
+   "image_ref": "crb-sandbox-go:main-8ab88ad",
+   "limits": "mem=2g,cpus=2,pids=512,tmp=512m,work=1g,user=65534:65534",
+   "network": "none",
+   "posture_class": "docker/copy/sealed",
+   "posture_id": "pst_9108b668d829d89d832eaaad",
+   "runner": "go",
+   "runner_env": "00052a484c87450c2e9c14ac8e30e1723c62bc2fcdd5a1b0b2c724999680031b",
+   "toolchain": "go version go1.26.8 linux/arm64",
+   "tree": "copy"
+  },
+  "posture_class": "docker/copy/sealed",
+  "posture_id": "pst_9108b668d829d89d832eaaad",
+  "provider": "SealedProvider"
+ },
+ "provisioning_off": {
+  "refused": {
+   "code": "PROVISION_DISABLED",
+   "doc": "docs/DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately",
+   "fix": "switch dependency provisioning on (CRB_PROVISION__ENABLED=true, DEPLOYMENT \u00a73.4), or measure this repository in the local posture",
+   "message": "cobra declares go dependencies (github.com/cpuguy83/go-md2man/v2@v2.0.6, github.com/inconshreveable/mousetrap@v1.1.0, github.com/spf13/pflag@v1.0.9) and dependency provisioning is off",
+   "scope": "run"
+  }
+ },
+ "qualification": {
+  "baseline": null,
+  "code": "",
+  "deps": {
+   "builder": {
+    "digest": "sha256:0338fa2960a873a2ae7270d97092700f6c6b07158cc8074303d2a580a2fef102",
+    "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6",
+    "lang": "go",
+    "mounts": [
+     {
+      "container_path": "/deps/gomod",
+      "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6"
+     }
+    ],
+    "role": "builder",
+    "scheme": "go.modcache.v1"
+   },
+   "digests": {
+    "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6": "sha256:0338fa2960a873a2ae7270d97092700f6c6b07158cc8074303d2a580a2fef102"
+   },
+   "gold": {
+    "digest": "sha256:0338fa2960a873a2ae7270d97092700f6c6b07158cc8074303d2a580a2fef102",
+    "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6",
+    "lang": "go",
+    "mounts": [
+     {
+      "container_path": "/deps/gomod",
+      "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6"
+     }
+    ],
+    "role": "gold",
+    "scheme": "go.modcache.v1"
+   },
+   "keys": [
+    "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6"
+   ],
+   "lang": "go",
+   "mode": "sealed",
+   "parent": {
+    "digest": "sha256:0338fa2960a873a2ae7270d97092700f6c6b07158cc8074303d2a580a2fef102",
+    "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6",
+    "lang": "go",
+    "mounts": [
+     {
+      "container_path": "/deps/gomod",
+      "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6"
+     }
+    ],
+    "role": "parent",
+    "scheme": "go.modcache.v1"
+   }
+  },
+  "env_probe": {
+   "duration_s": 0.335,
+   "ok": true,
+   "ran": true,
+   "rc": 0,
+   "tail": ""
+  },
+  "fingerprint": "7c3546c6809652d19b68f15dc59f25063b19922cd050ef442a8d657ef6f0458a",
+  "gold": {
+   "clean": true,
+   "duration_s": 20.343,
+   "lint": true,
+   "note": "",
+   "target_runs": 2,
+   "timeout_s": 300
+  },
+  "posture_id": "pst_9108b668d829d89d832eaaad",
+  "qualified": true,
+  "red": {
+   "duration_s": 7.685,
+   "failing": [],
+   "kind": "build_failed",
+   "rc": 1
+  },
+  "state": "qualified"
+ },
+ "requalify_broken": {
+  "code": "QUAL_ENV_UNLOADABLE",
+  "fix": "the parent cannot load its dependencies offline: switch provisioning on, or fix the module named",
+  "message": "the parent cannot load its dependencies offline in this posture: go: github.com/cpuguy83/go-md2man/v2@v2.0.6: module lookup disabled by GOPROXY=off",
+  "state": "unqualified"
+ },
+ "started": "2026-09-25T22:31:32+0100"
+}

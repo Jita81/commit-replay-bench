@@ -27,9 +27,9 @@ Works with:   deploy/verify-image.sh (under test), .github/workflows/release.yml
               deploy/helm/crb/values.yaml (the puller), docs/DEPLOYMENT.md (the released image:
               name, signature, SBOM, §2.2), docs/SECURITY.md (supply chain, §3.7)
 Tested by:    tests/test_release_verify_image.py
-Touch when:   the image repository, issuer or signing identity changes (all three files and this
-              suite together — a drift here is a release signed under one identity and
-              "verified" under another).
+Touch when:   never for a new repository; the image repository, issuer or signing identity
+              changes (all three files and this suite together — a drift here is a release
+              signed under one identity and "verified" under another).
 """
 
 from __future__ import annotations

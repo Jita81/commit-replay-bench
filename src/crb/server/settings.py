@@ -11,6 +11,13 @@ Invariants
   dialect because a PostgreSQL URL can embed a password.
 * Nested groups use ``__`` as the delimiter: ``CRB_OIDC__ISSUER``,
   ``CRB_OIDC__ROLE_MAP='{"crb-admins": "admin"}'``, ``CRB_SANDBOX__EXECUTOR=docker``.
+* **Production refuses the unsealed posture** (ADR-0023). ``CRB_ENV=prod`` with the host
+  builder (``CRB_BUILDER__EXECUTOR=host``) or the local test executor
+  (``CRB_SANDBOX__EXECUTOR=local``) does not start unless ``CRB_ALLOW_UNSEALED_PROD=1`` says
+  so on purpose; the override is shown by :meth:`Settings.posture` (``/health``,
+  ``/settings``, the Posture page) and the worker stamps it into every run's apparatus. In
+  ``prod`` the builder defaults to ``docker``; in ``dev`` to ``host``.
+  :func:`unsealed_prod_refusal` is the one rule; ``crb worker`` applies the same function.
 * **A deployment never lives in a temporary directory** (DL-045). ``CRB_HOME`` under
   ``/tmp``, ``/private/tmp``, ``/var/folders`` or ``$TMPDIR`` is refused in ``prod`` and
   warned about in ``dev`` (:func:`temp_dir_reason`); ``CRB_ALLOW_TEMP_HOME=true`` is the
@@ -28,29 +35,36 @@ What it is:   The server's configuration model — every ``CRB_*`` variable the 
 What it does: Parses the environment into typed, nested settings (OIDC, bootstrap admin,
               retention, sandbox, builder container, factory); refuses to start in ``prod`` without a
               strong ``CRB_SECRET_KEY``, with a short bootstrap password or with a ``CRB_HOME``
-              under an OS-managed temporary directory (``dev`` warns), or with automatic
-              sign-in outside ``dev`` or on a non-loopback bind; keeps secret
+              under an OS-managed temporary directory (``dev`` warns), with the host builder
+              or the local executor unless ``CRB_ALLOW_UNSEALED_PROD=1`` (ADR-0023), or with
+              automatic sign-in outside ``dev`` or on a non-loopback bind (ADR-0027); keeps secret
               values as ``SecretStr`` and exposes only ``redacted_dict`` for display. Defines
               the role ladder and ``MIN_PASSWORD_LENGTH`` the auth module enforces.
 How:          ``pydantic-settings`` with ``CRB_`` prefix and ``__`` nesting; CSV-or-JSON
               list fields via ``NoDecode`` + a ``before`` validator; an ``after`` validator
               generates a dev-only ephemeral key, applies the temporary-home guard
-              (``temp_dir_reason``), refuses automatic sign-in where it may not run
+              (``temp_dir_reason``), resolves the builder's default executor for the env,
+              applies ``unsealed_prod_refusal``, refuses automatic sign-in where it may not run
               (``dev_autologin_refusal_for``) and logs the prod warnings.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
+              docs/adr/0023-production-refuses-the-unsealed-posture.md,
               docs/adr/0027-dev-autologin-on-loopback.md
-Works with:   src/crb/server/app.py (reads ``resolved_database_url``, cookie security, CORS),
+Works with:   src/crb/server/worker_main.py (the worker applies ``unsealed_prod_refusal`` to
+              its own reading of the same environment), src/crb/server/app.py (reads
+              ``resolved_database_url``, cookie security, CORS),
               src/crb/server/auth.py (``ROLE_RANK``, ``session_ttl``, ``secret_key_value``),
               src/crb/server/routes/system.py (serves ``redacted_dict``),
               src/crb/builders/container.py (the worker reads the same ``CRB_BUILDER__*``),
               src/crb/cli/commands/service.py (``crb doctor``'s ``home`` line reuses
-              ``temp_dir_reason``), src/crb/factory/author.py (the rung spelling
+              ``temp_dir_reason``), src/crb/provision/config.py (the worker's side of
+              ``CRB_PROVISION__*`` and its production refusals), src/crb/factory/author.py (the rung spelling
               ``CRB_FACTORY__TEST_AUTHOR`` carries and the refusal it feeds),
               docs/DEPLOYMENT.md#21-environment-reference (the operator-facing list; §1.1 the
               temporary-directory rule)
 Tested by:    tests/test_server_app.py, tests/test_server_system.py, tests/test_server_auth.py,
-              tests/test_settings_home_guard.py, tests/test_server_dev_autologin.py
+              tests/test_settings_home_guard.py, tests/test_settings_posture.py,
+              tests/test_server_dev_autologin.py
 Touch when:   never for a new repository (repositories are configured in the database, not
               the environment); adding a variable means adding it here, to ``redacted_dict``
               (never a secret value), to docs/DEPLOYMENT.md#21-environment-reference and to
@@ -72,9 +86,18 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from crb.provision.config import (
+    DEFAULT_GO_IMAGE,
+    DEFAULT_NODE_IMAGE,
+    DEFAULT_PYTHON_IMAGE,
+    ProvisionConfig,
+    parse_host_list,
+)
+
 log = logging.getLogger("crb.server.settings")
 
 Env = Literal["dev", "prod"]
+BuilderExecutor = Literal["host", "docker"]
 Role = Literal["viewer", "operator", "approver", "admin"]
 
 #: Ascending privilege ladder. ``require_role(r)`` admits any role at or above ``r``.
@@ -107,6 +130,66 @@ TEMP_HOME_ADVICE = (
     "put the deployment under a persistent path such as ~/crb-stack or "
     "/srv/crb (docs/DEPLOYMENT.md#11-single-host-without-containers-evaluation)"
 )
+
+
+#: The one explicit opt-in to running production unsealed (ADR-0023). Its presence is the
+#: operator's statement that this deployment's measurements are a development reading.
+ALLOW_UNSEALED_PROD_ENV = "CRB_ALLOW_UNSEALED_PROD"
+#: The sealed kind for both executors: tests in the fail-closed sandbox (ADR-0005), the
+#: builder in its sealed container (ADR-0012).
+SEALED_EXECUTOR = "docker"
+#: Where the full rule is explained to the person who meets the refusal.
+UNSEALED_PROD_DOC = "docs/SECURITY.md#5-what-this-document-does-not-claim"
+
+
+def default_builder_executor(env: str) -> BuilderExecutor:
+    """The builder's executor when ``CRB_BUILDER__EXECUTOR`` is not set: the sealed
+    container in ``prod``, the host in ``dev`` (ADR-0023)."""
+    return "docker" if env == "prod" else "host"
+
+
+def unsealed_prod_refusal(
+    env: str, sandbox_executor: str, builder_executor: str, *, allow: bool
+) -> str:
+    """Why this posture may not run, or ``""`` when it may (ADR-0023).
+
+    ``prod`` with a test executor or a builder executor that is not :data:`SEALED_EXECUTOR`
+    is refused unless ``allow`` (``CRB_ALLOW_UNSEALED_PROD=1``) says so on purpose. ``dev``
+    and a sealed ``prod`` are never refused. The API's :class:`Settings` and the worker's
+    entrypoint (``crb.server.worker_main``) both call this, so the two processes cannot
+    disagree about what production may run.
+    """
+    if env != "prod" or allow:
+        return ""
+    unsealed: list[str] = []
+    if sandbox_executor != SEALED_EXECUTOR:
+        unsealed.append(
+            f"CRB_SANDBOX__EXECUTOR={sandbox_executor} (repository tests would run on the host, "
+            "outside the sealed sandbox)"
+        )
+    if builder_executor != SEALED_EXECUTOR:
+        unsealed.append(
+            f"CRB_BUILDER__EXECUTOR={builder_executor} (the builder would run on the host with "
+            "Bash, its API key and the gold commit within reach)"
+        )
+    if not unsealed:
+        return ""
+    return (
+        "production refuses the unsealed posture (ADR-0023): "
+        + "; ".join(unsealed)
+        + f". Use docker for both, or set {ALLOW_UNSEALED_PROD_ENV}=1 to run unsealed on "
+        "purpose: the override is shown on /health and the Posture page and stamped into "
+        "every run's apparatus, and what such a run measures is a development reading, not "
+        f"evidence ({UNSEALED_PROD_DOC})"
+    )
+
+
+def factory_builds_posture(env: str, *, allow: bool) -> str:
+    """Where a factory run's builds happen (ADR-0023): ``refused`` in ``prod`` unless
+    ``allow``, else ``host``. A factory build runs the builder on a host worktree and is never
+    sealed, so a sealed ``prod`` posture cannot admit one without the override. The API serves
+    this on ``/health``; the worker applies the same rule (``Worker._run_factory``)."""
+    return "refused" if env == "prod" and not allow else "host"
 
 
 def temp_dir_reason(path: Path | str, environ: Mapping[str, str] | None = None) -> str | None:
@@ -303,6 +386,75 @@ class SandboxSettings(BaseModel):
     #: ``docker`` (default, fail-closed isolation) or ``local`` (host execution; dev only).
     executor: Literal["local", "docker"] = "docker"
     image: str = ""
+    #: ``copy`` (default): tests run in a throwaway copy of the read-only worktree;
+    #: ``readonly``: the worktree itself, read-only — a different posture (ADR-0019 §7).
+    tree: Literal["copy", "readonly"] = "copy"
+    #: The size cap of the throwaway copy (a tmpfs, so it counts against the container's memory).
+    work_size: str = "1g"
+
+
+class ProvisionSettings(BaseModel):
+    """Dependency provisioning (ADR-0019, ``CRB_PROVISION__*``): a task's dependencies are
+    fetched outside the test container, sealed and mounted read-only. OFF by default —
+    switching it on is the operator's consent to a fetch through their egress. In ``prod``
+    a public registry is refused unless ``allow_public`` is set (a mirror inside the tenant
+    is the documented shape) and every fetch image must be pinned by digest. The worker
+    reads the same variables (:meth:`crb.provision.config.ProvisionConfig.from_env`)."""
+
+    enabled: bool = False
+    #: Empty ⇒ ``<CRB_HOME>/deps``. Must be a path the docker daemon can bind-mount.
+    store: str = ""
+    go_proxy: str = "https://proxy.golang.org"
+    go_sumdb: str = "sum.golang.org"
+    pypi_index: str = "https://pypi.org/simple"
+    pypi_files_host: str = "files.pythonhosted.org"
+    npm_registry: str = "https://registry.npmjs.org"
+    #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string);
+    #: read by :func:`crb.provision.config.parse_host_list`, the worker's own parser.
+    extra_allow_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    allow_public: bool = False
+    egress_network: str = "bridge"
+    proxy_image: str = ""
+    go_image: str = ""
+    python_image: str = ""
+    node_image: str = ""
+    ca_bundle: str = ""
+    max_bundle_mb: int = Field(default=2048, ge=1)
+    max_total_gb: float = Field(default=20.0, gt=0)
+    fetch_timeout_s: int = Field(default=900, ge=1)
+
+    @field_validator("extra_allow_hosts", mode="before")
+    @classmethod
+    def _split_hosts(cls, v: Any) -> Any:
+        # the worker's parser, not a copy of it: one value can never read two ways (PR #56)
+        return list(parse_host_list(v)) if isinstance(v, str) else v
+
+    def to_config(self, *, env: str, home: Path, builder_proxy_image: str = "") -> ProvisionConfig:
+        """The worker-side configuration; its own validation (the allowlist parsed by the
+        egress proxy's ``parse_allow``, ``GO_PROXY`` never ``direct``) raises ``ValueError``.
+        ``builder_proxy_image`` is ``CRB_BUILDER__PROXY_IMAGE``: an empty ``proxy_image``
+        falls back to it, as :meth:`ProvisionConfig.from_env` does in the worker."""
+        return ProvisionConfig(
+            enabled=self.enabled,
+            store=Path(self.store) if self.store else Path(home) / "deps",
+            go_proxy=self.go_proxy,
+            go_sumdb=self.go_sumdb,
+            pypi_index=self.pypi_index,
+            pypi_files_host=self.pypi_files_host,
+            npm_registry=self.npm_registry,
+            extra_allow_hosts=tuple(self.extra_allow_hosts),
+            allow_public=self.allow_public,
+            egress_network=self.egress_network,
+            proxy_image=self.proxy_image.strip() or builder_proxy_image.strip(),
+            go_image=self.go_image or DEFAULT_GO_IMAGE,
+            python_image=self.python_image or DEFAULT_PYTHON_IMAGE,
+            node_image=self.node_image or DEFAULT_NODE_IMAGE,
+            ca_bundle=self.ca_bundle,
+            max_bundle_mb=self.max_bundle_mb,
+            max_total_gb=self.max_total_gb,
+            fetch_timeout_s=self.fetch_timeout_s,
+            env=env,
+        )
 
 
 class FactorySettings(BaseModel):
@@ -344,11 +496,14 @@ class BuilderSettings(BaseModel):
 
     ``docker``: a sealed export of the parent tree, built inside ``image`` on an
     internal network whose only egress is the allowlisting proxy (``allow_hosts``,
-    ``host[:port]``; empty ⇒ no network at all). ``host`` (default): the builder runs
-    in the worker's process / host worktree — development and evaluation only.
+    ``host[:port]``; empty ⇒ no network at all). ``host``: the builder runs in the
+    worker's process / host worktree — development and evaluation only. Unset (``None``)
+    resolves in :class:`Settings` to ``docker`` in ``prod`` and ``host`` in ``dev``
+    (ADR-0023). An EXPLICIT ``docker`` needs ``image`` at start-up; the defaulted one does
+    not, and the worker fails closed when it builds without one.
     """
 
-    executor: Literal["host", "docker"] = "host"
+    executor: BuilderExecutor | None = None
     image: str = ""
     proxy_image: str = ""
     #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string).
@@ -366,6 +521,12 @@ class BuilderSettings(BaseModel):
     #: (``CRB_BUILDER__CLAUDE_BINARY``); empty ⇒ ``claude`` on PATH. The worker resolves its
     #: own binary through the builder config; this is the API's.
     claude_binary: str = ""
+
+    @field_validator("executor", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, v: Any) -> Any:
+        # an empty CRB_BUILDER__EXECUTOR (a template's placeholder) means "the env's default"
+        return None if isinstance(v, str) and not v.strip() else v
 
     @field_validator("allow_hosts", mode="before")
     @classmethod
@@ -452,6 +613,16 @@ class IntakeSettings(BaseModel):
     #: ``merged``/``closed`` → the state the ticket moves to. EMPTY BY DEFAULT: a
     #: deployment that configures nothing never moves anybody's ticket.
     outcome_map: dict[str, str] = Field(default_factory=dict)
+    #: ADR-0022 — a ready ticket is a DRAFT until an operator registers it on the Intake
+    #: screen (an evented act). ON BY DEFAULT: without it, anyone who can edit a ticket in
+    #: the watched column puts work into the factory. ``false`` registers ready tickets
+    #: unattended (``approved_by: unattended`` on the chain).
+    require_approval: bool = True
+    #: Tracker authors (the ticket's creator — Azure DevOps sign-in name, Jira email or
+    #: account id) whose ready tickets skip the Register act. EMPTY BY DEFAULT. Set as a
+    #: JSON list (``CRB_INTAKE__APPROVE_AUTHORS='["ada@contoso.com"]'``); compared
+    #: case-insensitively; recorded as ``approved_by: allowlist:<author>``.
+    approve_authors: list[str] = Field(default_factory=list)
 
     @property
     def enabled(self) -> bool:
@@ -468,6 +639,16 @@ class IntakeSettings(BaseModel):
         if raw and not raw.lower().startswith("https://"):
             raise ValueError(f"the tracker URL must be https://, got {raw!r}")
         return raw
+
+    @field_validator("approve_authors", mode="before")
+    @classmethod
+    def _authors_list(cls, v: Any) -> Any:
+        # an explicit env mapping (the worker's) hands a raw string: a JSON list, or names
+        # separated by commas; either way blanks are dropped and names compared casefolded
+        if isinstance(v, str):
+            raw = v.strip()
+            v = json.loads(raw) if raw.startswith("[") else raw.split(",")
+        return [str(a).strip().casefold() for a in (v or []) if str(a).strip()]
 
     @field_validator("outcome_map")
     @classmethod
@@ -494,6 +675,8 @@ class IntakeSettings(BaseModel):
             "max_per_poll": self.max_per_poll,
             "poll_budget_s": self.poll_budget_s,
             "outcome_map": dict(self.outcome_map),
+            "require_approval": self.require_approval,
+            "approve_authors": list(self.approve_authors),
             "enabled": self.enabled,
         }
 
@@ -543,6 +726,9 @@ class Settings(BaseSettings):
     #: ``CRB_ALLOW_TEMP_HOME=true`` admits a ``home`` under an OS temporary directory in
     #: ``prod`` — for a throwaway evaluation only; the warning is still logged.
     allow_temp_home: bool = False
+    #: ``CRB_ALLOW_UNSEALED_PROD=1`` admits the host builder or the local test executor in
+    #: ``prod`` (ADR-0023). Shown by :meth:`posture`; the worker stamps it on every run.
+    allow_unsealed_prod: bool = False
     database_url: str | None = None
     secret_key: SecretStr | None = None
     #: Session lifetime in seconds (default 8 hours).
@@ -561,6 +747,8 @@ class Settings(BaseSettings):
     trusted_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
+    #: Dependency provisioning (ADR-0019) — off by default; see ``ProvisionSettings``.
+    provision: ProvisionSettings = Field(default_factory=ProvisionSettings)
     builder: BuilderSettings = Field(default_factory=BuilderSettings)
     factory: FactorySettings = Field(default_factory=FactorySettings)
     #: Where work arrives from (ADR-0017). ``tracker: none`` by default: no column is
@@ -670,24 +858,79 @@ class Settings(BaseSettings):
                 )
             log.warning("CRB_HOME %s; %s", reason, TEMP_HOME_ADVICE)
         if self.auth.dev_autologin:
-            refusal = dev_autologin_refusal_for(self.env, self.bind_host)
-            if refusal:
-                raise ValueError(refusal)
+            refusal_a = dev_autologin_refusal_for(self.env, self.bind_host)
+            if refusal_a:
+                raise ValueError(refusal_a)
             if not self.local_auth_enabled:
                 raise ValueError(
                     "CRB_AUTH__DEV_AUTOLOGIN signs in a local account, but "
                     "CRB_LOCAL_AUTH_ENABLED=false turns local accounts away; unset one of them"
                 )
-        if self.env == "prod" and self.sandbox.executor == "local":
-            log.warning("CRB_SANDBOX__EXECUTOR=local in prod: test runs are NOT isolated")
-        if self.env == "prod" and self.builder.executor == "host":
+        # ADR-0023: the builder's default follows the env, then production refuses the
+        # unsealed posture unless the operator said so on purpose
+        if self.builder.executor is None:
+            self.builder.executor = default_builder_executor(self.env)
+        refusal = unsealed_prod_refusal(
+            self.env,
+            self.sandbox.executor,
+            self.builder_executor,
+            allow=self.allow_unsealed_prod,
+        )
+        if refusal:
+            raise ValueError(refusal)
+        # dependency provisioning: a typo in an allowlist, a public registry in prod without
+        # allow_public, or an unpinned fetch image fails at start-up — never at the first fetch
+        refusal_p = self.provision_config.production_refusal()
+        if refusal_p is not None:
+            raise ValueError(f"{refusal_p.code}: {refusal_p.message}; {refusal_p.fix}")
+        if self.posture()["unsealed_prod_override"]:
             log.warning(
-                "CRB_BUILDER__EXECUTOR=host in prod: builder attempts run on the host with a "
-                "worktree that shares the main clone's objects (ADR-0012 recommends docker)"
+                "%s=1: production runs UNSEALED (tests %s, builder %s) — every run's apparatus "
+                "carries the override; what it measures is a development reading (ADR-0023)",
+                ALLOW_UNSEALED_PROD_ENV,
+                self.sandbox.executor,
+                self.builder_executor,
             )
         return self
 
     # --- derived ---------------------------------------------------------------
+    @property
+    def builder_executor(self) -> str:
+        """The builder's executor as resolved for this env (``docker`` | ``host``)."""
+        return self.builder.executor or default_builder_executor(self.env)
+
+    def posture(self) -> dict[str, Any]:
+        """Where tests and the builder run, whether that is sealed, and whether production
+        runs unsealed under ``CRB_ALLOW_UNSEALED_PROD`` (ADR-0023). Served on ``/health``
+        and ``/settings``; nothing here is secret. ``sealed`` and ``unsealed_prod_override``
+        describe replay builds and test runs; the override is reported in force there only
+        when it is what lets this deployment start (an unused override is not a posture).
+
+        ``factory_builds`` is the factory's own posture, reported apart because a factory
+        build is never sealed (the builder is handed a host worktree, no container):
+        ``refused`` in ``prod`` without the override (the worker refuses the run), ``host``
+        otherwise — and in ``prod`` every such run's apparatus carries the override."""
+        sealed = (
+            self.sandbox.executor == SEALED_EXECUTOR and self.builder_executor == SEALED_EXECUTOR
+        )
+        return {
+            "env": self.env,
+            "sandbox_executor": self.sandbox.executor,
+            "builder_executor": self.builder_executor,
+            "sealed": sealed,
+            "unsealed_prod_override": self.env == "prod"
+            and not sealed
+            and self.allow_unsealed_prod,
+            "factory_builds": factory_builds_posture(self.env, allow=self.allow_unsealed_prod),
+        }
+
+    @property
+    def provision_config(self) -> ProvisionConfig:
+        """The worker-side provisioning configuration these settings describe."""
+        return self.provision.to_config(
+            env=self.env, home=self.home, builder_proxy_image=self.builder.proxy_image
+        )
+
     @property
     def is_dev(self) -> bool:
         """``CRB_ENV=dev`` — the only mode that relaxes a secret or cookie rule."""
@@ -758,8 +1001,15 @@ class Settings(BaseSettings):
             "cors_origins": list(self.cors_origins),
             "trusted_proxies": list(self.trusted_proxies),
             "retention": {"transcripts_days": self.retention.transcripts_days},
-            "sandbox": {"executor": self.sandbox.executor, "image": self.sandbox.image},
+            "sandbox": {
+                "executor": self.sandbox.executor,
+                "image": self.sandbox.image,
+                "tree": self.sandbox.tree,
+                "work_size": self.sandbox.work_size,
+            },
+            "provision": self.provision_config.view(),
             "builder": self.builder.redacted(),
+            "posture": self.posture(),
             "factory": self.factory.redacted(),
             "intake": self.intake.redacted(),
             "public_url": self.public_url,
@@ -770,9 +1020,11 @@ class Settings(BaseSettings):
 
 
 __all__ = [
+    "ALLOW_UNSEALED_PROD_ENV",
     "MIN_PASSWORD_LENGTH",
     "ROLE_LADDER",
     "ROLE_RANK",
+    "SEALED_EXECUTOR",
     "TEMP_DIR_ROOTS",
     "TEMP_HOME_ADVICE",
     "USERNAME_CHARS",
@@ -782,11 +1034,15 @@ __all__ = [
     "FactorySettings",
     "IntakeSettings",
     "OidcSettings",
+    "ProvisionSettings",
     "RetentionSettings",
     "Role",
     "SandboxSettings",
     "Settings",
+    "default_builder_executor",
     "dev_autologin_refusal_for",
+    "factory_builds_posture",
     "is_loopback_host",
     "temp_dir_reason",
+    "unsealed_prod_refusal",
 ]

@@ -18,8 +18,8 @@
  * Works with:   ui/src/dev/apiProxy.ts, ui/vite.config.ts, src/crb/server/auth.py
  *               (`dev_autologin_refusal`, which refuses any request carrying the header)
  * Tested by:    ui/src/dev/apiProxy.test.ts
- * Touch when:   the dev proxy changes; never to drop the mark for a client that is not on
- *               this machine.
+ * Touch when:   never for a new repository; the dev proxy changes; never to drop the mark for a
+ *               client that is not on this machine.
  */
 // @vitest-environment node — the config is loaded the way Vite loads it, in Node
 import { loadConfigFromFile } from 'vite'

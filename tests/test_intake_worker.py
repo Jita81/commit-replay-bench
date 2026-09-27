@@ -10,8 +10,12 @@ What it does: Pins that a deployment with no tracker never polls, that a reposit
               configured, that the poll runs on its own timer rather than every idle pass,
               that the worker keeps checking in for as long as a pass lasts (a slow board
               must not read as a stale worker), that a registration arriving during a factory
-              run is queued, and that an exception inside one repository's poll does not
-              touch the others.
+              run is queued, that an exception inside one repository's poll does not
+              touch the others, and (ADR-0022, C6) that the served default leaves a ready
+              ticket waiting for an operator, the deployment's author allowlist is honoured
+              and a timed pass takes the repository's lease — and (PR #55 review) that a
+              repository switched off after the worker listed it is not read, and the
+              outcome writes on the tickets run while the lease is still held.
 How:          A ``Worker`` over a SQLite store under ``tmp_path`` with the file-backed
               fake tracker; nothing here reaches a network, a model or a real tracker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -66,12 +70,16 @@ BOARD: dict[str, Any] = {
 
 
 def _intake(**kw: Any) -> IntakeSettings:
+    """A deployment's intake settings for the timer and registration MECHANICS these tests
+    pin — with operator approval OFF, said here once; the deployment default (approval ON,
+    ADR-0022) is pinned by its own tests below, which pass ``require_approval`` or none."""
     base: dict[str, Any] = {
         "tracker": "fake",
         "url": "https://tracker.invalid",
         "project": "W",
         "column": "Ready",
         "poll_s": 30,
+        "require_approval": False,
     }
     base.update(kw)
     return IntakeSettings(**base)
@@ -321,3 +329,113 @@ def test_a_worker_that_does_not_know_the_deployments_address_writes_nothing(
     assert "CRB_PUBLIC_URL" in last["advice"]
     board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
     assert board["tickets"]["4711"].get("comments") in (None, {})
+
+
+# --- C6 (assessment 2026-09-25): approval by default, the allowlist, the lease -----------
+
+
+def test_the_served_worker_leaves_a_ready_ticket_waiting_for_an_operator(tmp_path: Path) -> None:
+    """The deployment default (``IntakeSettings()`` — no ``require_approval`` given): the
+    worker's timed poll drafts the ready ticket and registers nothing (ADR-0022)."""
+    stack = Stack(
+        tmp_path,
+        IntakeSettings(
+            tracker="fake", url="https://tracker.invalid", project="W", column="Ready", poll_s=30
+        ),
+    )
+    stack.add_repo("alpha", {"enabled": True})
+    stack.worker.poll_intake()
+    home = FactoryHome(stack.home, "alpha")
+    assert home.load_backlog() is None
+    (row,) = IntakeStore(stack.home, "alpha").rows()
+    assert row.awaiting_approval and not row.registered
+
+
+def test_the_worker_honours_the_deployments_author_allowlist(tmp_path: Path) -> None:
+    board = json.loads(json.dumps(BOARD))
+    board["tickets"]["4711"]["author"] = "ada@example.invalid"
+    stack = Stack(tmp_path, _intake(require_approval=True, approve_authors=["ada@example.invalid"]))
+    fake_tracker_path(stack.home).write_text(json.dumps(board), encoding="utf-8")
+    stack.add_repo("alpha", {"enabled": True})
+    stack.worker.poll_intake()
+    backlog = FactoryHome(stack.home, "alpha").load_backlog()
+    assert backlog is not None and [i.id for i in backlog.items] == ["fake-4711"]
+
+
+def test_a_worker_poll_takes_the_repositorys_lease(tmp_path: Path) -> None:
+    """C6(c): a pass the worker starts while another pass holds the repository's lease
+    reads nothing and writes nothing."""
+    from crb.server.intake import intake_lease
+
+    stack = Stack(tmp_path, _intake(require_approval=False))
+    stack.add_repo("alpha", {"enabled": True})
+    held = intake_lease(stack.factory, "alpha", ttl_s=300)
+    assert held.acquire()
+    try:
+        stack.worker.poll_intake()
+        home = FactoryHome(stack.home, "alpha")
+        assert home.load_backlog() is None and home.events() == []
+        board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
+        assert "comments" not in board["tickets"]["4711"]
+    finally:
+        held.release()
+    stack.worker.poll_intake(now=time.time() + 3600)
+    assert FactoryHome(stack.home, "alpha").load_backlog() is not None
+
+
+# --- PR #55 review: consent is asked again under the lease, and held for the whole pass --
+
+
+def test_a_repository_switched_off_after_the_worker_listed_it_is_not_read(
+    tmp_path: Path,
+) -> None:
+    """The worker lists the switched-on repositories, then polls them one by one. A
+    switch-off that lands in between left the worker reading and writing that board on
+    consent it had read minutes earlier. Under the lease the pass asks the committed
+    switch again: nothing is read, nothing is written, nothing is on the chain."""
+    stack = Stack(tmp_path, _intake(require_approval=False))
+    stack.add_repo("alpha", {"enabled": True})
+    (listed,) = stack.worker.intake_repos()
+    with stack.factory() as s:
+        row = s.get(Repo, "alpha")
+        assert row is not None
+        row.config_json = {"intake": {"enabled": False}}
+        s.commit()
+    from crb.intake.fake import FileTracker
+
+    stack.worker._poll_one("alpha", FileTracker(fake_tracker_path(stack.home)), listed[1])
+    home = FactoryHome(stack.home, "alpha")
+    assert home.events() == [] and home.load_backlog() is None
+    board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
+    assert board == BOARD
+
+
+def test_the_worker_tells_the_tickets_their_outcomes_while_it_holds_the_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After the column pass the worker writes the outcomes on the tickets (the pull
+    request, the refusal, the merge). Those writes ran after the lease was released, so a
+    switch-off could land between the pass and them. They now run inside the pass, while
+    the lease is held — a switch-off waits for them or is refused."""
+    import crb.server.worker as w
+    from crb.store.models import LEASE_ROW_PREFIX, WorkerRow
+
+    held: list[bool] = []
+
+    def lease_held() -> bool:
+        with stack.factory() as s:
+            return s.get(WorkerRow, f"{LEASE_ROW_PREFIX}intake:alpha") is not None
+
+    def post_outcomes(*args: Any, **kwargs: Any) -> None:
+        held.append(lease_held())
+
+    def outcome_map(*args: Any, **kwargs: Any) -> None:
+        held.append(lease_held())
+
+    monkeypatch.setattr(w, "post_outcomes_to_tickets", post_outcomes)
+    monkeypatch.setattr(w, "apply_outcome_map", outcome_map)
+    stack = Stack(tmp_path, _intake(require_approval=False))
+    stack.add_repo("alpha", {"enabled": True})
+    assert stack.worker.poll_intake() == 1
+    assert held == [True, True]
+    assert not lease_held()

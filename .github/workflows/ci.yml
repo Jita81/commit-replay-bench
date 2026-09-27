@@ -8,6 +8,8 @@
 #   dod       every page/journey/stream + the product carry a definition of done; docs/dod/GAP-ANALYSIS.md current
 #   claims    every quantified sentence on an allowlisted public page carries a permitted tag,
 #             and a [measured] one carries its n, its method and its apparatus version
+#   (commit-subjects lives in commit-subjects.yml: it must re-run when a pull request's
+#             title is edited, and an edit should not re-run this whole workflow)
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
 #   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
@@ -33,7 +35,9 @@
 #                  under deploy/sandbox, then the smoke that matters: the fixture repository of
 #                  each language through DockerExecutor ON THAT IMAGE (uid 65534, read-only
 #                  root, network off, qualify + grade clean — tests/test_sandbox_images_docker.py),
-#                  and the sandbox + sealed-builder suites on the python one; a skip in the
+#                  the sandbox + sealed-builder suites on the python one, and the dependency
+#                  provisioning suites (ADR-0019: a real fetch from an offline mirror into a
+#                  sealed set, then each fixture offline on its image); a skip in the
 #                  smoke fails the job. Always runs, and is not on main's required-checks list
 #                  yet, so its failure does not by itself stop a merge: the context
 #                  "sandbox-images (build + hadolint + smoke each reference sandbox image)"
@@ -132,11 +136,19 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0 # --changed-since diffs the pull request against its base branch
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Headers present, links resolve, map current
         run: python scripts/code_map.py --check
+      # On a pull request, a file in scripts/code_map_onboarding_baseline.txt that the change
+      # edits must leave it, and no path may join it (P-114); a push has no base to diff.
+      - name: No edited or added onboarding-baseline entry
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/code_map.py --check --changed-since "origin/$BASE_REF"
 
   # GitHub truncates a check-run name at 100 characters, and branch protection matches the
   # FULL name — a longer one can never satisfy a required context (it blocked PR #48). Keep
@@ -166,6 +178,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # The fence reader is a CommonMark parser, not a hand-rolled one: PR #54's review found
+      # five ways a line-by-line reader let a fence hide real review actions. Pinned to the
+      # version the tests run against; pyproject's dev extra carries the same package.
+      - name: Install the CommonMark parser the fence reader uses
+        run: python -m pip install -q 'markdown-it-py==4.2.0'
       # The pages covered are scripts/claims_check.py's ALLOWLIST; the rest of the
       # documentation is ungated and the gap analysis (G-929) says so.
       - name: Every claim on a covered page carries what its tag requires
@@ -196,7 +213,8 @@ jobs:
     runs-on: ubuntu-latest
     # the hermetic suite takes 23–29 min on the hosted runner (py3.13 is the slower); 30 tipped
     # over twice on 2026-09-17 at 98 % — headroom until the suite is split and parallelised
-    timeout-minutes: 45
+    # a job-time budget, not a quality gate: py3.13 hit 45 min at 98% (run 36212115018); no test is skipped or weakened
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -575,6 +593,17 @@ jobs:
           docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-python:ci python -m pytest --version
           docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-node:ci node --version
           docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-go:ci go version
+      - name: Pre-pull the dependency fetch images by digest (ADR-0019; the worker never pulls)
+        run: |
+          set -euo pipefail
+          docker pull -q golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d
+          docker pull -q python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
+          docker pull -q node:22.19.0-bookworm-slim@sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90
+      # the D5 regression grades the same tree on the host posture too
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: false
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -594,7 +623,10 @@ jobs:
         # in these modules was skipped for any reason.
         run: |
           .venv/bin/pytest -q -rs tests/test_sandbox_images_docker.py tests/test_sandbox_docker.py \
-            tests/test_builders_container_docker.py -m "not network" --junitxml=sandbox-images.xml
+            tests/test_builders_container_docker.py tests/test_provision_fetch.py \
+            tests/test_provision_go.py tests/test_provision_python.py tests/test_provision_node.py \
+            tests/test_posture_e2e_docker.py \
+            -m "not network" --junitxml=sandbox-images.xml
           if grep -q '<skipped' sandbox-images.xml; then
             echo '::error::a sandbox image test was skipped'; grep -o '<skipped[^>]*>' sandbox-images.xml; exit 1
           fi

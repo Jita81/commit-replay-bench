@@ -12,9 +12,10 @@
 # runtime: it carries gcc, git and the buildpack toolchain (~1.2 GB on disk against
 # ~477 MB here), none of which `go test` needs with CGO_ENABLED=0 — the runner's default.
 # The runner pins GOTOOLCHAIN=local, so a module's `go` directive can never trigger a
-# toolchain download inside the sandbox. A repository with module dependencies extends
-# this image with a warm module cache (`go mod download` into the directory
-# `runner_opts.gomodcache` names); one that needs cgo adds gcc: deploy/sandbox/README.md §4.
+# toolchain download inside the sandbox. A repository's module dependencies are NOT baked
+# into any image: they are provisioned per task outside the test container and mounted
+# read-only at /deps/gomod with GOPROXY=off (ADR-0019; deploy/sandbox/README.md §4). A
+# repository that needs cgo adds gcc in a derived image (README §4.1).
 #
 # Build from deploy/sandbox:
 #
@@ -32,11 +33,13 @@
 #       --user=65534:65534 --cap-drop=ALL --security-opt no-new-privileges --read-only
 #       --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m   (exec: the Go runner declares
 #         Command.exec_tmp — every other command's tmpfs is noexec)
-#       --mount type=bind,src=<worktree>,dst=/work,readonly
-#       --env GOFLAGS="-count=1 -mod=mod" --env GOTOOLCHAIN=local --env CGO_ENABLED=0
-#       --env GOCACHE=/tmp/gocache --env GOMODCACHE=/tmp/gomod
+#       --mount type=bind,src=<worktree>,dst=/src,readonly
+#       --tmpfs /work:rw,exec,nosuid,nodev,size=1g,uid=65534,gid=65534,mode=0700
+#       --mount type=bind,src=<sealed module cache>,dst=/deps/gomod,readonly   (ADR-0019)
+#       --env GOMODCACHE=/deps/gomod --env GOPROXY=off --env GOSUMDB=off …
 #       --env HOME=/tmp --env CI=1 --env NO_COLOR=1 --workdir /work
-#       crb-sandbox-go:local go test -json ./…
+#       crb-sandbox-go:local /bin/sh -c '<tar /src into /work>; cd /work/$0 && exec "$@"' . \
+#         go test -json ./…   (the tests run in a throwaway copy of the tree: ADR-0019 §7)
 #
 # Security posture (docs/SECURITY.md §3.1):
 #   * Both bases are pinned BY DIGEST (the multi-arch index, so amd64 and arm64 resolve the

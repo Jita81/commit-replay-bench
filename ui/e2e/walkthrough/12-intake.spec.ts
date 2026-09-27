@@ -21,8 +21,9 @@
  *               says so; switching it on is refused for a viewer and recorded for an
  *               operator. A ticket with a missing acceptance fact is read, labelled
  *               `crb:needs-info` on the board, and nothing is registered. The person edits
- *               the ticket (the board file) and its revision moves; the next read registers
- *               it, labels it `crb:queued` and links the item. A second read of an unchanged
+ *               the ticket (the board file) and its revision moves; the next read drafts it
+ *               and registers nothing (ADR-0022); the operator presses Register, and it is
+ *               registered, labelled `crb:queued` and linked. A second read of an unchanged
  *               column writes nothing. The screen shows every step at 375 px and 1280 px, and
  *               the listener goes off again at the end.
  *               The worker's own timed poll is parked by the stack (`CRB_INTAKE__POLL_S`
@@ -35,7 +36,8 @@
  *               UI buttons; and Node's `fs` to write and read the fake board — the tracker's
  *               whole state.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
+ * ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
+ *               docs/adr/0022-intake-approval-by-default.md
  * Works with:   ui/e2e/walkthrough/support.ts (`env.board`, the already-signed-in `test`
  *               fixture, `personaPassword`),
  *               ui/src/screens/Factory/IntakePage.tsx (under test),
@@ -166,7 +168,7 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
     expect(JSON.stringify(readBoard())).toBe(before)
   })
 
-  test('the person answers on the ticket; the next read registers it and queues it', async ({ page }) => {
+  test('the person answers on the ticket; the next read drafts it, and an operator registers it', async ({ page }) => {
     const board = readBoard()
     const ticket = board.tickets[KEY]!
     ticket.acceptance_criteria = [
@@ -179,9 +181,16 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
 
     await page.goto(`/factory/intake?repo=${REPO}`)
     await page.getByRole('button', { name: 'Re-read the column now' }).click()
-    await expect(page.getByTestId('intake-success')).toContainText('1 registered')
-
+    // ADR-0022: a ready ticket is a DRAFT until an operator registers it — nothing yet
+    await expect(page.getByTestId('intake-success')).toContainText('0 registered')
+    await expect(page.getByTestId('intake-success')).toContainText('1 waiting for an operator to register them')
     const row = page.getByTestId(`intake-row-${KEY}`)
+    await expect(row).toContainText('Waiting for an operator to register it')
+    expect(tags()).not.toContain('crb:queued')
+
+    // the operator reads the draft and registers it: the act is theirs, and it is recorded
+    await row.getByRole('button', { name: 'Register this ticket' }).click()
+    await expect(page.getByTestId('intake-success')).toContainText(`Registered ticket ${KEY} as fake-4711`)
     await expect(row).toContainText('queued')
     await expect(row).toContainText('fake-4711')
 

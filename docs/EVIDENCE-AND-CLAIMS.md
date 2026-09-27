@@ -34,7 +34,11 @@ pages on its allowlist, finds the sentences that quantify something, and fails w
 carries no tag — or when a `[measured]` one carries no `n`, no method and no apparatus
 version. It checks the *shape* of the evidence, never whether a figure is sound, and it
 reads only the pages on the allowlist; the script's docstring states both limits and the
-gap analysis names the pages still ungated.
+gap analysis names the pages still ungated. The same job holds a review to its own actions:
+every numbered row of a review's *Actions* table needs a line in the
+[decision log](DECISION-LOG.md) that names the review, the action and its state (`closed`,
+`open`, `declined` or `[gap]`), and every such record needs its action still in the table,
+so an action a reviewer set cannot quietly disappear from either side (DL-057).
 
 A claim moves from `[hypothesis]` to `[measured]` only by a pre-registered measurement whose
 interval excludes a trivial effect and that has been replicated or independently re-run;
@@ -85,6 +89,8 @@ The product shows, for every cell and every aggregate:
 | `oracle_strength_mean` or "not measured" | Hygiene-adjusted mutant kill-rate (P2). | A verdict from a weak oracle certifies less. |
 | `apparatus_versions` | The set of `apparatus_version` values in the cell. | Mixed versions are visible, not blended (§4). |
 | `mode`, `builder`, `model`, `provider` | Cell key. | A sighted rate is not a blind rate; builder A's rate is not builder B's. |
+| `posture_class`, `posture_ids` | The posture labels on every row of apparatus 2.3 or later (ADR-0019); the map reads the deployment's posture class by default. | **`n` is counted per posture class.** A host rate is not a sealed-sandbox rate: the same commit can be RED in one and fail to build in the other. Two classes pool (`posture=all`) only over tasks whose qualification fingerprints match in both; the rows left out are shown as `excluded_posture_divergent`, and a docker row stamped before 2.3 (graded against a baseline measured elsewhere) as `unqualified_posture`. |
+| `blame_control` | The witness on a `builder_red` / `lint` row of apparatus 2.3 or later. | A row blames the model only when the humans' own change — or, for a factory item, a fresh tree — passed the failed scope again in the same posture. A failure the gold shared is `harness` (`error: environment: …`), never a model failure. |
 
 Aggregates across cells are shown only with their component cells reachable; an aggregate
 without a breakdown is not published. Where observations cluster by repository, the
@@ -101,20 +107,29 @@ Every grade row and every evidence pack carries an `ApparatusStamp`
 (`crb.core.evidence.ApparatusStamp`):
 
 ```
-apparatus_version:  2.2                 # grader semantics, belt set (v5), size table, taxonomy, routing rule
+apparatus_version:  2.3                 # grader semantics, belt set (v5), size table, taxonomy, routing rule, posture-relative qualification
 crb_version:        2.0.0a1
 grader:             crb.core.grade
 runner:             pytest | go | node | vitest | jest | mocha | maven | cargo (+ options)
 executor:           {executor: docker, image, user, memory, cpus, pids_limit, network: none}
+posture:            {executor, image_id, toolchain, runner, runner_env, tree, network, deps_mode, limits, posture_id, posture_class}
 corpus_sha:         <hash of the task set, when sealed>
 policy_version:     routing.v1
 ```
 
+The `posture` block (ADR-0019) names the instrument the verdict was graded in, down to the
+image's content id and the exact toolchain version probed inside it; every row carries its
+`posture_id`, `posture_class` and the `qualification_id` whose in-posture baseline belt 3
+subtracted.
+
 **Evidence expires when the conditions that produced it change.** When any stamped
 component changes — apparatus version, grader semantics, runner behaviour, executor,
+**posture** (a re-pinned image, a toolchain patch release, a changed limit or tree mode),
 corpus, routing policy, or the builder's model id — prior evidence downstream of that
 component becomes **stale**: citable as history, dead as a basis for routing until
-re-measured. A result quoted without its stamp is an anecdote.
+re-measured. A changed posture also makes every task's qualification stale: the task is
+qualified again (no model spend) before it is replayed there. A result quoted without its
+stamp is an anecdote.
 
 `APPARATUS_VERSION` bumps only with an ADR. Model changes are recorded on the cell key
 (`model`, `provider`), so a new model id is a new cell; no capability is inherited.
@@ -253,6 +268,19 @@ sources, on repositories whose suite runs in the sandbox. Every rate from it is 
 
 A claim that steps outside this population (a throughput headline, "AI can do our
 engineering", a rate on XL work) is not licensed by anything in the ledger.
+
+**The selection rule, and the bias it carries.** By default the miner
+(`crb.core.mine.iter_candidates`, then `mine`) takes the newest 3,000 non-merge commits from
+`HEAD`, keeps those that touch both source and test files within the caps (the standard pool:
+1–3 source files), and stops once 25 tasks are found or 1,000 candidates have been examined;
+the repository's `mining` configuration moves the window, the task target and the candidate
+cap; the file caps are fixed per pool. The pool therefore over-represents
+recent work and work that was tested at the time, and holds nothing older than the window
+**[hypothesis — that a recent, tested-commits-only pool is easier than the repository's other
+work is untested; a pool mined from an older window under the same builder and budget would
+confirm or refute it]**. `GET /repos/{name}/pool` and the Results screen's oracle card show
+each pool's date range and the share of the repository's non-merge history it covers, so a
+reader sees the window before quoting a rate from it.
 
 ### 6c. The evidence ladder — the chain proves integrity, not truth
 

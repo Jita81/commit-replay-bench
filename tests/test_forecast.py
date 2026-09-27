@@ -37,6 +37,7 @@ from crb.core import forecast as fc
 from crb.core import signoff as so
 from crb.core.ledger import GradeRow
 from crb.core.routing import ROUTE_CALIBRATE, ROUTE_DELIVER, ROUTE_GRANULARIZE, ROUTE_HUMAN
+from fixtures.posture import posture_row
 
 PACK = "c" * 64
 
@@ -52,7 +53,7 @@ def _row(
     oracle_strength: float | None = None,
     task_id: str = "0123456789abcdef",
 ) -> GradeRow:
-    return GradeRow(
+    return posture_row(
         repo="todo",
         task_id=task_id,
         clean=clean,

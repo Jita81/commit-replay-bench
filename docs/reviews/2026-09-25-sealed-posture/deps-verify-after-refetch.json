@@ -1,0 +1,10 @@
+{
+  "results": [
+    {
+      "digest": "sha256:0338fa2960a873a2ae7270d97092700f6c6b07158cc8074303d2a580a2fef102",
+      "key": "dep_a466b98b16506da499fd032568640333e6ba03b0b520cd9cd6ceee2bfa9fc2b6",
+      "status": "ok"
+    }
+  ],
+  "store": "$CRB_HOME/deps"
+}

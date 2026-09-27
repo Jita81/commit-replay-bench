@@ -60,6 +60,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.posture import witnessed_context_for
 
 # --- a scripted builder ---------------------------------------------------------------------
 
@@ -589,6 +590,13 @@ def test_run_climbs_ladder_and_grades_clean(
         ledger=ledger,
         evidence_dir=tmp_path / "evidence",
         ladder=adapter.ladder_labels(ladder),
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=harness["runner"],
+            executor=harness["executor"],
+            scratch=tmp_path / "scratch",
+        ),
     )
     events: list[tuple[str, dict[str, Any]]] = []
     fn = adapter.build_fn_for(
@@ -625,6 +633,13 @@ def test_blind_run_end_to_end(pyrepo: pr.PyRepo, tmp_path: Path, harness: dict[s
         evidence_dir=tmp_path / "evidence",
         mode="blind",
         ladder=adapter.ladder_labels(ladder),
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=harness["runner"],
+            executor=harness["executor"],
+            scratch=tmp_path / "scratch",
+        ),
     )
     fn = adapter.build_fn_for(ladder, budget=Budget(), **harness)
     summary = run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
@@ -652,6 +667,13 @@ def test_error_attempt_row_is_never_clean(
         ledger=ledger,
         evidence_dir=tmp_path / "evidence",
         ladder=adapter.ladder_labels(ladder),
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=harness["runner"],
+            executor=harness["executor"],
+            scratch=tmp_path / "scratch",
+        ),
     )
     events: list[tuple[str, dict[str, Any]]] = []
     fn = adapter.build_fn_for(
@@ -777,6 +799,13 @@ def _preflight_run(
         ledger=ledger,
         evidence_dir=tmp_path / "evidence",
         ladder=adapter.ladder_labels(ladder),
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=runner,
+            executor=LocalExecutor(),
+            scratch=tmp_path / "scratch",
+        ),
     )
     events: list[tuple[str, dict[str, Any]]] = []
     fn = adapter.build_fn_for(

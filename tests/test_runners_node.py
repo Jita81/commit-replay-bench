@@ -49,14 +49,15 @@ from pathlib import Path
 
 import pytest
 
-from crb.core.execution import LocalExecutor
+from crb.core.deps import DepsBinding
+from crb.core.execution import Command, LocalExecutor
 from crb.core.git import GitRepo
-from crb.core.grade import grade
 from crb.core.mine import Candidate, qualify
 from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner
 from crb.core.spec import BELT_AFFECTED_DIRS, BELT_TARGET_ONLY, RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from fixtures.posture import grade_adhoc as grade
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -339,3 +340,225 @@ def test_planted_node_modules_link_is_git_ignored(trial, config, tool):
     discarded = discard_source_edits(trial, config, [])
     assert "node_modules" not in discarded
     assert (trial.root / "node_modules").is_symlink()
+
+
+def test_a_local_sealed_run_resolves_the_sealed_tree_not_the_clones(tmp_path: Path) -> None:
+    """``local/inplace/sealed`` (provisioning on, the host executor): Node resolves
+    ``./node_modules`` before ``NODE_PATH``, and the workspace links every worktree's
+    ``node_modules`` to the CLONE's tree — so the tests, the lint tools and the
+    environment probe (``npm ls``) must see the SEALED set through that link, never the
+    clone's install under a ``sealed`` label (CodeRabbit on PR #56)."""
+    from crb.core.deps import SCHEME_NODE, BundleMount, DepsBinding, register_store_root
+
+    key = "dep_" + "a" * 64
+    store = register_store_root(tmp_path / "store")
+    sealed = store / "node" / key / "node_modules"
+    (sealed / ".bin").mkdir(parents=True)
+    sealed.chmod(0o555)
+    clone_nm = tmp_path / "clone" / "node_modules"
+    (clone_nm / ".bin").mkdir(parents=True)
+    root = tmp_path / "wt"
+    root.mkdir()
+    for d in (root, clone_nm.parent):  # one manifest: the clone's tree matches the worktree
+        (d / "package.json").write_text('{"name": "x"}', encoding="utf-8")
+    (root / "node_modules").symlink_to(clone_nm)
+    binding = DepsBinding(
+        role="gold",
+        lang="node",
+        scheme=SCHEME_NODE,
+        key=key,
+        digest="sha256:" + "d" * 64,
+        mounts=(BundleMount(sealed, "/work/node_modules", key),),
+        env={"NODE_PATH": "/work/node_modules"},
+        local_env={"NODE_PATH": str(sealed)},
+    )
+    runner = get_runner(noderepo.config("node"))
+    runner.env_dir = tmp_path / "env"
+    ex = LocalExecutor()
+    with runner.deps_bound(binding):
+        # the probe (``npm ls`` in the worktree) — built before any run touched the link
+        probe = runner.env_probe_command(root, (), executor=ex, timeout=30)
+        assert probe is not None and probe.root == root.resolve()
+        assert (root / "node_modules").resolve() == sealed.resolve()
+        (root / "node_modules").unlink()
+        (root / "node_modules").symlink_to(clone_nm)
+        runner.ensure_era(root, ex)  # what run() and lint_plan() call first
+    assert (root / "node_modules").resolve() == sealed.resolve()
+    # without a sealed set the worktree keeps today's link
+    (root / "node_modules").unlink()
+    (root / "node_modules").symlink_to(clone_nm)
+    runner.ensure_era(root, ex)
+    assert (root / "node_modules").resolve() == clone_nm.resolve()
+    sealed.chmod(0o755)
+
+
+def test_a_local_sealed_run_refuses_a_tree_whose_own_node_modules_would_shadow_the_set(
+    tmp_path: Path,
+) -> None:
+    """A commit that holds a REAL ``node_modules`` directory (a repository that commits
+    it): on the host Node and ``npm ls`` read it before the bound set, and the harness
+    must not delete what the commit holds — so a local sealed run stops with the
+    task-scope provisioning refusal ``PROVISION_TREE_SHADOWS_SET``, never a verdict under
+    a ``sealed`` label. The directory is left exactly as it was (the adversarial check on
+    the answer to CodeRabbit's thread on PR #56)."""
+    from crb.core.deps import (
+        PROVISION_TREE_SHADOWS_SET,
+        SCHEME_NODE,
+        SCOPE_TASK,
+        BundleMount,
+        DepsBinding,
+        ProvisionRefused,
+        register_store_root,
+    )
+
+    key = "dep_" + "b" * 64
+    store = register_store_root(tmp_path / "store")
+    sealed = store / "node" / key / "node_modules"
+    (sealed / ".bin").mkdir(parents=True)
+    root = tmp_path / "wt"
+    (root / "node_modules" / "leftpad").mkdir(parents=True)
+    (root / "node_modules" / "leftpad" / "index.js").write_text("module.exports=1\n")
+    (root / "package.json").write_text('{"name": "x"}', encoding="utf-8")
+    binding = DepsBinding(
+        role="parent",
+        lang="node",
+        scheme=SCHEME_NODE,
+        key=key,
+        digest="sha256:" + "e" * 64,
+        mounts=(BundleMount(sealed, "/work/node_modules", key),),
+        env={"NODE_PATH": "/work/node_modules"},
+        local_env={"NODE_PATH": str(sealed)},
+    )
+    runner = get_runner(noderepo.config("node"))
+    runner.env_dir = tmp_path / "env"
+    ex = LocalExecutor()
+    with runner.deps_bound(binding):
+        with pytest.raises(ProvisionRefused) as probe_exc:
+            runner.env_probe_command(root, (), executor=ex, timeout=30)
+        with pytest.raises(ProvisionRefused) as run_exc:
+            runner.ensure_era(root, ex)  # what run() and lint_plan() call first
+    for exc in (probe_exc.value, run_exc.value):
+        assert exc.code == PROVISION_TREE_SHADOWS_SET and exc.scope == SCOPE_TASK
+        assert "node_modules" in exc.message and exc.fix
+    nm = root / "node_modules"
+    assert nm.is_dir() and not nm.is_symlink()
+    assert (nm / "leftpad" / "index.js").read_text() == "module.exports=1\n"
+    # without a sealed set the worktree's own tree is the host-env posture's, as today
+    assert runner.ensure_era(root, ex) is None and nm.is_dir() and not nm.is_symlink()
+
+
+def _sealed_node_binding(tmp_path: Path, key: str) -> tuple[Path, DepsBinding]:
+    """A sealed Node set under a registered store (read-only, like the store makes it)
+    and the binding a local sealed run carries for it."""
+    from crb.core.deps import SCHEME_NODE, BundleMount, register_store_root
+
+    store = register_store_root(tmp_path / "store")
+    sealed = store / "node" / key / "node_modules"
+    (sealed / ".bin").mkdir(parents=True)
+    binding = DepsBinding(
+        role="parent",
+        lang="node",
+        scheme=SCHEME_NODE,
+        key=key,
+        digest="sha256:" + "f" * 64,
+        mounts=(BundleMount(sealed, "/work/node_modules", key),),
+        env={"NODE_PATH": "/work/node_modules"},
+        local_env={"NODE_PATH": str(sealed)},
+    )
+    return sealed, binding
+
+
+@pytest.mark.skipif(not langs.has_tool("npm"), reason="npm not on PATH")
+def test_a_local_sealed_run_links_the_set_into_a_worktree_with_no_node_modules(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit on PR #56 (node_runners.py:201), reproduced with the real ``npm`` and
+    ``node``: a worktree with NO ``node_modules`` entry (the clone was never set up, so
+    the workspace planted no link) left ``npm ls --all --offline`` reporting every
+    declared dependency missing — ``npm ls`` never reads ``NODE_PATH`` — so the probe
+    refused a parent the sealed set holds whole, and an ES module ``import`` (which
+    ignores ``NODE_PATH`` too) could not load it. The runner now links the set in."""
+    import json
+
+    key = "dep_" + "c" * 64
+    sealed, binding = _sealed_node_binding(tmp_path, key)
+    demo = sealed / "demo"
+    demo.mkdir()
+    (demo / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "demo",
+                "version": "1.0.0",
+                "exports": {".": {"import": "./index.mjs", "require": "./index.js"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (demo / "index.js").write_text('module.exports = "sealed"\n', encoding="utf-8")
+    (demo / "index.mjs").write_text('export default "sealed"\n', encoding="utf-8")
+    sealed.chmod(0o555)
+    root = tmp_path / "wt"
+    root.mkdir()
+    (root / "package.json").write_text(
+        json.dumps({"name": "work", "version": "1.0.0", "dependencies": {"demo": "1.0.0"}}),
+        encoding="utf-8",
+    )
+    (root / "esm.mjs").write_text('import d from "demo"; console.log(d)\n', encoding="utf-8")
+    runner = get_runner(noderepo.config("node"))
+    runner.env_dir = tmp_path / "env"
+    ex = LocalExecutor()
+    try:
+        with runner.deps_bound(binding):
+            probe = runner.probe_environment(ex, root, timeout=120)
+            assert probe is not None and probe.ok, probe and (probe.stdout + probe.stderr)[-800:]
+            assert (root / "node_modules").resolve() == sealed.resolve()
+            (root / "node_modules").unlink()
+            runner.ensure_era(root, ex)  # what run() and lint_plan() call first
+            env = runner._env(root, ex)
+            esm = ex.run(Command((ex.tool("node"), "esm.mjs"), root, env=env, timeout=60))
+        assert esm.ok and esm.stdout.strip() == "sealed", (esm.stdout + esm.stderr)[-800:]
+        assert (root / "node_modules").resolve() == sealed.resolve()
+    finally:
+        sealed.chmod(0o755)
+
+
+@pytest.mark.parametrize("entry", ["absent", "clone_link", "dangling_link", "sealed_link", "tree"])
+def test_every_node_modules_entry_ends_at_the_sealed_set_or_is_refused(
+    tmp_path: Path, entry: str
+) -> None:
+    """The class behind CodeRabbit's two threads on PR #56: ``ensure_era`` handled some
+    starting states of ``./node_modules`` and silently left the others as they were, so
+    a ``sealed`` label graded against a tree that was not the set. Every state a worktree
+    can hold is enumerated here, and each one must END either linked at the bound set or
+    refused ``PROVISION_TREE_SHADOWS_SET`` with the commit's tree untouched — there is no
+    third outcome. A new state belongs in this list before it belongs in the code."""
+    from crb.core.deps import PROVISION_TREE_SHADOWS_SET, ProvisionRefused
+
+    key = "dep_" + "d" * 64
+    sealed, binding = _sealed_node_binding(tmp_path, key)
+    clone_nm = tmp_path / "clone" / "node_modules"
+    (clone_nm / ".bin").mkdir(parents=True)
+    root = tmp_path / "wt"
+    root.mkdir()
+    (root / "package.json").write_text('{"name": "x"}', encoding="utf-8")
+    link = root / "node_modules"
+    if entry == "clone_link":
+        link.symlink_to(clone_nm)
+    elif entry == "dangling_link":
+        link.symlink_to(tmp_path / "gone" / "node_modules")
+    elif entry == "sealed_link":
+        link.symlink_to(sealed)
+    elif entry == "tree":
+        (link / "leftpad").mkdir(parents=True)
+    runner = get_runner(noderepo.config("node"))
+    runner.env_dir = tmp_path / "env"
+    ex = LocalExecutor()
+    with runner.deps_bound(binding):
+        if entry == "tree":
+            with pytest.raises(ProvisionRefused) as exc:
+                runner.ensure_era(root, ex)
+            assert exc.value.code == PROVISION_TREE_SHADOWS_SET
+            assert link.is_dir() and not link.is_symlink() and (link / "leftpad").is_dir()
+            return
+        assert runner.ensure_era(root, ex) is None
+    assert link.is_symlink() and link.resolve() == sealed.resolve()

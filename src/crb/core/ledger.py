@@ -70,7 +70,8 @@ How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to
               ``failure_split`` / ``cell_stats`` group eligible rows by ``CellKey``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
+              docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
               src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
               src/crb/store/ledger.py (the database ledger — same rows, same chain),
@@ -106,10 +107,13 @@ from typing import Any
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
 from crb.core.grade import (
     BELT_NAMES,
+    BLAME_CONTROLS,
     CORE_BELT_NAMES,
+    ENVIRONMENT_PREFIX,
     OPTIONAL_BELT_NAMES,
     FalseQ1Violation,
     GradeResult,
+    MisattributionViolation,
 )
 from crb.core.spec import TaskSpec
 from crb.core.stats import Interval, mean, wilson_interval
@@ -271,6 +275,18 @@ COST_UNKNOWN_MARK = "cost unknown"
 LABEL_FAILURE_KIND = "failure_kind"
 LABEL_COST_KNOWN = "cost_known"
 LABEL_STOP_REASON = "stop_reason"
+#: The posture labels every measured row of apparatus 2.3 or later carries (ADR-0019):
+#: where it was graded, the class statistics pool on, and the qualification it subtracted.
+LABEL_POSTURE_ID = "posture_id"
+LABEL_POSTURE_CLASS = "posture_class"
+LABEL_QUALIFICATION = "qualification_id"
+POSTURE_LABELS: tuple[str, ...] = (LABEL_POSTURE_ID, LABEL_POSTURE_CLASS, LABEL_QUALIFICATION)
+#: The witness that makes a model-failure row's blame true (``crb.core.grade.BLAME_CONTROLS``).
+LABEL_BLAME_CONTROL = "blame_control"
+#: Why an ``environment:`` row's instrument failed (``GOLD_CONTROL_RED`` …).
+LABEL_ENV_CODE = "env_code"
+#: The first apparatus whose measured rows must carry their posture and witness.
+POSTURE_APPARATUS: tuple[int, int] = (2, 3)
 
 
 class LedgerIntegrityError(RuntimeError):
@@ -382,6 +398,14 @@ def derive_failure_kind(
     if lint_only:
         return FAILURE_LINT
     return FAILURE_BUILDER_RED
+
+
+def is_environment_error(error: str) -> bool:
+    """``True`` for an error the grader recorded because the POSTURE failed, not the patch
+    (``environment: …`` — ADR-0019 §5). The failure-kind rule reads it as ``harness``
+    like any other grader error; this only lets a caller name it (stop a ladder, revoke
+    a qualification). It never decides a classification."""
+    return error.startswith(ENVIRONMENT_PREFIX)
 
 
 def lint_only_failure(belts: Mapping[str, Any]) -> bool:
@@ -557,6 +581,45 @@ class GradeRow:
         if ck is not None and ck not in ("true", "false"):
             raise ValueError(f"cost_known label must be 'true' or 'false', got {ck!r}")
         self.assert_belt_set_matches_apparatus()
+        self.assert_posture_and_witness()
+
+    @property
+    def carries_posture(self) -> bool:
+        """``True`` for a measured row of apparatus 2.3 or later — the rows that must name
+        their posture, and their witness when they blame the model (ADR-0019)."""
+        parsed = parse_apparatus_version(self.apparatus_version)
+        return self.provenance == "measured" and parsed is not None and parsed >= POSTURE_APPARATUS
+
+    def assert_posture_and_witness(self) -> None:
+        """ADR-0019 §5, at write and at read alike: a measured row of apparatus 2.3 or later
+        carries its posture labels, and a row in a model-failure kind names the witness
+        that makes the blame true. Rows of 2.2 and earlier are never re-interpreted."""
+        if not self.carries_posture:
+            return
+        missing = [k for k in POSTURE_LABELS if not self.labels.get(k)]
+        if missing:
+            raise MisattributionViolation(
+                f"ledger refuses row {self.task_id[:10]} ({self.repo}): apparatus "
+                f"{self.apparatus_version} row without its posture labels {missing}"
+            )
+        if self.failure_kind in MODEL_FAILURE_KINDS:
+            witness = self.labels.get(LABEL_BLAME_CONTROL, "")
+            if witness not in BLAME_CONTROLS:
+                raise MisattributionViolation(
+                    f"ledger refuses row {self.task_id[:10]} ({self.repo}): failure_kind="
+                    f"{self.failure_kind!r} blames the model without a witness from its posture "
+                    f"(blame_control={witness or '-'!r}; expected one of {BLAME_CONTROLS})"
+                )
+
+    @property
+    def posture_id(self) -> str:
+        """The posture this row was graded in (``""`` before apparatus 2.3)."""
+        return self.labels.get(LABEL_POSTURE_ID, "")
+
+    @property
+    def posture_class(self) -> str:
+        """The posture class this row pools under (``""`` before apparatus 2.3)."""
+        return self.labels.get(LABEL_POSTURE_CLASS, "")
 
     def assert_belt_set_matches_apparatus(self) -> None:
         """``belt_set`` is the one the row's apparatus could have recorded (module
@@ -817,8 +880,25 @@ def grade_row_from_result(
                 else {}
             ),
             **({LABEL_STOP_REASON: stop_reason} if stop_reason else {}),
+            **posture_labels(result),
         },
     )
+
+
+def posture_labels(result: GradeResult) -> dict[str, str]:
+    """The labels a result's posture stamp and witness become on its row (ADR-0019)."""
+    out: dict[str, str] = {}
+    if result.posture_id:
+        out[LABEL_POSTURE_ID] = result.posture_id
+    if result.posture_class:
+        out[LABEL_POSTURE_CLASS] = result.posture_class
+    if result.qualification_id:
+        out[LABEL_QUALIFICATION] = result.qualification_id
+    if result.blame_control:
+        out[LABEL_BLAME_CONTROL] = result.blame_control
+    if result.env_code:
+        out[LABEL_ENV_CODE] = result.env_code
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1106,6 +1186,9 @@ class CellStats:
     model_ci: Interval = field(default_factory=lambda: Interval(0.0, 1.0))
     n_lint: int = 0
     n_lint_evaluated: int = 0
+    #: The postures the cell's rows were graded in (ADR-0019 §8) — listed like the
+    #: apparatus versions, so a reader sees what a number pools.
+    posture_ids: tuple[str, ...] = ()
 
     @property
     def n_disqualified(self) -> int:
@@ -1183,6 +1266,7 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         latency_s_mean=mean(lats),
         oracle_strength_mean=mean(strengths) if strengths else None,
         apparatus_versions=tuple(sorted({r.apparatus_version for r in rs})),
+        posture_ids=tuple(sorted({r.posture_id for r in rs if r.posture_id})),
         n_builder_red=split.builder_red,
         n_budget=split.budget,
         n_protocol=split.protocol,

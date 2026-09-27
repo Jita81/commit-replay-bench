@@ -246,8 +246,26 @@ installs the repository's test dependencies once, up front, and records every co
 ran. Nothing else ever asks for the network; if a run needs something setup did not
 install, it fails — it does not fetch.
 
+**Setup is a host phase; the sealed posture provisions instead (ADR-0019).** Under the
+docker executor `crb repo setup` refuses (a sandbox has no network, and installing into one
+would run repository code with a network). A repository's dependencies there come from
+**dependency provisioning**: with `CRB_PROVISION__ENABLED=true` each task's lockfiles at the
+parent and at the gold are read from git objects, fetched outside the test container through
+the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
+`$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
+at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
+`--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
+pin Python as `name==version` in `requirements*.txt` (or name the files in
+`runner_opts.deps_lock`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
+version does not provision is refused with its `PROVISION_*` code and the fix
+([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With
+provisioning off, a repository that declares dependencies is refused `PROVISION_DISABLED`
+under docker before any spend. `crb deps ls | verify | gc` shows, re-proves and trims the
+sealed sets; the `provision` line of `crb doctor` says whether it can work on this host.
+
 `crb repo setup <name>` (CLI) and the `setup` run kind (`POST /runs {"kind": "setup"}` —
-server) call the same runner method. Per language:
+server) call the same runner method on the host (the local posture). Per language:
 
 | Runner | What setup runs (in the clone) | Where the environment lives | "Ready" means |
 |---|---|---|---|
@@ -315,26 +333,46 @@ Registry credentials likewise live in those files; every step tail is passed thr
 **Sandbox images**: start from the shipped reference set —
 [`deploy/sandbox/`](../deploy/sandbox/README.md): `crb-sandbox-python` (pytest),
 `crb-sandbox-node` (`node --test`), `crb-sandbox-go`, each digest-pinned, running as user
-`65534` with a read-only root and proven from inside by CI **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]** — and extend one per repository
-(or per toolchain) with the repository's dependencies when its tests need more than the
-runner. Under docker, setup does not run (`BaseRunner.sandbox_refusal`: setup is a host
-phase and fails closed with `SETUP_SANDBOX_REFUSED` when the executor is `docker`), so the
-image must already contain what setup would have installed — and nothing a host setup
-installed is visible inside: the sandbox mounts only the trial worktree, read-only, at
-`/work`, and a trial worktree's `node_modules` is a **symlink to the host clone's**
-(`Workspace._post_create`), which dangles inside the container; a host venv, module cache
-or `~/.m2` is likewise absent by construction — `DockerExecutor.build_argv` binds only the
-worktree (read-only, at `/work`) and tmpfs where the runner declared it, nothing else from
-the host **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag`
-and `::test_docker_build_argv_network_writable_paths_extra_mounts_and_cwd` pin the argv
-token by token; apparatus 2.2]**. Bake the dependencies into a derived image
-([`deploy/sandbox/README.md` §4](../deploy/sandbox/README.md) — `npm ci` of the lockfile
-under `/opt/app` and `runner_opts.env: {NODE_PATH: /opt/app/node_modules}`; hash-pinned
-test requirements for Python; `GOMODCACHE` for Go) **[measured — the symlink claim only: a `node_modules` symlink
-to a host directory reads `No such file or directory` from inside `crb-sandbox-node`
-under `DockerExecutor`, n = 1 probe, colima / Docker 29.5.2, 2026-09-22; apparatus
-2.2]**; the derived-image recipe itself is the README's and is **[hypothesis]** until a
-repository is measured on one. Name the image in the repository's `sandbox_image` (it wins) or the deployment's
+`65534` with a read-only root and proven from inside by CI **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]** — and never bake a repository's dependencies into one: they belong to the task, because a
+gold commit routinely changes its parent's lockfile. Under docker, setup does not run
+(`BaseRunner.sandbox_refusal`: setup is a host phase and fails closed with
+`SETUP_SANDBOX_REFUSED` when the executor is `docker`), and nothing a host setup installed is
+visible inside: a trial worktree's `node_modules` is a **symlink to the host clone's**
+(`Workspace._post_create`), which dangles inside the container **[measured — a
+`node_modules` symlink to a host directory reads `No such file or directory` from inside
+`crb-sandbox-node` under `DockerExecutor`, n = 1 probe, colima / Docker 29.5.2, 2026-09-22;
+apparatus 2.2]**. `DockerExecutor.build_argv` binds the worktree read-only at `/src` and
+runs the tests in a throwaway, size-capped tmpfs copy of it at `/work` (the default
+`CRB_SANDBOX__TREE=copy`; `readonly` binds the worktree itself at `/work`), plus the sealed
+dependency sets read-only, and nothing else from the host **[measured —
+`tests/test_execution.py::test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tmpfs_at_work`,
+`::test_docker_build_argv_has_every_hardening_flag` and
+`::test_docker_build_argv_writable_paths_extra_mounts_and_cwd` pin the argv token by token;
+apparatus 2.2]**.
+
+**Dependencies under docker come from the sealed sets (ADR-0019).** The workflow, per
+repository: commit the lockfile the recipe reads (`go.sum`; `name==version` pins in
+`requirements*.txt` or the files named in `runner_opts.deps_lock`; a `package-lock.json`,
+lockfileVersion 2+, with any install script named in `runner_opts.deps_build_scripts`);
+switch provisioning on (`CRB_PROVISION__ENABLED=true`, pointed at your mirror —
+[DEPLOYMENT §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)); run
+`crb repo qualify <name>` (or the Posture panel's **Qualify** button), which fetches each
+task's parent and gold sets through the allowlisting proxy, seals them under `$CRB_HOME/deps`
+and proves each task in the posture before any model spend; then replay as usual. Each test
+run mounts its task's set read-only (`/deps/gomod`, `/deps/site`, `/work/node_modules`) with
+the test container still `--network=none`. `crb deps ls | verify | gc` lists, re-proves and
+trims the sets. The recipe, the mount table and the refusals are
+[`deploy/sandbox/README.md` §4](../deploy/sandbox/README.md#4-dependencies-are-provisioned-per-task-adr-0019).
+
+**The exception — a derived image for the toolchain, never for dependencies.** Extend a
+reference image only for something the toolchain lacks: cgo's compiler, the linter belt 5
+runs at the repository's pinned version, another language's runtime
+([`deploy/sandbox/README.md` §4.1](../deploy/sandbox/README.md#41-extending-an-image-for-a-toolchain-never-for-dependencies)).
+It is a different posture — the image's ID is part of what a qualification records — so a
+repository moved onto it is qualified again. The derived-image recipe is the README's and is
+**[hypothesis]** until a repository is measured on one.
+
+**Which image a run uses.** Name the sandbox image in the repository's `sandbox_image` (it wins) or the deployment's
 `CRB_SANDBOX__IMAGE` (the default for repositories that name none); the worker never pulls,
 so it must be in the daemon's store. A JVM reference image is not shipped — the Maven
 runner cannot resolve plugins offline under docker yet (README §6), so under the compose /
@@ -717,6 +755,67 @@ Do **not** switch the executor to `local` for a repository you do not fully trus
 local executor exists for development and fixture repositories and is visible on every
 verdict's apparatus stamp.
 
+## 7a. When a posture is unqualified
+
+**A task is proven in the posture that grades it** (ADR-0019). A *posture* is everything
+outside the patch that can change a test's outcome: the executor, the sandbox image (by its
+content, not its tag), the exact toolchain version inside it, how the tree is presented,
+the network, where the dependencies come from, the limits and the runner's command
+environment. The same commit can be RED on the host and fail to build in the sealed
+sandbox; the same test can pass on the host and fail on a read-only tree. So the facts a
+replay rests on — the target is RED at the parent, which tests already fail there (the
+baseline), and the humans' own change passes — are measured again in each posture and kept
+as a *qualification* record per task and posture.
+
+**Qualifying spends no model money.** It runs the environment probe, RED, the baseline
+twice and the gold twice at half the wall clock, and belt 5 on the gold. No builder is
+constructed. Start it in any of three ways:
+
+- the **Qualify for this posture — no model spend** button on the repository's Posture
+  panel (`/repos/:name`, operators);
+- `POST /api/v1/runs {"kind": "qualify", "repo": "<repo>"}`;
+- `crb repo qualify <repo> [--task <sha>] [--executor docker --image <image>]` for a CLI
+  workdir.
+
+A replay, blind or controls run qualifies the tasks it needs first by default
+(`qualify_first`). With `qualify_first: false` the submit is refused
+(`409 posture_unqualified`) when nothing is qualified. Every stop below names its code; the
+Posture panel lists each with how many tasks it keeps out.
+
+| Code | Scope | What to do |
+|---|---|---|
+| `POSTURE_UNQUALIFIED` | run | qualify the repository in this posture (`crb repo qualify`, or leave `qualify_first` on); this costs no model money |
+| `POSTURE_DRIFT` | run | the image, toolchain, limits or runner environment changed after qualification: qualify again |
+| `POSTURE_CANARY_FAILED` | run | the gold did not grade clean here: read the canary's tail (the cause is usually provisioning or the image) |
+| `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify` and delete any set it names (the next run fetches it again); otherwise fix the module named |
+| `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Posture panel shows how the record differs from other postures |
+| `QUAL_GOLD_NOT_GREEN`, `QUAL_GOLD_NEW_FAILURES`, `QUAL_GOLD_LINT` | task | the humans' own patch does not pass here; the task is excluded, as a task with a dirty gold always was |
+| `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed: the test is not deterministic in this posture |
+| `QUAL_HEADROOM` | task | the gold needed more than half the wall clock: raise the repository's timeout |
+| `QUAL_TREE_COPY_FAILED` | task | the tree did not fit the copy: raise `work_size`, or choose `sandbox_tree: readonly` |
+| `QUAL_ENV_WITNESS_RED` | task | a replay found the gold failing here, so the qualification was revoked: qualify again (the cause is usually provisioning or the image) |
+| `PROVISION_*`, `BUNDLE_INTEGRITY` | run or task | a provisioning setting or a lockfile fact; each fix names the setting, the file or the host ([DEPLOYMENT §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)) |
+
+**The model is blamed only with a witness.** When a trial's belts would charge the builder,
+the grader first runs the same failing scope on the humans' own change, now, in the same
+posture. If that control passes, the row is `builder_red` (or `lint`) and names the witness
+(`labels.blame_control`). If it fails, the row is `harness` with `error: environment: …`
+— counted against autonomy, never against the model — and the task's qualification is
+revoked. Two such rows in a row stop the run (`env_stop`, default 2). When the trial's own
+tree could not be copied into the sandbox (`tree_copy_failed`), the same control decides:
+if the gold's tree runs there, the trial's tree was the problem (too big for `work_size`, a
+file the sandbox user cannot read) and the attempt is **disqualified**, never charged and
+never revoking anything; if the gold fails too, it is an environment row as above.
+
+**With provisioning off** (the default), the sealed sandbox provides no third-party
+dependencies, so a repository that declares one is refused `PROVISION_DISABLED` before
+anything runs, with the fix. **With provisioning on**, a task whose parent still cannot load
+its dependencies offline — its sealed set damaged, or a module the lockfile does not pin — is
+refused `QUAL_ENV_UNLOADABLE` at qualification instead of being charged to the model on every
+replay **[measured — n = 1 fixture Go repository with one module and 1 task of cobra, method:
+`tests/test_posture_e2e_docker.py` and docs/reviews/2026-09-25-sealed-posture.md §3(c), in the
+shipped Go sandbox image under `--network=none`, 2026-09-25; apparatus 2.3]**.
+
 ## 8. Stop conditions
 
 Stop delivery and investigate before any further sign-off if you observe any of:
@@ -725,7 +824,11 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - `crb ledger verify` fails;
 - a secret in an evidence pack, log or export;
 - a sandbox escape or unexpected network egress from a test container;
-- a builder repeatedly disqualified for test tampering (shows as a rising `disqualified` count).
+- a builder repeatedly disqualified for test tampering (shows as a rising `disqualified` count);
+- attempts recorded `harness` with `error: environment: …` — the humans' own change failed
+  the same scope in the same posture, so the posture moved under its qualification (a run
+  stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
+  before the next replay — §7a).
 
 **Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
 shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in
@@ -742,6 +845,7 @@ registered from a partial read.
 | `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks; or a ticket whose key cannot become an item id, which costs that ticket and nothing else | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP` |
 | `column_too_large` | the column holds more tickets than one pass may read (`CRB_INTAKE__MAX_PER_POLL`), or the pass ran past `CRB_INTAKE__POLL_BUDGET_S` | narrow the area path or the JQL so the column holds the work that is genuinely ready, or raise the bound; a pass that ran out of time serves what it read and the rest are read next time |
 | `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
+| `lease_lost` | one tracker call took longer than the pass's lease lives, and another pass took the repository over | nothing: the pass renews its lease around every tracker call, so this needs one call slower than the lease; the pass stopped before its next call and the other pass carries on. If it recurs, the tracker is answering very slowly — raise `CRB_INTAKE__POLL_BUDGET_S`, which lengthens the lease with it |
 
 Resume only after root cause, correction, a targeted regression run and re-qualification
 of the affected cells.
@@ -891,14 +995,20 @@ POST /runs {"repo": "cobra", "kind": "factory", "test_author": "editblock:gpt-os
 POST /runs {"repo": "cobra", "kind": "factory", "test_author": "none"}   # this run pays for no authoring
 ```
 
-**The author rung and the build rung are never the same rung.** This is the same refusal
-that has always stopped a rung building against a test it wrote itself: when the run's spec
-is built, the author's label is compared with every rung on the ladder, and a match ends the
-run with `SameIdentityError` **before anything is built or paid for**. If the run fails that
-way, choose another rung — the message names the ladder. What the refusal deliberately does
-not catch is the same model under a *different* registered builder name; the label space is
-closed to the registry, so no label can be invented to dodge it, but model-level separation
-is your choice of models, not something the product can enforce. [gap]
+**The author and every build rung are different models, not only different rungs.** This
+is the same refusal that has always stopped a rung building against a test it wrote itself:
+when the run's spec is built, the author's label is compared with every rung on the ladder,
+and a match ends the run with `SameIdentityError` **before anything is built or paid for**.
+Since 2026-09-25 the refusal compares the **model** as well as the label: the same model
+under a different registered builder name (`editblock:claude-sonnet-5` writing the test that
+`claude_code:claude-sonnet-5` is graded against) is one model's judgement on both sides of the
+test, and it is refused. Aliases do not get past it: the model id is lower-cased, a
+`@provider`, a `[1m]`-style suffix and a `vendor/` prefix are dropped, and the id is matched
+to the longest model in the pricing table (`CRB_PRICING_JSON` extends it), so
+`claude-sonnet-5-20260901` is `claude-sonnet-5`; Claude Code's bare `opus` / `sonnet` /
+`haiku` count as every model of that family. If the run fails this way, the message names
+the rung by its place on the ladder (`build rung 2`) and the model — change that rung's
+model, or give the test author a different one.
 
 Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
 the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at
@@ -940,6 +1050,8 @@ CRB_INTAKE__POLL_S=300
 CRB_INTAKE__MAX_PER_POLL=200                  # a longer column is not read at all (see below)
 CRB_INTAKE__POLL_BUDGET_S=60                  # one pass may take this long, then it stops early
 CRB_INTAKE__OUTCOME_MAP='{"merged": "Done"}'  # EMPTY by default: no ticket is ever moved
+CRB_INTAKE__REQUIRE_APPROVAL=true             # the default: an operator registers each ticket
+CRB_INTAKE__APPROVE_AUTHORS='[]'              # EMPTY by default: nobody skips the Register act
 CRB_PUBLIC_URL=https://crb.example.com        # THIS deployment's address (required, see below)
 ```
 
@@ -980,14 +1092,36 @@ click to switch off again.
 the column. For each ticket it has not already handled at its current revision it drafts a
 backlog item, runs the readiness gate, and leaves **one** comment (idempotent by a hidden
 marker) and **one** `crb:` label. When every question a good acceptance test needs is
-answered, the item is registered through the same path the freeze form uses and the ticket
-gets `crb:queued`, a note naming the item and a link to it. An edited ticket comes back as an
+answered, the ticket becomes a **draft waiting for an operator** (ADR-0022): the Intake screen
+shows *Waiting for an operator to register it*, who wrote the ticket, and a **Register this
+ticket** button. Moving a ticket into the column is the request; the Register act is the
+consent, because anyone who can edit the board can write what becomes the backlog item. Read
+the comment on the row — it is what the item will say — and press Register. The item is then
+registered through the same path the freeze form uses, the ticket gets `crb:queued`, a note
+naming the item and a link to it, and the act is recorded against your account
+(`intake.registered` with `approved_by: operator:<your account id>` and your name beside it,
+and `intake.approved` on the system trace). Registering writes on the ticket, so it needs the
+listener on: with the listener off the button is not shown and the act is refused
+(`intake_listener_off`). If the
+ticket was edited after you loaded the page the act is refused (`revision_moved`): reload and
+read the new draft. To let named people's tickets register without the act, list their
+tracker identities in `CRB_INTAKE__APPROVE_AUTHORS` (the ticket's creator: the Azure DevOps
+sign-in name, the Jira email or, where Jira hides it, the account id); `false` in
+`CRB_INTAKE__REQUIRE_APPROVAL` registers every ready ticket unattended. Both are on the record
+on every registration. The allowlist trusts who **created** the ticket, not who edited it
+since; leave it empty if that difference matters to you. An edited ticket comes back as an
 *evolution* — a new item superseding the old one; the frozen record is never rewritten. Over
 a ticket's life it can receive four comments, each marked as its own (what is missing, the
 queued note, the pull-request note, the note if the work stopped), one `crb:` label, a link
 to the item and a link to the pull request, and — only where the outcome map is configured —
 one state change. It edits no other field, never creates a ticket, and never reads a column it
-was not pointed at. Switching the listener on or off is itself an event on the repository's
+was not pointed at. What a ticket says reaches a pull request only as quoted text inside a
+code block, and the branch name is lower-case letters, digits and hyphens. **One pass at a
+time:** the worker's timer, *Re-read the column now* and *Register* each take the repository's
+lease first; a second one that finds it held does nothing and says so (`intake_busy`). A
+rate-limited tracker (HTTP 429) is waited out for up to 10 seconds at a time, twice, as its
+`Retry-After` asks, before the pass stops `unreachable`; and the tracker credential is only
+ever sent to the tracker's own address. Switching the listener on or off is itself an event on the repository's
 system trace (`intake.listener.switched`) naming the operator, so a later switch cannot
 quietly overwrite who consented.
 
@@ -998,7 +1132,8 @@ failing `unauthorised` reads `degraded`, not `ok`. It contacts no tracker: a rea
 that called somebody else's service would make this deployment's health depend on theirs, and
 the reachability it reports is therefore the reachability the last poll measured. Every step is on the repository's own evidence chain
 (`GET /factory/{repo}/evidence`) as `intake.polled`, `intake.read`,
-`intake.feedback.posted`, `intake.registered`, `intake.queued`, `intake.delivered`,
+`intake.feedback.posted`, `intake.awaiting_approval`, `intake.registered`, `intake.queued`,
+`intake.delivered`,
 `intake.transitioned` and `intake.stopped` (API.md, "Event vocabulary"). Stop conditions
 are in §8.
 

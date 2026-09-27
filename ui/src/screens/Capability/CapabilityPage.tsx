@@ -17,7 +17,9 @@
  *               title inside the tile, and never a button inside the tile's button. The
  *               detail card recomputes the interval in the browser and flags drift from the
  *               server's rather than hiding it. The run action in the empty state is an
- *               operator's; other roles read who acts.
+ *               operator's; other roles read who acts. The header's controls pill reads the
+ *               map through `currentData`, so a refetch that fails never leaves the old
+ *               verdict beside the error.
  * How:          `useRepoParam` → `useCapabilityMapWithControls(repo, projection)` → index the
  *               cells by `class|size` → the full taxonomy × size order as the grid so 0-count
  *               classes render honestly → `CellBox` per cell, `CellDetail` on click.
@@ -36,10 +38,10 @@
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (a real cell with route `calibrate`),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   the class taxonomy changes (src/crb/core/taxonomy.py — mirror `ALL_CLASSES`
- *               here), a cell field is added to docs/API.md "/capability-map" (type it in
- *               ui/src/screens/Capability/contract.ts first), or the routing policy gains a
- *               threshold worth a tick; never for a new repository.
+ * Touch when:   never for a new repository; the class taxonomy changes (src/crb/core/taxonomy.py —
+ *               mirror `ALL_CLASSES` here), a cell field is added to docs/API.md "/capability-map"
+ *               (type it in ui/src/screens/Capability/contract.ts first), or the routing policy
+ *               gains a threshold worth a tick.
  * Claims:       The map shows measured cells only; coverage is `null` until the repo has a
  *               change profile (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
  */
@@ -61,6 +63,7 @@ import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
 import { VerdictPill } from '../../components/VerdictPill'
 import { apiUrl } from '../../api/client'
+import { currentData } from '../../api/hooks'
 import { useAuth } from '../../lib/auth'
 import { fmtInt, fmtPct, fmtRatio, fmtSeconds, fmtUsd, wilson } from '../../lib/format'
 import { tierDisplay } from '../../lib/verdict'
@@ -337,6 +340,9 @@ export function CapabilityPage() {
   }, [repo, byLanguage, byModel, language, model])
 
   const map = useCapabilityMapWithControls(repo, projection)
+  // the header pill sits outside QueryBoundary: after a failed refetch it must not show the
+  // earlier verdict beside the error (PR #54 review)
+  const mapData = currentData(map)
 
   return (
     <>
@@ -347,7 +353,7 @@ export function CapabilityPage() {
         actions={
           <>
             <RepoPicker value={repo} onChange={setRepo} />
-            {repo && map.data && <ControlsPill verdict={map.data.controls} minShare={map.data.policy?.min_controls_share} />}
+            {repo && mapData && <ControlsPill verdict={mapData.controls} minShare={mapData.policy?.min_controls_share} />}
             {repo && (
               <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv&repo=${encodeURIComponent(repo)}`)} download hint="button.capability.export">
                 Export CSV
@@ -393,11 +399,21 @@ export function CapabilityPage() {
                   hint="stat.capability.false_q1"
                   value={String(s.false_q1_total ?? 0)}
                   n={s.n_total ?? nTotal}
-                  apparatus="clean rows with a failed belt, across the map — must be 0"
+                  apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'} · clean rows with a failed belt, across the map — must be 0`}
                   tone={(s.false_q1_total ?? 0) > 0 || badCells > 0 ? 'red' : 'green'}
                   data-testid="tile-false-q1"
                 />
                 <ControlsTile verdict={m.controls} policy={m.policy} />
+                <StatTile
+                  label="Posture"
+                  hint="stat.capability.posture"
+                  value={s.posture_class || '—'}
+                  n={s.n_total ?? nTotal}
+                  ci={null}
+                  apparatus={`apparatus ${s.apparatus_versions?.join('/') || '—'} · ${fmtInt(s.unqualified_posture ?? 0)} unqualified-posture rows excluded · ${fmtInt(s.excluded_posture_divergent ?? 0)} rows left out where the task's tests differ between postures`}
+                  footer="no interval: a posture and row counts, not a rate"
+                  data-testid="tile-posture"
+                />
               </div>
 
               {((s.false_q1_total ?? 0) > 0 || badCells > 0) && (

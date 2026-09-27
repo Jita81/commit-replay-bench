@@ -10,24 +10,30 @@
  *               the summary tiles carry value + n + apparatus, that no repo gives the designed
  *               empty state, that a 503 renders the envelope (message, HTTP status, code), and
  *               — after A2 — that a failed / thin / escaped / unmeasured controls verdict gets
- *               its own pill and the split and model point appear next to the point.
+ *               its own pill and the split and model point appear next to the point; and
+ *               that a map whose refetch fails shows the error and no controls pill, the
+ *               page reading every query only through `currentData` (PR #54 review).
  * How:          `mockApi` answers `GET /capability-map` with hand-built maps; `renderApp` at
  *               `/capability?repo=…`; assertions on the `cell-*`, `tile-*`, `kind-*` and
- *               `controls-*` test ids.
+ *               `controls-*` test ids; `qc.refetchQueries()` for a refetch; the page's own
+ *               source as `?raw` text for the `currentData` ratchet.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Capability/CapabilityPage.tsx (the code under test),
  *               ui/src/screens/Capability/contract.ts (the fixture shapes),
- *               ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`)
+ *               ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`),
+ *               ui/src/test/source-ratchets.ts (`queryDataReads`, the `currentData` ratchet)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx
- * Touch when:   a cell field or controls state is added — extend the fixtures and assert its
- *               rendering here.
+ * Touch when:   never for a new repository; a cell field or controls state is added — extend the
+ *               fixtures and assert its rendering here.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'
-import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
+import { queryDataReads } from '../../test/source-ratchets'
+import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { CapabilityPage } from './CapabilityPage'
+import pageSource from './CapabilityPage.tsx?raw'
 import type { CapabilityCellSplit, CapabilityMapWithControls, ControlsVerdict } from './contract'
 
 const cell = (over: Partial<CapabilityCell>): CapabilityCell => ({
@@ -106,6 +112,24 @@ describe('CapabilityPage', () => {
     expect(screen.getAllByTestId('ci-bar')).toHaveLength(2)
     expect(screen.getByTestId('cell-measured').textContent).toContain('n=40')
     expect(screen.getByTestId('cell-measured').textContent).toContain('92.5%')
+  })
+
+  it('the posture tile carries its apparatus and says no interval applies; every tile names the apparatus (PR #56 review)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, summary: { ...MAP.summary, posture_class: 'docker/copy/sealed', unqualified_posture: 3, excluded_posture_divergent: 1 } },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const posture = await screen.findByTestId('tile-posture')
+    expect(posture).toHaveTextContent('docker/copy/sealed')
+    expect(posture).toHaveTextContent('apparatus 2.0')
+    expect(posture).toHaveTextContent('95% CI—')
+    expect(posture).toHaveTextContent('no interval: a posture and row counts, not a rate')
+    // the class, not the instance: every headline tile on the page carries the map's apparatus
+    for (const tile of document.querySelectorAll('[data-component="stat-tile"]')) {
+      expect(tile.textContent, tile.getAttribute('data-testid') ?? tile.textContent ?? '').toContain('apparatus 2.0')
+    }
   })
 
   it('shows the designed empty state when no repo is chosen; its action is Connection, not the repo list (J-HEL-14)', async () => {
@@ -300,5 +324,27 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
       unmount()
       vi.unstubAllGlobals()
     }
+  })
+
+  it('a map that fails on a refetch shows the error and no controls pill as current (PR #54 review)', async () => {
+    let calls = 0
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': () => (++calls === 1 ? json(MAP_WITH_CONTROLS) : envelope(500, 'internal', 'boom')),
+    })
+    const { qc } = renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    await waitFor(() => expect(screen.getByTestId('tile-controls')).toBeInTheDocument())
+    expect(screen.getAllByTestId('controls-failed').length).toBeGreaterThanOrEqual(1)
+    await qc.refetchQueries()
+    await waitFor(() => expect(screen.getByTestId('error-state')).toBeInTheDocument())
+    expect(calls).toBe(2)
+    expect(screen.queryAllByTestId('controls-failed')).toEqual([])
+  })
+
+  it('the page reads every query only through currentData', () => {
+    // a `<query>.data` read outside QueryBoundary shows an old value after a failed refetch
+    // (PR #54 review), so the page's source may not contain one
+    expect(queryDataReads(pageSource)).toEqual([])
   })
 })

@@ -40,8 +40,8 @@
  *               the role chip),
  *               ui/src/components/DevAutologinBanner.test.tsx (the status while an automatic
  *               sign-in settles; a failed one shown above the form)
- * Touch when:   the OIDC start path or the login body changes (docs/API.md "Auth"); never for
- *               a new repository.
+ * Touch when:   never for a new repository; the OIDC start path or the login body changes
+ *               (docs/API.md "Auth").
  */
 import { useState, type FormEvent } from 'react'
 import { Navigate, useSearchParams } from 'react-router'

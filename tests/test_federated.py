@@ -42,6 +42,7 @@ import pytest
 
 from crb.core import federated as fed
 from crb.core.ledger import CELL_FIELDS, GradeRow, all_cell_stats, cell_stats
+from fixtures.posture import posture_row
 
 PACK = "d" * 64
 
@@ -58,7 +59,7 @@ def _row(
     latency: float = 0.0,
     provenance: str = "self-calibrate:acme",
 ) -> GradeRow:
-    return GradeRow(
+    return posture_row(
         repo=repo,
         task_id=task_id,
         clean=clean,

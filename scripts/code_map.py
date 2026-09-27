@@ -10,11 +10,16 @@ with every path rendered as a link.
 
     python scripts/code_map.py            # rewrite docs/CODE-MAP.md
     python scripts/code_map.py --check    # CI: every file has a valid block AND the map is current
+    python scripts/code_map.py --check --changed-since origin/main   # CI on a pull request
 
 ``--check`` fails on: a file with no block; a missing required key; a key out of order; a path
 in ``Layer``/``ADRs``/``Works with``/``Tested by``/``Touch when``/``Claims`` that does not exist
 in the repository (anchors are stripped before the check); a ``Tested by`` that is blank;
-a ``docs/CODE-MAP.md`` that differs from what the headers generate. Files listed in
+a ``Touch when`` whose first clause does not address onboarding a client repository (files
+older than that rule are listed in ``scripts/code_map_onboarding_baseline.txt``, which only
+shrinks — with ``--changed-since REF``, as CI runs it on a pull request, a listed file the
+change edits and a path the change adds to the list are refused too); a ``docs/CODE-MAP.md``
+that differs from what the headers generate. Files listed in
 ``EXEMPT`` (an explicit path → reason map; today only Vite's generated ambient types) are
 skipped and listed at the end of the map so the exemption is visible. There is no size- or
 name-based exemption: a thin ``__init__.py`` needs a block like every other file.
@@ -22,8 +27,9 @@ name-based exemption: a thin ``__init__.py`` needs a block like every other file
 Navigation
 ----------
 What it is:   The code-map generator and header gate (stdlib only; runs in CI's ``code-map`` job).
-What it does: Parses every source file's Navigation block, validates keys, order and links,
-              writes docs/CODE-MAP.md, and in --check mode exits non-zero on any defect or drift.
+What it does: Parses every source file's Navigation block, validates keys, order, links and
+              that ``Touch when`` speaks to onboarding a client repository first, writes
+              docs/CODE-MAP.md, and in --check mode exits non-zero on any defect or drift.
 How:          Walk the source roots → extract the docstring / leading comment per language →
               parse ``Key: value`` lines (continuations indented) → resolve every path against
               the repository → render Markdown tables grouped by top-level package.
@@ -32,14 +38,16 @@ ADRs:         none
 Works with:   docs/FILE-HEADER-STANDARD.md (the format it enforces), docs/CODE-MAP.md (its
               output), .github/workflows/ci.yml (the code-map job that runs --check)
 Tested by:    tests/test_code_map.py
-Touch when:   a new source root or language is added; a key is added to the standard (update
-              REQUIRED_KEYS, the standard and every header together).
+Touch when:   never for a new repository; a new source root or language is added; a key is
+              added to the standard (update REQUIRED_KEYS, the standard and every header
+              together).
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -69,6 +77,30 @@ KEYS: tuple[str, ...] = REQUIRED_KEYS + OPTIONAL_KEYS
 LINK_KEYS: tuple[str, ...] = ("Layer", "ADRs", "Works with", "Tested by", "Touch when", "Claims")
 _PATH_RE = re.compile(r"(?<![\w/.-])((?:src|tests|ui|docs|deploy|scripts|\.github)/[\w./-]+)")
 _KEY_RE = re.compile(r"^(" + "|".join(re.escape(k) for k in KEYS) + r"):\s*(.*)$")
+#: ``Touch when`` speaks first to the developer onboarding a client repository
+#: (docs/FILE-HEADER-STANDARD.md): its first clause — up to the first ``;``, sentence end,
+#: dash or bracket — speaks about onboarding one ("never for a new repository; …").
+_FIRST_CLAUSE_RE = re.compile(r";|\.\s|\s(?:—|\u2013|-)\s|\(")
+#: Code spans and paths are removed before the match: ``GET /repos/{name}`` or
+#: ``ui/src/screens/Repos/…`` names a route or a folder, not a repository being onboarded.
+_NOT_PROSE_RE = re.compile(r"``.*?``|`[^`]*`|\S*/\S*")
+#: The ecosystems a runner or recipe serves, as a first clause names them ("a Go repository
+#: needs cgo"). A repository with no such word before it — "the image repository", "the
+#: repository layer", "Add repo" — is not one being onboarded (P-116).
+ONBOARDING_ECOSYSTEMS: tuple[str, ...] = (
+    "Python", "Go", "Rust", "Cargo", "JavaScript", "TypeScript", "Node", "Maven", "Gradle",
+    "JVM", "Java", "Kotlin",
+)  # fmt: skip
+_ONBOARDING_RE = re.compile(
+    r"\bonboard"
+    r"|\b(?:new|client|" + "|".join(map(re.escape, ONBOARDING_ECOSYSTEMS)) + r")\s+"
+    r"repo(?:s|sitory|sitories)?\b",
+    re.IGNORECASE,
+)
+#: Files whose ``Touch when`` is older than the onboarding check. The list only shrinks:
+#: a file that now addresses onboarding first must leave it, and an entry for a file that is
+#: gone fails ``--check`` (P-114).
+ONBOARDING_BASELINE = "scripts/code_map_onboarding_baseline.txt"
 
 
 @dataclass
@@ -158,6 +190,82 @@ def parse_block(comment: str) -> tuple[str, dict[str, str], list[str]]:
     return summary, fields, problems
 
 
+def addresses_onboarding(touch_when: str) -> bool:
+    """True when the first clause of ``Touch when``, its code spans and paths removed, speaks
+    about onboarding a client repository: onboarding itself, or a new, client or
+    ecosystem-named repository (``ONBOARDING_ECOSYSTEMS``)."""
+    first = _FIRST_CLAUSE_RE.split(touch_when, maxsplit=1)[0]
+    return bool(_ONBOARDING_RE.search(_NOT_PROSE_RE.sub(" ", first)))
+
+
+def onboarding_baseline() -> frozenset[str]:
+    path = ROOT / ONBOARDING_BASELINE
+    if not path.exists():
+        return frozenset()
+    lines = (ln.strip() for ln in path.read_text(encoding="utf-8").splitlines())
+    return frozenset(ln for ln in lines if ln and not ln.startswith("#"))
+
+
+def baseline_violations(
+    baseline: frozenset[str], changed: set[str], before: frozenset[str] | None
+) -> list[str]:
+    """What a change owes the onboarding baseline: every baseline file it edits must leave
+    the list (its ``Touch when`` fixed first), and no path may join it. ``before`` is the
+    baseline at the change's base, ``None`` when the base had none (the list's first change)."""
+    found = [
+        f"{rel}: edited in this change but still in {ONBOARDING_BASELINE}: put onboarding a "
+        "client repository first in its Touch when and delete its line"
+        for rel in sorted(baseline & changed)
+    ]
+    if before is not None:
+        found += [
+            f"{rel}: added to {ONBOARDING_BASELINE}, which only shrinks: put onboarding first "
+            "in its Touch when instead"
+            for rel in sorted(baseline - before)
+        ]
+    return found
+
+
+def _git(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def changed_since(ref: str) -> tuple[set[str], frozenset[str] | None]:
+    """The paths added, modified or renamed since the merge base with ``ref`` (the working
+    tree included), and the baseline at that base (``None`` when it had none). Raises
+    ``subprocess.CalledProcessError`` when ``ref`` cannot be resolved: the caller fails."""
+    base = _git("merge-base", ref, "HEAD").strip()
+    changed = set(_git("diff", "--name-only", "--diff-filter=AMR", base).split())
+    try:
+        text = _git("show", f"{base}:{ONBOARDING_BASELINE}")
+    except subprocess.CalledProcessError:
+        return changed, None
+    lines = (ln.strip() for ln in text.splitlines())
+    return changed, frozenset(ln for ln in lines if ln and not ln.startswith("#"))
+
+
+def _onboarding_problems(rel: str, fields: dict[str, str], baseline: frozenset[str]) -> list[str]:
+    touch = fields.get("Touch when", "")
+    if not touch:
+        return []  # already reported as a missing or empty key
+    if rel in baseline:
+        if addresses_onboarding(touch):
+            return [
+                f"Touch when now addresses onboarding first: remove it from {ONBOARDING_BASELINE}"
+            ]
+        return []
+    if addresses_onboarding(touch):
+        return []
+    return [
+        "Touch when: its first clause does not address onboarding a client repository "
+        "(name onboarding, a new or client repository, or an ecosystem in "
+        "ONBOARDING_ECOSYSTEMS; write 'never for a new repository; …' when nothing here "
+        "changes for one — docs/FILE-HEADER-STANDARD.md)"
+    ]
+
+
 def _paths_in(value: str) -> list[str]:
     return [p.split("#", 1)[0].rstrip(".,;:)") for p in _PATH_RE.findall(value)]
 
@@ -169,6 +277,7 @@ def read_header(path: Path) -> Header:
     if comment is None:
         return Header(rel, "", {}, ["no leading docstring / comment"])
     summary, fields, problems = parse_block(comment)
+    problems += _onboarding_problems(rel, fields, onboarding_baseline())
     for key in LINK_KEYS:
         for target in _paths_in(fields.get(key, "")):
             if not (ROOT / target).exists():
@@ -269,6 +378,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--check", action="store_true", help="validate and compare; write nothing")
     ap.add_argument("--list-missing", action="store_true", help="print files without a valid block")
+    ap.add_argument(
+        "--changed-since",
+        metavar="REF",
+        help="with --check: refuse a baseline file this change edits, and any path it adds "
+        "to the baseline (CI passes the pull request's base branch)",
+    )
     args = ap.parse_args(argv)
     headers: list[Header] = []
     exempt: dict[str, str] = {}
@@ -279,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         headers.append(read_header(p))
     bad = [h for h in headers if h.problems]
+    gone = sorted(onboarding_baseline() - {h.path for h in headers})
     if args.list_missing:
         for h in bad:
             print(f"{h.path}: {'; '.join(h.problems)}")
@@ -288,11 +404,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         for h in bad:
             print(f"{h.path}: {'; '.join(h.problems)}", file=sys.stderr)
+        for rel in gone:
+            print(f"{ONBOARDING_BASELINE}: {rel} is not a source file: remove it", file=sys.stderr)
+        owed: list[str] = []
+        if args.changed_since:
+            try:
+                changed, before = changed_since(args.changed_since)
+            except (subprocess.CalledProcessError, OSError) as exc:
+                owed = [f"--changed-since {args.changed_since}: git could not diff it ({exc})"]
+            else:
+                owed = baseline_violations(onboarding_baseline(), changed, before)
+        for line in owed:
+            print(line, file=sys.stderr)
         current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
         stale = current != rendered
         if stale:
             print(f"{OUT.relative_to(ROOT)} is stale: run scripts/code_map.py", file=sys.stderr)
-        return 1 if (bad or stale) else 0
+        return 1 if (bad or stale or gone or owed) else 0
     OUT.write_text(rendered, encoding="utf-8")
     print(
         f"wrote {OUT.relative_to(ROOT)}: {len(headers) - len(bad)} files; {len(bad)} without a valid block"

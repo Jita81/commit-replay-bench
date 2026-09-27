@@ -99,6 +99,7 @@ def test_enqueue_fills_defaults_and_validates(queue: JobQueue) -> None:
         "controls",
         "label",
         "factory",
+        "qualify",
     }
 
 
