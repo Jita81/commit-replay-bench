@@ -836,3 +836,61 @@ def test_the_vendored_campaigns_verify_against_their_manifests() -> None:
     for d in campaigns:
         rel = d.relative_to(ROOT).as_posix()
         assert cc.verify_manifest(ROOT, rel) == [], rel
+
+
+# ─── the gate reads what a reader reads as prose (G-929) ──────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # an HTML comment is not rendered, even when it spans blank lines (a Navigation header)
+        "<!--\nNavigation\n\nWhat it does: counts eleven jobs.\n\nTested by: x\n-->\n\nProse.\n",
+        # front matter is metadata, not prose
+        "---\nid: dod.page.x\nname: The walk — six stages for one repository\n---\n\n# x\n",
+        # a contents line links to headings, and a heading is not a claim
+        "Contents: [1 Install](#1-install) · [2 Configure eleven repositories](#2-configure)\n",
+    ],
+)
+def test_what_a_reader_never_reads_as_prose_is_not_a_claim(tree: Path, body: str) -> None:
+    _write(tree, "README.md", body)
+    assert cc.check_tree(tree, ("README.md",)) == []
+
+
+def test_a_link_elsewhere_keeps_its_words(tree: Path) -> None:
+    """Only a link to a heading on the same page drops its text: a link to another page
+    reads as the words it shows."""
+    _write(tree, "README.md", "# t\n\nSee [eleven jobs](docs/CI.md) for the list.\n")
+    assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
+
+
+def test_a_gap_register_line_is_its_own_gap_tag(tree: Path) -> None:
+    """A definition-of-done gap line — ``**G-nnn** — what is missing · what closes it`` — is
+    a [gap] by its form: it names what is absent and what would close it, which is exactly
+    what the tag must cite. A sentence that only mentions a gap id is not one."""
+    _write(
+        tree,
+        "README.md",
+        "# t\n\n- **G-214** — the walkthrough asserts two of the 24 rows · assert them all · ui\n"
+        "- **F42** — no builder measured on four repositories · measure them · you\n",
+    )
+    assert cc.check_tree(tree, ("README.md",)) == []
+    _write(tree, "README.md", "# t\n\n- The walkthrough asserts two of the 24 rows (G-214).\n")
+    assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
+
+
+def test_an_allowlist_glob_reads_every_page_it_matches_and_no_generated_one(tree: Path) -> None:
+    """A folder joins the gate as a glob, so a page added to it later is read the day it
+    lands; a generated page it would match is read by its own generator's --check instead."""
+    (tree / "docs" / "dod").mkdir()
+    _write(tree, "docs/A.md", "# a\n\nThe gate found 12 defects.\n")
+    _write(tree, "docs/dod/B.md", "# b\n\nThe gate found 13 defects.\n")
+    _write(tree, "docs/dod/GAP-ANALYSIS.md", "# g\n\n576 criteria are met.\n")
+    pages, empty = cc.expand(tree, ("docs/*.md", "docs/dod/**/*.md", "docs/none/*.md"))
+    assert pages == ["docs/A.md", "docs/dod/B.md"] and empty == ["docs/none/*.md"]
+    findings = cc.check_tree(tree, ("docs/*.md", "docs/dod/**/*.md", "docs/none/*.md"))
+    assert [(f.path, f.reason) for f in findings] == [
+        ("docs/none/*.md", "on the allowlist but matches nothing"),
+        ("docs/A.md", "no claim tag"),
+        ("docs/dod/B.md", "no claim tag"),
+    ]
