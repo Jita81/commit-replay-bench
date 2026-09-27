@@ -14,11 +14,12 @@ here is a ``[hypothesis]`` with that reason, DL-100).
     python scripts/claims_check.py --check    # CI: exit non-zero on any finding
 
 **The heuristic, honestly.** A sentence is treated as a claim when, after inline code, links
-and HTML comments are stripped, it contains either a percentage (``95%``, ``95 per cent``, ``ninety percent``) or a cardinal (``12``,
-``1200``, ``eleven``) qualifying a plural noun — "eleven jobs", "22 tasks", "1200 tasks",
-"four public libraries". A tag covers the block it sits in (a paragraph, a list item, a
-blockquote paragraph), and a list item is also covered by the paragraph that introduces the
-list, which is how the README tags a whole measured section at its head. Inline code is
+and HTML comments are stripped, it contains either a percentage (``95%``, ``95 per cent``,
+``ninety percent``) or a cardinal (``12``, ``1200``, ``eleven``) qualifying a plural noun —
+"eleven jobs", "22 tasks", "1200 tasks", "four public libraries". A tag covers the block it
+sits in (a paragraph, a list item, a blockquote paragraph), and a list item is also covered
+by the paragraph that introduces the list, which is how the README tags a whole measured
+section at its head. Inline code is
 stripped from the cover too: a page that *documents* ``[hypothesis]`` in backticks has not
 thereby tagged the sentence around it.
 
@@ -83,8 +84,8 @@ the promises registered here; an unregistered capability sentence still needs a 
 
 **README's measured claims name their rows.** A ``[measured]`` tag on README (``ROWS_PAGES``),
 wherever it renders — a paragraph, a list item, a heading, a table cell or a checklist item
-(P-126) — must say where its rows are — ``rows: data/<campaign>/``, written plain inside the tag — and
-that directory must be in the repository with a ``MANIFEST.sha256`` that verifies: every
+(P-126) — must say where its rows are — ``rows: data/<campaign>/``, written plain inside the
+tag — and that directory must be in the repository with a ``MANIFEST.sha256`` that verifies: every
 listed file present and unchanged, and no file beside it that the manifest does not list
 (its README excepted). The gate holds that shape; ``tests/test_measured_claims.py``
 re-derives the numbers and the apparatus from the rows (G-660).
