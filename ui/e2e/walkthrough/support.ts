@@ -22,7 +22,7 @@
  * ----------
  * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
  *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
- *               `signIn`, `signOut`, `axeScan` (every axe scan, after transitions settle),
+ *               `signIn`, `signOut`, `axeScan` (every axe scan, after the page settles),
  *               `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
  *               `expectLogAction`, `stackHealth`.
  * What it does: Makes every spec drive a REAL stack through the UI only — sign-in through the
@@ -270,17 +270,40 @@ export function personaPassword(username: string): string {
 export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 
 /**
- * Wait until no CSS transition is running, so a scan reads the colours a person sees rather
- * than a frame in between. Found by the 07 sweep on 2026-09-26: the walk page's Baseline button
+ * Wait until the page has settled, so a scan reads the colours a person sees rather than a
+ * frame in between. Found by the 07 sweep on 2026-09-26: the walk page's Baseline button
  * turns from outlined to filled when the last stage's data arrives, `transition-colors` blends
- * the two, and axe read the half-way frame as a 3.05:1 contrast failure (P-051). Only
- * transitions are awaited: a looping animation (a pulsing dot) never ends and is not a state
- * change. A transition still running after `timeoutMs` is left to axe, which then reports it.
+ * the two, and axe read the half-way frame as a 3.05:1 contrast failure (P-051). Waiting only
+ * for "no transition running now" was not enough: on 2026-09-27 the wait returned, the stage
+ * answered, and the transition began during the scan (3.19:1). So the settle waits, bounded,
+ * for the network to go idle (the data has arrived) and then for a quiet window of `quietMs`
+ * in which no CSS transition runs and nothing in the DOM changes. A looping animation (a
+ * pulsing dot) never ends and changes no DOM, so it is not waited on. A page still changing
+ * after `timeoutMs` is left to axe, which then reports what it reads.
  */
-export async function settleTransitions(page: Page, timeoutMs = 3_000): Promise<void> {
-  await page
-    .waitForFunction(() => document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState !== 'running'), undefined, { timeout: timeoutMs })
-    .catch(() => undefined)
+export async function settleTransitions(page: Page, timeoutMs = 3_000, quietMs = 300): Promise<void> {
+  await page.waitForLoadState('networkidle', { timeout: timeoutMs }).catch(() => undefined)
+  await page.evaluate(
+    ({ quiet, limit }) =>
+      new Promise<void>((resolve) => {
+        const start = performance.now()
+        let last = start
+        const mo = new MutationObserver(() => {
+          last = performance.now()
+        })
+        mo.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true })
+        const tick = () => {
+          const now = performance.now()
+          if (document.getAnimations().some((a) => a instanceof CSSTransition && a.playState === 'running')) last = now
+          if (now - last >= quiet || now - start >= limit) {
+            mo.disconnect()
+            resolve()
+          } else requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      }),
+    { quiet: quietMs, limit: timeoutMs },
+  )
 }
 
 /**
