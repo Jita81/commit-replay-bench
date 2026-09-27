@@ -119,6 +119,23 @@ describe('DecisionsPage', () => {
     expect(within(staleList).queryByText(/signed at apparatus/)).toBeNull()
   })
 
+  it('a sign-off with no apparatus stamp says it was signed before the stamp and asks for a re-sign', async () => {
+    const stale = { id: 's3', repo: 'alpha', cell: { capability_class: 'bug.fix', size: 'XS' }, revoked: false, active: false, stale: true, stale_reason: 'no_apparatus_stamp', apparatus_current: '2.3', approver: 'u9', approver_name: 'Grace', created: '2026-09-01T10:00:00Z', evidence: { n: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, apparatus_versions: [] } }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': map('alpha', [CELL]),
+      'GET /signoffs': { items: [stale], total: 1, limit: 50, offset: 0 },
+      'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Stale sign-offs' })).toBeInTheDocument())
+    const staleList = screen.getByRole('list', { name: 'Stale sign-offs' })
+    expect(within(staleList).getByText(/signed before the apparatus stamp, now reading at 2\.3/)).toBeInTheDocument()
+    expect(within(staleList).queryByText(/signed at apparatus \?/)).toBeNull()
+    expect(within(staleList).getByRole('link', { name: 'Revoke or re-sign' })).toBeInTheDocument()
+  })
+
   it('a viewer sees the same rows with Read and the role that acts', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },

@@ -178,9 +178,11 @@ export function DecisionsPage() {
                       {signoff.cell.capability_class} × {signoff.cell.size}
                     </code>{' '}
                     on {repo} —{' '}
-                    {signoff.checks_arm && signoff.checks_arm_current && signoff.checks_arm !== signoff.checks_arm_current
-                      ? `signed on the ${signoff.checks_arm} checks arm, now reading the ${signoff.checks_arm_current} arm`
-                      : `signed at apparatus ${signoff.evidence.apparatus_versions.join(', ') || '?'}, now reading at ${signoff.apparatus_current || apparatus}`}
+                    {signoff.stale_reason === 'no_apparatus_stamp'
+                      ? `signed before the apparatus stamp, now reading at ${signoff.apparatus_current || apparatus}`
+                      : signoff.checks_arm && signoff.checks_arm_current && signoff.checks_arm !== signoff.checks_arm_current
+                        ? `signed on the ${signoff.checks_arm} checks arm, now reading the ${signoff.checks_arm_current} arm`
+                        : `signed at apparatus ${signoff.evidence.apparatus_versions.join(', ') || '?'}, now reading at ${signoff.apparatus_current || apparatus}`}
                   </Hint>
                   <p className="m-0 font-mono text-[16px] leading-[1.5] text-on-surface-muted">
                     signed {signoff.created.slice(0, 10)} by {approverName(signoff)} · n={signoff.evidence.n} · {pct(signoff.evidence.point)} [{pct(signoff.evidence.ci_low)}, …]

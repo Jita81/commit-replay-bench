@@ -25,8 +25,9 @@ showed it did not.
    `SignoffRecord.covers_apparatus(cell)` is true when every apparatus version among the
    cell's rows is in the record's stamped set. `apply_signoffs` lifts a tier only for records
    that both match the cell's scope and cover its apparatus. A record with no stamp
-   (`crb.signoff.v1`) or a cell with no rows is not judged here — the thin-cell and policy
-   rules already refuse those.
+   (`crb.signoff.v1`, or a stored row whose cell carries none) cannot show that it covers
+   the rows read now, so it covers nothing and is stale on every apparatus (amended
+   2026-09-27, below). A cell with no rows is not judged here — the thin-cell rule refuses it.
 2. **Stale is a state, not a deletion.** The row stays on the ledger, still verifies in the
    hash chain, and is served with `stale: true`, `apparatus_current: "<deployment's>"` and
    `active: false`. Nothing is edited (ADR-0002); the approver re-signs against the new rows
@@ -55,6 +56,27 @@ showed it did not.
   `tests/test_server_routes_signoffs.py` (a v1 or earlier-apparatus record served
   `stale: true`, `active: false`, `apparatus_current`); UI: `MapTable.test.tsx`,
   `DecisionsPage.test.tsx`.
+
+## Amendment (2026-09-27) — a record with no stamp lifts nothing
+
+**Context.** §1 as first written let a record with no apparatus stamp lift a cell on every
+apparatus, on the ground that "the thin-cell and policy rules already refuse those". Those
+rules run when the sign-off is written, not when the overlay reads it, so a record whose
+evidence was graded by an older instrument went on licensing a cell forever — the
+opposite of "evidence expires with the apparatus" (governance review 2026-09-27, GOV-6;
+DL-148).
+
+**Decision.** `SignoffRecord.covers_apparatus` is false for a record with an empty stamp
+whenever the cell has rows, so `apply_signoffs` lifts nothing on it. `GET /signoffs` serves
+such a record `stale: true`, `active: false`, with `stale_reason: "no_apparatus_stamp"`
+(the other reasons are `apparatus_moved`, `checks_arm_moved` and `posture_moved`, first
+match wins), and the Decisions inbox lists it under *Signed cells now stale* with that
+reason, so an approver re-signs it on the current rows or revokes it. No apparatus bump:
+the instrument has not moved; the read rule now matches §2's promise.
+
+**Consequences.** A deployment carrying `crb.signoff.v1` records sees those cells return to
+the inbox. Tested by `tests/test_signoff.py::test_a_sign_off_with_no_apparatus_stamp_lifts_nothing`
+and `tests/test_server_routes_signoffs.py::TestListAndRevoke::test_a_row_with_no_apparatus_stamp_is_served_stale_and_asks_for_a_re_sign`.
 
 ## Alternatives considered
 

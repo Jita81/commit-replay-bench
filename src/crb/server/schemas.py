@@ -709,8 +709,9 @@ class RunCreateRequest(BaseModel):
     #: (OFF by default; needs a credentials provider on the worker). Delivery is ROUTE-GATED:
     #: it happens only when the item's (class × size) cell routes ``deliver`` on the
     #: capability map; otherwise it is withheld and recorded (DL-038). ``deliver_override``:
-    #: an APPROVER's one-run override of that gate — the caller's identity is stamped into
-    #: ``params.deliver_override_by`` and onto the evidence chain. ``max_rework``: how many
+    #: refused 409 ``same_actor`` at enqueue — the gate's one-run override is a SECOND
+    #: approver's act, ``POST /runs/{id}/deliver-override``, never the enqueuer's (GOV-4,
+    #: ADR-0003 amendment 2026-09-27); it never lifts a false-Q1 cell. ``max_rework``: how many
     #: review-driven rework cycles an item may take (default 1).
     deliver: bool | None = None
     deliver_override: bool | None = None
@@ -1260,8 +1261,13 @@ class SignoffOut(BaseModel):
     #: graded in another posture class than the one the deployment grades the repository in
     #: now is stale too (ADR-0019 §8): ``posture_class`` is the class(es) it was signed on
     #: (``""`` for evidence from before apparatus 2.3) and ``posture_class_current`` the
-    #: deployment's class for the repository now (``""`` for a record not tied to one).
+    #: deployment's class for the repository now (``""`` for a record not tied to one). A
+    #: record with no apparatus stamp is stale on every apparatus (GOV-6): it cannot show it
+    #: covers the rows read now. ``stale_reason`` names the first reason that applies —
+    #: ``no_apparatus_stamp``, ``apparatus_moved``, ``checks_arm_moved``, ``posture_moved``
+    #: — and is ``""`` when the record is not stale.
     stale: bool = False
+    stale_reason: str = ""
     apparatus_current: str = ""
     checks_arm: str = ""
     checks_arm_current: str = ""

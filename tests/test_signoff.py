@@ -1162,9 +1162,26 @@ def test_signoff_made_on_an_earlier_apparatus_is_stale_and_lifts_nothing() -> No
     fresh = replace(_signoff(), apparatus_version=current)
     assert fresh.covers_apparatus(cell)
     assert so.apply_signoffs(m.cells, [fresh], repo="todo")[0].verification_tier == "human-verified"
-    # a v1 record with no stamp is not judged stale here
+    # a record with no stamp cannot show it covers the rows now read (GOV-6)
     unstamped = replace(_signoff(), apparatus_version="")
-    assert unstamped.covers_apparatus(cell)
+    assert not unstamped.covers_apparatus(cell) and unstamped.is_stale(cell)
+
+
+def test_a_sign_off_with_no_apparatus_stamp_lifts_nothing() -> None:
+    """GOV-6 (governance review 2026-09-27): evidence expires with the apparatus (ADR-0015).
+    A record with no stamp — ``crb.signoff.v1``, or any stored row whose cell carries none —
+    cannot show it covers the rows read now, so it is stale and lifts no cell on any
+    apparatus; the write-time rules that refused thin cells never ran at read. A cell with
+    no rows lifts nothing either way (the thin-cell rule)."""
+    m = cap.build_capability_map(_rows(12, 12))
+    legacy = replace(_signoff(), apparatus_version="", schema=so.SIGNOFF_SCHEMA_V1)
+    assert legacy.is_stale(m.cells[0])
+    out = so.apply_signoffs(m.cells, [legacy], repo="todo")
+    assert out[0].verification_tier == "automated-pass" and not out[0].earned
+    # the same record stamped on the apparatus the rows were graded at still lifts
+    current = ",".join(m.cells[0].stats.apparatus_versions) if m.cells[0].stats else ""
+    stamped = replace(legacy, apparatus_version=current)
+    assert so.apply_signoffs(m.cells, [stamped], repo="todo")[0].earned
 
 
 def test_revoked_signoff_does_not_elevate() -> None:

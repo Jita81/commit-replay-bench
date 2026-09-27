@@ -292,6 +292,7 @@ from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
+    ROLE_RANK,
     FactorySettings,
     GitHubAppSettings,
     IntakeSettings,
@@ -319,7 +320,7 @@ from crb.store.jobs import (
     StaleClaim,
 )
 from crb.store.ledger import DbLedger
-from crb.store.models import EvidencePackRow, Repo, Run, Task, WorkerRow
+from crb.store.models import EvidencePackRow, Repo, Run, Task, User, WorkerRow
 
 #: Stop a build run after this many consecutive attempts the provider refused
 #: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables.
@@ -2432,20 +2433,22 @@ class Worker:
         return (STATUS_CANCELLED if cancelled else STATUS_SUCCEEDED), counts, ""
 
     def _served_map(
-        self, repo: str, *, run_id: str = "", posture_class: str = ""
+        self, repo: str, *, run_id: str = "", posture_class: str = "", checks_arm: str = ""
     ) -> tuple[CapabilityMap, dict[str, str]]:
         """The (class × size) map ``GET /capability-map`` serves by default — sighted rows,
-        the current apparatus, the repository's own checks arm, this deployment's posture
-        class (or ``posture_class``), the latest controls verdict, sign-offs overlaid —
-        without the rows of ``run_id``; and the scope it was read in (apparatus × posture
-        class × checks arm). The route gate and the flow recorder read this one map."""
+        the current apparatus, the repository's own checks arm (or ``checks_arm``: the arm a
+        factory run grades on, GOV-3), this deployment's posture class (or
+        ``posture_class``), the latest controls verdict, sign-offs overlaid — without the
+        rows of ``run_id``; and the scope it was read in (apparatus × posture class × checks
+        arm). The route gate and the flow recorder read this one map."""
         cls = posture_class or self._deployment_posture_class(repo)
+        arm = checks_arm or CHECKS_CURRENT
         before = (r for r in self.ledger.rows(repo=repo) if not run_id or r.run_id != run_id)
         current = rows_for_arm(
             self.factory,
             repo,
             rows_for_apparatus(rows_for_mode(before, "sighted"), "current"),
-            CHECKS_CURRENT,
+            arm,
         )
         with self.factory() as s:
             rows = rows_for_posture(
@@ -2462,7 +2465,7 @@ class Worker:
         scope = {
             "apparatus": APPARATUS_VERSION,
             "posture_class": cls,
-            "checks_arm": current_checks_arm(self.factory, repo),
+            "checks_arm": checks_arm or current_checks_arm(self.factory, repo),
         }
         return cmap, scope
 
@@ -2486,7 +2489,7 @@ class Worker:
             _LOG.exception("flow: recording deliver transitions for %s failed", run.repo)
 
     def _route_lookup(
-        self, repo: str, run_id: str = "", posture_class: str = ""
+        self, repo: str, run_id: str = "", posture_class: str = "", *, checks_arm: str = ""
     ) -> Callable[[BacklogItem], dict[str, Any] | None]:
         """The capability map's decision for an item's (class × size) cell — computed once,
         lazily, from the same signed map ``GET /capability-map`` serves (sighted rows,
@@ -2500,13 +2503,18 @@ class Worker:
 
         ADR-0019 §8: only rows of ``posture_class`` (the run's own, else this deployment's)
         license a delivery — a cell measured in another posture never does. ADR-0024: and
-        only rows of the repository's own ``checks`` arm — a cell measured with the format
-        step or belt 6 set otherwise never does."""
+        only rows of the repository's own ``checks`` arm — or of ``checks_arm``, the arm the
+        factory run grades its builds on (GOV-3) — license it: a cell measured with the format
+        step or belt 6 set otherwise never does. The map is read once, lazily, at the first
+        item's readiness: a later call for another cell (the measured size of a change larger
+        than its estimate, GOV-2) answers from that same pre-run reading."""
         cache: dict[str, dict[str, Any] | None] = {}
         computed: dict[str, bool] = {}
 
         def compute() -> None:
-            cmap, _ = self._served_map(repo, run_id=run_id, posture_class=posture_class)
+            cmap, _ = self._served_map(
+                repo, run_id=run_id, posture_class=posture_class, checks_arm=checks_arm
+            )
             for c in cmap.cells:
                 if c.decision is not None:
                     st = c.stats
@@ -2580,6 +2588,15 @@ class Worker:
         retain = dict(p.get("retain") or {})
         runner = self._runner(ctx)
         executor = self._executor(ctx)
+        # ADR-0024 §6 (GOV-3): the run's checks, resolved exactly as a replay's — the run's
+        # switches over the learning overlay of the repository's block. Every build is graded
+        # on this arm, and the route gate reads its licence on the same arm.
+        checks = resolve_checks(
+            RepoChecks.from_config(
+                self._learning_snapshot(ctx).config_section(W_SECTION, ctx.config.checks)
+            ),
+            p.get("checks"),
+        )
         # G-904 — the served worker's test author. Resolved here, BEFORE anything is
         # stamped or spent, so a rung that is also on the build ladder is refused by
         # ``FactorySpec``'s existing identity check rather than found half-way through.
@@ -2618,6 +2635,7 @@ class Worker:
             # default branch as fetched, or the clone's head when nothing was fetched)
             base_sha=base_sha,
             posture=gate.posture.to_dict(),
+            **({"checks": checks.to_dict()} if checks.any_on else {}),
             **self._factory_override_stamp(),
         )
         # delivery through the GitHub App: the linked installation's token pushes the branch
@@ -2666,8 +2684,14 @@ class Worker:
             # the route gate: the same signed (class × size) map the API serves, under the
             # repo's latest controls verdict, sighted rows of the current apparatus — minus
             # this run's own rows (DL-045); the loop reads it once per item, at readiness
-            route_decision_for=self._route_lookup(run.repo, run.id, gate.posture.posture_class),
-            deliver_override_by=str(p.get("deliver_override_by", "") or ""),
+            route_decision_for=self._route_lookup(
+                run.repo, run.id, gate.posture.posture_class, checks_arm=checks.arm
+            ),
+            # GOV-4: the override is a second approver's act, read LIVE at each gate from the
+            # run's row (a grant made while the run works reaches the next gate); honoured only
+            # for a person with the approver role — the loop refuses the run's own actor
+            deliver_override_for=lambda: self._deliver_override(run.id),
+            checks=checks,
             run_id=run.id,
             actor=run.actor,
             timeout=ctx.timeout,
@@ -2715,6 +2739,27 @@ class Worker:
         if self._cancelled(ctx):
             return STATUS_CANCELLED, counts, ""
         return STATUS_SUCCEEDED, counts, ""
+
+    def _deliver_override(self, run_id: str) -> str:
+        """Who overrides this factory run's route gate, read from the run's row NOW: the
+        ``params.deliver_override_by`` a second approver granted (``POST
+        /runs/{id}/deliver-override``), honoured only when it names an account that holds
+        the approver role at the moment of the gate — ``""`` otherwise (GOV-4). The loop
+        refuses one that names the run's own actor, on the record."""
+        with self.factory() as s:
+            row = s.get(Run, run_id)
+            who = str(
+                ((row.params_json if row is not None else None) or {}).get(
+                    "deliver_override_by", ""
+                )
+                or ""
+            )
+            if not who:
+                return ""
+            user = s.get(User, who)
+            if user is None or ROLE_RANK.get(user.role, -1) < ROLE_RANK["approver"]:
+                return ""
+        return who
 
     def _test_author(self, ctx: RunContext, ladder: EscalationLadder) -> TestAuthor | None:
         """The run's test author, or ``None`` when this deployment has none.
