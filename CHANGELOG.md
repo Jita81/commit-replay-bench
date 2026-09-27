@@ -20,6 +20,9 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `CRB_ALLOW_UNSEALED_PROD_BY` (an active admin) and `_REASON`, and each start records that
   admin (DL-102). The append-only probe proves every table (DL-104), `crb_signoffs_total`
   counts sign-offs, and the Ledger and Posture pages name a broken audit event (P-118 to P-122).
+  From 0031 the database refuses an event written without the chain, so stop the API and the
+  worker for that upgrade and never roll back across it (DEPLOYMENT §6); between full walks,
+  at most five minutes apart, `/ledger/verify` re-hashes only new events (P-123 to P-126).
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

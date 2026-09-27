@@ -99,6 +99,7 @@ from crb.server.flow_record import stamp_install
 from crb.server.settings import Settings
 from crb.server.unsealed_override import record_unsealed_override
 from crb.store.db import init_db, make_engine, make_session_factory
+from crb.store.events import EventChainVerifier
 from crb.store.ledger import assert_append_only
 
 log = logging.getLogger("crb.server")
@@ -563,6 +564,8 @@ def create_app(
     app.state.engine = None
     app.state.started_at = 0.0
     app.state.login_limiter = LoginRateLimiter()
+    # the audit trail's walk for /ledger/verify: new events only between full walks (P-126)
+    app.state.events_verifier = EventChainVerifier()
     # An injected client (tests) wins; else a real one only when OIDC is configured.
     if oidc_client is not None:
         app.state.oidc_client = oidc_client

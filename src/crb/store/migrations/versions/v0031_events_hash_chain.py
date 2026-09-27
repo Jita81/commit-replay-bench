@@ -7,16 +7,21 @@ What it is:   Revision 0031: the two chain columns on ``events`` and the chainin
 What it does: Adds ``prev_hash`` and ``row_hash`` (``VARCHAR(64) NOT NULL``, server default
               ``''`` so a populated table can take them), chains the existing rows in id
               order from the genesis hash — deterministically: the same rows give the same
-              hashes on any run, on either dialect — and then adds the unique indexes on
-              both columns (one successor per row, so the chain cannot fork). ``events`` is
-              append-only, so its UPDATE trigger is dropped for the back-fill and the
-              triggers are re-installed at the end, in the same transaction on PostgreSQL.
-              ``downgrade`` drops the indexes and the columns; the events themselves stay.
+              hashes on any run, on either dialect — then drops the server default and adds
+              a CHECK that each column holds 64 characters (so a writer that names no chain
+              column, the release before this one included, is refused row by row — P-123),
+              and adds the unique indexes on both columns (one successor per row, so the
+              chain cannot fork). ``events`` is append-only, so its UPDATE trigger is dropped
+              for the back-fill and the triggers are re-installed at the end, in the same
+              transaction on PostgreSQL. ``downgrade`` drops the indexes, the CHECK and the
+              columns; the events themselves stay.
 How:          ``op.add_column`` twice (skipped when ``init_db`` already made them) → drop
               ``events_no_update`` → read the rows in id pages and ``UPDATE`` each by id with
               the hashes of a FROZEN copy of the chain rule (``_row_hash``; a released
               revision imports nothing of the product's runtime, and a test holds this copy
-              to ``crb.core.event_chain``) → ``op.create_index`` twice →
+              to ``crb.core.event_chain``) → ``batch_alter_table`` (no default, the CHECK;
+              a table rebuild on SQLite, copied from a pinned table offline) →
+              ``op.create_index`` twice →
               ``install_append_only_triggers_on``. Offline (``--sql``) there are no rows to
               read, so the back-fill is skipped.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -61,6 +66,12 @@ APPEND_ONLY_AT_0031: tuple[str, ...] = (
     "task_qualifications",
 )
 PREV_INDEX = "uq_events_prev_hash"
+#: P-123: after the back-fill both chain columns lose the server default and must hold a
+#: SHA-256, so a writer that names no chain column (the release before this revision, still
+#: running during the upgrade or after a rollback) is refused for that row instead of
+#: storing a head of '' that no later write can chain onto. Pinned text, not imported.
+CHECK_NAME = "ck_events_chain_hashes"
+CHECK_SQL = "length(prev_hash) = 64 AND length(row_hash) = 64"
 ROW_INDEX = "uq_events_row_hash"
 BATCH = 1000
 
@@ -174,16 +185,76 @@ def _chain_existing_rows(bind: sa.Connection) -> int:
         last = int(rows[-1]["id"])
 
 
+def _events_at_0031(*, checked: bool) -> sa.Table:
+    """The whole ``events`` table at this revision, pinned — what an OFFLINE (``--sql``)
+    SQLite rebuild copies from, since there is no database to reflect. ``checked`` is the
+    state after this revision (no default, the CHECK); otherwise the state before it."""
+    default = None if checked else sa.text("''")
+    s64 = sa.String(64)
+    cols: list[Any] = [
+        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column("event_id", sa.String(32), nullable=False, unique=True),
+        sa.Column("trace_id", sa.String(32), nullable=False, index=True),
+        sa.Column("seq", sa.Integer, nullable=False),
+        sa.Column("timestamp", sa.String(40), nullable=False),
+        sa.Column("stage", sa.String(16), nullable=False),
+        sa.Column("action", s64, nullable=False),
+        sa.Column("status", sa.String(16), nullable=False),
+        sa.Column("step_id", s64, nullable=False),
+        sa.Column("parent_step_id", s64, nullable=False),
+        sa.Column("actor", sa.String(128), nullable=False),
+        sa.Column("repo", s64, nullable=False, index=True),
+        sa.Column("task_id", s64, nullable=False),
+        sa.Column("input_ref", sa.Text, nullable=False),
+        sa.Column("output_ref", sa.Text, nullable=False),
+        sa.Column("error_code", s64, nullable=False),
+        sa.Column("error_message", sa.Text, nullable=False),
+        sa.Column("duration_ms", sa.Integer, nullable=True),
+        sa.Column("cost_usd", sa.Float, nullable=True),
+        sa.Column("payload_json", sa.JSON, nullable=False),
+        sa.Column("prev_hash", s64, nullable=False, server_default=default),
+        sa.Column("row_hash", s64, nullable=False, server_default=default),
+        sa.Index("uq_events_trace_seq", "trace_id", "seq", unique=True),
+    ]
+    if checked:
+        cols.append(sa.CheckConstraint(CHECK_SQL, name=CHECK_NAME))
+    return sa.Table(TABLE, sa.MetaData(), *cols)
+
+
+def _copy_from(*, checked: bool) -> sa.Table | None:
+    offline_sqlite = context.is_offline_mode() and op.get_context().dialect.name == "sqlite"
+    return _events_at_0031(checked=checked) if offline_sqlite else None
+
+
+def _checks() -> set[str]:
+    if context.is_offline_mode():
+        return set()
+    return {str(ck["name"]) for ck in sa.inspect(op.get_bind()).get_check_constraints(TABLE)}
+
+
 def upgrade() -> None:
-    """Add the columns, chain the rows already there, then make each link unique."""
+    """Add the columns, chain the rows already there, refuse an unchained row from then on,
+    then make each link unique."""
     cols = _columns()
+    added = False
     for name in ("prev_hash", "row_hash"):
         if name not in cols:
             op.add_column(TABLE, sa.Column(name, sa.String(64), nullable=False, server_default=""))
+            added = True
     if not context.is_offline_mode():
         bind = op.get_bind()
         _drop_update_trigger(bind)
         _chain_existing_rows(bind)
+    if added or CHECK_NAME not in _checks():
+        # SQLite rebuilds the table (move and copy; the copy fires no row trigger and the
+        # indexes are re-created from the reflection); PostgreSQL alters it in place
+        with op.batch_alter_table(TABLE, copy_from=_copy_from(checked=False)) as batch:
+            for name in ("prev_hash", "row_hash"):
+                batch.alter_column(
+                    name, existing_type=sa.String(64), existing_nullable=False, server_default=None
+                )
+            if CHECK_NAME not in _checks():
+                batch.create_check_constraint(CHECK_NAME, sa.text(CHECK_SQL))
     names = _indexes()
     if PREV_INDEX not in names:
         op.create_index(PREV_INDEX, TABLE, ["prev_hash"], unique=True)
@@ -199,9 +270,12 @@ def downgrade() -> None:
         if ix in names or context.is_offline_mode():
             op.drop_index(ix, table_name=TABLE)
     cols = _columns()
+    checks = _checks()
     # batch mode is "move and copy" on SQLite (the only way to drop a column there) and a
     # plain ALTER elsewhere; the copy fires no row trigger, and the triggers are re-installed
-    with op.batch_alter_table(TABLE) as batch:
+    with op.batch_alter_table(TABLE, copy_from=_copy_from(checked=True)) as batch:
+        if CHECK_NAME in checks or context.is_offline_mode():
+            batch.drop_constraint(CHECK_NAME, type_="check")
         for name in ("row_hash", "prev_hash"):
             if name in cols or context.is_offline_mode():
                 batch.drop_column(name)

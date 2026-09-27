@@ -1180,6 +1180,10 @@ export interface EventsVerify {
   detail: string
   /** The last event's `row_hash` (`""` when there is none), to record outside the store. */
   head_row_hash: string
+  /** `full` re-hashed every event; `tail` only those appended since the last clean walk (P-126). */
+  walk: 'full' | 'tail'
+  /** When the last full walk behind this answer ran (ISO 8601, UTC). */
+  full_walk_at: string
 }
 
 /**

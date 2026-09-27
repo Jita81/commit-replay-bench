@@ -250,7 +250,9 @@ def _a_value_for(col: Any) -> Any:
         return []
     if kind is bytes:
         return b"x"
-    return "x"
+    # a string as long as the column allows, so a length CHECK is met (the events chain's
+    # hash columns must hold 64 characters since revision 0031, P-123)
+    return "x" * int(getattr(col.type, "length", None) or 1)
 
 
 def _seed_one_row(backend: Backend, table: str) -> None:

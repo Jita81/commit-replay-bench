@@ -61,6 +61,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -70,6 +71,11 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+#: The CHECK on ``events`` (revision 0031, P-123): both chain columns hold a SHA-256 in hex.
+#: ``length`` is the one spelling SQLite and PostgreSQL share.
+EVENTS_CHAIN_CHECK_NAME = "ck_events_chain_hashes"
+EVENTS_CHAIN_CHECK = "length(prev_hash) = 64 AND length(row_hash) = 64"
 
 
 def _now() -> str:
@@ -268,19 +274,23 @@ class Event(Base):
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     # revision 0031 (ADR-0041, F51): the audit trail's hash chain, in id order. Set by the
     # flush hook in src/crb/store/events.py whatever the writer put there; declared LAST so
-    # the column order matches a migrated database. The server default exists only so the
-    # revision could add the columns to a populated table; nothing writes it.
-    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
-    row_hash: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
+    # the column order matches a migrated database. No server default and a CHECK on both
+    # (P-123): a writer that skips the hook — the release before 0031 during an upgrade or
+    # after a rollback, a Core insert — is refused for that one row instead of storing a
+    # head of '' that no later write could chain onto.
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
     # UNIQUE: ``seq`` is the SSE resume cursor; two rows of a trace with one ``seq`` would
     # lose one on ``?after=`` (revision 0004; ``DbEventSink`` re-allocates on collision).
-    # UNIQUE ``prev_hash``: one successor per row, so two writers cannot fork the chain even
-    # if one bypassed the flush hook (revision 0031).
+    # UNIQUE ``prev_hash``: one successor per row, so a writer that copies the head cannot
+    # fork the chain (revision 0031). The CHECK refuses a row whose chain columns are not
+    # hashes at all — the unique index alone would accept the first such row.
     __table_args__ = (
         Index("uq_events_trace_seq", "trace_id", "seq", unique=True),
         Index("uq_events_prev_hash", "prev_hash", unique=True),
         Index("uq_events_row_hash", "row_hash", unique=True),
+        CheckConstraint(EVENTS_CHAIN_CHECK, name=EVENTS_CHAIN_CHECK_NAME),
     )
 
 

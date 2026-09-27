@@ -35,7 +35,8 @@ What it is:   The ``events`` chain's hash rule and verifier — stdlib only, sha
 What it does: Names the hashed fields (``EVENT_CHAIN_FIELDS``), builds the canonical body
               of one row (``event_body``), hashes it onto its predecessor
               (``event_row_hash``) and walks a sequence of stored rows reporting the first
-              broken link or edited row (``walk_event_chain`` → ``EventChainReport``).
+              broken link or edited row (``walk_event_chain`` → ``EventChainReport``), from
+              genesis or resumed from a head already walked.
 How:          ``canonical_json`` + ``sha256_text`` from crb.core.evidence (the one
               serialisation every hash in the product is taken over); the walk compares each
               ``prev_hash`` with the running head and each ``row_hash`` with a recomputation.
@@ -50,8 +51,8 @@ Works with:   src/crb/store/events.py (chains every new ``events`` row in the wr
 Tested by:    tests/test_event_chain.py, tests/test_store_events_chain.py
 Touch when:   never for a new repository; a column added to ``events`` is either added to
               ``EVENT_CHAIN_FIELDS`` under a new ``EVENT_CHAIN_SCHEMA`` (old rows keep
-              verifying under the old one) or deliberately left unhashed, and ADR-0041 says
-              which.
+              verifying under the old one) or named in ``EVENT_CHAIN_UNHASHED``, and ADR-0041
+              says which — tests/test_event_chain.py fails until one of the two is done.
 """
 
 from __future__ import annotations
@@ -91,6 +92,11 @@ EVENT_CHAIN_FIELDS: tuple[str, ...] = (
     "cost_usd",
     "payload",
 )
+#: ``events`` columns deliberately left OUT of the hash (besides the id and the chain). Empty:
+#: every column is hashed. A test holds ``EVENT_CHAIN_FIELDS`` plus this tuple to the table's
+#: columns (P-124), so a new column is a reviewed decision — hashed under a new schema, or
+#: named here with the reason in ADR-0041 — never an edit the walk cannot see.
+EVENT_CHAIN_UNHASHED: tuple[str, ...] = ()
 _INT_FIELDS = frozenset({"seq", "duration_ms"})
 
 
@@ -134,6 +140,13 @@ class EventChainReport:
     broken_at: int | None
     detail: str
     head: str
+    #: ``full`` — every row re-hashed from genesis; ``tail`` — only the rows appended since
+    #: the last full walk, from its head (``crb.store.events.EventChainVerifier``).
+    walk: str = "full"
+    #: How many rows this walk re-hashed (``rows`` on a full walk).
+    walked: int = 0
+    #: When the last FULL walk behind this report ran (ISO 8601, UTC; ``""`` = not stamped).
+    full_walk_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -142,19 +155,25 @@ class EventChainReport:
             "broken_at": self.broken_at,
             "detail": self.detail,
             "head_row_hash": self.head,
+            "walk": self.walk,
+            "full_walk_at": self.full_walk_at,
         }
 
 
-def walk_event_chain(rows: Iterable[Mapping[str, Any]]) -> EventChainReport:
+def walk_event_chain(
+    rows: Iterable[Mapping[str, Any]], *, prev: str = GENESIS_HASH, verified: int = 0
+) -> EventChainReport:
     """Walk stored rows in id order: every ``prev_hash`` must be the previous ``row_hash``
     (genesis first) and every ``row_hash`` must recompute. Never raises; the first break is
     reported by row id — an edited row as ``row_hash mismatch``, a row deleted from the
-    middle or moved as ``prev_hash mismatch`` at the row that follows the gap."""
-    n = 0
-    prev = GENESIS_HASH
+    middle or moved as ``prev_hash mismatch`` at the row that follows the gap.
+
+    ``prev`` and ``verified`` resume a walk: the rows given follow ``verified`` rows already
+    walked intact, the last of which hashed to ``prev`` (a tail walk)."""
+    n = verified
     broken_at: int | None = None
     detail = ""
-    head = ""
+    head = prev if verified else ""
     for row in rows:
         n += 1
         rid = int(row.get("id") or n)
@@ -174,13 +193,20 @@ def walk_event_chain(rows: Iterable[Mapping[str, Any]]) -> EventChainReport:
     if broken_at is None:
         detail = f"{n} events, chain intact"
     return EventChainReport(
-        rows=n, ok=broken_at is None, broken_at=broken_at, detail=detail, head=head
+        rows=n,
+        ok=broken_at is None,
+        broken_at=broken_at,
+        detail=detail,
+        head=head,
+        walk="tail" if verified else "full",
+        walked=n - verified,
     )
 
 
 __all__ = [
     "EVENT_CHAIN_FIELDS",
     "EVENT_CHAIN_SCHEMA",
+    "EVENT_CHAIN_UNHASHED",
     "GENESIS_HASH",
     "EventChainReport",
     "event_body",

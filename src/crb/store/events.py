@@ -22,8 +22,12 @@ Invariants
   every ``Session`` gives each new ``Event`` its ``prev_hash`` (the table's head) and
   ``row_hash`` (:func:`crb.core.event_chain.event_row_hash`) under the events write lock,
   in insertion order, overwriting anything the writer set. The sink, ``append_event``, the
-  routes' ``append_system_event`` and any plain ``add`` all flush, so none can skip it;
-  the unique index on ``prev_hash`` refuses a fork from a writer that bypassed the ORM.
+  routes' ``append_system_event`` and any plain ``add`` all flush, so none can skip it.
+  A writer that bypasses the ORM (a Core insert, the release before revision 0031) is
+  refused by the database: the chain columns have no default and a CHECK requires a
+  SHA-256 in each, and the unique index on ``prev_hash`` refuses a second row on one
+  predecessor. Genesis is the predecessor of the first row of an empty table only; a head
+  that is not a hash raises :class:`EventChainHeadError` (P-123).
 
 Navigation
 ----------
@@ -34,13 +38,16 @@ What it does: Writes every ``StepEvent`` as one ``events`` row and never raises 
               resume cursor; allocates the next ``seq`` for out-of-band system events under
               the same write lock the ledger uses, and lends that lock (``lock_events``) to a
               writer on a trace other processes also write; walks the whole chain and reads
-              its head.
+              its head; and, for the page that reads it often, walks only the events written
+              since its last clean walk between bounded full walks (``EventChainVerifier``).
 How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one transaction
               with a per-row fallback; ``read_events`` = ``seq > after`` ordered by
               ``(seq, id)`` with a clamped limit; ``append_event`` = lock → ``max(seq)+1`` →
               insert; ``_chain_new_events`` (``before_flush``) = lock → head → hash each new
               row in insertion order; ``verify_events`` = keyset pages by id →
-              ``walk_event_chain``; ``events_head`` = count + last ``row_hash``.
+              ``walk_event_chain``; ``EventChainVerifier`` = the last clean walk's (id, head,
+              count) re-checked, then a walk resumed from it; ``events_head`` = count + last
+              ``row_hash``.
 Layer:        store — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0041-the-audit-trail-is-hash-chained.md
@@ -61,8 +68,12 @@ Touch when:   never for a new repository; when ``StepEvent`` gains a field (a mi
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
-from collections.abc import Iterable, Iterator
+import threading
+import time
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy import Column, func, select, text
@@ -201,6 +212,29 @@ def _stored_values(obj: Event) -> dict[str, Any]:
     return {key: getattr(obj, key) for key in _HASHED_COLUMNS}
 
 
+class EventChainHeadError(RuntimeError):
+    """The ``events`` table has rows but its last ``row_hash`` is not a SHA-256: a row reached
+    the table without the chain (only possible with the CHECK constraint lifted). Nothing
+    more is chained onto it — the operator restores the table or re-chains it (ADR-0041)."""
+
+
+_HEX = frozenset("0123456789abcdef")
+
+
+def _predecessor(head: str | None) -> str:
+    """The ``prev_hash`` of the next row: genesis for an EMPTY table only (``head`` is
+    ``None``); otherwise the head, which must be a SHA-256 in hex (P-123 — a head of ``''``
+    read as genesis once made every later write collide with the first row)."""
+    if head is None:
+        return GENESIS_HASH
+    if len(head) != 64 or not set(head) <= _HEX:
+        raise EventChainHeadError(
+            f"the events chain's head {head!r} is not a SHA-256: a row was written without "
+            "the chain; verify the audit trail (crb ledger verify --store) before writing more"
+        )
+    return head
+
+
 def _chain_new_events(session: Session, _flush_context: Any, _instances: Any) -> None:
     """``before_flush``: give every pending ``Event`` its ``prev_hash`` and ``row_hash``,
     in insertion order, onto the table's head — whatever the writer set, so no writer can
@@ -215,7 +249,7 @@ def _chain_new_events(session: Session, _flush_context: Any, _instances: Any) ->
         .execute(select(Event.row_hash).order_by(Event.id.desc()).limit(1))
         .scalar_one_or_none()
     )
-    prev = head or GENESIS_HASH
+    prev = _predecessor(head)
     for obj in new:
         obj.prev_hash = prev
         obj.row_hash = event_row_hash(_stored_values(obj), prev)
@@ -420,9 +454,12 @@ def append_event(
 VERIFY_BATCH = 1000
 
 
-def _chain_rows(s: Session, batch: int = VERIFY_BATCH) -> Iterator[dict[str, Any]]:
-    """Every ``events`` row in id order as a plain mapping, keyset-paged."""
-    last = 0
+def _chain_rows(
+    s: Session, batch: int = VERIFY_BATCH, *, after: int = 0
+) -> Iterator[dict[str, Any]]:
+    """Every ``events`` row with an id above ``after``, in id order as a plain mapping,
+    keyset-paged."""
+    last = after
     while True:
         chunk = list(
             s.execute(select(Event).where(Event.id > last).order_by(Event.id).limit(batch))
@@ -439,8 +476,9 @@ def _chain_rows(s: Session, batch: int = VERIFY_BATCH) -> Iterator[dict[str, Any
 
 
 def verify_events_in(s: Session) -> EventChainReport:
-    """Walk the whole ``events`` chain on an open session (never raises on a break)."""
-    return walk_event_chain(_chain_rows(s))
+    """Walk the whole ``events`` chain on an open session (never raises on a break); the
+    report is stamped with the time of this full walk."""
+    return replace(walk_event_chain(_chain_rows(s)), full_walk_at=_utc_now())
 
 
 def verify_events(factory: sessionmaker[Session]) -> EventChainReport:
@@ -449,6 +487,88 @@ def verify_events(factory: sessionmaker[Session]) -> EventChainReport:
     head recorded outside the store is for (docs/DEPLOYMENT.md §8)."""
     with factory() as s:
         return verify_events_in(s)
+
+
+#: The longest a tail walk may lean on an earlier full walk: every ``/ledger/verify`` after
+#: this re-hashes the whole chain again (P-126).
+FULL_WALK_EVERY_S = 300.0
+
+
+def _utc_now() -> str:
+    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
+
+
+@dataclass(frozen=True)
+class _Walked:
+    """What the last clean walk covered: its last row id, that row's hash, the row count."""
+
+    last_id: int
+    head: str
+    rows: int
+    full_at: float
+    full_at_iso: str
+
+
+class EventChainVerifier:
+    """The audit trail's walk for a page that is read often (P-126).
+
+    A full walk re-hashes every row — the audit trail holds every step of every run, so it
+    grows without bound. Between full walks (at most ``full_every_s`` apart, measured on
+    ``clock``) this re-hashes only the rows appended since the last clean walk, starting
+    from its head, and only after checking that the row it ended on still carries that
+    hash and that the number of rows up to it is unchanged. Anything else — a first read,
+    an expired full walk, ``full=True``, a changed prefix, a chain that was broken last
+    time — walks in full. What a tail walk cannot see is an edit, underneath the triggers,
+    to a row before the head that leaves the count and the head unchanged; the next full
+    walk (``full_walk_at`` on every report says when the last one ran) finds it. One
+    instance per process; thread-safe."""
+
+    def __init__(
+        self, *, full_every_s: float = FULL_WALK_EVERY_S, clock: Callable[[], float] | None = None
+    ) -> None:
+        self._every = float(full_every_s)
+        self._clock = clock or time.monotonic
+        self._lock = threading.Lock()
+        self._walked: _Walked | None = None
+
+    def verify(self, s: Session, *, full: bool = False) -> EventChainReport:
+        with self._lock:
+            now = self._clock()
+            w = self._walked
+            if w is not None and not full and now - w.full_at < self._every and self._holds(s, w):
+                report = walk_event_chain(
+                    _chain_rows(s, after=w.last_id), prev=w.head, verified=w.rows
+                )
+                report = replace(report, full_walk_at=w.full_at_iso)
+                full_at, full_at_iso = w.full_at, w.full_at_iso
+            else:
+                report = verify_events_in(s)
+                full_at, full_at_iso = now, report.full_walk_at
+            self._walked = None
+            if report.ok and report.rows:
+                # the id of the row the walk ended on (``row_hash`` is unique), not max(id):
+                # a row appended after the walk must be walked by the next read
+                last_id = s.execute(
+                    select(Event.id).where(Event.row_hash == report.head)
+                ).scalar_one_or_none()
+                if last_id is not None:
+                    self._walked = _Walked(
+                        int(last_id), report.head, report.rows, full_at, full_at_iso
+                    )
+            return report
+
+    @staticmethod
+    def _holds(s: Session, w: _Walked) -> bool:
+        """The prefix the last walk covered is still there: the row it ended on still hashes,
+        from its stored values, to the head it ended with, and the number of rows up to it
+        is unchanged."""
+        row = s.get(Event, w.last_id, populate_existing=True)
+        if row is None or row.row_hash != w.head:
+            return False
+        if event_row_hash(_stored_values(row), row.prev_hash) != w.head:
+            return False
+        n = s.execute(select(func.count(Event.id)).where(Event.id <= w.last_id)).scalar_one()
+        return int(n) == w.rows
 
 
 def events_head(factory: sessionmaker[Session]) -> tuple[int, str]:
@@ -464,8 +584,11 @@ def events_head(factory: sessionmaker[Session]) -> tuple[int, str]:
 __all__ = [
     "DEFAULT_READ_LIMIT",
     "EVENTS_LOCK_KEY",
+    "FULL_WALK_EVERY_S",
     "MAX_READ_LIMIT",
     "DbEventSink",
+    "EventChainHeadError",
+    "EventChainVerifier",
     "append_event",
     "count_events",
     "events_head",

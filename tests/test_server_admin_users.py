@@ -521,6 +521,39 @@ def test_account_events_are_on_the_hash_chained_audit_trail(client: TestClient, 
     )
 
 
+def test_a_write_that_skips_the_chain_is_refused_and_sign_in_keeps_working(
+    client: TestClient, app: Any
+) -> None:
+    """P-123: the release before revision 0031 (still running during the upgrade, or after
+    a rollback) inserts events naming no chain column. That one write must fail on its own;
+    it must not leave a head the next sign-in cannot chain onto (which answered 500 to every
+    sign-in from then on)."""
+    from sqlalchemy import insert
+    from sqlalchemy.exc import IntegrityError
+
+    from crb.store.events import verify_events
+
+    login(client, "root", ROOT_PW)
+    old_release_row = {
+        "event_id": "a" * 32,
+        "trace_id": "old-release",
+        "seq": 1,
+        "timestamp": "2026-09-27T10:00:00+00:00",
+        "stage": "system",
+        "action": "user.login",
+        "status": "ok",
+        "actor": "root",
+        "payload_json": {},
+    }
+    with app.state.session_factory() as s, pytest.raises(IntegrityError):
+        s.execute(insert(Event.__table__).values(**old_release_row))
+        s.commit()
+    client.cookies.clear()
+    login(client, "root", ROOT_PW)
+    report = verify_events(app.state.session_factory)
+    assert report.ok and report.rows >= 2, report.detail
+
+
 def events_all(app: Any) -> list[Event]:
     with app.state.session_factory() as s:
         return list(s.execute(select(Event)).scalars())

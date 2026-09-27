@@ -24,7 +24,9 @@ What it is:   The ``/ledger/*`` route module — verify the chain, export it, ex
               abstract cells, import crb JSONL rows.
 What it does: ``verify`` walks the stored rows recomputing every hash from the columns (a
               tampered or false-Q1 row is REPORTED, never hidden behind an exception),
-              re-counts false-Q1 in SQL, walks the ``events`` chain and serves both heads;
+              re-counts false-Q1 in SQL, walks the ``events`` chain (only the new events
+              between full walks; in full on an operator's ``?full=true``) and serves both
+              heads;
               ``export`` streams rows verbatim as JSONL (verifies standalone when
               unfiltered) or formula-safe CSV; ``export/abstract`` emits
               only the allowlisted cell fields; ``import`` re-chains foreign rows, skips
@@ -64,7 +66,7 @@ import json
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from fastapi import APIRouter, Query, UploadFile
+from fastapi import APIRouter, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -80,12 +82,12 @@ from crb.core.ledger import (
     verify_chain,
 )
 from crb.core.redact import redact
-from crb.server.auth import AdminDep, OperatorDep, ViewerDep
+from crb.server.auth import AdminDep, OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.routes.grades import ROW_FIELDS, grade_to_dict
 from crb.server.routes.signoffs import FALSE_Q1_PREDICATE
 from crb.server.schemas import EventsVerifyOut, LedgerImportOut, LedgerVerifyOut
-from crb.store.events import verify_events_in
+from crb.store.events import EventChainVerifier, verify_events_in
 from crb.store.ledger import DbLedger
 from crb.store.models import Grade
 
@@ -140,9 +142,13 @@ def _iter_grades(session: Session, batch: int = EXPORT_BATCH) -> Iterator[Grade]
         last = chunk[-1].seq
 
 
-def verify_ledger(session: Session) -> LedgerVerifyOut:
+def verify_ledger(
+    session: Session, *, events_verifier: EventChainVerifier | None = None, full: bool = False
+) -> LedgerVerifyOut:
     """The chain walk + the two SQL counts (false-Q1, clean-without-pack); never raises —
-    the first break is reported by ``seq`` and the walk continues to count rows."""
+    the first break is reported by ``seq`` and the walk continues to count rows. The audit
+    trail is walked by ``events_verifier`` (the app's, which re-hashes only new events
+    between full walks — P-126) or, without one, in full."""
     rows = 0
     prev = GENESIS_HASH
     broken_at: int | None = None
@@ -172,7 +178,11 @@ def verify_ledger(session: Session) -> LedgerVerifyOut:
         detail = f"{rows} rows, chain intact, false_q1=0"
     elif chain_ok:
         detail = f"chain intact but false_q1={fq1}, clean_without_pack={no_pack}"
-    events = verify_events_in(session)
+    events = (
+        events_verifier.verify(session, full=full)
+        if events_verifier is not None
+        else verify_events_in(session)
+    )
     if not events.ok:
         detail = f"{detail}; events chain broken — {events.detail}"
     return LedgerVerifyOut(
@@ -195,9 +205,27 @@ def verify_ledger(session: Session) -> LedgerVerifyOut:
     responses={401: _ERR},
     summary="Walk the hash chain and re-count false-Q1 over the stored belts (never raises)",
 )
-def ledger_verify(viewer: ViewerDep, db: DbDep) -> LedgerVerifyOut:
-    del viewer
-    return verify_ledger(db)
+def ledger_verify(
+    request: Request,
+    viewer: ViewerDep,
+    db: DbDep,
+    full: bool = Query(
+        False,
+        description="Re-hash every audit event now rather than only those appended since the "
+        "last full walk (operator; each is a walk of the whole trail)",
+    ),
+) -> LedgerVerifyOut:
+    if full:
+        require_role_now(viewer, "operator")
+    return verify_ledger(db, events_verifier=events_verifier(request.app), full=full)
+
+
+def events_verifier(app: Any) -> EventChainVerifier:
+    """The app's one audit-trail verifier (made on first use)."""
+    v = getattr(app.state, "events_verifier", None)
+    if v is None:
+        v = app.state.events_verifier = EventChainVerifier()
+    return v
 
 
 # ---------------------------------------------------------------------------

@@ -1326,6 +1326,11 @@ class EventsVerifyOut(BaseModel):
     detail: str
     #: The last event's ``row_hash`` (``""`` when there is none) — to record outside the store.
     head_row_hash: str
+    #: ``full`` — every event re-hashed; ``tail`` — only those appended since the last clean
+    #: walk, from its head (P-126). ``?full=true`` (operator) forces ``full``.
+    walk: str = "full"
+    #: When the last full walk behind this answer ran (ISO 8601, UTC).
+    full_walk_at: str = ""
 
 
 class LedgerVerifyOut(BaseModel):

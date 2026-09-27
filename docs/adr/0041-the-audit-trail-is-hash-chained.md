@@ -40,16 +40,31 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
    7332; SQLite `BEGIN IMMEDIATE`), in insertion order, onto the table's head — overwriting
    whatever the writer set. Every writer (the run's sink, `append_event`,
    `append_system_event`, a plain `add`) flushes, so none can skip it or choose its hashes.
-   A unique index on `prev_hash` is the second line: two writers cannot fork the chain
-   even if one bypassed the ORM, and one on `row_hash` refuses a duplicate.
+   The database is the second line, for a writer that bypasses the hook (a Core `insert`,
+   or the release before this one still running during the upgrade or after a rollback):
+   the two chain columns have no default and a CHECK (`ck_events_chain_hashes`) requires 64
+   characters in each, so such a row is refused alone; a unique index on `prev_hash` stops
+   two rows chaining onto one predecessor, and one on `row_hash` refuses a duplicate. The
+   hook reads genesis as the predecessor of the first row of an EMPTY table only; a head
+   that is not a SHA-256 raises `EventChainHeadError` rather than starting a second chain
+   (P-123 — a head of `''` once collided every later write with the first row).
+   Every column of `events` is hashed: `EVENT_CHAIN_FIELDS` plus `EVENT_CHAIN_UNHASHED`
+   (empty) must equal the table's columns, and a test fails until a new column is hashed
+   under a new chain schema or named unhashed with its reason here (P-124).
 3. **Existing rows are chained by the migration** (revision 0031, a temporary id the
    integration renumbers): in id order from genesis, with a frozen copy of the rule that a
    test holds to the runtime one, so the same rows give the same hashes on every run and
    either dialect. The `events` update trigger is dropped for the back-fill and every
-   trigger is re-installed in the same revision.
+   trigger is re-installed in the same revision. After the back-fill the revision drops the
+   columns' server default and adds the CHECK (item 2).
 4. **The walk is served.** `GET /ledger/verify` walks the audit trail after the grade
-   ledger and serves `events: {rows, chain_ok, broken_at, detail, head_row_hash}`; `ok` now
-   also needs the audit trail intact. An edited event reads `row_hash mismatch` at its id; an
+   ledger and serves `events: {rows, chain_ok, broken_at, detail, head_row_hash, walk,
+   full_walk_at}`; `ok` now also needs the audit trail intact. Between full walks the route
+   re-hashes only the events written since its last clean walk, from that walk's head, once
+   the head row still hashes to it and the count up to it is unchanged (`walk: tail`); it
+   walks in full on the first read, at most five minutes after the last full walk, when that
+   check fails, after a break, and on an operator's `?full=true` (P-126,
+   `ledger.operations.11`). An edited event reads `row_hash mismatch` at its id; an
    event deleted from the middle, or moved, reads `prev_hash mismatch` at the event after
    the gap. `crb ledger verify --store` prints the same and exits 1 on either break.
 5. **Both heads are served and logged, to be recorded outside the store** (G-601).
@@ -76,16 +91,21 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
   reads a trace's last `seq` on a trace other processes write at the same moment takes the
   lock before it reads (`crb.store.events.lock_events`): the override's start event does, as
   every process start writes its one trace (P-118).
-- Reading the chain costs a walk of the whole trail, every time. `GET /ledger/verify`
-  re-hashes every event on each call, and the Ledger and Posture pages call it whenever a
-  person opens them (a browser reuses an answer for 30 seconds). The trail holds a row for
-  every step of every run, many times the grade ledger, so the call slows as the trail grows
+- A full walk of the trail costs a re-hash of every event. The trail holds a row for every
+  step of every run, many times the grade ledger, so a full walk slows as it grows
   [hypothesis — two readings of `verify_events` over 100,000 events, SQLite on developers'
   machines, 2026-09-27: 1.6 s and 2.7 s; a timing on a store of the deployment's own size
-  would confirm or refute it]. Nothing verifies from a head already
-  verified [gap — an incremental walk from the last verified id and head, with the full walk
-  kept for `crb ledger verify --store`, would close it; it waits for a criterion that bounds
-  the page's cost]. DEPLOYMENT §9.5 tells an operator to size for it.
+  would confirm or refute it]. A page read pays it at most once in five minutes per API
+  process; between full walks it pays for the events written since (item 4). The price is
+  a window: an edit underneath the triggers to an event before the last verified head that
+  leaves the head row and the count unchanged is found by the next full walk, not the next
+  read, and every answer says when that full walk ran. `crb ledger verify --store` always
+  walks in full. DEPLOYMENT §9.5 tells an operator to size for it.
+- Upgrading to this revision refuses every event the previous release writes, because it
+  writes no chain: while the previous release's pods still run (the `pre-upgrade` hook
+  migrates first), and after a `helm rollback` across this revision, their sign-ins answer
+  500 and their run steps are dropped, each one alone. DEPLOYMENT §6 tells an operator to
+  stop the API and the worker for the upgrade and never to roll back across it.
 - Truncation and wholesale replacement stay invisible to the chain alone; they are caught
   only by comparing a head the operator recorded outside the store. That comparison is the
   operator's act (DEPLOYMENT §8), not the product's.

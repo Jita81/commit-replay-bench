@@ -1528,12 +1528,16 @@ class Worker:
             ctx._runner.env_dir = self.env_dir(ctx.run.repo)
         return ctx._runner
 
+    def _executor_kind(self, ctx: RunContext) -> str:
+        """The executor this run asks for: its own ``params.executor``, else the worker's."""
+        return str(ctx.params.get("executor") or self.settings.executor or "local")
+
     def _executor(self, ctx: RunContext) -> Executor:
         """The run's executor. Docker is fail-closed: no image / no daemon → the
         run fails with ``sandbox unavailable``; there is no local fallback."""
         if ctx._executor is not None:
             return ctx._executor
-        kind = str(ctx.params.get("executor") or self.settings.executor or "local")
+        kind = self._executor_kind(ctx)
         if kind != "docker" and self.settings.refuse_unsealed:
             raise SandboxUnavailable(
                 f"production refuses the {kind} executor (ADR-0023): this run asks for it; use "
@@ -1627,7 +1631,7 @@ class Worker:
             "runner": self._runner(ctx).name,
             "executor": self._executor(ctx).describe(),
             "worker": self.worker_id,
-            **self._override_stamp(),
+            **self._override_stamp(ctx),
             **extra,
         }
         self.queue.set_apparatus(ctx.run.id, apparatus, worker_id=self.worker_id)
@@ -1651,10 +1655,24 @@ class Worker:
         }
         return {"unsealed_prod_override": stamp}
 
-    def _override_stamp(self) -> dict[str, Any]:
+    def _override_stamp(self, ctx: RunContext) -> dict[str, Any]:
         """ADR-0023: a prod worker running unsealed under the override says so on every
-        apparatus it writes (and so in every pack); nothing when sealed or in dev."""
+        apparatus it writes (and so in every pack); nothing when sealed or in dev. A worker
+        whose DEFAULTS are sealed stamps a run that asks for another executor in its own
+        parameters (only the override admits one), naming who set the override (P-125)."""
         o = dict(self.settings.unsealed_override)
+        if not o and self.settings.env == "prod":
+            kind = self._executor_kind(ctx)
+            if kind != "docker":
+                ack = dict(self.settings.unsealed_override_ack)
+                o = {
+                    "env": "prod",
+                    "sandbox_executor": kind,
+                    "builder_executor": self.settings.builder_executor,
+                    "override": ALLOW_UNSEALED_PROD_ENV,
+                    "adr": "0023",
+                    "acknowledged_by": ack.get("by", ""),
+                }
         return {"unsealed_prod_override": o} if o else {}
 
     def _progress(self, ctx: RunContext, done: int, total: int) -> None:
@@ -2200,7 +2218,7 @@ class Worker:
             on_environment=gate.on_environment,
             extra={
                 "worker": self.worker_id,
-                **self._override_stamp(),
+                **self._override_stamp(ctx),
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
                 "learning": learning.apparatus(),

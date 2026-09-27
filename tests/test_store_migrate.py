@@ -60,7 +60,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Engine, inspect, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from crb.store import migrate
 from crb.store.db import init_db, make_engine, make_session_factory
@@ -133,7 +133,9 @@ def _canonical_sql(sql: str | None) -> tuple[str, frozenset[str]]:
     open_at = sql.find("(")
     if open_at < 0:
         return (" ".join(sql.split()), frozenset())
-    head = " ".join(sql[:open_at].split())
+    # SQLite stores a table rebuilt by batch mode's rename as ``CREATE TABLE "t"``; the
+    # quoted and bare lower-case names are one identifier, so the head drops the quotes
+    head = " ".join(sql[:open_at].replace('"', "").split())
     body = sql[open_at + 1 : sql.rfind(")")]
     defs: list[str] = []
     depth = 0
@@ -526,6 +528,9 @@ def test_offline_sql_includes_tables_and_triggers(backend: Backend) -> None:
     # 0008 offline adds the reaper count to that table after it exists
     count = sql.find("ADD COLUMN unconfirmed_containers INTEGER DEFAULT '0' NOT NULL")
     assert count > workers, sql[-2000:]
+    # 0031 offline refuses an unchained row too (P-123): the CHECK after the back-fill
+    check = sql.find("ck_events_chain_hashes")
+    assert check > sql.find("ADD COLUMN row_hash"), sql[-2000:]
     assert migrate.current(backend.url) is None  # offline mode touched nothing
 
 
@@ -1075,12 +1080,11 @@ def test_0031_adopts_a_create_all_schema_from_the_release_before(backend: Backen
     from crb.store.events import verify_events
 
     fresh = _reset(backend)
-    init_db(fresh)
+    # the release before's schema is 0012's (test_upgrade_head_equals_init_db holds every
+    # revision to create_all); drop the version table and it is that release's create_all
+    migrate.upgrade(backend.url, revision="0012")
     with fresh.begin() as c:
-        c.execute(text("DROP INDEX uq_events_prev_hash"))
-        c.execute(text("DROP INDEX uq_events_row_hash"))
-        c.execute(text("ALTER TABLE events DROP COLUMN prev_hash"))
-        c.execute(text("ALTER TABLE events DROP COLUMN row_hash"))
+        c.execute(text("DROP TABLE alembic_version"))
         _insert_event(c, n=1)
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
@@ -1121,3 +1125,39 @@ def test_0031_frozen_rule_is_the_runtime_rule() -> None:
     assert m.GENESIS_HASH == GENESIS_HASH
     for prev in (GENESIS_HASH, "a" * 64):
         assert m._row_hash(row, prev) == event_row_hash(row, prev)
+
+
+def test_0031_refuses_a_row_from_the_release_before_it_and_keeps_recording(
+    backend: Backend,
+) -> None:
+    """P-123: during a rolling upgrade the release before 0031 keeps writing events, and a
+    rollback runs it against the migrated schema. Its INSERT names no chain column. The
+    migrated table must refuse that row outright — if it stored ``''`` it would become a
+    head no later write can chain onto, and the audit trail (sign-in included) would stop
+    for good."""
+    from crb.observability.events import StepEvent
+    from crb.store.events import DbEventSink, verify_events
+
+    migrate.upgrade(backend.url, revision="0012")
+    with backend.engine.begin() as c:
+        _insert_event(c, n=1)
+    migrate.upgrade(backend.url)
+    for n in (2, 3):
+        with pytest.raises(IntegrityError), backend.engine.begin() as c:
+            _insert_event(c, n=n)
+    sink = DbEventSink(backend.factory)
+    sink.emit(StepEvent(trace_id="x", stage="system", action="a", seq=1))
+    assert sink.dropped == 0
+    report = verify_events(backend.factory)
+    assert report.ok and report.rows == 2, report.detail
+    assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
+    # the rollback path the runbook names: downgrade first, then the old release writes
+    cfg = migrate.alembic_config(backend.url)
+    with backend.engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0012")
+    with backend.engine.begin() as c:
+        _insert_event(c, n=4)
+    migrate.upgrade(backend.url)
+    report = verify_events(backend.factory)
+    assert report.ok and report.rows == 3, report.detail

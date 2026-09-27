@@ -109,7 +109,7 @@ server and never appear in logs or `/settings`.
 | `CRB_BUILDER__EXECUTOR` | api, worker | where the builder runs: `docker` — the sealed container of ADR-0012 (an exported checkout that cannot contain the gold commit, one allowlisting egress sidecar) — or `host` (development). Empty means the env's default: `docker` in `prod`, `host` in `dev`. Compose and Helm pass one value to both the API and the worker (empty by default), so `/health` describes the builds the worker runs. `host` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` is set with `CRB_ALLOW_UNSEALED_PROD_BY` and `CRB_ALLOW_UNSEALED_PROD_REASON` (below). Factory builds are not covered: they always run on the host (below) |
 | `CRB_BUILDER__IMAGE` | worker | the builder image (`deploy/Dockerfile.builder`), in the daemon's store. An explicit `CRB_BUILDER__EXECUTOR=docker` without it fails at start-up; the `prod` default without it fails each build closed (`sandbox unavailable`), never on the host |
 | `CRB_ALLOW_UNSEALED_PROD` | api, worker | `1` lets `prod` start with the host builder or the local test executor — **for an evaluation you have decided not to count as evidence**. Without it both processes refuse to start and say which setting is unsealed. In `prod` it must name who set it and why (`CRB_ALLOW_UNSEALED_PROD_BY`, `CRB_ALLOW_UNSEALED_PROD_REASON`, below), or neither process starts. With it the API logs a warning, `/health` and `/settings` report `posture.unsealed_prod_override: true`, the Posture page says so to every viewer, and the worker stamps `unsealed_prod_override` into every run's apparatus and every evidence pack (ADR-0023). Without it a `prod` worker also refuses a run that asks for the local executor in its own parameters, and refuses every **factory** run: a factory build hands the builder a host worktree and no container, so it is never sealed (`posture.factory_builds: refused`). With it a factory run builds on the host and its apparatus carries the override (`run_kind: factory`) |
-| `CRB_ALLOW_UNSEALED_PROD_BY` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: the username of the admin who decided to run unsealed (a local username, the identity provider's subject or the account's email). At every start each process checks it names exactly one active admin — otherwise it refuses to start and writes nothing (the worker exits 2) — and writes one `posture.unsealed_override` event on the audit trail whose actor is that admin, with the reason, the process, the host and the posture it admits ([API.md § Event vocabulary](API.md#event-vocabulary); ADR-0023 as amended). The worker stamps the name beside the override (`unsealed_prod_override.acknowledged_by`) on every run it admits. Name a person with an admin account: a deployment whose only admin is the bootstrap account names that account |
+| `CRB_ALLOW_UNSEALED_PROD_BY` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: the username of the admin who decided to run unsealed (a local username, the identity provider's subject or the account's email). At every start each process checks it names exactly one active admin — otherwise it refuses to start and writes nothing (the worker exits 2) — and writes one `posture.unsealed_override` event on the audit trail whose actor is that admin, with the reason, the process, the host and the posture it admits ([API.md § Event vocabulary](API.md#event-vocabulary); ADR-0023 as amended). The worker stamps the name beside the override (`unsealed_prod_override.acknowledged_by`) on every run that does not run sealed: every run of a worker whose defaults are unsealed, a run that asks for the local executor in its own parameters, and every factory run. Name a person with an admin account: a deployment whose only admin is the bootstrap account names that account |
 | `CRB_ALLOW_UNSEALED_PROD_REASON` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: why, in the admin's words — written into the same event |
 | `CRB_METRICS_ENABLED` | api, worker | `true` (default). `false` → the api's `/metrics` answers 404 and the worker starts no exposition |
 | `CRB_METRICS_HOST` | worker | the address the worker's exposition binds (default `127.0.0.1`, like `CRB_BIND_HOST`: the series name repositories, builders and installations, so a bare `crb worker` on a host offers them to nobody else). Compose and Helm set `0.0.0.0` inside the container, where only the compose network / the NetworkPolicy's scraper can reach the port (§9.1) |
@@ -609,6 +609,21 @@ its sessions. On a deployment whose cookies are `Secure` (the default outside
 everybody signs in once more after the upgrade. From this release, signing out ends the
 account's sessions on every device.
 
+**Upgrading to revision `0031`** (the audit trail's hash chain, ADR-0041): the revision
+chains every event already stored, then makes the database refuse any event that does not
+carry the chain — the two chain columns have no default and must each hold a SHA-256. The
+release before it does not write the chain, so while its API and worker pods still run
+(the `pre-upgrade` hook migrates before any pod is replaced; compose's `run --rm migrate`
+runs before `up -d`) every event they try to write is refused, one at a time: a sign-in
+answers 500, a run's steps are dropped from its log. Nothing already chained is harmed and
+the new release writes normally. To avoid that window, scale the API and the worker to 0
+before the upgrade (`kubectl -n crb scale deploy --replicas=0 -l
+'app.kubernetes.io/instance=crb,app.kubernetes.io/component in (api,worker)'`, or
+`docker compose stop api worker`); `helm upgrade` then starts them on the new release. A
+`helm rollback` across `0031` leaves the previous release refused on every event, since
+the schema is not downgraded: do not roll back across it — restore the pre-upgrade dump
+instead.
+
 Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up -d`
 ([deploy/README.md §5](../deploy/README.md#5-upgrade)).
 
@@ -782,10 +797,14 @@ walks the chain), streamed live as SSE from `GET /runs/{id}/events` and paged fr
 emitter, consumer — is [API.md § Event vocabulary](API.md#event-vocabulary), kept in step
 with the code by `tests/test_event_vocabulary.py`. Retention: the table is append-only and
 is never pruned by crb; size it with the ledger (a replay writes roughly 10–30 events per
-task). Every `GET /ledger/verify` — each time a person opens the Ledger or the Posture page,
-at most once in 30 seconds per browser — re-hashes the whole table, so the call slows as it
-grows [hypothesis — two readings on SQLite over 100,000 events: 1.6 s and 2.7 s a call; time
-`crb ledger verify --store` on your own store to know yours] (ADR-0041, Consequences). The
+task). `GET /ledger/verify` — read each time a person opens the Ledger or the Posture page —
+re-hashes only the events written since its last full walk, and walks the whole table again
+at most five minutes after the last full walk, when anything it walked has changed, after a
+break, or when an operator asks with `?full=true`; each answer says which walk it was
+(`events.walk`) and when the last full walk ran (`events.full_walk_at`). A full walk still
+slows as the table grows [hypothesis — two readings on SQLite over 100,000 events: 1.6 s and
+2.7 s a walk; time `crb ledger verify --store`, which always walks in full, on your own
+store to know yours] (ADR-0041, Consequences). The
 JSONL copy under `<CRB_HOME>/events/` is the operator's local mirror and may be rotated
 freely.
 

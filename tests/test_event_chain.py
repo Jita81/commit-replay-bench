@@ -4,7 +4,9 @@ Navigation
 ----------
 What it is:   The unit suite for ``crb.core.event_chain`` — the body an event row hashes and
               the walk that proves the audit trail was not altered.
-What it does: Pins that the body covers every hashed field and normalises values to what a
+What it does: Pins that every ``events`` column is hashed or named unhashed (the field set
+              is held to the table), that an edit to any column changes the hash, that the
+              body normalises values to what a
               database hands back (``1`` and ``1.0`` in ``cost_usd``, a tuple in the payload),
               that a chain built from genesis walks intact and serves its head, and that an
               edited, a deleted and a reordered row are each reported at the right id with
@@ -24,8 +26,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from crb.core.event_chain import (
     EVENT_CHAIN_FIELDS,
+    EVENT_CHAIN_UNHASHED,
     GENESIS_HASH,
     event_body,
     event_row_hash,
@@ -72,7 +77,7 @@ def _chain(n: int) -> list[dict[str, Any]]:
     return rows
 
 
-def test_the_body_covers_every_field_and_normalises_to_what_a_database_returns() -> None:
+def test_the_body_holds_the_named_fields_and_normalises_to_what_a_database_returns() -> None:
     body = event_body(_row(1))
     assert set(body) == {"schema", *EVENT_CHAIN_FIELDS}
     # a REAL column hands back 1.0 for 1; a JSON column a list for a tuple
@@ -81,6 +86,34 @@ def test_the_body_covers_every_field_and_normalises_to_what_a_database_returns()
         _row(1, payload_json={"a": [1, 2]})
     )
     assert event_row_hash(_row(1), GENESIS_HASH) != event_row_hash(_row(1), "1" * 64)
+
+
+def test_every_events_column_is_hashed_or_named_unhashed() -> None:
+    """P-124: the hashed field set is held to the TABLE, not to itself. A column added to
+    ``events`` and left out of ``EVENT_CHAIN_FIELDS`` would be editable without a trace; it
+    must be hashed (a new chain schema) or named in ``EVENT_CHAIN_UNHASHED``, reviewed."""
+    from crb.store.models import Event
+
+    columns = {c.key for c in Event.__table__.columns} - {"id", "prev_hash", "row_hash"}
+    hashed = {"payload_json" if f == "payload" else f for f in EVENT_CHAIN_FIELDS}
+    assert EVENT_CHAIN_UNHASHED == ()  # a change here is a reviewed decision in ADR-0041
+    assert not hashed & set(EVENT_CHAIN_UNHASHED)
+    assert columns == hashed | set(EVENT_CHAIN_UNHASHED)
+
+
+@pytest.mark.parametrize("column", [c for c in _row(1) if c != "id"], ids=lambda c: str(c))
+def test_an_edit_to_any_hashed_column_changes_the_hash(column: str) -> None:
+    """Every column of a stored row reaches the hash under the name the store reads it by
+    (``payload_json`` included): an edit to any one of them breaks the row."""
+    row = _row(1)
+    edited = dict(row)
+    value = row[column]
+    edited[column] = (
+        {"forged": True} if isinstance(value, dict) else 99 if column in ("seq",) else "forged"
+    )
+    if column in ("duration_ms", "cost_usd"):
+        edited[column] = 7
+    assert event_row_hash(edited, GENESIS_HASH) != event_row_hash(row, GENESIS_HASH), column
 
 
 def test_an_intact_chain_walks_and_serves_its_head() -> None:

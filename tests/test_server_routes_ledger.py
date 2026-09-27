@@ -5,7 +5,8 @@ Navigation
 What it is:   ``/ledger/*``'s test suite — verify (reports, never raises), export (verifies
               standalone), abstract, import.
 What it does: Pins that verify reports ok, ``broken_at`` on a tampered row and a broken link on a
-              deleted one, counts false-Q1 over the STORED belts, a viewer reads; that the JSONL
+              deleted one, counts false-Q1 over the STORED belts, a viewer reads, a page read
+              walks only new audit events and only an operator forces a full walk; that the JSONL
               export verifies standalone, the default format and repo filter, CSV with a header
               and formula cells neutralised, 422 on a bad format, the abstract export is
               operator-only and allowlisted, anonymous 401; and that import is admin-only,
@@ -105,8 +106,10 @@ class TestVerify:
             "broken_at": None,
             "detail": f"{n_events} events, chain intact",
             "head_row_hash": events_head,
+            "walk": "full",
+            "full_walk_at": d["events"]["full_walk_at"],
         }
-        assert n_events > 0
+        assert n_events > 0 and d["events"]["full_walk_at"]
 
     def test_a_tampered_audit_event_is_reported_and_fails_the_verification(self, env: Env) -> None:
         """F51: a reader proves the audit trail was not altered — an account event edited
@@ -120,6 +123,32 @@ class TestVerify:
         assert d["chain_ok"] is True and d["ok"] is False
         assert d["events"]["chain_ok"] is False and d["events"]["broken_at"] == first
         assert "events" in d["detail"] and "edited" in d["detail"]
+
+    def test_a_page_read_walks_only_new_events_and_an_operator_can_walk_them_all(
+        self, env: Env
+    ) -> None:
+        """P-126: a page read between full walks re-hashes only the events appended since
+        the last walk and says so (``walk: tail``, with when the last full walk ran); an
+        operator's ``?full=true`` re-hashes the whole trail and finds an edit a tail walk
+        cannot see; a viewer may not ask for one (each is a walk of every event)."""
+        first = env.get("/ledger/verify").json()["events"]
+        assert first["walk"] == "full" and first["chain_ok"] is True
+        with env.factory() as s:
+            s.execute(text("DROP TRIGGER events_no_update"))
+            second = s.execute(text("SELECT MIN(id) + 1 FROM events")).scalar_one()
+            s.execute(text("UPDATE events SET actor = 'mallory' WHERE id = :i"), {"i": second})
+            s.commit()
+        tail = env.get("/ledger/verify").json()["events"]
+        assert tail["walk"] == "tail" and tail["full_walk_at"] == first["full_walk_at"]
+        full = env.get("/ledger/verify", params={"full": "true"}).json()
+        assert full["events"]["walk"] == "full" and full["events"]["broken_at"] == second
+        assert full["ok"] is False
+
+    def test_a_viewer_may_not_force_a_full_walk(self, tmp_path: Path) -> None:
+        with make_env(tmp_path, role="viewer") as e:
+            assert e.get("/ledger/verify").status_code == 200
+            r = e.get("/ledger/verify", params={"full": "true"})
+            assert r.status_code == 403 and envelope(r)["code"] == "forbidden"
 
     def test_tampered_row_reports_broken_at(self, env: Env) -> None:
         _drop_triggers(env)

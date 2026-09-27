@@ -2004,6 +2004,34 @@ def test_a_prod_worker_under_the_override_stamps_every_factory_run(
     assert stamp["acknowledged_by"] == "root"
 
 
+def test_a_sealed_prod_worker_under_the_override_stamps_a_run_that_asks_for_local(
+    h: Harness,
+) -> None:
+    """P-125: a worker whose defaults are sealed (docker and docker) but that starts under
+    the override admits a run asking for the local executor in its own parameters. That run
+    executes unsealed, so its apparatus must carry the override and the name of the admin
+    who set it — the worker-wide stamp is empty because the DEFAULTS are sealed."""
+    h.worker.settings = replace(
+        h.settings,
+        env="prod",
+        executor="docker",
+        builder_executor="docker",
+        refuse_unsealed=False,
+        unsealed_override={},
+        unsealed_override_ack={"by": "root", "reason": "evaluation"},
+    )
+    h.enqueue("probe", params_json={"executor": "local"})
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    stamp = done.apparatus_json["unsealed_prod_override"]
+    assert stamp["sandbox_executor"] == "local" and stamp["acknowledged_by"] == "root"
+    assert stamp["override"] == "CRB_ALLOW_UNSEALED_PROD" and stamp["adr"] == "0023"
+    # a run that keeps the sealed default stamps nothing: it ran sealed
+    h.enqueue("probe")
+    sealed = h.run_one()
+    assert "unsealed_prod_override" not in (sealed.apparatus_json or {})
+
+
 def test_a_dev_worker_stamps_no_override_on_a_factory_run(
     h: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

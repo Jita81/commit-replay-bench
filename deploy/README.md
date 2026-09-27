@@ -218,6 +218,13 @@ image keeps working against the untouched schema. Rolling back a *successful* mi
 not supported while the ledger holds rows — `downgrade` refuses by design; restore the
 pre-upgrade dump instead.
 
+Upgrading to revision `0031` (the audit trail's hash chain): from it the database refuses an
+event written without the chain, which is every event the previous image writes. Run
+`$C stop api worker` before `$C run --rm migrate`, so no sign-in or run step is refused in
+between; `$C up -d` starts them on the new image. Never go back to an image from before
+`0031` against the upgraded database — restore the dump instead
+([DEPLOYMENT §6](../docs/DEPLOYMENT.md#6-upgrade)).
+
 ## 6. Air-gap: egress only to the model endpoint
 
 crb makes exactly two kinds of outbound connections: the **worker** to the configured model
