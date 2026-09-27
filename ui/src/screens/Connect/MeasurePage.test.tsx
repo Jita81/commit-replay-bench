@@ -6,10 +6,12 @@
  * What it is:   Tests for the Measure page.
  * What it does: Pins that the estimate uses the repository's measured cost per attempt when
  *               it has one (30 attempts × $0.34 ±20 %), that the button names the band as an
- *               estimate — never a cap the request does not carry (F5b) — and the Budget row
- *               says there is no spend cap yet, that picking 10 attempts and keeping
+ *               estimate and the spend cap the request carries (F5b), which starts at the top
+ *               of the estimate and follows it until the operator types one, that no amount
+ *               above $0 disables the button, that a last replay the cap stopped is said
+ *               with its reason and its run, that picking 10 attempts and keeping
  *               worktrees changes the summary, that the POST carries `{kind: replay, mode:
- *               sighted, limit, retain}`, that a viewer sees no button, that the kicker counts
+ *               sighted, limit, retain, max_cost_usd}`, that a viewer sees no button, that the kicker counts
  *               Home's 8 tasks and the back-link names the walk (J-HEL-7, J-ONR-13), that a
  *               repository with no gold-clean task points at stage 3 of the walk, and that a
  *               replay already queued or running replaces the red button with a banner naming
@@ -62,10 +64,12 @@ describe('MeasurePage', () => {
     expect(box).toHaveTextContent('$8.16 to $12.24 for 30 attempts, at about $0.34 each')
     expect(box).toHaveTextContent('sealed (docker) — countable as evidence')
     expect(box).toHaveTextContent('Nothing retained — grades and hashes only')
-    // the button names an estimate, not a cap: the request carries none (F5b)
-    expect(screen.getByRole('button', { name: 'Start the run — estimated $8.16 to $12.24' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /spend up to/ })).not.toBeInTheDocument()
-    expect(box).toHaveTextContent('No spend cap on this run yet. Each attempt is capped on turns, tool calls and wall clock; you can cancel at any point and attempts already made are still charged.')
+    // the button names the estimate AND the cap the request carries (F5b): the cap starts at
+    // the top of the estimate, rounded up to the dollar
+    expect(screen.getByRole('button', { name: 'Start the run — estimated $8.16 to $12.24, stops at $13.00' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Stop the run at $')).toHaveValue(13)
+    expect(box).toHaveTextContent('$13.00 for the whole run. Before each attempt the run counts what it has spent plus what that attempt could cost, and stops if the sum would pass $13.00')
+    expect(box).not.toHaveTextContent('No spend cap')
     expect(within(box).getByRole('link', { name: 'Measure: the money step' })).toHaveAttribute('href', '/help/docs/ONBOARDING-A-REPO#step-4--measure-operator-the-money-step')
     // the kicker counts Home's eight tasks; the back-link names the walk
     expect(screen.getByText('Journey · 1 of 4 · Connection · task 5 of 8 · this step spends money')).toBeInTheDocument()
@@ -73,10 +77,11 @@ describe('MeasurePage', () => {
     await userEvent.click(screen.getByLabelText(/10 attempts/))
     await userEvent.click(screen.getByLabelText('Keep worktrees for failed attempts'))
     expect(box).toHaveTextContent('worktrees kept until deleted')
-    await userEvent.click(screen.getByRole('button', { name: 'Start the run — estimated $2.72 to $4.08' }))
+    // the cap follows the estimate until the operator types one
+    await userEvent.click(screen.getByRole('button', { name: 'Start the run — estimated $2.72 to $4.08, stops at $5.00' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
     const post = calls.find((c) => c.method === 'POST')!
-    expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'cobra', kind: 'replay', mode: 'sighted', builder: 'claude_code', model: 'claude-sonnet-5', builder_config: { auth: 'cli' }, limit: 10, retain: { worktrees: true, transcripts: false } })
+    expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'cobra', kind: 'replay', mode: 'sighted', builder: 'claude_code', model: 'claude-sonnet-5', builder_config: { auth: 'cli' }, limit: 10, retain: { worktrees: true, transcripts: false }, max_cost_usd: 5 })
     expect(box).toHaveTextContent('the operator’s own CLI login (development and evaluation only)')
   })
 
@@ -146,9 +151,49 @@ describe('MeasurePage', () => {
     // an API-role process that skipped the sandbox probe does not claim "sealed"
     expect(box).toHaveTextContent('the worker’s own health check decides')
     expect(box).not.toHaveTextContent('countable as evidence')
-    await userEvent.click(screen.getByRole('button', { name: 'Start the run — estimated $1.90 to $2.86' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Start the run — estimated $1.90 to $2.86, stops at $3.00' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).limit).toBe(7)
+  })
+
+  it('the operator names the spend cap the run is sent with; no amount above $0 disables the button', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': MAP,
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+      'POST /runs': () => json({ id: 'run-3', repo: 'cobra', kind: 'replay', status: 'queued' }, 201),
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const field = await screen.findByLabelText('Stop the run at $')
+    await waitFor(() => expect(field).toHaveValue(13))
+    await userEvent.clear(field)
+    expect(screen.getByTestId('cap-invalid')).toHaveTextContent('Enter an amount above $0')
+    expect(screen.getByRole('button', { name: /Start the run/ })).toBeDisabled()
+    expect(screen.getByTestId('before-you-start')).toHaveTextContent('No valid cap yet')
+    await userEvent.type(field, '9.5')
+    await userEvent.click(screen.getByRole('button', { name: 'Start the run — estimated $8.16 to $12.24, stops at $9.50' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
+    expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).max_cost_usd).toBe(9.5)
+  })
+
+  it('a last replay that stopped itself at its spend cap is said with its reason and its run (F5b)', async () => {
+    const reason = 'spend cap: $9.20 of $10.00 spent; the next attempt could cost an amount no cap of its own bounds, counted at the dearest attempt this run has made, $0.90, which would pass the cap, so the run stopped before it'
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': { ...REPO, last_run: { id: 'run-9', kind: 'replay', status: 'failed', finished: '2026-09-27T10:00:00Z' } },
+      'GET /capability-map': MAP,
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+      'GET /runs/run-9': { id: 'run-9', repo: 'cobra', kind: 'replay', status: 'failed', mode: 'sighted', builder: 'claude_code', model: 'claude-sonnet-5', provider: '', ladder: [], max_cost_usd: 10, executor: 'docker', timeout: 600, pool: '', limit: 30, task_ids: [], builder_config: {}, actor: 'op', created: '2026-09-27T09:00:00Z', started: '2026-09-27T09:00:20Z', finished: '2026-09-27T10:00:00Z', cancel_requested: false, error: reason, cost_usd: 9.2, apparatus_version: '2.3', counts: { tasks: 11, clean: 8, disqualified: 0, errors: 0, first_pass_clean: 8, rows: 11, stopped_reason: reason, stopped_code: 'spend_cap' }, progress: { done: 11, total: 30, current_task_id: null } },
+    })
+    const { container } = renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const banner = await screen.findByRole('region', { name: 'Stopped at its spend cap' })
+    await waitFor(() => expect(banner).toHaveTextContent('The last measurement of cobra stopped itself at its spend cap of $10.00: $9.20 spent over 11 attempts, before an attempt that could have passed it.'))
+    expect(screen.getByTestId('measure-cap-stop-reason')).toHaveTextContent(reason)
+    expect(within(banner).getByRole('link', { name: 'Open the run' })).toHaveAttribute('href', '/runs/run-9')
+    expect(container.querySelector('[data-hint="banner.measure.spend_cap_stop"]')).not.toBeNull()
+    // a stop is not a run in flight: the page still offers the next measurement
+    expect(screen.getByRole('button', { name: /Start the run/ })).toBeEnabled()
   })
 
   it('a repository with no gold-clean task points at stage 3 of the walk and disables the button', async () => {
@@ -194,7 +239,7 @@ describe('MeasurePage', () => {
     const { container } = renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
     await waitFor(() => expect(screen.getByRole('button', { name: /Start the run/ })).toHaveAttribute('data-hint', 'button.measure.start'))
     expect(unhinted(container)).toEqual([])
-    for (const id of ['link.measure.back', 'nav.measure.kicker', 'field.measure.retain_worktrees', 'field.measure.retain_transcripts', 'stat.measure.gold_cap', 'stat.measure.estimate', 'summary.measure.builder', 'link.measure.every_knob', 'summary.measure.budget_cap', 'summary.measure.retention', 'summary.measure.posture']) {
+    for (const id of ['link.measure.back', 'nav.measure.kicker', 'field.measure.spend_cap', 'field.measure.retain_worktrees', 'field.measure.retain_transcripts', 'stat.measure.gold_cap', 'stat.measure.estimate', 'summary.measure.builder', 'link.measure.every_knob', 'summary.measure.budget_cap', 'summary.measure.retention', 'summary.measure.posture']) {
       expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
     }
     // the radio's label is the trigger: the input keeps the tab stop, and focusing it opens the same bubble

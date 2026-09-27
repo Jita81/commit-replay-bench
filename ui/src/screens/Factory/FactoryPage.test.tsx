@@ -15,8 +15,9 @@
  *               sentence is role-aware (a viewer reads "An operator freezes one", no
  *               Freeze button); that "Run the
  *               factory" posts the builder `builderChoice` picks (J-FAC-1 — the 422 a run
- *               without one met), names the estimate and never a cap (F5b), says what it
- *               will spend and where it delivers first, that reached without `?repo=` the
+ *               without one met), names the estimate and, only when one is typed, the spend
+ *               cap it sends as `max_cost_usd` (F5b; no amount above $0 disables it), says
+ *               what it will spend and where it delivers first, that reached without `?repo=` the
  *               latest repository is chosen (as the Baseline) and a viewer is offered no
  *               action on an empty deployment
  *               (J-FAC-2/3), that a refusal's reason reaches the step and the row (J-FAC-4,
@@ -384,10 +385,10 @@ describe('FactoryPage — the shipped contract', () => {
     await waitFor(() => expect(box).toHaveTextContent("this repository's measured mean over n = 40 attempts with a known cost at apparatus 2.2"))
     expect(box).toHaveTextContent('$0.27 to $0.41 for 1 item at about $0.34 each')
     expect(box).toHaveTextContent('1 of 2 will be worked (1 waits on a signed gap); 1 sits in a cell that routes deliver')
-    expect(box).toHaveTextContent('no spend cap yet')
+    expect(box).toHaveTextContent('none on the whole run — set one under Stop the run at')
     expect(box).toHaveTextContent('You can cancel the run at any point. Items already built are still charged.')
     const { default: userEvent } = await import('@testing-library/user-event')
-    // the button names the estimate — never a cap the request does not carry (F5b)
+    // with no cap typed, the button names the estimate only, and the request carries no cap
     await userEvent.click(screen.getByRole('button', { name: 'Run the factory — estimated $0.27 to $0.41' }))
     expect(screen.queryByRole('button', { name: /spend up to/ })).not.toBeInTheDocument()
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
@@ -400,6 +401,24 @@ describe('FactoryPage — the shipped contract', () => {
       builder_config: { auth: 'cli' },
     })
     expect(await screen.findByRole('link', { name: /run ffffffff/ })).toHaveAttribute('href', `/runs/${'f'.repeat(32)}`)
+  })
+
+  it('a spend cap typed in Before you run is named by the button and the Budget cap row, and sent (F5b)', async () => {
+    const { calls } = mockApi(base({ 'POST /runs': () => json({ id: 'e'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued' }, 201) }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent('$0.27 to $0.41 for 1 item'))
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const field = within(screen.getByTestId('factory-spend-cap')).getByLabelText('Stop the run at (USD)')
+    await userEvent.type(field, '0')
+    expect(screen.getByRole('button', { name: /Run the factory/ })).toBeDisabled()
+    await userEvent.clear(field)
+    await userEvent.type(field, '2.5')
+    expect(box).toHaveTextContent('$2.50 for the whole run: before each item the run counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass $2.50')
+    expect(field.closest('[data-hint]')).toHaveAttribute('data-hint', 'field.factory.spend_cap')
+    await userEvent.click(screen.getByRole('button', { name: 'Run the factory — estimated $0.27 to $0.41, stops at $2.50' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
+    expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).max_cost_usd).toBe(2.5)
   })
 
   it('with no ?repo= the most recently updated repository is chosen (as the Baseline); an empty deployment offers Connect to an operator only', async () => {

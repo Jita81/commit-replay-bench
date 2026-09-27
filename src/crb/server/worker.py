@@ -114,7 +114,9 @@ What it does: Polls the job queue, claims one run, dispatches by kind (setup, pr
               grade rows through the append-only ledger with the run's labels stamped,
               records the apparatus, and marks the run succeeded / failed / cancelled
               honestly (all-attempts-errored is a failure; a provider outage streak stops
-              the run; a harness error on one mined candidate skips it). Fetches and
+              the run; so does a spend cap, before an attempt or item that could pass it —
+              src/crb/server/spend_cap.py, ADR-0043; a harness error on one mined candidate
+              skips it). Fetches and
               fast-forwards the clone's default branch before a factory run (refusing the
               run when it cannot) and syncs delivered pull requests' outcomes first. Checks in to the
               ``workers`` table every ``heartbeat_s`` (idle or not, with the reaper's
@@ -297,6 +299,14 @@ from crb.server.settings import (
     IntakeSettings,
 )
 from crb.server.spend import SpendHooks, build_spend_hooks, pack_turns
+from crb.server.spend_cap import (
+    EVENT_SPEND_CAP,
+    STOP_SPEND_CAP,
+    Halt,
+    Spend,
+    SpendCap,
+    item_reserve,
+)
 from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, last_seq
@@ -2170,6 +2180,18 @@ class Worker:
             repo_spend=learning.config_section(K_SECTION, ctx.config.spend),
             checks_arm=checks.arm,
         )
+        # F5b — the run's own spend cap, asked before every attempt (``RunSpec.admit``)
+        cap = SpendCap.from_params(p)
+        halted: list[Halt] = []
+
+        def admit(task: TaskSpec, rung_index: int) -> str:
+            assert cap is not None
+            attempt_cap = budget_for_rung(ladder.rungs[rung_index - 1], budget).max_cost_usd
+            halt = cap.check(Spend.of_rows(self.ledger.rows(run_id=run.id)), reserve=attempt_cap)
+            if halt is not None:
+                halted.append(halt)
+            return halt.reason if halt is not None else ""
+
         spec = RunSpec(
             run_id=run.id,
             config=ctx.config,
@@ -2219,6 +2241,7 @@ class Worker:
             if self.settings.store_patches
             else None,
             escalation_gate=spend.escalation_gate,
+            admit=admit if cap is not None else None,
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
         build_fn = build_fn_for(
@@ -2306,6 +2329,8 @@ class Worker:
         self._progress(ctx, summary.tasks, total)
         self._ledger_health()
         self._learning_tick(run.repo)
+        if halted and not self._cancelled(ctx):
+            return self._spend_cap_stop(ctx, counts, halted[-1])
         if tripped() and not self._cancelled(ctx):
             reason = (
                 f"provider outage: {streak['n']} consecutive attempts refused; "
@@ -2702,11 +2727,32 @@ class Worker:
             return out
 
         loop.run_item = run_item  # type: ignore[method-assign]
+        # F5b — the run's spend cap, asked before every item: an item may take every rung,
+        # once more per rework, so it is reserved at all of them (``item_reserve``)
+        cap = SpendCap.from_params(p)
+        halted: list[Halt] = []
+
+        def stop() -> bool:
+            if self._cancelled(ctx):
+                return True
+            if cap is None:
+                return False
+            spent = Spend.of_rows(self.ledger.rows(run_id=run.id))
+            reserve, attempts = item_reserve(
+                [budget_for_rung(r, budget).max_cost_usd for r in ladder.rungs],
+                spent,
+                max_rework=int(p.get("max_rework", 1)),
+            )
+            halt = cap.check(spent, reserve=reserve, unit="item", attempts=attempts)
+            if halt is not None:
+                halted.append(halt)
+            return halt is not None
+
         outcomes = loop.run_backlog(
             backlog,
             authored=home.authored(),
             expected_hash=backlog.backlog_hash,
-            stop=lambda: self._cancelled(ctx),
+            stop=stop,
         )
         counts["outcomes"] = [o.to_dict() for o in outcomes]
         ctx.counts.clear()
@@ -2714,7 +2760,23 @@ class Worker:
         self._ledger_health()
         if self._cancelled(ctx):
             return STATUS_CANCELLED, counts, ""
+        if halted:
+            return self._spend_cap_stop(ctx, counts, halted[-1])
         return STATUS_SUCCEEDED, counts, ""
+
+    def _spend_cap_stop(
+        self, ctx: RunContext, counts: dict[str, Any], halt: Halt
+    ) -> tuple[str, dict[str, Any], str]:
+        """F5b — the run stopped itself before an attempt or item that could pass its cap:
+        ``failed`` with the reason, ``stopped_code: spend_cap`` and a ``run.spend_cap``
+        event carrying the cap, what was spent and the reserve that did not fit."""
+        counts["stopped_reason"] = halt.reason
+        counts["stopped_code"] = STOP_SPEND_CAP
+        ctx.counts.update(counts)
+        ctx.emit(
+            "system", EVENT_SPEND_CAP, status=StepStatus.SKIPPED, reason=halt.reason, **halt.payload
+        )
+        return STATUS_FAILED, counts, halt.reason
 
     def _test_author(self, ctx: RunContext, ladder: EscalationLadder) -> TestAuthor | None:
         """The run's test author, or ``None`` when this deployment has none.

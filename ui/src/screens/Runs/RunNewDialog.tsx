@@ -184,6 +184,8 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
   const [ladder, setLadder] = useState('r1')
   const [rungs, setRungs] = useState<RungDraft[]>([])
   const [budget, setBudget] = useState<BudgetDraft>(EMPTY_BUDGET)
+  // F5b: the whole run's spend cap, summed over its attempts (blank = no cap on the run)
+  const [spendCap, setSpendCap] = useState('')
   const [builderConfig, setBuilderConfig] = useState('')
   const [limit, setLimit] = useState('')
   const taskIdsKey = (initialTaskIds ?? []).join(', ')
@@ -218,7 +220,8 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
     .map((s) => s.trim())
     .filter(Boolean)
   const ladderEmpty = needsBuilder && labels.length === 0 && rungs.length === 0
-  const valid = repo && (!needsBuilder || (builder && cfg.ok && rungsComplete && !ladderEmpty))
+  const spendCapOk = !spendCap.trim() || Number(spendCap) > 0
+  const valid = repo && (!needsBuilder || (builder && cfg.ok && rungsComplete && !ladderEmpty && spendCapOk))
   const serverExecutor = settings.data?.sandbox_mode || ''
   const builders = settings.data?.builders ?? []
   const cliLogin = cfg.ok && cfg.value.auth === 'cli'
@@ -263,6 +266,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
       if (cfg.ok && Object.keys(cfg.value).length) body.builder_config = cfg.value
       const caps = budgetFromDraft(budget)
       if (caps) body.budget = caps
+      if (spendCap.trim() && Number(spendCap) > 0) body.max_cost_usd = Number(spendCap)
     }
     if (limit) body.limit = Number(limit)
     const ids = parseTaskIds(taskIds)
@@ -394,6 +398,22 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                   />
                 ))}
               </div>
+            </fieldset>
+
+            <fieldset className="space-y-2 rounded-[var(--radius-control)] border border-border p-3 sm:col-span-2" data-testid="run-spend-cap">
+              <legend className="px-1 text-xs font-semibold text-on-surface-body">Spend cap (whole run)</legend>
+              <TextField
+                label="Stop the run at (USD)"
+                hint="field.run_new.spend_cap"
+                type="number"
+                min={0.01}
+                step="0.01"
+                value={spendCap}
+                onChange={(e) => setSpendCap(e.target.value)}
+                placeholder="no cap"
+                description="Summed over every attempt. The run stops before an attempt that could pass it: at that attempt's own cost cap, or at the dearest attempt so far when it has none."
+                error={spendCapOk ? undefined : 'Enter an amount above $0, or leave it blank for no cap on the run.'}
+              />
             </fieldset>
 
             <fieldset className="space-y-2 rounded-[var(--radius-control)] border border-border p-3 sm:col-span-2" data-testid="run-ladder">

@@ -228,6 +228,8 @@ export const ACTION_HELP: Record<string, string> = {
   'run.posture_refused': 'The run stopped before any builder was called: no task was qualified in this posture, the posture moved since qualification, or the first task’s own gold did not grade clean. Nothing was spent.',
   'run.canary': 'The first task’s own gold was graded through the real path before any build; a canary that is not clean stops the run at no cost.',
   'run.environment_stop': 'The run stopped after consecutive attempts failed on the posture, not the patch; their qualifications are revoked.',
+  'run.halted': 'The run did not start its next attempt because a rule it runs under refused it; no worktree was made and no builder was called.',
+  'run.spend_cap': 'The run stopped itself at its spend cap, before an attempt or item that could have taken its spend past it; what it made is graded and kept.',
   'qualify.task': 'A task was measured in this posture — RED, a two-run baseline and the gold — with no model spend; the record says whether it qualified and, if not, why.',
   'qualify.done': 'The qualify run finished: how many tasks are proven in this posture and why the others are not.',
   'run.start': 'The run started.',

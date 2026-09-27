@@ -348,13 +348,17 @@ export const HINTS = {
   'link.measure.every_knob':
     'Open the full run form on Runs to set the builder, model, ladder, budget caps and executor yourself.',
   'summary.measure.budget_cap':
-    'There is no cap on the run’s total spend yet. Each attempt is capped on turns, tool calls and wall clock, and you can cancel at any point.',
+    'The most this run may spend, and how it keeps to it: before each attempt it counts what it has spent plus what that attempt could cost, and stops if the sum would pass the cap. An attempt with no cost cap of its own is counted at the dearest attempt so far.',
+  'field.measure.spend_cap':
+    'The most this measurement may spend, in US dollars. It starts at the top of the estimate; the run stops itself before an attempt that could take its spend past it.',
+  'banner.measure.spend_cap_stop':
+    'The last measurement stopped itself at its spend cap, before an attempt that could have passed it. The attempts it made are graded and kept; start another run to reach the tasks it did not.',
   'summary.measure.retention':
     'What this run will keep beyond grades and hashes, from the two boxes above.',
   'summary.measure.posture':
     'Whether the sandbox that runs the tests is sealed (docker) so the rows count as evidence, or a local executor whose rows are a development reading only.',
   'button.measure.start':
-    'Queue the measurement now. It spends model budget up to the estimate shown; you can cancel from Runs and pay only for attempts made.',
+    'Queue the measurement now. It stops itself at the spend cap shown, and you can cancel from Runs and pay only for attempts made.',
 
   // ── /results — Baseline (screens/Results/ResultsPage.tsx + MapTable.tsx)
   'field.shared.repo_picker':
@@ -570,7 +574,9 @@ export const HINTS = {
   'summary.factory.delivery':
     'Whether a clean build in a deliver cell will open a branch and pull request in the linked repository, and against which branch. Not linked means no pull request can be opened; the reason is under it.',
   'summary.factory.budget_cap':
-    'There is no cap on the run’s total spend yet. The builder’s ladder caps turns, tool calls and wall clock per attempt.',
+    'The most this run may spend, and how it keeps to it: before each item it counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass the cap.',
+  'field.factory.spend_cap':
+    'The most this factory run may spend, in US dollars. The run stops itself before an item that could take its spend past it; blank means no cap on the whole run.',
   'field.factory.deliver':
     'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
   'stat.factory.deliverable':
@@ -584,7 +590,7 @@ export const HINTS = {
   'field.factory.own_model':
     'Optional model id for that builder; blank uses the builder’s default.',
   'button.factory.run':
-    'Queue the factory run now. It spends model budget up to the estimate shown; you can cancel and pay only for items built.',
+    'Queue the factory run now. With a spend cap it stops itself before an item that could pass it; you can cancel and pay only for items built.',
   'button.factory.started_run':
     'The factory run you just queued; open it to watch the loop work the backlog.',
   'item.factory.id':
@@ -1007,6 +1013,8 @@ export const HINTS = {
     'Comma-separated rung labels; each rung is one attempt, and the next runs only if the previous was not clean. Object rungs below are appended in order.',
   'field.run_new.cli_login':
     'Run the builder on the operator’s own subscription login instead of an API key. Developer and evaluation use only; the repository’s CLAUDE.md is auto-discovered in this mode.',
+  'field.run_new.spend_cap':
+    'The most the whole run may spend, in US dollars, summed over its attempts. The run stops itself before an attempt that could take its spend past it. Blank means no cap on the whole run.',
   'field.run_new.budget':
     'The cap per attempt on turns, tool calls, tokens, cost and wall clock. Blank is the builder’s default (shown); 0 tokens or $0 means no cap. Every row is stamped with the tier it ran under.',
   'button.run_new.add_rung':

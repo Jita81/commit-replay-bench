@@ -84,7 +84,7 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Choose how many attempts to buy and what to keep, then start the first sighted measurement. This is the step that spends money, and it says how much before you confirm.',
     next: {
       viewer: 'Only an operator can start a measurement.',
-      operator: 'Pick a number of attempts, decide whether to keep worktrees for failed attempts, then confirm. You can cancel the run from Runs while it is in flight and you pay only for attempts made.',
+      operator: 'Pick a number of attempts, check the spend cap the run will keep, decide whether to keep worktrees for failed attempts, then confirm. You can cancel the run from Runs while it is in flight and you pay only for attempts made.',
     },
     numbers: 'The estimate is a planning band, not a measurement: with no measured mean for this repository it uses the per-attempt range from earlier repositories and carries no apparatus. Once this repository has measured attempts the estimate uses their mean (n shown) with ±20 % around it.',
     terms: ['sighted', 'apparatus', 'evidence_pack', 'cell'],

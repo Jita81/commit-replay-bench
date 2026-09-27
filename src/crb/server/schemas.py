@@ -417,6 +417,9 @@ class RunCounts(BaseModel):
     rows: int = 0
     duration_s: float = 0.0
     stopped_reason: str = ""
+    #: Why the run stopped itself, as a code: ``spend_cap`` when it stopped before an attempt
+    #: or item that could pass its ``max_cost_usd`` (F5b); ``""`` otherwise.
+    stopped_code: str = ""
     #: The run kind's OWN counters when the kind is not a build (replay / blind / factory
     #: keep the RunSummary above): served VERBATIM from the worker's ``counts_json`` —
     #: a mine run's ``{examined, found, gold_clean, gold_dirty, skipped, known, pool}``, a
@@ -565,6 +568,9 @@ class RunOut(BaseModel):
     ladder: list[LadderEntry]
     #: Run-level budget overrides (``params.budget``; ``{}`` when the defaults apply).
     budget: dict[str, Any]
+    #: The run's spend cap (``params.max_cost_usd``, F5b): the most its attempts may cost
+    #: together; ``null`` for a run without one.
+    max_cost_usd: float | None = None
     executor: str
     timeout: int
     pool: str
@@ -643,6 +649,12 @@ class RunCreateRequest(BaseModel):
     #: (:data:`BUDGET_DEFAULTS`); a rung's own ``budget`` overrides these for that rung.
     #: Stored as ``params.budget`` (only the fields set) and stamped into the apparatus.
     budget: RunBudget | None = None
+    #: Build kinds (F5b): the most the run's attempts may cost together, in USD. The worker
+    #: stops the run before an attempt (a factory run: an item) that could take its spend
+    #: past it — ``failed``, ``counts.stopped_code: spend_cap``. Refused (422
+    #: ``spend_cap_unpriced``) when a rung's model has no known price. Stored as
+    #: ``params.max_cost_usd`` only when set.
+    max_cost_usd: float | None = Field(default=None, gt=0, le=1_000_000)
     task_ids: list[str] = Field(default_factory=list, max_length=5000)
     limit: int | None = Field(default=None, ge=1)
     pool: str = ""
@@ -837,6 +849,11 @@ class RunCreateRequest(BaseModel):
             raise ValueError(
                 f"kind {self.kind!r} needs a builder (or a ladder of object rungs "
                 "{builder, model, …}, whose first rung names the run's builder)"
+            )
+        if self.max_cost_usd is not None and self.kind not in BUILD_KINDS:
+            raise ValueError(
+                f"max_cost_usd applies to build runs only ({sorted(BUILD_KINDS)}): a "
+                f"{self.kind!r} run makes no builder attempt"
             )
         return self
 

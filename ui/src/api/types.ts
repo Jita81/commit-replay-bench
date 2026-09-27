@@ -414,6 +414,11 @@ export interface RunCounts {
   errors: number
   first_pass_clean: number
   rows: number
+  /** Why the run ended before its tasks did (`""` when it did not). */
+  stopped_reason?: string
+  /** The same as a code: `spend_cap` when the run stopped itself before an attempt or item
+   *  that could pass its `max_cost_usd` (F5b); `""` otherwise, absent on an older server. */
+  stopped_code?: string
   /** A non-build kind's own counters, verbatim (a mine run's examined / found /
    *  gold_clean / gold_dirty / skipped / known / pool; an oracle, controls or label
    *  run's raw counts object, which may nest); `{}` for build kinds, absent on an
@@ -491,6 +496,9 @@ export interface Run {
   ladder: LadderEntry[]
   /** Run-level budget overrides (`params.budget`; `{}` when the defaults apply). */
   budget?: RunBudget
+  /** The run's spend cap in USD (`params.max_cost_usd`, F5b): the most its attempts may cost
+   *  together; `null` without one, absent on an older server. */
+  max_cost_usd?: number | null
   executor: string
   timeout: number
   pool: string
@@ -534,6 +542,12 @@ export interface RunCreateRequest {
   ladder?: LadderEntry[]
   /** Run-level caps; only the fields set are sent, a rung's own budget overrides them. */
   budget?: RunBudget
+  /**
+   * Build kinds (F5b): the most the run's attempts may cost together, in USD. The worker stops
+   * the run before an attempt (a factory run: an item) that could pass it. Refused 422
+   * `spend_cap_unpriced` when a rung's model has no known price. @contract API.md "POST /runs".
+   */
+  max_cost_usd?: number
   task_ids?: string[]
   limit?: number
   pool?: string

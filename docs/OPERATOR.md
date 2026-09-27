@@ -884,6 +884,12 @@ Stop delivery and investigate before any further sign-off if you observe any of:
   stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
   before the next replay — §7a).
 
+A run that stops itself at its spend cap (`counts.stopped_code: spend_cap`,
+`run.spend_cap`) is not a stop condition: it did what it was told. Its attempts are graded
+and kept, the reason names what was spent and the attempt or item it did not start, and the
+next run reaches the tasks it did not. If a capped run stopped because an attempt's cost was
+not known, price the model in `CRB_PRICING_JSON` before the next one.
+
 **Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
 shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in
 `crb doctor`'s `intake` line. None of them loses work: the next poll retries, and nothing is

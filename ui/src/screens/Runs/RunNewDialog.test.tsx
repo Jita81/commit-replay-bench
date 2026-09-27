@@ -233,6 +233,30 @@ describe('RunNewDialog', () => {
     expect(body.ladder).toEqual(['r1'])
   })
 
+  it('the spend cap for the whole run is sent as max_cost_usd only when typed', async () => {
+    const user = userEvent.setup()
+    const { calls } = setup()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+    const cap = within(screen.getByTestId('run-spend-cap')).getByLabelText('Stop the run at (USD)')
+    expect(cap).toHaveAttribute('placeholder', 'no cap')
+    await user.type(cap, '12.5')
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const body = await postedBody(calls)
+    expect(body.max_cost_usd).toBe(12.5)
+    expect(body).not.toHaveProperty('budget') // the run's cap is not a per-attempt cap
+  })
+
+  it('a spend cap that is not a positive amount keeps Queue run disabled', async () => {
+    const user = userEvent.setup()
+    setup()
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+    const cap = within(screen.getByTestId('run-spend-cap')).getByLabelText('Stop the run at (USD)')
+    await user.type(cap, '0')
+    expect(screen.getByRole('button', { name: 'Queue run' })).toBeDisabled()
+    await user.clear(cap)
+    expect(screen.getByRole('button', { name: 'Queue run' })).toBeEnabled()
+  })
+
   it('omits budget when every cap is blank', async () => {
     const user = userEvent.setup()
     const { calls } = setup()
@@ -241,6 +265,7 @@ describe('RunNewDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Queue run' }))
     const body = await postedBody(calls)
     expect(body).not.toHaveProperty('budget')
+    expect(body).not.toHaveProperty('max_cost_usd')
     expect(budgetFromDraft({ max_turns: '', max_tool_calls: ' ' })).toBeUndefined()
     expect(budgetFromDraft({ max_turns: '3', max_cost_usd: '0.5', max_tokens: 'abc' })).toEqual({ max_turns: 3, max_cost_usd: 0.5 })
   })
