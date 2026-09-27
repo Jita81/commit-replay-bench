@@ -41,13 +41,16 @@ Rules:
   `ui/src/screens/Runs/RunDetailPage.tsx`) and must exist; `scripts/code_map.py --check`
   refuses a dangling link. A path may carry an `#anchor` for Markdown targets.
 - `Works with` names files, never packages, and says WHY in parentheses — that is the
-  hyperlink graph a reader walks. Three to eight entries; the most-read neighbour first.
+  hyperlink graph a reader walks. Three to eight entries; the most-read neighbour first **[aspiration — the standard's rule;
+`scripts/code_map.py` checks that each entry exists, not how many there are]**.
 - `Touch when` is written for the developer onboarding a client repository first, the
   contributor second. If nothing in the file ever changes for a new repository, say so:
   "never for a new repository; …".
 - Prose above the block: keep it. Do not restate the block. Do not pad. A reader should be able
   to read the summary line, the block, and know whether to open the file.
-- Wrap at 100 columns. British English. No marketing.
+- Wrap at 100 columns **[aspiration — the standard's rule; ruff's formatter wraps code at 100
+columns but not a docstring, and the long-line lint rule is off, so nothing checks a header's
+width]**. British English. No marketing.
 
 ## Python example (tail of the module docstring)
 
