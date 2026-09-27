@@ -97,7 +97,7 @@ describe('renderMarkdown', () => {
     const ext = screen.getByRole('link', { name: 'ext' })
     expect(ext).toHaveAttribute('href', 'https://example.org/x')
     expect(ext).toHaveAttribute('rel', 'noopener noreferrer')
-    // the decision records are bundled (DL-077): a guide's and a sibling record's links open them here
+    // the decision records are bundled (DL-073): a guide's and a sibling record's links open them here
     expect(screen.getByRole('link', { name: 'adr' })).toHaveAttribute('href', '/help/docs/ADR-0003')
     expect(screen.getByRole('link', { name: 'sibling' })).toHaveAttribute('href', '/help/docs/ADR-0015')
     expect(screen.getByRole('link', { name: 'up' })).toHaveAttribute('href', '/help/docs/SECURITY')

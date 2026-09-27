@@ -281,7 +281,7 @@ export function useRepo(name: string): UseQueryResult<RepoDetail, ApiError> {
  * baseline in front of them (`POST /repos/{name}/baseline-read` → a `repo.baseline_read`
  * event, once per person). The Baseline screen calls it when the map of a repository with
  * rows has loaded; the repository is then re-read, so Home's task 6 "Read the baseline"
- * completes on a recorded read rather than only on a sign-off (G-165, DL-078). A failed record
+ * completes on a recorded read rather than only on a sign-off (G-165, DL-074). A failed record
  * changes nothing the reader sees — Home keeps reading the task as not yet done.
  */
 export function useRecordBaselineRead(repo: string, ready: boolean): void {

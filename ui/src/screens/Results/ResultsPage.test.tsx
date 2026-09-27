@@ -494,7 +494,7 @@ describe('ResultsPage', () => {
     const { calls } = mockApi({ ...ROUTES, 'POST /repos/alpha/baseline-read': { repo: 'alpha', at: '2026-09-26T09:00:00Z', by: 'u1', rows: 35, recorded: true } })
     const first = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/repos/alpha/baseline-read')).toHaveLength(1))
-    // the repository is re-read, so Home's task 6 sees the record (DL-078)
+    // the repository is re-read, so Home's task 6 sees the record (DL-074)
     await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.path === '/repos/alpha').length).toBeGreaterThan(1))
     first.unmount()
     vi.unstubAllGlobals()

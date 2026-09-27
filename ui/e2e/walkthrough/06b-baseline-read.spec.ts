@@ -18,11 +18,11 @@
  *               nobody has read them, nobody has signed); opens the Baseline screen, which
  *               tells the server it was read (`POST /repos/{name}/baseline-read` answers 201
  *               with `recorded: true` — the first read by this person); and finds task 6
- *               Completed on that record (G-166, G-165, DL-078).
+ *               Completed on that record (G-166, G-165, DL-074).
  * How:          support.ts's signed-in `test` (the bootstrap admin); `primary()`; the POST is
  *               awaited as the page's own response, never sent by the spec.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-078)
+ * ADRs:         none (DL-074)
  * Works with:   ui/src/screens/Home/HomePage.tsx (the task list), ui/src/screens/Results/
  *               ResultsPage.tsx (the page that records the read), src/crb/server/routes/repos.py
  *               (`record_baseline_read`, `baseline_read` on the detail), ui/e2e/walkthrough/
@@ -63,7 +63,7 @@ test.describe('06b baseline read', () => {
     await expect(task(page, 6)).toContainText('Read the baseline')
     await expect(task(page, 6)).toContainText('Incomplete')
 
-    // open the baseline: the Baseline screen tells the server it was read, for the first time (DL-078)
+    // open the baseline: the Baseline screen tells the server it was read, for the first time (DL-074)
     const recorded = page.waitForResponse((r) => r.url().endsWith(`/api/v1/repos/${encodeURIComponent(repo)}/baseline-read`) && r.request().method() === 'POST')
     await page.goto(`/results?repo=${encodeURIComponent(repo)}`)
     const res = await recorded

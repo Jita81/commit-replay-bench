@@ -16,7 +16,7 @@
  * How:          `mockApi` + `renderApp` at the route with `path` for `useParams`; `loadDoc` is
  *               wrapped so a test can make its next call reject, as a failed chunk does.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-077)
+ * ADRs:         none (DL-073)
  * Works with:   ui/src/screens/Help/HelpPage.tsx, ui/src/screens/Help/DocPage.tsx,
  *               ui/src/help/docs.ts (`loadDoc`), ui/src/help/adrs.ts (`ADR_TITLES`)
  * Tested by:    ui/src/screens/Help/HelpPage.test.tsx

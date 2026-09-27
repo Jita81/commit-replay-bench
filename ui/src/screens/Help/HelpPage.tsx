@@ -12,7 +12,7 @@
  * How:          `TERM_IDS` / `TERMS`, `DOC_NAMES` / `DOC_TITLES`, `ADR_TITLES`; on load it
  *               scrolls to `location.hash` so a term link lands on its entry.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-077)
+ * ADRs:         none (DL-073)
  * Works with:   ui/src/help/glossary.ts (the terms), ui/src/help/docs.ts (the guides),
  *               ui/src/help/adrs.ts (the decision records),
  *               ui/src/screens/Help/DocPage.tsx (where a guide link lands),

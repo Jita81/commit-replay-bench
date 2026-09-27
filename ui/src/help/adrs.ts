@@ -5,7 +5,7 @@
  * Why bundle rather than link to the repository: a screen cites an ADR (ADR-0015 on the
  * sign-off, ADR-0016 on the two-person rule) and a reviewer following it must be able to read
  * it where they stand — the repository is private and a deployment may have no egress
- * (docs/SECURITY.md §2), exactly the reason the guides are bundled (DL-077).
+ * (docs/SECURITY.md §2), exactly the reason the guides are bundled (DL-073).
  *
  * Navigation
  * ----------
@@ -19,9 +19,9 @@
  * How:          The glob is resolved by Vite (`../../../docs/adr/…` is the repository's
  *               docs/adr); the dev server reads it through `server.fs.allow` (`../docs`), and
  *               the image build carries it because deploy/Dockerfile.dockerignore re-includes
- *               `docs/adr/*.md` (P-051 — before that the image shipped no guide at all).
+ *               `docs/adr/*.md` (P-106 — before that the image shipped no guide at all).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-077)
+ * ADRs:         none (DL-073)
  * Works with:   ui/src/screens/Help/HelpPage.tsx (lists `ADR_TITLES` as links),
  *               ui/src/screens/Help/DocPage.tsx (renders a record at /help/docs/ADR-nnnn),
  *               ui/src/help/markdown.ts (a guide's `adr/nnnn-….md` link becomes an in-app link),

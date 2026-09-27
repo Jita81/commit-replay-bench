@@ -1,4 +1,4 @@
-"""The image's UI build can see every document the UI bundles (P-051).
+"""The image's UI build can see every document the UI bundles (P-106).
 
 The UI bundles the eight guides and the decision records at build time
 (``ui/src/help/docs.ts``, ``ui/src/help/adrs.ts``: ``import.meta.glob`` over ``../docs``).
@@ -24,7 +24,7 @@ Two artefacts stop the class; this suite pins the first:
 Navigation
 ----------
 What it is:   The prevention test for the class "a build input the UI bundles is missing
-              from the image's build context" (docs/PREVENTION.md P-051).
+              from the image's build context" (docs/PREVENTION.md P-106).
 What it does: Reads ``DOC_NAMES`` from ui/src/help/docs.ts and the record files in docs/adr,
               applies deploy/Dockerfile.dockerignore through a model of Docker's pattern
               matcher, and asserts every one of them is in the context; proves the model
@@ -33,7 +33,7 @@ How:          A regex per ignore pattern (``**`` → any depth, ``*`` / ``?`` �
               segment), evaluated against the path and each of its parent directories, last
               match wins — the rule moby's ``patternmatcher`` implements.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
-ADRs:         none (DL-077)
+ADRs:         none (DL-073)
 Works with:   deploy/Dockerfile.dockerignore (the rule under test), deploy/Dockerfile (the UI
               build stage copies the whole context), ui/plugins/requireBundledDocs.ts (the build
               gate, tested by ui/plugins/requireBundledDocs.test.ts),
@@ -121,7 +121,7 @@ def test_the_image_context_keeps_every_doc_the_ui_bundles() -> None:
 
 
 def test_the_model_catches_the_rule_that_shipped_the_defect() -> None:
-    """The ignore file as it stood before P-051 — ``docs`` with no re-include — loses every
+    """The ignore file as it stood before P-106 — ``docs`` with no re-include — loses every
     bundled file; a model that could not see that would prove nothing above."""
     old = _rules("docs\nscripts\n")
     assert all(excluded(p, old) for p in bundled_paths())

@@ -11,7 +11,7 @@ Navigation
 ----------
 What it is:   The documentation ratchet for event action names.
 What it does: Extracts every action literal from the emit call sites in ``src/crb`` — a
-              literal or a module-level string constant passed in its place (P-052) — (emitter
+              literal or a module-level string constant passed in its place (P-107) — (emitter
               ``emit`` / ``error`` / ``timed``, the core's ``_emit(on_event, "…")`` helpers,
               plain ``on_event("…", …)`` callbacks, ``append_event(action=…)``, the factory
               loop's ``self._emit("…", item_id)``, and the builders' ``builder.``-prefixed
@@ -69,7 +69,7 @@ def _literals(node: ast.AST, consts: dict[str, str] | None = None) -> list[str]:
 
 def _module_constants(tree: ast.Module) -> dict[str, str]:
     """``NAME = "a.b"`` / ``NAME: str = "a.b"`` at module level — a name an emit call may pass
-    as its action (P-052: such an action escaped the ratchet while it read literals only)."""
+    as its action (P-107: such an action escaped the ratchet while it read literals only)."""
     out: dict[str, str] = {}
     for stmt in tree.body:
         if isinstance(stmt, ast.Assign):
@@ -202,7 +202,7 @@ def test_the_walker_sees_every_emit_shape() -> None:
 def test_an_action_named_by_a_module_constant_is_seen(tmp_path: Path) -> None:
     """``action=SOME_CONSTANT`` is how a module names an action it also queries by; the walker
     read literals only, so such an action escaped the table entirely (found 2026-09-26 while
-    adding ``repo.baseline_read``: the ratchet stayed green with no row — P-052)."""
+    adding ``repo.baseline_read``: the ratchet stayed green with no row — P-107)."""
     src = tmp_path / "mod.py"
     src.write_text(
         'READ: str = "demo.read"\n'

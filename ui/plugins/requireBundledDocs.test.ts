@@ -11,15 +11,15 @@
  *               fails naming what is missing when one guide is gone, when docs/adr is empty
  *               or absent, and when `DOC_NAMES` cannot be read; that it passes on this
  *               repository's own docs; and that the config vite builds with lists it — so the
- *               refusal P-051 relies on is proven by what it does, not by the words in the
+ *               refusal P-106 relies on is proven by what it does, not by the words in the
  *               config (the grep this replaced survived its `if (false)` mutation).
  * How:          `mkdtempSync` trees; `buildStart` called with a `this` whose `error` throws, as
  *               Rollup's does; the config imported and its plugins' names read.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-077)
+ * ADRs:         none (DL-073)
  * Works with:   ui/plugins/requireBundledDocs.ts, ui/vite.config.ts, ui/src/help/docs.ts
  *               (`DOC_NAMES`), deploy/Dockerfile.dockerignore (the context the refusal guards),
- *               tests/test_image_bundles_docs.py (the ignore file's half), docs/PREVENTION.md P-051
+ *               tests/test_image_bundles_docs.py (the ignore file's half), docs/PREVENTION.md P-106
  * Tested by:    ui/plugins/requireBundledDocs.test.ts
  * Touch when:   the bundled docs change shape (a new kind of document the UI imports).
  */

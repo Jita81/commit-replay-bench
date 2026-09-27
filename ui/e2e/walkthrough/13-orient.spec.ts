@@ -24,14 +24,14 @@
  *               quotes (G-414). (2) Opens all eight bundled guides on the served bundle and
  *               asserts each renders its own first heading, the file's, and never an error or
  *               "No guide with that name"; then opens a decision record from /help (G-149,
- *               G-156) — each page holding one h1, its header (P-054). Home's task tags on
+ *               G-156) — each page holding one h1, its header (P-109). Home's task tags on
  *               the live stack, and the read that completes task 6, are 06b's: they must be
  *               read before 07 opens the baseline.
  * How:          @playwright/test's own `test` (the journey starts signed out, so it does not
  *               use support.ts's signed-in fixture); `field` / `env` from
  *               support.ts; the guides' first headings read from docs/ with Node's `fs`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-077)
+ * ADRs:         none (DL-073)
  * Works with:   ui/src/screens/Home/HomePage.tsx (the task list), ui/src/screens/Help/HelpPage.tsx
  *               and DocPage.tsx (the glossary, the guides and the records), ui/src/help/help.ts
  *               (the About blocks it asserts), ui/src/screens/Login/LoginPage.tsx (the About
@@ -150,7 +150,7 @@ test.describe('13 orient — sign in and find your way', () => {
       await page.goto(`/help/docs/${name}`)
       const article = page.getByRole('article')
       await expect(article, `${name}: the guide did not render`).toBeVisible()
-      // the page's one h1 is its header; the file's own `#` title is the article's h2 (P-054)
+      // the page's one h1 is its header; the file's own `#` title is the article's h2 (P-109)
       await expect(page.getByRole('heading', { level: 1 }), name).toHaveCount(1)
       await expect(article.getByRole('heading', { level: 2 }).first(), name).toHaveText(firstHeading(name))
       await expect(page.getByText('No guide with that name'), name).toHaveCount(0)

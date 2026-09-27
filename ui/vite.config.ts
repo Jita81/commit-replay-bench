@@ -28,7 +28,7 @@ import { requireBundledDocs } from './plugins/requireBundledDocs'
  *   running it) fails `vite build` when a guide `DOC_NAMES` lists,
  *   or the decision records, are missing from `../docs` — the globs would otherwise resolve to
  *   nothing and ship a Help that cannot open a single guide, which is what the image did while
- *   `deploy/Dockerfile.dockerignore` dropped `docs` (docs/PREVENTION.md P-051).
+ *   `deploy/Dockerfile.dockerignore` dropped `docs` (docs/PREVENTION.md P-106).
  * - Test: vitest with jsdom; `src/test/setup.ts` installs jest-dom matchers; the per-test
  *   timeout is raised from vitest's 5 s default because the `ui-unit` CI job is blocking and
  *   runs on a slower shared runner than a developer's machine (see `test.testTimeout` below).

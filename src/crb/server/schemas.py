@@ -208,7 +208,7 @@ class RepoSummary(BaseModel):
 
 class BaselineRead(BaseModel):
     """The first recorded read of a repository's baseline — the ``repo.baseline_read`` event
-    ``POST /repos/{name}/baseline-read`` appends. Home task 6 completes on it (DL-078)."""
+    ``POST /repos/{name}/baseline-read`` appends. Home task 6 completes on it (DL-074)."""
 
     at: str
     by: str

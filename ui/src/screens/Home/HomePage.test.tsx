@@ -31,7 +31,7 @@
  *               that failed; that every GET the page makes, failed alone, reaches the
  *               envelope (a read added later cannot be missed); and that a failed read never
  *               offers "Continue to the factory" — Continue stops at the task it could not
- *               read (P-053).
+ *               read (P-108).
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
