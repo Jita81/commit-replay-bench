@@ -165,6 +165,7 @@ ALLOWLIST: tuple[str, ...] = (
     "docs/dod/journeys/learn-and-strengthen.md",
     "docs/dod/journeys/orient.md",
     "docs/dod/journeys/prove-the-instrument.md",
+    "docs/dod/journeys/read-the-map-and-decide.md",
 )
 
 #: Generated pages a glob on ``ALLOWLIST`` would take in, and why they are not read: a
