@@ -304,7 +304,7 @@ export async function expectLogAction(page: Page, action: string): Promise<void>
  * Resolve once every finite CSS transition and animation on the page has finished, so an axe
  * sweep reads the colours a person sees, not a frame in between. A button that turns from
  * outlined to filled when its data lands (`transition-colors`) read as a 3.7:1 contrast failure
- * when axe caught it mid-transition (docs/PREVENTION.md P-055). Infinite animations (a
+ * when axe caught it mid-transition (docs/PREVENTION.md P-085). Infinite animations (a
  * spinner) are skipped: they never finish, and their colours do not change.
  */
 export async function settled(page: Page): Promise<void> {

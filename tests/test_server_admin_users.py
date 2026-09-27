@@ -18,7 +18,7 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               and never a password, that those events are ordinary ``events`` rows —
               trigger-protected, not hash-chained (the chain is the ledger's) — and that a
               password set by any door rotates the session nonce, so the old sessions end
-              even when the stored hash does not move (#52's revocation, P-052).
+              even when the stored hash does not move (#52's revocation, P-082).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; a second
               ``TestClient`` on the started app (no second lifespan) where two sessions
               must be told apart; events read straight from the ``events`` table on the

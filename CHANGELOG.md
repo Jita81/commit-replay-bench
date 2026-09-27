@@ -19,7 +19,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   changes their own password. `/login` names who sets a new password and the wait after a 429,
   and a failed organisation sign-in returns to the form with its reason. Every sign-in joins the
   account's trail, retried on a lost race; a name that is no account is stored nowhere
-  (DL-071). A password set rotates the session nonce (DL-072). Walkthrough 13 recovers an
+  (DL-068). A password set rotates the session nonce (DL-069). Walkthrough 13 recovers an
   account, timed.
 
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**

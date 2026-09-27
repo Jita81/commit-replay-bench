@@ -61,7 +61,7 @@
 #               (the ``walkthrough`` job)
 # Tested by:    ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
 #               (the suite it drives — CI runs it end to end), tests/test_walkthrough_serves_this_tree.py
-#               (the refusal to serve another checkout's crb, P-060)
+#               (the refusal to serve another checkout's crb, P-090)
 # Touch when:   a spec needs another ``CRB_E2E_*`` variable (export it in step 4 and document it in
 #               the README); the server or worker CLI flags change; never to inherit an existing
 #               home, database or port.
@@ -102,7 +102,7 @@ if ! "$PY" -c "import crb.server.app" 2>/dev/null; then
 fi
 # The stack must serve THIS checkout's code. A shared editable venv imports crb from whichever
 # tree it was installed from, and the walk would then report another tree's behaviour as this
-# branch's (P-060). PYTHONPATH="$ROOT/src" makes a shared venv serve this tree.
+# branch's (P-090). PYTHONPATH="$ROOT/src" makes a shared venv serve this tree.
 # (crb itself is a namespace package with no __file__, so the check reads a real module's path)
 SERVED="$("$PY" -c 'import crb.server.app as a, os; print(os.path.realpath(os.path.dirname(os.path.dirname(a.__file__))))')"
 HERE="$(cd "$ROOT/src/crb" && pwd -P)"

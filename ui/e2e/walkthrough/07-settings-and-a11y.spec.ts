@@ -57,7 +57,7 @@ const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 const APPROVER = 'walk-approver'
 
 async function axeClean(page: Page, where: string): Promise<void> {
-  await settled(page) // read the settled colours, not a transition's middle frame (P-055)
+  await settled(page) // read the settled colours, not a transition's middle frame (P-085)
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
   expect(results.violations, `${where}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([])
 }

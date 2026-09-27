@@ -20,7 +20,7 @@ What it does: Extracts every action literal from the emit call sites in ``src/cr
               action has its plain sentence in the UI's ``ACTION_HELP``
               (ui/src/lib/verdict.ts) — so the Python half alone fails when a row is added
               without the sentence the live log shows — and that any function forwarding an
-              ``action`` parameter to an emitter is itself walked (P-054).
+              ``action`` parameter to an emitter is itself walked (P-084).
 How:          ``ast`` over ``src/crb/**/*.py``; a regex over the vocabulary section of the doc.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
@@ -52,7 +52,7 @@ EMITTERS = {
     "append_event",
     "append_system_event",
     # the account trail's writer (src/crb/server/routes/admin.py): it forwards ``action`` to
-    # ``append_system_event``, so its callers name the ``user.*`` actions (P-054)
+    # ``append_system_event``, so its callers name the ``user.*`` actions (P-084)
     "record_user_event",
 }
 #: Functions that forward an ``action`` parameter to an emitter but are only ever handed on
@@ -167,7 +167,7 @@ def test_the_vocabulary_table_names_no_ghost_action() -> None:
 
 
 def test_every_function_that_forwards_an_action_is_walked() -> None:
-    """P-054: ``record_user_event(db, action=…)`` forwards its ``action`` to
+    """P-084: ``record_user_event(db, action=…)`` forwards its ``action`` to
     ``append_system_event``, but the walker did not know its name, so every ``user.*`` action
     was emitted with no row in the table and no test noticed. Any function that takes an
     ``action`` parameter and hands it to an emitter is itself an emitter: it must be in

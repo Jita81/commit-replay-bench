@@ -2,7 +2,7 @@
 
 Navigation
 ----------
-What it is:   The regression test for P-060: the walkthrough driver served whatever tree the
+What it is:   The regression test for P-090: the walkthrough driver served whatever tree the
               interpreter's ``crb`` import resolved to, so a worktree run against a shared,
               editable venv walked the OTHER checkout's server and reported its results as
               this branch's.
@@ -18,7 +18,7 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   scripts/walkthrough.sh (the guard under test), .github/workflows/ci.yml (the
               ``walkthrough`` job runs the positive path on an editable install of this tree),
-              docs/PREVENTION.md (P-060, the row this test closes),
+              docs/PREVENTION.md (P-090, the row this test closes),
               tests/test_walkthrough_axe_settles.py (the other test that holds the
               walkthrough's own behaviour)
 Tested by:    tests/test_walkthrough_serves_this_tree.py

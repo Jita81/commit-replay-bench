@@ -20,7 +20,7 @@ What it does: Rate-limits local login per ``(username, ip)`` and per ``ip`` and 
               ``user.role_overridden``) and upserts the user; refuses a disabled account and
               any ``next`` that is not a same-origin path. Every sign-in writes
               ``user.login`` and every refused local one ``user.login_failed`` (a name that
-              is no account: recorded without the name and logged as unknown, DL-071);
+              is no account: recorded without the name and logged as unknown, DL-068);
               every callback failure redirects to ``/login?error=<code>`` from
               ``OIDC_FAILURE_CODES`` (anything else as ``oidc_failed``).
 How:          Thin handlers over src/crb/server/auth.py — ``authenticate_local`` →
@@ -132,7 +132,7 @@ def _commit_audited(db: Session, write: Callable[[], None]) -> None:
 
     Two sign-ins to one account can read the same last ``seq`` on its trace; the loser's
     insert then breaks ``uq_events_trace_seq``. That is a lost race, not a refused sign-in,
-    so the transaction is rolled back and ``write`` runs again on fresh rows (DL-071).
+    so the transaction is rolled back and ``write`` runs again on fresh rows (DL-068).
     """
     for attempt in range(_AUDIT_ATTEMPTS):
         write()
@@ -146,7 +146,7 @@ def _commit_audited(db: Session, write: Callable[[], None]) -> None:
 
 
 def _record_failed_login(db: Session, username: str) -> None:
-    """``user.login_failed`` for one refused local sign-in (DL-071).
+    """``user.login_failed`` for one refused local sign-in (DL-068).
 
     On the account's own trail when the name is a local account (its History shows who
     tried); otherwise one event with NO name on a shared trace — a person who typed their
@@ -216,7 +216,7 @@ def login(
         # One message for every failure: an attacker must not learn which half was wrong.
         limiter.record_failure(body.username, ip)
         # The typed name reaches the log only when it is an account: a password typed into
-        # the username box is never stored, in the log or the audit table (DL-071, P-056).
+        # the username box is never stored, in the log or the audit table (DL-068, P-086).
         known = find_local_user(db, body.username) is not None
         log.info(
             "login failed",

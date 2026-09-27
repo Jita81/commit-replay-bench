@@ -1,6 +1,6 @@
 """Every axe sweep in the live-stack walkthrough reads a settled page — a ratchet.
 
-On 2026-09-26 (docs/PREVENTION.md P-055) the tier-1 walkthrough failed three runs in four on a
+On 2026-09-26 (docs/PREVENTION.md P-085) the tier-1 walkthrough failed three runs in four on a
 colour-contrast violation on `/connect/<repo>`: the Baseline button turns from outlined to
 filled when the walk's data lands, it carries ``transition-colors``, and axe read a frame in
 the middle of the transition (3.7:1). The page a person sees was fine; the sweep was reading a
@@ -24,7 +24,7 @@ ADRs:         none
 Works with:   ui/e2e/walkthrough/support.ts (``settled`` — the wait itself),
               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts and
               13-recover-an-account.spec.ts (the sweeps that call it), docs/PREVENTION.md
-              (P-055, G-988 — the two sweeps still to move)
+              (P-085, G-988 — the two sweeps still to move)
 Tested by:    (this is a test file)
 Touch when:   you add an axe sweep to a walkthrough spec (call ``settled`` first), or move
               one of the ``UNSETTLED`` specs onto ``settled`` (remove it from the list).
@@ -69,7 +69,7 @@ def test_every_axe_sweep_waits_for_a_settled_page() -> None:
     new = {name: lines for name, lines in unsettled.items() if name not in UNSETTLED}
     assert not new, (
         "an axe sweep reads the page before its transitions finish — call "
-        f"`await settled(page)` (ui/e2e/walkthrough/support.ts) first (P-055): {new}"
+        f"`await settled(page)` (ui/e2e/walkthrough/support.ts) first (P-085): {new}"
     )
 
 

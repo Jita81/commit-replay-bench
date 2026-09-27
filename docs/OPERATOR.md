@@ -957,11 +957,11 @@ admin's user id, or `cli:<os user>`) and the target; never the password. The His
 an actor by the account's username; an actor whose account has since been deleted keeps its id. Each sign-in is one
 too: `user.login`, and `user.login_failed` with the actor `anonymous` — a refused name that
 is no account here is recorded without the name, and the server log writes it as
-`(not an account)`, so a password typed into the username box is stored in neither (DL-071). `GET /users/{id}/events`
+`(not an account)`, so a password typed into the username box is stored in neither (DL-068). `GET /users/{id}/events`
 serves that trace, and the Users card's **History** button renders it under the account, so who
 reset or disabled an account is read in the product and not only in the database. Setting a
 password ends the account's sessions on their next request (it rotates the session nonce the
-cookie is bound to, DL-072 —
+cookie is bound to, DL-069 —
 [SECURITY.md §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
 
 **Signing out ends the session everywhere.** Signing out (`POST /auth/logout`, the
