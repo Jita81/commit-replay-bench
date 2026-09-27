@@ -70,6 +70,7 @@ from typing import Any
 
 import pytest
 
+import docker_wait
 from crb.builders import adapter
 from crb.builders.base import Budget, EscalationLadder, Rung
 from crb.builders.container import (
@@ -320,8 +321,8 @@ def test_scripted_builder_in_container_grades_clean(
     # the sealed checkout and the containers are gone
     assert not list((sandbox_root / "scratch").glob("*-sealed"))
     for prefix in ("crb-build-", "crb-proxy-"):
-        left = _docker("ps", "-a", "-q", "--filter", f"name={prefix}{task.short_id}").stdout
-        assert left.strip() == ""
+        # --rm removal runs in the daemon after the session exits: a bounded wait (P-052)
+        assert docker_wait.gone(f"{prefix}{task.short_id}"), f"{prefix} container leaked"
 
 
 def test_the_cell_seen_from_inside(
@@ -508,7 +509,7 @@ def test_no_allowlist_means_no_network_and_no_sidecar(sealed: SealedCheckout) ->
         )
         (line,) = [ln for ln in handle.lines() if ln.strip()]
     assert line != "open"
-    assert _docker("ps", "-a", "-q", "--filter", f"name={session.proxy_name}").stdout.strip() == ""
+    assert docker_wait.gone(session.proxy_name)
 
 
 # ---------------------------------------------------------------------------
@@ -526,11 +527,9 @@ def test_sidecar_that_cannot_start_fails_closed(sealed: SealedCheckout) -> None:
     session = ContainerSession(_settings(proxy_image=NO_PYTHON_IMAGE), sealed, label="badproxy")
     with pytest.raises(SandboxUnavailable, match=r"egress proxy (unhealthy|start failed)"):
         session.__enter__()
-    # nothing is left behind
-    assert _docker("ps", "-a", "-q", "--filter", f"name={session.proxy_name}").stdout.strip() == ""
-    assert (
-        _docker("network", "ls", "-q", "--filter", f"name={session.network}").stdout.strip() == ""
-    )
+    # nothing is left behind (a bounded wait: the teardown's removals finish in the daemon)
+    assert docker_wait.gone(session.proxy_name)
+    assert docker_wait.network_gone(session.network)
 
 
 def test_cancel_kills_the_container(sealed: SealedCheckout) -> None:
@@ -545,7 +544,7 @@ def test_cancel_kills_the_container(sealed: SealedCheckout) -> None:
         list(it)
         assert time.monotonic() - started < 30
         assert handle.cancelled and not handle.timed_out
-        assert _docker("ps", "-q", "--filter", f"name={session.build_name}").stdout.strip() == ""
+        assert docker_wait.gone(session.build_name, running_only=True)
 
 
 def test_wall_clock_kills_the_container(sealed: SealedCheckout) -> None:
@@ -555,7 +554,7 @@ def test_wall_clock_kills_the_container(sealed: SealedCheckout) -> None:
         list(handle.lines())
         assert time.monotonic() - started < 30
         assert handle.timed_out and not handle.cancelled
-        assert _docker("ps", "-q", "--filter", f"name={session.build_name}").stdout.strip() == ""
+        assert docker_wait.gone(session.build_name, running_only=True)
 
 
 def test_spawn_refuses_any_other_cwd(sealed: SealedCheckout, tmp_path: Path) -> None:

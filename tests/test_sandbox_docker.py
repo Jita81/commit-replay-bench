@@ -33,7 +33,8 @@ What it does: Pins that the executor is hardened, that ``qualify`` and ``grade``
               ``/work/hacked.txt`` writes only a throwaway copy, that
               the host worktree is byte-identical after a sandboxed run, and that a cancel /
               the wall clock on ``run()`` ends in a daemon-confirmed ``docker kill`` of the
-              container (``kill_confirmed`` True, nothing reported, ``docker ps`` empty).
+              container (``kill_confirmed`` True, nothing reported, gone from ``docker ps``
+              within tests/docker_wait.py's bounded wait, P-052).
               Never falls back to in-process execution — that is ``SandboxUnavailable``'s job.
 How:          ``crb-test-py:local`` built once per session from an inline Dockerfile
               (``python:3.12-slim`` + pytest), or the present image ``CRB_TEST_SANDBOX_IMAGE``
@@ -68,6 +69,7 @@ from pathlib import Path
 
 import pytest
 
+import docker_wait
 from crb.core.execution import (
     TREE_COPY_MARKER,
     TREE_COPY_RC,
@@ -353,16 +355,6 @@ def test_the_copy_fails_closed_on_a_path_it_cannot_read_never_drops_it(trial, ex
 # ---------------------------------------------------------------------------
 
 
-def _ps(name: str) -> str:
-    return subprocess.run(
-        ["docker", "ps", "-aq", "--filter", f"name={name}"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    ).stdout.strip()
-
-
 def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
     """``run()`` under a cancel token flipped mid-command: rc 130, ``cancelled``,
     ``kill_confirmed`` True (the daemon reported the container not running), the container
@@ -383,7 +375,9 @@ def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.cancelled and r.returncode == 130 and not r.timed_out and not r.ok
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
-    assert _ps(r.container) == ""
+    # --rm removal runs in the daemon after the kill returns: a bounded wait, never an
+    # instant read (docs/PREVENTION.md P-052)
+    assert docker_wait.gone(r.container), f"container {r.container} still listed: leaked"
 
 
 def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
@@ -399,7 +393,30 @@ def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.timed_out and not r.cancelled and r.returncode == 124
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
-    assert _ps(r.container) == ""
+    # --rm removal runs in the daemon after the kill returns: a bounded wait, never an
+    # instant read (docs/PREVENTION.md P-052)
+    assert docker_wait.gone(r.container), f"container {r.container} still listed: leaked"
+
+
+def test_the_gone_check_still_catches_a_container_that_is_left_behind():
+    """The bounded wait tolerates ``--rm``'s background removal and nothing more: a
+    container that stays behind is still reported as leaked."""
+    name = f"crb-leak-probe-{uuid.uuid4().hex[:10]}"
+    started = subprocess.run(
+        ["docker", "run", "-d", "--name", name, "--pull=never", IMAGE, "sleep", "30"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert started.returncode == 0, started.stderr
+    try:
+        # a real docker ps under a loaded runner can take longer than a second; the
+        # container sleeps 30 s, so 10 s still proves "left behind reads as leaked" (#60)
+        assert docker_wait.gone(name, within_s=10.0) is False
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=60)
+    assert docker_wait.gone(name) is True
 
 
 def test_a_command_that_reads_no_tree_runs_in_an_empty_scratch(trial, executor):
