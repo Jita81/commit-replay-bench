@@ -17,9 +17,11 @@ Navigation
 What it is:   The ``/flow`` route module — the endpoint each screen reads its own stream's lead
               time, spend and counts from.
 What it does: Resolves the repository (404 when unknown), loads its rows, sign-offs and factory
-              events, folds them with ``build_flow``, and re-types the reading into
-              ``FlowOut``. A viewer may read it; the deployment's account figures are
-              served to an admin only (as ``GET /admin/users`` is); nothing here writes.
+              events, reads the go-live checklist (``read_golive`` — the platform stream's
+              count of proven, attested and unproven lines), folds them with
+              ``build_flow``, and re-types the reading into ``FlowOut``. A viewer may read it;
+              the deployment's account figures are served to an admin only (as
+              ``GET /admin/users`` is); nothing here writes.
 How:          ``get_repo_or_404`` → ``DbLedger(factory).rows(repo=…)`` →
               ``load_signoff_records`` → ``FactoryHome(settings.home, repo).events()`` →
               ``build_flow`` → ``FlowOut.model_validate(reading.to_dict())``.
@@ -30,6 +32,7 @@ Works with:   src/crb/server/flow.py (``build_flow`` — every rule lives there)
               src/crb/server/routes/signoffs.py (``load_signoff_records``),
               src/crb/server/factory_state.py (``FactoryHome.events``),
               src/crb/server/routes/repos.py (``get_repo_or_404``),
+              src/crb/server/routes/golive.py (``read_golive``),
               ui/src/api/hooks.ts (``useFlow`` — the one client that reads it),
               docs/API.md (the "Flow" section — the contract this route serves)
 Tested by:    tests/test_server_routes_flow.py
@@ -41,12 +44,13 @@ Claims:       Every duration and spend here is derived from records already writ
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from crb.server.auth import ViewerDep
 from crb.server.deps import DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.flow import build_flow
+from crb.server.routes.golive import read_golive
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
 from crb.server.schemas_flow import FlowOut
@@ -64,6 +68,8 @@ _ERR = {"model": ErrorEnvelope}
     summary="Each value stream's own lead time, spend and counts, derived from stored records",
 )
 def flow(
+    request: Request,
+    *,
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
@@ -79,5 +85,7 @@ def flow(
         signoffs=load_signoff_records(db, repo),
         factory_events=FactoryHome(settings.home, repo).events(),
         admin=ROLE_RANK.get(viewer.role, -1) >= ROLE_RANK["admin"],
+        # the platform stream counts the go-live lines as /golive reads them (G-584)
+        golive=read_golive(request, db, factory, settings).counts(),
     )
     return FlowOut.model_validate(reading.to_dict())

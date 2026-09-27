@@ -108,6 +108,8 @@ export const HINTS = {
     'What a clean grade licenses at this strength: clears the bar (a branch and pull request under review), review-gated (a person reviews before anything opens), or needs a human (the tests are too weak for a green to mean anything).',
   'review.verdict':
     'The standing human review of this row: OK, or the worst finding recorded (regression, defect, API change, style). Not reviewed means someone looked and could not review. A review is advisory to a person; it never changes a route.',
+  'nav.deploy_position':
+    'Where this screen sits in going live: sign in, Settings, Deployment, then Home. It is part of running the platform — deploying, going live, operating and recovering — and the host install before sign-in is step 0.',
   'nav.journey_position':
     'Where this screen sits on the four-step journey: connect a repository, earn its baseline, decide what waits on a person, run the factory. The number is a position, not progress.',
 
@@ -781,6 +783,16 @@ export const HINTS = {
     'How evidence leaves the system: JSONL export and evidence packs by hash.',
   'link.posture.settings':
     'Where an admin changes this value; the row above says what it should be.',
+  'button.posture.print':
+    'Opens the browser’s print dialogue. The printed page leaves out the menus and the help, and keeps every row with its source and the versions in the footer.',
+  'stat.posture.golive_counts':
+    'How many lines of the go-live checklist stand now: proven by a check this product ran when the page loaded, or attested by a named admin. The rest are unproven, each with the reason.',
+  'summary.posture.golive_line':
+    'One line of the go-live checklist, with its state now, why, and where that state comes from. A line the product proves is never ticked by hand.',
+  'pill.posture.golive_state':
+    'Proven: the product ran the check and it passed. Attested: an admin recorded doing it, with the day and what was done; the product did not check it. Unproven: neither yet.',
+  'link.posture.attest':
+    'Settings, where an admin records that this act was done, or withdraws a record that no longer holds.',
 
   // ── /repos (screens/Repos/ReposPage.tsx)
   'button.repos.add':
@@ -1724,6 +1736,22 @@ export const HINTS = {
     'Go back to Home: the task list shows the account you just created, and the next task.',
   'link.settings.created_connect':
     'Go on to Connection to connect a repository, the next step once the people who approve are set up.',
+  'tile.settings.attestations':
+    'The go-live acts only the operator can do. Recording one names you, the day it was done and what was done; the Deployment page then shows it as attested.',
+  'field.settings.attest_line':
+    'The go-live line you are recording. Only the acts the product cannot see are listed; the lines it proves by its own check cannot be attested.',
+  'field.settings.attest_day':
+    'The day the act was done, not today unless it was. It cannot be in the future.',
+  'field.settings.attest_statement':
+    'What was done and where its evidence is kept, in up to 500 characters — for example the ticket that holds the test output. A reviewer reads these words.',
+  'button.settings.attest':
+    'Records the attestation as one event naming you. The line then reads attested on the Deployment page until someone withdraws it.',
+  'button.settings.withdraw':
+    'Asks before ending this attestation, for when the act no longer holds (a new image, a failed restore).',
+  'button.settings.withdraw_confirm':
+    'Ends the attestation. The line reads unproven again, and the withdrawal is itself on record.',
+  'button.settings.withdraw_keep':
+    'Closes the question and keeps the attestation.',
   'tile.settings.my_password':
     'Change the password of the account you are signed in as. This browser stays signed in; every other session of the account ends.',
   'field.settings.my_current_password':
@@ -1831,7 +1859,8 @@ export const MIN_HINTS: Record<string, number> = {
   '/signoff': 30,
   '/factory': 28,
   '/factory/intake': 16,
-  '/posture': 23,
+  // the five groups plus the go-live checklist (both its lists) and the print control
+  '/posture': 39,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants
   '/repos/:name': 21,

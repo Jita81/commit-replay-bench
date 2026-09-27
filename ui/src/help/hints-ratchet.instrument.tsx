@@ -41,6 +41,7 @@ import { REGISTER } from '../screens/Learn/register.fixture'
 import { LedgerPage } from '../screens/Ledger/LedgerPage'
 import { OraclePage } from '../screens/Oracle/OraclePage'
 import { PosturePage } from '../screens/Posture/PosturePage'
+import { GOLIVE } from '../test/golive'
 import { RepoDetail } from '../screens/Repos/RepoDetail'
 import { ReposPage } from '../screens/Repos/ReposPage'
 import { RoutingPage } from '../screens/Routing/RoutingPage'
@@ -537,7 +538,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/posture',
     path: '/posture',
     element: <PosturePage />,
-    api: { 'GET /version': VERSION, 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'degraded', detail: 'no worker has checked in', data: {} }, { name: 'toolchains', status: 'ok', detail: 'python 3.12', data: {} }, { name: 'append_only', status: 'ok', detail: 'triggers present', data: {} }] }, 'GET /settings': SETTINGS, 'GET /ledger/verify': LEDGER_VERIFY, 'GET /github/app': GITHUB_APP, 'GET /repos': REPOS, 'GET /flow': FLOW },
+    api: { 'GET /version': VERSION, 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'degraded', detail: 'no worker has checked in', data: {} }, { name: 'toolchains', status: 'ok', detail: 'python 3.12', data: {} }, { name: 'append_only', status: 'ok', detail: 'triggers present', data: {} }] }, 'GET /settings': SETTINGS, 'GET /ledger/verify': LEDGER_VERIFY, 'GET /github/app': GITHUB_APP, 'GET /repos': REPOS, 'GET /flow': FLOW, 'GET /golive': GOLIVE },
     roles: ['viewer', 'admin'],
   },
   '/repos': {
@@ -609,7 +610,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/settings',
     path: '/settings',
     element: <SettingsPage />,
-    api: { 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'ok', detail: 'worker-1 alive', data: {} }] }, 'GET /version': VERSION, 'GET /settings': SETTINGS, 'GET /users': USERS, 'GET /settings/secrets': SECRETS, 'GET /github/app': GITHUB_APP },
+    api: { 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'ok', detail: 'worker-1 alive', data: {} }] }, 'GET /version': VERSION, 'GET /settings': SETTINGS, 'GET /users': USERS, 'GET /settings/secrets': SECRETS, 'GET /github/app': GITHUB_APP, 'GET /golive': GOLIVE },
     roles: ['viewer', 'operator', 'admin'],
   },
   '/tasks/:repo/:taskId': {
@@ -659,7 +660,22 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
     open: async () => {
       await screen.findByTestId('settings-sandbox-mode')
     },
-    minHints: 58,
+    // the configuration, the Users card and the go-live attestations card (ADR-0045)
+    minHints: 67,
+  },
+  {
+    // ADR-0045: the go-live attestations card, with Withdraw's question open — its two buttons are a state of their own
+    name: '/settings as admin + go-live attestation Withdraw confirm',
+    route: '/settings',
+    path: '/settings',
+    element: <SettingsPage />,
+    api: INSTRUMENT_SCREENS['/settings']!.api,
+    roles: ['admin'],
+    open: async () => {
+      await userEvent.click(await screen.findByTestId('withdraw-egress-denied'))
+      await screen.findByTestId('withdraw-confirm-egress-denied')
+    },
+    minHints: 68,
   },
   {
     // G-922: Remove token asks before it deletes — the question's two buttons are a state of their own

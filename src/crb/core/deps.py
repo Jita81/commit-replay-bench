@@ -159,7 +159,8 @@ REFUSALS: Mapping[str, tuple[str, str]] = {
     PROVISION_LOCK_UNSUPPORTED: (
         SCOPE_TASK,
         "this lockfile format is not provisioned in this version (go.work, yarn, pnpm, "
-        "poetry, uv, pylock, npm lockfileVersion 1); commit a supported lock or use the "
+        "Pipfile.lock, npm lockfileVersion 1); commit a supported lock — a pinned "
+        "requirements file, uv.lock, poetry.lock or pylock.toml for Python — or use the "
         "local posture",
     ),
     PROVISION_PRIVATE_MODULE: (
@@ -196,9 +197,10 @@ REFUSALS: Mapping[str, tuple[str, str]] = {
     ),
     BUNDLE_INTEGRITY: (
         SCOPE_RUN,
-        "a sealed dependency set no longer matches its digest: `crb deps verify` names it; "
-        "delete that set's directory from the store and the next run fetches and seals it "
-        "again",
+        "a sealed dependency set no longer matches its digest and is never used again: a run "
+        "moves it to the store's .quarantine directory and revokes every qualification that "
+        "cites it (crb deps verify --quarantine does the same between runs); run again with "
+        "qualify first on and the set is fetched and sealed afresh — nothing to delete by hand",
     ),
 }
 
@@ -257,9 +259,19 @@ class ProvisionRefused(RuntimeError):
     carries it, and ``code`` / ``scope`` / ``message`` / ``fix`` / ``doc`` read it.
     ``scope == "run"`` stops the run; ``"task"`` skips the task."""
 
-    def __init__(self, code: str | Refusal, message: str = "", *, fix: str = "") -> None:
+    def __init__(
+        self,
+        code: str | Refusal,
+        message: str = "",
+        *,
+        fix: str = "",
+        keys: Sequence[str] = (),
+    ) -> None:
         r = code if isinstance(code, Refusal) else refusal(code, message, fix=fix)
         self.refusal = r
+        #: The sealed sets the refusal names (``BUNDLE_INTEGRITY``: the damaged ones), so a
+        #: caller that keeps records can revoke what cites them (G-966).
+        self.keys: tuple[str, ...] = tuple(keys)
         self.code = r.code
         self.scope = r.scope
         self.message = r.message

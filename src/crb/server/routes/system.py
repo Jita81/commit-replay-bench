@@ -134,6 +134,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.core.ledger import BELT_SET_V3_LEGACY, BELT_SET_V5, LedgerIntegrityError
 from crb.core.routing import POLICY_VERSION
 from crb.core.secrets_file import SecretsError
+from crb.core.signoff import SIGNOFF_POLICY_VERSION
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import build_stamp, metrics, probes
@@ -847,14 +848,24 @@ def prometheus_metrics(factory: SessionFactoryDep, settings: SettingsDep) -> Res
     return Response(content=metrics.render(), media_type=CONTENT_TYPE_LATEST)
 
 
+#: The package's licence — pyproject.toml's ``license`` (tests/test_server_app.py pins the
+#: two together, so the Deployment page never states a licence the package does not carry).
+LICENCE = "Apache-2.0"
+
+
 @router.get("/version", summary="Package, apparatus and routing-policy versions")
 def version(request: Request) -> dict[str, Any]:
-    """Package, apparatus and routing-policy versions plus uptime — what a claim cites."""
+    """Package, apparatus and routing-policy versions plus uptime — what a claim cites.
+    ``belt_set``, ``signoff_policy`` and ``licence`` are the values in force, so the
+    Deployment page reads them rather than stating them (G-212)."""
     started = float(getattr(request.app.state, "started_at", 0.0) or 0.0)
     return {
         "crb": __version__,
         "apparatus": APPARATUS_VERSION,
         "policy": POLICY_VERSION,
+        "belt_set": BELT_SET_V5,
+        "signoff_policy": SIGNOFF_POLICY_VERSION,
+        "licence": LICENCE,
         "uptime_s": int(time.time() - started) if started else 0,
         # whether an organisation sign-in exists is a fact the login page and the posture
         # page both need before anyone is signed in; it names no provider and no secret
@@ -864,6 +875,7 @@ def version(request: Request) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_ROLE",
+    "LICENCE",
     "MIGRATE_FIX",
     "ROLES",
     "ROLE_ALL",

@@ -168,7 +168,8 @@ def test_the_env_unloadable_fix_holds_whether_provisioning_is_on_or_off() -> Non
     ON, and the fix said to switch it on. The sentence now names both cases."""
     fix = qmod.QUAL_TEXT[qmod.QUAL_ENV_UNLOADABLE]
     assert "switch provisioning on if it is off" in fix
-    assert "crb deps verify" in fix and "delete any set it names" in fix
+    assert "crb deps verify --quarantine" in fix and "revokes what cites it" in fix
+    assert "delete" not in fix  # the product recovers a damaged set; nobody deletes one (G-966)
 
 
 # ---------------------------------------------------------------------------

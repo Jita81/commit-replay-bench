@@ -26,9 +26,10 @@ Works with:   src/crb/core/qualify.py (``qualify_task``, ``context_for``, ``Gold
               provider the bindings come from), src/crb/server/worker.py (the caller:
               replay, blind, oracle, controls), src/crb/core/run.py (``RunSpec.context_for``
               consumes the contexts)
-Tested by:    tests/test_worker.py, tests/test_run.py
-Touch when:   a run kind starts grading (give it the gate); a posture-level stop is added
-              (its code in ``crb.core.qualify`` and ADR-0019's table first).
+Tested by:    tests/test_worker.py, tests/test_run.py, tests/test_provision_quarantine.py
+Touch when:   never for a new repository; a run kind starts grading (give it the gate); a
+              posture-level stop is added (its code in ``crb.core.qualify`` and ADR-0019's
+              table first).
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from crb.core.deps import DepsProvider, TaskDeps
+from crb.core.deps import BUNDLE_INTEGRITY, DepsProvider, ProvisionRefused, TaskDeps
 from crb.core.execution import Executor
 from crb.core.git import GitRepo
 from crb.core.grade import ENV_CODE_GOLD_CONTROL_RED, MODE_SIGHTED, GradeContext, grade
@@ -296,6 +297,36 @@ class PostureGate:
             max_chars=1000,
         )
 
+    def revoke_citing(self, keys: Sequence[str], reason: str) -> int:
+        """A sealed set failed its digest and the provider quarantined it (G-966): revoke every
+        qualification in force that cites it — in the store when the gate has one, and in this
+        run's own view — so no task is graded on a qualification measured on bytes that are
+        gone. Emits ``provision.revoked``; returns how many records were revoked."""
+        why = redact_and_cap(reason, max_chars=300)
+        revoked: list[Qualification] = []
+        if self.session_factory is not None:
+            with self.session_factory() as s:
+                revoked = store_q.revoke_citing(
+                    s, keys, BUNDLE_INTEGRITY, self.actor or "worker", why, run_id=self.run_id
+                )
+        wanted = set(keys)
+        for tid, q in list(self.qualifications.items()):
+            cited = {str(k) for k in dict(q.deps).get("keys") or []}
+            if q.is_qualified and cited & wanted:
+                self.qualifications[tid] = Qualification.from_dict(
+                    {
+                        **q.to_dict(),
+                        "qualification_id": "",
+                        "state": "revoked",
+                        "code": BUNDLE_INTEGRITY,
+                        "message": why,
+                        "fingerprint": "",
+                    }
+                )
+        if self.on_event is not None:
+            self.on_event("provision.revoked", {"keys": list(keys), "revoked": len(revoked)})
+        return len(revoked)
+
     def on_environment(self, task: TaskSpec, row: GradeRow) -> None:
         """``RunSpec.on_environment``: the trial's gold control was red in this posture —
         the posture moved under the qualification, so it is revoked (a new record, never an
@@ -368,7 +399,12 @@ class PostureGate:
                 f"{code_view(POSTURE_UNQUALIFIED)['fix']}"
             )
         deps = self.deps_for(task)
-        self.provider.verify(deps)
+        try:
+            self.provider.verify(deps)
+        except ProvisionRefused as exc:
+            if exc.code == BUNDLE_INTEGRITY and exc.keys:
+                self.revoke_citing(exc.keys, exc.message)
+            raise
         witness = GoldWitness(
             self.repo,
             self.config,

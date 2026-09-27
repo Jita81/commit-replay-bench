@@ -12,7 +12,8 @@ ADRs:         none
 Works with:   src/crb/cli/commands/deps.py (under test), src/crb/provision/store.py (the store),
               src/crb/core/deps.py (the refusal codes and fixes the commands print)
 Tested by:    tests/test_cli_deps.py
-Touch when:   a ``crb deps`` subcommand is added or its output changes.
+Touch when:   never for a new repository; a ``crb deps`` subcommand is added or its output
+              changes.
 """
 
 from __future__ import annotations
@@ -56,7 +57,9 @@ def test_ls_verify_and_gc(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
     target.chmod(0o444)
     assert main(["deps", "verify", "--store", str(store.root)]) == 1
     out = capsys.readouterr().out
-    assert f"FAIL {K2}: BUNDLE_INTEGRITY" in out and "delete that set" in out
+    # the fix names the product's own recovery (G-966), never a directory to delete by hand
+    assert f"FAIL {K2}: BUNDLE_INTEGRITY" in out and "crb deps verify --quarantine" in out
+    assert "delete that set" not in out
     assert main(["deps", "gc", "--store", str(store.root), "--max-gb", "0", "--keep", K2]) == 0
     assert "removed 1 set(s)" in capsys.readouterr().out
     assert [s.key for s in store.sets()] == [K2]

@@ -282,6 +282,9 @@ BASE_URL="http://127.0.0.1:$PORT"
 # openable — a listener may not be switched on without it
 export CRB_PUBLIC_URL="$BASE_URL"
 
+# the wall clock from the first command to a /health that answers: Step 0's machine time on
+# this single-host shape, printed so docs/DEPLOYMENT.md §8.1 cites a reading, not a guess (G-321)
+BOOT_T0="$("$PY" -c 'import time; print(time.time())')"
 "$CRB" migrate >"$API_LOG" 2>&1
 
 "$CRB" serve --host 127.0.0.1 --port "$PORT" >>"$API_LOG" 2>&1 &
@@ -298,7 +301,8 @@ done
 curl -fsS "$BASE_URL/api/v1/health" >/dev/null || { echo "walkthrough: API never became healthy" >&2; exit 2; }
 if ! kill -0 "$WORKER_PID" 2>/dev/null; then echo "walkthrough: worker exited early" >&2; exit 2; fi
 
-echo "walkthrough: stack up at $BASE_URL (home $CRB_HOME, repo $REPO_URL)" >&2
+BOOT_S="$("$PY" -c "import time; print(f'{time.time() - $BOOT_T0:.1f}')")"
+echo "walkthrough: stack up at $BASE_URL in ${BOOT_S} s from migrate to an answering /health (home $CRB_HOME, repo $REPO_URL)" >&2
 
 # --- 4. what the specs need ----------------------------------------------------------------
 export CRB_E2E_BASE_URL="$BASE_URL"

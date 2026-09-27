@@ -25,7 +25,8 @@ Navigation
 What it is:   The pure half of dependency provisioning: lockfile readers over git objects, the
               refusal rules, the content-addressed bundle key and the closure selector.
 What it does: Reads ``go.mod``/``go.sum`` (and a local replace target's ``go.mod``),
-              pinned ``requirements*.txt`` (following ``-r``) or ``runner_opts.deps_lock``,
+              pinned ``requirements*.txt`` (following ``-r``), a ``uv.lock``, ``poetry.lock``
+              or PEP 751 ``pylock.toml`` (DL-125) or ``runner_opts.deps_lock``,
               and ``package.json`` + ``package-lock.json`` at a commit; refuses every source
               the ADR refuses; computes the bundle keys; says which set a trial selects.
 How:          ``GitRepo.show_blob`` / ``tree_names`` → per-language parser → ``LockInputs``
@@ -40,9 +41,9 @@ Works with:   src/crb/core/deps.py (the seam types and the refusal vocabulary),
               Node lockfile, for the host's eras), src/crb/core/spec.py (``RepoConfig.runner`` and
               ``runner_opts``)
 Tested by:    tests/test_provision.py
-Touch when:   a lock format becomes provisioned (a parser here, a recipe under
-              src/crb/provision/, and a row in docs/DEPLOYMENT.md §3.4); never for a new
-              repository — its lockfiles are read as committed.
+Touch when:   never for a new repository — its lockfiles are read as committed; a lock
+              format becomes provisioned (a parser here, a recipe under src/crb/provision/,
+              and a row in docs/DEPLOYMENT.md §3.4).
 """
 
 from __future__ import annotations
@@ -321,7 +322,8 @@ _PY_SOURCE_OPTS = (
     "--trusted-host",
     "--no-index",
 )
-_PY_ALT_LOCKS: tuple[str, ...] = ("uv.lock", "poetry.lock", "pylock.toml", "Pipfile.lock")
+#: Python locks this version still refuses (uv, poetry and pylock are read since DL-125).
+_PY_ALT_LOCKS: tuple[str, ...] = ("Pipfile.lock",)
 
 
 @dataclass(frozen=True)
@@ -436,6 +438,196 @@ def _py_declares(reader: _Reader) -> bool:
     return bool(project.get("dependencies")) or bool(project.get("optional-dependencies"))
 
 
+# ---------------------------------------------------------------------------
+# Python — the structured locks (uv, poetry, PEP 751 pylock): read into the same pinned,
+# hashed ``PyPin`` set a requirements lock gives, so one recipe fetches all four (DL-125)
+# ---------------------------------------------------------------------------
+
+#: A PEP 751 lock's file name: ``pylock.toml`` or ``pylock.<name>.toml``.
+_PYLOCK = re.compile(r"pylock(?:\.[A-Za-z0-9_-]+)?\.toml")
+
+
+def _structured_lock(name: str) -> str:
+    """``uv`` / ``poetry`` / ``pylock`` for a structured lock's file name, else ``""``."""
+    base = posixpath.basename(name)
+    if base == "uv.lock":
+        return "uv"
+    if base == "poetry.lock":
+        return "poetry"
+    if _PYLOCK.fullmatch(base):
+        return "pylock"
+    return ""
+
+
+def _sha256s(values: Iterable[object]) -> tuple[str, ...]:
+    """The ``sha256:<hex>`` hashes among ``values`` (anything else is left out, never guessed)."""
+    out: list[str] = []
+    for v in values:
+        text = str(v or "").strip()
+        m = re.fullmatch(r"sha256[:=]([0-9a-fA-F]{64})", text)
+        if m and f"sha256:{m.group(1).lower()}" not in out:
+            out.append(f"sha256:{m.group(1).lower()}")
+    return tuple(out)
+
+
+def _or_markers(markers: Iterable[str]) -> str:
+    """``(a) or (b)`` over distinct non-empty markers; ``""`` when there are none."""
+    uniq = list(dict.fromkeys(m.strip() for m in markers if m and m.strip()))
+    if not uniq:
+        return ""
+    return uniq[0] if len(uniq) == 1 else " or ".join(f"({m})" for m in uniq)
+
+
+def _and_markers(*markers: str) -> str:
+    parts = [m.strip() for m in markers if m and m.strip()]
+    if len(parts) <= 1:
+        return parts[0] if parts else ""
+    return " and ".join(f"({m})" for m in parts)
+
+
+def _edge_markers(edges: Iterable[tuple[str, str]], names: Iterable[str]) -> dict[str, str]:
+    """name → the marker under which some package needs it: the OR of its incoming edges'
+    markers, or ``""`` when any edge needs it unconditionally (or nothing names it)."""
+    incoming: dict[str, list[str]] = {}
+    for target, marker in edges:
+        incoming.setdefault(re.sub(r"[-_.]+", "-", target).lower(), []).append(marker)
+    out: dict[str, str] = {}
+    for name in names:
+        ms = incoming.get(re.sub(r"[-_.]+", "-", name).lower(), [])
+        out[name] = "" if not ms or any(not m for m in ms) else _or_markers(ms)
+    return out
+
+
+def _pin(name: str, version: object, hashes: tuple[str, ...], marker: str, where: str) -> PyPin:
+    v = str(version or "").strip()
+    if not name or not v or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+!_-]*", v):
+        raise ProvisionRefused("PROVISION_UNPINNED", f"{where}: {name or '?'} has no exact version")
+    return PyPin(name, v, hashes, f"; {marker}" if marker else "", where)
+
+
+def _inside_repo(rel: object) -> bool:
+    text = str(rel or "").strip()
+    return (
+        bool(text)
+        and not text.startswith(("/", "\\"))
+        and ".." not in posixpath.normpath(text).split("/")
+    )
+
+
+def _uv_pins(doc: Mapping[str, Any], path: str) -> list[PyPin]:
+    """``uv.lock``: every registry package, hashed from its wheels and sdist. The project and
+    its workspace members (``editable`` / ``virtual`` / a ``directory`` inside the tree) are
+    the repository's own code, never fetched; a git, URL or outside path source is refused."""
+    packages = [p for p in doc.get("package") or [] if isinstance(p, Mapping)]
+    edges: list[tuple[str, str]] = []
+    for pkg in packages:
+        groups: list[Any] = [pkg.get("dependencies") or []]
+        for table in ("optional-dependencies", "dev-dependencies"):
+            groups += list(dict(pkg.get(table) or {}).values())
+        for group in groups:
+            for dep in group or []:
+                if isinstance(dep, Mapping) and dep.get("name"):
+                    edges.append((str(dep["name"]), str(dep.get("marker") or "")))
+    reach = _edge_markers(edges, [str(p.get("name") or "") for p in packages])
+    pins: list[PyPin] = []
+    for i, pkg in enumerate(packages):
+        name = str(pkg.get("name") or "")
+        where = f"{path}:package[{i}] {name}"
+        source = dict(pkg.get("source") or {})
+        local = [k for k in ("editable", "virtual", "directory", "path") if k in source]
+        if local:
+            if all(_inside_repo(source[k]) for k in local) and "path" not in source:
+                continue  # the project or a workspace member: the repository's own code
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED", f"{where}: a path source ({source}) is not fetched"
+            )
+        if "git" in source or "url" in source or ("registry" not in source and source):
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED", f"{where}: a git or URL source is refused"
+            )
+        files = [pkg.get("sdist") or {}, *(pkg.get("wheels") or [])]
+        hashes = _sha256s(f.get("hash") for f in files if isinstance(f, Mapping))
+        forks = _or_markers(str(m) for m in pkg.get("resolution-markers") or [])
+        pins.append(_pin(name, pkg.get("version"), hashes, _and_markers(reach[name], forks), where))
+    return pins
+
+
+def _poetry_pins(doc: Mapping[str, Any], path: str) -> list[PyPin]:
+    """``poetry.lock``: every package, hashed from its ``files``; a ``legacy`` source (a
+    private index) is fetched from the configured index like any other, a git, URL, file or
+    directory source is refused."""
+    packages = [p for p in doc.get("package") or [] if isinstance(p, Mapping)]
+    edges: list[tuple[str, str]] = []
+    for pkg in packages:
+        for dep, spec in dict(pkg.get("dependencies") or {}).items():
+            specs = spec if isinstance(spec, list) else [spec]
+            for one in specs:
+                marker = str(one.get("markers") or "") if isinstance(one, Mapping) else ""
+                edges.append((str(dep), marker))
+    reach = _edge_markers(edges, [str(p.get("name") or "") for p in packages])
+    pins: list[PyPin] = []
+    for i, pkg in enumerate(packages):
+        name = str(pkg.get("name") or "")
+        where = f"{path}:package[{i}] {name}"
+        source = dict(pkg.get("source") or {})
+        kind = str(source.get("type") or "")
+        if kind and kind != "legacy":
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED", f"{where}: a {kind} source is refused"
+            )
+        own = pkg.get("markers")
+        if isinstance(own, Mapping):
+            own = _or_markers(str(v) for v in own.values())
+        marker = str(own or "") or reach[name]
+        hashes = _sha256s(f.get("hash") for f in pkg.get("files") or [] if isinstance(f, Mapping))
+        pins.append(_pin(name, pkg.get("version"), hashes, marker, where))
+    return pins
+
+
+def _pylock_pins(doc: Mapping[str, Any], path: str) -> list[PyPin]:
+    """A PEP 751 ``pylock.toml``: every package from an index, hashed from its wheels and
+    sdist; a ``vcs``, ``directory`` or ``archive`` package is refused."""
+    version = str(doc.get("lock-version") or "")
+    if not version.startswith("1."):
+        raise ProvisionRefused(
+            "PROVISION_LOCK_UNSUPPORTED", f"{path}: lock-version {version or '?'} is not 1.x"
+        )
+    pins: list[PyPin] = []
+    for i, pkg in enumerate(p for p in doc.get("packages") or [] if isinstance(p, Mapping)):
+        name = str(pkg.get("name") or "")
+        where = f"{path}:packages[{i}] {name}"
+        other = [k for k in ("vcs", "directory", "archive") if k in pkg]
+        if other:
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED", f"{where}: a {other[0]} source is refused"
+            )
+        files = [pkg.get("sdist") or {}, *(pkg.get("wheels") or [])]
+        hashes = _sha256s(
+            f"sha256:{dict(f.get('hashes') or {}).get('sha256', '')}"
+            for f in files
+            if isinstance(f, Mapping)
+        )
+        pins.append(_pin(name, pkg.get("version"), hashes, str(pkg.get("marker") or ""), where))
+    return pins
+
+
+def parse_structured_lock(reader: _Reader, path: str) -> tuple[list[LockFile], list[PyPin]]:
+    """Read one uv, poetry or pylock lock at ``path`` through git objects."""
+    norm = posixpath.normpath(path)
+    data = reader.blob(norm)
+    if data is None:
+        raise ProvisionRefused("PROVISION_NO_LOCK", f"{norm} is not committed at this commit")
+    try:
+        doc = tomllib.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ProvisionRefused(
+            "PROVISION_LOCK_UNSUPPORTED", f"{norm} is not a readable TOML lock: {exc}"
+        ) from exc
+    kind = _structured_lock(norm)
+    reader_fn = {"uv": _uv_pins, "poetry": _poetry_pins, "pylock": _pylock_pins}[kind]
+    return [LockFile(norm, data)], reader_fn(doc, norm)
+
+
 def _read_python(
     reader: _Reader, config: RepoConfig
 ) -> tuple[str, tuple[LockFile, ...], tuple[PyPin, ...]]:
@@ -449,12 +641,18 @@ def _read_python(
         else sorted(n for n in names if re.fullmatch(r"requirements[\w.-]*\.txt", n))
     )
     if not paths:
+        structured = [n for n in ("uv.lock", "poetry.lock") if n in names] + sorted(
+            n for n in names if _PYLOCK.fullmatch(n)
+        )
+        if structured:
+            paths = structured[:1]
+    if not paths:
         alt = [n for n in _PY_ALT_LOCKS if n in names]
         if alt:
             raise ProvisionRefused(
                 "PROVISION_LOCK_UNSUPPORTED",
                 f"{alt[0]} is not provisioned in this version; commit a pinned requirements "
-                "lock (or name one in runner_opts.deps_lock)",
+                "lock, a uv.lock, poetry.lock or pylock.toml (or name one in runner_opts.deps_lock)",
             )
         if _py_declares(reader):
             raise ProvisionRefused(
@@ -466,7 +664,10 @@ def _read_python(
     pins: list[PyPin] = []
     seen: set[str] = set()
     for p in paths:
-        f, pn = parse_requirements(reader, p, seen=seen)
+        if _structured_lock(p):
+            f, pn = parse_structured_lock(reader, p)
+        else:
+            f, pn = parse_requirements(reader, p, seen=seen)
         files += f
         pins += pn
     if not pins:
@@ -849,6 +1050,7 @@ __all__ = [
     "lang_of",
     "parse_go_mod",
     "parse_requirements",
+    "parse_structured_lock",
     "select_role",
     "tree_lock_key",
 ]

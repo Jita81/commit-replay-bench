@@ -126,6 +126,7 @@ server and never appear in logs or `/settings`.
 | `CRB_PROVISION__ALLOW_PUBLIC` | api, worker | `false` (default): with `CRB_ENV=prod` a public registry (proxy.golang.org, sum.golang.org, pypi.org, files.pythonhosted.org, registry.npmjs.org) is refused at start-up (`PROVISION_PUBLIC_REGISTRY`) |
 | `CRB_PROVISION__GO_IMAGE` / `__PYTHON_IMAGE` / `__NODE_IMAGE` | worker | the fetch images; default the sandbox images' own bases, pinned by digest. In prod a reference without `@sha256:` is refused (`PROVISION_FETCH_IMAGE_UNPINNED`); pre-pull them (the worker never pulls) |
 | `CRB_PROVISION__PROXY_IMAGE` / `__EGRESS_NETWORK` | worker | the image the fetch's allowlisting proxy sidecar runs on (needs `python3`; default the builder's proxy image) and the docker network it reaches the registry on (default `bridge`) |
+| `CRB_PROVISION__MIRROR_CREDENTIAL_ENV` | worker | the NAME of a worker environment variable that holds your private mirror's credential as `user:password` (for example `CORP_MIRROR_AUTH`, set from your secret store) — never the credential itself, which is refused at start-up. Only a networked fetch to a registry that is not public carries it, written inside the fetch container to the file its toolchain reads (`.netrc` for pip and Go, `.npmrc` for npm); a test container and a builder never receive it ([SECURITY §3.1.1](SECURITY.md#311-dependency-provisioning--crbcoredeps-crbprovision-adr-0019)). A named variable that is not set stops the fetch with the variable's name |
 | `CRB_PROVISION__CA_BUNDLE` | worker | a CA bundle for a TLS-intercepting mirror, mounted read-only into the fetch |
 | `CRB_PROVISION__MAX_BUNDLE_MB` / `__MAX_TOTAL_GB` / `__FETCH_TIMEOUT_S` | worker | one set's size cap (`PROVISION_TOO_LARGE`, default 2048), the store's cap for `crb deps gc` (default 20) and a fetch's wall clock (default 900 s) |
 | `CRB_FACTORY__TEST_AUTHOR` | api, worker | the factory's test-author rung — `builder:model[:provider]`, the same spelling as a build rung, or empty / `none` (the default) for no author. With no author, an item nobody wrote a failing test for stops `no_oracle`; with one, that rung writes the test. **The author rung and the build rung are never the same rung**: a label that is also on a run's ladder is refused before anything is built. A run may override it (`POST /runs {test_author}`) |
@@ -331,7 +332,8 @@ stream D read 4 from the deployment's ledger export, which is not committed — 
 - the result is sealed under `CRB_PROVISION__STORE` (on the work volume; the `dind` sidecar
   sees it at the same path) and mounted **read-only** into the test container, which keeps
   `--network=none`: Go's modules at `/deps/gomod` with `GOPROXY=off` (one cache for the
-  parent's and the gold's modules), Python's wheels installed with no network at
+  parent's and the gold's modules), Python's wheels (from a pinned requirements file, a `uv.lock`, a `poetry.lock` or a PEP 751
+  `pylock.toml`, each read into the same pinned, hashed set; DL-125) installed with no network at
   `/deps/site`, Node's `node_modules` from `npm ci --ignore-scripts` at `/work/node_modules`;
 - every stop is a code with a fix, served as `{code, message, fix, doc}`:
 
@@ -343,7 +345,7 @@ stream D read 4 from the deployment's ledger export, which is not committed — 
 | `PROVISION_STORE_NOT_VISIBLE` | run | put `CRB_PROVISION__STORE` where the daemon can bind-mount it (under colima: your home; under `dind`: the work volume) |
 | `PROVISION_UNSUPPORTED_LANGUAGE` | run | JVM and Rust: the local posture only in this version |
 | `PROVISION_NO_LOCK`, `PROVISION_UNPINNED`, `PROVISION_SOURCE_REFUSED`, `PROVISION_BUILD_REQUIRED`, `PROVISION_LOCK_UNSUPPORTED`, `PROVISION_PRIVATE_MODULE`, `PROVISION_TOOLCHAIN_TOO_OLD`, `PROVISION_FETCH_FAILED`, `PROVISION_TOO_LARGE`, `PROVISION_UNSAFE_OUTPUT`, `PROVISION_TREE_SHADOWS_SET` | task | a fact about that commit's lockfiles or the registry; the message names the file, the line, the host or the setting |
-| `BUNDLE_INTEGRITY` | run | a sealed set no longer matches its digest: `crb deps verify` names it; delete that set's directory from the store and the next run fetches and seals it again. Nothing removes the damaged set or revokes the qualifications that cite it for you yet **[gap]** (G-966) |
+| `BUNDLE_INTEGRITY` | run | a sealed set no longer matches its digest. The run stops before any builder is called, moves the set to `<store>/.quarantine/<lang>/<key>.<time>` with a record of why (a `provision.quarantined` event), and revokes every qualification that cites it (`provision.revoked`); the damaged bytes are never mounted again and stay for whoever investigates. Run again with qualify first on and the set is fetched and sealed afresh. Between runs, `crb deps verify --quarantine` does the same (G-966). Nothing is deleted by hand |
 
 Switch it on in this order: mirror the registries inside the tenant (or allow the public
 ones deliberately), pre-pull the three fetch images and the proxy image into the worker's
@@ -630,43 +632,98 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
 
 ## 8. Go-live checklist
 
-- [ ] The running image is a released digest: `deploy/verify-image.sh <version> --digest
-      sha256:<pinned>` passes (§2.2) and the digest is what `image.digest` / `CRB_IMAGE` says.
-- [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
+Each line below is one of two kinds, and the product shows every line's state on the
+Deployment page (`/posture`, read from `GET /api/v1/golive`) so a review board reads the state,
+not a ticked list:
+
+- **product proves** — the product runs the check itself each time the page is read. The
+  line is *proven* while the check passes and *unproven*, with what failed, while it does not.
+  Nobody can attest a line of this kind: an attestation cannot stand in for a check the
+  product runs (`409 proven_by_product`).
+- **operator attests** — only you can do it, on your own infrastructure. The product cannot
+  see it, so it reads *unproven* until an admin records it on Settings → Go-live attestations
+  (`PUT /api/v1/settings/attestations/{line}`): what was done, the day it was done, and the
+  admin's name. It then reads *attested*, with that record, until someone withdraws it. Each
+  record is one `golive.attested` event; nothing is ever edited.
+
+**Not here.** Going live does not connect a repository ([ONBOARDING Step 1](ONBOARDING-A-REPO.md#step-1--register-the-repository-developer-30-minutes)),
+recover an account ([OPERATOR §9](OPERATOR.md#9-users)) or measure anything; those are other
+journeys. The product performs none of the *operator attests* acts below: the egress test, the
+backup rehearsal, the digest check, the alert rules and the penetration test are yours.
+
+- [ ] **`image-digest`** · operator attests — The running image is a released digest:
+      `deploy/verify-image.sh <version> --digest sha256:<pinned>` passes (§2.2) and the
+      digest is what `image.digest` / `CRB_IMAGE` says.
+- [ ] **`health-green`** · product proves — `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
       `database at <rev> = code head` — its contract is
       [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
       line. `append_only` proves an
       UPDATE refused, `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
-      worker owns it; prove it with `crb doctor` on the worker host).
-- [ ] `crb doctor` on the API host and on the worker host: every line `ok`, or `warn` for a
+      worker owns it; prove it with `crb doctor` on the worker host). The line is proven
+      only while every probe is `ok` or `skipped`.
+- [ ] **`doctor`** · operator attests — `crb doctor` on the API host and on the worker host: every line `ok`, or `warn` for a
       reason you have written down; no `fail`. It covers what `/health` cannot see from
       inside a pod — the GitHub App's installations, the secrets directory mode, the
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
-- [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
+- [ ] **`ledger-verified`** · product proves — `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`.
+- [ ] **`row-hash-recorded`** · operator attests — The last `row_hash`
       (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
-- [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
+- [ ] **`sign-in`** · product proves — OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
       bootstrap admin password has been rotated (`PUT /users/{id}/password`, or
       `crb users set-password <admin>` on the API host) or the account deactivated
       (`PUT /users/{id}/active {"active": false}` / `crb users deactivate <admin>` —
       possible once another active admin exists, for example the first OIDC sign-in
       from an `CRB_OIDC__ADMIN_GROUPS` member); `CRB_BOOTSTRAP_ADMIN__*` unset
-      ([OPERATOR.md §9](OPERATOR.md#9-users)).
-- [ ] Egress test from a worker pod fails to any public address.
-- [ ] `crb repo probe <repo>` is green inside the sandbox for every configured repository.
-- [ ] Provisioning points at your mirror and `crb repo qualify` is green for every
+      ([OPERATOR.md §9](OPERATOR.md#9-users)). The product proves it from what it holds:
+      an organisation account has signed in (the live proof that OIDC works), local
+      sign-in is off, no bootstrap admin is configured, and every active local admin has
+      had its password set since it was created.
+- [ ] **`egress-denied`** · operator attests — Egress test from a worker pod fails to any public address.
+- [ ] **`repo-probe`** · operator attests — `crb repo probe <repo>` is green inside the sandbox for every configured repository.
+- [ ] **`repos-qualified`** · product proves — Provisioning points at your mirror and `crb repo qualify` is green for every
       repository: the `provision` line of `crb doctor` on the worker host is `ok` (store
       visible to the daemon, fetch images present, egress network present), and each
       repository with dependencies qualifies in the sealed posture before its first replay.
-- [ ] Backups: PITR enabled; a restore has been rehearsed and verified against the chain.
-- [ ] `false_q1 == 0` and `crb_false_q1_total == 0` on the dashboards, with an alert on any
-      non-zero value ([OPERATOR.md §8](OPERATOR.md#8-stop-conditions)).
-- [ ] The reverse proxy limits `POST /api/v1/auth/login` per client address (for example
+      The product proves it while every connected repository has a task qualified in a
+      docker posture and the `provision` probe is not `down`.
+- [ ] **`backups-pitr`** · operator attests — Backups: PITR enabled; a restore has been rehearsed and verified against the chain.
+- [ ] **`false-q1-alert`** · operator attests — `false_q1 == 0` and `crb_false_q1_total == 0` on the dashboards, with an alert on any
+      non-zero value ([OPERATOR.md §8](OPERATOR.md#8-stop-conditions)). The zero itself is
+      proven by `ledger-verified`; the alert rule is yours.
+- [ ] **`login-rate-limit`** · operator attests — The reverse proxy limits `POST /api/v1/auth/login` per client address (for example
       ingress-nginx `nginx.ingress.kubernetes.io/limit-rpm: "20"` on a path-scoped ingress,
       or `limit_req` on `/api/v1/auth/login`). This is required: the product's own limiter
       (five failures a minute per username and address, twenty per address) lives in the
       memory of one API process, so it does not see the other replicas or survive a restart
       ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
+- [ ] **`sealed-posture`** · product proves — Tests and the builder both run sealed in docker
+      (`CRB_SANDBOX__EXECUTOR=docker`, `CRB_BUILDER__EXECUTOR=docker`; §3.4 and ADR-0023):
+      the `posture` of `GET /api/v1/health` reads `sealed: true`.
+- [ ] **`penetration-test`** · operator attests — A penetration test of this deployment has been done and its findings handled
+      ([SECURITY §5](SECURITY.md#5-what-this-document-does-not-claim) says what the
+      documentation does not claim in its place).
+
+### 8.1 Record what only you can prove
+
+On Settings, the Go-live attestations card lists the *operator attests* lines. For each act
+you have done, write what was done and where its evidence is kept (for example "egress to
+1.1.1.1 from worker-0 timed out; transcript in change ticket CHG-1042"), give the day it was
+done, and choose *Record attestation*. The Deployment page then shows the line as attested,
+with your name, that day and your words. *Withdraw* ends an attestation that no longer holds
+(a new image, a restore that failed); the line reads unproven again and the withdrawal is
+itself on record. Only an admin can record or withdraw, and the day of an act cannot be in
+the future.
+
+**Time and money.** Nothing on this checklist starts a run, so Step 0 buys no attempts: it
+spends £0 of model money. The one model call on the way is *Verify* on a stored Claude Code
+token, a single no-tool turn that an admin chooses to make, billed to that token's own
+subscription. On the single-host evaluation shape the machine's part took 8.5 seconds, from
+`crb migrate` on an empty database to the first `/health` that answered **[measured — n = 1
+boot; method: `scripts/walkthrough.sh --trace off` prints the wall clock from `crb migrate` to
+the first answering `/health` (the API and the worker started on SQLite, a fresh
+`CRB_HOME`), on the operator's 16 GB Mac mini on 2026-09-27; apparatus 2.3]**. **[gap]** A
+Compose or Helm install, with the operator's own decisions, has not been timed (G-321).
 
 ## 9. Observability
 

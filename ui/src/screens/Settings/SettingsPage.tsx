@@ -7,8 +7,9 @@
  * What it is:   The screen at /settings: `HealthCard` (every probe with its verdict and the
  *               versions), the Claude Code login card, the GitHub App card, "Change my
  *               password" for the account the reader is signed in as, and for admins the
- *               redacted configuration (`GET /settings`) and the Users card (the account
- *               lifecycle: role, active, password, audit trail, create).
+ *               redacted configuration (`GET /settings`), the Users card (the account
+ *               lifecycle: role, active, password, audit trail, create) and the Go-live
+ *               attestations card (the operator's own acts on DEPLOYMENT §8, recorded).
  * What it does: Describes the instrument honestly and never leaks a secret: a builder is
  *               reported as configured or not, the retention settings are shown as returned,
  *               sandbox mode / ledger backend / apparatus / policy are named. Non-admins see
@@ -24,6 +25,8 @@
  *               ui/src/screens/Settings/GitHubAppCard.tsx,
  *               ui/src/screens/Settings/UsersCard.tsx (the admin\'s account lifecycle),
  *               ui/src/screens/Settings/ChangeMyPasswordCard.tsx (the self-service door),
+ *               ui/src/screens/Settings/AttestationsCard.tsx (go-live attestations),
+ *               ui/src/lib/deployJourney.ts (the eyebrow: the go-live journey's step 2),
  *               src/crb/server/routes/admin.py (settings and users),
  *               src/crb/observability/probes.py (the probes the health card lists)
  * Tested by:    ui/src/screens/Settings/SettingsPage.test.tsx (the roles guide link, the
@@ -43,7 +46,9 @@ import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { useAuth } from '../../lib/auth'
+import { deployEyebrow } from '../../lib/deployJourney'
 import { probeDisplay } from '../../lib/verdict'
+import { AttestationsCard } from './AttestationsCard'
 import { ChangeMyPasswordCard } from './ChangeMyPasswordCard'
 import { ClaudeCodeLoginCard } from './ClaudeCodeLoginCard'
 import { GitHubAppCard } from './GitHubAppCard'
@@ -102,7 +107,7 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Instrument · Settings" title="Settings" purpose="Non-secret configuration, the instrument's health, your own password and — for admins — accounts. Secrets are never returned by the API and never shown here; a builder is reported as configured or not, nothing more — the Claude Code login card reports at most the last four characters of a stored token, and a password is sent once and never shown back." />
+      <PageHeader eyebrow={deployEyebrow('/settings')} title="Settings" purpose="Non-secret configuration, the instrument's health, your own password and — for admins — accounts. Secrets are never returned by the API and never shown here; a builder is reported as configured or not, nothing more — the Claude Code login card reports at most the last four characters of a stored token, and a password is sent once and never shown back." />
       <HealthCard />
       <ChangeMyPasswordCard />
       <ClaudeCodeLoginCard />
@@ -180,6 +185,7 @@ export function SettingsPage() {
             </QueryBoundary>
           </Card>
           <UsersCard />
+          <AttestationsCard />
         </>
       ) : (
         <Card title="Configuration">
