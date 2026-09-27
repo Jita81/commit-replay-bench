@@ -156,21 +156,8 @@ ROOT = Path(__file__).resolve().parent.parent
 #: The pages this gate reads. It only grows (see the module docstring).
 ALLOWLIST: tuple[str, ...] = (
     "README.md",
-    "docs/RELEASING.md",
-    "docs/CONTRIBUTING.md",
-    "docs/SUMMARY.md",
+    "docs/*.md",
     "docs/reviews/2026-09-25-value-baseline.md",
-    "docs/SECURITY.md",
-    "docs/DEPLOYMENT.md",
-    "docs/OPERATOR.md",
-    "docs/ARCHITECTURE.md",
-    "docs/EVIDENCE-AND-CLAIMS.md",
-    "docs/REPRODUCING-THE-CENSUS.md",
-    "docs/LEARNING-LOOP.md",
-    "docs/ONBOARDING-A-REPO.md",
-    "docs/API.md",
-    "docs/GITHUB-APP.md",
-    "docs/FILE-HEADER-STANDARD.md",
 )
 
 #: Generated pages a glob on ``ALLOWLIST`` would take in, and why they are not read: a

@@ -231,15 +231,18 @@ def test_check_exits_non_zero_and_the_default_report_exits_zero(
 
 
 def test_the_repository_itself_passes_the_gate() -> None:
-    """The allowlist is not aspirational: every file on it is clean on this tree."""
+    """The allowlist is not aspirational: every file on it is clean on this tree, and every
+    glob on it matches at least one page."""
     assert cc.check_tree(ROOT, cc.ALLOWLIST) == []
-    assert all((ROOT / rel).exists() for rel in cc.ALLOWLIST)
+    pages, empty = cc.expand(ROOT, cc.ALLOWLIST)
+    assert empty == [] and all((ROOT / rel).is_file() for rel in pages)
 
 
 def test_the_allowlist_only_grows() -> None:
     """A page that has been cleaned never leaves the gate. CONTRIBUTING joined when PR #51's
     review found a verdict claim there that the evidence did not support."""
-    assert {"README.md", "docs/RELEASING.md", "docs/CONTRIBUTING.md"} <= set(cc.ALLOWLIST)
+    pages, _ = cc.expand(ROOT, cc.ALLOWLIST)
+    assert {"README.md", "docs/RELEASING.md", "docs/CONTRIBUTING.md"} <= set(pages)
 
 
 DL053_RULES = (
