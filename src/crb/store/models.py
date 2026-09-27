@@ -18,6 +18,8 @@ workers    — one row per worker process, upserted every heartbeat even when id
 task_qualifications — APPEND-ONLY: each task's qualification per posture (ADR-0019); the
              latest row for (repo, task, posture) is in force, a revocation is a new row
              (revision 0011)
+library_acts — APPEND-ONLY, hash-chained: every act on a repository's context library —
+             propose, sponsor, sign, stale, revoke, retire (ADR-0026 item 10; revision 0043)
 
 Navigation
 ----------
@@ -434,6 +436,29 @@ class TaskQualification(Base):
     )
 
 
+class LibraryActRow(Base):
+    """APPEND-ONLY. One act on a repository's context library (ADR-0026 item 10) — the
+    :class:`crb.core.library.LibraryAct` column for column, chained on its own
+    ``prev_hash`` / ``row_hash``. A new version, a signature, a staleness notice, a
+    revocation and a retirement are each a new row; nothing is edited (revision 0043)."""
+
+    __tablename__ = "library_acts"
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    act_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    schema: Mapped[str] = mapped_column(String(32), nullable=False)
+    repo: Mapped[str] = mapped_column(String(64), nullable=False)
+    entry_id: Mapped[str] = mapped_column(String(96), nullable=False)
+    version: Mapped[str] = mapped_column(String(64), nullable=False)
+    act: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
+    body_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created: Mapped[str] = mapped_column(String(40), nullable=False)
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+
+    __table_args__ = (Index("ix_library_acts_repo_entry", "repo", "entry_id", "seq"),)
+
+
 #: Every append-only table of the CURRENT schema. A revision script pins the tuple that
 #: existed at its own revision (a table a later revision adds has no triggers to install
 #: yet); ``init_db`` and ``migrate.upgrade`` use this live one.
@@ -444,4 +469,5 @@ APPEND_ONLY_TABLES: tuple[str, ...] = (
     "evidence",
     "reviews",
     "task_qualifications",
+    "library_acts",
 )
