@@ -10,9 +10,9 @@ What it does: Pins that a deployment with no ``CRB_FACTORY__TEST_AUTHOR`` has no
               that the setting produces an author whose identity is that rung label; that a
               run's ``params.test_author`` wins over the setting and that ``none`` in either
               place declines one; that the run's provider is the author's default and is
-              refused when it is not the configured endpoint's (G-611); that an unregistered builder name is refused with the run's
-              ladder named; and that the environment reaches ``WorkerSettings`` the way every
-              other shared key does.
+              refused when it is not the configured endpoint's (G-611); that an unregistered
+              builder name is refused with the run's ladder named; and that the environment
+              reaches ``WorkerSettings`` the way every other shared key does.
 How:          ``Worker.__new__`` with only ``settings`` set (the resolution reads nothing
               else) and a ``RunContext`` over the ``pyrepo`` fixture; ``settings_from_args``
               for the environment path; ``monkeypatch`` for the endpoint variables. No model

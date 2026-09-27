@@ -1,8 +1,8 @@
 """A configured builder endpoint is the endpoint the builder calls: every OpenAI-compatible
-builder (tool loop, edit block, labeller) and the factory's test author are pointed by ``CRB_OPENAI_BASE_URL`` at a fake
-OpenAI-compatible server on localhost — no real model — and the request must land there,
-the row must carry that host as its provider, and the timeout and retry settings must be
-the ones the operator set.
+builder (tool loop, edit block, labeller) and the factory's test author are pointed by
+``CRB_OPENAI_BASE_URL`` at a fake OpenAI-compatible server on localhost — no real model —
+and the request must land there, the row must carry that host as its provider, and the
+timeout and retry settings must be the ones the operator set.
 
 Navigation
 ----------
