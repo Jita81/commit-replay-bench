@@ -33,11 +33,13 @@ Works with:   docs/SECURITY.md (the boundary table), docs/DEPLOYMENT.md (§1 and
               src/crb/factory/delivery.py (the write seams the delivery paragraph names),
               docs/PREVENTION.md (rows P-103, P-107, P-110 and P-111)
 Tested by:    tests/test_egress_inventory.py
-Touch when:   the product gains or loses a flow that leaves the deployment, or a setting
-              that points at an address — the discovery test fails until the setting has a
-              flow (and that flow a row in all three statements) or a ``NOT_EGRESS`` reason;
-              or when factory delivery gains a write seam — map it in ``_DELIVERY_WRITES``
-              and say in SECURITY.md what it writes.
+Touch when:   never for a new repository (a client repository adds no flow; its remote is
+              the git-remote row); the product gains or loses a flow that leaves the
+              deployment, or a setting that points at an address — the discovery test fails
+              until the setting has a flow (and that flow a row in all three statements) or a
+              ``NOT_EGRESS`` reason; or factory delivery gains a write seam — map it in
+              ``_DELIVERY_WRITES`` and say in SECURITY.md what it writes; or a row uses a
+              write verb not in ``_WRITE_STEMS``.
 """
 
 from __future__ import annotations
@@ -248,15 +250,33 @@ def test_the_provisioning_row_says_what_a_fetch_sends_and_never_sends() -> None:
     assert "source code" in never and "credential" in never
 
 
-#: A word in a row's "What is sent" cell that says the flow CHANGES something outside the
-#: deployment: a pushed or re-pointed branch, a comment or post, an opened, created,
-#: updated, merged, closed or deleted object, a label, a transition, an HTTP write method,
-#: or a write TO something. A bare "writes" is not one: the builder row's "the diff it
-#: writes" is content sent to the model (pinned both ways by the two tests below the
-#: write-statement test).
+#: The verbs that say a flow CHANGES something outside the deployment: a pushed or
+#: re-pointed branch, a comment or post, an opened, created, updated, merged, closed or
+#: deleted object, a label, a transition, an HTTP write method. Each is matched in every
+#: form a row may use — the stem, ``-s`` / ``-es`` and ``-d`` / ``-ed`` / ``-led`` — so a
+#: verb added here is recognised in the past tense by construction (P-115).
+_WRITE_STEMS: tuple[str, ...] = (
+    "push",
+    "re-point",
+    "comment",
+    "post",
+    "close",
+    "open",
+    "create",
+    "update",
+    "merge",
+    "delete",
+    "label",
+    "transition",
+    "patch",
+)
+#: A word in a row's "What is sent" cell that says the flow writes: one of the stems above in
+#: any form, an HTTP ``PUT``, or a write TO something. A bare "writes" is not one: the
+#: builder row's "the diff it writes" is content sent to the model (pinned both ways by the
+#: two tests below the write-statement test).
 _WRITE_VERB = re.compile(
-    r"\b(?:push(?:es)?|re-points?|comments?|posts?|close[sd]?|opens?|creates?|updates?"
-    r"|merges?|deletes?|labels?|transitions?|patch|put|writes?\s+to)\b",
+    r"\b(?:(?:" + "|".join(map(re.escape, _WRITE_STEMS)) + r")(?:e?s|e?d|led)?"
+    r"|put|(?:writes?|wrote|written)\s+to)\b",
     re.IGNORECASE,
 )
 
@@ -269,9 +289,8 @@ def _write_statement() -> str:
 
 
 def test_the_write_statement_names_every_flow_whose_row_writes() -> None:
-    """The table is the inventory; the prose under it may not name fewer writers than the
-    table's rows describe (PR #61 review: GitHub delivery comments and closes a pull request,
-    and pushes a branch, while the prose said intake was the only writer)."""
+    """The table is the inventory: the prose under it names exactly the flows whose rows say
+    they write, no fewer and no more (P-107)."""
     writers = {
         k
         for k, f in FLOWS.items()
@@ -297,8 +316,7 @@ def test_the_write_statement_names_every_flow_whose_row_writes() -> None:
     ],
 )
 def test_an_endpoint_read_is_discovered_whatever_quote_it_uses(source: str) -> None:
-    """PR #61 review: the discovery matched only double-quoted names, so a single-quoted
-    read of a new endpoint would have passed the inventory unseen."""
+    """An endpoint setting is discovered whatever quote or string prefix reads it (P-110)."""
     assert _names_in_source(source) == {"CRB_NEW_ENDPOINT"}
 
 
@@ -321,14 +339,37 @@ def test_a_name_that_is_not_an_endpoint_is_not_discovered() -> None:
         "re-points the branch to a new commit",
         "a force-push of the branch",
         "writes to the tracker",
+        "pushed a branch",
+        "re-pointed the branch to a new commit",
+        "opened a pull request",
+        "created an issue",
+        "posted a comment",
+        "commented on the ticket",
+        "updated the state",
+        "merged the pull request",
+        "deleted the branch",
+        "labelled the ticket",
+        "labeled the ticket",
+        "transitioned the work item",
+        "patched the ticket",
+        "wrote to the tracker",
     ],
 )
 def test_a_row_that_writes_in_any_of_the_usual_words_counts_as_a_writer(cell: str) -> None:
-    """PR #61 adversarial check: the verb list read only push, comment, close, label and
-    transition, so a new row whose only write was 'opens a pull request' (or creates,
-    posts, updates, merges, deletes) would not have counted as a writer, and prose that
-    left it out would still have passed."""
+    """A row counts as a writer when its "What is sent" cell uses any write verb, in any
+    tense: a push or re-point, an open, create, post, comment, update, merge, close or
+    delete, a label, a transition, an HTTP write method, or a write to something. The
+    write-statement test then requires the prose to name that flow (P-107, P-115)."""
     assert _WRITE_VERB.search(cell), cell
+
+
+def test_every_write_stem_counts_in_every_tense() -> None:
+    """Each write verb counts in its base, third-person and past forms (P-115)."""
+    for stem in _WRITE_STEMS:
+        third = stem + ("es" if stem.endswith(("sh", "ch")) else "s")
+        past = stem + ("d" if stem.endswith("e") else "ed")
+        for form in (stem, third, past):
+            assert _WRITE_VERB.search(f"it {form} the object"), form
 
 
 @pytest.mark.parametrize(
@@ -368,10 +409,10 @@ def _delivery_paragraph() -> str:
 
 
 def test_the_delivery_paragraph_names_every_write_delivery_makes() -> None:
-    """PR #61 adversarial check (the P-107 class, prose naming fewer writes than the code
-    makes): the paragraph said that after opening the pull request delivery writes to it
-    'only to post a comment when it re-delivers it', but a re-delivery first moves the same
-    branch to a new commit with a force-with-lease push, which changes the pull request."""
+    """The delivery paragraph names every write delivery makes: each write seam of
+    ``crb.factory.delivery`` (push, open, comment, close), and the re-delivery's
+    force-with-lease push that re-points the same branch to a new commit and so changes what
+    the pull request contains (P-111)."""
     source = (SRC / "factory" / "delivery.py").read_text(encoding="utf-8")
     seams = set(re.findall(r"^#: ``(\w+_fn)\(", source, re.MULTILINE))
     assert "push_fn" in seams, seams  # the seam reader still reads the module

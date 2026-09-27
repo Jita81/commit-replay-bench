@@ -146,8 +146,8 @@ def test_check_fails_on_a_stale_map_and_passes_after_a_write(repo: Path, capsys)
 def test_touch_when_addresses_onboarding_a_client_repository_first(
     repo: Path, touch: str, refused: bool
 ) -> None:
-    """PR #61 review: three new test files' ``Touch when`` named contributor tasks only; the
-    standard puts the developer onboarding a client repository first (P-114)."""
+    """The first clause of ``Touch when`` names a repository or onboarding, so the developer
+    onboarding a client repository reads first whether the file concerns them (P-114)."""
     block = BLOCK.replace("Touch when:   never for a new repository.", f"Touch when:   {touch}")
     h = cm.read_header(_py(repo, "src/crb/core/thing.py", block))
     assert any("onboarding" in p for p in h.problems) is refused, h.problems
@@ -178,7 +178,7 @@ def test_the_onboarding_baseline_only_shrinks(repo: Path, capsys) -> None:
 #: The size of ``scripts/code_map_onboarding_baseline.txt`` when the check was added (PR #61).
 #: Lower it as files leave the list; raising it is adding a file to the baseline, which the
 #: baseline exists to stop.
-BASELINE_CEILING = 373
+BASELINE_CEILING = 372
 
 
 def test_the_real_onboarding_baseline_never_grows() -> None:
