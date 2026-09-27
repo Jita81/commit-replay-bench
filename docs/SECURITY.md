@@ -568,12 +568,12 @@ machine:
   again, so `--host 0.0.0.0` is refused too (`dev_autologin_refusal_for`,
   `crb.server.main.serve`). The container image's entrypoint refuses to run any role with the
   variable set, because a container is never a development stack on one machine
-  (`deploy/entrypoint.sh`). There is no override flag. [measured — n = 14 test cases under
+  (`deploy/entrypoint.sh`). There is no override flag. [measured — n = 15 test cases under
   apparatus 2.2 in `tests/test_server_dev_autologin.py::TestSettings`: off by default; `prod`
   refuses, as an argument and from the environment (2); four non-loopback binds refuse and
   four loopback binds admit (8); local sign-in switched off refuses; a malformed username
   refuses; `serve` refuses `--host
-  0.0.0.0` before uvicorn starts; pass/fail, not a rate] [measured — n = 4 test cases under
+  0.0.0.0` before uvicorn starts; the admin `/settings` view names it; pass/fail, not a rate] [measured — n = 4 test cases under
   apparatus 2.2 in `tests/test_server_dev_autologin.py::TestTheContainerImage`: the
   entrypoint refuses `serve`, `worker` and `migrate` with the variable set before anything
   runs, and runs `serve` as before without it; pass/fail, not a rate]

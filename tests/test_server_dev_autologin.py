@@ -3,9 +3,10 @@
 The setting names one local account. When it is set, a browser on the same machine is signed
 in as that account without a password — and nothing else is. These tests pin every half of
 that sentence: the settings refuse it outside ``CRB_ENV=dev``, on a non-loopback bind
-(``crb serve --host`` included) and with local sign-in switched off; the route signs in a loopback peer that names a loopback
-host and refuses a remote peer, a request that came through a proxy (any forwarding header),
-a page served under another host name (DNS rebinding) and a cross-site request, answering
+(``crb serve --host`` included) and with local sign-in switched off; the route signs in a
+loopback peer that names a loopback host and refuses a remote peer, a request that came
+through a proxy (any forwarding header), a page served under another host name (DNS
+rebinding) and a cross-site request, answering
 all of them exactly as if the setting were off; the session it issues is exactly the one a
 password sign-in issues (the same cookie names, the credential version with the account's
 session nonce, the session-bound CSRF token), so the role ladder, sign-out and "sign out
@@ -20,7 +21,8 @@ What it is:   The test suite for the development-only automatic sign-in — the 
               refusals, the loopback-only route, the session it issues and how it is reported.
 What it does: Pins that the setting is empty by default and the route then answers 404
               ``dev_autologin_off``; that ``prod``, a non-loopback ``bind_host`` and
-              ``local_auth_enabled=False`` refuse to construct and ``serve`` refuses a non-loopback ``--host``; that a loopback peer
+              ``local_auth_enabled=False`` refuse to construct and ``serve`` refuses a
+              non-loopback ``--host``; that a loopback peer
               (IPv4 and IPv6) on a loopback host name is signed in with the session and CSRF
               cookies; that a remote peer, each forwarding header, a foreign ``Host``, a
               foreign ``Origin`` and ``Sec-Fetch-Site: cross-site`` are refused like "off"
