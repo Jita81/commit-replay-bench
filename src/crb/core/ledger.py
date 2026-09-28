@@ -327,33 +327,48 @@ def is_outage_error_v1(error: str) -> bool:
     return _outage(error, OUTAGE_ERROR_MARKERS_V1)
 
 
+#: What the ``S1`` author step writes after ``authoring:`` when the RUNNER raised while
+#: proving the authored test RED (``crb.builders.adapter`` imports it): the instrument failed.
+AUTHORING_HARNESS_ERROR = "harness error proving RED:"
+#: What the ``S1`` author step writes after ``authoring:`` when the author's own call RAISED
+#: (``crb.builders.adapter`` imports it); the builder's ``model_error: …`` follows it when that
+#: call failed at its provider, the exception's own name otherwise.
+AUTHORING_AUTHOR_FAILED = "the test author failed:"
+
+
+def authoring_model_error(error: str) -> str:
+    """The author's own ``model_error: …`` in an ``authoring:`` error, or ``""``: read ONLY at
+    the head the adapter writes — ``authoring:``, then optionally
+    :data:`AUTHORING_AUTHOR_FAILED`, then ``model_error`` (any case). Every other word of the
+    error is the model's (the path it chose for its test, an exception it raised), so a
+    ``model_error`` found anywhere else is never the instrument's (P-735)."""
+    if not error.startswith(AUTHORING_ERROR_PREFIX):
+        return ""
+    rest = error[len(AUTHORING_ERROR_PREFIX) :].lstrip()
+    if rest.startswith(AUTHORING_AUTHOR_FAILED):
+        rest = rest[len(AUTHORING_AUTHOR_FAILED) :].lstrip()
+    return rest if rest.lower().startswith("model_error") else ""
+
+
 def authoring_outage(error: str) -> bool:
     """``True`` when an ``authoring:`` error's cause is the TEST AUTHOR's provider refusing
     the call — the ``model_error: …`` the author's builder recorded, matched by
     :func:`is_outage_error`. Such a row observed nothing, so it is an ``outage``, never an
     ``authoring`` failure counted against the arm (docs/PREVENTION.md P-005's class)."""
-    if not error.startswith(AUTHORING_ERROR_PREFIX):
-        return False
-    at = error.lower().find("model_error")
-    return at >= 0 and is_outage_error(error[at:])
-
-
-#: What the ``S1`` author step writes after ``authoring:`` when the RUNNER raised while
-#: proving the authored test RED (``crb.builders.adapter`` imports it): the instrument failed.
-AUTHORING_HARNESS_ERROR = "harness error proving RED:"
+    return is_outage_error(authoring_model_error(error))
 
 
 def authoring_instrument_failure(error: str) -> bool:
     """``True`` when an ``authoring:`` error names an INSTRUMENT failure, not the author's
-    output: the author's own provider call failed without a refusal (any ``model_error: …``
-    :func:`authoring_outage` does not read as an outage — a 400, a 500, a reset) or the runner
-    raised while proving the test RED. Rule 4b then holds for the author as for the builder:
+    output: the author's own provider call failed without a refusal (any ``model_error: …`` at
+    the adapter's head, :func:`authoring_model_error`, that :func:`authoring_outage` does not
+    read as an outage — a 400, a 500, a reset) or the runner raised while proving the test RED. Rule 4b then holds for the author as for the builder:
     the row is ``harness``, never an ``authoring`` miss counted against the arm (DL-360,
     P-720). Called after :func:`authoring_outage`, which takes the refusals first."""
     if not error.startswith(AUTHORING_ERROR_PREFIX):
         return False
     rest = error[len(AUTHORING_ERROR_PREFIX) :].lstrip()
-    return "model_error" in error.lower() or rest.startswith(AUTHORING_HARNESS_ERROR)
+    return bool(authoring_model_error(error)) or rest.startswith(AUTHORING_HARNESS_ERROR)
 
 
 #: WHY an ``outage`` row's call never happened — a hashed label from apparatus 2.4, stamped at

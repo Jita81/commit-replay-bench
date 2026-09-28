@@ -158,6 +158,7 @@ from crb.core.finish_gate import (
 from crb.core.formatting import FormatRun, formatters_for, run_formatters
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import (
+    AUTHORING_AUTHOR_FAILED,
     AUTHORING_HARNESS_ERROR,
     BUILDER_EXECUTOR_SEALED,
     LABEL_BUILDER_EXECUTOR,
@@ -842,7 +843,7 @@ def build_fn_for(
         except SandboxUnavailable:
             raise
         except Exception as exc:
-            return fail(f"the test author failed: {author_error(exc)}")
+            return fail(f"{AUTHORING_AUTHOR_FAILED} {author_error(exc)}")
         path = path.strip().lstrip("/")
         if not path or ".." in path.split("/") or not config.is_test(path):
             return fail(f"{path!r} is not a test path for {config.name!r}")

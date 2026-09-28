@@ -66,8 +66,10 @@ GOLDEN: dict[str, str] = {
     # ``authoring`` kind and its author-outage exception (stream F), before 2.4 shipped — the
     # Wave 2 integration wrote this line on the grid that reads them (AUTHORING_ERRORS);
     # rewritten once, before 2.4 shipped and with no 2.4 row measured, when rule 3b took
-    # rule 4b for the author's instrument failures (DL-360) — never edited after release
-    "2.4": "11f4e75172c66252531b66116f8a2bcbcf45125792581a923d7d7ed53bb2d4a8",
+    # rule 4b for the author's instrument failures (DL-360), and once more, still before 2.4
+    # shipped, when rule 3b read the author's ``model_error`` only at the adapter's head
+    # (P-735, DL-360 amended) — never edited after release
+    "2.4": "08d22b5d006f77b4b60954876f6ebba145072e155379cffc83ae8548a326f661",
 }
 #: SHA-256 of the canonical JSON of ``OUTAGE_ERROR_MARKERS_V1`` (frozen at 2.3).
 V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd544364713f"
@@ -76,8 +78,9 @@ V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd54436
 #: branch the grid never reaches still fails (P-306). Written once per version, never edited.
 GOLDEN_SOURCE: dict[str, str] = {
     "2.3": "f4931817defdcb051a19397bee4a2b32bc1ea73e8b59eb2216edc3063df21e96",
-    # 2.4: rewritten with the line above (DL-360), which also pinned rule 3b's helpers
-    "2.4": "f72436d515808286810b2b3e1d78ade9f690c203c37a92868563a8635d06d775",
+    # 2.4: rewritten with the line above (DL-360), which also pinned rule 3b's helpers, and
+    # again with it for P-735 (``authoring_model_error``, ``AUTHORING_AUTHOR_FAILED``)
+    "2.4": "4bc0aa97759143cb4159822ace028ba567a992d00f73cef58f728b7fed45ce60",
 }
 #: The hash of the frozen 2.3 rule's source (``derive_failure_kind_v1`` and what it calls).
 V1_SOURCE_SHA256 = "1768a6844c74c9e2c789635b33388b72960c656e0f91d9f916d60efdae54d842"
@@ -96,7 +99,35 @@ AUTHORING_ERRORS: tuple[str, ...] = (
     # raising while proving RED, are ``harness`` — the instrument failed, not the arm
     "authoring: the test author failed: model_error: InternalServerError: 500",
     "authoring: harness error proving RED: OSError: the sandbox went away",
+    # the model's own words are never the instrument's (P-735): a miss whose test path — the
+    # model chose it — says ``model_error``, even beside an outage marker, is ``authoring``
+    "authoring: the authored test 'tests/test_model_error.py' is not RED at the parent: "
+    "it passes at the parent",
+    "authoring: the authored test 'tests/test_model_error_rate_limit.py' is not RED at the "
+    "parent: it passes at the parent",
 )
+
+
+def test_rule_3b_reads_the_instrument_only_off_the_head_the_adapter_writes() -> None:
+    """P-735: the answers the ``AUTHORING_ERRORS`` lines must give, spelt out, so the grid's
+    hash is not the only thing that knows them."""
+    want = {
+        AUTHORING_ERRORS[0]: lg.FAILURE_AUTHORING,
+        AUTHORING_ERRORS[1]: lg.FAILURE_OUTAGE,
+        AUTHORING_ERRORS[2]: lg.FAILURE_HARNESS,
+        AUTHORING_ERRORS[3]: lg.FAILURE_HARNESS,
+        AUTHORING_ERRORS[4]: lg.FAILURE_AUTHORING,
+        AUTHORING_ERRORS[5]: lg.FAILURE_AUTHORING,
+        "authoring: the test author failed: model_error: RateLimitError: 429": lg.FAILURE_OUTAGE,
+        "authoring: the test author failed: ImportError: no name 'Model_Error'": (
+            lg.FAILURE_AUTHORING
+        ),
+        "authoring: the test author failed: ValueError: model_error: rate limit": (
+            lg.FAILURE_AUTHORING
+        ),
+    }
+    got = {e: lg.derive_failure_kind(clean=False, disqualified=False, error=e) for e in want}
+    assert got == want
 
 
 def _errors(markers: Sequence[str], *, authoring: bool = True) -> list[str]:
@@ -247,6 +278,7 @@ _LIVE_ONLY_CONSTANTS = (
     "FAILURE_AUTHORING",
     "AUTHORING_ERROR_PREFIX",
     "AUTHORING_HARNESS_ERROR",
+    "AUTHORING_AUTHOR_FAILED",
 )
 #: The live rule and the frozen one, each with every function it calls — held by
 #: ``test_every_function_and_constant_the_live_rule_reads_is_pinned`` (P-720).
@@ -254,6 +286,7 @@ LIVE_RULE = (
     lg.derive_failure_kind,
     lg.is_outage_error,
     lg._outage,
+    lg.authoring_model_error,
     lg.authoring_outage,
     lg.authoring_instrument_failure,
 )
