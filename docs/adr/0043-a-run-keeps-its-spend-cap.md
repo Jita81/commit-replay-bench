@@ -54,7 +54,11 @@ experiment. So a run cap must not be kept by quietly shrinking each attempt.
 7. **The pages name the cap they send.** The Measure page starts the cap at the top of its
    estimate and names it on the button. After a run stops at its cap, the page says so with
    the reason and a link to the run. The Factory page and the run form take a cap that is
-   blank unless the operator types one.
+   blank unless the operator types one. Each cap is a text field read as typed: text that
+   is not an amount is refused, never read as no cap (a number input reports text it cannot
+   parse as blank, P-133). The Measure page always sends a cap, so when the model has no
+   known price it names the two ways forward it can reach: an admin prices the model, or
+   the full run form runs without a cap (P-134).
 
 ## Consequences
 

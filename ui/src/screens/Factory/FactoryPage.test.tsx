@@ -423,6 +423,20 @@ describe('FactoryPage — the shipped contract', () => {
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).max_cost_usd).toBe(2.5)
   })
 
+  it('a spend cap the browser could not read as a number is refused, never sent as no cap (P-133)', async () => {
+    const { calls } = mockApi(base({ 'POST /runs': () => json({ id: 'e'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued' }, 201) }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent('$0.27 to $0.41 for 1 item'))
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const field = within(screen.getByTestId('factory-spend-cap')).getByLabelText('Stop the run at (USD)')
+    await userEvent.type(field, '1e')
+    expect(field).toHaveValue('1e')
+    expect(screen.getByRole('button', { name: /Run the factory/ })).toBeDisabled()
+    expect(screen.getByText('Enter an amount above $0, or leave it blank.')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(false)
+  })
+
   it('with no ?repo= the most recently updated repository is chosen (as the Baseline); an empty deployment offers Connect to an operator only', async () => {
     mockApi(base({ 'GET /repos': { items: [{ name: 'alpha', updated: '2026-09-10T00:00:00Z' }, { name: 'beta', updated: '2026-09-12T00:00:00Z' }], total: 2, limit: 50, offset: 0 }, 'GET /factory/beta/backlog': { ...BACKLOG, repo: 'beta' }, 'GET /factory/beta/tasks': TASKS }))
     renderApp(<FactoryPage />, { route: '/factory' })

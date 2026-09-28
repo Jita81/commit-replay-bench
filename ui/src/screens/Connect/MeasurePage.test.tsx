@@ -32,7 +32,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
-import { PRINCIPAL, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { MeasurePage } from './MeasurePage'
 
 const REPO = { name: 'cobra', language: 'go', runner: 'go', url: 'https://github.com/spf13/cobra', clone_path: '', probe: { status: 'ok', run_id: 'r', checked: 'x', detail: '' }, task_counts: { total: 36, standard: 30, hard: 6, gold_clean: 32, gold_failed: 4, unchecked: 0 }, last_run: null, created: '', updated: '', config: {} }
@@ -67,7 +67,7 @@ describe('MeasurePage', () => {
     // the button names the estimate AND the cap the request carries (F5b): the cap starts at
     // the top of the estimate, rounded up to the dollar
     expect(screen.getByRole('button', { name: 'Start the run — estimated $8.16 to $12.24, stops at $13.00' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Stop the run at $')).toHaveValue(13)
+    expect(screen.getByLabelText('Stop the run at $')).toHaveValue('13')
     expect(box).toHaveTextContent('$13.00 for the whole run. Before each attempt the run counts what it has spent plus what that attempt could cost, and stops if the sum would pass $13.00')
     expect(box).not.toHaveTextContent('No spend cap')
     expect(within(box).getByRole('link', { name: 'Measure: the money step' })).toHaveAttribute('href', '/help/docs/ONBOARDING-A-REPO#step-4--measure-operator-the-money-step')
@@ -166,7 +166,7 @@ describe('MeasurePage', () => {
     })
     renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
     const field = await screen.findByLabelText('Stop the run at $')
-    await waitFor(() => expect(field).toHaveValue(13))
+    await waitFor(() => expect(field).toHaveValue('13'))
     await userEvent.clear(field)
     expect(screen.getByTestId('cap-invalid')).toHaveTextContent('Enter an amount above $0')
     expect(screen.getByRole('button', { name: /Start the run/ })).toBeDisabled()
@@ -175,6 +175,46 @@ describe('MeasurePage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start the run — estimated $8.16 to $12.24, stops at $9.50' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).max_cost_usd).toBe(9.5)
+  })
+
+  it('a spend cap the browser could not read as a number is refused, never sent (P-133)', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': MAP,
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+      'POST /runs': () => json({ id: 'run-3', repo: 'cobra', kind: 'replay', status: 'queued' }, 201),
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const field = await screen.findByLabelText('Stop the run at $')
+    await waitFor(() => expect(field).toHaveValue('13'))
+    await userEvent.clear(field)
+    await userEvent.type(field, '1e3')
+    expect(field).toHaveValue('1e3')
+    expect(screen.getByTestId('cap-invalid')).toHaveTextContent('Enter an amount above $0')
+    expect(screen.getByRole('button', { name: /Start the run/ })).toBeDisabled()
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(false)
+  })
+
+  it('a cap refused because the model has no price says what to do from this page: price it, or the full run form (F5b)', async () => {
+    const message = 'a spend cap needs the price of every model the run can call, and claude_code:claude-sonnet-5 has none: price it in CRB_PRICING_JSON or run without a cap — nothing was queued'
+    const { container } = (() => {
+      mockApi({
+        'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+        'GET /repos/cobra': REPO,
+        'GET /capability-map': MAP,
+        'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+        'POST /runs': () => envelope(422, 'spend_cap_unpriced', message, { rungs: [{ builder: 'claude_code', model: 'claude-sonnet-5' }] }),
+      })
+      return renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    })()
+    const start = await screen.findByRole('button', { name: /Start the run/ })
+    await waitFor(() => expect(start).toBeEnabled())
+    await userEvent.click(start)
+    const way = await screen.findByTestId('measure-unpriced')
+    expect(way).toHaveTextContent('This page always sends a spend cap, and a cap can only be kept on a model with a known price. An admin adds the price of claude_code:claude-sonnet-5 to the price table (CRB_PRICING_JSON), then start again here. To measure without a cap, use the full run form: Every knob, and leave its spend cap blank.')
+    expect(within(way).getByRole('link', { name: 'Every knob' })).toHaveAttribute('href', '/runs')
+    expect(container.querySelector('[data-hint="text.measure.spend_cap_unpriced"]')).not.toBeNull()
   })
 
   it('a last replay that stopped itself at its spend cap is said with its reason and its run (F5b)', async () => {

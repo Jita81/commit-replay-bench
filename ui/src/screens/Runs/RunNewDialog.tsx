@@ -19,13 +19,17 @@
  *               re-score links, the Tasks tab's re-qualify) opens the dialog with them filled
  *               in, and a hand-off from Learn says which step of the learning loop it is.
  * How:          Local state per field; `parseBuilderConfig` validates the JSON with the
- *               server's rules; `valid` gates the submit; `rungToEntry` and `budgetFromDraft`
- *               emit only what was set; on 201 the caller navigates to the run.
+ *               server's rules; every numeric field is text read by `readAmount`
+ *               (ui/src/lib/amount.ts), so text the browser could not parse is an error,
+ *               never a blank (P-133); `valid` gates the submit; `rungToEntry` and
+ *               `budgetFromDraft` emit only what was set; on 201 the caller navigates to the
+ *               run.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
  * Works with:   ui/src/api/hooks.ts (`useCreateRun`, `useSettings`), ui/src/api/types.ts
  *               (`RunCreateRequest`, `LadderRung`, `RunBudget`), ui/src/lib/jsonObject.ts
- *               (the builder-config rules), src/crb/server/schemas.py (`RunCreateRequest`
+ *               (the builder-config rules), ui/src/lib/amount.ts (the numeric fields),
+ *               src/crb/server/schemas.py (`RunCreateRequest`
  *               validation, `BUDGET_DEFAULTS`), src/crb/builders/base.py (`Budget`
  *               defaults), src/crb/builders/claude_code.py (`DEFAULT_MODEL`, `KNOWN_MODELS`
  *               — mirrored in `CLAUDE_CODE_MODELS`), ui/src/screens/Runs/RunsPage.tsx and
@@ -46,6 +50,7 @@ import { Dialog } from '../../components/Dialog'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea, TextField } from '../../components/Field'
 import { Hint } from '../../components/Hint'
+import { readAmount, type AmountRule } from '../../lib/amount'
 import { useAuth } from '../../lib/auth'
 import { formatJsonObject, parseBuilderConfig } from '../../lib/jsonObject'
 
@@ -80,6 +85,30 @@ const BUDGET_LABELS: Record<BudgetKey, string> = {
   max_cost_usd: 'Max cost (USD)',
   wall_clock_s: 'Wall clock (s)',
 }
+/** What each cap accepts (`crb.server.schemas.RunBudget`): read by `readAmount`, so text a
+ *  number input would have reported as blank is refused, never sent as "the default". */
+const BUDGET_RULES: Record<BudgetKey, AmountRule> = {
+  max_turns: { min: 1, whole: true },
+  max_tool_calls: { min: 1, whole: true },
+  max_tokens: { min: 0, whole: true },
+  max_cost_usd: { min: 0 },
+  wall_clock_s: { min: 1, whole: true },
+}
+/** The error under a cap whose text `readAmount` refuses. */
+const BUDGET_ERRORS: Record<BudgetKey, string> = {
+  max_turns: 'Enter a whole number of 1 or more, or leave it blank.',
+  max_tool_calls: 'Enter a whole number of 1 or more, or leave it blank.',
+  max_tokens: 'Enter a whole number of 0 or more, or leave it blank.',
+  max_cost_usd: 'Enter an amount of $0 or more, or leave it blank.',
+  wall_clock_s: 'Enter a whole number of 1 or more, or leave it blank.',
+}
+/** A rung's caps (tool calls, turns, wall clock) and the task limit and timeout: whole, 1 or more. */
+const COUNT_RULE: AmountRule = { min: 1, whole: true }
+const COUNT_ERROR = 'Enter a whole number of 1 or more, or leave it blank.'
+/** The run's spend cap: an amount above $0. */
+const SPEND_CAP_RULE: AmountRule = { min: 0, above: true }
+const bad = (text: string, rule: AmountRule) => readAmount(text, rule).kind === 'bad'
+
 /** Nothing typed. */
 const EMPTY_BUDGET: BudgetDraft = { max_turns: '', max_tool_calls: '', max_tokens: '', max_cost_usd: '', wall_clock_s: '' }
 
@@ -220,8 +249,16 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
     .map((s) => s.trim())
     .filter(Boolean)
   const ladderEmpty = needsBuilder && labels.length === 0 && rungs.length === 0
-  const spendCapOk = !spendCap.trim() || Number(spendCap) > 0
-  const valid = repo && (!needsBuilder || (builder && cfg.ok && rungsComplete && !ladderEmpty && spendCapOk))
+  // P-133: every numeric field is text read by `readAmount` — what is on screen is what is
+  // checked, so a cap the browser could not parse is refused, never sent as no cap
+  const cap = readAmount(spendCap, SPEND_CAP_RULE)
+  const spendCapOk = cap.kind !== 'bad'
+  const budgetOk = BUDGET_KEYS.every((key) => !bad(budget[key], BUDGET_RULES[key]))
+  const rungCapsOk = rungs.every((r) => !bad(r.max_tool_calls, COUNT_RULE) && !bad(r.max_turns, COUNT_RULE) && !bad(r.wall_clock_s, COUNT_RULE))
+  const limitRead = readAmount(limit, COUNT_RULE)
+  const timeoutRead = readAmount(timeout, COUNT_RULE)
+  const countsOk = limitRead.kind !== 'bad' && timeoutRead.kind !== 'bad'
+  const valid = repo && countsOk && (!needsBuilder || (builder && cfg.ok && rungsComplete && !ladderEmpty && spendCapOk && budgetOk && rungCapsOk))
   const serverExecutor = settings.data?.sandbox_mode || ''
   const builders = settings.data?.builders ?? []
   const cliLogin = cfg.ok && cfg.value.auth === 'cli'
@@ -266,14 +303,14 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
       if (cfg.ok && Object.keys(cfg.value).length) body.builder_config = cfg.value
       const caps = budgetFromDraft(budget)
       if (caps) body.budget = caps
-      if (spendCap.trim() && Number(spendCap) > 0) body.max_cost_usd = Number(spendCap)
+      if (cap.kind === 'ok') body.max_cost_usd = cap.value
     }
-    if (limit) body.limit = Number(limit)
+    if (limitRead.kind === 'ok') body.limit = limitRead.value
     const ids = parseTaskIds(taskIds)
     if (ids.length) body.task_ids = ids
     if (pool) body.pool = pool
     if (executor) body.executor = executor
-    if (timeout) body.timeout = Number(timeout)
+    if (timeoutRead.kind === 'ok') body.timeout = timeoutRead.value
     if (POSTURE_KINDS.has(kind) && !qualifyFirst) body.qualify_first = false
     create.mutate(body, {
       onSuccess: (run) => {
@@ -388,13 +425,12 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                     key={key}
                     label={BUDGET_LABELS[key]}
                     hint="field.run_new.budget"
-                    type="number"
-                    min={key === 'max_tokens' || key === 'max_cost_usd' ? 0 : 1}
-                    step={key === 'max_cost_usd' ? '0.01' : 1}
+                    inputMode={key === 'max_cost_usd' ? 'decimal' : 'numeric'}
                     value={budget[key]}
                     onChange={(e) => setBudget((b) => ({ ...b, [key]: e.target.value }))}
                     placeholder={String(BUDGET_DEFAULTS[key])}
                     description={`default ${BUDGET_DEFAULTS[key]}${key === 'max_tokens' || key === 'max_cost_usd' ? ' (no cap)' : ''}`}
+                    error={bad(budget[key], BUDGET_RULES[key]) ? BUDGET_ERRORS[key] : undefined}
                   />
                 ))}
               </div>
@@ -405,9 +441,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
               <TextField
                 label="Stop the run at (USD)"
                 hint="field.run_new.spend_cap"
-                type="number"
-                min={0.01}
-                step="0.01"
+                inputMode="decimal"
                 value={spendCap}
                 onChange={(e) => setSpendCap(e.target.value)}
                 placeholder="no cap"
@@ -450,9 +484,9 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                       <TextField label={`Rung ${i + 1} builder`} hint="field.run_new.rung" required value={r.builder} onChange={(e) => updateRung(i, { builder: e.target.value })} list="crb-builders" />
                       <TextField label={`Rung ${i + 1} model`} hint="field.run_new.rung" required value={r.model} onChange={(e) => updateRung(i, { model: e.target.value })} />
                       <TextField label={`Rung ${i + 1} provider`} hint="field.run_new.rung" value={r.provider} onChange={(e) => updateRung(i, { provider: e.target.value })} placeholder="run’s" />
-                      <TextField label={`Rung ${i + 1} tool calls`} hint="field.run_new.rung" type="number" min={1} value={r.max_tool_calls} onChange={(e) => updateRung(i, { max_tool_calls: e.target.value })} placeholder="inherit" />
-                      <TextField label={`Rung ${i + 1} turns`} hint="field.run_new.rung" type="number" min={1} value={r.max_turns} onChange={(e) => updateRung(i, { max_turns: e.target.value })} placeholder="inherit" />
-                      <TextField label={`Rung ${i + 1} wall clock (s)`} hint="field.run_new.rung" type="number" min={1} value={r.wall_clock_s} onChange={(e) => updateRung(i, { wall_clock_s: e.target.value })} placeholder="inherit" />
+                      <TextField label={`Rung ${i + 1} tool calls`} hint="field.run_new.rung" inputMode="numeric" value={r.max_tool_calls} error={bad(r.max_tool_calls, COUNT_RULE) ? COUNT_ERROR : undefined} onChange={(e) => updateRung(i, { max_tool_calls: e.target.value })} placeholder="inherit" />
+                      <TextField label={`Rung ${i + 1} turns`} hint="field.run_new.rung" inputMode="numeric" value={r.max_turns} error={bad(r.max_turns, COUNT_RULE) ? COUNT_ERROR : undefined} onChange={(e) => updateRung(i, { max_turns: e.target.value })} placeholder="inherit" />
+                      <TextField label={`Rung ${i + 1} wall clock (s)`} hint="field.run_new.rung" inputMode="numeric" value={r.wall_clock_s} error={bad(r.wall_clock_s, COUNT_RULE) ? COUNT_ERROR : undefined} onChange={(e) => updateRung(i, { wall_clock_s: e.target.value })} placeholder="inherit" />
                       <Button size="sm" variant="ghost" onClick={() => removeRung(i)} aria-label={`Remove rung ${i + 1}`} hint="button.run_new.remove_rung">
                         Remove
                       </Button>
@@ -478,7 +512,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
             </div>
           </>
         )}
-        <TextField label="Task limit" hint="field.run_new.limit" type="number" min={1} value={limit} onChange={(e) => setLimit(e.target.value)} description="Leave blank for all tasks" />
+        <TextField label="Task limit" hint="field.run_new.limit" inputMode="numeric" value={limit} error={limitRead.kind === 'bad' ? COUNT_ERROR : undefined} onChange={(e) => setLimit(e.target.value)} description="Leave blank for all tasks" />
         <TextField
           label="Only these tasks"
           hint="field.run_new.task_ids"
@@ -497,7 +531,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
           <option value="docker">docker (sandboxed)</option>
           <option value="local">local</option>
         </SelectField>
-        <TextField label="Timeout (s)" hint="field.run_new.timeout" type="number" min={1} value={timeout} onChange={(e) => setTimeoutS(e.target.value)} description="Per test run; a timeout is a failure, never a pass" />
+        <TextField label="Timeout (s)" hint="field.run_new.timeout" inputMode="numeric" value={timeout} error={timeoutRead.kind === 'bad' ? COUNT_ERROR : undefined} onChange={(e) => setTimeoutS(e.target.value)} description="Per test run; a timeout is a failure, never a pass" />
         {POSTURE_KINDS.has(kind) && repo && (
           <div className="space-y-2 sm:col-span-2" data-testid="run-posture">
             <p className="text-xs text-on-surface-muted" data-testid="run-posture-line">

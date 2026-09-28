@@ -51,7 +51,8 @@
  *               `useRegisterBacklog`, `useCreateRun`, `useCancelRun`, `useRuns`, `useHealth`,
  *               `useCapabilityMap`, `useAllRepos`), ui/src/api/types.ts (`FactoryTask`,
  *               `FactoryBacklog`), ui/src/lib/builder.ts (`builderChoice`, shared with
- *               Measure), ui/src/components/RepoPicker.tsx (`defaultToLatest`, as the
+ *               Measure), ui/src/lib/amount.ts (the spend cap's text, read as typed),
+ *               ui/src/components/RepoPicker.tsx (`defaultToLatest`, as the
  *               Baseline), ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view an item
  *               row opens), src/crb/server/routes/factory.py (the shapes — `way_forward`
  *               included — documented under "Factory" in the API doc),
@@ -85,6 +86,7 @@ import { ShortId } from '../../components/ShortId'
 import { Details, NotificationBanner, SummaryList, WarningButton } from '../../components/govuk'
 import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
+import { readAmount } from '../../lib/amount'
 import { builderChoice } from '../../lib/builder'
 import { measuredCostPerAttempt, noMeasuredCostReason, type MeasuredCost } from '../../lib/economics'
 import { fmtDate, fmtInt, kOfN, shortId } from '../../lib/format'
@@ -667,9 +669,11 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   // F5b — the run's own spend cap (blank = none): the worker stops the run before an item
   // that could take its spend past it — a guard, not a guarantee (ADR-0043 §3)
   const [capText, setCapText] = useState('')
-  const cap = Number(capText)
-  const capSet = capText.trim() !== ''
-  const capOk = !capSet || (Number.isFinite(cap) && cap > 0)
+  // read as typed (P-133): text the browser could not parse is refused, never "no cap"
+  const capRead = readAmount(capText, { min: 0, above: true })
+  const cap = capRead.kind === 'ok' ? capRead.value : 0
+  const capSet = capRead.kind === 'ok'
+  const capOk = capRead.kind !== 'bad'
   const choice = builderChoice(health.data)
   const measured = useMemo(() => estimateFromMap(map.data), [map.data])
   // an API older than J-FAC-3 serves no pre-flight: say so rather than guess (never a white screen)
@@ -789,9 +793,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
         <div className="max-w-[20em]" data-testid="factory-spend-cap">
           <TextField
             label="Stop the run at (USD)"
-            type="number"
-            min={0.01}
-            step="0.01"
+            inputMode="decimal"
             value={capText}
             onChange={(e) => setCapText(e.target.value)}
             placeholder="no cap"

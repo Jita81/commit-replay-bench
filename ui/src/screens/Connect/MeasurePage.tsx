@@ -25,17 +25,20 @@
  *               sees the choices as read-only lists — nothing a role cannot act on is shown
  *               as a control. Every element a reader meets — the back link, the kicker, the
  *               in-flight banner's lead line, each radio and checkbox (or its read-only row),
+ *               the way forward when the cap is refused on an unpriced model,
  *               the gold-clean cap note, every "Before you start" row, the "Every knob" link
  *               and the red button — is a hint trigger (`link.measure.*`, `nav.measure.kicker`,
  *               `banner.measure.inflight`, `banner.measure.spend_cap_stop`, `field.measure.*`,
- *               `stat.measure.*`,
+ *               `stat.measure.*`, `text.measure.spend_cap_unpriced`,
  *               `summary.measure.*`, `button.measure.start`).
  * How:          `useRepo` (+ `last_run` → `useRun`, polled, for the in-flight banner),
  *               `useCapabilityMap` (its economics fold, read by `measuredCostPerAttempt`),
  *               `useHealth` (sandbox posture and the builder), `builderChoice`
  *               (ui/src/lib/builder.ts) for the builder the deployment can run,
  *               `useCreateRun` with `{kind: replay, mode: sighted, limit, retain,
- *               max_cost_usd}`; on success the walk resumes on the repository with
+ *               max_cost_usd}`, the cap's text read by `readAmount` (ui/src/lib/amount.ts,
+ *               P-133); a 422 `spend_cap_unpriced` gets this page's own way forward; on
+ *               success the walk resumes on the repository with
  *               the run watched. The kicker is `journeyEyebrow(pathname, 'task 5 of 8 · …')`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
@@ -53,12 +56,14 @@
 
 import { useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
+import { ApiError } from '../../api/client'
 import { useCapabilityMap, useCreateRun, useHealth, useRepo, useRun } from '../../api/hooks'
 import { ErrorState } from '../../components/ErrorState'
 import { DocLink } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { journeyEyebrow } from '../../components/Layout'
 import { BackLink, Kicker, Lede, NotificationBanner, PageTitle, SummaryList, WarningButton, type SummaryRow } from '../../components/govuk'
+import { readAmount } from '../../lib/amount'
 import { useAuth } from '../../lib/auth'
 import { builderChoice } from '../../lib/builder'
 import { measuredCostPerAttempt, noMeasuredCostReason } from '../../lib/economics'
@@ -91,6 +96,12 @@ export function posturePhrase(sandbox: { status: string; data?: Record<string, u
   if (executor === 'docker') return `docker executor, daemon ${sandbox.status} — a development reading, not evidence, until the sandbox answers`
   if (executor === 'local') return 'local executor — a development reading, not evidence (tests run unisolated)'
   return `${sandbox.status} — a development reading, not evidence, until the sandbox is available`
+}
+
+/** "claude_code:claude-sonnet-5" — the unpriced models a `spend_cap_unpriced` refusal names. */
+function unpricedModels(detail: Record<string, unknown>): string {
+  const rungs = Array.isArray(detail.rungs) ? (detail.rungs as Array<{ builder?: unknown; model?: unknown }>) : []
+  return rungs.map((r) => `${String(r.builder ?? '')}:${String(r.model ?? '')}`).join(', ')
 }
 
 /** "14:05" — when the in-flight run started. */
@@ -137,8 +148,15 @@ export function MeasurePage() {
   // estimate, rounded up to the dollar, and follows it until the operator types another
   const [capDraft, setCapDraft] = useState<string | null>(null)
   const capText = capDraft ?? String(Math.max(1, Math.ceil(hi)))
-  const cap = Number(capText)
-  const capOk = capText.trim() !== '' && Number.isFinite(cap) && cap > 0
+  // read as typed (P-133): text the browser could not parse is refused, never sent; the page
+  // always sends a cap, so blank is refused too
+  const capRead = readAmount(capText, { min: 0, above: true })
+  const cap = capRead.kind === 'ok' ? capRead.value : 0
+  const capOk = capRead.kind === 'ok'
+  // a cap cannot be kept on a model with no known price (ADR-0043 §6): the API says so as
+  // 422 spend_cap_unpriced, whose own way forward ("run without a cap") this page cannot
+  // take, so the page names the two it can reach
+  const unpriced = create.error instanceof ApiError && create.error.code === 'spend_cap_unpriced' ? unpricedModels(create.error.detail) : null
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
   const choice = builderChoice(health.data)
   const posture = posturePhrase(sandbox)
@@ -253,9 +271,7 @@ export function MeasurePage() {
             <Hint as="label" id="field.measure.spend_cap" className="flex items-center gap-4 py-2 text-[19px] leading-[1.47]">
               <span>Stop the run at $</span>
               <input
-                type="number"
-                min={0.01}
-                step="0.01"
+                type="text"
                 inputMode="decimal"
                 className="w-32 border-2 border-[var(--ink)] bg-surface px-2 py-1 text-[19px]"
                 value={capText}
@@ -341,7 +357,17 @@ export function MeasurePage() {
             )}
           </>
         )}
-        {create.isError && <ErrorState compact error={create.error} />}
+        {create.isError && (
+          <ErrorState compact error={create.error}>
+            {unpriced !== null && (
+              <div data-testid="measure-unpriced" className="mt-2 text-sm">
+                <Hint as="p" id="text.measure.spend_cap_unpriced" className="m-0">
+                  This page always sends a spend cap, and a cap can only be kept on a model with a known price. An admin adds the price of {unpriced || 'the model'} to the price table (CRB_PRICING_JSON), then start again here. To measure without a cap, use the full run form: <Link to="/runs" className="underline">Every knob</Link>, and leave its spend cap blank.
+                </Hint>
+              </div>
+            )}
+          </ErrorState>
+        )}
       </div>
     </>
   )

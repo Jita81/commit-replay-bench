@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-633 files with a header · 1 exempt (listed at the end).
+635 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -620,10 +620,12 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`ui/src/help/markdown.test.tsx`](../ui/src/help/markdown.test.tsx) | Tests for the subset markdown renderer. | [`ui/src/help/markdown.test.tsx`](../ui/src/help/markdown.test.tsx) | a construct is added to the renderer. |
 | [`ui/src/help/markdown.ts`](../ui/src/help/markdown.ts) | `renderMarkdown(src)` — the guides' renderer — and `parseMarkdown(src)`, its block parser (`plainText` strips inline markup for an accessible name). | [`ui/src/help/markdown.test.tsx`](../ui/src/help/markdown.test.tsx) | a guide uses a construct this does not render (add it here with a test); never for a new repository. |
 
-## `ui/src/lib` (14 files)
+## `ui/src/lib` (16 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
+| [`ui/src/lib/amount.test.ts`](../ui/src/lib/amount.test.ts) | The tests of [`ui/src/lib/amount.ts`](../ui/src/lib/amount.ts) and a source-level ratchet (P-133) over `[`ui/src`](../ui/src)`: no screen or component renders an `<input type="number">`. | itself (the negative control below) | a field takes a number: read it with `readAmount`, never `type="number"`. |
+| [`ui/src/lib/amount.ts`](../ui/src/lib/amount.ts) | The one reader of a numeric field's text (a spend cap, a budget cap, a task limit, a timeout). | [`ui/src/lib/amount.test.ts`](../ui/src/lib/amount.test.ts) (with the ratchet that no source renders a number input) | a field needs another shape of number (a sign, a unit). |
 | [`ui/src/lib/auth.test.tsx`](../ui/src/lib/auth.test.tsx) | Tests for `RequireAuth`'s redirect. | [`ui/src/lib/auth.test.tsx`](../ui/src/lib/auth.test.tsx) | the redirect's `next` changes shape. |
 | [`ui/src/lib/auth.tsx`](../ui/src/lib/auth.tsx) | The auth context (`AuthProvider` / `useAuth`) and the `RequireAuth` route guard. | [`ui/src/lib/auth.test.tsx`](../ui/src/lib/auth.test.tsx) (the redirect's `next`), [`ui/src/test/utils.tsx`](../ui/src/test/utils.tsx) (`renderApp` mounts the provider for every screen test), [`ui/e2e/walkthrough/01-login.spec.ts`](../ui/e2e/walkthrough/01-login.spec.ts), [`ui/e2e/smoke.spec.ts`](../ui/e2e/smoke.spec.ts) | a role is added to the ladder ([`docs/API.md`](../docs/API.md) "Conventions") — extend `Role` in [`ui/src/api/types.ts`](../ui/src/api/types.ts) first; never for a new repository. |
 | [`ui/src/lib/builder.test.ts`](../ui/src/lib/builder.test.ts) | Tests for `builderChoice`. | [`ui/src/lib/builder.test.ts`](../ui/src/lib/builder.test.ts) | a builder is added to the deployment's probe. |

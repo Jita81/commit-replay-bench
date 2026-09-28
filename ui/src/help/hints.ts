@@ -351,6 +351,8 @@ export const HINTS = {
     'The most this run may spend, and how it keeps to it: before each attempt it counts what it has spent plus what that attempt could cost, and stops if the sum would pass the cap. An attempt with no cost cap of its own is counted at the dearest attempt so far, nothing before the first, so a run can pass its cap by up to one attempt; it then stops and says so.',
   'field.measure.spend_cap':
     'The most this measurement should spend, in US dollars. It starts at the top of the estimate. The run stops before an attempt that could take its spend past it; an attempt with no cost cap of its own is counted at the dearest attempt so far, so the run can pass this amount by up to one attempt.',
+  'text.measure.spend_cap_unpriced':
+    'Why the run was not queued and what to do: this page always caps the run, and a cap needs the price of the model. An admin can add the price, or you can use the full run form, which can run with no cap.',
   'banner.measure.spend_cap_stop':
     'The last measurement stopped at its spend cap: before an attempt that could have passed it, or after an attempt with no cost cap of its own passed it. The attempts it made are graded and kept; start another run to reach the tasks it did not.',
   'summary.measure.retention':
