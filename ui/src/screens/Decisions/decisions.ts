@@ -3,29 +3,29 @@
  *
  * Navigation
  * ----------
- * What it is:   `decisionsFor` — the rows of the Decisions screen for one repository, derived
- *               from the capability map (routes), the active sign-offs and the factory tasks:
- *               a cell that routes `deliver` and is not yet signed (an attestation is due);
- *               a cell the rule sent to a human and why; a cell that must not ship; a factory
- *               item with an unsigned structural gap; an item the entry gate did not build
- *               (no proven standard, or missing context — ADR-0026 item 8), which waits here
- *               with its act; an item routed to a human; a review that asked for rework; a
- *               delivery the route gate withheld.
- * What it does: Makes "the points where human sign-off is surfaced" one list, ordered by
- *               what is blocking what, each row naming the act, the evidence behind it and
- *               where the act happens — so an approver sees what matters when it matters and
- *               a viewer sees the same list read-only — including the prevention loop's filed
- *               items, reopened classes and harm retirements (`preventionDecisions`), and the
- *               context library's entries to sign, gone stale or retired by measurement
- *               (`libraryDecisions`). Nothing
- *               here decides: every row is a
- *               fact from the ledger or the factory chain with a link to the surface that
- *               records the human's answer.
+ * What it is:   The inbox's row type, its kinds and their labels (`KIND_LABEL`), and
+ *               `decisionsFor` — the cell and item rows for ONE repository, folded in the browser
+ *               for the Results page's "waiting on a person" panel: a cell that routes `deliver`
+ *               and is not yet signed (an attestation is due); a cell held by its oracle or its
+ *               controls (`strengthen`, G-535); a cell the rule sent to a human and why; a cell
+ *               that must not ship; a factory item with an unsigned structural gap; an item the
+ *               entry gate did not build (no proven standard, or missing context — ADR-0026
+ *               item 8); an item routed to a human; a review that asked for rework; a delivery
+ *               the route gate withheld.
+ * What it does: Names every kind of point where human sign-off is surfaced, in the order of
+ *               what blocks what, so the Decisions screen can label and render the rows the
+ *               server serves (`GET /decisions`, F6 — the inbox is derived there once, not in
+ *               every browser) and the Results page can fold its own panel. Nothing here
+ *               decides: every row is a fact from the ledger or the factory chain with a link to
+ *               the surface that records the human's answer. The server's derivation and
+ *               `decisionsFor` read one fixture (`decisions.parity.json`) and must both produce
+ *               its rows, so the two cannot drift apart unnoticed.
  * How:          Pure functions over the API types; no fetching. `kind` orders the rows;
  *               `act` is the verb the button shows; `href` is the screen with the cell / item
  *               preselected; a cell row also carries its `reasonCode` on its own so the
  *               screen can render it as a term with its meaning (`evidenceStats` is the
- *               evidence line without the code).
+ *               evidence line without the code). `STRENGTHEN_REASONS` is
+ *               `crb.core.learn.STRENGTHEN_REASONS`, pinned by tests/test_decisions_kinds.py.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md (the routes and reason codes),
  *               docs/adr/0006-zero-raw-retention-and-evidence-packs.md (a sign-off is a
@@ -39,12 +39,20 @@
  *               src/crb/factory/loop.py (the route gate whose withholding shows here),
  *               src/crb/server/decisions.py (the same rows derived on the server, which keeps
  *               the clock: `kind` + `key` is the identity the ages join on)
- * Tested by:    ui/src/screens/Decisions/decisions.test.ts
+ * Tested by:    ui/src/screens/Decisions/decisions.test.ts, tests/test_decisions_kinds.py,
+ *               tests/test_server_decisions.py (the shared fixture)
  * Touch when:   never for a new repository; a new human act is added to the product (a row kind
- *               here, its surface there).
+ *               in src/crb/server/decisions.py first, its label and order here, its surface there).
  */
 
 import type { CapabilityCell, FactoryTask, LibraryIndex, PreventionRegister, Signoff } from '../../api/types'
+
+/**
+ * The routing reasons test-strengthening work can move — a weak oracle, escaped or thin
+ * negative controls. A cell held for one of them is a `strengthen` row (G-535), never a
+ * `routed_human` row beside it. The same tuple as `crb.core.learn.STRENGTHEN_REASONS`.
+ */
+export const STRENGTHEN_REASONS = ['oracle_weak', 'controls_escapes', 'controls_thin'] as const
 
 export type DecisionKind =
   | 'signoff_due' // a cell routes deliver and no active sign-off exists
@@ -59,6 +67,9 @@ export type DecisionKind =
   | 'entry_to_sign' // a library entry waits for its second person (or, when mined, for a sponsor) — ADR-0026 item 10
   | 'entry_stale' // a signed library entry's source file changed at the head; it counts for nothing until signed again
   | 'entry_retired' // a library entry was retired by measurement (its arm's reading) — read why
+  | 'signoff_stale' // an attestation signed on an earlier instrument, or by a leaver: revoke or re-sign (ADR-0015)
+  | 'strengthen' // a cell held by its oracle or its controls: strengthen the tests (G-535)
+  | 'remeasure' // a cell whose evidence predates the apparatus in force: queue its re-measurement (server only)
 
 export interface Decision {
   kind: DecisionKind
@@ -85,21 +96,43 @@ export interface Decision {
   dueSince?: string
   /** How long it has been due, in whole seconds — the server's own clock, never the browser's. */
   ageS?: number
+  /** Whether the person reading can take the act (served by `GET /decisions`; absent on a browser fold). */
+  canAct?: boolean
+  /** On a `signoff_stale` row: the attestation as `GET /signoffs` serves it. */
+  signoff?: Signoff
 }
 
-const ORDER: Record<DecisionKind, number> = {
+/** What blocks what — the same ranks as `ORDER` in src/crb/server/decisions.py (tests/test_decisions_kinds.py). */
+export const ORDER: Record<DecisionKind, number> = {
   do_not_ship: 0,
   gap_unsigned: 1,
   not_built: 2,
   signoff_due: 3,
-  rework: 4,
-  delivery_withheld: 5,
-  prevention: 6,
-  entry_stale: 7,
-  entry_to_sign: 8,
-  item_human: 9,
-  routed_human: 10,
-  entry_retired: 11,
+  signoff_stale: 4,
+  rework: 5,
+  delivery_withheld: 6,
+  prevention: 7,
+  entry_stale: 8,
+  entry_to_sign: 9,
+  item_human: 10,
+  strengthen: 11,
+  routed_human: 12,
+  remeasure: 13,
+  entry_retired: 14,
+}
+
+function isStrengthen(code: string | undefined): boolean {
+  return (STRENGTHEN_REASONS as readonly string[]).includes(code ?? '')
+}
+
+/**
+ * The clause a held cell is held by: its reason code when that is one test-strengthening work can
+ * move, else the first such shortfall (routing.v2 lists every failing clause) — `crb.core.learn.
+ * hold_reason`. `null` when the cell is not held by its tests.
+ */
+export function holdReason(c: Pick<CapabilityCell, 'reason_code' | 'shortfalls'>): string | null {
+  if (isStrengthen(c.reason_code)) return c.reason_code ?? null
+  return (c.shortfalls ?? []).find((s) => isStrengthen(s.code))?.code ?? null
 }
 
 function cellKeyOf(c: { capability_class: string; size: string }): string {
@@ -214,13 +247,18 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
   for (const c of input.cells) {
     if (c.n <= 0) continue
     const label = `${c.capability_class} × ${c.size}`
-    const ev = `n=${c.n}${c.n_tasks !== undefined ? ` on ${c.n_tasks} tasks` : ''} · ${pct(c.point)} [${pct(c.ci_low)}, ${pct(c.ci_high)}]${c.reason_code ? ` · ${c.reason_code}` : ''}`
+    const held = c.route !== 'do_not_ship' ? holdReason(c) : null
+    const reason = held ?? c.reason_code
+    const ev = `n=${c.n}${c.n_tasks !== undefined ? ` on ${c.n_tasks} tasks` : ''} · ${pct(c.point)} [${pct(c.ci_low)}, ${pct(c.ci_high)}]${reason ? ` · ${reason}` : ''}`
     const cellQ = `${q}&cell=${encodeURIComponent(cellKeyOf(c))}`
-    const code = c.reason_code ? { reasonCode: c.reason_code } : {}
+    const code = reason ? { reasonCode: reason } : {}
     if (c.route === 'do_not_ship') {
       out.push({ kind: 'do_not_ship', repo, key: cellKeyOf(c), title: `${label} must not ship — false-Q1 in the cell`, evidence: ev, ...code, act: 'Investigate', href: `/ledger?${q}`, role: 'viewer' })
     } else if (c.route === 'deliver' && !signed.has(cellKeyOf(c))) {
       out.push({ kind: 'signoff_due', repo, key: cellKeyOf(c), title: `${label} clears the bar — attest it or decline`, evidence: ev, ...code, act: 'Attest', href: `/signoff?${cellQ}`, role: 'approver' })
+    } else if (held) {
+      // G-535: held by its oracle or its controls — one row, the strengthening work on Learn
+      out.push({ kind: 'strengthen', repo, key: cellKeyOf(c), title: `${label} is held until its tests are stronger`, evidence: ev, ...code, act: 'Strengthen the tests', href: `/learn?${q}#strengthen`, role: 'operator' })
     } else if (c.route === 'human') {
       out.push({ kind: 'routed_human', repo, key: cellKeyOf(c), title: `${label} routed to a human — ${c.reason}`, evidence: ev, ...code, act: 'Read why', href: `/routing?${q}`, role: 'viewer' })
     }
@@ -287,4 +325,7 @@ export const KIND_LABEL: Record<DecisionKind, string> = {
   entry_to_sign: 'Library entry to sign',
   entry_stale: 'Library entry stale',
   entry_retired: 'Library entry retired',
+  signoff_stale: 'Sign-off stale',
+  strengthen: 'Strengthen the tests',
+  remeasure: 'Re-measure',
 }

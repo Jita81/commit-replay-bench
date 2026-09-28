@@ -30,6 +30,8 @@ Touch when:   never for a new repository; a human act is added to the product (a
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +39,12 @@ import pytest
 
 from crb.core.capability import CapabilityCell
 from crb.core.ledger import CellKey, CellStats
-from crb.core.routing import RouteDecision
+from crb.core.routing import RouteDecision, Shortfall
 from crb.core.stats import Interval
 from crb.server import decisions as dec
 from crb.server.factory_state import TaskView
 from crb.store.models import DecisionDue
-from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
+from fixtures.server_seed import ALPHA, BETA, Env, envelope, login, logout, make_env
 from fixtures.signoff_seed import clear_policy
 
 
@@ -128,6 +130,12 @@ def cell(
     )
 
 
+def replace_decision(c: CapabilityCell, **over: Any) -> CapabilityCell:
+    """``c`` with its route decision's fields replaced."""
+    assert c.decision is not None
+    return dataclasses.replace(c, decision=dataclasses.replace(c.decision, **over))
+
+
 def task(**over: Any) -> TaskView:
     base: dict[str, Any] = {
         "id": "I-1",
@@ -163,8 +171,8 @@ def test_the_cell_and_item_kinds_and_their_keys_are_the_ones_the_screen_computes
             cell(
                 route="human",
                 size="M",
-                reason="oracle strength 0.58 < 0.80",
-                reason_code="oracle_weak",
+                reason="the reading decided against the arm",
+                reason_code="insufficient",
             ),
             cell(route="deliver", size="L", tier="human-verified"),  # signed: not a decision
             cell(
@@ -197,7 +205,7 @@ def test_the_cell_and_item_kinds_and_their_keys_are_the_ones_the_screen_computes
     assert by_kind["item_human"].role == "operator"
     assert by_kind["do_not_ship"].role == "viewer"
     assert "2 structural gaps" in by_kind["gap_unsigned"].title
-    assert "oracle strength" in by_kind["routed_human"].title
+    assert "decided against" in by_kind["routed_human"].title
 
 
 def test_the_prevention_rows_carry_the_keys_the_screen_computes() -> None:
@@ -368,3 +376,324 @@ def test_an_unknown_repository_is_a_404_and_writes_nothing(env: Env) -> None:
         assert envelope(r)["code"] == "not_found"
     with env.factory() as db:
         assert dec.due_records(db) == []
+
+
+# --- G-535: a held cell and a stale apparatus are Decisions rows ----------------------
+
+
+def test_a_cell_held_by_its_oracle_or_its_controls_is_one_strengthening_row() -> None:
+    """G-535: a cell the rule holds for a reason test-strengthening work can move
+    (``STRENGTHEN_REASONS``: a weak oracle, escaped or thin controls) is a ``strengthen`` row
+    for an operator that links to the strengthening backlog on Learn — and it is ONE row, not a
+    ``routed_human`` row beside it. A clause the rule lists as a shortfall counts too (routing.v2
+    lists every failing clause), and the row names that clause, never the posture or a pending
+    reading, which no test can fix."""
+    weak = cell(route="human", size="M", reason="oracle strength 0.58", reason_code="oracle_weak")
+    rows = dec.decision_rows(cells=[weak], repo="alpha")
+    assert [(r.kind, r.key) for r in rows] == [("strengthen", "bug.fix|M")]
+    (row,) = rows
+    assert row.role == "operator" and row.act == "Strengthen the tests"
+    assert row.href == "/learn?repo=alpha#strengthen"
+    assert row.reason_code == "oracle_weak" and row.evidence.endswith(" · oracle_weak")
+    # a calibrate cell whose shortfalls include thin controls: held, named by that clause
+    thin = cell(route="calibrate", size="S", reason_code="reading_unregistered")
+    assert thin.decision is not None
+    thin_held = replace_decision(
+        thin,
+        shortfalls=(
+            Shortfall("reading_unregistered", "calibrate", None, None, "register"),
+            Shortfall("controls_thin", "calibrate", 0.2, 0.5, "controls"),
+        ),
+    )
+    (held,) = dec.decision_rows(cells=[thin_held], repo="alpha")
+    assert (held.kind, held.reason_code) == ("strengthen", "controls_thin")
+    # a human cell held for another reason stays "routed to a human", read by anyone
+    other = cell(route="human", size="L", reason_code="insufficient")
+    assert [r.kind for r in dec.decision_rows(cells=[other])] == ["routed_human"]
+
+
+def test_a_cell_whose_evidence_predates_the_apparatus_is_a_remeasurement_row() -> None:
+    """G-535: each STALE cell of the re-measurement plan is a ``remeasure`` row for an operator,
+    keyed by its full cell and mode, with the rows it needs and the estimate — or, when no row
+    recorded a cost, "cost not known", never a $0 that reads as free. A cell whose queued runs
+    have not finished asks nobody for anything; a plan with no stale cell raises no row."""
+    key = {"capability_class": "bug.fix", "size": "S", "builder": "editblock", "model": "m"}
+    plan = {
+        "current_apparatus": "2.4",
+        "cells": [
+            {
+                "cell": {**key, "provider": "p"},
+                "label": "*|bug.fix|S|go|editblock|m|p",
+                "mode": "sighted",
+                "stale_versions": ["2.2"],
+                "n_needed": 20,
+                "est_cost_usd": 1.5,
+                "cost_known": True,
+            },
+            {
+                "cell": {**key, "size": "M", "provider": "p"},
+                "label": "*|bug.fix|M|go|editblock|m|p",
+                "mode": "blind",
+                "stale_versions": ["2.2", "2.3"],
+                "n_needed": 1,
+                "est_cost_usd": 0.0,
+                "cost_known": False,
+            },
+        ],
+    }
+    rows = dec.decision_rows(repo="alpha", remeasure=plan)
+    assert [(r.kind, r.key, r.role) for r in rows] == [
+        ("remeasure", "*|bug.fix|M|go|editblock|m|p|blind", "operator"),
+        ("remeasure", "*|bug.fix|S|go|editblock|m|p|sighted", "operator"),
+    ]
+    by_key = {r.key.rsplit("|", 1)[1]: r for r in rows}
+    assert by_key["sighted"].evidence.startswith("20 rows needed · est. $1.50")
+    assert by_key["blind"].evidence.startswith("1 row needed · cost not known")
+    assert "was measured under apparatus 2.2, 2.3, not 2.4" in by_key["blind"].title
+    assert all(
+        r.act == "Queue re-measurement" and r.href == "/learn?repo=alpha#remeasure" for r in rows
+    )
+    busy = {("*|bug.fix|S|go|editblock|m|p", "sighted")}
+    assert [r.key for r in dec.decision_rows(remeasure=plan, in_flight=busy)] == [
+        "*|bug.fix|M|go|editblock|m|p|blind"
+    ]
+    assert dec.decision_rows(remeasure={"current_apparatus": "2.4", "cells": []}) == []
+
+
+def test_a_stale_signoff_is_its_own_row_and_its_cell_is_counted_once() -> None:
+    """ADR-0015: a sign-off served ``stale`` is a ``signoff_stale`` row (revoke or re-sign),
+    carrying the attestation as served, and its cell is then no ``signoff_due`` row as well —
+    the inbox counts the cell once. A revoked sign-off is nobody's decision."""
+    stale = {
+        "id": "s-9",
+        "cell": {"capability_class": "bug.fix", "size": "S"},
+        "stale": True,
+        "revoked": False,
+        "stale_reason": "apparatus_moved",
+        "created": "2026-09-01T10:00:00+00:00",
+        "approver_name": "Grace",
+    }
+    rows = dec.decision_rows(cells=[cell()], repo="alpha", stale=[stale])
+    assert [(r.kind, r.key) for r in rows] == [("signoff_stale", "s-9")]
+    (row,) = rows
+    assert row.signoff == stale and row.act == "Revoke or re-sign" and row.role == "approver"
+    assert row.href == "/signoff?repo=alpha&cell=bug.fix%7CS"
+    assert row.evidence == "signed 2026-09-01 by Grace · apparatus_moved"
+    gone = {**stale, "revoked": True}
+    assert [r.kind for r in dec.decision_rows(cells=[cell()], stale=[gone])] == ["signoff_due"]
+
+
+def test_an_entry_its_sponsor_reads_is_never_theirs_to_sign() -> None:
+    """ADR-0026 item 10: the sponsor of a proposed or stale library entry is refused their own
+    signature (``same_person``), so the row they read names that another approver acts; the
+    clock keeps the row everyone else reads, under the same key."""
+    library = {
+        "entries": [
+            {
+                "entry_id": "convention/x",
+                "status": "proposed",
+                "sponsor": "u-ada",
+                "sponsor_name": "Ada",
+                "entry": {"title": "X"},
+            }
+        ]
+    }
+    (row,) = dec.decision_rows(repo="alpha", library=library)
+    assert (row.role, row.act) == ("approver", "Sign")
+    mine = dec.for_viewer(row, "u-ada")
+    assert (mine.key, mine.role, mine.act) == (row.key, "viewer", "Read")
+    assert mine.title.endswith("— you sponsored it")
+    assert dec.for_viewer(row, "u-ben") == row
+
+
+def test_the_act_is_offered_only_to_a_role_that_can_take_it() -> None:
+    """F6: the served row carries the act only for a role that can take it; anyone reads a
+    viewer's row."""
+    from crb.server.settings import ROLE_RANK
+
+    (due,) = dec.decision_rows(cells=[cell()])
+    assert not dec.can_act(due, "viewer", ROLE_RANK)
+    assert not dec.can_act(due, "operator", ROLE_RANK)
+    assert dec.can_act(due, "approver", ROLE_RANK) and dec.can_act(due, "admin", ROLE_RANK)
+    (read,) = dec.decision_rows(cells=[cell(route="do_not_ship", reason_code="false_q1")])
+    assert dec.can_act(read, "viewer", ROLE_RANK)
+
+
+# --- F6: one derivation, pinned to the browser's ---------------------------------------
+
+PARITY = Path(__file__).resolve().parents[1] / "ui/src/screens/Decisions/decisions.parity.json"
+
+
+def _served_cell(c: dict[str, Any]) -> CapabilityCell:
+    """A served map cell (``GET /capability-map``'s shape) as the core cell the server folds."""
+    built = cell(
+        capability_class=c["capability_class"],
+        size=c["size"],
+        route=c["route"],
+        n=c["n"],
+        tier=c["verification_tier"],
+        reason=c["reason"],
+        reason_code=c["reason_code"],
+    )
+    if built.stats is None or built.decision is None:
+        return built
+    stats = dataclasses.replace(
+        built.stats,
+        n_tasks=c["n_tasks"],
+        point=c["point"],
+        ci=Interval(c["ci_low"], c["ci_high"]),
+    )
+    shortfalls = tuple(
+        Shortfall(s["code"], s["route"], s["observed"], s["threshold"], s["next"])
+        for s in c["shortfalls"]
+    )
+    return dataclasses.replace(
+        built, stats=stats, decision=dataclasses.replace(built.decision, shortfalls=shortfalls)
+    )
+
+
+def test_server_rows_match_the_ui_fixture() -> None:
+    """F6: the server serves the inbox, and the Results page still folds the cell and item rows
+    in the browser (``decisionsFor``). One fixture holds one repository's inputs and the rows
+    both must produce — every field a person reads: kind, key, title, role, evidence, reason
+    code, act and link. ``decisions.test.ts`` asserts the browser's side against the same file,
+    so a word changed on one side only fails one of the two."""
+    fx = json.loads(PARITY.read_text(encoding="utf-8"))
+    rows = dec.decision_rows(
+        [_served_cell(c) for c in fx["cells"]],
+        fx["tasks"],
+        fx["register"],
+        repo=fx["repo"],
+        library=fx["library"],
+    )
+    got = [
+        {
+            "kind": r.kind,
+            "key": r.key,
+            "title": r.title,
+            "role": r.role,
+            "evidence": r.evidence,
+            "reason_code": r.reason_code,
+            "act": r.act,
+            "href": r.href,
+        }
+        for r in rows
+    ]
+    assert got == fx["expected"]
+    # every kind the browser folds is exercised, so a kind added on one side is noticed
+    assert {r["kind"] for r in got} == {
+        "do_not_ship",
+        "gap_unsigned",
+        "not_built",
+        "signoff_due",
+        "rework",
+        "delivery_withheld",
+        "prevention",
+        "entry_stale",
+        "entry_to_sign",
+        "item_human",
+        "strengthen",
+        "routed_human",
+        "entry_retired",
+    }
+
+
+# --- F6: the count mode, the cache, the viewer's role, one broken repository -----------
+
+
+def test_count_mode_does_not_write_the_clock_and_honours_the_etag(env: Env) -> None:
+    """The nav badge reads ``?count=1`` on every screen: the total and the count per acting
+    role, the same number the full list has, and NO clock row — a badge is not an observation.
+    Both readings carry a strong ETag; sending it back is a 304 with no body. The count may be
+    kept 30 seconds by the browser that asked; the list is revalidated every time."""
+    clear_policy(env)
+    login(env.client, "viewer")
+    r = env.get("/decisions", params={"count": "1"})
+    assert r.status_code == 200, r.text
+    counted = r.json()
+    assert set(counted) == {"total", "by_role", "errors"}
+    assert counted["total"] >= 1 and counted["total"] == sum(counted["by_role"].values())
+    assert r.headers["Cache-Control"] == "private, max-age=30"
+    tag = r.headers["ETag"]
+    assert tag.startswith('"') and tag.endswith('"') and not tag.startswith("W/")
+    with env.factory() as db:
+        assert dec.due_records(db) == []  # the badge wrote nothing
+    same = env.get("/decisions", params={"count": "1"}, headers={"If-None-Match": tag})
+    assert same.status_code == 304 and same.content == b"" and same.headers["ETag"] == tag
+    # the list: the same total, the clock stamped, and revalidated on every read
+    full = env.get("/decisions")
+    assert full.json()["total"] == counted["total"]
+    assert full.headers["Cache-Control"] == "private, no-cache" and full.headers["ETag"]
+    with env.factory() as db:
+        assert len(dec.due_records(db)) == counted["total"]
+
+
+def test_the_served_row_fits_the_viewers_role(env: Env) -> None:
+    """F6: a viewer is served the approver's row with ``Read`` and ``can_act`` false; an
+    approver the same row with its act; the link and the key do not change."""
+    clear_policy(env)
+    login(env.client, "viewer")
+    seen = {(r["kind"], r["key"]): r for r in env.get("/decisions").json()["items"]}
+    due = next(r for (k, _), r in seen.items() if k == "signoff_due")
+    assert (due["act"], due["can_act"], due["role"]) == ("Read", False, "approver")
+    logout(env.client)
+    login(env.client, "approver")
+    mine = {(r["kind"], r["key"]): r for r in env.get("/decisions").json()["items"]}
+    same = mine[("signoff_due", due["key"])]
+    assert (same["act"], same["can_act"]) == ("Attest", True)
+    assert same["href"] == due["href"] and same["href"].startswith("/signoff?repo=")
+
+
+def test_a_repository_whose_inputs_cannot_be_read_is_named_and_the_rest_are_served(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One repository whose library no longer folds (409 ``library_integrity``) is named in
+    ``errors`` with its status, code and message, and every other repository is still served —
+    the count is incomplete, never quietly smaller. The badge's count names it too."""
+    from crb.server.deps import ApiError
+    from crb.server.routes import decisions as route
+
+    real = route.library_index
+
+    def broken(repo: str, *a: Any, **kw: Any) -> Any:
+        if repo == BETA:
+            raise ApiError(409, "library_integrity", "the library's acts no longer fold")
+        return real(repo, *a, **kw)
+
+    monkeypatch.setattr(route, "library_index", broken)
+    clear_policy(env)
+    login(env.client, "viewer")
+    body = env.get("/decisions").json()
+    assert body["errors"] == [
+        {
+            "repo": BETA,
+            "status": 409,
+            "code": "library_integrity",
+            "message": "the library's acts no longer fold",
+        }
+    ]
+    assert {r["repo"] for r in body["items"]} == {ALPHA}
+    assert ALPHA in body["measured"]
+    assert env.get("/decisions", params={"count": "1"}).json()["errors"] == [BETA]
+
+
+def test_the_idle_pass_never_resolves_a_row_it_cannot_see(env: Env) -> None:
+    """F6: ``GET /decisions`` stamps a ``not_built`` row for an item no run has reached (the
+    entry gate's preview); the worker's idle pass cannot read that preview, so it keeps the kind
+    open (``IDLE_KEEPS_OPEN``) instead of resolving the route's row every pass. The route's own
+    pass, which sees the item, resolves it when it goes."""
+    row = dec.DecisionRow(
+        dec.KIND_NOT_BUILT, "I-9", "I-9 x is not built — no proven standard", "approver"
+    )
+    with env.factory() as db:
+        dec.record_due(db, ALPHA, [row], now="2026-09-01T09:00:00+00:00")
+        dec.record_due(
+            db, ALPHA, [], now="2026-09-02T09:00:00+00:00", keep_open=dec.IDLE_KEEPS_OPEN
+        )
+        db.commit()
+        rec = _due(db)[("not_built", "I-9")]
+        assert rec.resolved == "" and rec.first_due == "2026-09-01T09:00:00+00:00"
+        dec.record_due(db, ALPHA, [], now="2026-09-03T09:00:00+00:00")
+        db.commit()
+        assert _due(db)[("not_built", "I-9")].resolved == "2026-09-03T09:00:00+00:00"
+    assert frozenset({"not_built"}) == dec.IDLE_KEEPS_OPEN

@@ -14,7 +14,11 @@
  *               the run's split tiles show the all-rows rate, the model rate, instrument and
  *               budget counts with cost-known, that a v5 task row shows five belt pills and a
  *               v4 row four (belt 5 never as failed), and that a failing split endpoint is
- *               reported instead of zero-filled.
+ *               reported instead of zero-filled; that a refused cancel (409, 403) is said under
+ *               the header with its envelope and the run is read again (G-976); that a task row
+ *               links to its task page while the row still opens the pack (G-260); and that the
+ *               About block names the Review tab, who records a review and the page's non-goals
+ *               (G-262, G-263).
  * How:          `RunEventStream` driven directly with the fake; `renderApp` at `/runs/:id` with
  *               `eventSourceFactory` injected; assertions on `live-log`, `tile-*` and
  *               `belt-*` test ids.
@@ -33,8 +37,10 @@ import type { EventSourceLike } from '../../api/sse'
 import { RunEventStream, isPinned, parseStepEvent, runEventsUrl } from '../../api/sse'
 import type { Run } from '../../api/types'
 import { HINTS } from '../../help/hints'
-import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
+import { HELP, helpFor } from '../../help/help'
+import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
 import { RunDetailPage } from './RunDetailPage'
+import { ACTION_HELP } from '../../lib/verdict'
 import { containerLine } from './telemetry'
 
 /** A controllable EventSource double. */
@@ -531,6 +537,83 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
     await screen.findByTestId('run-identity')
     expect(screen.queryByRole('button', { name: /Lift the sign-off clause/ })).toBeNull()
+  })
+
+  it('a refused cancel (409, the run already terminal) is shown under the header and the run is re-read', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    let runReads = 0
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /runs/run-1': () => {
+        runReads += 1
+        // the worker finished the run between the page's read and the click
+        const run = runReads === 1 ? RUN : { ...RUN, status: 'succeeded', finished: '2026-09-13T09:30:00Z' }
+        return new Response(JSON.stringify(run), { headers: { 'Content-Type': 'application/json' } })
+      },
+      'GET /runs/run-1/tasks': tasksPage([]),
+      'POST /runs/run-1/cancel': () => envelope(409, 'run_terminal', 'run is already succeeded', { status: 'succeeded' }),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel run' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The cancel was refused')
+    expect(alert).toHaveTextContent('run is already succeeded')
+    expect(alert).toHaveTextContent('HTTP 409 · run_terminal')
+    expect(alert).toHaveTextContent('The run had already finished, so there was nothing to cancel.')
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/runs/run-1/cancel')).toHaveLength(1)
+    // the page's copy was stale: it is read again, and a finished run offers no Cancel
+    await waitFor(() => expect(runReads).toBeGreaterThanOrEqual(2))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel run' })).toBeNull())
+  })
+
+  it('a cancel refused 403 names the role', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    mockApi({
+      // the session's role was lowered after the page loaded: the button was offered, the server refuses
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /runs/run-1': RUN,
+      'GET /runs/run-1/tasks': tasksPage([]),
+      'POST /runs/run-1/cancel': () => envelope(403, 'forbidden', 'requires role operator'),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel run' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The cancel was refused')
+    expect(alert).toHaveTextContent('HTTP 403 · forbidden')
+    expect(alert).toHaveTextContent('Cancelling a run needs the operator role or higher.')
+  })
+
+  it('each task row links to its task page, and the row still opens the pack (G-260)', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const taskId = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': { ...RUN, status: 'succeeded', finished: '2026-09-13T09:30:00Z' },
+      'GET /runs/run-1/tasks': { items: [{ task_id: taskId, capability_class: 'bug.fix', size: 'XS', pool: 'standard', language: 'go', trials: 1, clean: true, first_pass_clean: true, disqualified: false, error: '', cost_usd: 0.1, latency_s: 3, pack_hashes: ['p'.repeat(64)], row_ids: ['row-1'], belt_set: 'v5', belts: { tests_unmodified: true, target_green: true, no_new_failures: true, source_changed: true, repo_lint_clean: true } }], total: 1, limit: 500, offset: 0 },
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const link = await screen.findByRole('link', { name: /^a1b2c3d4e5/ })
+    expect(link).toHaveAttribute('href', `/tasks/sqlalchemy/${taskId}`)
+    expect(link).toHaveAttribute('data-hint', 'link.run_tasks.task')
+    expect(HINTS['col.run_tasks.task']).toMatch(/The id opens the task’s own page/)
+    // clicking the rest of the row still opens the evidence drawer on the last trial's pack
+    const row = link.closest('tr')!
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(within(row).getByText('bug.fix'))
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  })
+
+  it('the About block names the Review tab and who records a review, and what the page does not do (G-262, G-263)', () => {
+    const about = helpFor('/runs/:id')!
+    expect(about.next.viewer).toMatch(/Review tab/)
+    expect(about.next.viewer).toMatch(/recording one is an operator’s act/)
+    expect(about.next.operator).toMatch(/Review tab — the operator role records reviews/)
+    expect(about.purpose).toMatch(/This page does not start a run, does not change a graded row and never talks to the worker/)
+    // docs/API.md: a running run stops between tasks and the command in flight is killed
+    expect(about.purpose).toMatch(/a running one stops between tasks and the command in flight is killed/)
+    // P-610: no copy anywhere says a cancel waits for the attempt in flight — API.md says the command is killed
+    const copy = [...HELP.flatMap((h) => [h.purpose, ...Object.values(h.next), h.numbers ?? '']), ...Object.values(HINTS), ...Object.values(ACTION_HELP)]
+    expect(copy.filter((c) => /after the attempt in flight/.test(c))).toEqual([])
   })
 
   it('live log: a failed belt and an error row carry the red glyph, and every row explains its action', async () => {

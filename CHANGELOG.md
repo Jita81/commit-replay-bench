@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **One served Decisions inbox, and honest run, task and oracle pages**
+  (north-star Wave 6, stream Decisions; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-dec)).
+  `GET /decisions` now derives every row once, fits each act to the reader's role and carries
+  an ETag; `?count=1` feeds the nav badge in one request and never writes the clock. A cell
+  held by its tests and a cell measured on an old apparatus each become a row. ADR-0003 says
+  merge outcomes and review verdicts feed no routing clause. A refused cancel, an unknown task
+  and a failed read now say what happened; task rows link to their pages; Runs states its
+  200-run limit (DL-303, P-610, P-611).
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

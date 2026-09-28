@@ -2805,8 +2805,10 @@ def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: 
         assert due_records(db) == []
     # not due again until the interval has passed (the idle loop calls it every poll)
     assert h.worker.refresh_decisions(now=1000.0 + DECISIONS_REFRESH_S / 2) == 0
-    # a second item with no structural facts: the run refuses it at readiness, which is a
-    # decision waiting on an approver
+    # a second item with no structural facts: the run stops it before any spend — its cell has
+    # no proven standard (ADR-0026 item 8), so it waits NOT BUILT, the row the inbox shows for
+    # it (F6: one derivation, so the clock keeps the row a person reads, not a gap row the
+    # screen never showed)
     gapped = BacklogItem(
         id="I-2",
         title="Add divide to calc",
@@ -2823,14 +2825,14 @@ def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: 
     assert h.worker.refresh_decisions(now=1000.0 + DECISIONS_REFRESH_S) == 1
     with h.factory() as db:
         rows = {(r.kind, r.key): r for r in due_records(db)}
-    assert ("gap_unsigned", "I-2") in rows, rows
-    rec = rows[("gap_unsigned", "I-2")]
+    assert ("not_built", "I-2") in rows, rows
+    rec = rows[("not_built", "I-2")]
     assert rec.repo == pr.REPO_NAME and rec.first_due and rec.resolved == ""
-    assert rec.act_role == "approver" and "structural gap" in rec.title
+    assert rec.act_role in {"approver", "operator"} and "is not built" in rec.title
     # the stamp is the decision's, not the reader's: a later pass does not move it
     assert h.worker.refresh_decisions(now=1000.0 + 3 * DECISIONS_REFRESH_S) == 1
     with h.factory() as db:
-        again = {(r.kind, r.key): r for r in due_records(db)}[("gap_unsigned", "I-2")]
+        again = {(r.kind, r.key): r for r in due_records(db)}[("not_built", "I-2")]
     assert again.first_due == rec.first_due and again.last_seen >= rec.last_seen
 
 

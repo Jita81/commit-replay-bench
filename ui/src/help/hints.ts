@@ -326,7 +326,7 @@ export const HINTS = {
   'link.walk.inflight_open':
     'Watch the live log and per-task rows of this run.',
   'button.walk.cancel':
-    'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
+    'Stop the run. A queued run ends at once; a running one stops between tasks and the command in flight is killed. Attempts already made are still charged and their rows are kept.',
 
   // ── /connect/:name/measure (screens/Connect/MeasurePage.tsx)
   'link.measure.back':
@@ -542,7 +542,7 @@ export const HINTS = {
   'stat.decisions.repo_count':
     'How many of the decisions above belong to this repository; each is listed under it.',
   'pill.decisions.kind':
-    'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, delivery withheld by the route, or a library entry to sign, gone stale or retired by measurement.',
+    'The kind of decision: must not ship (false-Q1), sign-off due, a sign-off gone stale, a structural gap to sign, an item not built, a factory item routed to a person, a review to read, delivery withheld by the route, a cell held until its tests are stronger, a cell measured on an earlier apparatus, or a library entry to sign, gone stale or retired by measurement.',
   'stat.decisions.waiting':
     'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
@@ -551,6 +551,8 @@ export const HINTS = {
     'Take this decision. It opens the sign-off form with the cell chosen, the factory item, or the ledger row, depending on the kind.',
   'button.decisions.read':
     'Read the decision without acting. The role that can act is named under the button.',
+  'stat.decisions.who_acts':
+    'The role that takes this decision. You can read it; a person with that role, or a higher one, acts on it. Admins give roles on the Users page.',
   'tile.decisions.stale':
     'A cell signed under an earlier apparatus, or on a checks arm the repository no longer grades under (the format step or the public-API check was switched since). It is kept as history and licenses nothing until an approver re-signs it on the current instrument or revokes it.',
   'button.decisions.resign':
@@ -1135,6 +1137,10 @@ export const HINTS = {
     'Builder-reported dollars, summed over the run’s attempts. A measurement, not an estimate.',
   'col.runs.created':
     'When the run was queued. Newest first by default.',
+  'stat.runs.kind_origin':
+    'Where each kind of run is started. This page’s Start run form starts the measurement runs; a probe starts from its repository, the factory from the Factory page, and a label run through the API. Every kind is listed here whichever way it started.',
+  'stat.runs.limit':
+    'This list reads the newest 200 runs that match the filters and says how many match in all. It does not page: choose a repository, a kind or a status to reach an older run.',
 
   // ── Start a run dialog (screens/Runs/RunNewDialog.tsx)
   'field.run_new.repo':
@@ -1196,7 +1202,7 @@ export const HINTS = {
   'pill.run.status':
     'Queued means nothing has started or been spent; Running means a worker holds it; Succeeded, Failed and Cancelled are final and keep every graded row.',
   'pill.run.cancel_requested':
-    'Someone asked the run to stop; the worker ends it after the attempt in flight.',
+    'Someone asked the run to stop; the worker ends it between tasks and kills the command in flight.',
   'stat.run.identity':
     'The mode, builder, model, provider and ladder this run graded under. A rate quoted without these is not a claim.',
   'link.run.repo':
@@ -1204,7 +1210,7 @@ export const HINTS = {
   'button.run.deliver_override':
     'Let this factory run build and deliver items whose cell’s proven standard nobody has signed yet. It lifts the sign-off clause and nothing else: a cell that does not route deliver still opens no pull request, and a cell with a wrong clean verdict (the honesty floor) is never lifted. A second approver’s act: the person who queued the run cannot grant it. Recorded under your name on the run’s trace.',
   'button.run.cancel':
-    'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
+    'Stop the run. A queued run ends at once; a running one stops between tasks and the command in flight is killed. Attempts already made are still charged and their rows are kept.',
   'chart.run.progress':
     'Tasks attempted out of tasks planned, as a share.',
   'stat.run.queue':
@@ -1260,7 +1266,13 @@ export const HINTS = {
   'button.run.event_error_hide':
     'Close the full error message and leave the log on its own. The row it came from stays where it is.',
   'col.run_tasks.task':
-    'The task attempted, shortened. Click the row to open the evidence pack of its last trial.',
+    'The task attempted, shortened. The id opens the task’s own page — its spec and every graded trial of it on this repository, with each trial’s review; clicking anywhere else on the row opens the evidence pack of its last trial.',
+  'link.task.repo':
+    'The repository this task was mined from; opens its overview.',
+  'button.task.back_to_tasks':
+    'Open the repository’s Tasks tab: every task mined from it, with its class, size and gold check.',
+  'link.run_tasks.task':
+    'Open this task’s page: its spec and every graded trial of it on this repository, with each trial’s review. The rest of the row opens this run’s evidence pack instead.',
   'col.run_tasks.cell':
     'The class and size tier the task falls in: the cell its row counts toward on the map.',
   'col.run_tasks.trials':

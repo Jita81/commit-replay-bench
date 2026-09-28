@@ -45,6 +45,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import { keys, useCancelRun, useGrantDeliverOverride, useHealth, useRun, useRunEvents, useRunTasks } from '../../api/hooks'
 import type { EventSourceFactory } from '../../api/sse'
+import { ApiError } from '../../api/client'
 import { isRunTerminal, ladderEntryLabel, type Health, type Run, type RunTaskRow, type StepEvent, type WorkerProbeData } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
 import { Button } from '../../components/Button'
@@ -110,53 +111,70 @@ function Header({ run }: { run: Run }) {
   const canGrantOverride =
     run.kind === 'factory' && !!run.factory?.deliver && !run.factory.deliver_override_by && !isRunTerminal(run.status) && can('approver') && !!me && me.id !== run.actor
   return (
-    <PageHeader
-      eyebrow={`Runs · ${run.repo} · ${run.kind}`}
-      title={`Run ${shortId(run.id, 8)}`}
-      purpose={
-        <span className="inline-flex flex-wrap items-center gap-2">
-          <Pill tone={d.tone} glyph={d.glyph} label={d.describe} data-testid="run-status" hint="pill.run.status">
-            <span className={run.status === 'running' ? 'crb-pulse' : ''}>{d.label}</span>
-          </Pill>
-          {run.cancel_requested && !isRunTerminal(run.status) && (
-            <Pill tone="amber" glyph="⊘" size="xs" label="Cancel requested; the worker stops between tasks" hint="pill.run.cancel_requested">
-              cancel requested
+    <>
+      <PageHeader
+        eyebrow={`Runs · ${run.repo} · ${run.kind}`}
+        title={`Run ${shortId(run.id, 8)}`}
+        purpose={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <Pill tone={d.tone} glyph={d.glyph} label={d.describe} data-testid="run-status" hint="pill.run.status">
+              <span className={run.status === 'running' ? 'crb-pulse' : ''}>{d.label}</span>
             </Pill>
-          )}
-          <Hint id="stat.run.identity" className="font-mono text-xs" data-testid="run-identity">
-            {run.kind === 'factory' ? factoryLine(run) : run.kind === 'replay' || run.kind === 'blind' ? `${run.mode} · ${run.builder || '—'}${run.model ? ` · ${run.model}` : ''}${run.provider ? ` · ${run.provider}` : ''} · ladder ${run.ladder.map(ladderEntryLabel).join(',') || 'r1'}` : run.kind}
-          </Hint>
-          <span className="text-xs text-on-surface-muted">
-            created {fmtDate(run.created)}
-            {run.started ? ` · started ${fmtDate(run.started)}` : ''}
-            {run.finished ? ` · finished ${fmtDate(run.finished)}` : ''}
-          </span>
-        </span>
-      }
-      actions={
-        <>
-          <Hint as={Link} id="link.run.repo" to={`/repos/${encodeURIComponent(run.repo)}`} className="text-sm">
-            {run.repo}
-          </Hint>
-          {canGrantOverride && (
-            <Button size="sm" onClick={() => grant.mutate(run.id)} pending={grant.isPending} hint="button.run.deliver_override">
-              {grant.isPending ? 'Recording…' : 'Lift the sign-off clause for this run (second approver)'}
-            </Button>
-          )}
-          {grant.error && (
-            <span role="alert" className="text-sm text-status-red">
-              {grant.error.message}
+            {run.cancel_requested && !isRunTerminal(run.status) && (
+              <Pill tone="amber" glyph="⊘" size="xs" label="Cancel requested; the worker stops between tasks" hint="pill.run.cancel_requested">
+                cancel requested
+              </Pill>
+            )}
+            <Hint id="stat.run.identity" className="font-mono text-xs" data-testid="run-identity">
+              {run.kind === 'factory' ? factoryLine(run) : run.kind === 'replay' || run.kind === 'blind' ? `${run.mode} · ${run.builder || '—'}${run.model ? ` · ${run.model}` : ''}${run.provider ? ` · ${run.provider}` : ''} · ladder ${run.ladder.map(ladderEntryLabel).join(',') || 'r1'}` : run.kind}
+            </Hint>
+            <span className="text-xs text-on-surface-muted">
+              created {fmtDate(run.created)}
+              {run.started ? ` · started ${fmtDate(run.started)}` : ''}
+              {run.finished ? ` · finished ${fmtDate(run.finished)}` : ''}
             </span>
-          )}
-          {can('operator') && !isRunTerminal(run.status) && !run.cancel_requested && (
-            <Button variant="danger" size="sm" onClick={() => cancel.mutate(run.id)} pending={cancel.isPending} hint="button.run.cancel">
-              {cancel.isPending ? 'Requesting…' : 'Cancel run'}
-            </Button>
-          )}
-        </>
-      }
-    />
+          </span>
+        }
+        actions={
+          <>
+            <Hint as={Link} id="link.run.repo" to={`/repos/${encodeURIComponent(run.repo)}`} className="text-sm">
+              {run.repo}
+            </Hint>
+            {canGrantOverride && (
+              <Button size="sm" onClick={() => grant.mutate(run.id)} pending={grant.isPending} hint="button.run.deliver_override">
+                {grant.isPending ? 'Recording…' : 'Lift the sign-off clause for this run (second approver)'}
+              </Button>
+            )}
+            {grant.error && (
+              <span role="alert" className="text-sm text-status-red">
+                {grant.error.message}
+              </span>
+            )}
+            {can('operator') && !isRunTerminal(run.status) && !run.cancel_requested && (
+              <Button variant="danger" size="sm" onClick={() => cancel.mutate(run.id)} pending={cancel.isPending} hint="button.run.cancel">
+                {cancel.isPending ? 'Requesting…' : 'Cancel run'}
+              </Button>
+            )}
+          </>
+        }
+      />
+      {/* G-976: a refused cancel is said, with the server's envelope; the run is read again (useCancelRun) */}
+      {cancel.isError && (
+        <ErrorState compact error={cancel.error} title="The cancel was refused">
+          <p className="text-sm">{cancelRefusedNext(cancel.error)}</p>
+        </ErrorState>
+      )}
+    </>
   )
+}
+
+/** What a refused cancel means for the person who pressed it, by the refusal's status. */
+function cancelRefusedNext(error: unknown): string {
+  const status = error instanceof ApiError ? error.status : 0
+  if (status === 409) return 'The run had already finished, so there was nothing to cancel. The page shows its final state.'
+  if (status === 403) return 'Cancelling a run needs the operator role or higher. Ask an operator, or an admin for the role.'
+  if (status === 404) return 'This run no longer exists.'
+  return 'The request did not reach the server or was not answered. The run may still be going; try again.'
 }
 
 /**
@@ -251,11 +269,32 @@ function SplitTiles({ repo, runId, poll }: { repo: string; runId: string; poll: 
   )
 }
 
-function TaskTable({ runId, poll, onOpenPack }: { runId: string; poll: boolean; onOpenPack: (hash: string) => void }) {
+function TaskTable({ repo, runId, poll, onOpenPack }: { repo: string; runId: string; poll: boolean; onOpenPack: (hash: string) => void }) {
   const tasks = useRunTasks(runId, { poll })
   const columns = useMemo<Column<RunTaskRow>[]>(
     () => [
-      { key: 'task', header: 'Task', hint: 'col.run_tasks.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <ShortId value={t.task_id} /> },
+      {
+        key: 'task',
+        header: 'Task',
+        hint: 'col.run_tasks.task',
+        mono: true,
+        sortValue: (t) => t.task_id,
+        // G-260: the task's own page, one click away; the row itself still opens the pack
+        cell: (t) =>
+          repo ? (
+            <Hint
+              as={Link}
+              id="link.run_tasks.task"
+              to={`/tasks/${encodeURIComponent(repo)}/${encodeURIComponent(t.task_id)}`}
+              onClick={(e: { stopPropagation: () => void }) => e.stopPropagation()}
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              <ShortId value={t.task_id} />
+            </Hint>
+          ) : (
+            <ShortId value={t.task_id} />
+          ),
+      },
       { key: 'class', header: 'Class', hint: 'col.run_tasks.cell', mono: true, sortValue: (t) => t.capability_class, cell: (t) => t.capability_class },
       { key: 'size', header: 'Size', hint: 'col.run_tasks.cell', sortValue: (t) => SIZE_ORDER.indexOf(t.size), cell: (t) => <span className="font-mono text-xs">{t.size}</span> },
       { key: 'trials', header: 'Trials', hint: 'col.run_tasks.trials', numeric: true, sortValue: (t) => t.trials, cell: (t) => fmtInt(t.trials) },
@@ -314,7 +353,7 @@ function TaskTable({ runId, poll, onOpenPack }: { runId: string; poll: boolean; 
           ),
       },
     ],
-    [onOpenPack],
+    [onOpenPack, repo],
   )
   return (
     <QueryBoundary query={tasks} loading="Loading per-task outcomes…">
@@ -451,7 +490,7 @@ export function RunDetailPage({ eventSourceFactory, clock = systemClock }: RunDe
         <LiveLog events={events.events} status={events.status} reconnects={events.reconnects} dropped={events.dropped} error={events.error} />
       </Card>
       <Card title="Tasks" padded={false}>
-        <TaskTable runId={id} poll={!terminal && run.isSuccess} onOpenPack={setPack} />
+        <TaskTable repo={repoName} runId={id} poll={!terminal && run.isSuccess} onOpenPack={setPack} />
       </Card>
       <EvidenceDrawer packHash={pack} onClose={() => setPack(null)} />
     </>
