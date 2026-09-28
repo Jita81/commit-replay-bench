@@ -1502,6 +1502,20 @@ class TestPostureClass:
         ev = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()["evidence"]
         assert ev["posture_class"].startswith("local/") and ev["sealed_posture"] is False
 
+    def test_a_deployment_that_grades_in_docker_reads_its_evidence_as_the_sealed_posture(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other half of G-480: the preview's ``sealed_posture`` is the deployment's own
+        reading, not a constant. The same repository on a deployment whose executor is
+        docker is graded in ``docker/<tree>/sealed``, and the gate says the evidence is the
+        sealed posture — a route that always answered False would call a sealed
+        deployment's evidence a development reading and fail here."""
+        clear_policy(env)
+        monkeypatch.setattr(env.settings.sandbox, "executor", "docker")
+        ev = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()["evidence"]
+        assert ev["posture_class"].startswith("docker/") and ev["posture_class"].endswith("/sealed")
+        assert ev["sealed_posture"] is True
+
     def test_a_row_of_another_class_neither_counts_nor_can_be_attested(self, env: Env) -> None:
         clear_policy(env)
         before = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()

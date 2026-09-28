@@ -31,7 +31,9 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               production worker stamps the unsealed-production override into every run's
               apparatus and every pack, and refuses a run that asks for the local executor
               without it. And that the idle loop calls every idle step under its guard and
-              survives each one raising (P-154).
+              survives each one raising (P-154), and that the production path stops an
+              unsigned deliver cell before any spend unless the setting turns the clause off
+              (ADR-0018).
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
               / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -2485,3 +2487,84 @@ def test_the_decisions_pass_never_raises_and_one_repository_cannot_spoil_the_nex
     assert set(recs) == {(pr.REPO_NAME, "signoff_due", "bug.fix|XS")}
     assert recs[(pr.REPO_NAME, "signoff_due", "bug.fix|XS")].first_due.startswith("2026-09-01")
 
+
+# --- the sign-off clause on the production path (ADR-0018) ------------------------------
+
+
+def test_the_worker_stops_an_unsigned_deliver_cell_before_any_spend_unless_configured_off(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``decide-and-license.handoff.13`` says the FACTORY reads the sign-off before any
+    spend. The loop's own tests hand it a spec; this one runs ``Worker.run_one`` — the
+    production path — over a map where the item's cell routes ``deliver`` with no human
+    sign-off: the item stops ``unsigned_cell``, with ``entry.refused`` on the run and
+    nothing proven RED or built. With ``CRB_FACTORY__REQUIRE_SIGNED_CELL=false`` the worker
+    hands the loop the clause switched off and the same cell builds; so does a signed cell
+    with the clause on. A worker that dropped the setting would fail the first half."""
+    import argparse
+    from dataclasses import replace as dc_replace
+    from types import SimpleNamespace
+
+    from crb.factory import evidence as fe
+    from crb.server.settings import FactorySettings
+
+    home, _item, _ = _multiply_backlog(h)
+    _cmap, scope = h.worker._served_map(pr.REPO_NAME)
+    decision = SimpleNamespace(
+        route="deliver",
+        to_dict=lambda: {"route": "deliver", "reason_code": "deliver", "n": 30},
+    )
+
+    def served(tier: str, earned: bool) -> Callable[..., Any]:
+        cell = SimpleNamespace(
+            key=SimpleNamespace(capability_class="bug.fix", size="XS"),
+            decision=decision,
+            stats=None,
+            verification_tier=tier,
+            earned=earned,
+        )
+        return lambda repo, **kw: (SimpleNamespace(cells=[cell]), scope)
+
+    def run_and_read() -> tuple[Any, list[str], list[str]]:
+        before = len(home.events())
+        run = h.enqueue("factory", ladder_json=["fake:m0"])
+        done = h.run_one()
+        assert done.status == STATUS_SUCCEEDED, done.error
+        kinds = [e.kind for e in home.events()[before:]]
+        actions = [e.action for e in h.events(run.id) if e.stage == "factory"]
+        return done, kinds, actions
+
+    # unsigned, the clause on (the default): stopped before any spend
+    monkeypatch.setattr(h.worker, "_served_map", served("automated-pass", False))
+    assert h.worker.settings.factory.require_signed_cell is True
+    done, kinds, actions = run_and_read()
+    assert done.counts_json["by_status"] == {"unsigned_cell": 1}
+    assert "entry.refused" in actions
+    assert fe.EV_BUILD not in kinds and fe.EV_RED_PROOF not in kinds
+    # the same cell, the clause switched off in the worker's own environment: built
+    args = argparse.Namespace(
+        home="",
+        executor="",
+        image="",
+        kinds="factory",
+        database_url="",
+        worker_id="",
+        poll=2.0,
+        heartbeat=10.0,
+        stale_after=120.0,
+        keep_worktrees=False,
+        metrics_port=None,
+        metrics_host="",
+    )
+    off = worker_main.settings_from_args(args, env={"CRB_FACTORY__REQUIRE_SIGNED_CELL": "false"})
+    assert off.factory.require_signed_cell is False
+    h.worker.settings = dc_replace(h.worker.settings, factory=off.factory)
+    done, kinds, actions = run_and_read()
+    assert done.counts_json["by_status"] == {"accepted": 1}
+    assert "entry.refused" not in actions and fe.EV_BUILD in kinds
+    # a signed cell, the clause back on: built
+    h.worker.settings = dc_replace(h.worker.settings, factory=FactorySettings())
+    monkeypatch.setattr(h.worker, "_served_map", served("human-verified", True))
+    done, kinds, actions = run_and_read()
+    assert done.counts_json["by_status"] == {"accepted": 1}
+    assert "entry.refused" not in actions and fe.EV_BUILD in kinds
