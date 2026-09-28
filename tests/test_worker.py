@@ -445,6 +445,31 @@ def test_a_build_that_meets_a_refused_login_records_the_login_invalid(
     assert state.state == bl.STATE_INVALID
 
 
+def test_a_failed_login_record_never_replaces_the_builds_own_outage(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-731: recording the refused login is a database write after the build returned. When
+    it raised, ``core_run`` caught it as a builder failure and wrote the database error in
+    place of the provider's refusal — a ``harness`` row, counted, its cause lost. The record
+    is best effort: the attempt stays the build's own ``outage``."""
+    from crb.server import worker as worker_mod
+
+    def broken(*a: object, **kw: object) -> bool:
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(worker_mod, "record_refused_login", broken)
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="login_refused", **cfg)
+    run = h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    h.run_one()
+    (row,) = list(h.worker.ledger.rows(run_id=run.id))
+    assert row.failure_kind == "outage", row.error
+    assert "authentication failed (HTTP 401)" in row.error
+
+
 def test_a_queued_run_whose_login_was_recorded_invalid_is_failed_before_any_build(
     h: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

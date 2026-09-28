@@ -327,6 +327,21 @@ def test_a_store_at_head_whose_schema_drifted_names_the_drift(backend: Backend) 
     assert any("ix_runs_status" in d for d in st.drift), st.drift
 
 
+def test_the_health_reading_compares_again_after_an_out_of_band_change(backend: Backend) -> None:
+    """Why ``/health`` compares the schema on every read and never caches it by revision: an
+    out-of-band change (an index dropped by hand) leaves the revision where it was, so a
+    cache keyed on the revision would keep answering "matches" — the very reading pilot D7
+    closed. The same process reads the store twice, before and after the change."""
+    migrate.upgrade(backend.url)
+    with backend.engine.connect() as c:
+        assert migrate.head_status_on(c).matches_models is True
+    with backend.engine.begin() as c:
+        c.execute(text("DROP INDEX ix_runs_status"))
+    with backend.engine.connect() as c:
+        st = migrate.head_status_on(c)
+    assert st.at_head is True and st.matches_models is False
+
+
 def test_a_dropped_server_default_is_drift_on_postgresql(backend: Backend) -> None:
     """Q1's review: the probe compared with alembic's defaults, so a server default dropped
     outside the migrations on PostgreSQL read ``matches_models: True``. PostgreSQL reflects

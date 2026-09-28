@@ -571,12 +571,12 @@ def test_a_calibration_build_is_an_approvers_evented_act_for_an_entry_stop_only(
     url = f"/factory/{ALPHA}/items/I-1/calibration"
     login(env.client, "approver")
     # a proven cell whose standard the item carries: nothing to calibrate
-    every_cell_proven(monkeypatch, "S1@m")
-    r = env.post(url, json={"reason": "measure the cell"})
-    assert r.status_code == 409 and envelope(r)["code"] == "calibration_not_answering"
-    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
-    assert t["entry"] is None and t["way_forward"] is None
-    monkeypatch.undo()
+    with monkeypatch.context() as mp:  # scoped: undo() would drop the autouse guards too
+        every_cell_proven(mp, "S1@m")
+        r = env.post(url, json={"reason": "measure the cell"})
+        assert r.status_code == 409 and envelope(r)["code"] == "calibration_not_answering"
+        (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+        assert t["entry"] is None and t["way_forward"] is None
     # before any run: the gate as the next run will read it (no reading is registered)
     (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
     assert t["status"] == "pending" and t["entry"]["code"] == "no_proven_standard"
@@ -609,6 +609,20 @@ def test_a_calibration_build_is_an_approvers_evented_act_for_an_entry_stop_only(
     assert t["calibration"]["approver"] == body["approver"] and t["way_forward"] is None
     r = env.post(url, json={"reason": "again"})
     assert r.status_code == 409 and envelope(r)["code"] == "calibration_pending"
+    # P-730: a second POST that read the task view before the first one's grant landed
+    # passes the route's own check — the store's conditional append still refuses it
+    import dataclasses
+
+    stale = FactoryHome.task_views
+
+    def before_the_grant(self: Any) -> Any:
+        return [dataclasses.replace(v, calibration=None) for v in stale(self)]
+
+    with monkeypatch.context() as mp:
+        mp.setattr(FactoryHome, "task_views", before_the_grant)
+        r = env.post(url, json={"reason": "raced"})
+    assert r.status_code == 409 and envelope(r)["code"] == "calibration_pending"
+    assert len(home.evidence().events_for("I-1", EV_CALIBRATION_FUNDED)) == 1
 
 
 def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:
@@ -1507,3 +1521,29 @@ def test_every_freeze_or_evolve_decision_holds_the_registration_lock() -> None:
     } <= seen
     assert set(_UNLOCKED_LOAD_EXEMPT) <= seen
     assert all(why.strip() for why in _UNLOCKED_LOAD_EXEMPT.values())
+
+
+def test_an_s1_author_mismatch_asks_for_the_authors_test_not_a_structural_slot() -> None:
+    """P-726: the entry gate's ``S1@<author>`` mismatch stop needs "a failing test written
+    by <author>, the standard's test author". The way forward matched only the exact words
+    "a failing test", so it asked for that need as a ``slot: text`` structural fact and did
+    not ask for a test at all. Every need that is a test is read as one."""
+    from crb.server.routes.factory import _way_forward
+
+    need = "a failing test written by claude-opus-4-8, the standard's test author"
+    view = {
+        "id": "I-1",
+        "status": "needs_context",
+        "entry": {"code": "needs_context", "needs": [need]},
+    }
+    wf = _way_forward(ALPHA, view)
+    assert wf is not None and wf.needs_authored_test is True
+    assert "slot: text" not in wf.what_to_change and need in wf.what_to_change
+    person = {
+        "id": "I-1",
+        "status": "needs_context",
+        "entry": {"code": "needs_context", "needs": ["a failing test"]},
+    }
+    wf = _way_forward(ALPHA, person)
+    assert wf is not None and wf.needs_authored_test is True
+    assert wf.what_to_change.startswith("Attach a failing test a person wrote")

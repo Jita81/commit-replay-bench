@@ -128,3 +128,58 @@ def test_register_refuses_what_the_rules_forbid(
     JsonlLedger(ledger).append(sealed_row(shas[3], created="2026-09-01T00:00:00+00:00"))
     assert main(_argv(wd)) == 2
     assert "pool_seen" in capsys.readouterr().err
+
+
+def test_two_overlapping_registrations_never_overspend_the_cells_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """P-722 (ADR-0026 item 5): the read of the readings on file, the budget check and the
+    append are one step under the file's lock. The budget holds two readings; one is on
+    file. A second registration starts a third from inside its own check: without the lock
+    both read one reading, both pass and both append — three on file, the budget overspent.
+    With it the third waits, then reads two and is refused ``budget_spent``."""
+    import threading
+
+    from crb.cli.commands import reading as cli_reading
+
+    wd = tmp_path / ".crb"
+    _tasks(wd, commits(40))
+    assert main(_argv(wd)) == 0
+    real = cli_reading.register_reading
+    third: dict[str, int] = {}
+    threads: list[threading.Thread] = []
+
+    def overlapping(**kw: object) -> object:
+        if not threads:
+            t = threading.Thread(target=lambda: third.setdefault("rc", main(_argv(wd))))
+            threads.append(t)
+            t.start()
+            t.join(timeout=3)  # it finishes here only when nothing serialises the two
+        return real(**kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cli_reading, "register_reading", overlapping)
+    rc = main(_argv(wd))
+    threads[0].join(timeout=30)
+    capsys.readouterr()
+    on_file = (wd / "readings.jsonl").read_text(encoding="utf-8").splitlines()
+    assert sorted([rc, third["rc"]]) == [0, 2]
+    assert len(on_file) == 2
+
+
+def test_ledger_stats_names_the_arm_and_class_set_of_each_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """P-727: ``crb ledger stats`` splits one cell by apparatus, context arm and class-set
+    version, so its table names each — two lines of one cell (``S3`` and ``A0`` here) are
+    otherwise identical to a reader."""
+    ledger = tmp_path / "ledger.jsonl"
+    book = JsonlLedger(ledger)
+    shas = commits(4)
+    book.append(sealed_row(shas[0], arm="S3"))
+    book.append(sealed_row(shas[1], arm="A0"))
+    assert main(["ledger", "stats", "--path", str(ledger)]) == 0
+    header, *lines = capsys.readouterr().out.splitlines()
+    assert "arm" in header.split() and "class_set" in header.split()
+    body = [ln for ln in lines if ln.strip() and not set(ln.strip()) <= {"-", " "}][:2]
+    assert len(body) == 2 and body[0] != body[1]
+    assert {"S3", "A0"} <= {tok for ln in body for tok in ln.split()}

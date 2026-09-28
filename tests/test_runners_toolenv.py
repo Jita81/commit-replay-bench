@@ -48,8 +48,10 @@ from crb.core.qualify import context_for
 from crb.core.runners import get_runner
 from crb.core.runners.toolenv import (
     IDENTITY_PREFIX,
+    ResolvedTool,
     ToolSpec,
     declare_environment,
+    ensure_farm,
 )
 from crb.core.spec import BELT_BARE, Language, RepoConfig, TaskSpec
 
@@ -432,6 +434,49 @@ def test_a_pinned_node_leads_the_setup_path_so_npm_runs_under_it(tmp_path: Path)
     assert "PATH" not in plain.setup_env(ex)
 
 
+class _NoBaseEnv:
+    """An executor with no ``base_env``: ``honours`` says whether a host pin applies on it
+    (a container's ``tool`` never takes one — ``DockerExecutor.tool``)."""
+
+    def __init__(self, *, honours: bool) -> None:
+        self.honours = honours
+
+    def tool(self, name: str, host_override: str | None = None) -> str:
+        return (host_override or name) if self.honours else name
+
+
+def test_a_pinned_node_leads_path_only_where_the_executor_runs_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-724: a container's toolchain is on the image's ``PATH`` and a host pin never applies
+    there, so setup sets no ``PATH`` at all — before, the pin led ``os.defpath``
+    (``/bin:/usr/bin``), which dropped the image's ``/usr/local/bin``, where ``node`` and
+    ``npm`` live. An executor that runs the pin but has no ``base_env`` puts the pin before
+    the worker's own ``PATH``, as ``declare_environment`` reads ``os.environ`` there."""
+    pinned = _tool(tmp_path / "node24" / "bin", "node")
+    runner = get_runner(
+        RepoConfig(
+            name="js",
+            language=Language.JAVASCRIPT,
+            runner="node",
+            runner_opts={"node": str(pinned)},
+        )
+    )
+    monkeypatch.setenv("PATH", "/opt/worker/bin:/usr/local/bin:/usr/bin")
+    assert "PATH" not in runner.setup_env(_NoBaseEnv(honours=False))  # type: ignore[arg-type]
+    env = runner.setup_env(_NoBaseEnv(honours=True))  # type: ignore[arg-type]
+    assert env["PATH"].split(os.pathsep) == [
+        str(pinned.parent),
+        "/opt/worker/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+    ]
+    monkeypatch.delenv("PATH")
+    assert runner.setup_env(_NoBaseEnv(honours=True))["PATH"] == os.pathsep.join(  # type: ignore[arg-type]
+        [str(pinned.parent), os.defpath]
+    )
+
+
 def test_the_evidence_pack_carries_the_declared_environment(tmp_path: Path) -> None:
     """Packs are stamped with the run's ``Posture.to_dict()``; the pack itself — its dict and
     its hash — must carry the environment's identity and its tool list."""
@@ -652,3 +697,30 @@ def test_the_farm_root_is_private_to_its_user(
         toolenv.declare_environment(
             (ToolSpec("crbdeclared"),), host_env={"PATH": str(host)}, root=root
         )
+
+
+def test_a_farm_another_worker_just_renamed_in_is_kept_never_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-723: two workers resolve one tool set at once; both find no farm, both build one.
+    A renames its farm in and its test runs with ``PATH=<farm>/bin``; B must not then set
+    A's live farm aside and delete it — the key is content-addressed, so a farm that checks
+    out is identical to B's own and stays. B's first check is made to miss, as it would
+    have before A's rename."""
+    from crb.core.runners import toolenv
+
+    sh = ResolvedTool("sh", path="/bin/sh", sha256="a" * 64)
+    root = tmp_path / "farms"
+    bin_dir = ensure_farm([sh], root=root)  # worker A's farm, in place
+    before = os.stat(bin_dir.parent).st_ino
+    real = toolenv._farm_ok
+    calls: list[int] = []
+
+    def missed_once(bin_dir: Path, tools: object) -> bool:
+        calls.append(1)
+        return False if len(calls) == 1 else real(bin_dir, tools)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(toolenv, "_farm_ok", missed_once)
+    assert ensure_farm([sh], root=root) == bin_dir  # worker B
+    assert os.stat(bin_dir.parent).st_ino == before, "B replaced A's live farm"
+    assert sorted(p.name for p in root.iterdir()) == [bin_dir.parent.name]

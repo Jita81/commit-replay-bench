@@ -435,6 +435,10 @@ def ensure_farm(tools: Sequence[ResolvedTool], *, root: Path | None = None) -> P
         (staging / "bin").mkdir()
         for t in present:
             os.symlink(t.path, staging / "bin" / t.name)
+        if _farm_ok(bin_dir, present):
+            # another worker renamed its farm in while this one built: the key is content-
+            # addressed, so it is this farm, and its tests may be running on it — keep it
+            return bin_dir
         if final.exists():
             # a stale or damaged farm under the same key: set it aside, then take its place
             stale = Path(tempfile.mkdtemp(prefix=f".{key}-stale-", dir=base))

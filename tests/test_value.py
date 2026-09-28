@@ -570,6 +570,33 @@ def test_a_deliver_decision_is_made_from_prior_rows_only() -> None:
     assert rp["controls"] == "not evaluated"
 
 
+def _change(i: int, first: str, then: str) -> list[ValueRow]:
+    """Two attempts at one change ``c{i}``: ``first``, then ``then``."""
+    return [
+        dataclasses.replace(vr(2 * i, mode="sighted", kind=first), task_id=f"c{i}"),
+        dataclasses.replace(vr(2 * i + 1, mode="sighted", kind=then), task_id=f"c{i}"),
+    ]
+
+
+def test_the_proxy_reads_each_change_by_its_first_observed_attempt_as_a_reading_does() -> None:
+    """P-721: the proxy says it replays a registered reading, so it reads a change as
+    ``arm_reading`` does — a ``harness`` first row observed nothing and is skipped (never a
+    miss), and a ``disqualified`` first attempt is the builder's miss (never skipped, so a
+    later clean row of the same change cannot stand in for it)."""
+    harness_first = [row for i in range(20) for row in _change(i, FAILURE_HARNESS, FAILURE_CLEAN)]
+    harness_first.append(vr(99, mode="sighted", kind=FAILURE_CLEAN))
+    rp = prospective_routing(harness_first).to_dict()
+    assert rp["decisions"][ROUTE_HUMAN] == 0
+    assert rp["decisions"][ROUTE_DELIVER] == 1  # 20 clean first attempts: the last row delivers
+    disqualified_first = [
+        row for i in range(20) for row in _change(i, FAILURE_DISQUALIFIED, FAILURE_CLEAN)
+    ]
+    disqualified_first.append(vr(99, mode="sighted", kind=FAILURE_CLEAN))
+    rp = prospective_routing(disqualified_first).to_dict()
+    assert rp["decisions"][ROUTE_DELIVER] == 0
+    assert rp["rows_scored"] == 21  # a disqualified row still gets no decision of its own
+
+
 def test_routing_never_pools_modes_or_repositories() -> None:
     rows = [vr(i, mode="sighted", kind=FAILURE_CLEAN) for i in range(16)]
     rows.append(vr(16, mode="blind", kind=FAILURE_CLEAN))

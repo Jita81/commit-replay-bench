@@ -980,13 +980,28 @@ class RoutingPrecision:
         }
 
 
+def _reading_outcome(r: ValueRow) -> bool | None:
+    """What a registered reading reads off ``r`` as its change's first attempt
+    (:func:`crb.core.reading.arm_reading`): ``None`` when ``r`` observed nothing of the
+    builder — an outage, a ``harness`` row, a gold-red commit or an escalation rung — so the
+    change's next row is read; ``False`` for a disqualified attempt (the builder's miss,
+    never skipped); otherwise whether it was clean (P-721)."""
+    if r.failure_kind in (FAILURE_OUTAGE, FAILURE_HARNESS) or r.gold_clean is False:
+        return None
+    if r.trial and r.trial.strip().lower() != "r1":
+        return None
+    return False if r.failure_kind == FAILURE_DISQUALIFIED else r.clean
+
+
 def prospective_routing(
     rows: Iterable[ValueRow], *, policy: RoutingPolicy = DEFAULT_POLICY
 ) -> RoutingPrecision:
     """Replay routing.v2's look rule forward in time; score every ``deliver`` on the row it
     let in. A PROXY: per (repository, mode, checks arm, apparatus, context arm, class set,
     full cell) the rows are read in arrival order as if a reading had been registered before
-    the first — each distinct change counted once, by its first row — so a cell delivers from
+    the first — each distinct change counted once, by its first observed ``r1`` attempt as the
+    reading reads it (:func:`_reading_outcome`: a ``harness`` row is skipped, a disqualified
+    one is a miss; only an eligible row gets a decision) — so a cell delivers from
     the first look its running first attempts clear (ADR-0026 item 3), reads ``human`` once a
     miss puts the last look out of reach, and ``calibrate`` before either; a size the policy
     splits reads ``granularize``; an arm that does not certify — ``S3`` (a ceiling) or ``A0``
@@ -999,8 +1014,6 @@ def prospective_routing(
     delivered: list[ValueRow] = []
     scored = 0
     for r in _ordered(rows):
-        if not r.eligible:
-            continue
         key = (
             r.repo,
             r.mode,
@@ -1011,27 +1024,29 @@ def prospective_routing(
             *r.cell.to_tuple(),
         )
         so_far = outcomes.setdefault(key, [])
-        if r.cell.size in policy.granularize_sizes:
-            decision = ROUTE_GRANULARIZE
-        elif r.context_arm and not parse_arm(r.context_arm).certifies:
-            decision = ROUTE_CALIBRATE  # a ceiling (S3) or descriptive (A0) arm never delivers
-        else:
-            state = look_state(so_far, policy.rule).state
-            decision = (
-                ROUTE_DELIVER
-                if state == STATE_DELIVER
-                else ROUTE_HUMAN
-                if state == STATE_INSUFFICIENT
-                else ROUTE_CALIBRATE
-            )
-        decisions[decision] += 1
-        scored += 1
-        if decision == ROUTE_DELIVER:
-            delivered.append(r)
+        if r.eligible:  # only an eligible row gets a decision, made before its own outcome
+            if r.cell.size in policy.granularize_sizes:
+                decision = ROUTE_GRANULARIZE
+            elif r.context_arm and not parse_arm(r.context_arm).certifies:
+                decision = ROUTE_CALIBRATE  # S3 (a ceiling) or A0 (descriptive) never delivers
+            else:
+                state = look_state(so_far, policy.rule).state
+                decision = (
+                    ROUTE_DELIVER
+                    if state == STATE_DELIVER
+                    else ROUTE_HUMAN
+                    if state == STATE_INSUFFICIENT
+                    else ROUTE_CALIBRATE
+                )
+            decisions[decision] += 1
+            scored += 1
+            if decision == ROUTE_DELIVER:
+                delivered.append(r)
+        outcome = _reading_outcome(r)  # every row, eligible or not, as the reading reads it
         change = r.change or r.task_id
-        if change not in seen.setdefault(key, set()):
+        if outcome is not None and change not in seen.setdefault(key, set()):
             seen[key].add(change)
-            so_far.append(r.clean)
+            so_far.append(outcome)
     by_mode: dict[str, int] = {}
     for r in delivered:
         by_mode[r.mode] = by_mode.get(r.mode, 0) + 1

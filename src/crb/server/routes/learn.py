@@ -126,7 +126,9 @@ from crb.server.routes.capability import (
     CHECKS_CURRENT,
     POSTURE_DEPLOYMENT,
     filter_posture,
+    rows_for_apparatus,
     rows_for_arm,
+    rows_for_mode,
 )
 from crb.server.routes.factory import _next_item_id, _refuse_if_run_active
 from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict, oracle_by_task
@@ -261,18 +263,17 @@ def derive_strengthen(
         )
     # the repository's own checks arm: a cell never pools two arms (ADR-0024)
     every = list(DbLedger(factory).rows(repo=repo))
-    rows = rows_for_arm(factory, repo, every, CHECKS_CURRENT)
+    # the map's and the delivery gate's own reading: sighted rows and every certifying arm's
+    # (P-338), on the current apparatus, measured HERE — never an imported row (EI-2; P-728)
+    current = rows_for_apparatus(rows_for_mode(every, "sighted"), "current")
+    rows = rows_for_arm(factory, repo, current, CHECKS_CURRENT)
     # the deployment's posture class: a reading licenses only the rows it counted on (P-319)
     rows = filter_posture(db, repo, rows, POSTURE_DEPLOYMENT, settings).rows
-    # one reading: the current apparatus and global class set, each cell on its standard arm
-    # (ADR-0025 item 1, ADR-0026) — never two pooled
+    # one reading: the global class set, each cell on its standard arm (ADR-0025 item 1,
+    # ADR-0026) — never two pooled
     book = reading_book(db, repo, every)
     rows = rows_on_standard_arms(
-        [
-            r
-            for r in rows
-            if r.apparatus_version == APPARATUS_VERSION and r.taxonomy in ("", GLOBAL_CLASS_SET)
-        ],
+        [r for r in rows if r.taxonomy in ("", GLOBAL_CLASS_SET)],
         PROJECTIONS[by],
         book,
     )
@@ -1092,7 +1093,9 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
         runs = []
         for v in validated_runs:
             run = new_run(v, actor=operator.id)
-            submit_refusals(db, settings, v, run)
+            # every refusal again but the login check, which ran above, outside the lock:
+            # it may write on a second connection, which would wait on this lock (P-729)
+            submit_refusals(db, settings, v, run, login=False)
             runs.append(stage_queued(db, run))
         return {
             "cell": cell.cell.label,

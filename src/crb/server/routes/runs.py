@@ -882,7 +882,9 @@ def provider_refusal(run: Run, settings: Any, test_author: str | None = None) ->
         return
 
 
-def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
+def submit_refusals(
+    db: Session, settings: Any, body: RunCreateRequest, run: Run, *, login: bool = True
+) -> None:
     """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
     route that enqueues a run cannot skip one (docs/PREVENTION.md P-160: the Learn queue
     enqueued the plan's runs with no credential check, the class P-003 closed on
@@ -904,6 +906,11 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
       refusal that costs nothing, so a run refused for free never spends a verify (pilot D1,
       P-435, P-462 — presence is not a working login; src/crb/server/builder_login.py;
       ``tests/test_builder_login.py`` holds the order).
+
+    ``login=False`` skips ONLY the login check, for a caller that re-runs the gate under an
+    events write lock after running it whole before the lock: the check can verify a stale
+    login and record it on a second connection, which would wait on the lock the caller's
+    own transaction holds (P-729).
     """
     credential_refusal(run, settings)
     factory_settings = getattr(settings, "factory", None)
@@ -924,6 +931,8 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
             executor=deployment_executor(settings, body.executor),
             image_ref=deployment_image(settings, repo_row),
         )
+    if not login:
+        return
     # last: the only refusal that can cost a verify turn (P-462)
     login_refusal(
         make_session_factory(db.get_bind()),  # type: ignore[arg-type]

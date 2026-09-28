@@ -518,6 +518,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
             "belts",
             "apparatus",
             "checks",
+            # the reading key a cell is split by (P-727): two lines of one cell differ here
+            "arm",
+            "class_set",
         ]
         body = [
             [
@@ -533,6 +536,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "+".join(d["belt_sets"]),
                 "+".join(d["apparatus_versions"]),
                 d["checks"],
+                d["context_arm"] or "-",
+                d["taxonomy"] or "-",
             ]
             for d in stats
         ]

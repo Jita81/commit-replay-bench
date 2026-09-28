@@ -338,6 +338,24 @@ def authoring_outage(error: str) -> bool:
     return at >= 0 and is_outage_error(error[at:])
 
 
+#: What the ``S1`` author step writes after ``authoring:`` when the RUNNER raised while
+#: proving the authored test RED (``crb.builders.adapter`` imports it): the instrument failed.
+AUTHORING_HARNESS_ERROR = "harness error proving RED:"
+
+
+def authoring_instrument_failure(error: str) -> bool:
+    """``True`` when an ``authoring:`` error names an INSTRUMENT failure, not the author's
+    output: the author's own provider call failed without a refusal (any ``model_error: …``
+    :func:`authoring_outage` does not read as an outage — a 400, a 500, a reset) or the runner
+    raised while proving the test RED. Rule 4b then holds for the author as for the builder:
+    the row is ``harness``, never an ``authoring`` miss counted against the arm (DL-360,
+    P-720). Called after :func:`authoring_outage`, which takes the refusals first."""
+    if not error.startswith(AUTHORING_ERROR_PREFIX):
+        return False
+    rest = error[len(AUTHORING_ERROR_PREFIX) :].lstrip()
+    return "model_error" in error.lower() or rest.startswith(AUTHORING_HARNESS_ERROR)
+
+
 #: WHY an ``outage`` row's call never happened — a hashed label from apparatus 2.4, stamped at
 #: write by :func:`row_labels_at_write` and read verbatim (pilot D1, P-435). The kind stays
 #: ``outage`` either way, outside every ``n``; the cause only says whose move it is.
@@ -533,7 +551,10 @@ def derive_failure_kind(
        (the ``S1`` arm's test author produced no RED test: against the arm, never the
        builder, never the harness — ADR-0026 item 1) — unless the author's own call was
        refused by its provider (:func:`authoring_outage`)       → ``outage``
-       (nothing was observed, exactly as rule 4 for the builder: excluded from ``n``)
+       (nothing was observed, exactly as rule 4 for the builder: excluded from ``n``) —
+       or the instrument failed (:func:`authoring_instrument_failure`: any other
+       ``model_error: …`` of the author, or the runner raising while proving RED) → ``harness``
+       (rule 4b for the author as for the builder; never the arm's miss — DL-360)
     4. a ``model_error: …`` naming a provider refusal (usage
        limit, 429, quota, dead credential)                   → ``outage``
        (the call never happened: no observation of anything; excluded from ``n``)
@@ -572,7 +593,9 @@ def derive_failure_kind(
     ):
         return FAILURE_PROTOCOL
     if error.startswith(AUTHORING_ERROR_PREFIX):
-        return FAILURE_OUTAGE if authoring_outage(error) else FAILURE_AUTHORING
+        if authoring_outage(error):
+            return FAILURE_OUTAGE
+        return FAILURE_HARNESS if authoring_instrument_failure(error) else FAILURE_AUTHORING
     if error:
         return FAILURE_OUTAGE if is_outage_error(error) else FAILURE_HARNESS
     if stop_reason in BUDGET_STOP_REASONS:
