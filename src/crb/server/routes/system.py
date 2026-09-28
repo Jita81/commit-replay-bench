@@ -117,9 +117,10 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe
               probe calls ``assert_append_only`` in src/crb/store/ledger.py; the
               ``append_only`` probe counts ``expected_triggers`` from src/crb/store/db.py),
               src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``
-              and ``probe_worker``), src/crb/observability/metrics.py
-              (the gauges and the registry — the API's series only; the worker serves its
-              own, docs/DEPLOYMENT.md#9-observability), src/crb/server/worker.py (upserts
+              and ``probe_worker``),
+              src/crb/observability/metrics.py (the gauges and the registry — the API's
+              series only; the worker serves its own, docs/DEPLOYMENT.md#9-observability),
+              src/crb/server/worker.py (upserts
               the ``workers`` rows the worker probe reads; the false-Q1 predicate is kept in
               step with src/crb/server/routes/signoffs.py), deploy/entrypoint.sh + deploy/Dockerfile
               (``CRB_ROLE`` per container and the ``HEALTHCHECK`` on ``/health/live``),

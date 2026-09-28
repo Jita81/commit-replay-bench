@@ -482,3 +482,31 @@ def test_a_builder_error_that_is_not_a_credential_keeps_its_own_words() -> None:
         == lg.FAILURE_HARNESS
     )
     assert model_error_text(ValueError("bad reply")) == "model_error: ValueError: bad reply"
+
+
+def test_the_test_posture_stamps_every_classification_label_the_writer_stamps() -> None:
+    """P-457: ``fixtures.posture`` fills a 2.4 row's classification in "as the writer would",
+    by hand — so when the writer gained ``outage_cause`` (stream Q1) the fixture's 2.4
+    outage rows lacked it and the ledger refused them. For a clean, a ``builder_red`` and two
+    outage rows the fixture now stamps every 2.4-only label the writer stamps, and the kind
+    and the cause the writer derives, so the next label the writer gains fails here first."""
+    from fixtures.posture import with_posture_labels
+
+    written = [
+        _replay(_result(lint_status=lint_mod.LINT_NONE_DETECTED)),
+        _replay(_result(clean=False, belts=g.Belts(True, False), lint_status="not_reached")),
+        _outage(AUTH_401),
+        _outage(USAGE_LIMIT),
+    ]
+    classification = {*lg.V2_ONLY_LABELS, lg.LABEL_FAILURE_KIND}
+    for row in written:
+        fields = row.fields()
+        fields["labels"] = {
+            k: v
+            for k, v in row.labels.items()
+            if k not in classification or k == lg.LABEL_CHANGE_ID
+        }
+        fixture = with_posture_labels(fields)["labels"]
+        assert set(row.labels) & classification <= set(fixture), row.failure_kind
+        for key in (lg.LABEL_FAILURE_KIND, lg.LABEL_OUTAGE_CAUSE):
+            assert fixture.get(key) == row.labels.get(key), (row.failure_kind, key)

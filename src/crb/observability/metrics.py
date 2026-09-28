@@ -46,8 +46,9 @@ Layer:        observability — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
 Works with:   src/crb/server/worker.py (calls the recorders after each grade and build,
               meters events through ``record_event``, sets the queue gauge on check-in),
-              src/crb/server/worker_main.py (``start_worker_exposition`` before the loop),
-              src/crb/server/worker_metrics.py (records the ``Exposition`` for ``/health``),
+              src/crb/server/worker_main.py and src/crb/server/worker_metrics.py
+              (``start_worker_exposition`` before the loop; the ``Exposition`` it returns is
+              recorded for ``/health``),
               src/crb/server/routes/system.py (``/metrics`` renders ``render()``),
               src/crb/server/routes/signoffs.py (``record_signoff`` after each decision),
               src/crb/server/http_metrics.py (the HTTP-level metrics on the same registry),
