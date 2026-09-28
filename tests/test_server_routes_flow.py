@@ -16,9 +16,11 @@ What it does: Pins the reading's shape (six streams, the apparatus, the method s
               the platform stream, the reviewers' stated minutes, the spend counted once
               across the streams, the figures served as not captured with their gap ids, the
               connect stream's registration → first green probe (G-302), step 2's span
-              standing in for the developer's hours (G-556) and each proving run's duration
-              (G-430), the learn stream's guard verdicts and finding → re-measurement (G-536),
-              and the 404 / 401 / 409 answers.
+              served in plain words as an estimate of the developer's time (G-556) and each
+              proving run's duration from its start at the current apparatus (G-430, P-605),
+              that no served label carries a docs claim tag (P-608), the learn stream's guard
+              verdicts and finding → re-measurement through the route, a broken prevention
+              chain named rather than folded (G-536, P-604), and the 404 / 401 / 409 answers.
 How:          ``make_env`` over the synthetic seed; events and a factory evidence chain are
               written directly for the cases the seed has no data for; a deliberately
               false-Q1 row proves the read refuses untrusted rows like the map does.
@@ -38,6 +40,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -164,9 +167,17 @@ UV_RUN = (
 )
 
 
-def add_protocol_row(env: Env, error: str, task: str) -> None:
+#: A network refusal of ``go mod`` and the prevention class it falls into.
+NET_ERR = (
+    "protocol violation: network: 'go' is not allowed (no network access) (attempted: go mod tidy)"
+)
+NET_SIG = "protocol:network:go mod"
+
+
+def add_protocol_row(env: Env, error: str, task: str, *, created: str = "") -> None:
     """One protocol row of ALPHA through the write path: a seeded clean row refused by a guard
-    with ``error``, as the grader writes it (``failure_kind`` protocol)."""
+    with ``error``, as the grader writes it (``failure_kind`` protocol); graded at ``created``
+    when given (else the seeded row's own stamp)."""
     ledger = DbLedger(env.factory)
     template = next(r for r in ledger.rows(repo=ALPHA) if r.clean)
     d = template.to_dict()
@@ -187,6 +198,7 @@ def add_protocol_row(env: Env, error: str, task: str) -> None:
             "prev_hash": "",
             "row_hash": "",
             "task_id": task,
+            **({"created": created} if created else {}),
         }
     )
     d.pop("failure_kind", None)
@@ -211,10 +223,20 @@ def register_beta(env: Env, at: str) -> None:
 
 
 def add_run(
-    env: Env, run_id: str, kind: str, status: str, start: str, end: str, counts: dict[str, Any]
+    env: Env,
+    run_id: str,
+    kind: str,
+    status: str,
+    start: str,
+    end: str,
+    counts: dict[str, Any],
+    *,
+    queued: str = "",
+    apparatus: str = APPARATUS_VERSION,
 ) -> None:
-    """One run of BETA on 2026-09-01, started at ``start`` and finished at ``end`` (HH:MM;
-    ``""`` for a run that has not finished), with the counts its worker wrote."""
+    """One run of BETA on 2026-09-01, queued at ``queued`` (default: ``start``), started at
+    ``start`` and finished at ``end`` (HH:MM; ``""`` for a run that has not finished), with the
+    counts its worker wrote and the apparatus it stamped."""
 
     def stamp(hhmm: str) -> str:
         return f"2026-09-01T{hhmm}:00+00:00" if hhmm else ""
@@ -226,10 +248,11 @@ def add_run(
                 repo=BETA,
                 kind=kind,
                 status=status,
-                created=stamp(start),
+                created=stamp(queued or start),
                 started=stamp(start),
                 finished=stamp(end),
                 counts_json=counts,
+                apparatus_json={"apparatus_version": apparatus} if apparatus else {},
             )
         )
         s.commit()
@@ -601,8 +624,8 @@ class TestConnectAndProve:
     ) -> None:
         """G-556: step 2 (making the oracle reproducible) as the product sees it: from the first
         probe or qualify after registration that said the repository was not ready to the first
-        qualify that qualified a task. It stands in for the developer's hours and says so; the
-        hours themselves stay named as not captured."""
+        qualify that qualified a task. It is served as an estimate of the developer's time and says so;
+        the hours themselves stay named as not captured."""
         register_beta(env, "2026-09-01T10:00:00+00:00")
         # before registration: not this repository's step 2
         add_run(env, "p0", "probe", "failed", "08:00", "08:05", {"green": False})
@@ -619,14 +642,32 @@ class TestConnectAndProve:
         s = stream(reading(env, BETA), "connect-and-prove")
         lt = lead(s, "step_2_span")
         assert (lt["n"], lt["median_s"]) == (1, 7200.0)  # 10:10 → 12:10
-        assert (
-            "stands in for the developer's hours" in lt["label"] and "[hypothesis]" in lt["label"]
-        )
+        # the label is plain words: an estimate, not a measure; the claim tag stays in the docs
+        assert "an estimate of the developer's time" in lt["label"]
+        assert "[" not in lt["label"] and "red probe" not in lt["label"]
         (nc,) = s["not_captured"]
-        assert nc["gap"] == "G-556" and "stands in" in nc["why"]
+        assert nc["gap"] == "G-556" and "an estimate" in nc["why"]
         # a repository with no red probe or qualify: step 2 not needed or not started, and said
         alpha = lead(stream(reading(env), "connect-and-prove"), "step_2_span")
         assert alpha["median_s"] is None and "step 2" in alpha["reason"]
+
+    def test_no_served_flow_words_carry_a_docs_claim_tag(self, env: Env) -> None:
+        """P-608: a claim tag (``[hypothesis]``, ``[measured …]``) is the docs register's
+        mark, not plain English for a reader. Every label, reason and not-captured sentence
+        ``GET /flow`` serves, on every stream, is free of one — the evidence tag stays in the
+        docs and the criterion's evidence."""
+        register_beta(env, "2026-09-01T10:00:00+00:00")
+        add_run(env, "p1", "probe", "failed", "10:05", "10:10", {"green": False})
+        add_run(env, "q1", "qualify", "succeeded", "12:00", "12:10", {"qualified": 1})
+        tag = re.compile(r"\[(hypothesis|measured|operator|gap|estimate)\b", re.IGNORECASE)
+        for repo in (ALPHA, BETA):
+            for s in reading(env, repo)["streams"]:
+                words = [s["name"], s["spend_label"], s["per_unit_label"], s["per_unit_reason"]]
+                words += [lt["label"] for lt in s["lead_times"]]
+                words += [lt["reason"] for lt in s["lead_times"]]
+                words += [f"{nc['figure']} {nc['why']}" for nc in s["not_captured"]]
+                for w in words:
+                    assert not tag.search(w or ""), (s["stream"], w)
 
     def test_step_2_without_a_qualified_task_has_not_ended(self, env: Env) -> None:
         register_beta(env, "2026-09-01T10:00:00+00:00")
@@ -637,12 +678,18 @@ class TestConnectAndProve:
 
     def test_connect_stream_serves_each_proving_run_duration_with_n(self, env: Env) -> None:
         """G-430: how long one mine, oracle and controls run takes on this repository — the
-        median from started to finished over SUCCEEDED runs, with n. A failed run is not a
-        duration of the work; a kind with no succeeded run reads unmeasured with its reason."""
+        median from started (never queued) to finished over SUCCEEDED runs the worker stamped
+        with the current apparatus, with n. A failed run is not a duration of the work, a run
+        of an older apparatus is another instrument's; a kind with no succeeded run reads
+        unmeasured with its reason."""
         register_beta(env, "2026-09-01T10:00:00+00:00")
-        add_run(env, "m1", "mine", "succeeded", "10:00", "10:05", {})
+        # queued 55 minutes before it started: the wait is not the work
+        add_run(env, "m1", "mine", "succeeded", "10:00", "10:05", {}, queued="09:05")
         add_run(env, "m2", "mine", "succeeded", "11:00", "11:15", {})
         add_run(env, "m3", "mine", "failed", "12:00", "14:00", {})
+        # two hours on an older apparatus: another instrument's figure, never pooled
+        add_run(env, "m4", "mine", "succeeded", "15:00", "17:00", {}, apparatus="2.3")
+        add_run(env, "m5", "mine", "succeeded", "18:00", "20:00", {}, apparatus="2.3")
         add_run(env, "o1", "oracle", "succeeded", "12:00", "12:20", {})
         s = stream(reading(env, BETA), "connect-and-prove")
         mine = lead(s, "mine_run")
@@ -1166,6 +1213,78 @@ class TestLearn:
         # and the finding → re-measurement lead time is served, unmeasured with its reason
         lt = lead(s, "finding_to_remeasurement")
         assert lt["n"] == 0 and lt["median_s"] is None and "change" in lt["reason"]
+
+    def test_the_learn_stream_serves_a_class_found_to_its_first_decided_look_through_the_route(
+        self, env: Env
+    ) -> None:
+        """G-536 through ``GET /flow`` itself, not the fold alone: a class a guard first raised
+        at 07:00, a change applied to it at 09:00 and its first decided look at 11:00 read
+        4 hours, n = 1 — the route hands the repository's own prevention register to the fold.
+        A decided record under a change that does not target the class, and a later look,
+        never move it."""
+        from crb.core.prevention import PreventionRecord
+        from crb.server.prevention_state import EventsPreventionStore
+
+        def at(hhmm: str) -> str:
+            return f"2026-09-02T{hhmm}:00+00:00"
+
+        add_protocol_row(env, NET_ERR, "d" * 40, created=at("07:00"))
+        with env.factory() as s:
+            store = EventsPreventionStore(s, ALPHA)
+            for kind, hhmm, payload in (
+                (
+                    "applied",
+                    "09:00",
+                    {"change_id": "c-net", "lever_id": "line:T-NET", "targets": [NET_SIG]},
+                ),
+                (
+                    "applied",
+                    "09:30",
+                    {"change_id": "c-other", "lever_id": "x", "targets": ["other:x"]},
+                ),
+                (
+                    "decided",
+                    "10:00",
+                    {"change_id": "c-other", "signature": NET_SIG, "verdict": "keep"},
+                ),
+                (
+                    "decided",
+                    "11:00",
+                    {"change_id": "c-net", "signature": NET_SIG, "verdict": "continue"},
+                ),
+                (
+                    "decided",
+                    "12:00",
+                    {"change_id": "c-net", "signature": NET_SIG, "verdict": "keep"},
+                ),
+            ):
+                store.append(PreventionRecord(kind, ALPHA, payload, created=at(hhmm)))
+            s.commit()
+        s_ = stream(reading(env), "learn")
+        lt = lead(s_, "finding_to_remeasurement")
+        assert (lt["n"], lt["median_s"]) == (1, 14400.0), lt
+        assert s_["counts"]["classes_with_a_change"] >= 1
+        assert s_["counts"]["classes_remeasured"] == 1
+        # a chain that no longer verifies (a record chained on a head that is not the last)
+        # is named, never folded
+        from crb.server.routes.learn import learn_trace_id
+        from crb.server.routes.runs import append_system_event
+
+        forged = PreventionRecord(
+            "decided", ALPHA, {"change_id": "c-net", "signature": NET_SIG}, created=at("13:00")
+        ).chained("f" * 64)
+        with env.factory() as s:
+            append_system_event(
+                s,
+                trace_id=learn_trace_id(ALPHA),
+                action="learn.prevention.recorded",
+                repo=ALPHA,
+                actor="",
+                payload=forged.to_dict(),
+            )
+            s.commit()
+        broken = lead(stream(reading(env), "learn"), "finding_to_remeasurement")
+        assert broken["n"] == 0 and "prevention chain does not verify" in broken["reason"]
 
     def test_an_evolution_that_answers_no_refusal_is_not_timed(self, env: Env) -> None:
         write_chain(

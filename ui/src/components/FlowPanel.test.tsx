@@ -249,7 +249,7 @@ describe('FlowPanel', () => {
       name: 'Connect & prove',
       lead_times: [
         lt('registered_to_probe_green', 'Registered → first green probe', 1, 1800),
-        lt('step_2_span', 'Step 2: first red probe or qualify → first qualified task (stands in for the developer’s hours [hypothesis])', 0, null, 'no probe or qualify of this repository has failed since it was registered, so step 2 has not been needed or has not started'),
+        lt('step_2_span', 'Step 2: first failed probe or qualify → first qualified task (an estimate of the developer’s time on step 2, not a measure of it)', 0, null, 'no probe or qualify of this repository has failed since it was registered, so step 2 has not been needed or has not started'),
         lt('mine_run', 'One mine run, started → finished', 2, 750),
         lt('oracle_run', 'One oracle run, started → finished', 1, 1800),
         lt('controls_run', 'One controls run, started → finished', 0, null, 'no controls run of this repository has succeeded yet'),
@@ -266,7 +266,7 @@ describe('FlowPanel', () => {
     for (const key of ['step_2_span', 'mine_run', 'oracle_run', 'controls_run']) {
       expect(screen.getByTestId(`flow-${key}`).getAttribute('data-hint')).toBe(`flow.${key}`)
     }
-    expect(screen.getByTestId('flow-step_2_span').textContent).toContain('stands in for the developer’s hours')
+    expect(screen.getByTestId('flow-step_2_span').textContent).toContain('an estimate of the developer’s time')
     expect(screen.getByTestId('flow-controls_run').textContent).toContain('no controls run of this repository has succeeded yet')
     expect(unhinted(container)).toEqual([])
   })

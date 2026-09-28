@@ -14,9 +14,9 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 |---|---|
 | connect-and-prove | repository registered → its first controls report that passed; |
 | | registered → its first probe that finished green (G-302); step 2's span, the |
-| | first red probe or qualify → the first qualify that qualified a task, standing in |
-| | for the developer's hours (G-556); one succeeded mine, oracle and controls run, |
-| | started → finished (G-430) |
+| | first failed probe or qualify → the first qualify that qualified a task, an |
+| | estimate of the developer's time (G-556); one succeeded mine, oracle and controls |
+| | run at the current apparatus, started → finished (G-430) |
 | measure | run queued → its last row graded; a cell's first row → its tenth |
 | decide-and-license | a cell first routed ``deliver`` in the sign-off's own scope (recorded, |
 | | ADR-0028 §6) → the cell signed; |
@@ -243,8 +243,8 @@ def step_2_span(session: Session, repo: str, registered: str) -> tuple[str, str,
     ``(start, end, why)``. The start is the first probe or qualify after registration that
     said the repository was not ready (a probe that failed or was not green; a qualify that
     qualified no task); the end is the first qualify after that
-    start which qualified at least one task. This span stands in for the developer's hours
-    (G-556): the work itself happens outside the product. ``why`` names the missing end."""
+    start which qualified at least one task. This span is an estimate of the developer's time
+    (G-556), not a measure of it: the work itself happens outside the product. ``why`` names the missing end."""
     start = ""
     for run in _finished_runs(session, repo, (KIND_PROBE, KIND_QUALIFY)):
         if registered and not _before(registered, run.finished):
@@ -284,15 +284,22 @@ def step_2_span(session: Session, repo: str, registered: str) -> tuple[str, str,
     )
 
 
-def run_durations(session: Session, repo: str, kind: str) -> list[tuple[str, str]]:
-    """``(started, finished)`` of every SUCCEEDED run of ``kind`` — how long one such run
-    takes on this repository (G-430). A failed or cancelled run is not a duration of the
-    work, and a run the worker never stamped as started (written before the stamp existed,
-    or imported) was never timed, so it is left out rather than guessed."""
+def run_durations(
+    session: Session, repo: str, kind: str, *, apparatus: str = APPARATUS_VERSION
+) -> list[tuple[str, str]]:
+    """``(started, finished)`` of every SUCCEEDED run of ``kind`` the worker stamped with
+    ``apparatus`` — how long one such run takes on this repository at the apparatus the figure
+    is labelled with (G-430). Timed from the start, never from the queue: the wait before a
+    worker claims a run is not the work. A failed or cancelled run is not a duration of the
+    work; a run the worker never stamped as started (written before the stamp existed, or
+    imported) was never timed; and a run of another apparatus is another instrument's figure
+    — each is left out rather than guessed or pooled."""
     return [
         (run.started, run.finished)
         for run in _finished_runs(session, repo, (kind,))
-        if run.status == STATUS_SUCCEEDED and run.started
+        if run.status == STATUS_SUCCEEDED
+        and run.started
+        and str(dict(run.apparatus_json or {}).get("apparatus_version") or "") == apparatus
     ]
 
 
@@ -393,8 +400,8 @@ def connect_and_prove(session: Session, repo: str, rows: Sequence[GradeRow]) -> 
             ),
             lead_time(
                 "step_2_span",
-                "Step 2: first red probe or qualify → first qualified task (stands in for the "
-                "developer's hours [hypothesis])",
+                "Step 2: first failed probe or qualify → first qualified task (an estimate of "
+                "the developer's time on step 2, not a measure of it)",
                 [(s2_start, s2_end)] if s2_start and s2_end else [],
                 reason=s2_reason,
             ),
@@ -402,19 +409,28 @@ def connect_and_prove(session: Session, repo: str, rows: Sequence[GradeRow]) -> 
                 "mine_run",
                 "One mine run, started → finished",
                 run_durations(session, repo, KIND_MINE),
-                reason="no mine run of this repository has succeeded yet",
+                reason=(
+                    "no mine run of this repository has succeeded at apparatus "
+                    f"{APPARATUS_VERSION} yet"
+                ),
             ),
             lead_time(
                 "oracle_run",
                 "One oracle run, started → finished",
                 run_durations(session, repo, KIND_ORACLE),
-                reason="no oracle run of this repository has succeeded yet",
+                reason=(
+                    "no oracle run of this repository has succeeded at apparatus "
+                    f"{APPARATUS_VERSION} yet"
+                ),
             ),
             lead_time(
                 "controls_run",
                 "One controls run, started → finished",
                 run_durations(session, repo, KIND_CONTROLS),
-                reason="no controls run of this repository has succeeded yet",
+                reason=(
+                    "no controls run of this repository has succeeded at apparatus "
+                    f"{APPARATUS_VERSION} yet"
+                ),
             ),
         ),
         spend=_costs(rows),
@@ -731,8 +747,8 @@ def learn(
         "refusals_answered": len(strengthened),
     }
     if fp is not None:
-        # the guard's verdicts, as counts: a false positive is a row in a class a person
-        # decided honest; the undecided rows stay visible and are never either verdict
+        # the guard's verdicts, as counts: a false positive is a row every class of which a
+        # person decided honest; the undecided rows stay visible and are never either verdict
         counts.update(
             {
                 "guard_rows_refused": fp.rows_protocol,
@@ -870,8 +886,8 @@ NOT_CAPTURED: dict[str, NotCaptured] = {
     "developer_hours": NotCaptured(
         figure="the developer hours of step 2 (the guide's “real work”), as the developer spent them",
         why=(
-            "the work happens outside this product; the span from the first red probe or "
-            "qualify to the first qualified task is timed above and stands in for it, but "
+            "the work happens outside this product; the span from the first failed probe or "
+            "qualify to the first qualified task is timed above as an estimate of it, but "
             "nobody marks when the developer started and stopped"
         ),
         gap="G-556",

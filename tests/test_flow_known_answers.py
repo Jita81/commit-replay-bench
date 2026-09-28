@@ -91,7 +91,8 @@ KNOWN: dict[str, tuple[int, float | None, float | None, float | None]] = {
     # a task 09:10 (one that qualified nothing at 08:20; the seed's probe of 2026-08-25
     # predates registration and never starts it)
     "step_2_span": (1, 3600.0, 3600.0, 3600.0),
-    # two succeeded mine runs of 5 and 20 minutes; a failed one of 2 hours never counts
+    # two succeeded mine runs of 5 and 20 minutes, each timed from its start, not its queueing;
+    # a failed one of 2 hours and a succeeded one of 2 hours on apparatus 2.3 never count
     "mine_run": (2, 750.0, 300.0, 1200.0),
     # one succeeded oracle run of 30 minutes (the seed's has no start stamp: never timed)
     "oracle_run": (1, 1800.0, 1800.0, 1800.0),
@@ -136,6 +137,11 @@ DAY = "2026-09-01"
 POSTURE = "local/inplace/host-env"
 ARM = "off"
 RUN_A, RUN_B = "e1" * 16, "e2" * 16
+
+
+#: When each proving run was queued, well before it started (a run timed from its queueing
+#: would read 40 to 50 minutes longer).
+QUEUED = {"m1": "07:35", "m2": "07:40", "o1": "08:20", "c1": "08:00"}
 
 
 def at(hhmm: str) -> str:
@@ -255,19 +261,25 @@ def served(tmp_path: Path) -> dict[str, Any]:
             ("m1", "mine", "succeeded", "08:15", "08:20", {}),
             ("m2", "mine", "succeeded", "08:25", "08:45", {}),
             ("m3", "mine", "failed", "09:00", "11:00", {}),
+            # two hours on an older apparatus: another instrument's, never pooled with 2.4
+            ("m4", "mine", "succeeded", "05:00", "07:00", {"apparatus": "2.3"}),
             ("o1", "oracle", "succeeded", "09:00", "09:30", {}),
             ("c1", "controls", "succeeded", "08:50", "09:00", {}),
         ):
+            stamped = str(counts.pop("apparatus", APPARATUS_VERSION))
+            proving = kind in ("mine", "oracle", "controls")
             s.add(
                 Run(
                     id=rid.ljust(32, "0"),
                     repo=ALPHA,
                     kind=kind,
                     status=status,
-                    created=at(start),
+                    # the proving runs waited in the queue first: the wait is not the work
+                    created=at(QUEUED.get(rid, start)),
                     started=at(start),
                     finished=at(end),
                     counts_json=counts,
+                    apparatus_json={"apparatus_version": stamped} if proving else {},
                 )
             )
         # the true deliver stamp; every decoy is LATER and must never be the start

@@ -129,7 +129,7 @@ async function learnRendered(page: Page): Promise<void> {
   for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale or thin evidence']) await expect(page.getByText(eyebrow, { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('table', { name: /Refusal classes/ })).toBeVisible()
   await expect(page.getByRole('table', { name: /Strengthening backlog/ })).toBeVisible()
-  await expect(page.getByRole('table', { name: /Cells to re-measure or top up/ })).toBeVisible()
+  await expect(page.getByRole('table', { name: /Cells to top up, or to register a reading on/ })).toBeVisible()
   await expect(page.getByRole('table', { name: /The guard's false positives, by apparatus/ })).toBeVisible()
   await expect(page.getByText(/^Deriving /)).toHaveCount(0)
 }
@@ -184,19 +184,21 @@ test.describe('13 learn: the loop acts from the page', () => {
     await expect(fp.getByRole('table', { name: /The guard's false positives, by apparatus/ }).locator('tbody tr').first()).toBeVisible()
     await expect(fp).toContainText(/refused rows are undecided/)
     // the plan: a fresh stack's rows all carry the running apparatus, so nothing is stale —
-    // but the held cell is short of the rule's first look, so it is offered as thin (G-565),
-    // with either its Queue control or the reason nothing can be queued
+    // but no reading is registered on the held cell, so its rows cannot count and it is
+    // offered registration first, never a replay (ADR-0026 item 2, P-602), and says why
     const plan = page.locator('#remeasure')
     await expect(page.locator('[data-hint="stat.learn.stale_rows"]')).toContainText(/n =\s*\d+/)
-    const thinRow = plan.getByRole('table', { name: /Cells to re-measure or top up/ }).locator('tbody tr').filter({ hasText: 'thin' }).first()
+    const thinRow = plan.getByRole('table', { name: /Cells to top up, or to register a reading on/ }).locator('tbody tr').filter({ hasText: 'thin' }).first()
     await expect(thinRow).toBeVisible()
-    await expect(thinRow.getByRole('button', { name: 'Queue runs' }).or(thinRow.getByText(/Nothing to queue: mine more history/))).toBeVisible()
+    await expect(thinRow.getByText('Register a reading first')).toBeVisible()
+    await expect(thinRow).toContainText(/register a reading of this cell at apparatus/)
+    await expect(thinRow.getByRole('button', { name: 'Queue runs' })).toHaveCount(0)
     // and read against a future apparatus (what a bump would cost, G-983) every row is stale:
     // a row of the plan, naming the runs it would queue — and no Queue control on a preview
     await plan.getByLabel(/^Plan against apparatus/).fill(WHAT_IF)
     await plan.getByRole('button', { name: 'Plan', exact: true }).click()
     await expect(plan.getByTestId('learn-plan-whatif')).toContainText(`planned against apparatus ${WHAT_IF}`)
-    const planRow = plan.getByRole('table', { name: /Cells to re-measure or top up/ }).locator('tbody tr').first()
+    const planRow = plan.getByRole('table', { name: /Cells to top up, or to register a reading on/ }).locator('tbody tr').first()
     await expect(planRow).toBeVisible()
     await expect(planRow).toContainText(/\S+\|\S+/)
     await expect(plan.getByRole('button', { name: 'Queue runs' })).toHaveCount(0)
@@ -281,9 +283,11 @@ test.describe('13 learn: the loop acts from the page', () => {
     const plan = page.locator('#remeasure')
     await plan.getByLabel(/^Plan against apparatus/).fill(WHAT_IF)
     await plan.getByRole('button', { name: 'Plan', exact: true }).click()
-    const runs = plan.getByRole('table', { name: /Cells to re-measure or top up/ }).locator('tbody tr').first()
+    const runs = plan.getByRole('table', { name: /Cells to top up, or to register a reading on/ }).locator('tbody tr').first()
     await expect(runs).toBeVisible()
-    await expect(page.locator('[data-hint="stat.learn.needed"]')).toContainText(/n =\s*[1-9]/)
+    // no reading is registered at the future apparatus, so each cell names registration first
+    await expect(runs).toContainText(new RegExp(`register a reading of this cell at apparatus ${WHAT_IF.replace('.', '\\.')}`))
+    await expect(page.locator('[data-hint="stat.learn.needed"]')).toContainText(/need a reading registered first/)
   })
 
   test('a viewer reads the reports and is offered none of the decisions', async ({ browser }) => {
