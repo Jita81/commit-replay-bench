@@ -120,7 +120,9 @@ test.describe('14 go live', () => {
     expect(version, footer).not.toBeNull()
     // Build and apparatus: the version the footer (GET /version) carries
     await expect(postureRow(page, 'Build and apparatus', 'Version')).toContainText(`crb ${version![1]}`)
-    await expect(postureRow(page, 'Build and apparatus', 'Policies in force')).toContainText('signoff-policy.v3')
+    // the sign-off policy the server serves, never a version written into the spec
+    const served = (await (await page.request.get(`${env.baseUrl}/api/v1/version`)).json()) as { signoff_policy: string }
+    await expect(postureRow(page, 'Build and apparatus', 'Policies in force')).toContainText(served.signoff_policy)
     // Identity and access: this stack signs in locally (no provider configured in tier 1)
     await expect(postureRow(page, 'Identity and access', 'Sign-in')).toContainText(/Local accounts only|OpenID Connect/)
     // Execution and egress: the executor the stack was started with
