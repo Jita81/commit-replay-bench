@@ -8,14 +8,17 @@
  *               signed context with sponsor, signer, date, provenance and effect, what is proven
  *               per size (or "no proven standard" and the next measurement), which switched-on
  *               checks evidence which ISO/IEC 25010 characteristic — then the nomenclature index
- *               of every entry with its status and the act due on it, and the proposal form.
- * What it does: Lets an operator propose an entry (and so sponsor it), an operator adopt a
+ *               of every entry with its status and the act due on it, the miners' card and the
+ *               proposal form.
+ * What it does: Lets an operator run the miners over the repository's files at a commit (each
+ *               proposal arrives unsigned, with no sponsor), propose an entry (and so sponsor
+ *               it), an operator adopt a
  *               miner's or a model's proposal, and a DIFFERENT approver sign it; revocation and
  *               retirement are appended with a reason. The sponsor's own Sign button is disabled
  *               and says why (the API refuses it too, 409 `same_person`). Every refusal is shown
  *               in the API's words. The page says, in the lede and on its tag, that nothing here
  *               reaches a builder's brief until an arm measures it.
- * How:          `useLibrary` + `useWorkTypePage` + `useLibraryAct`; tables through `DataTable`
+ * How:          `useLibrary` + `useWorkTypePage` + `useLibraryAct` + `useLibraryMine`; tables through `DataTable`
  *               with a hint on every column; forms through `Field`; every element a reader meets
  *               is a hint trigger (`*.library.*`).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -34,7 +37,7 @@
 import { type FormEvent, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
-import type { LibraryEntry, LibraryKind, LibraryStatus, WorkTypePage } from '../../api/types'
+import type { LibraryEntry, LibraryKind, LibraryMineRun, LibraryStatus, WorkTypePage } from '../../api/types'
 import { Card } from '../../components/Card'
 import { type Column, DataTable } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
@@ -44,7 +47,7 @@ import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
 import { BackLink, InsetText, Kicker, Lede, PageTitle, SecondaryButton, StartButton, Tag, type TagTone, WarningButton } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
-import { type LibraryAct, useLibrary, useLibraryAct, useWorkTypePage } from './useLibrary'
+import { type LibraryAct, useLibrary, useLibraryAct, useLibraryMine, useWorkTypePage } from './useLibrary'
 
 const STATUS_TONE: Record<LibraryStatus, TagTone> = { proposed: 'blue', signed: 'green', stale: 'amber', retired: 'grey', revoked: 'red' }
 const KIND_LABEL: Record<LibraryKind, string> = {
@@ -274,6 +277,45 @@ function ProposeForm({ repo, kinds, characteristics, statementMax, onAct }: { re
   )
 }
 
+/** What a miner run did, in one sentence: the commit, the proposals and what waits on a person. */
+function mineSummary(run: LibraryMineRun): string {
+  const c = run.counts
+  const others = (['held', 'refused', 'failed'] as const).filter((k) => c[k] > 0).map((k) => `${c[k]} ${k}`)
+  const tail = others.length ? `, ${others.join(', ')}` : ''
+  const lead = `Read ${run.repo} at ${run.commit.slice(0, 12)}: ${c.proposed} proposed, ${c.unchanged} unchanged, ${c.noted} noted${tail}.`
+  return c.proposed > 0 ? `${lead} Each proposal waits for a person to sponsor it and a different approver to sign it.` : `${lead} Nothing new at this commit.`
+}
+
+function MineCard({ repo }: { repo: string }) {
+  const [commit, setCommit] = useState('')
+  const mine = useLibraryMine(repo)
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    mine.mutate({ commit })
+  }
+  return (
+    <Card title="Propose from the repository’s files" id="mine">
+      <p>
+        The miners read what the repository already holds at one commit — its decision records, code owners and layout, lint and formatter settings, tests and change history — and propose entries with the file and commit they came from. No model is called, and nothing is signed.
+      </p>
+      <form onSubmit={submit} className="space-y-4" aria-label={`Propose entries from ${repo}’s files`}>
+        <TextField label="Commit (optional)" value={commit} onChange={(e) => setCommit(e.target.value)} hint="field.library.commit" description="A sha, branch or tag of the clone. Empty reads its head." />
+        <SecondaryButton type="submit" disabled={mine.isPending} hint="button.library.mine">
+          {mine.isPending ? 'Reading the files…' : 'Propose from the files'}
+        </SecondaryButton>
+      </form>
+      <div role="status" aria-live="polite" className="mt-3" data-testid="library-mined">
+        {mine.data ? mineSummary(mine.data) : ''}
+      </div>
+      {mine.isError && (
+        <div role="alert" className="mt-3 border-l-4 border-status-red p-3" data-testid="library-mine-refused">
+          {refusal(mine.error)}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 function IndexSection({ repo, entries, meId, onAct }: { repo: string; entries: LibraryEntry[]; meId: string; onAct: ReturnType<typeof useLibraryAct> }) {
   const { can } = useAuth()
   const [reason, setReason] = useState('')
@@ -419,6 +461,7 @@ export function LibraryPage() {
           {page.data && <WorkTypeSection page={page.data} />}
           {chosen && !pageable && types.some((t) => t.slug === chosen) && <p>This work type has no page until it is signed.</p>}
           <IndexSection repo={repo} entries={lib.data.entries} meId={me?.id ?? ''} onAct={onAct} />
+          {can('operator') && <MineCard repo={repo} />}
           {can('operator') && <ProposeForm repo={repo} kinds={lib.data.kinds} characteristics={lib.data.characteristics} statementMax={lib.data.statement_max} onAct={onAct} />}
         </>
       )}

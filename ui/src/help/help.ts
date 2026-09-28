@@ -333,7 +333,7 @@ export const HELP: ScreenHelp[] = [
     purpose: 'What people know about one repository that a test cannot say, in one vocabulary, with one page per kind of change. Each entry needs a sponsor and a different approver, and nothing here reaches a builder until an arm has measured it.',
     next: {
       viewer: 'Pick a work type to read what it is, what a ticket must carry, the signed context and what is proven for each size.',
-      operator: 'Propose an entry and you become its sponsor, or adopt a mined proposal with Sponsor. A different approver then signs it.',
+      operator: 'Propose an entry and you become its sponsor, or propose from the repository’s files and adopt a mined proposal with Sponsor. A different approver then signs it.',
       approver: 'Sign entries someone else sponsored; you cannot sign one you sponsored. Revoke or retire with a reason, and both are kept on the record.',
     },
     numbers: 'A proven standard shows its distinct commits, its 95 % Wilson interval and the apparatus it was proven under; with none, the page names the reading that would prove it. A measured effect reads unmeasured until an arm is read with and without the entry.',

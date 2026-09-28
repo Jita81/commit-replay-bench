@@ -521,6 +521,10 @@ export const HINTS = {
     'The name of the repository’s check that evidences the entry. It counts only if the quality table counts that check for the characteristic named and the repository runs it; otherwise the entry is advisory.',
   'button.library.propose':
     'Record the proposal with you as its sponsor. Nothing is signed until a different approver signs it.',
+  'field.library.commit':
+    'The commit the miners read: a sha, a branch or a tag the repository’s clone holds. Leave it empty for the clone’s head. The run is pinned to the full sha, so a branch that moves later does not move it.',
+  'button.library.mine':
+    'Read the repository’s own files at that commit — its decision records, code owners and layout, lint and formatter settings, tests and change history — and propose entries from them. No model is called. Nothing is signed: each proposal waits for a person to sponsor it and a different approver to sign it. The same commit proposes nothing new.',
 
   // ── /decisions (screens/Decisions/DecisionsPage.tsx)
   'stat.decisions.apparatus':

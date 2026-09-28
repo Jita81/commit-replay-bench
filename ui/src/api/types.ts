@@ -2077,6 +2077,29 @@ export interface WorkTypePage {
   reaches_briefs: boolean
 }
 
+/** One outcome of a miner run: what it did with one draft or note. */
+export type LibraryMineOutcomeKind = 'proposed' | 'unchanged' | 'held' | 'refused' | 'noted' | 'failed'
+export interface LibraryMineOutcome {
+  miner: string
+  subject: string
+  outcome: LibraryMineOutcomeKind
+  reason: string
+  version: string
+  counts: Record<string, number>
+}
+
+/** `POST /library/{repo}/mine` — the miners over the clone at one pinned commit (G-677). */
+export interface LibraryMineRun {
+  repo: string
+  commit: string
+  miners: string[]
+  counts: Record<LibraryMineOutcomeKind, number>
+  proposed: LibraryEntry[]
+  outcomes: LibraryMineOutcome[]
+  files_read: number
+  reaches_briefs: boolean
+}
+
 /** `POST /library/{repo}/entries`. */
 export interface LibraryProposeRequest {
   kind: LibraryKind

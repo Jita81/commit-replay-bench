@@ -23,7 +23,7 @@
  */
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
 import { api, type ApiError } from '../../api/client'
-import type { LibraryEntry, LibraryIndex, LibraryProposeRequest, WorkTypePage } from '../../api/types'
+import type { LibraryEntry, LibraryIndex, LibraryMineRun, LibraryProposeRequest, WorkTypePage } from '../../api/types'
 
 const enc = encodeURIComponent
 
@@ -61,6 +61,18 @@ export function useLibraryAct(repo: string): UseMutationResult<LibraryEntry, Api
       const body = 'version' in a ? { version: a.version } : { reason: a.reason }
       return api<LibraryEntry>(path, { method: 'POST', body })
     },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['library', repo] })
+    },
+  })
+}
+
+/** `POST /library/{repo}/mine` — run the miners over the repository's clone at one commit (empty
+ * = its HEAD). Every proposal is appended unsigned, waiting for a person to sponsor it. */
+export function useLibraryMine(repo: string): UseMutationResult<LibraryMineRun, ApiError, { commit: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ commit }) => api<LibraryMineRun>(`/library/${enc(repo)}/mine`, { method: 'POST', body: { commit: commit.trim() } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['library', repo] })
     },

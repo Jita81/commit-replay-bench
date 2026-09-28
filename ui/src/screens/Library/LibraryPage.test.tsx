@@ -11,7 +11,9 @@
  *               interval, apparatus — or "No proven standard" and the next measurement), and
  *               which switched-on checks evidence which ISO/IEC 25010 characteristic; that
  *               nothing is shown as reaching a brief; that an operator proposes and is told a
- *               second person must sign; that the sponsor's own Sign button is disabled with the
+ *               second person must sign; that an operator runs the miners and is told what was
+ *               proposed and that each proposal waits for a person, while a viewer is not offered
+ *               them; that the sponsor's own Sign button is disabled with the
  *               reason while another approver's posts the version read; that a refusal is shown
  *               in the API's words; and that every element resolves to a hint.
  * How:          `renderApp` at `/library/alpha` with `mockApi`; the principal is switched by
@@ -99,6 +101,48 @@ describe('LibraryPage', () => {
     // a mined proposal nobody adopted offers the operator Sponsor
     const mined = screen.getAllByText('decision/adr-0001').find((el) => el.closest('tr'))!.closest('tr')!
     expect(within(mined).getByRole('button', { name: 'Sponsor' })).toBeEnabled()
+  })
+
+  it('an operator proposes from the repository’s files and is told each proposal waits for a person', async () => {
+    const mined = { ...LIBRARY.entries[1], entry_id: 'convention/ruff', sponsor: '', sponsor_name: '', entry: { ...LIBRARY.entries[1]!.entry, proposed_by: 'mined:lint@1' } }
+    const run = (proposed: number, unchanged: number) => ({
+      repo: 'alpha',
+      commit: 'a'.repeat(40),
+      miners: ['adrs@1', 'owners@1', 'lint@1', 'tests@1', 'change-profile@1'],
+      counts: { proposed, unchanged, held: 0, refused: 0, noted: 1, failed: 0 },
+      proposed: proposed ? [mined] : [],
+      outcomes: [],
+      files_read: 7,
+      reaches_briefs: false,
+    })
+    let n = 0
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      ...LIBRARY_API,
+      'POST /library/alpha/mine': () => json(n++ === 0 ? run(1, 0) : run(0, 1)),
+    })
+    const { container } = renderApp(<LibraryPage />, AT)
+    await screen.findByRole('heading', { name: 'Propose from the repository’s files' })
+    await userEvent.type(screen.getByLabelText(/^Commit/), 'main')
+    await userEvent.click(screen.getByRole('button', { name: 'Propose from the files' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('library-mined')).toHaveTextContent(
+        'Read alpha at aaaaaaaaaaaa: 1 proposed, 0 unchanged, 1 noted. Each proposal waits for a person to sponsor it and a different approver to sign it.',
+      ),
+    )
+    const post = calls.find((c) => c.method === 'POST')!
+    expect(JSON.parse(String(post.init?.body))).toEqual({ commit: 'main' })
+    // the same commit again proposes nothing new
+    await userEvent.click(screen.getByRole('button', { name: 'Propose from the files' }))
+    await waitFor(() => expect(screen.getByTestId('library-mined')).toHaveTextContent('0 proposed, 1 unchanged, 1 noted. Nothing new at this commit.'))
+    expect(unhinted(container)).toEqual([])
+  })
+
+  it('a viewer is not offered the miners', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, ...LIBRARY_API })
+    renderApp(<LibraryPage />, AT)
+    await screen.findByRole('table', { name: 'Library entries for alpha' })
+    expect(screen.queryByRole('button', { name: 'Propose from the files' })).not.toBeInTheDocument()
   })
 
   it('the sponsor cannot sign their own entry; another approver signs the version read', async () => {

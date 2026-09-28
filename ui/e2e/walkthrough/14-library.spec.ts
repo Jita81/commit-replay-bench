@@ -16,14 +16,17 @@
  *               size has no proven standard with the next measurement, and says nothing reaches
  *               a brief. Walked at 1280 and at 375 without sideways scroll. The pass from the
  *               repository's page to the signed entry on the work type's page is timed, printed
- *               and attached to the report — the figure OPERATOR §14 quotes (G-737).
+ *               and attached to the report — the figure OPERATOR §14 quotes (G-737). Then the
+ *               admin proposes from the repository's files (G-677): the miners' proposals arrive
+ *               with no sponsor and none signed, a Sponsor adopts one, and the same commit again
+ *               proposes nothing new.
  * How:          Playwright; the form through its labels; the refusal through `page.request`
  *               with the CSRF header; the approver persona created with `POST /users` as 08 does.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0026-the-context-standard.md (item 10)
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Library/LibraryPage.tsx,
- *               src/crb/server/routes/library.py, ui/e2e/walkthrough/03-mine.spec.ts (the
- *               tasks whose work types the page lists)
+ *               src/crb/server/routes/library.py, src/crb/core/miners.py (the miners' run),
+ *               ui/e2e/walkthrough/03-mine.spec.ts (the tasks whose work types the page lists)
  * Tested by:    ui/e2e/walkthrough/14-library.spec.ts
  * Touch when:   never for a new repository; the page's form, its acts or the two-person rule
  *               change.
@@ -123,4 +126,30 @@ test('a sponsor proposes an entry and cannot sign it; a second person signs it a
   await expect(page.getByRole('heading', { name: `Work type: ${workType}` })).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow, 'no sideways scroll at 375 px').toBeLessThanOrEqual(1)
+})
+
+test('an operator proposes from the repository’s files; each proposal waits for a person, and the same commit proposes nothing new', async ({ page }) => {
+  const repo = primary().name
+  await page.goto(`/library/${encodeURIComponent(repo)}`)
+  await expect(page.getByTestId('library-count')).toHaveAttribute('data-ready', 'true')
+  const summary = page.getByTestId('library-mined')
+  const before = await page.request.get(`${env.baseUrl}/api/v1/library/${repo}`)
+  const known = ((await before.json()) as { entries: Array<{ entry_id: string }> }).entries.length
+  await page.getByRole('button', { name: 'Propose from the files' }).click()
+  // the fixture repository has tests under tests/ and a src/calc package: at least those
+  await expect(summary).toContainText(/Read .+ at [0-9a-f]{12}: [1-9]\d* proposed/)
+  await expect(summary).toContainText('Each proposal waits for a person to sponsor it and a different approver to sign it.')
+  const mined = page.getByRole('table', { name: /^Library entries for/ }).getByRole('row').filter({ hasText: 'none yet — proposed by mined:' })
+  await expect(mined.first()).toBeVisible()
+  const after = ((await (await page.request.get(`${env.baseUrl}/api/v1/library/${repo}`)).json()) as { entries: Array<{ entry_id: string; status: string; sponsor: string }> }).entries
+  expect(after.length).toBeGreaterThan(known)
+  expect(after.filter((e) => e.status === 'signed' && !e.sponsor)).toEqual([]) // no miner signs
+  // a person adopts one; nothing is signed until a different approver signs it
+  const unadopted = await mined.count()
+  await mined.first().getByRole('button', { name: 'Sponsor' }).click()
+  await expect(mined).toHaveCount(unadopted - 1)
+  // the same commit again: nothing new
+  await page.getByRole('button', { name: 'Propose from the files' }).click()
+  await expect(summary).toContainText(': 0 proposed,')
+  await expect(summary).toContainText('Nothing new at this commit.')
 })
