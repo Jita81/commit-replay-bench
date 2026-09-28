@@ -338,33 +338,40 @@ def learn_register_item(
         },
     )
     home = FactoryHome(settings.home, repo)
-    active = home.load_backlog()
     recorded = {
         str(r.payload.get("registered_id", ""))
         for r in chain
         if r.kind == "registered" and r.payload.get("item_id") == item_id
     }
-    orphan = _unrecorded_registration(active, item_id, recorded)
-    try:
-        if orphan is not None and active is not None:
-            # an earlier call wrote the backlog and then failed to record it: record THAT
-            # registration, never register the same item again as a new version
-            reg = active
-            how, registered_id, supersedes = "recovered", orphan.id, orphan.supersedes
-        elif active is None:
-            reg = home.register_backlog([item], actor=operator.id)
-            how, registered_id, supersedes = "frozen", item.id, ""
-        else:
-            registered_id, supersedes = item.id, ""
-            if active.get(item.id) is not None:
-                registered_id = _next_item_id(item.id, [i.id for i in active.all_items()])
-                supersedes = _latest_in_lineage(active, item.id)
-            reg = home.register_evolution(
-                replace(item, id=registered_id, supersedes=supersedes), actor=operator.id
-            )
-            how = "evolved"
-    except (BacklogError, ValueError, LookupError) as exc:
-        raise ApiError(409, "register_refused", f"{item_id!r} was not registered: {exc}") from exc
+    # the load, the orphan check and the freeze-or-evolve are ONE locked read-modify-write
+    # of the active backlog (EI-7): a second registration — another item, the intake
+    # listener, Learn — waits, then evolves onto this one's freeze instead of freezing a
+    # backlog that replaces it
+    with home.registration():
+        active = home.load_backlog()
+        orphan = _unrecorded_registration(active, item_id, recorded)
+        try:
+            if orphan is not None and active is not None:
+                # an earlier call wrote the backlog and then failed to record it: record THAT
+                # registration, never register the same item again as a new version
+                reg = active
+                how, registered_id, supersedes = "recovered", orphan.id, orphan.supersedes
+            elif active is None:
+                reg = home.register_backlog([item], actor=operator.id)
+                how, registered_id, supersedes = "frozen", item.id, ""
+            else:
+                registered_id, supersedes = item.id, ""
+                if active.get(item.id) is not None:
+                    registered_id = _next_item_id(item.id, [i.id for i in active.all_items()])
+                    supersedes = _latest_in_lineage(active, item.id)
+                reg = home.register_evolution(
+                    replace(item, id=registered_id, supersedes=supersedes), actor=operator.id
+                )
+                how = "evolved"
+        except (BacklogError, ValueError, LookupError) as exc:
+            raise ApiError(
+                409, "register_refused", f"{item_id!r} was not registered: {exc}"
+            ) from exc
     rec = _append(
         db,
         repo,
