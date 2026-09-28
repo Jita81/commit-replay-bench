@@ -254,6 +254,39 @@ def test_the_loss_share_is_rounded_once_from_the_exact_sums(vb: ModuleType, tmp_
     assert "$1.00 of $2.01 (50.0%)" in loss, loss
 
 
+def test_the_page_reads_only_the_checks_arm_the_report_serves(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """docs/PREVENTION.md P-407: the page re-scoped the rows by apparatus alone, so a budget
+    row graded on another checks arm was added to the budget spend and the loss share,
+    beside the report's own figures, which read one arm (ADR-0024 - never two)."""
+    import dataclasses
+
+    from crb.core.checks import ARMS
+
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join(
+            [
+                HEADER,
+                _row(1, clean="1", lint="1"),
+                _row(2, kind="budget"),
+                _row(3, kind="budget", cost="5.0"),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rows = vb.read_ledger(p)
+    other = next(a for a in ARMS if a != rows[0].checks_arm)
+    rows = [rows[0], rows[1], dataclasses.replace(rows[2], checks_arm=other)]
+    out = vb.render_markdown(rows, [], apparatus="all")
+    budget = next(line for line in out.splitlines() if line.startswith("| spend on budget-stopped"))
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$1.00 of $2.00" in budget and "n = 1 budget rows" in budget, budget
+    assert "$1.00 of $2.00 (50.0%)" in loss, loss
+
+
 def test_no_percentage_on_the_page_is_formed_from_a_served_rounded_figure() -> None:
     """docs/PREVENTION.md P-028 and P-406: the report serves money to the cent and shares and
     rates to 4 places. A ``_pct`` or ``_frac`` whose argument reads one of those served keys
