@@ -466,16 +466,31 @@ def assert_append_only(
     return tried
 
 
+#: PostgreSQL's SQLSTATE for a statement the role has no privilege to run.
+INSUFFICIENT_PRIVILEGE = "42501"
+
+
+def _sqlstate(exc: DBAPIError) -> str:
+    """The driver's SQLSTATE for ``exc`` (psycopg's ``sqlstate``, psycopg2's ``pgcode``)."""
+    orig = exc.orig
+    return str(getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None) or "")
+
+
 def _probe_write(factory: sessionmaker[Session], table: str, verb: str, stmt: Any) -> None:
-    """Run ``stmt`` and roll it back: return when the trigger refused it in its own words,
-    re-raise any other database error, and raise :class:`LedgerIntegrityError` when the
-    write went through (the rollback undoes it)."""
+    """Run ``stmt`` and roll it back: return when the trigger refused it in its own words, or
+    when PostgreSQL refused it for want of the privilege (SQLSTATE ``42501``: an application
+    role granted only ``SELECT``/``INSERT`` on the append-only tables, as DEPLOYMENT §3.3
+    advises, cannot reach the trigger at all — P-321); re-raise any other database error,
+    and raise :class:`LedgerIntegrityError` when the write went through (the rollback undoes
+    it). Whether the triggers are there for the owner is the live-trigger check's to say."""
     with factory() as s:
         try:
             s.execute(stmt)
         except DBAPIError as exc:
             s.rollback()
             if append_only_error_text(table) in str(exc.orig):
+                return
+            if _sqlstate(exc) == INSUFFICIENT_PRIVILEGE:
                 return
             raise
         s.rollback()
