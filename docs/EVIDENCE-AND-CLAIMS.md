@@ -262,8 +262,18 @@ sources, on repositories whose suite runs in the sandbox. Every rate from it is 
 - the original engineering reasoning: a builder sees the commit's subject and description
   (blind) or its tests (sighted), never the ticket, the conversation or the maintainer's
   tacit knowledge, so a rate measures reproduction of the observable result from the
-  available information, not the reasoning that produced it (the upstream spec-lever finding:
-  blind-authored facts 68.8 % ≈ bare 72.9 %; docs/reviews/2026-09-13-critical-friend.md);
+  available information, not the reasoning that produced it. Upstream, on the same 48 census
+  tasks, the message alone was clean 33 times (68.8 %) and the message with a checklist 35
+  times (72.9 %); facts written from the source diff, with the checklist, reached 46 (95.8 %),
+  and in a re-run through one harness facts written without the diff reached 33 (68.8 %) and
+  facts written with it 44 (91.7 %) — the lift was the author having seen the answer
+  **[measured — n = 48 tasks per arm, one rep each; method: the upstream T2 ledger
+  (`grades.jsonl`, `informed_grades.json`, `regrade_grades.json`) tallied on 2026-09-26;
+  apparatus n/a — the upstream harness, not crb]**. The 72.9 % this page called "bare" until
+  2026-09-27 is the checklist arm. The re-run gave every task one class's four slots, 22 of its
+  48 "informed" sheets were empty and the answer commit was reachable in its worktree, so
+  per-class structural facts written without the diff are unmeasured, not falsified (ADR-0026;
+  docs/reviews/2026-09-13-critical-friend.md);
 - sizes beyond the caps, and commits the miner skipped (merges, gold-dirty).
 
 A claim that steps outside this population (a throughput headline, "AI can do our
@@ -327,6 +337,8 @@ that what was recorded is true. Evidence ranks, weakest first:
 - That an aggregate success rate makes every cell inside it safe for automated delivery.
 - Any rate without `n`, interval, mode, builder/model and apparatus version.
 - Anything that blends `1.0-census` and `2.0` apparatus rows into one number.
+- That code conforms to ISO/IEC 25010, ISO/IEC 5055 or any other standard because the checks
+  mapped to it pass (ADR-0026 item 11).
 
 ## 8. Validation principles we inherit
 

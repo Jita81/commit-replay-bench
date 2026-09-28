@@ -2,7 +2,7 @@
 Navigation
 ----------
 What it is:   The plan — the order of work in GAP-ANALYSIS.md batched into waves (Wave 0 to
-              Wave 4, the acts only the operator can do, and what comes after Wave 4).
+              Wave 5, the acts only the operator can do, and what comes after Wave 4).
 What it does: Says which gaps travel together, on which branch, and what "done" looks like when
               each wave lands; every wave item is a gap id the record defines, and
               scripts/dod_check.py refuses one that is not.
@@ -12,7 +12,8 @@ How:          One table per wave; its `gaps` column holds gap ids and nothing el
               artefacts' git history shows they were gaps; every gap the order of work ranks
               must sit in some table here, and no heading quotes a rank (P-189).
 Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         none (DL-063 records the rule the checker enforces on this file)
+ADRs:         docs/adr/0026-the-context-standard.md (Waves 2 to 5 build it; DL-086,
+              DL-087); DL-063 records the rule the checker enforces on this file
 Works with:   docs/dod/GAP-ANALYSIS.md (the order of work this batches), docs/dod/STANDARD.md
               (§6: the next feature is the top of the gap analysis), scripts/dod_check.py
               (refuses a wave item that is not a gap id), docs/PREVENTION.md (P-118, the class
@@ -59,7 +60,8 @@ their files; the shared registries (`hints.ts`, `help.ts`, `types.ts`, `API.md`,
 from the integration tree, with every stream's ids renumbered to follow the base in merge
 order. It awaits the operator's merge. The gaps the streams opened are placed in Wave 2, Wave 4
 or the list after Wave 4 below, and the checker now refuses a ranked gap in no table (P-189).
-Waves 2 to 4 have not started.
+The next wave runs on `feat/ns2-*` branches cut from `feat/ns1`, stream T first; no later
+wave has started.
 
 Some ids the base carried are retired on this branch because they were **merged or narrowed,
 not closed**: the criteria that cited them are still open under the id that replaced them.
@@ -116,68 +118,101 @@ the tier-1 walkthrough passes with specs in which an admin resets a colleague's 
 the colleague signs in again, and an operator accepts a refusal line on `/learn` and reads what
 it did.
 
-## Wave 2 — trustworthy when (autonomous)
+## Wave 2 — trustworthy when, and the context standard (autonomous)
 
-Four of the external assessment's five conditions, spend under control, and the approver task
-that now leads the autonomous work. On this branch the order of work puts G-477 (Home's task 7
-reads Completed with only the bootstrap admin) first among the gaps nobody but us can close,
-so it moves here from Wave 4 (STANDARD §6); it restarts from the parked `feat/w2-s`, whose
-readiness rule it is, and the rest of that stream stays in Wave 4. H, I and C can
-start beside Wave 1; R branches from Wave 1's merge, because it shares `capability.py` with E
-and `learn.py` with L; F owns `worker.py` for the wave. A3 (G-973) and A6 (G-974) ride the one
-apparatus bump to 2.4 with `routing.v2`.
+The external assessment's conditions for trust, all but the measured README section, which is
+Wave 3's; spend under control; and the operator's thesis of 26 September 2026 made buildable
+(ADR-0026): a context arm and a class-set version on every row, registered readings under the
+look rule, the leak guard and the entry gate. **T, the thesis record, lands first** and is docs
+only: ADR-0026, DL-086 and DL-087, the criteria and gaps the thesis needs, the corrected
+specification-lever record and this plan. It closes no gap, so it has no row. Every other stream
+branches from T's head. R builds on G's branch, because it owns the one apparatus bump that G's
+`lint_status`, `failure_kind` and `mutation.v2` ride; F owns `worker.py`, the factory and the
+brief composer for the wave.
+
+On this branch the order of work puts G-477 (Home's task 7 reads Completed with only the
+bootstrap admin) first among the gaps nobody but us can close, so it moves here from Wave 4
+(STANDARD §6); it restarts from the parked `feat/w2-s`, whose readiness rule it is, and the rest
+of that stream stays in Wave 4.
 
 | stream | gaps | what ships |
 |---|---|---|
-| R · `routing.v2` | G-661, G-540, G-973, G-974 | one ADR; apparatus 2.4; a distinct-task minimum; `calibrate` on an unmeasured oracle; the sealed-posture clause; `lint_status` and `mutation.v2` in the same bump; the map and `/value` split by learn label |
-| F · factory | G-662, G-538, G-707, G-975 | the required, scoreable strength probe and the `oracle_not_scoreable` stop; factory builds get the loop's overlay and labels; the worker re-checks the builder credential when it claims a run; a pull request opens only when the delivered change's own cell routes `deliver` |
+| C · claims | G-929, G-660, G-674, G-994, G-996, G-995, G-998 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the ISO/IEC 25010 characteristic-to-check table and the rule that refuses a conformity claim; a scheduled mutation pass that proves the evidence of a met criterion or a closed prevention row can fail, and a check that a criterion flipped to met kept its words; one owner per shared defect class in a wave, so parallel streams stop fixing one class several ways; a `[measured]` tag whose method names a source the repository does not carry is refused |
 | I · audit | G-663, F51, G-601, G-924, G-972, G-709 | an audit event naming who set the unsealed override; the `events` table hash-chained and verified; the head `row_hash` served and logged at worker start; `crb_signoffs_total`; the append-only probe on every table; the migration job's own owner URL in the chart and compose, so the API and the worker connect as a role that does not own the ledger |
-| H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970, G-971, G-987 | `uv.lock`, CI installing from it, and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap (the assessment's C8 re-scoped to it); the reaper test on a fake clock; the Helm API and worker share the evidence directories; the docker-wait sites and their ratchet; the executor and mining edge cases; one retrying helper for every system event's trace seq |
+| G · the grade says why | G-973, G-974, G-971 | `lint_status`; `failure_kind` stamped at write; `mutation.v2`; the executor and mining edge cases |
+| R · routing.v2 and the context arms | G-661, G-932, G-678 | ADR-0025 committed as ADR-0026 amends it; apparatus 2.4; registered readings with a frozen pool and a seeded order; the look rule, the hierarchy and the per-cell budget; the context arm and class-set version on every row, never pooled; the map, `/routes`, `/value`, sign-offs and the delivery gate read one arm and one version; the cell's standard served |
+| F · the factory's licence and entry | G-662, G-975, G-707, G-934, G-671, G-933 | the required, scoreable strength probe; the delivered change's own cell; the credential re-check at claim; one brief composer for replay and the factory, and the replay `S1` arm; the leak guard; readiness reads the cell's standard, stops `no_proven_standard` or `needs_context` before any spend, runs calibration builds that never deliver, and applies the size rule |
+| H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970, G-987 | `uv.lock` and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap; the reaper test on a fake clock; shared evidence directories; the docker-wait sites and their ratchet; one retrying helper for every system event's trace seq |
 | E2 · economics in one scope | G-990, G-991, G-989 | a cell's flat cost and latency means, the Pareto frontier, the best config and the forecast's price read one apparatus version and one posture class or are withheld; `GET /value` filters by posture class and refuses to pool two; a help-copy ratchet ties "not yet served" sentences to the API's fields (opened by Wave 1's stream E) |
 | S0 · the approver task · from `feat/w2-s` | G-477 | Home task 7 reads the real two-person readiness: Completed only when an approver other than the operator who would queue exists, never on the bootstrap admin alone |
-| C · claims | G-929, G-660, G-994, G-996, G-995, G-998 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the README routing bar generated and checked; a scheduled mutation pass that proves the evidence of a met criterion or a closed prevention row can fail, and a check that a criterion flipped to met kept its words; one owner per shared defect class in a wave, so parallel streams stop fixing one class several ways; a `[measured]` tag whose method names a source the repository does not carry is refused |
 | A · the security review's auth findings · `fix/audit-a` | G-750, G-751, G-752, G-753, G-754 | the operator's internal security and governance review (2026-09-27): the login limiter reserves an attempt before it checks the password, so a burst cannot outrun it (AUTH-1); the identity provider's claims never demote the last active admin (AUTH-2); deactivation ends an account's sessions for good (AUTH-3); every credential change and every sign-out is an event naming who made it (EI-8); the re-check's two residuals — the last-admin count takes only admins who can sign in, and a finished Claude sign-in is recorded with its own time though nobody reads it back (G-754) |
 
-The builder-endpoint work parked on `feat/w3-x` joins this wave when its criteria reach the
-record; until then it is not a wave item.
+The builder-endpoint work parked on `feat/w3-x` (stream X) joins this wave when its criteria
+reach the record; until then it is not a wave item.
 
-**Done when:** truth.202, truth.203, posture.204, roles.7, evidence.205, go-live.15, go-live.20
-and claims.21 read `met`, and so do `home.truth.13` and `sign-off-a-cell.truth.3` (G-477); `APPARATUS_VERSION` reads 2.4; the fresh-clone job passes every gate
-as root without a docker daemon, installing from `uv.lock`; tests show a cell of many attempts
-on too few tasks routing `calibrate`, a build that cannot be scored stopping before any push,
-and a production start under the override writing an event that names who set it.
+**Done when:** truth.202, truth.203, posture.204, roles.7, evidence.205, go-live.15, go-live.20,
+claims.21, value.111, truth.206, truth.207, truth.214, truth.216 and claims.210 read `met`, as
+do the learn stream's automation.25 and measure.27, intake's recovery.23 and manufacture's
+non-goals.12, and so do `home.truth.13` and `sign-off-a-cell.truth.3` (G-477);
+`APPARATUS_VERSION` reads 2.4; tests show a cell of many attempts on too few commits routing `calibrate`, rows of more than one context arm or class-set version refused a
+pooled reading, a planted leaking context line refused, a ticket in a cell with no proven
+standard stopped before any spend with delivery off, a calibration build that never opens a pull
+request, the code's look rule reproducing ADR-0026's operating characteristics, a build that
+cannot be scored stopping before any push, and a production start under the override writing an
+event that names who set it; the fresh-clone job passes every gate as root without a docker
+daemon, installing from `uv.lock`.
 
 ## Wave 3 — the measurement (needs the operator)
 
-One campaign, graded at apparatus 2.4, in the sealed posture (sandbox and builder both in
-docker), after Wave 2 — rows of two apparatus versions are never pooled, so a campaign graded
-at 2.3 would be bought twice.
+One pre-registered campaign, graded at apparatus 2.4 in the sealed posture (sandbox and builder
+both in docker), after Wave 2 — rows of different apparatus versions are never pooled, so a
+campaign graded earlier would be bought twice. ADR-0026 item 13 is its protocol: cobra and click
+`bug.fix` XS and S; one registered reading per cell, `S3` then `S1` under the look rule; `A0`
+and `A0+L` on the first commits of each cell's seeded order; rung r1 only. Each cell's pool is
+mined and qualified first, at no model cost.
 
-| arm | gaps | what it produces |
+| piece | gaps | what it produces |
 |---|---|---|
-| sealed replay: cobra `bug.fix` XS and S, at least 10 distinct tasks per cell, one attempt each | G-660, F42, G-571 | README's `[measured]` section on vendored rows; rows stamped `executor: docker`; the probe green in the sandbox image |
-| paired blind: the same tasks with the loop off and on | G-653, G-537, G-572, G-590 | the north star before and after, each with its interval; each class's recurrence in round 2 against round 1; each switch's effect per pound |
+| the readings: `S3` then `S1` per cell, the look rule, the sealed posture, rung r1, apparatus 2.4 | G-653, G-660, F42, G-571 | each cell's standard, ceiling or "no proven standard", every arm with its n and interval; README's measured section on vendored `S3` rows; rows stamped `executor: docker`; the probe green in the sandbox image |
+| the loop pair: `A0` and `A0+L` on the same commits | G-653, G-537, G-572, G-590 | the north star with the loop off and on, as a descriptive paired reading beside the campaign's minimum detectable effect; each class's recurrence with the loop on against off |
 | reviews on kept patches | G-539 | review classes measured on anchored reviews |
-| a factory rerun under docker on a scratch repository | G-549, G-365, G-142, G-367 | a delivered pull request under the sealed posture; minutes and £ per item |
+| the factory under docker: calibration builds on cobra; a tier-2 walkthrough on a scratch repository | G-549, G-365, G-142, G-367 | on cobra, the B-1b items rerun as sealed calibration builds — minutes and £ per item and no pull request, because no cobra cell has a proven standard until its `S1` reading delivers; on a scratch repository linked through the App, the tier-2 walkthrough seeded with a registered fixture reading whose `S3` and `S1` arms both deliver, ending in a pull request under the sealed posture — minutes and £ per delivered item |
 | a timed intake pass over a real board column | G-928, G-383 | minutes and £ per ticket; the per-attempt £ the map serves |
 
-**Done when:** the baseline review publishes the north star with the loop off and on, each with
-n, its interval in pounds and apparatus 2.4 (value.109 met); README's measured section cites
-vendored rows whose checksum manifest and re-derivation test pass in CI (claims.201 met);
-posture.23 and go-live.18 read met.
+**Done when:** the baseline review publishes, per arm, the first-attempt clean rate and working
+changes per pound with n, interval and apparatus 2.4, the loop's paired reading with its
+interval beside the minimum detectable effect, and each cell's standard or "no proven standard"
+(value.109 met); README's measured section cites vendored rows whose checksum manifest and
+re-derivation test pass in CI (claims.201 met); posture.23 and go-live.18 read met.
 
 ## Wave 4 — the second person and the go-live truth (autonomous)
 
 | stream · base | gaps | what ships |
 |---|---|---|
-| S · the second person · `feat/w2-s` | G-517, G-518, G-516, G-476, G-478, G-479, G-480, G-481, G-284, G-285, G-286 | a signed cell licenses delivery by default (ADR-0018); an approver is invited with a one-time link (task 7's readiness rule lands first, in Wave 2's S0); a decision carries its age; the sign-off gate shows the evidence's posture |
+| S · the second person · `feat/w2-s` | G-517, G-518, G-516, G-476, G-478, G-479, G-480, G-481, G-284, G-285, G-286 | a signed cell licenses delivery by default (ADR-0018, re-read against ADR-0026 item 8 before it merges: an unsigned cell stops a ticket before any spend, and `deliver_override` lifts only the sign-off clause of a proven standard); an approver is invited with a one-time link (task 7's readiness rule lands first, in Wave 2's S0); a decision carries its age; the sign-off gate shows the evidence's posture |
 | P · posture and go-live · new | G-317, G-316, G-318, G-319, G-580, G-581, G-583, G-584, G-582, G-212, G-213, G-214, G-215, G-320, G-321, G-950, G-951, G-966 | `/posture` lists each go-live line as proven, attested or unproven; each posture row names its source and the page prints; the go-live walkthrough; mirror credentials; the remaining lock formats sealed; a damaged sealed set quarantined |
-| T · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952, G-992, G-993 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control; the walkthrough presses Sign off, Revoke sign-off, Freeze and Run by Tab and Enter |
+| V · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952, G-992, G-993 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control; the walkthrough presses Sign off, Revoke sign-off, Freeze and Run by Tab and Enter |
+| LIB · the context library · new, after S | G-673, G-677, G-675, G-676 | the entry record and its two-person sign-off ledger; the miner registry and its miners over a pinned commit; entry sets registered as arms and kept or retired by the look rule and the harm clause, the brief switch off by default; `/library/:repo` with one page per work type |
+| CLS · the organisation's classes · new, after S | G-672 | class-set versions per organisation with the global classes as parents; the derivation and confirmation split by commit; one rule over ticket-time fields at replay and at intake, with the linked-ticket reader; the validity report with its size-agreement clause; the two-person sign-off; the class set as a DL-044 seam |
+| FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `S2` stamp; the registered `S2` reading that alone promotes an `S3` ceiling |
 
 **Done when:** an invited approver can accept, sign in and sign a cell on the walkthrough stack;
-the factory refuses an unsigned cell by default; `/posture` shows each go-live line's state; the
+the factory refuses an unsigned cell by default; `/posture` shows each go-live line's state;
+roles.209, extensibility.213, truth.212, explanation.211, truth.208 and truth.215 read met; the
 only open product criteria are go-live.16 (F43), release.22 (G-604), extensibility.25 (F21) and
 identity.11 (G-600).
+
+## Wave 5 — the library and the organisation's classes, measured (needs the operator)
+
+Every reading here is registered before its first attempt and spends from its cell's budget
+(ADR-0026 items 5 and 10). Prospective readings run at each cell's own commit rate, so they are
+planned in months or years, not in runs.
+
+| act | what it needs | when |
+|---|---|---|
+| an organisation's first class set: derive on the derivation commits, validate, sign, register readings on the confirmation commits | a person-labelled sample; a second person; a budget per cell | after Wave 4's CLS |
+| library entry sets as arms: mechanical sets on replay, signed sets on new commits | a budget per cell; the per-repository brief switch, off until a set is kept | after Wave 4's LIB; on slow repositories this takes years |
+| forward `S2` readings in cells whose standard is a ceiling | tickets that carry a person's failing test; held-out acceptance tests from a second person | after Wave 4's FWD |
 
 ## Acts only the operator can do
 
@@ -195,6 +230,9 @@ These are not wave items; each unblocks the work named beside it.
 | cut 2.0.0b1: the tag, the chart as an OCI artifact, a `v*` tag-protection ruleset | G-604 (release.22) | after Wave 4 |
 | a penetration test | F46, named in G-317's line | before go-live |
 | add a fine-grained token with Administration: read as the secret `BRANCH_PROTECTION_TOKEN` | G-930 (`product.evidence.6`): the daily `branch-protection` workflow goes green | any time |
+| accept ADR-0026 and fix its [operator] values: the per-cell budget, the first look, the size rule, the class-set split and thresholds, the export | Wave 2's R and F | before Wave 2 builds past T |
+| register and fund the Wave 3 readings | Wave 3 | after Wave 2 |
+| a person-labelled sample and a second person for class sets and library entries | Wave 5 | after Wave 4 |
 
 ## After Wave 4, in gap order
 

@@ -25,9 +25,14 @@ its file cites (or, in the register, no pending row); a ``PLAN.md`` wave item th
 gap id the record defines or has retired; a gap the order of work ranks that no table of
 the plan names, and a plan heading that quotes a rank; a retired id that neither the
 artefacts' git history nor the base branch's committed gap analysis shows was a gap (the
-generated file never vouches for itself); an evidence reference that does not resolve; and a
-``GAP-ANALYSIS.md`` or a ``status:`` line that differs from what the artefacts generate. It
-never edits a criterion.
+generated file never vouches for itself); a twin left in old words — a clause of at least
+``TWIN_MIN_WORDS`` words that a criterion reworded since the merge-base with the base branch
+dropped, still said by another criterion that does not wait on the same gap (P-228); a
+criterion or gap line that states a value a Proposed ADR leaves to the operator without
+``ADR-nnnn [operator]`` on it, an ``[operator]`` marker the ADR's ``## Operator values`` table
+does not register, or the marker left on after the ADR is accepted (P-229); an evidence
+reference that does not resolve; and a ``GAP-ANALYSIS.md`` or a ``status:`` line that differs
+from what the artefacts generate. It never edits a criterion.
 
     python scripts/dod_check.py --check --base origin/integration/next   # another base branch
     DOD_BASE=origin/integration/next python scripts/dod_check.py --check  # the same (CI's form)
@@ -43,22 +48,28 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               four-level roll-up and writes docs/dod/GAP-ANALYSIS.md (the order of work, the
               gaps by fan-out, the gap ids retired, and every open criterion); refuses a gap
               line nothing cites, a PLAN.md wave item that is not a gap, a ranked gap in no
-              table of the plan, a plan heading that quotes a rank, and a retired id that git
-              history does not vouch for; --check exits
+              table of the plan, a plan heading that quotes a rank, a retired id that git
+              history does not vouch for, a twin criterion left in the words another
+              criterion dropped since the base (P-228), and a value a Proposed ADR leaves to
+              the operator stated as settled (P-229); --check exits
               non-zero on any defect or drift.
 How:          Walk docs/dod/{pages,journeys,streams}/*.md + product.md → parse front matter
               and the criteria table → resolve evidence (one resolver per prefix) → demote
-              ``met`` with no resolving reference → roll up child → parent → render.
+              ``met`` with no resolving reference → compare each criterion with its words at
+              the merge-base (git show) and each Proposed ADR's operator values → roll up
+              child → parent → render.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
-Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYSIS.md (its
-              output), docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog
+Works with:   docs/dod/STANDARD.md (the format it enforces, and the ``## Operator values``
+              table a Proposed ADR under docs/adr/ carries, as ADR-0026 does),
+              docs/dod/GAP-ANALYSIS.md (its output), docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog
               a gap may cite), ui/src/App.tsx and ui/src/components/Layout.tsx (the routes
               and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
               .github/workflows/ci.yml (the dod job that runs --check, with full history and
               the pull request's base in DOD_BASE, since the artefacts' git history vouches
-              for each retired id), docs/dod/PLAN.md (its wave items must be gap ids)
+              for each retired id and the base's criteria are what a rewording is read
+              against), docs/dod/PLAN.md (its wave items must be gap ids)
 Tested by:    tests/test_dod_check.py
 Touch when:   never for a new repository; a level or category is added to the standard (update
               CATEGORIES / LEVELS and the standard together); a new evidence prefix is needed (add a
@@ -256,9 +267,12 @@ def record_gap(gaps: dict[str, str], gid: str, body: str, where: str, errors: li
     gaps[gid] = body
 
 
-def parse_artefact(path: Path) -> tuple[Artefact, list[str]]:
+def parse_artefact(path: Path, text: str | None = None) -> tuple[Artefact, list[str]]:
+    """One artefact, read from ``path`` — or from ``text`` when given (the twin check reads
+    the base branch's copy through git, never from the work tree)."""
     errors: list[str] = []
-    text = path.read_text(encoding="utf-8")
+    if text is None:
+        text = path.read_text(encoding="utf-8")
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         return Artefact(path, {}, [], {}), [f"{path.name}: no front matter"]
@@ -1300,6 +1314,170 @@ def status_drift(arts: list[Artefact]) -> list[str]:
     return out
 
 
+# ------------------------------------------------------------------ twins (P-228)
+
+#: A clause shorter than this is common prose ("delivery is switched on"), not a twin.
+TWIN_MIN_WORDS = 6
+_CLAUSE_SPLIT = re.compile(r"[;:,.()\"\u201c\u201d\u2014]|\s-\s|\s\u00b7\s")
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.replace("`", "").replace("*", "").lower().split())
+
+
+def _clauses(text: str) -> set[str]:
+    """The clauses of a criterion long enough to identify it, lower-cased and trimmed."""
+    out: set[str] = set()
+    for part in _CLAUSE_SPLIT.split(_norm(text)):
+        words = part.split()
+        while words and words[0] in ("and", "or", "that", "but", "so", "while"):
+            words = words[1:]
+        if len(words) >= TWIN_MIN_WORDS:
+            out.add(" ".join(words))
+    return out
+
+
+def validate_twins(arts: list[Artefact], base: dict[str, str]) -> list[str]:
+    """A clause that a reworded criterion drops must leave every other criterion too (P-228).
+
+    ``base`` maps each criterion id to its words at the base. For every criterion whose words
+    changed, each clause of its old words that its new words no longer hold is looked for in
+    every other criterion; one that still says it is a twin left behind — two end states that
+    cannot both hold — unless it waits on the same gap, which is the record saying the two
+    change together. An empty ``base`` (no base branch to read) checks nothing."""
+    errors: list[str] = []
+    crits = [(a, c) for a in arts for c in a.criteria]
+    for a, c in crits:
+        old = base.get(c.id)
+        if old is None or _norm(old) == _norm(c.text):
+            continue
+        now = _norm(c.text)
+        dropped = sorted(cl for cl in _clauses(old) if cl not in now)
+        for clause in dropped:
+            for b, t in crits:
+                if t.id == c.id or clause not in _norm(t.text):
+                    continue
+                if c.gap and t.gap == c.gap:
+                    continue
+                errors.append(
+                    f'{b.rel}:{t.line}: {t.id} still says "{clause}", which '
+                    f"{c.id} ({a.rel}) no longer says — reword it the same way, or have it "
+                    f"wait on the same gap ({c.gap or 'none'}) and name it in that gap's line"
+                )
+    return errors
+
+
+def base_criteria(root: Path, base: str) -> dict[str, str]:
+    """Every criterion's words at the merge-base of ``HEAD`` and ``base``; empty when the base
+    does not resolve or ``root`` is not its own work tree."""
+    if not _own_work_tree(root):
+        return {}
+    mb = _git(root, "merge-base", "HEAD", base)
+    if mb is None:
+        return {}
+    dod = DOD.relative_to(root).as_posix() if DOD.is_relative_to(root) else "docs/dod"
+    listing = _git(
+        root,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        mb.strip(),
+        "--",
+        *(f"{dod}/{sub}" for sub in LEVEL_DIR.values()),
+        f"{dod}/product.md",
+    )
+    out: dict[str, str] = {}
+    for rel in (listing or "").split():
+        if not rel.endswith(".md"):
+            continue
+        text = _git(root, "show", f"{mb.strip()}:{rel}")
+        if text is None:
+            continue
+        art, _errs = parse_artefact(root / rel, text)
+        out.update({c.id: c.text for c in art.criteria})
+    return out
+
+
+# ------------------------------------------------------------------ provisional values (P-229)
+
+_OPERATOR_RE = re.compile(r"\[operator\b")
+_STATUS_RE = re.compile(r"^\*\*Status:\*\*\s*([A-Za-z]+)", re.M)
+_OPERATOR_SECTION = "## Operator values"
+
+
+def operator_values(adr_dir: Path) -> tuple[dict[str, tuple[bool, list[str]]], list[str]]:
+    """Each ADR that leaves values to the operator: ``{number: (proposed, phrases)}``.
+
+    A Proposed ADR that marks a value **[operator]** registers every such value in a
+    ``## Operator values`` table whose last cell gives, in backticks, the words a criterion
+    states it in; the table has one row per marker in the ADR's body (its Status line and the
+    table's own section aside), so a marker cannot go unregistered."""
+    out: dict[str, tuple[bool, list[str]]] = {}
+    errors: list[str] = []
+    if not adr_dir.is_dir():
+        return out, errors
+    for path in sorted(adr_dir.glob("[0-9][0-9][0-9][0-9]-*.md")):
+        text = path.read_text(encoding="utf-8")
+        number = path.name[:4]
+        status = _STATUS_RE.search(text)
+        proposed = status is not None and status.group(1).lower() == "proposed"
+        body, _, section = text.partition(_OPERATOR_SECTION)
+        section = section.split("\n## ", 1)[0]
+        markers = sum(
+            len(_OPERATOR_RE.findall(line))
+            for line in body.split("\n")
+            if not line.startswith("**Status:**")
+        )
+        rows = [
+            ln
+            for ln in section.split("\n")
+            if ln.startswith("|") and not ln.startswith("| item") and not ln.startswith("|---")
+        ]
+        phrases = [
+            p.lower() for ln in rows for p in re.findall(r"`([^`]+)`", ln.strip("|").split("|")[-1])
+        ]
+        if proposed and markers and not section:
+            errors.append(
+                f"docs/adr/{path.name}: {markers} [operator] markers and no '{_OPERATOR_SECTION}' "
+                "table — register each value with the words a criterion states it in"
+            )
+        elif proposed and section and markers != len(rows):
+            errors.append(
+                f"docs/adr/{path.name}: {markers} [operator] markers but {len(rows)} rows under "
+                f"'{_OPERATOR_SECTION}' — one row per value the operator fixes"
+            )
+        if section or markers:
+            out[number] = (proposed, phrases)
+    return out, errors
+
+
+def validate_operator_values(arts: list[Artefact], adr_dir: Path) -> list[str]:
+    """A criterion or gap line that states a value a Proposed ADR leaves to the operator
+    carries ``ADR-nnnn [operator]``; once the ADR is accepted the marker must go (P-229)."""
+    values, errors = operator_values(adr_dir)
+    for a in arts:
+        texts = [(f"{a.rel}:{c.line}: {c.id}", c.text) for c in a.criteria]
+        texts += [(f"{a.rel}: gap {gid}", body) for gid, body in a.gaps.items()]
+        for where, text in texts:
+            low = text.lower()
+            for number, (proposed, phrases) in values.items():
+                mark = f"adr-{number} [operator]"
+                if proposed:
+                    said = [p for p in phrases if p in low]
+                    if said and mark not in low:
+                        errors.append(
+                            f'{where} states "{said[0]}", a value ADR-{number} leaves to the '
+                            f"operator — say so on the row (ADR-{number} [operator] values; the "
+                            "row follows the operator's choice)"
+                        )
+                elif mark in low:
+                    errors.append(
+                        f"{where} still marks ADR-{number} [operator], but the ADR is accepted "
+                        "— state the value the operator fixed and drop the marker"
+                    )
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument(
@@ -1321,6 +1499,8 @@ def main(argv: list[str] | None = None) -> int:
         arts.append(a)
         errors.extend(errs)
     errors.extend(validate(arts))
+    errors.extend(validate_operator_values(arts, ADR_DIR))
+    errors.extend(validate_twins(arts, base_criteria(ROOT, args.base)))
     prevention, pgaps, perrs = parse_prevention(PREVENTION)
     errors.extend(perrs)
     backlog = backlog_index()

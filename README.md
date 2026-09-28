@@ -108,6 +108,12 @@ default**.
   map gates the factory ([ADR-0003](docs/adr/0003-one-routing-rule.md), amendment
   2026-09-16). It never means a change is safe to merge or deploy unattended; a human
   merges, and the measurement says nothing about security, operations or business fit.
+- **Not a standards authority.** It does not decide an organisation's standards — it proposes,
+  measures and records the ones that organisation's people sign — and it never certifies that
+  code conforms to ISO/IEC 25010, ISO/IEC 5055 or any other standard. Its checks evidence
+  parts of only some of ISO/IEC 25010's characteristics;
+  [ADR-0026](docs/adr/0026-the-context-standard.md) proposes which (its item 11), and the
+  product will name them (G-674).
 
 ---
 
