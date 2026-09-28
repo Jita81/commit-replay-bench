@@ -386,7 +386,7 @@ export const ACTION_HELP: Record<string, string> = {
   'user.deactivated': 'An account was turned off: it is refused on its very next request.',
   'user.sessions_revoked': 'An admin signed the account out everywhere: every session it held ended.',
   'user.role_overridden': 'The identity provider’s claims replaced the role set here, because the deployment lets the provider decide roles.',
-  'user.role_override_refused': 'The identity provider’s claims would have demoted the last active admin, so the role was kept; fix the claims at the provider or add a second admin.',
+  'user.role_override_refused': 'The identity provider’s claims would have left no active admin who can sign in by a way this deployment has switched on (a local password, or the identity provider), so the role was kept; fix the claims at the provider or add a second admin who can sign in.',
   'user.sessions_ended': 'The account signed out: every session it held, on every device, ended.',
   'user.login': 'The account signed in, with a local password or through the organisation’s identity provider.',
   'user.login_failed': 'A sign-in was refused: a wrong password, or the account is turned off. Nothing that was typed is recorded.',

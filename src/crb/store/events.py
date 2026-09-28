@@ -176,6 +176,50 @@ def lock_event_writes(s: Session) -> None:
                 raise
     elif dialect == "postgresql":
         s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
+    write_locks_held(s).add(EVENTS_LOCK)
+
+
+#: The ``events`` write lock's name in :func:`write_locks_held`.
+EVENTS_LOCK = "events"
+#: The ``users`` lock's name (``crb.server.auth.lock_users_table``).
+USERS_LOCK = "users"
+#: Locks a transaction must take BEFORE the ``events`` lock, never after it (P-227): every
+#: admin act holds ``users`` and then records its event, so a path that holds ``events``
+#: and then asks for ``users`` deadlocks against it on PostgreSQL.
+TAKEN_BEFORE_EVENTS = frozenset({USERS_LOCK})
+
+_LOCKS_KEY = "crb.write_locks_held"
+
+
+class LockOrderError(RuntimeError):
+    """A write lock was asked for after a lock that must come after it (P-227)."""
+
+
+def write_locks_held(s: Session) -> set[str]:
+    """The names of the write locks ``s``'s CURRENT transaction holds, as the helpers that
+    take them record them. A new transaction starts with none: the set is keyed on the
+    transaction object, so a commit or a rollback forgets it."""
+    tx = s.get_transaction()
+    held = s.info.get(_LOCKS_KEY)
+    if held is None or held[0] is not tx:
+        held = (tx, set())
+        s.info[_LOCKS_KEY] = held
+    return set() if tx is None else held[1]
+
+
+def refuse_after_events_lock(s: Session, name: str) -> None:
+    """Raise :class:`LockOrderError` when ``s`` already holds the ``events`` write lock and
+    asks for ``name``, a lock in :data:`TAKEN_BEFORE_EVENTS` it does not yet hold. Re-taking
+    a lock the transaction holds is never an inversion. Called by the helper that takes
+    ``name`` BEFORE it waits for it, so the inverted order fails at once on every dialect
+    instead of deadlocking on PostgreSQL."""
+    held = write_locks_held(s)
+    if name in TAKEN_BEFORE_EVENTS and EVENTS_LOCK in held and name not in held:
+        raise LockOrderError(
+            f"the {name} lock was asked for after the events write lock in one transaction; "
+            f"take the {name} lock first (commit_audited's `before=`), or two writers "
+            "deadlock on PostgreSQL (P-227)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -647,11 +691,15 @@ def append_event_checked(
 
 __all__ = [
     "DEFAULT_READ_LIMIT",
+    "EVENTS_LOCK",
     "FULL_WALK_EVERY_S",
     "MAX_READ_LIMIT",
+    "TAKEN_BEFORE_EVENTS",
+    "USERS_LOCK",
     "DbEventSink",
     "EventChainHeadError",
     "EventChainVerifier",
+    "LockOrderError",
     "append_event",
     "append_event_checked",
     "count_events",
@@ -660,6 +708,8 @@ __all__ = [
     "last_seq",
     "lock_event_writes",
     "read_events",
+    "refuse_after_events_lock",
     "verify_events",
     "verify_events_in",
+    "write_locks_held",
 ]

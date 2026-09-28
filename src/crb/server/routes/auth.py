@@ -455,9 +455,6 @@ def _complete_oidc(
     def _signed_in() -> None:
         # Re-run whole on a retry: the rollback undid the upsert as well as the events.
         signed_in.clear()
-        if source == "always":
-            # the role read below, the last-admin count and the write are one serialised step
-            lock_users_table(db)
         before = _stored_role(db, issuer, claims)
         user = upsert_oidc_user(
             db,
@@ -502,8 +499,13 @@ def _complete_oidc(
         record_user_event(db, action="user.login", actor=user.id, target=user, method="oidc")
         signed_in.append(user)
 
+    def _users_first() -> None:
+        # the role read, the last-admin count and the write are one serialised step, under
+        # the users lock taken BEFORE the audited commit's events lock (P-227)
+        lock_users_table(db)
+
     try:
-        commit_audited(db, _signed_in)
+        commit_audited(db, _signed_in, before=_users_first if source == "always" else None)
     except _AccountDisabled as off:
         db.rollback()
         account = db.get(User, off.user_id)

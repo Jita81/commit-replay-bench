@@ -1751,7 +1751,7 @@ export const HINTS = {
   'col.settings.active':
     'Whether the account can sign in. A deactivated account is refused on its very next request.',
   'toggle.settings.user_active':
-    'Turn an account off when the person leaves, and back on when they return. Deactivating refuses the account on its very next request and ends every session it held, so reactivating it brings none of them back: the person signs in again. The last active admin cannot be deactivated — activate or create a second admin first.',
+    'Turn an account off when the person leaves, and back on when they return. Deactivating refuses the account on its very next request and ends every session it held, so reactivating it brings none of them back. An admin can be deactivated only while another active admin can still sign in by a way this deployment has switched on — create that admin first.',
   'col.settings.last_login':
     'How long ago the account last signed in successfully. "Never" means it has not been used since it was created.',
   'stat.settings.last_login':
@@ -1781,7 +1781,7 @@ export const HINTS = {
   'tile.settings.my_password':
     'Change the password of the account you are signed in as. This browser stays signed in; every other session of the account ends.',
   'field.settings.my_current_password':
-    'Your current password, which proves the session is yours and not a borrowed one. Five wrong attempts in a minute, for this account from this address, stop further tries — the refusal says how many seconds to wait.',
+    'Your current password, which proves the session is yours and not a borrowed one. Five wrong attempts in a minute, for this account from this address, stop further tries, and so do twenty a minute from this address whatever the accounts. The refusal says how many seconds to wait.',
   'field.settings.my_new_password':
     'Your new password: at least 12 characters. It is never shown back.',
   'field.settings.my_new_password_confirm':

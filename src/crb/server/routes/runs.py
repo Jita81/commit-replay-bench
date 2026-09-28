@@ -303,8 +303,16 @@ def append_system_event(
 AUDIT_ATTEMPTS = 3
 
 
-def commit_audited(db: Session, write: Callable[[], None]) -> None:
+def commit_audited(
+    db: Session, write: Callable[[], None], *, before: Callable[[], None] | None = None
+) -> None:
     """Apply ``write`` (a state change and its ``system`` event) and commit them together.
+
+    ``before`` takes the locks that rank ahead of the ``events`` write lock (the ``users``
+    lock, :data:`crb.store.events.TAKEN_BEFORE_EVENTS`) and runs first on EVERY attempt, so
+    a write that needs one takes it in the one order every writer uses: an organisation
+    sign-in that took ``users`` inside ``write`` held ``events`` first and deadlocked
+    against an admin act on PostgreSQL (P-227).
 
     The ``events`` write lock (:func:`crb.store.events.lock_event_writes`) is taken BEFORE
     ``write`` reads the trace's last ``seq``, so writers to one trace are serialised on
@@ -315,6 +323,8 @@ def commit_audited(db: Session, write: Callable[[], None]) -> None:
     transaction is rolled back and ``write`` runs again on fresh rows (DL-068).
     """
     for attempt in range(AUDIT_ATTEMPTS):
+        if before is not None:
+            before()
         lock_event_writes(db)
         write()
         try:
@@ -998,8 +1008,14 @@ def grant_deliver_override(run_id: str, approver: ApproverDep, db: DbDep) -> Run
     (``params.deliver_override_by``) and on a ``system/run.deliver_override`` event on the
     run's trace, in one transaction. The worker reads it live at each item's gate; it never
     lifts a false-Q1 cell (the honesty floor). 409 ``not_a_factory_run`` /
-    ``run_terminal`` / ``delivery_off`` / ``same_actor`` / ``override_already_granted``."""
+    ``run_terminal`` / ``delivery_off`` / ``same_actor`` / ``override_already_granted``.
+
+    The check and the grant are one serialised step: the events write lock the grant's
+    event needs anyway is taken FIRST and the run re-read under it, so two approvers granting
+    at once cannot both pass ``override_already_granted`` (P-228)."""
+    lock_event_writes(db)
     run = _get_run(db, run_id)
+    db.refresh(run)  # the row as it is under the lock, never an earlier read of it
     params = dict(run.params_json or {})
     if run.kind != KIND_FACTORY:
         raise ApiError(409, "not_a_factory_run", "only a factory run has a route gate")

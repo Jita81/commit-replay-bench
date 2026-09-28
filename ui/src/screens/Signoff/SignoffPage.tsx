@@ -76,7 +76,7 @@ import { useEvidence, useRevokeSignoff, useSignoffs } from '../../api/hooks'
 import { PatchView } from '../Runs/EvidenceDrawer'
 import { useRetainedPatch } from '../Runs/contract'
 import type { AcceptedRow } from './contract'
-import { approverName, NOT_YET_MEASURED } from '../../api/types'
+import { approverName, NOT_YET_MEASURED, signoffStaleWhy } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
@@ -378,7 +378,7 @@ export function SignoffPage() {
           ) : s.active ? (
             <Pill tone="green" glyph="✓" size="xs" label="Active attestation" hint="pill.signoff.status">active</Pill>
           ) : s.stale ? (
-            <Pill tone="amber" glyph="◷" size="xs" label={`Stale: signed at apparatus ${s.evidence.apparatus_versions.join(', ') || '?'}, the deployment now reads at ${s.apparatus_current || '?'} — lifts nothing until re-signed`} hint="pill.signoff.status">stale</Pill>
+            <Pill tone="amber" glyph="◷" size="xs" label={`Stale: ${signoffStaleWhy(s)} — lifts nothing until re-signed`} hint="pill.signoff.status">stale</Pill>
           ) : s.current_false_q1 > 0 ? (
             <Pill tone="red" glyph="✗" size="xs" label={`Invalidated: the cell now has false_q1 = ${s.current_false_q1}`} hint="pill.signoff.status">invalidated</Pill>
           ) : (

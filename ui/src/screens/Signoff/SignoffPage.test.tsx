@@ -514,6 +514,28 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(within(table).queryByText('superseded')).toBeNull()
   })
 
+  it('a stale sign-off says why it is stale, as the Decisions page does, never an unknown apparatus (P-232)', async () => {
+    const stale: SignoffWithPolicy[] = [
+      { ...SIGNED, approver_name: 'ada', active: false, stale: true, stale_reason: 'no_apparatus_stamp', apparatus_current: '2.3', evidence: { ...SIGNED.evidence, apparatus_versions: [] } },
+      { ...SIGNED, id: 's2', approver_name: 'ada', active: false, stale: true, stale_reason: 'checks_arm_moved', checks_arm: 'off', checks_arm_current: 'api', apparatus_current: '2.1' },
+      { ...SIGNED, id: 's3', approver_name: 'ada', active: false, stale: true, stale_reason: 'apparatus_moved', apparatus_current: '2.3' },
+    ]
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED },
+      'GET /signoffs': { items: stale, total: stale.length, limit: 50, offset: 0 },
+      'GET /signoffs/preview': signablePreview(),
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const table = await screen.findByRole('table', { name: 'Sign-offs for r' })
+    await waitFor(() => expect(within(table).getAllByRole('img', { name: /^Stale:/ })).toHaveLength(3))
+    expect(within(table).getByRole('img', { name: /signed before the apparatus stamp, now reading at 2\.3/ })).toBeInTheDocument()
+    expect(within(table).getByRole('img', { name: /signed on the off checks arm, now reading the api arm/ })).toBeInTheDocument()
+    expect(within(table).getByRole('img', { name: /signed at apparatus 2\.1, now reading at 2\.3/ })).toBeInTheDocument()
+    expect(within(table).queryByRole('img', { name: /apparatus \?/ })).toBeNull()
+  })
+
   it('naming a row keeps the Accepted row select enabled while the row’s preview loads, so keyboard focus is not dropped (G-905)', async () => {
     const unsigned = signablePreview()
     // the row's preview never answers in this test: what matters is the screen while it loads
