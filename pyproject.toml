@@ -163,7 +163,9 @@ source_modules = [
   "crb.builders", "crb.factory", "crb.intake", "crb.core.run", "crb.core.playbook",
   "crb.core.finish_gate", "crb.core.learn", "crb.core.prevention",
 ]
-forbidden_modules = ["crb.core.library", "crb.store.library", "crb.server.routes.library"]
+forbidden_modules = [
+  "crb.core.library", "crb.core.miners", "crb.store.library", "crb.server.routes.library",
+]
 
 [[tool.importlinter.contracts]]
 name = "layers depend downward only"
