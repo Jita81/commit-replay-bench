@@ -3149,7 +3149,7 @@ class Worker:
             },
         )
         ctx.emit("oracle", "controls.report", **report.to_dict())
-        counts = {
+        counts: dict[str, Any] = {
             "tasks": len(report.task_ids),
             "total": total,
             "rows": len(report.rows),
@@ -3157,6 +3157,9 @@ class Worker:
             "escapes": len(report.escapes),
             "not_constructible": len(report.not_constructible),
             "skipped": len(report.skipped),
+            "witnessed": len(report.witnessed),
+            "witness_failures": len(report.witness_failures),
+            "controls_version": CONTROLS_VERSION,
             "passed": report.passed,
             "complete": not cancelled,
         }

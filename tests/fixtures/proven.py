@@ -247,6 +247,10 @@ def add_oracle_and_controls(
             "skipped": 0,
             "not_constructible": 1,
             "escapes": 0,
-            "apparatus": {"apparatus_version": "2.4", "complete": True},
+            "apparatus": {
+                "apparatus_version": "2.4",
+                "complete": True,
+                "controls_version": "controls.v3",
+            },
         },
     )

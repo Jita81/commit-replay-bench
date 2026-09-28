@@ -8,28 +8,32 @@
  *               stages as a task list (register → probe → mine → oracle → controls → first
  *               measurement) with the action for the next one and, while a stage runs, an
  *               in-flight panel (the attempt in hand of total (`kOfN`), spend so far, started, Cancel).
- * What it does: Lets an enterprise tech lead connect a repository and get to the baseline
- *               without knowing the product's vocabulary: every stage says what it proves and
- *               what it costs ("no model involved" / "spends model budget"), gold-clean, oracle
- *               strength and negative controls carry their definitions (`Term`), the status is
- *               derived from the API (`stagesFor`), so the walk resumes where the repository
- *               is, and the action is gated on the operator role like the API is (a
- *               non-operator reads "An operator runs this."). Nothing here fabricates
- *               progress: a stage is done only when the API holds its evidence, a queued run
- *               reads "Queued" with its place in the line (the server's `queue_position`),
- *               the running stage's line is the polled run's own counter (`runningDetail`),
- *               and a passed controls report that still carries a finding (an escape, a
- *               thin set) reads "Done, with a finding" in amber — deliver is withheld until
- *               it is answered. Every door to /results is named "Baseline", as the nav
- *               names it, and opens /results (a measured row's button; an unmeasured row's
- *               reads "Continue" and opens the walk); at phone width the repository link
- *               is the row's door to the walk. Every element a reader meets — the two
- *               connect buttons, each column header, the stage-summary pill and row action,
- *               each stage's title, status pill, "spends" pill, detail line, run link and
- *               action, and the in-flight panel's counters and Cancel — is a hint trigger
- *               (`button.connect.*`, `col.connect.*`, `pill.connect.*`, `stage.walk.*`,
- *               `pill.walk.*`, `stat.walk.*`, `link.walk.*`, `button.walk.*`) so what each
- *               shows opens on hover, focus and tap and is listed in the About block.
+ * What it does: Lets an enterprise tech lead connect a repository and get to the baseline without
+ *               knowing the product's vocabulary: every stage says what it proves and what it costs
+ *               ("no model involved" / "spends model budget"), gold-clean, oracle strength and
+ *               negative controls carry their definitions (`Term`), the status is derived from the
+ *               API (`stagesFor`), so the walk resumes where the repository is, and the action is
+ *               gated on the operator role like the API is (a non-operator reads "An operator runs
+ *               this."). Nothing here fabricates progress: a stage is done only when the API holds
+ *               its evidence, a queued run reads "Queued" with its place in the line (the server's
+ *               `queue_position`), the running stage's line is the polled run's own counter
+ *               (`runningDetail`), and a passed controls report that still carries a finding (an
+ *               escape, a thin set) reads "Done, with a finding" in amber — deliver is withheld
+ *               until it is answered. A row whose oracle, controls or map read fails for a reason
+ *               other than 404 (never run) shows that error with Retry in its Next stage cell,
+ *               never a stage state (G-124); on the walk, such a failed read (`failedRead`) is
+ *               said with Retry in place of the stages, with no stage action offered, so a
+ *               failed map never reads "Not started" beside a paid Measure… (G-730). Every door
+ *               to /results is named "Baseline", as the nav names it, and opens /results (a
+ *               measured row's button; an unmeasured row's reads
+ *               "Continue" and opens the walk); at phone width the repository link is the row's
+ *               door to the walk. Every element a reader meets — the two connect buttons, each
+ *               column header, the stage-summary pill and row action, each stage's title, status
+ *               pill, "spends" pill, detail line, run link and action, and the in-flight panel's
+ *               counters and Cancel — is a hint trigger (`button.connect.*`, `col.connect.*`,
+ *               `pill.connect.*`, `stage.walk.*`, `pill.walk.*`, `stat.walk.*`, `link.walk.*`,
+ *               `button.walk.*`) so what each shows opens on hover, focus and tap and is listed in
+ *               the About block.
  * How:          `useAllRepos` → the table; `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` (+ the polled `useRun` while a stage runs, and
  *               `useQueuedRuns` only for an older server that sends no `queue_position`)
@@ -49,9 +53,9 @@
  *               for the CLI)
  * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element on /connect and /connect/:name resolves to a registry id)
- * Touch when:   never for a new repository; a stage is added (connection.ts first); the API grows a
- *               GitHub App install flow (replace the URL field with the installation's repository
- *               picker).
+ * Touch when:   never for a new repository (it appears on the list once connected); a stage
+ *               is added (connection.ts first); the API grows a GitHub App install flow
+ *               (replace the URL field with the installation's repository picker).
  */
 
 import { useEffect, useState } from 'react'
@@ -143,6 +147,26 @@ function clock(iso: string): string {
 /** A 404 from the oracle / controls routes means "never run" — a stage state, not an error. */
 function notRun(err: unknown): boolean {
   return isApiError(err) && err.status === 404
+}
+
+interface Read {
+  isError: boolean
+  error: unknown
+  refetch: () => unknown
+}
+
+/**
+ * The first of a repository's three stage reads that failed for a reason other than 404
+ * (never run), with what it reads, or `undefined`. While one has failed the walk cannot say
+ * where the repository is — a stage read from nothing would say "Not started" — so the list
+ * row and the walk each show this error with Retry in place of any stage (G-124, G-730).
+ */
+function failedRead(oracle: Read, controls: Read, map: Read): { q: Read; what: string } | undefined {
+  return [
+    { q: oracle, what: 'oracle scores' },
+    { q: controls, what: 'controls report' },
+    { q: map, what: 'capability map' },
+  ].find(({ q }) => q.isError && !notRun(q.error))
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +294,9 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
   })
   const s = stageSummary(stages)
   const d = STATUS_DISPLAY[s.status]
+  // G-124: a read that failed for any reason but 404 (never run) is an error on this row,
+  // never a stage state: the walk cannot say where the repository is without it
+  const failed = failedRead(oracle, controls, map)
   return (
     <tr className="border-t border-border">
       <td className="py-2 pr-4 font-mono text-xs">
@@ -283,9 +310,17 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
         {repo.task_counts.total} · {repo.task_counts.gold_clean} <Term id="gold_clean">gold-clean</Term>
       </td>
       <td className="py-2 pr-4">
-        <Pill tone={d.tone} glyph={d.glyph} size="xs" hint="pill.connect.stage_summary">
-          {s.label}
-        </Pill>
+        {failed ? (
+          <div data-testid="connect-row-error" className="min-w-[16em]">
+            <ErrorState compact title={`Could not read the ${failed.what}`} error={failed.q.error} onRetry={() => void failed.q.refetch()}>
+              <p className="m-0 text-xs">The next stage is unknown until it answers. Retry, or open the repository.</p>
+            </ErrorState>
+          </div>
+        ) : (
+          <Pill tone={d.tone} glyph={d.glyph} size="xs" hint="pill.connect.stage_summary">
+            {s.label}
+          </Pill>
+        )}
       </td>
       <td className="py-2 pr-4 font-mono text-xs text-on-surface-muted">
         {repo.last_run ? `${repo.last_run.kind} · ${repo.last_run.status}` : '—'}
@@ -368,15 +403,20 @@ export function ConnectRepoPage() {
   }
   const busy = probe.isPending || createRun.isPending
   const actionError = probe.error ?? createRun.error ?? cancel.error
-  const allDone = stages.length > 0 && stages.every((s) => stageComplete(s.status))
-  const next = stages.find((s) => !stageComplete(s.status))
+  // G-730: a stage read that failed (not 404) leaves the walk unable to say where the
+  // repository is; it is said with Retry, and no stage state or stage action is shown
+  const failed = failedRead(oracle, controls, map)
+  const allDone = !failed && stages.length > 0 && stages.every((s) => stageComplete(s.status))
+  const next = failed ? undefined : stages.find((s) => !stageComplete(s.status))
 
   return (
     <>
       <PageHeader
         title={name}
         purpose={
-          allDone
+          failed
+            ? 'The walk cannot say where this repository is until every read answers.'
+            : allDone
             ? 'Every stage is done — the baseline holds what the evidence says about this repository.'
             : next
               ? `Next: ${next.title.toLowerCase()}. ${next.why}`
@@ -394,7 +434,16 @@ export function ConnectRepoPage() {
         }
       />
       {repo.isError && <ErrorState error={repo.error} onRetry={() => void repo.refetch()} />}
-      {repo.data && (
+      {repo.data && failed && (
+        <Card title="The walk" eyebrow="six stages · each says what it proves and what it costs">
+          <div data-testid="connect-walk-error">
+            <ErrorState compact title={`Could not read the ${failed.what}`} error={failed.q.error} onRetry={() => void failed.q.refetch()}>
+              <p className="m-0 text-xs">The walk cannot say where this repository is until it answers, so no stage is shown and nothing is offered to run. Retry, or open the configuration.</p>
+            </ErrorState>
+          </div>
+        </Card>
+      )}
+      {repo.data && !failed && (
         <Card title="The walk" eyebrow="six stages · each says what it proves and what it costs">
           <ol className="m-0 list-none space-y-3 p-0" aria-label="Connection stages">
             {stages.map((s, i) => {

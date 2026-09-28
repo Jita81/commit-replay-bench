@@ -1207,6 +1207,11 @@ def test_controls_run_records_report(h: Harness) -> None:
     assert report.stage == "oracle" and report.payload["schema"] == nc.CONTROLS_SCHEMA
     assert [r["control"] for r in report.payload["rows"]] == list(nc.CONTROLS)
     assert report.payload["apparatus"]["worker"] == "w-test"
+    # both the report and the run's counts say they were witnessed, so routing reads either as
+    # passed; a pre-witness report reads as unmeasured (P-344)
+    assert c["controls_version"] == report.payload["apparatus"]["controls_version"]
+    assert nc.report_is_witnessed(c) and nc.report_is_witnessed(report.payload)
+    assert nc.controls_verdict_of(c).passed and nc.controls_verdict_of(report.payload).passed
 
 
 def test_controls_violation_fails_the_gate(h: Harness) -> None:
@@ -1234,7 +1239,10 @@ def test_controls_violation_fails_the_gate(h: Harness) -> None:
     )
     done = h.run_one()
     assert done.status == STATUS_FAILED and "gate FAILED" in done.error
-    assert done.counts_json["violations"] == 1 and done.counts_json["passed"] is False
+    # the GOLD row is a violation, and so is the noop's catch: its gold witness, graded in
+    # the same posture, is red too, so the red noop proves nothing (G-952, controls.v3)
+    assert done.counts_json["violations"] == 2 and done.counts_json["passed"] is False
+    assert done.counts_json["witnessed"] == 1 and done.counts_json["witness_failures"] == 1
 
 
 # --- worker mechanics --------------------------------------------------------------------------

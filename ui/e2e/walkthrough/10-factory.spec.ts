@@ -23,9 +23,11 @@
  *               sources and a factory item has none — an honest not-clean, never a fabricated
  *               pass), its Evidence button opening the drawer with the pack (F15), its run
  *               link; I-2 not built — no proven standard — with its gap named and the way
- *               forward (J-FAC-4 / J-FAC-15); that the Runs list names
- *               the factory kind; and that /factory does not scroll sideways at 375 px
- *               (J-FAC-14).
+ *               forward (J-FAC-4 / J-FAC-15); that the Runs list names the factory kind; that
+ *               the approver (a second persona, signed in as themselves) signs I-2's
+ *               structural gap and the evidence chain records it under their id, with no
+ *               route-gate override offered while delivery is not linked (G-143); and that
+ *               /factory does not scroll sideways at 375 px (J-FAC-14).
  * How:          `signIn` (the fixture), the freeze dialog's JSON mode (the only way to attach
  *               an authored test in the UI), `waitForRun` on the status pill, then the item
  *               rows' test ids (`factory-item-<id>`, `step-<id>-<step>`, `cell-route-<id>`,
@@ -42,7 +44,8 @@
  *               proven standard); the fixture builder learns to build a factory item (then I-1
  *               grades clean and the delivery step, not the build step, is the one to assert).
  */
-import { env, expect, primary, runIdFromUrl, signIn, test, waitForRun } from './support'
+import type { Page } from '@playwright/test'
+import { env, expect, personaPassword, primary, runIdFromUrl, signIn, test, waitForRun } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -75,6 +78,24 @@ const BACKLOG = {
   authored: {
     'I-1': { path: 'tests/test_multiply.py', content: 'from calc import multiply\n\n\ndef test_multiply():\n    assert multiply(3, 4) == 12\n' },
   },
+}
+
+/** The second person: the persona 08 and 11 use, so a rerun reuses it (created through `POST /users`). */
+const APPROVER = 'walk-approver'
+const APPROVER_PASS = personaPassword(APPROVER)
+
+/** Create the approver persona unless an earlier spec did; the page must be signed in as the admin. */
+async function ensureApprover(page: Page): Promise<void> {
+  const users = await page.request.get(`${env.baseUrl}/api/v1/users?limit=500`)
+  expect(users.status(), 'GET /users as the admin').toBe(200)
+  if (((await users.json()) as { items: Array<{ username: string }> }).items.some((u) => u.username === APPROVER)) return
+  const cookie = (await page.context().cookies()).find((c) => c.name === 'crb_csrf')
+  if (!cookie) throw new Error('no crb_csrf cookie — is the page signed in?')
+  const res = await page.request.post(`${env.baseUrl}/api/v1/users`, {
+    data: { username: APPROVER, password: APPROVER_PASS, role: 'approver', display_name: 'Walk approver' },
+    headers: { 'X-CSRF-Token': cookie.value },
+  })
+  expect(res.status(), `POST /users → ${res.status()} ${await res.text()}`).toBeLessThan(300)
 }
 
 test.describe('10 factory (fixture_gold)', () => {
@@ -202,6 +223,46 @@ test.describe('10 factory (fixture_gold)', () => {
     // J-FAC-16 — the approver's gap form asks the catalogue's question
     const form = i2.getByRole('form', { name: 'Sign a structural gap for I-2' })
     await expect(form.getByRole('combobox')).toContainText(/\(method_path\)/)
+  })
+
+  // G-143 — the approver's own acts, walked live as the approver: signing the structural gap
+  // (the chain records it under their id), and the route-gate override, which is offered only
+  // where delivery is linked — never on this stack, so it must not be offered here
+  test('the approver signs I-2’s structural gap; the chain records it under their id; no override is offered while delivery is not linked', async ({ page }) => {
+    await ensureApprover(page)
+    await page.goto('/home')
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+    await expect(page).toHaveURL(/\/login/)
+    await signIn(page, APPROVER, APPROVER_PASS)
+    const me = (await (await page.request.get(`${env.baseUrl}/api/v1/auth/me`)).json()) as { id: string; role: string }
+    expect(me.role).toBe('approver')
+
+    await page.goto(`/factory?repo=${encodeURIComponent(t.name)}&item=I-2`)
+    const i2 = page.getByTestId('factory-item-I-2')
+    const form = i2.getByRole('form', { name: 'Sign a structural gap for I-2' })
+    await expect(form).toBeVisible()
+    await form.getByRole('combobox').selectOption({ value: 'method_path' })
+    await form.getByLabel('Your answer (the structural fact)').fill('GET /health')
+    await form.getByRole('button', { name: 'Sign the gap' }).click()
+    await expect(form).toContainText(`Signed by ${me.id}`)
+    await expect(form).toContainText('on the chain')
+
+    // the evidence chain holds the signature under the approver's id, and still verifies
+    const chain = (await (await page.request.get(`${env.baseUrl}/api/v1/factory/${encodeURIComponent(t.name)}/evidence`)).json()) as {
+      verified: boolean
+      items: Array<{ kind: string; item_id: string; actor: string; payload: { record?: { slot?: string; verifier?: string } } }>
+    }
+    expect(chain.verified).toBe(true)
+    const signed = chain.items.filter((e) => e.kind === 'gap.signoff' && e.item_id === 'I-2')
+    expect(signed.at(-1)?.actor).toBe(me.id)
+    expect(signed.at(-1)?.payload.record?.slot).toBe('method_path')
+    expect(signed.at(-1)?.payload.record?.verifier).toBe(me.id)
+
+    // the override is the approver's, but only over a delivery that can happen: not linked here
+    const box = page.getByTestId('before-you-start')
+    await expect(box).toBeVisible()
+    await expect(box.getByRole('checkbox', { name: /Open pull requests/ })).toBeDisabled()
+    await expect(box.getByText('Override the route gate (approver)')).toHaveCount(0)
   })
 
   test('the Runs list names the factory kind', async ({ page }) => {

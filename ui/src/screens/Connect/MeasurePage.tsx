@@ -17,7 +17,9 @@
  * What it does: Replaces the technical run dialog for the person who has never used the
  *               product: every number on the page is the deployment's (the cost estimate is
  *               the repository's measured mean per attempt when it has one, else the
- *               documented range), the button says "estimated" and names the cap the request
+ *               documented range; while the map has not answered nothing is priced, and a
+ *               failed map read is said with Retry — never priced from the range, G-108),
+ *               the button says "estimated" and names the cap the request
  *               carries as `max_cost_usd` and the worker keeps (F5b); a last replay that
  *               stopped itself at its cap is said in a banner with its reason and its run,
  *               the posture is the real sandbox mode, and nothing is queued until the red
@@ -161,10 +163,21 @@ export function MeasurePage() {
   const choice = builderChoice(health.data)
   const posture = posturePhrase(sandbox)
   const retention = !worktrees && !transcripts ? 'Nothing retained — grades and hashes only' : `${[worktrees && 'worktrees', transcripts && 'transcripts'].filter(Boolean).join(' and ')} kept until deleted`
+  // G-108: the estimate prices from the map's measured mean, so it waits for the map to
+  // answer; a failed read is said, with Retry, and nothing is priced from the fallback range
+  const priced = map.isSuccess
   const estimate: SummaryRow = {
     key: 'Estimated cost',
     hint: 'stat.measure.estimate',
-    value: (
+    value: map.isError ? (
+      <span data-testid="measure-estimate-error" className="block">
+        <ErrorState compact title="Could not read this repository’s measured cost" error={map.error} onRetry={() => void map.refetch()}>
+          <p className="m-0 text-xs">The estimate comes from the capability map, so nothing is priced until it answers. Retry, or come back when the map is available.</p>
+        </ErrorState>
+      </span>
+    ) : !priced ? (
+      <span data-testid="measure-estimate-pending">Reading this repository’s measured cost…</span>
+    ) : (
       <>
         {usd(lo)} to {usd(hi)} for {runLimit} attempts
         {measured
@@ -176,7 +189,7 @@ export function MeasurePage() {
   }
 
   const start = () => {
-    if (!choice || inFlight || !capOk) return
+    if (!choice || inFlight || !capOk || !priced) return
     create.mutate(
       {
         repo: name,
@@ -351,8 +364,8 @@ export function MeasurePage() {
           <>
             <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>
             {operator && (
-              <WarningButton hint="button.measure.start" onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0 || !capOk}>
-                Start the run — estimated {usd(lo)} to {usd(hi)}{capOk ? `, stops at ${usd(cap)}` : ''}
+              <WarningButton hint="button.measure.start" onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0 || !capOk || !priced}>
+                {priced ? <>Start the run — estimated {usd(lo)} to {usd(hi)}{capOk ? `, stops at ${usd(cap)}` : ''}</> : 'Start the run — no estimate yet'}
               </WarningButton>
             )}
           </>

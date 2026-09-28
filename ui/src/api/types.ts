@@ -1399,6 +1399,8 @@ export interface ControlRow {
   verdict: ControlVerdict
   note: string
   duration_s: number
+  /** G-952 (controls.v3): the gold graded beside a catch in the same posture (`clean`, or what it read instead); null or absent when the row is not a catch or predates witnesses. */
+  witness?: string | null
 }
 
 /** `crb.core.oracle.controls.ControlsReport.to_dict()` */
@@ -1411,6 +1413,9 @@ export interface ControlsReport {
   escapes: number
   not_constructible: number
   skipped: number
+  /** G-952 (controls.v3): caught rows with a gold witness, and those whose witness was not clean; absent before v3. */
+  witnessed?: number
+  witness_failures?: number
   passed: boolean
   escape_rows: ControlRow[]
   rows: ControlRow[]

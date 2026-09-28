@@ -737,7 +737,11 @@ def _events(tasks: list[TaskSpec]) -> list[Event]:
                 "schema": "crb.negative_controls.v1",
                 # the controls report of the seed rows' apparatus (controls-gate.v2 reads a
                 # report of its own apparatus only), complete — its one escape is load-bearing
-                "apparatus": {"apparatus_version": APPARATUS_VERSION, "complete": True},
+                "apparatus": {
+                    "apparatus_version": APPARATUS_VERSION,
+                    "complete": True,
+                    "controls_version": "controls.v3",
+                },
                 "n_tasks": 2,
                 "n_rows": 14,
                 "violations": 0,

@@ -12,7 +12,10 @@ What it does: Pins that verify reports ok, ``broken_at`` on a tampered row and a
               operator-only and allowlisted, anonymous 401; and that import is admin-only,
               re-chains and skips duplicates, keeps belt 5 unrecorded on pre-belt-5 rows
               (ADR-0011), points census rows at the CLI, refuses a false-Q1 row with 409 and
-              malformed bodies with 422.
+              malformed bodies with 422; and that every export records one
+              ``ledger.exported`` event with the actor, the format and the filter (G-184),
+              that an export whose recording fails every retry is refused with a 500 and no
+              byte of the ledger, and that a refused abstract export records nothing.
 How:          ``make_env`` over the seed; triggers dropped deliberately for the tamper cases.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
@@ -21,8 +24,9 @@ Works with:   src/crb/server/routes/ledger.py (under test), src/crb/store/ledger
               import, export), src/crb/core/federated.py (the abstract allowlist),
               tests/fixtures/server_seed.py, docs/API.md (ledger)
 Tested by:    tests/test_server_routes_ledger.py
-Touch when:   never for a new repository; an export format is added (a header / escaping case); a
-              row field is added (the CSV and abstract cases decide whether it is exported).
+Touch when:   never for a new repository; an export format is added (a header / escaping
+              case, and its `ledger.exported` event); a row field is added (the CSV and
+              abstract cases decide whether it is exported).
 """
 
 from __future__ import annotations
@@ -35,19 +39,32 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from fastapi.testclient import TestClient
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from crb.core.federated import ABSTRACT_ALLOWLIST
 from crb.core.ledger import GENESIS_HASH, GradeRow, verify_chain
 from crb.server.app import API_PREFIX
-from crb.server.routes.ledger import EXPORT_LABEL_COLUMNS
+from crb.server.routes.ledger import EXPORT_LABEL_COLUMNS, EXPORT_TRACE, LEDGER_EXPORTED
+from crb.store.models import Event
 from fixtures.posture import (
     TEST_POSTURE_CLASS,
     TEST_POSTURE_ID,
     TEST_QUALIFICATION_ID,
     dict_at_apparatus,
 )
-from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
+from fixtures.server_seed import (
+    ALPHA,
+    USERS,
+    Env,
+    assert_rbac,
+    envelope,
+    login,
+    make_env,
+    user_id,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -289,6 +306,87 @@ class TestExport:
     def test_anonymous_401(self, env: Env) -> None:
         env.client.cookies.clear()
         assert env.client.get(f"{API_PREFIX}/ledger/export").status_code == 401
+
+    def test_every_export_records_who_took_it_with_what_filter(self, env: Env) -> None:
+        """G-184: each export route commits one ``ledger.exported`` event naming the actor,
+        the format and the filter; a refused export (a bad format) records nothing."""
+        login(env.client, "viewer")
+        assert env.get(f"/ledger/export?format=csv&repo={ALPHA}").status_code == 200
+        assert env.get("/ledger/export").status_code == 200
+        assert env.get("/ledger/export?format=xml").status_code == 422
+        login(env.client, "operator")
+        assert env.get("/ledger/export/abstract").status_code == 200
+        with env.factory() as s:
+            evs = (
+                s.execute(select(Event).where(Event.action == LEDGER_EXPORTED).order_by(Event.seq))
+                .scalars()
+                .all()
+            )
+        got = [
+            (e.trace_id, e.actor, e.repo, e.payload_json["format"], e.payload_json["filter"])
+            for e in evs
+        ]
+        viewer, operator = user_id(USERS["viewer"]), user_id(USERS["operator"])
+        assert got == [
+            (EXPORT_TRACE, viewer, ALPHA, "csv", {"repo": ALPHA}),
+            (EXPORT_TRACE, viewer, "", "jsonl", {}),
+            (EXPORT_TRACE, operator, "", "abstract", {}),
+        ]
+        assert all(e.payload_json["at"] for e in evs)
+
+    @pytest.mark.parametrize(
+        ("role", "path"),
+        [
+            ("viewer", "/ledger/export"),
+            ("viewer", "/ledger/export?format=csv"),
+            ("operator", "/ledger/export/abstract"),
+        ],
+    )
+    def test_an_export_that_cannot_be_recorded_is_not_served(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch, role: str, path: str
+    ) -> None:
+        """DATA-RETENTION §4: every try at recording the export loses the race for the trace's
+        next ``seq``; the export is refused with a 500 and no byte of the ledger, and no event
+        is left behind. Swallowing the failure would stream the ledger unrecorded."""
+        tries: list[int] = []
+        real_commit = Session.commit
+
+        def racing_commit(self: Session) -> None:
+            if any(getattr(o, "action", None) == LEDGER_EXPORTED for o in self.new):
+                tries.append(1)
+                raise IntegrityError("INSERT INTO events", {}, Exception("UNIQUE trace_id, seq"))
+            real_commit(self)
+
+        login(env.client, role)
+        client = TestClient(env.client.app, raise_server_exceptions=False)
+        client.cookies = env.client.cookies
+        monkeypatch.setattr(Session, "commit", racing_commit)
+        r = client.get(f"{API_PREFIX}{path}")
+        monkeypatch.undo()
+        assert r.status_code == 500
+        assert "content-disposition" not in r.headers
+        assert ALPHA not in r.text and "row_hash" not in r.text
+        assert len(tries) == 3  # it re-reads the next seq and tries again, then gives up
+        with env.factory() as s:
+            assert s.execute(select(Event).where(Event.action == LEDGER_EXPORTED)).first() is None
+
+    def test_a_refused_abstract_export_records_nothing(self, env: Env) -> None:
+        """A ledger holding a false-Q1 row refuses the abstract export (409): nothing was
+        taken, so no ``ledger.exported`` event says it was."""
+        _drop_triggers(env)
+        with env.factory() as s:
+            s.execute(
+                text(
+                    "UPDATE grades SET target_green = 0 "
+                    "WHERE seq = (SELECT MIN(seq) FROM grades WHERE clean = 1)"
+                )
+            )
+            s.commit()
+        login(env.client, "operator")
+        r = env.get("/ledger/export/abstract")
+        assert r.status_code == 409 and envelope(r)["code"] == "false_q1_refused"
+        with env.factory() as s:
+            assert s.execute(select(Event).where(Event.action == LEDGER_EXPORTED)).first() is None
 
 
 def _jsonl(rows: list[GradeRow]) -> bytes:

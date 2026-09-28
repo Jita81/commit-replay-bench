@@ -11,8 +11,12 @@
  *               seven negative controls through the real grader). The controls gate is green
  *               only with zero VIOLATION rows; an ESCAPE is shown as a finding (the repo's
  *               tests could not tell a cheat from an implementation), not as an instrument
- *               failure. A 404 on controls is the designed "not measured yet" state with the
- *               run button.
+ *               failure. Each caught control shows its gold witness — the commit's own change
+ *               graded beside it in the same posture — and a red witness reads as an
+ *               instrument failure (G-952); a passed report the server reads as unmeasured
+ *               has no witness (it predates `controls.v3`) and the gate says it licenses
+ *               nothing until the controls run again (P-344). A 404 on controls is the
+ *               designed "not measured yet" state with the run button.
  * How:          `useOracle` → tiles computed from the tasks (mean over scored tasks only;
  *               unscoreable never averaged in) → two `DataTable`s; `ControlsSection` reads the
  *               latest report and builds the `GateBanner` criteria from its counts.
@@ -26,7 +30,8 @@
  *               (the routes), src/crb/core/oracle/adequacy.py (bands and gates),
  *               src/crb/core/oracle/controls.py (the control matrix and verdict vocabulary)
  * Tested by:    ui/src/screens/Oracle/OraclePage.test.tsx (the purpose, no "auto-ship", terms,
- *               the run actions per role), ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
+ *               the run actions per role, the Wilson interval and served floors, the gold
+ *               witness column), ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
  *               (strength, band and gate per task; every control with its verdict; no
  *               VIOLATION), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
  * Touch when:   never for a new repository; a control or a verdict word is added
@@ -100,6 +105,22 @@ function ControlsSection({ repo }: { repo: string }) {
       { key: 'control', header: 'Control', hint: 'col.controls.control', mono: true, sortValue: (r) => r.control, cell: (r) => r.control },
       { key: 'expected', header: 'Expected', hint: 'col.controls.expected', sortValue: (r) => r.expected, cell: (r) => r.expected },
       { key: 'observed', header: 'Observed', hint: 'col.controls.expected', sortValue: (r) => r.observed, cell: (r) => r.observed },
+      // G-952: the gold graded beside a catch in the same posture; a catch with no clean
+      // witness is a violation (a report from before controls.v3 carries none: a dash)
+      {
+        key: 'witness',
+        header: 'Gold witness',
+        hint: 'col.controls.witness',
+        sortValue: (r) => r.witness ?? '',
+        cell: (r) =>
+          r.witness ? (
+            <span className={`font-mono text-xs ${r.witness === 'clean' ? 'text-status-green' : 'font-bold text-status-red'}`} data-testid="controls-witness">
+              {r.witness === 'clean' ? 'clean' : `${r.witness} — instrument failure`}
+            </span>
+          ) : (
+            <span className="text-xs text-on-surface-muted">—</span>
+          ),
+      },
       {
         key: 'verdict',
         header: 'Verdict',
@@ -144,9 +165,15 @@ function ControlsSection({ repo }: { repo: string }) {
   // with no verdict (a bare to_dict) is pending, never derived open from the counts.
   const v = c.verdict
   const verdictOk = v ? (v.state === 'passed' ? true : v.state === 'unmeasured' ? null : false) : null
+  // P-344: a passed report the server reads as unmeasured has no gold witness beside its
+  // catches (it was written before controls.v3), so it licenses nothing until the controls re-run
+  const unwitnessed = v && c.passed && v.state === 'unmeasured'
+  const version = typeof c.apparatus?.controls_version === 'string' ? c.apparatus.controls_version : 'before controls.v3'
   const verdictDetail = !v
     ? 'no verdict served with this report'
-    : `${v.state}${v.measured ? ` · ${fmtInt(v.constructible)} of ${fmtInt(v.total)} constructible (${Math.round(v.share * 100)}%) · ${fmtInt(v.escapes)} escape(s)${v.complete ? '' : ' · run cancelled part-way'}` : ''}${v.run_id ? ` · run ${shortId(v.run_id)}` : ''}`
+    : unwitnessed
+      ? `unmeasured · no gold witness beside its catches (${version}): run the controls again before anything here can deliver`
+      : `${v.state}${v.measured ? ` · ${fmtInt(v.constructible)} of ${fmtInt(v.total)} constructible (${Math.round(v.share * 100)}%) · ${fmtInt(v.escapes)} escape(s)${v.complete ? '' : ' · run cancelled part-way'}` : ''}${v.run_id ? ` · run ${shortId(v.run_id)}` : ''}`
   return (
     <div className="space-y-4">
       <Hint as="div" id="gate.oracle.controls">

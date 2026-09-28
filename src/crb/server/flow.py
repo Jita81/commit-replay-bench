@@ -100,6 +100,7 @@ from crb.core.flow import (
     stated_durations,
 )
 from crb.core.ledger import PROCESS_FACTORY, GradeRow, pool_scope
+from crb.core.oracle.controls import controls_verdict_of
 from crb.core.routing import DEFAULT_POLICY, ControlsVerdict
 from crb.core.signoff import SignoffRecord
 from crb.core.version import APPARATUS_VERSION
@@ -166,7 +167,9 @@ def first_controls_pass(session: Session, repo: str) -> str:
 
     "Passed" is the same word the map routes under — :meth:`ControlsVerdict.state` against
     ``DEFAULT_POLICY`` — so a report with an escape or too few constructible controls does not
-    count here either. Source order matches ``latest_controls_verdict``, read oldest first:
+    count here either, nor does a passed one with no gold witness (before ``controls.v3``):
+    each report is reduced by the same ``controls_verdict_of`` the map reads (P-344). Source
+    order matches ``latest_controls_verdict``, read oldest first:
     the ``controls.report`` events, then the finished ``controls`` runs' counts.
     """
     events = session.execute(
@@ -175,14 +178,14 @@ def first_controls_pass(session: Session, repo: str) -> str:
         .order_by(Event.id.asc())
     ).scalars()
     for ev in events:
-        if _passed(ControlsVerdict.from_counts(dict(ev.payload_json or {}))):
+        if _passed(controls_verdict_of(dict(ev.payload_json or {}))):
             return ev.timestamp
     runs = session.execute(
         select(Run).where(Run.repo == repo, Run.kind == "controls").order_by(Run.created.asc())
     ).scalars()
     for run in runs:
         counts = dict(run.counts_json or {})
-        if "passed" in counts and _passed(ControlsVerdict.from_counts(counts)):
+        if "passed" in counts and _passed(controls_verdict_of(counts)):
             return run.finished or run.created
     return ""
 

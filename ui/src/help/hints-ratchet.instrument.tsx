@@ -640,6 +640,8 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
   { name: '/repos/:name tab=profile', route: '/repos/alpha?tab=profile', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer'] },
   { name: '/repos/:name tab=tasks', route: '/repos/alpha?tab=tasks', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer'] },
   { name: '/repos/:name tab=config', route: '/repos/alpha?tab=config', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer', 'operator'] },
+  // G-180: a filter that arrives in a link and has no control of its own shows as a chip
+  { name: '/ledger + filters from a link', route: '/ledger?repo=alpha&run_id=r1&task_id=t1&builder=fixture&language=python', path: '/ledger', element: <LedgerPage />, api: INSTRUMENT_SCREENS['/ledger']!.api, roles: ['viewer'] },
   {
     name: '/capability + open cell detail',
     route: '/capability?repo=alpha',

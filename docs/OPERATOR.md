@@ -972,7 +972,16 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - attempts recorded `harness` with `error: environment: …` — the humans' own change failed
   the same scope in the same posture, so the posture moved under its qualification (a run
   stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
-  before the next replay — §7a).
+  before the next replay — §7a);
+- a controls report with `witness_failures > 0` — a control read as caught, but the commit's
+  own change graded beside it in the same posture was not clean, so the environment could not
+  build or grade at that moment and the catch proves nothing. Each such row is a `VIOLATION`;
+  fix the posture (qualify again, check the sandbox image and the dependency source) and
+  re-run the controls;
+- a controls verdict that reads `unmeasured` on a repository whose report says passed — the
+  report was written before `controls.v3`, so no gold witness stands beside its catches, and
+  it licenses nothing (the Oracle screen says so). Run the controls again; after an upgrade to
+  `controls.v3`, do this for every connected repository.
 
 A run that stops itself at its spend cap (`counts.stopped_code: spend_cap`,
 `run.spend_cap`) is not a stop condition: it did what it was told. Its attempts are graded

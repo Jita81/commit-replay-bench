@@ -18,7 +18,8 @@
  *               field, row and the button carry a hint, with the attempts radio opening on hover;
  *               and that the estimate reads the map's economics fold, so a known $0 is quoted as
  *               $0.00 over the attempts with a known cost, never dropped for the planning range
- *               (P-131).
+ *               (P-131); and that a map that cannot be read is said with Retry while nothing is
+ *               priced and the button waits (G-108).
  * How:          `mockApi` + `renderApp` with `path` for `useParams`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
@@ -98,6 +99,35 @@ describe('MeasurePage', () => {
     await waitFor(() => expect(box).toHaveTextContent('$0.00 to $0.00 for 30 attempts, at about $0.00 each'))
     expect(box).toHaveTextContent("this repository's measured mean over n=20 attempts with a known cost at apparatus 2.2")
     expect(box).not.toHaveTextContent('a planning range, not a measured interval')
+  })
+
+  it('a map that cannot be read is said with Retry, nothing is priced from the fallback range, and the button waits (G-108)', async () => {
+    let mapReads = 0
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': () => {
+        mapReads += 1
+        return envelope(503, 'ledger_unavailable', 'ledger is locked')
+      },
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const err = await screen.findByTestId('measure-estimate-error')
+    expect(err).toHaveTextContent('Could not read this repository’s measured cost')
+    expect(err).toHaveTextContent('ledger is locked')
+    expect(err).toHaveTextContent('HTTP 503')
+    const box = screen.getByTestId('before-you-start')
+    // no figure from the documented range stands in for the map while it is down
+    expect(box).not.toHaveTextContent('a planning range, not a measured interval')
+    expect(box).not.toHaveTextContent('$6.00 to $18.00')
+    const button = screen.getByRole('button', { name: 'Start the run — no estimate yet' })
+    expect(button).toBeDisabled()
+    await userEvent.click(button)
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    const before = mapReads
+    await userEvent.click(within(err).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(mapReads).toBeGreaterThan(before))
   })
 
   it('attempts with no known cost fall back to the range and say why, never n = 0', async () => {

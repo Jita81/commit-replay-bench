@@ -96,7 +96,7 @@ STREAMS_THAT_SPEND = ("connect-and-prove", "measure", "manufacture-and-deliver")
 
 PASSING_CONTROLS = {
     "schema": "crb.negative_controls.v1",
-    "apparatus": {"apparatus_version": "2.2"},
+    "apparatus": {"apparatus_version": "2.2", "controls_version": "controls.v3"},
     "n_tasks": 2,
     "n_rows": 14,
     "violations": 0,

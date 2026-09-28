@@ -26,6 +26,15 @@ deterministic edit → :func:`~crb.core.grade.grade`) with seven generators:
                     gold source into the module under test at collection time: the
                     target goes green purely by state pollution.
 
+Every control that reads as caught (every row but ``gold`` whose verdict is ``ok``) is
+witnessed: the commit's own change is graded again in a fresh tree, in the same posture and
+with the same grade context, beside it. A catch stands only when that gold witness grades
+``clean``; any other witness (red, an error) means the posture could not grade the gold at
+that moment — a sealed environment that cannot build makes every cheat look "caught" — so
+the row becomes a ``VIOLATION`` and the gate fails (G-952, ``controls.v3``). The ``gold``
+row at the head of each task only proves the posture at the start of the task; the witness
+proves it beside each catch.
+
 The last two are MEASUREMENT controls. Their expectation is ``caught`` (red,
 regressed or disqualified) and the row's note names WHICH belt caught it. If one of
 them grades ``clean`` that is a **MEASURED ORACLE ESCAPE**, reported prominently and
@@ -78,12 +87,18 @@ What it does: Proves the instrument rejects what it must (gold clean, noop red, 
               stub red, regression regressed) and measures what the oracle lets through
               (``hardcode_cheat``, ``env_poison``): a VIOLATION fails the gate, an ESCAPE is
               reported and never hidden, a cheat that cannot honestly be built reads
-              ``not_constructible``, a harness error is always a VIOLATION.
+              ``not_constructible``, a harness error is always a VIOLATION; every catch
+              carries a gold witness graded beside it in the same posture, and a catch
+              whose witness is not clean is a VIOLATION (G-952); ``controls_verdict_of`` is
+              the one reduction of a stored report for routing, and a passed report with no
+              witness (before ``controls.v3``) reads as unmeasured there, licensing nothing
+              (P-344).
 How:          Per task: RED check at the parent (else ``skip``) → per control: fresh
               ``Workspace`` + tests overlaid → ``TamperGuard.snapshot`` → the control's edit
               (dispatched on ``RepoConfig.language``; Go/JS compile- or syntax-checked) →
               ``guard.check`` → ``grade(..., evaluate_lint=False)`` → ``observe`` →
-              verdict + the belt that caught it → ``ControlRow`` → ``ControlsReport``.
+              verdict + the belt that caught it → (a catch) the gold witness in a fresh
+              ``Workspace`` → ``ControlRow`` → ``ControlsReport``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0010-polyglot-negative-controls.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md
@@ -93,9 +108,13 @@ Works with:   src/crb/core/grade.py (the grader every control goes through),
               text-level transforms this dispatches to), src/crb/core/test_infra.py (belt 1b
               — why an ``env_poison`` row is expected ``caught by belt 1``),
               src/crb/core/runners/base.py (the RED check and the compile probes),
-              src/crb/server/worker.py (the ``controls`` run kind)
-Tested by:    tests/test_oracle_controls.py, tests/test_oracle_controls_go.py,
-              tests/test_oracle_controls_js.py
+              src/crb/server/worker.py (the ``controls`` run kind),
+              src/crb/core/routing.py (``ControlsVerdict``, which ``controls_verdict_of``
+              builds), src/crb/server/routes/oracle.py (reads each report through
+              ``controls_verdict_of`` for the map and the routes, as the flow's first pass and
+              ``crb learn`` do)
+Tested by:    tests/test_oracle_controls.py, tests/test_server_routes_oracle.py,
+              tests/test_oracle_controls_go.py, tests/test_oracle_controls_js.py
 Touch when:   never for a new repository (a repo whose regression control reads
               ``not_constructible`` needs a wider ``belt_scope`` in its config, not an edit
               here — docs/OPERATOR.md); a new language needs its own transform module and a
@@ -125,13 +144,64 @@ from crb.core.grade import MODE_SIGHTED, GradeContext, GradeResult, grade
 from crb.core.oracle import controls_go, controls_js
 from crb.core.qualify import adhoc_context
 from crb.core.redact import redact_and_cap
+from crb.core.routing import ControlsVerdict
 from crb.core.runners.base import BaseRunner, tail_of
 from crb.core.spec import BELT_AFFECTED_DIRS, BELT_TARGET_ONLY, Language, RepoConfig, TaskSpec
 from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace, opaque_dest
 
 CONTROLS_SCHEMA = "crb.negative_controls.v1"
-CONTROLS_VERSION = "controls.v2"  # v2: Go + JavaScript transforms
+#: v2: Go + JavaScript transforms; v3: a gold witness beside every catch (G-952, ADR-0010).
+CONTROLS_VERSION = "controls.v3"
+#: The first controls version whose catches each carry a gold witness (G-952).
+WITNESSED_FROM = 3
+_CONTROLS_VERSION_RE = re.compile(r"controls\.v(\d+)")
+#: Why a passed report with no witness reads as unmeasured: what to do next, and why.
+UNWITNESSED_DETAIL = (
+    "the latest passed report predates controls.v3 (no gold witness beside its catches) "
+    "— run the controls again"
+)
+
+
+def report_is_witnessed(report: Mapping[str, Any]) -> bool:
+    """``True`` when a controls report — a ``controls.report`` payload or a controls run's
+    ``counts_json`` — was written with a gold witness beside every catch: its
+    ``controls_version`` (top level, or under ``apparatus``) is ``controls.v3`` or later.
+
+    A report from before the witness, or one that states no version, cannot show that its
+    "caught" rows were not an environment that could not build, so it licenses nothing
+    (P-344): routing reads it as unmeasured and asks for the controls to be run again.
+    """
+    version = report.get("controls_version")
+    apparatus = report.get("apparatus")
+    if not version and isinstance(apparatus, Mapping):
+        version = apparatus.get("controls_version")
+    m = _CONTROLS_VERSION_RE.fullmatch(str(version or ""))
+    return m is not None and int(m.group(1)) >= WITNESSED_FROM
+
+
+def controls_verdict_of(
+    report: Mapping[str, Any], *, run_id: str = "", created: str = ""
+) -> ControlsVerdict:
+    """One controls report — a ``controls.report`` payload or a controls run's
+    ``counts_json`` — reduced for routing, the one reduction every reader uses (the map,
+    the sign-off, the Oracle screen's verdict, the flow's first pass, ``crb learn``). A
+    PASSED report that is not :func:`report_is_witnessed` licenses nothing: it reads as
+    :meth:`~crb.core.routing.ControlsVerdict.unmeasured` until the controls are run again
+    (P-344), with :data:`UNWITNESSED_DETAIL` as its reason. It keeps the apparatus it was
+    written at, so a reader that looks for the latest report of an apparatus stops at it
+    rather than reading an older one in its place. A failed report stays failed, witnessed
+    or not."""
+    verdict = ControlsVerdict.from_counts(report, run_id=run_id, created=created)
+    if report.get("passed") and not report_is_witnessed(report):
+        return dataclasses.replace(
+            ControlsVerdict.unmeasured(UNWITNESSED_DETAIL),
+            run_id=run_id,
+            created=created,
+            apparatus_version=verdict.apparatus_version,
+        )
+    return verdict
+
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -575,6 +645,11 @@ class ControlRow:
     note: str = ""
     grade: GradeResult | None = None
     duration_s: float = 0.0
+    #: What the commit's own change graded, in a fresh tree in the same posture, beside
+    #: this control (G-952): ``clean`` when the catch stands, anything else when the
+    #: posture could not grade the gold (the row is then a VIOLATION); ``""`` when the row
+    #: is not a catch (gold itself, an escape, not constructible, skipped, an error).
+    witness: str = ""
 
     def __post_init__(self) -> None:
         if self.control not in CONTROLS:
@@ -592,6 +667,7 @@ class ControlRow:
             "note": self.note,
             "grade": self.grade.to_dict() if self.grade else None,
             "duration_s": round(self.duration_s, 3),
+            "witness": self.witness or None,
         }
 
 
@@ -631,6 +707,17 @@ class ControlsReport:
         return self._with(VERDICT_SKIP)
 
     @property
+    def witnessed(self) -> tuple[ControlRow, ...]:
+        """Caught rows with a gold witness beside them (G-952)."""
+        return tuple(r for r in self.rows if r.witness)
+
+    @property
+    def witness_failures(self) -> tuple[ControlRow, ...]:
+        """Caught rows whose gold witness did not grade clean: the posture could not grade
+        the commit's own change, so the catch is not evidence (each is a VIOLATION)."""
+        return tuple(r for r in self.rows if r.witness and r.witness != OBS_CLEAN)
+
+    @property
     def passed(self) -> bool:
         """The CI gate: no VIOLATION. Escapes, not-constructible and skips do not fail it."""
         return not self.violations
@@ -651,6 +738,8 @@ class ControlsReport:
             "escapes": len(self.escapes),
             "not_constructible": len(self.not_constructible),
             "skipped": len(self.skipped),
+            "witnessed": len(self.witnessed),
+            "witness_failures": len(self.witness_failures),
             "passed": self.passed,
             "escape_rows": [r.to_dict() for r in self.escapes],
             "rows": [r.to_dict() for r in self.rows],
@@ -667,13 +756,16 @@ class ControlsReport:
             f"- escapes: {len(self.escapes)} (measured oracle escapes — findings, not instrument bugs)",
             f"- not constructible: {len(self.not_constructible)} (cheat honestly unbuildable for the task)",
             f"- skipped: {len(self.skipped)} (no RED oracle)",
+            f"- gold witnesses: {len(self.witnessed)} beside the caught controls, "
+            f"{len(self.witness_failures)} not clean (each an instrument failure)",
             f"- gate: {'PASS' if self.passed else 'FAIL'}",
             "",
-            "| task | control | expected | observed | verdict | note |",
-            "|------|---------|----------|----------|---------|------|",
+            "| task | control | expected | observed | witness | verdict | note |",
+            "|------|---------|----------|----------|---------|---------|------|",
         ]
         lines += [
-            f"| {r.task_id[:10]} | {r.control} | {r.expected} | {r.observed} | {r.verdict} | {r.note} |"
+            f"| {r.task_id[:10]} | {r.control} | {r.expected} | {r.observed} | "
+            f"{r.witness or '—'} | {r.verdict} | {r.note} |"
             for r in self.rows
         ]
         if self.escapes:
@@ -1248,8 +1340,10 @@ def controls_for_task(
 
     ``context`` is the task's grade context in the run's posture (ADR-0019): the worker
     passes the in-posture qualification so belt 3 subtracts the baseline measured there.
-    The controls always grade UNWITNESSED — a control's verdict is never a row that
-    blames a model, and a control writes no ``GradeRow`` at all. With no context the
+    The controls always grade UNWITNESSED in the builder-blame sense — a control's
+    verdict is never a row that blames a model, and a control writes no ``GradeRow`` at
+    all. Each catch is instead witnessed by the gold graded beside it (G-952): a catch
+    whose gold witness is not clean is a ``VIOLATION``. With no context the
     task's own discovery values are used (an ad hoc context).
     """
     unknown = [c for c in controls if c not in CONTROLS]
@@ -1269,6 +1363,7 @@ def controls_for_task(
         *,
         grade_result: GradeResult | None = None,
         started: float | None = None,
+        witness: str = "",
     ) -> ControlRow:
         return ControlRow(
             task_id=task.task_id,
@@ -1280,7 +1375,40 @@ def controls_for_task(
             note=note,
             grade=grade_result,
             duration_s=0.0 if started is None else time.monotonic() - started,
+            witness=witness,
         )
+
+    def gold_witness(control: str) -> tuple[str, str]:
+        """G-952: grade the commit's own change in a fresh tree, in the same posture and
+        with the same grade context, beside a control that read as caught. (observed,
+        detail). A red here means the posture could not build or grade the gold at that
+        moment, so the catch beside it proves nothing. A sandbox that is gone still stops
+        the run; any other harness error is an ``error`` witness, never a clean one."""
+        dest = opaque_dest(scratch, "ctrl", avoid=(task.task_id,))
+        _emit(on_event, "controls.witness", task=task.task_id, control=control, worktree=dest.name)
+        try:
+            with Workspace.create(repo, task.task_id, dest, config=config) as ws:
+                ws.overlay_tests(task.test_files)
+                _apply_control(GOLD, ws, task, config, runner=runner, executor=executor)
+                result = grade(
+                    ws,
+                    graded,
+                    ctx=gctx,
+                    config=config,
+                    runner=runner,
+                    executor=executor,
+                    mode=MODE_SIGHTED,
+                    timeout=timeout,
+                    on_event=on_event,
+                    evaluate_lint=False,
+                )
+        except SandboxUnavailable:
+            raise
+        except Exception as exc:
+            return OBS_ERROR, redact_and_cap(
+                f"harness error: {type(exc).__name__}: {exc}", max_chars=300
+            )
+        return observe(result), result.error or result.dq_reason or result.note
 
     try:
         is_red, why = _red_at_parent(
@@ -1403,7 +1531,25 @@ def controls_for_task(
                         )
         if apply_note:
             note = f"{note}; {apply_note}" if note else apply_note
-        rows.append(row(name, observed, verdict, note, grade_result=result, started=started))
+        witness = ""
+        if name != GOLD and verdict == VERDICT_OK:
+            # a catch is evidence only if the same posture can grade the gold beside it
+            witness, detail = gold_witness(name)
+            if witness == OBS_CLEAN:
+                note = f"{note}; gold witness clean" if note else "gold witness clean"
+            else:
+                verdict = VERDICT_VIOLATION
+                note = (
+                    f"gold witness graded {witness} beside this control"
+                    f"{f' ({detail})' if detail else ''}: the posture could not grade the "
+                    "commit's own change, so this catch is not evidence — an instrument "
+                    f"failure, never a finding about the tests; {note}"
+                ).rstrip("; ")
+        rows.append(
+            row(
+                name, observed, verdict, note, grade_result=result, started=started, witness=witness
+            )
+        )
         _emit(
             on_event,
             "controls.row",
@@ -1411,6 +1557,7 @@ def controls_for_task(
             control=name,
             observed=observed,
             verdict=verdict,
+            witness=witness,
         )
     return rows
 

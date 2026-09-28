@@ -825,6 +825,8 @@ export const HINTS = {
     'Tasks the miner placed in the hard pool by churn; a run can be limited to one pool.',
   'col.repos.last_run':
     'The kind and status of the most recent run, and when it finished.',
+  'summary.repos.count':
+    'How many repositories this list shows of the total the server holds. Every page is read, each repository is listed once, and a list that changed while it was read is read again; "All" is said only when one read saw a list that did not change.',
 
   // ── Add a repository dialog (screens/Repos/RepoNewDialog.tsx)
   'field.repo_new.name':
@@ -1248,7 +1250,7 @@ export const HINTS = {
 
   // ── /capability — Map grid (screens/Capability/CapabilityPage.tsx)
   'button.capability.export':
-    'Download the ledger rows behind this map for this repository as CSV.',
+    'Download the ledger rows behind this map for this repository as CSV. Anyone signed in can take it, and each download is recorded with who took it.',
   'stat.capability.coverage':
     'The share of this repository’s change volume (its change profile, weighted by commit count) whose cell routes deliver. A coverage of the profile, not a sampled rate, so it carries no interval; each cell’s rate carries its own.',
   'stat.capability.posture':
@@ -1429,6 +1431,8 @@ export const HINTS = {
     'Which deliberate cheat: gold (the real change), noop, test-tamper, stub, regression, hardcode-cheat or env-poison.',
   'col.controls.expected':
     'What the grader must say for this cheat, and what it said.',
+  'col.controls.witness':
+    'What the commit’s own change graded in a fresh tree, in the same posture, beside a control that was caught. A catch stands only beside a clean witness; a red one means the environment could not build or grade the change, so the catch proves nothing and the row is a violation. A dash: the row is not a catch, or the report predates witnesses.',
   'col.controls.verdict':
     'ok means the grader answered as it must; VIOLATION means it passed a cheat (an instrument defect); ESCAPE means the tests could not tell (a finding about the tests); not constructible or skip means the control could not be built.',
   'pill.controls.verdict':
@@ -1638,6 +1642,8 @@ export const HINTS = {
     'Rows credited clean against a failed belt, across the whole ledger. Must be 0; it is the number everything else defends.',
   'stat.ledger.matching':
     'Rows matching the current filters, out of the whole ledger; the table shows one page of them.',
+  'button.ledger.remove_filter':
+    'A filter that came with the link you followed, with no control of its own on this page. Matching rows counts only the rows it lets through; press it to remove the filter. A value a select on this page does not offer (Size xl, say) reads "not applied": the rows are not narrowed by it, and pressing it removes it from the link.',
   'field.ledger.clean':
     'Show only clean rows, or only rows that were not clean.',
   'field.ledger.mode':

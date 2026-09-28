@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Truth on the instrument screens: failed reads are said, exports are recorded, catches are witnessed**
+  (north-star Wave 4, stream T; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-t4)).
+  A failed read on Connect or the Measure estimate is an error with Retry, and a ratchet stops
+  the next screen showing a fallback instead; Repos reads every page and re-reads a list that
+  moved; the Ledger shows linked filters as chips; every ledger export is recorded first, or
+  not served (DL-112); each caught negative control carries a gold witness from the same
+  posture (`controls.v3`, DL-111). **Upgrading:** a passed controls report from before
+  `controls.v3` licenses nothing — run the controls again on every repository.
+
 - **One governed delivery, end to end: the entry gate reads the registered readings**
   (the north-star Wave 2 integration; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
   The seven Wave 2 streams are merged on `feat/ns2` with their ids renumbered after

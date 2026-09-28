@@ -7,7 +7,10 @@ What it is:   ``/oracle/{repo}`` and ``/oracle/{repo}/controls``'s test suite �
 What it does: Pins the report's shape, bands and gates over the seed's ``oracle.score`` events,
               that the latest score per task wins and the class comes from the task table, the
               empty repo and 404, anonymous 401; and that the controls route serves the latest
-              report, 404s when not measured, and admins read too.
+              report, 404s when not measured, and admins read too; and that a passed report
+              or run with no gold witness (before ``controls.v3``, or unstamped) is served as
+              written but reads as unmeasured for routing and on its own verdict, while a
+              witnessed one reads as written (P-344).
 How:          ``make_env`` over the seed; extra ``oracle.score`` events appended through the ORM
               in the worker's shape.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -16,8 +19,8 @@ Works with:   src/crb/server/routes/oracle.py (under test), src/crb/core/oracle/
               (the bands and gates), src/crb/server/routes/runs.py (``event_to_model``),
               tests/fixtures/server_seed.py, docs/API.md (oracle adequacy)
 Tested by:    tests/test_server_routes_oracle.py
-Touch when:   the ``oracle.score`` or ``controls.report`` event shape changes in the worker (the
-              seed and these cases together).
+Touch when:   never for a new repository; the ``oracle.score`` or ``controls.report`` event
+              shape changes in the worker (the seed and these cases together).
 """
 
 from __future__ import annotations
@@ -25,13 +28,17 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from crb.core.oracle.adequacy import DEFAULT_POLICY
 from crb.core.version import APPARATUS_VERSION
+from crb.core.oracle.controls import CONTROLS_VERSION, UNWITNESSED_DETAIL
 from crb.observability.events import StepEvent
+from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.runs import event_to_model
+from crb.store.models import Run
 from fixtures.server_seed import ALPHA, BETA, Env, envelope, login, make_env, task_id
 
 
@@ -160,3 +167,106 @@ class TestControls:
     def test_admin_reads_too(self, env: Env) -> None:
         login(env.client, "admin")
         assert env.get(f"/oracle/{ALPHA}/controls").status_code == 200
+
+    @pytest.mark.parametrize("stamp", ["controls.v2", "controls.v1", None])
+    def test_a_passed_report_with_no_gold_witness_licenses_nothing(
+        self, env: Env, stamp: str | None
+    ) -> None:
+        """P-344: a report written before ``controls.v3`` has no gold witness beside any catch,
+        so its "caught" rows may be an environment that could not build. It is served as it
+        was written, but routing reads it as unmeasured — re-run the controls — never as
+        passed, whatever its counts say."""
+        _controls_event(env, BETA, _passed_report(stamp))
+        with env.factory() as s:
+            v = latest_controls_verdict(s, BETA)
+        assert v.measured is False and v.passed is False
+        # unmeasured for the witness, at this apparatus — not for another apparatus's report
+        assert v.detail == UNWITNESSED_DETAIL and v.apparatus_version == APPARATUS_VERSION
+        d = env.get(f"/oracle/{BETA}/controls").json()
+        assert d["passed"] is True  # the report as it was written…
+        assert d["verdict"]["state"] == "unmeasured"  # …licenses nothing
+        assert env.get(f"/capability-map?repo={BETA}").json()["controls"]["state"] == "unmeasured"
+
+    def test_an_unwitnessed_latest_report_is_not_passed_over_for_an_older_one(
+        self, env: Env
+    ) -> None:
+        """The latest report of this apparatus is the one read: when it has no witness it
+        licenses nothing, and an older witnessed report is never read in its place."""
+        _controls_event(env, BETA, _passed_report(CONTROLS_VERSION))
+        _controls_event(env, BETA, _passed_report("controls.v2"), seq=2)
+        with env.factory() as s:
+            v = latest_controls_verdict(s, BETA)
+        assert v.measured is False and v.detail == UNWITNESSED_DETAIL
+
+    def test_a_witnessed_report_reads_as_written(self, env: Env) -> None:
+        _controls_event(env, BETA, _passed_report(CONTROLS_VERSION))
+        with env.factory() as s:
+            v = latest_controls_verdict(s, BETA)
+        assert v.measured is True and v.passed is True
+        assert env.get(f"/oracle/{BETA}/controls").json()["verdict"]["state"] == "passed"
+
+    @pytest.mark.parametrize(("witnessed", "measured"), [(False, False), (True, True)])
+    def test_a_passed_run_is_read_only_when_its_counts_carry_the_witness(
+        self, env: Env, witnessed: bool, measured: bool
+    ) -> None:
+        """The run fallback (a report event pruned): a controls run's counts carry
+        ``witnessed`` from ``controls.v3``; counts without it are from before the witness."""
+        counts: dict[str, Any] = {"tasks": 3, "total": 3, "rows": 21, "violations": 0}
+        counts |= {"escapes": 0, "not_constructible": 0, "skipped": 0}
+        counts |= {"passed": True, "complete": True}
+        if witnessed:
+            counts |= {"witnessed": 15, "witness_failures": 0, "controls_version": CONTROLS_VERSION}
+        with env.factory() as s:
+            s.add(
+                Run(
+                    id="8" * 32,
+                    repo=BETA,
+                    kind="controls",
+                    status="succeeded",
+                    actor="op1",
+                    counts_json=counts,
+                    apparatus_json={"apparatus_version": APPARATUS_VERSION},
+                    created="2026-09-10T09:00:00+00:00",
+                    finished="2026-09-10T09:20:00+00:00",
+                )
+            )
+            s.commit()
+            v = latest_controls_verdict(s, BETA)
+        assert v.measured is measured and v.passed is measured
+
+
+def _passed_report(stamp: str | None) -> dict[str, Any]:
+    """A clean, passed ``controls.report`` payload stamped ``stamp`` (``None``: unstamped)."""
+    apparatus: dict[str, Any] = {"apparatus_version": APPARATUS_VERSION}
+    if stamp:
+        apparatus["controls_version"] = stamp
+    return {
+        "schema": "crb.negative_controls.v1",
+        "apparatus": apparatus,
+        "n_tasks": 3,
+        "n_rows": 21,
+        "violations": 0,
+        "escapes": 0,
+        "not_constructible": 0,
+        "skipped": 0,
+        "passed": True,
+        "escape_rows": [],
+        "rows": [],
+    }
+
+
+def _controls_event(env: Env, repo: str, payload: dict[str, Any], *, seq: int = 1) -> None:
+    with env.factory() as s:
+        s.add(
+            event_to_model(
+                StepEvent(
+                    trace_id="9" * 32,
+                    stage="oracle",
+                    action="controls.report",
+                    repo=repo,
+                    seq=seq,
+                    payload=payload,
+                )
+            )
+        )
+        s.commit()

@@ -5,33 +5,40 @@
  * ----------
  * What it is:   The screen at /repos — the first screen a new deployment shows — and the
  *               host of the Add-repo dialog.
- * What it does: Lists `GET /repos` with the probe pill (can the instrument run this repo's
- *               tests?), task counts, gold-clean and hard-pool counts and the last run's kind
- *               and status; rows open the repo page. Operators get "Add repo"; a viewer's
+ * What it does: Lists every page of `GET /repos` (never only the first page) with the probe
+ *               pill (can the instrument run this repo's tests?), task counts, gold-clean
+ *               and hard-pool counts and the last run's kind and status; rows open the repo
+ *               page. Operators get "Add repo"; a viewer's
  *               empty state says to ask an operator rather than offering a button that would
- *               403.
- * How:          `useRepos` → `DataTable`; `can('operator')` gates the action; the dialog
- *               navigates to the new repo on success.
+ *               403. A line above the table says how many of the served total are listed,
+ *               so a list that is not whole says so, and "All" is said only of a read that
+ *               saw one unchanging list — a list that moved while it was read is read again
+ *               (G-229).
+ * How:          `useAllRepos` (every page, as each journey screen reads) → `DataTable`;
+ *               `can('operator')` gates the action; the dialog navigates to the new repo on
+ *               success.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/api/hooks.ts (`useRepos`), ui/src/api/types.ts (`RepoSummary`),
+ * Works with:   ui/src/api/hooks.ts (`useAllRepos`), ui/src/api/types.ts (`RepoSummary`),
  *               ui/src/screens/Repos/RepoNewDialog.tsx, ui/src/screens/Repos/RepoDetail.tsx
  *               (where a row leads), ui/src/lib/verdict.ts (`probeDisplay`,
  *               `runStatusDisplay`), src/crb/server/routes/repos.py
  * Tested by:    ui/src/screens/Repos/ReposPage.test.tsx (rows, probe pills, the empty state per
- *               role), ui/e2e/walkthrough/02-repo-onboard.spec.ts (Add repo → the repo page),
+ *               role, every page read and the count line),
+ *               ui/e2e/walkthrough/02-repo-onboard.spec.ts (Add repo → the repo page),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe)
  * Touch when:   never for a new repository (it appears here once added); a column is worth
  *               adding from `GET /repos` (docs/API.md).
  */
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { useRepos } from '../../api/hooks'
+import { useAllRepos } from '../../api/hooks'
 import type { RepoSummary } from '../../api/types'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
+import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
@@ -42,7 +49,7 @@ import { RepoNewDialog } from './RepoNewDialog'
 
 /** The screen; "Add repo" only for operators. */
 export function ReposPage() {
-  const repos = useRepos()
+  const repos = useAllRepos()
   const { can } = useAuth()
   const navigate = useNavigate()
   const [adding, setAdding] = useState(false)
@@ -116,6 +123,18 @@ export function ReposPage() {
       <Card padded={false}>
         <QueryBoundary query={repos} loading="Loading repositories…">
           {(page) => (
+            <>
+            {page.total > 0 && (
+              <Hint as="p" id="summary.repos.count" className="m-0 px-4 pt-3 text-xs text-on-surface-muted" data-testid="repos-count">
+                {page.stable && page.items.length === page.total
+                  ? page.total === 1
+                    ? 'The one repository is listed.'
+                    : `All ${fmtInt(page.total)} repositories are listed.`
+                  : page.items.length === page.total
+                    ? `${fmtInt(page.items.length)} repositories are listed, but the list changed while it was read. Reload the page to be sure none is missing.`
+                    : `${fmtInt(page.items.length)} of ${fmtInt(page.total)} repositories are listed: the list changed while it was read. Reload the page for all of them.`}
+              </Hint>
+            )}
             <DataTable
               rows={page.items}
               columns={columns}
@@ -131,6 +150,7 @@ export function ReposPage() {
                 />
               }
             />
+            </>
           )}
         </QueryBoundary>
       </Card>
