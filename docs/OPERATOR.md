@@ -1281,16 +1281,22 @@ proposes entries from it, citing the file and the commit, with no model call:
 |---|---|---|
 | `adrs` | architecture decision records (`docs/adr/NNNN-*.md` and the like) | a **decision** per record in force, stating the first paragraph of its decision; a superseded, rejected or proposed record is noted, not proposed |
 | `owners` | `CODEOWNERS` and the directory layout | a **component** per part of the system, with the owners `CODEOWNERS` names (an email address is counted, never copied) |
-| `lint` | lint and formatter configurations (`pyproject.toml` tables, `ruff.toml`, `.eslintrc*`, `.golangci.yml`, `go.mod` …) | a **convention** per tool, naming belt 5's check (`repo_lint_clean`) where crb runs the tool, and advisory where it does not |
+| `lint` | lint and formatter configurations (`pyproject.toml` tables, `ruff.toml`, `.eslintrc*`, `.golangci.yml`, `go.mod` …), through belt 5's own detectors | a **convention** per tool, naming belt 5's check (`repo_lint_clean`) only where belt 5's own detection finds the tool — and saying which language's runner runs it — and advisory where it does not (a `[format]` table in `ruff.toml`, say, or black beside ruff format) |
 | `tests` | the test files and the runner's configuration | a **standard** per language: a change leads to a failing test, where the tests live, how they are named and run, with examples, scoped to the work types whose commits changed such tests |
 | `change-profile` | the mined commits and the graded rows | a **work-type** candidate per global class and part of the system it changes, with its counts, citing the graded rows — a candidate with no graded rows is noted with its counts, not proposed |
 
-`CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING` are read as data: only a command of a known tool,
-with no shell operator in it, reaches a proposal, inside a fixed sentence — never their prose.
+`CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING` are read as data: only a command of a known tool
+whose every argument is a flag or a path the repository holds — no shell operator, no URL, no
+other word — reaches a proposal, inside a fixed sentence — never their prose.
 **No miner signs anything.** Every proposal is `proposed` under `mined:<miner>@<version>` and
 waits in Decisions for a person to **Sponsor** it; a different approver then signs it. The same
-commit proposes nothing new, and a later one proposes an entry again only when the file it cites
-has changed. A miner never replaces an entry a person wrote, revoked or retired. The run is one
+commit, with the same graded rows, proposes nothing new. A later commit, a newly graded row or a
+new miner version proposes an entry again only when the source it cites has changed or the
+miner now reads it differently — a test standard, for one, names the runner's configuration but
+cites an example test, so a new runner is a new version even though the cited file is
+unchanged. A new version needs its two people again. A miner never replaces an entry a person
+wrote, revoked or retired. A refused proposal is named in the run with any credential it
+carried redacted, and nothing of it is written. The run is one
 `library.mined` event naming you, the commit and the counts, and each proposal a
 `library.proposed` event naming its miner. `crb library mine <repo>` prints what a run would
 propose from a workdir repository and writes nothing. A team adds its own miner through the

@@ -18,8 +18,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   pinned commit, at no model cost: decision records, code owners and layout, lint settings,
   tests, and the change profile. Each proposal cites its file and commit, is recorded under
   `mined:<miner>@<version>` and waits for a person to sponsor it. Guidance files are read as
-  data. The same commit proposes nothing new. Teams add miners through a registry
-  (DL-132, G-677).
+  data. The same commit, with the same graded rows, proposes nothing new; an entry is
+  proposed again only when the source it cites or the miner's reading of it has changed. A
+  convention names belt 5's check only where belt 5's own detectors find the tool. Teams add
+  miners through a registry (DL-132, DL-133, G-677).
 
 - **The context library: two people sign what a repository's people know, and each work type has a page**
   (north-star Wave 4, stream L; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-l)).
