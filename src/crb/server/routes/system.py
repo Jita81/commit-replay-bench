@@ -106,8 +106,6 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
               ``failure_detail`` and ``aggregate``), src/crb/observability/build_stamp.py
               (the ``build`` probe and the ``served`` block),
-              src/crb/server/builder_login.py (the ``builders`` probe's login state),
-              src/crb/server/worker_metrics.py (each worker's listener state),
               src/crb/store/migrate.py (``head_status_on`` — the one head check; the ledger
               probe calls ``assert_append_only`` in src/crb/store/ledger.py),
               src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``

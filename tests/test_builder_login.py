@@ -23,7 +23,8 @@ How:          ``fixtures.server_seed.make_env`` (a seeded app), ``FakeJobs`` fro
 Layer:        tests — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/server/builder_login.py (under test), src/crb/server/routes/runs.py
-              (``submit_refusals``), src/crb/server/routes/builders.py,
+              (``submit_refusals``), src/crb/server/routes/builders.py (the list and the
+              Verify),
               src/crb/server/routes/system.py (``probe_builder_logins``), tests/conftest.py
               (``_no_real_builder_login`` — the suite never runs the real CLI)
 Tested by:    tests/test_builder_login.py

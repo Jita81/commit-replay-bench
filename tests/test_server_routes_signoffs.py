@@ -1113,6 +1113,7 @@ class TestPreview:
             "lint": 0,
             "lint_evaluated": 0,
             "outage": 0,
+            "outage_auth": 0,  # of the outages, the refused logins (pilot D1)
             "api": 0,
         }
         assert ev["model_n"] == 40 and ev["model_point"] == 0.95
