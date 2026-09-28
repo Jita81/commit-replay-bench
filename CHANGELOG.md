@@ -14,13 +14,24 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **A development stack signs a browser in on its own machine; production cannot**
   ([#58](https://github.com/Jita81/commit-replay-bench/pull/58)). `CRB_AUTH__DEV_AUTOLOGIN=<username>`
-  (off by default, ADR-0027, DL-063) signs a browser on the same computer in as one local account.
+  (off by default, ADR-0027, DL-240) signs a browser on the same computer in as one local account.
   The server refuses it outside `CRB_ENV=dev`, on a non-loopback bind and with
   `CRB_LOCAL_AUTH_ENABLED=false`, and the container image refuses to start with it set. A request
   from another machine, through a forwarding proxy (the UI's Vite proxy now marks one) or naming
   another `Host` is answered as if it were off. The session is the one a password issues — the
   revocable nonce, the session-bound CSRF token — and it never touches the rate limit. Every
   sign-in is an `auth.dev_autologin` event, and every page shows a banner.
+
+- **The record corrects itself; costs carry their n; each stream measures its own flow**
+  (north-star Waves 0 and 1, streams D, E and M;
+  [#64](https://github.com/Jita81/commit-replay-bench/pull/64)).
+  `scripts/dod_check.py` refuses a gap line no criterion cites, a plan item that is not a gap
+  and a ranked gap in no plan table (DL-063, DL-064); `scripts/check_branch_protection.py`
+  compares the required checks with the CI jobs. Cost and latency are means with n, an interval
+  and the apparatus; a known $0 counts, and a fold across apparatus versions, posture classes or
+  checks arms is refused (F35, DL-065). `GET /flow?repo=` derives each stream's lead time and
+  spend from stored records under one money rule (DL-066); `POST /reviews` takes minutes
+  (DL-067).
 
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile

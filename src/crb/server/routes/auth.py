@@ -31,15 +31,18 @@ How:          Thin handlers over src/crb/server/auth.py — ``authenticate_local
               cookies; ``OidcState.fresh`` → provider URL → cookie; callback: cookie →
               ``exchange`` → ``map_role`` → ``upsert_oidc_user`` → cookies → redirect;
               automatic sign-in: setting → ``dev_autologin_refusal`` → ``find_local_user`` →
-              ``record_user_event`` → the same cookies as a password sign-in.
+              ``record_user_event`` + ``record_sign_in`` → the same cookies as a password
+              sign-in.
 Layer:        server — docs/ARCHITECTURE.md#71-security
-ADRs:         docs/adr/0027-dev-autologin-on-loopback.md
-Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/app.py
+ADRs:         docs/adr/0027-dev-autologin-on-loopback.md,
+              docs/adr/0028-the-moments-flow-needs-are-recorded.md (§8, every sign-in)
+Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/routes/admin.py
+              (``record_user_event`` — the account trail; ``record_sign_in`` — every
+              sign-in, ADR-0028 §8), src/crb/server/app.py
               (``/auth/login`` is CSRF-exempt; the limiter lives on ``app.state``),
               src/crb/server/settings.py (``OidcSettings``, ``local_auth_enabled``),
               ui/src/api/client.ts (the UI's login and CSRF echo), ui/src/api/hooks.ts
-              (``useMe`` asks for an automatic sign-in), src/crb/server/routes/admin.py
-              (``record_user_event``), docs/API.md#auth
+              (``useMe`` asks for an automatic sign-in), docs/API.md#auth
 Tested by:    tests/test_server_auth.py, tests/test_server_dev_autologin.py
 Touch when:   never for a new repository; when the IdP's claim layout changes (that is
               ``CRB_OIDC__ROLE_CLAIM`` / ``ROLE_MAP`` configuration, not code); adding a
@@ -84,7 +87,7 @@ from crb.server.auth import (
     upsert_oidc_user,
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep, client_ip
-from crb.server.routes.admin import record_user_event
+from crb.server.routes.admin import record_sign_in, record_user_event
 from crb.server.settings import Settings
 from crb.store.models import User
 
@@ -160,6 +163,8 @@ def login(
         raise ApiError(401, "invalid_credentials", "username or password is incorrect")
     limiter.reset(body.username, ip)
     user.last_login = _now()
+    # every sign-in, not just the latest: a recovery is timed to the FIRST after a reset
+    record_sign_in(db, user=user, by="local")
     db.commit()
     return _issue_session(request, response, settings, user)
 
@@ -267,6 +272,8 @@ def dev_autologin(
         )
     user.last_login = _now()
     record_user_event(db, action="auth.dev_autologin", actor=user.id, target=user, client=peer)
+    # every sign-in, this one too: a recovery is timed to the FIRST after a reset (ADR-0028 §8)
+    record_sign_in(db, user=user, by="dev_autologin")
     db.commit()
     log.warning(
         "automatic sign-in: %r signed in from %s without a password "
@@ -398,6 +405,7 @@ def oidc_callback(
             issuer=issuer,
         )
     user.last_login = _now()
+    record_sign_in(db, user=user, by="oidc")
     db.commit()
     request.state.user_id = user.id
     response = RedirectResponse(pending.next_path, status_code=status.HTTP_302_FOUND)

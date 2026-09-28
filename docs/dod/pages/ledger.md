@@ -8,14 +8,14 @@ children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Ledger
 
 **Purpose.** "Every graded trial, append-only and hash-chained. Verify proves nothing was edited, reordered or removed; the false-Q1 total is the number everything else defends." (`help.ts`, About block; page header `Instrument · Ledger`.)
 
-**Entry → exit.** Arrive from the instrument nav "Ledger" — the one instrument entry a viewer has (`Layout.tsx:122`) — from the shell's stop-condition banner ("Investigate in the ledger"), from a Capability cell's "rows" button (class and size carried in the URL), from the Results page's ledger button, or from a Decisions `do_not_ship` "Investigate" action. Leave with the chain gate's state, the false-Q1 total, a filtered page of rows whose URL can be shared, a task opened at `/tasks/:repo/:taskId`, or a downloaded export — JSONL or CSV for anyone who can read, the abstract cell export for an operator.
+**Entry → exit.** Arrive from the instrument nav "Ledger" — the one instrument entry a viewer has (the `nav.ledger` entry in `Layout.tsx`) — from the shell's stop-condition banner ("Investigate in the ledger"), from a Capability cell's "rows" button (class and size carried in the URL), from the Results page's ledger button, or from a Decisions `do_not_ship` "Investigate" action. Leave with the chain gate's state, the false-Q1 total, a filtered page of rows whose URL can be shared, a task opened at `/tasks/:repo/:taskId`, or a downloaded export — JSONL or CSV for anyone who can read, the abstract cell export for an operator.
 
 **Non-goals.** Does not verify on demand — the server verifies on every read and an operator's own verification is `crb ledger verify` on the export; does not edit, repair or delete a row (append-only: a break is a finding); does not explain a cell's rate (the Capability page does); does not start, cancel or re-run anything; does not expose every filter `GET /grades` accepts.
 

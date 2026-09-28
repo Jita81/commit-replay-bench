@@ -23,9 +23,10 @@ Works with:   src/crb/core/ledger.py (under test), src/crb/core/grade.py (``Fals
               tests/test_store_ledger.py (the same chain in the database),
               docs/EVIDENCE-AND-CLAIMS.md (the apparatus stamp rule the coupling enforces)
 Tested by:    tests/test_ledger.py
-Touch when:   a field is added to ``GradeRow`` (it is hashed: pin the old rows still verify and
-              the new ones commit to it); a belt set or apparatus version is introduced (extend
-              ``expected_belt_sets`` and its table here); a failure kind is added.
+Touch when:   never for a new repository; a field is added to ``GradeRow`` (it is hashed: pin the
+              old rows still verify and the new ones commit to it); a belt set or apparatus version
+              is introduced (extend ``expected_belt_sets`` and its table here); a failure kind is
+              added.
 """
 
 from __future__ import annotations
@@ -550,7 +551,10 @@ def test_cell_stats_numbers() -> None:
     assert s.false_q1 == 0
     assert s.point == pytest.approx(9 / 12)
     assert s.ci == wilson_interval(9, 12)
-    assert s.cost_usd_mean == pytest.approx((0.02 * 8 + 0.04) / 9)
+    # cost is a row fact (F35): every eligible row here names a builder that reported
+    # through the ledger, so a $0 is a KNOWN $0 and counts; latency 0 s is "not recorded"
+    assert all(r.cost_known for r in _cell_rows())
+    assert s.cost_usd_mean == pytest.approx((0.02 * 8 + 0.04) / 12)
     assert s.latency_s_mean == pytest.approx((10.0 * 8 + 20.0) / 9)
     assert s.oracle_strength_mean == pytest.approx((0.9 * 8 + 0.7) / 9)
     assert s.apparatus_versions == ("2.1", APPARATUS_VERSION)
@@ -559,6 +563,19 @@ def test_cell_stats_numbers() -> None:
     assert d["ci_low"] == round(s.ci.low, 4) and d["oracle_strength_mean"] == round(
         s.oracle_strength_mean, 4
     )
+
+
+def test_cell_stats_cost_mean_leaves_out_unknown_costs_and_keeps_a_known_zero() -> None:
+    # F35: an unknown cost (imported, or pinned cost_known=false) is left out of the mean;
+    # a known $0 stays in it. Before F35 the fold dropped every $0 and kept every unknown.
+    rs = [
+        row(cost_usd=0.10),
+        row(cost_usd=0.0),  # a builder reported $0: known
+        row(cost_usd=0.0, provenance="imported:census"),  # never reported: unknown
+        row(cost_usd=0.50, labels={lg.LABEL_COST_KNOWN: "false"}),  # pinned unknown
+    ]
+    assert [r.cost_known for r in rs] == [True, True, False, False]
+    assert lg.cell_stats(rs).cost_usd_mean == pytest.approx(0.05)
 
 
 def test_cell_stats_without_oracle_strength_and_empty() -> None:

@@ -25,9 +25,9 @@
  *               src/crb/server/routes/reviews.py (the write boundary and its 422 codes),
  *               ui/src/lib/auth.tsx (`can('operator')`)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx, ui/e2e/walkthrough/09-review.spec.ts
- * Touch when:   a finding kind or a write-boundary rule is added (src/crb/core/review.py,
- *               docs/API.md "Reviews") — add the chip, the tone and the client-side blocker
- *               together; never for a new repository.
+ * Touch when:   never for a new repository; a finding kind or a write-boundary rule is added
+ *               (src/crb/core/review.py, docs/API.md "Reviews") — add the chip, the tone and the
+ *               client-side blocker together.
  * Claims:       A review is governance evidence about mergeability; it never alters the
  *               mechanical grade (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
  */
@@ -95,6 +95,9 @@ interface FindingDraft {
 /** A blank draft per kind. */
 const emptyDraft = (): FindingDraft => ({ note: '', file: '', line: '' })
 
+/** The most minutes one review may state — a working day (`crb.core.review.MAX_REVIEW_MINUTES`). */
+const MAX_REVIEW_MINUTES = 480
+
 interface Props {
   /** The graded row the review is about. */
   rowHash: string
@@ -128,6 +131,7 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
   })
   const [mergeable, setMergeable] = useState<'yes' | 'no' | ''>('')
   const [statement, setStatement] = useState('')
+  const [minutes, setMinutes] = useState('')
   const [notReviewed, setNotReviewed] = useState(false)
   const [submitted, setSubmitted] = useState<Review | null>(null)
 
@@ -157,8 +161,10 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
       if (regressionMergeable) out.push('A change with a regression finding is never mergeable.')
     }
     if (!statement.trim()) out.push('A statement is required.')
+    if (minutes !== '' && !(Number(minutes) >= 1 && Number(minutes) <= MAX_REVIEW_MINUTES))
+      out.push(`Minutes must be a whole number from 1 to ${MAX_REVIEW_MINUTES}, or left empty.`)
     return out
-  }, [mayReview, notReviewed, hasDiff, patch, missingNotes, regressionMergeable, statement])
+  }, [mayReview, notReviewed, hasDiff, patch, missingNotes, regressionMergeable, statement, minutes])
 
   const canSubmit = blockers.length === 0 && !create.isPending
 
@@ -182,11 +188,14 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
           mergeable: mergeable === '' ? null : mergeable === 'yes',
           patch_sha256: patch?.sha256 ?? '',
         }
-    create.mutate(body, {
+    // stated minutes travel with the record; an empty field sends nothing, never a zero
+    const timed = minutes === '' ? body : { ...body, minutes: Number(minutes) }
+    create.mutate(timed, {
       onSuccess: (r) => {
         setSubmitted(r)
         setKinds([])
         setStatement('')
+        setMinutes('')
         setMergeable('')
         setNotReviewed(false)
       },
@@ -260,6 +269,16 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
         </Hint>
 
         <TextArea label="Statement" hint="field.review.statement" required rows={3} value={statement} onChange={(e) => setStatement(e.target.value)} placeholder="What you concluded and why — this is the governance record." />
+
+        <TextField
+          label="Minutes this review took (optional)"
+          hint="field.review.minutes"
+          inputMode="numeric"
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value.replace(/[^0-9]/g, ''))}
+          placeholder="whole minutes, as you judge them"
+          data-testid="review-minutes"
+        />
 
         <Hint as="label" id="field.review.not_reviewed" className="inline-flex items-center gap-2 text-xs">
           <input type="checkbox" checked={notReviewed} onChange={(e) => setNotReviewed(e.target.checked)} data-testid="not-reviewed" />
@@ -341,7 +360,8 @@ export function ReviewPanel({ rowHash, repo, taskId, patch, hasDiff, onOpenPatch
                     </Pill>
                   )}
                   <span className="text-on-surface-muted">
-                    {r.reviewer} · {fmtDate(r.created)} · <ShortId value={r.row_hash} n={10} className="font-mono" />
+                    {r.reviewer} · {fmtDate(r.created)}
+                    {typeof r.minutes === 'number' ? ` · ${r.minutes} min, as stated` : ''} · <ShortId value={r.row_hash} n={10} className="font-mono" />
                   </span>
                 </div>
                 <p className="mt-1 text-on-surface-body">{r.statement}</p>

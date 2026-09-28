@@ -639,6 +639,15 @@ class TestAuditAndReporting:
             assert ev.actor == me["id"] and ev.stage == "system"
             assert ev.payload_json["client"] == "127.0.0.1"
             assert ev.payload_json["username"] == "root"
+        # every sign-in is also a ``user.signed_in`` event (ADR-0028 §8), so flow's recovery
+        # timing sees an automatic sign-in the way it sees a password one
+        with app.state.session_factory() as db:
+            signed_in = list(
+                db.execute(select(Event).where(Event.action == "user.signed_in")).scalars()
+            )
+        assert [e.payload_json for e in signed_in] == [
+            {"target": me["id"], "by": "dev_autologin"}
+        ] * 2
         lines = [r for r in caplog.records if "automatic sign-in" in r.getMessage()]
         assert len(lines) == 2 and all(r.levelno == logging.WARNING for r in lines)
         assert "'root'" in lines[0].getMessage() and "127.0.0.1" in lines[0].getMessage()

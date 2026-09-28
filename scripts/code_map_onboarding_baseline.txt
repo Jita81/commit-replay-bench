@@ -72,7 +72,6 @@ tests/test_builders_container_docker.py
 tests/test_builders_editblock.py
 tests/test_builders_labeller.py
 tests/test_builders_openai_agent.py
-tests/test_capability.py
 tests/test_check_commit_subject.py
 tests/test_classify.py
 tests/test_cli_deps.py
@@ -96,8 +95,6 @@ tests/test_factory_outcomes.py
 tests/test_factory_readiness.py
 tests/test_factory_review.py
 tests/test_factory_testfirst.py
-tests/test_federated.py
-tests/test_forecast.py
 tests/test_git.py
 tests/test_grade.py
 tests/test_intake_adapters.py
@@ -108,8 +105,6 @@ tests/test_intake_feedback.py
 tests/test_intake_service.py
 tests/test_intake_worker.py
 tests/test_intake_write_bound.py
-tests/test_learn.py
-tests/test_ledger.py
 tests/test_legacy.py
 tests/test_mcp_server.py
 tests/test_mine.py
@@ -128,7 +123,6 @@ tests/test_posture_e2e_docker.py
 tests/test_provision_fetch.py
 tests/test_provision_go.py
 tests/test_provision_python.py
-tests/test_public_docs.py
 tests/test_qualify.py
 tests/test_redact.py
 tests/test_release_tag.py
@@ -141,7 +135,6 @@ tests/test_runners_node.py
 tests/test_runners_parsers.py
 tests/test_sandbox_docker.py
 tests/test_server_admin_users.py
-tests/test_server_auth.py
 tests/test_server_claude_login.py
 tests/test_server_github_app.py
 tests/test_server_reaper.py
@@ -158,7 +151,6 @@ tests/test_store_db.py
 tests/test_store_events.py
 tests/test_store_jobs.py
 tests/test_store_ledger.py
-tests/test_store_migrate.py
 tests/test_store_qualifications.py
 tests/test_store_reviews.py
 tests/test_worker_budget_ladder.py
@@ -166,18 +158,14 @@ tests/test_worker_fetch.py
 tests/test_worker_label.py
 tests/test_worker_test_author.py
 tests/test_workspace.py
-ui/e2e/smoke.spec.ts
 ui/e2e/walkthrough/01-login.spec.ts
 ui/e2e/walkthrough/02-repo-onboard.spec.ts
 ui/e2e/walkthrough/03-mine.spec.ts
 ui/e2e/walkthrough/03b-qualify.spec.ts
 ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
-ui/e2e/walkthrough/05-replay-fake.spec.ts
 ui/e2e/walkthrough/06-cancel.spec.ts
 ui/e2e/walkthrough/09-budget-sweep.spec.ts
 ui/e2e/walkthrough/09-review.spec.ts
-ui/e2e/walkthrough/10-factory.spec.ts
-ui/e2e/walkthrough/repo-config.spec.ts
 ui/src/App.reachability.test.ts
 ui/src/App.tsx
 ui/src/api/client.test.ts
@@ -206,7 +194,6 @@ ui/src/components/Provenance.tsx
 ui/src/components/ShortId.test.tsx
 ui/src/components/ShortId.tsx
 ui/src/components/Sparkline.tsx
-ui/src/components/StatTile.test.tsx
 ui/src/components/VerdictPill.test.tsx
 ui/src/components/VerdictPill.tsx
 ui/src/help/docs.test.ts
@@ -221,8 +208,6 @@ ui/src/help/markdown.ts
 ui/src/lib/auth.tsx
 ui/src/lib/builder.test.ts
 ui/src/lib/builder.ts
-ui/src/lib/format.test.ts
-ui/src/lib/format.ts
 ui/src/lib/jsonObject.test.ts
 ui/src/lib/jsonObject.ts
 ui/src/lib/theme.ts
@@ -231,14 +216,9 @@ ui/src/main.tsx
 ui/src/screens/Capability/FailureSplit.tsx
 ui/src/screens/Capability/ReasonCode.tsx
 ui/src/screens/Connect/ConnectPage.test.tsx
-ui/src/screens/Connect/ConnectPage.tsx
 ui/src/screens/Connect/GitHubConnectDialog.test.tsx
 ui/src/screens/Connect/GitHubConnectDialog.tsx
-ui/src/screens/Connect/MeasurePage.test.tsx
-ui/src/screens/Connect/MeasurePage.tsx
 ui/src/screens/Connect/connection.test.ts
-ui/src/screens/Factory/FactoryPage.test.tsx
-ui/src/screens/Factory/FactoryPage.tsx
 ui/src/screens/Factory/IntakePage.test.tsx
 ui/src/screens/Factory/IntakePage.tsx
 ui/src/screens/Help/DocPage.tsx
@@ -265,13 +245,10 @@ ui/src/screens/Results/MapTable.test.tsx
 ui/src/screens/Results/MapTable.tsx
 ui/src/screens/Routing/RoutingPage.tsx
 ui/src/screens/Runs/EvidenceDrawer.tsx
-ui/src/screens/Runs/ReviewPanel.test.tsx
-ui/src/screens/Runs/ReviewPanel.tsx
 ui/src/screens/Runs/RunsPage.test.tsx
 ui/src/screens/Runs/RunsPage.tsx
 ui/src/screens/Runs/TaskDetailPage.test.tsx
 ui/src/screens/Runs/TaskDetailPage.tsx
-ui/src/screens/Runs/contract.ts
 ui/src/screens/Runs/telemetry.test.ts
 ui/src/screens/Runs/telemetry.ts
 ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx
@@ -282,7 +259,6 @@ ui/src/screens/Settings/SettingsPage.test.tsx
 ui/src/screens/Settings/SettingsPage.tsx
 ui/src/screens/Settings/claudeCodeLogin.ts
 ui/src/screens/Signoff/SignoffPage.test.tsx
-ui/src/screens/Signoff/SignoffPage.tsx
 ui/src/screens/Signoff/contract.ts
 ui/src/test/setup.ts
 ui/src/test/utils.tsx

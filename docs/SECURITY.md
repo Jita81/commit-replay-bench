@@ -626,7 +626,8 @@ machine:
   sign out everywhere, sign-out on another device) and 4 in `::TestTheLoginLimit`, apparatus
   2.2; pass/fail, not a rate]
 - **Recorded and visible.** Every sign-in appends `auth.dev_autologin` on the account's trace
-  (actor = the account, `payload.client` = the peer) and logs one warning line; start-up logs
+  (actor = the account, `payload.client` = the peer) and the `user.signed_in` event every
+  sign-in writes (ADR-0028 §8, `by` = `dev_autologin`), and logs one warning line; start-up logs
   a warning; `crb doctor` shows `warn  dev_autologin`; `GET /health` and `GET /version` report
   `dev_autologin`; and the UI shows a banner on every page, the sign-in page included.
   `/health` and `/version` say `on` only to a caller the route would sign in. Anyone else

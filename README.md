@@ -28,16 +28,22 @@ builder, runner, control, review probe, readiness slot and policy is a documente
 loop runs on `crb`'s own repository, and what one team learns reaches another only as
 abstract cells, never code.
 
-> Status: **2.0.0a1 on `main`, 2.0.0b1 in preparation** (apparatus **2.2**, belt set v5) — a public, Apache-2.0
+> Status: **2.0.0a1 on `main`, 2.0.0b1 in preparation** (apparatus **2.3**, belt set v5) — a public, Apache-2.0
 > repository since 2026-09-16 with **CI green on `main`** — every job in
 > [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request, and
-> branch protection requires the checks on its required list before anything merges —
-> 16 contexts, `dod`, `claims`, `ui-unit`, `ui-smoke`, `sbom`, `sandbox-images` and the
-> tier-1 walkthrough among them; the list is a repository setting only an administrator can
-> change ([docs/DEPLOYMENT.md §3.4](docs/DEPLOYMENT.md) names the call)
-> **[measured 2026-09-27 — the required-checks list read once from the repository setting
-> (`gh api …/branches/main/protection/required_status_checks`), n = 1 reading;
-> apparatus n/a: a repository setting, not a graded number]** — and every change since
+> branch protection requires the checks on its required list before anything merges: 16
+> required checks (the Python suite once per Python version and the tier-1 walkthrough, each
+> through an aggregator over its parallel parts, `dod`, `claims`, `ui-unit`, `ui-smoke`,
+> `sandbox-images` and `sbom` among them), with a branch required to be up to date; the list
+> is a repository setting only an administrator can change
+> ([docs/DEPLOYMENT.md §3.4](docs/DEPLOYMENT.md) names the call)
+> **[measured 2026-09-27 — the required-checks list read from the repository setting
+> (`gh api …/branches/main/protection`) and compared with the workflow's check names by
+> `scripts/check_branch_protection.py`, n = 16 required checks and 2 readings (26 and 27
+> September); apparatus 2.3 — a repository setting, not a graded number, so no interval]**. One
+> workflow outside `ci.yml` is red by design: the daily `branch-protection` check fails until an
+> administrator adds the `BRANCH_PROTECTION_TOKEN` secret it reads the setting with (G-930;
+> [DEPLOYMENT §3.4](docs/DEPLOYMENT.md)) — and every change since
 > 2026-09-15 reviewed by CodeRabbit (ADR-0013). Every phase of the product plan has shipped (P0–P7: engine, oracle,
 > builders, store, server, UI, factory, deployment) plus the MCP server (P8) so Claude Code
 > can drive a deployment. `v2.0.0a1` is tagged and its image is on GHCR; `v2.0.0b1` will be

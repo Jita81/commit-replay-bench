@@ -6,7 +6,8 @@ What it is:   The statistics test suite — Wilson intervals, mean / stddev and 
               z against known values.
 What it does: Pins the essay's example (10/10 licenses only ≈ 0.722 at 95 %), 48/50, the
               degenerate 0/10 and 5/10 cases, that a smaller z narrows the interval, that
-              impossible counts are refused, and the interval's properties over random counts.
+              impossible counts are refused, the interval's properties over random counts, and
+              the Student-t critical value against the textbook table and a numeric integral.
 How:          Known values to three decimals plus a small property loop; no fixtures.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0003-one-routing-rule.md
@@ -25,7 +26,15 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from crb.core.stats import Z_95, Interval, mean, stddev, two_proportion_z, wilson_interval
+from crb.core.stats import (
+    Z_95,
+    Interval,
+    mean,
+    stddev,
+    t_975,
+    two_proportion_z,
+    wilson_interval,
+)
 
 
 def test_wilson_no_data_is_the_whole_unit_interval() -> None:
@@ -110,3 +119,32 @@ def test_interval_is_frozen() -> None:
     with pytest.raises(AttributeError):
         ci.low = 0.5  # type: ignore[misc]
     assert math.isclose(ci.width, 0.1)
+
+
+def test_t_975_textbook_values() -> None:
+    """The printed table (two-sided 95 %): 12.706 at 1 df, 2.228 at 10, 2.042 at 30,
+    2.021 at 40, 2.000 at 60, 1.980 at 120 — and it tends to z."""
+    for df, want in ((1, 12.706), (2, 4.303), (10, 2.228), (30, 2.042), (40, 2.021)):
+        assert t_975(df) == pytest.approx(want, abs=0.0005)
+    assert t_975(60) == pytest.approx(2.000, abs=0.0005)
+    assert t_975(120) == pytest.approx(1.980, abs=0.0005)
+    assert t_975(100_000) == pytest.approx(Z_95, abs=1e-4)
+    with pytest.raises(ValueError, match="at least one degree of freedom"):
+        t_975(0)
+
+
+def _t_cdf(t: float, df: int, steps: int = 20_000) -> float:
+    """The t CDF by Simpson's rule on the density — independent of the table."""
+    c = math.gamma((df + 1) / 2) / (math.sqrt(df * math.pi) * math.gamma(df / 2))
+
+    def f(x: float) -> float:
+        return c * (1 + x * x / df) ** (-(df + 1) / 2)
+
+    h = t / steps
+    total = f(0) + f(t) + sum((4 if i % 2 else 2) * f(i * h) for i in range(1, steps))
+    return 0.5 + total * h / 3
+
+
+@pytest.mark.parametrize("df", [1, 3, 7, 15, 29, 30, 31, 45, 90])
+def test_t_975_is_the_0975_quantile(df: int) -> None:
+    assert _t_cdf(t_975(df), df) == pytest.approx(0.975, abs=1e-6)

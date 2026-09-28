@@ -36,6 +36,7 @@ from crb.core.ledger import GENESIS_HASH, GradeRow, LedgerIntegrityError
 from crb.core.review import (
     DEFECT_VERDICTS,
     FINDING_KINDS,
+    MAX_REVIEW_MINUTES,
     REFUSAL_MERGEABLE_CONTRADICTS,
     REFUSAL_NO_DIFF_IN_PACK,
     REFUSAL_PACK_MISMATCH,
@@ -247,6 +248,25 @@ def test_to_dict_from_dict_round_trip_and_hash() -> None:
     # unknown keys are ignored; the hash covers every field but row_hash
     assert ReviewRecord.from_dict({**d, "extra": 1}) == r
     assert "row_hash" not in r.body() and "prev_hash" in r.body()
+
+
+def test_minutes_are_the_reviewers_own_and_hashed_only_when_stated() -> None:
+    # a record that states no minutes hashes exactly as one written before the field existed
+    plain = record().chained(GENESIS_HASH)
+    assert "minutes" not in plain.body() and "minutes" not in plain.to_dict()
+    timed = record(minutes=12).chained(GENESIS_HASH)
+    assert timed.body()["minutes"] == 12 and timed.verify_hash()
+    assert timed.row_hash != record(minutes=13).chained(GENESIS_HASH).row_hash
+    back = ReviewRecord.from_dict(json.loads(json.dumps(timed.to_dict())))
+    assert back.minutes == 12 and back.verify_hash()
+    # a not_reviewed record may say how long the looking took: the time was spent
+    assert record(verdict="not_reviewed", patch_sha256_reviewed="", minutes=3).minutes == 3
+
+
+@pytest.mark.parametrize("bad", [0, -1, MAX_REVIEW_MINUTES + 1, True, 2.5, "10"])
+def test_minutes_outside_a_working_day_or_not_a_whole_number_are_refused(bad: Any) -> None:
+    with pytest.raises(ValueError, match="minutes"):
+        record(minutes=bad)
 
 
 # ---------------------------------------------------------------------------

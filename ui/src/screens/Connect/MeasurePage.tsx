@@ -28,9 +28,10 @@
  *               `banner.measure.inflight`, `field.measure.*`, `stat.measure.*`,
  *               `summary.measure.*`, `button.measure.start`).
  * How:          `useRepo` (+ `last_run` → `useRun`, polled, for the in-flight banner),
- *               `useCapabilityMap` (cost_usd_mean over measured cells), `useHealth` (sandbox
- *               posture and the builder), `builderChoice` (ui/src/lib/builder.ts) for the
- *               builder the deployment can run, `useCreateRun` with `{kind: replay, mode:
+ *               `useCapabilityMap` (its economics fold, read by `measuredCostPerAttempt`),
+ *               `useHealth` (sandbox posture and the builder), `builderChoice`
+ *               (ui/src/lib/builder.ts) for the builder the deployment can run,
+ *               `useCreateRun` with `{kind: replay, mode:
  *               sighted, limit, retain}`; on success the walk resumes on the repository with
  *               the run watched. The kicker is `journeyEyebrow(pathname, 'task 5 of 8 · …')`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -44,13 +45,12 @@
  *               every knob), src/crb/server/routes/runs.py (the request it submits)
  * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
- * Touch when:   the run request grows a field the walk should expose.
+ * Touch when:   never for a new repository; the run request grows a field the walk should expose.
  */
 
 import { useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { useCapabilityMap, useCreateRun, useHealth, useRepo, useRun } from '../../api/hooks'
-import { NOT_YET_MEASURED } from '../../api/types'
 import { ErrorState } from '../../components/ErrorState'
 import { DocLink } from '../../components/Help'
 import { Hint } from '../../components/Hint'
@@ -58,6 +58,7 @@ import { journeyEyebrow } from '../../components/Layout'
 import { BackLink, Kicker, Lede, NotificationBanner, PageTitle, SummaryList, WarningButton, type SummaryRow } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
 import { builderChoice } from '../../lib/builder'
+import { measuredCostPerAttempt, noMeasuredCostReason } from '../../lib/economics'
 
 const LIMITS: Array<{ n: number; note: string }> = [
   { n: 10, note: 'enough to see the shape, not to route' },
@@ -114,16 +115,10 @@ export function MeasurePage() {
   const [transcripts, setTranscripts] = useState(false)
   const operator = can('operator')
 
-  // the repository's own measured mean per attempt, when it has one: a row-weighted mean
-  // over the map's measured cells (the map is served on the current apparatus, so the
-  // versions are the same set on every cell), carrying the n it rests on and that apparatus
-  const measured = useMemo(() => {
-    const cells = (map.data?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0 && c.cost_usd_mean > 0)
-    if (cells.length === 0) return null
-    const n = cells.reduce((a, c) => a + c.n, 0)
-    const apparatus = Array.from(new Set(cells.flatMap((c) => c.apparatus_versions))).join(', ')
-    return { mean: cells.reduce((a, c) => a + c.cost_usd_mean * c.n, 0) / n, n, apparatus }
-  }, [map.data])
+  // the repository's own measured cost per attempt, when it has one: the map's economics
+  // fold (F35) — its mean over the attempts with a KNOWN cost (a known $0 is $0), that
+  // count as n, and the apparatus; never the cells' flat means filtered by > 0 (P-131)
+  const measured = useMemo(() => measuredCostPerAttempt(map.data?.economics), [map.data])
   const measuredMean = measured?.mean ?? null
   const gold = repo.data?.task_counts.gold_clean ?? 0
   // the run makes one attempt per gold-clean task: the estimate, the button and the
@@ -142,8 +137,8 @@ export function MeasurePage() {
       <>
         {usd(lo)} to {usd(hi)} for {runLimit} attempts
         {measured
-          ? `, at about ${usd(measured.mean)} each (this repository's measured mean over n=${measured.n} attempts at apparatus ${measured.apparatus || '—'}; the range is a ±20 % planning band, not a measured interval).`
-          : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each — a planning range, not a measured interval: this repository has no measured mean yet (n = 0 on the current apparatus); the range is the per-attempt band the onboarding guide quotes for Claude Sonnet across earlier repositories, and carries no apparatus of its own.`}{' '}
+          ? `, at about ${usd(measured.mean)} each (this repository's measured mean over n=${measured.n} attempts with a known cost at apparatus ${measured.apparatus || '—'}; the range is a ±20 % planning band, not a measured interval).`
+          : `, at ${usd(RANGE_LOW)}–${usd(RANGE_HIGH)} each — a planning range, not a measured interval: this repository has no measured mean yet (${noMeasuredCostReason(map.data?.economics)}); the range is the per-attempt band the onboarding guide quotes for Claude Sonnet across earlier repositories, and carries no apparatus of its own.`}{' '}
         <DocLink to="ONBOARDING-A-REPO#step-4--measure-operator-the-money-step">Measure: the money step</DocLink>
       </>
     ),

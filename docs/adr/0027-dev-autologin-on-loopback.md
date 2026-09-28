@@ -1,6 +1,6 @@
 # ADR-0027 — Automatic sign-in for a development stack, on loopback only
 
-**Status:** Accepted (operator request 2026-09-26; decision DL-063)
+**Status:** Accepted (operator request 2026-09-26; decision DL-240)
 **Date:** 2026-09-26 (amended the same day after a security review: points 2, 3, 5 and 7)
 **Apparatus impact:** none — this changes who is signed in on a development stack, never
 what a belt means, how a cell is keyed or how a route is decided.
@@ -52,7 +52,8 @@ unauthenticated production deployment.
    the account's own (username, address) bucket, which a password success clears (it checks
    no password).
 5. **Recorded and visible.** Every sign-in appends `auth.dev_autologin` on the account's
-   trace (actor = the account, `payload.client` = the peer) and logs one warning line.
+   trace (actor = the account, `payload.client` = the peer), and the `user.signed_in` event
+   every sign-in writes (ADR-0028 §8, `by` = `dev_autologin`), and logs one warning line.
    Start-up logs a warning. `GET /health` and `GET /version` carry `dev_autologin`, which
    reads `on` only for a caller that point 3 would sign in and `off` for everyone else;
    `crb doctor` reads the settings directly and has a `dev_autologin` line that warns while it

@@ -35,10 +35,10 @@
  *               (the code under test), src/crb/server/routes/repos.py (the PUT and the
  *               audit event)
  * Tested by:    ui/e2e/walkthrough/repo-config.spec.ts
- * Touch when:   a `RepoConfig` field is added (assert its round-trip here) or the audit
- *               event payload changes.
+ * Touch when:   never for a new repository; a `RepoConfig` field is added (assert its round-trip
+ *               here) or the audit event payload changes.
  */
-import AxeBuilder from '@axe-core/playwright'
+import { axeViolations } from '../axe'
 import type { Page, Request } from '@playwright/test'
 import { env, expect, field, signIn, test } from './support'
 
@@ -219,8 +219,8 @@ test.describe('repo configuration editing', () => {
 
     // the operator's own tab is accessible
     await openConfig(page)
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
-    expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([])
+    const violations = await axeViolations(page)
+    expect(violations, JSON.stringify(violations, null, 2)).toEqual([])
 
     const ctx = await browser.newContext()
     const other = await ctx.newPage()

@@ -188,9 +188,10 @@ and the branch is deleted). A branch exists only while its PR is open: merged an
 PRs delete theirs. Feature branches
 `feat/<area>-<topic>` / `fix/<area>-<topic>` / `docs/<topic>`; one PR per file-disjoint
 workstream where possible. **Branch protection on `main` requires the CI jobs green and
-the branch up to date before a merge** (lint, types, layers, code-map, dod, claims, both
-pytest aggregators, PostgreSQL, security, sbom, container, sandbox-images, ui-unit, ui-smoke,
-walkthrough — commands you can run
+the branch up to date before a merge** (every gating check in `.github/workflows/ci.yml`:
+lint, types, layers, code-map, dod, claims, both pytest aggregators, PostgreSQL, security,
+sbom, container, sandbox-images, ui-unit, ui-smoke and the walkthrough aggregator;
+`scripts/check_branch_protection.py` compares the setting with the workflow — commands you can run
 locally: the five in [The gates](#the-gates), exactly as written there, and
 `python scripts/code_map.py --check`, `python scripts/dod_check.py --check`,
 `python scripts/claims_check.py --check`,
