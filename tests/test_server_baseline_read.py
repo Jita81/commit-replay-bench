@@ -44,6 +44,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from crb.server.routes import repos as repos_routes
 from crb.server.routes.runs import append_system_event, system_trace_id
@@ -200,3 +201,34 @@ def test_a_read_that_loses_the_seq_to_another_write_is_still_recorded(
         user_id(USERS["operator"]),
         user_id(USERS["viewer"]),
     ]
+
+
+def test_a_read_that_loses_every_seq_race_stops_and_records_nothing(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-421: the retry is bounded. When another person's write takes the trace's ``seq`` on
+    every one of the ``_BASELINE_READ_ATTEMPTS`` tries, the route stops and re-raises the
+    conflict instead of looping, and this person's read is not recorded."""
+    real = repos_routes.append_system_event
+    attempts = [0]
+
+    def always_racing(db, **kw):  # type: ignore[no-untyped-def]
+        ev = real(db, **kw)
+        attempts[0] += 1
+        with env.factory() as other:
+            append_system_event(
+                other,
+                trace_id=system_trace_id("repo", ALPHA),
+                action="repo.updated",
+                repo=ALPHA,
+                actor=user_id(USERS["operator"]),
+                payload={"attempt": attempts[0]},
+            )
+            other.commit()
+        return ev
+
+    monkeypatch.setattr(repos_routes, "append_system_event", always_racing)
+    with pytest.raises(IntegrityError):
+        env.post(f"/repos/{ALPHA}/baseline-read")
+    assert attempts[0] == repos_routes._BASELINE_READ_ATTEMPTS
+    assert _reads(env, ALPHA) == []

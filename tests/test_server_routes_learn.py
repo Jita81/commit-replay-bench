@@ -867,6 +867,37 @@ def test_a_lost_seq_race_on_the_learn_trace_is_retried_with_nothing_queued_twice
     assert event.payload_json["run_ids"] == run_ids
 
 
+def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-420: the retry is bounded. When other Learn writes take the trace's ``seq`` on every
+    one of the ``_QUEUE_ATTEMPTS`` tries, the route answers the documented 409
+    ``remeasure_concurrent_write`` — no run on the queue and no event naming one."""
+    del builder_keys
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    real_commit = Session.commit
+    lost = [0]
+
+    def commit(self: Session) -> None:
+        pending = [o for o in self.new if isinstance(o, Event)]
+        if any(o.action == "learn.remeasure.queued" for o in pending):
+            lost[0] += 1
+            self.rollback()
+            raise IntegrityError(
+                "INSERT INTO events", {}, Exception("duplicate key: uq_events_trace_seq")
+            )
+        real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+    r = _queue(env, cell=STALE_CELL)
+    assert lost[0] == learn_routes._QUEUE_ATTEMPTS
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "remeasure_concurrent_write"
+    assert env.get("/runs").json()["total"] == before
+    assert _queued_events(env) == []
+
+
 def test_a_queue_that_fails_part_way_queues_nothing(env: Env, builder_keys: None) -> None:
     """P-420: a cell is queued whole or not at all. When the second run of a cell cannot be
     written, the first is not left on the queue with no event naming it."""
