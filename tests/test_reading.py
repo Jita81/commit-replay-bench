@@ -10,7 +10,8 @@ What it does: Reproduces ADR-0026's table from the in-code programme; reads 20 o
               that ends before a look as ``undecided``; pins the seeded order's preimage byte
               for byte; shows a later re-run never changes which commits a look reads, a row
               graded before registration never counting, a commit the instrument cannot grade
-              leaving the pool before its outcome is read, and registration refused
+              leaving the pool before its outcome is read, a re-run never replacing a
+              commit's first attempt, an imported row never counting, and registration refused
               ``pool_seen`` and ``budget_spent``.
 How:          Sealed 2.4 rows from ``tests.fixtures.readings``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -257,3 +258,25 @@ def test_a_first_attempt_graded_with_belt_5_switched_off_leaves_the_pool() -> No
     got = arm_reading(reading, "S3", rows)
     assert [(c.commit, c.left) for c in got.left] == [(off, "lint_disabled")]
     assert off not in got.counted_commits and got.look.state == STATE_DELIVER
+
+
+def test_a_rerun_of_a_missed_commit_never_replaces_its_first_attempt() -> None:
+    """ADR-0026 item 2, product.truth.202: each commit counts once, by its FIRST observed
+    attempt. Re-running a missed commit at ``r1`` until it goes green would otherwise turn
+    three misses into a delivering cell."""
+    reading = register_reading(commits(40))
+    first = rows_for([False] * 3 + [True] * 17, reading.pool)
+    reruns = [sealed_row(c, clean=True) for c in reading.pool[:3]]
+    got = arm_reading(reading, "S3", [*first, *reruns])
+    assert [c.outcome for c in got.commits[:3]] == [False] * 3
+    assert [c.row_hash for c in got.commits[:3]] == [r.row_hash for r in first[:3]]
+    assert (got.look.state, got.look.counted, got.look.clean) == (STATE_INSUFFICIENT, 3, 0)
+
+
+def test_an_imported_row_never_counts_toward_a_reading() -> None:
+    """P-139: a row imported from another ledger is history, whatever its labels say."""
+    reading = register_reading(commits(40))
+    imported = rows_for([True] * 20, reading.pool, labels={"imported": "true"})
+    assert arm_reading(reading, "S3", imported).look.counted == 0
+    legacy = rows_for([True] * 20, reading.pool, labels={"source_row_hash": "f" * 64})
+    assert arm_reading(reading, "S3", legacy).look.counted == 0

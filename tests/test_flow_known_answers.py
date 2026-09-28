@@ -50,7 +50,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.context_arm import LABEL_CONTEXT_ARM
 from crb.core.flow import LeadTime
-from crb.core.ledger import LABEL_COST_KNOWN, PROCESS_FACTORY, GradeRow
+from crb.core.ledger import LABEL_COST_KNOWN, PROCESS_FACTORY, GradeRow, labels_at_apparatus
 from crb.core.review import ReviewRecord
 from crb.core.signoff import Attestation, SignoffRecord
 from crb.core.version import APPARATUS_VERSION
@@ -136,7 +136,7 @@ def graded(
         mode="sighted",
         created=at(hhmm),
         cost_usd=cost or 0.0,
-        labels=labels,
+        labels=labels_at_apparatus(labels, apparatus),
         process_step=process_step or base.process_step,
         row_hash=f"{run_id[:4]}-{capability_class}-{apparatus}-{hhmm}".ljust(64, "0"),
     )

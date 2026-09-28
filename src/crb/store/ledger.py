@@ -6,8 +6,9 @@ read the last ``row_hash``, chain, validate the false-Q1 invariant, insert.
 Because ``prev_hash``/``row_hash`` are stored, an exported JSONL verifies
 standalone with :func:`crb.core.ledger.verify_chain`.
 
-Imports (``import_rows``) re-chain foreign rows into this ledger and keep the
-source row's own hash in ``labels['source_row_hash']`` for traceability.
+Imports (``import_rows``) re-chain foreign rows into this ledger, stamp each one
+``labels['imported'] = 'true'`` (history: a reading never counts it) and keep the source row's
+own hash in ``labels['source_row_hash']`` for traceability.
 
 :class:`DbReviewLedger` is the same contract for the ``reviews`` table
 (:class:`crb.core.review.ReviewRecord`): its own chain, its own write lock, and the
@@ -63,6 +64,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.core.evidence import EvidencePack
 from crb.core.ledger import (
     GENESIS_HASH,
+    LABEL_IMPORTED,
+    LABEL_SOURCE_ROW_HASH,
     GradeRow,
     LedgerIntegrityError,
     verify_chain,
@@ -209,12 +212,13 @@ class DbLedger:
 
     # --- import / export ------------------------------------------------------
     def import_rows(self, rows: Iterable[GradeRow]) -> int:
-        """Re-chain foreign rows into this ledger (source hash kept in labels)."""
+        """Re-chain foreign rows into this ledger: every row is stamped ``imported`` (history —
+        a reading never counts it, P-139), and its source hash, when it has one, is kept."""
         prepared: list[GradeRow] = []
         for r in rows:
-            labels = dict(r.labels)
+            labels = {**r.labels, LABEL_IMPORTED: "true"}
             if r.row_hash:
-                labels.setdefault("source_row_hash", r.row_hash)
+                labels.setdefault(LABEL_SOURCE_ROW_HASH, r.row_hash)
             d = r.fields()
             d["labels"] = labels
             # Blank prev_hash: ``chained`` in append_many recomputes it against THIS

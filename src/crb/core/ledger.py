@@ -371,6 +371,12 @@ LABEL_CHANGE_ID = "change_id"
 LABEL_BUILDER_EXECUTOR = "builder_executor"
 #: The builder's sealed container (``crb.builders.container.EXECUTOR_DOCKER``).
 BUILDER_EXECUTOR_SEALED = "docker"
+#: Stamped ``true`` on every row the ledger IMPORTED (``DbLedger.import_rows``), with or without
+#: a source hash: an imported row is history — its labels were set elsewhere, so a reading
+#: never counts it as an attempt this deployment graded (ADR-0026 item 2, P-139).
+LABEL_IMPORTED = "imported"
+#: The source ledger's own hash of an imported row, kept for traceability.
+LABEL_SOURCE_ROW_HASH = "source_row_hash"
 #: Belt 6 (ADR-0024) is recorded as this hashed label — ``true`` / ``false`` / ``none``
 #: (switched on, not evaluated) — and is absent when the belt was switched off.
 LABEL_API_STABLE = BELT_API_STABLE
@@ -636,6 +642,15 @@ V2_ONLY_LABELS: frozenset[str] = frozenset(
 #: The labels a replay row KEEPS only from 2.4: the helper's (:data:`V2_ONLY_LABELS`) and
 #: the builder executor the adapter writes on every attempt, which a row below 2.4 drops.
 V2_KEPT_LABELS: frozenset[str] = V2_ONLY_LABELS | {LABEL_BUILDER_EXECUTOR}
+
+
+def labels_at_apparatus(labels: Mapping[str, str], apparatus_version: str) -> dict[str, str]:
+    """The labels a row of ``apparatus_version`` keeps (DL-106 (2), P-135): from 2.4 all of
+    them; below 2.4 none of :data:`V2_KEPT_LABELS` — the row is written as a 2.3 row always
+    was. THE one rule for every writer, and for every test that rewrites a row's apparatus."""
+    if is_v2_apparatus(apparatus_version):
+        return dict(labels)
+    return {k: v for k, v in labels.items() if k not in V2_KEPT_LABELS}
 
 
 def is_environment_error(error: str) -> bool:
@@ -1016,6 +1031,12 @@ class GradeRow:
         return self.labels.get(LABEL_BUILDER_EXECUTOR, "")
 
     @property
+    def imported(self) -> bool:
+        """Imported into this ledger from another (:data:`LABEL_IMPORTED`, or the older
+        ``source_row_hash`` marker): never an attempt this deployment graded."""
+        return self.labels.get(LABEL_IMPORTED) == "true" or LABEL_SOURCE_ROW_HASH in self.labels
+
+    @property
     def sealed(self) -> bool:
         """Graded in the SEALED posture (ADR-0026 item 2; ADR-0025 as amended): the tests in
         the docker sandbox's sealed mode (a ``docker/<tree>/sealed`` posture class, ADR-0019)
@@ -1273,17 +1294,9 @@ def grade_row_from_result(
             # the change identity is a 2.4 label (DL-106 (2)): a mined task carries it at
             # any apparatus, but a row below 2.4 is written as a 2.3 row always was — as
             # are the builder executor, the context arm and the class-set version
-            **{
-                k: str(v)
-                for k, v in task.labels.items()
-                if k not in V2_KEPT_LABELS or is_v2_apparatus(apparatus)
-            },
+            **labels_at_apparatus({k: str(v) for k, v in task.labels.items()}, apparatus),
             **({"builder_error": builder_error[:300]} if builder_error else {}),
-            **{
-                k: v
-                for k, v in given.items()
-                if k not in V2_KEPT_LABELS or is_v2_apparatus(apparatus)
-            },
+            **labels_at_apparatus(given, apparatus),
             **written,
             **(
                 {LABEL_COST_KNOWN: _bool_label(cost_known)}

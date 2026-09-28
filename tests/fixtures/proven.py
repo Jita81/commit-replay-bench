@@ -67,9 +67,10 @@ def add_tasks(
     *,
     prefix: str = "proven",
     cell: Mapping[str, str] = CELL,
+    authored: str = "2026-08-01T12:00:00+00:00",
 ) -> list[str]:
     """``n`` qualified tasks of ``cell`` (default :data:`CELL`) on ``alpha``, each its own
-    change."""
+    change, authored at ``authored``."""
     ids = [commit(i, prefix) for i in range(n)]
     cls, size, language = cell["capability_class"], cell["size"], cell["language"]
     with factory() as s:
@@ -78,7 +79,7 @@ def add_tasks(
                 task_id=tid,
                 repo=ALPHA,
                 subject=f"fix: proven {i}",
-                authored="2026-08-01T12:00:00+00:00",
+                authored=authored,
                 test_files=(f"tests/test_p{i}.py",),
                 src_files=(f"src/pkg/p{i}.py",),
                 target_tests=(f"tests/test_p{i}.py",),

@@ -11,7 +11,10 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               proven standard" — and serving per-arm readings; shows the loop on and off as two
               arms on the map and on ``/value`` with the playbook digests as provenance; refuses
               every pooled view with 422; carries the arm, builder and model in the CSV export;
-              and answers ``standard_for`` for the factory's gate.
+              answers ``standard_for`` for the factory's gate; shows a reading licensing only
+              the checks arm and posture class it counted on (P-137), a pool picked on
+              outcomes refused ``pool_not_blind`` and a date cut accepted (P-138), imported
+              rows never counted (P-139), and an S3-only standard read as a ceiling.
 How:          ``make_env`` with ``tests.fixtures.proven`` adding tasks, sealed rows, scores and a
               controls report; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -109,7 +112,7 @@ def test_a_registered_reading_delivers_only_on_the_cells_standard_arm(env: Env) 
     assert got["budget"] == 0.05 and got["readings"][0]["standard"] == S1
     assert got["budgets"][0]["spent"] == pytest.approx(0.02096, abs=1e-4)
     # the factory's gate reads the same standard
-    std = standard_for(env.factory, ALPHA, CELL)
+    std = standard_for(env.factory, ALPHA, CELL, checks_arm="off", posture_class=SEALED)
     assert std is not None and std.arm == S1 and not std.ceiling
     assert std.reading_id == reading["reading_id"]
 
@@ -124,13 +127,13 @@ def test_a_cell_with_no_reading_reads_no_proven_standard_and_names_the_next_meas
     assert cell["standard"]["standard"] is None
     assert cell["standard"]["label"] == "no proven standard"
     assert cell["standard"]["next"] == "register"
-    assert standard_for(env.factory, ALPHA, CELL) is None
+    assert standard_for(env.factory, ALPHA, CELL, checks_arm="off", posture_class=SEALED) is None
 
 
 def test_registering_is_an_operators_act_and_refuses_what_the_rules_forbid(env: Env) -> None:
-    reading = _proven(env)
+    _proven(env)
     # the same commits again: already graded under an arm of the hierarchy
-    again = register_via_api(env, pool=reading["pool"][:25])
+    again = register_via_api(env)
     assert again.status_code == 409 and again.json()["error"]["code"] == "pool_seen"
     # a replayed arm on an unsealed posture class
     host = register_via_api(env, posture_class="local/inplace/host-env")
@@ -221,3 +224,134 @@ def test_the_delivery_gate_reads_one_class_set_version(env: Env) -> None:
         "acme/classes@v1",
         "global/classes@v1",
     ]
+
+
+# --- a reading licenses only the checks arm and posture class it counted on (P-137) ----------
+
+
+def test_a_reading_on_the_off_checks_arm_never_licenses_the_fmt_arm(env: Env) -> None:
+    """ADR-0024 (arms never pool) and ADR-0026 item 2: a reading registered on the ``off``
+    checks arm counts ``off`` rows only, so it never speaks for the same cell read on ``fmt``
+    — the map, /routes and the factory's gate alike."""
+    _proven(env)
+    add_rows(env.factory, [commit(30)], arm=S1, clean=False, labels={"checks": "fmt=1"})
+    (fmt,) = _cells(env, "&checks=fmt")
+    assert fmt["checks_arm"] == "fmt" and fmt["n"] == 1
+    assert fmt["route"] != "deliver" and fmt["reason_code"] == "reading_unregistered", fmt
+    r = env.get(f"/routes?repo={ALPHA}&posture={SEALED}&checks=fmt")
+    assert r.status_code == 200, r.text
+    fmt_routes = [x for x in r.json()["decisions"] if x["cell"]["size"] == "XS"]
+    assert fmt_routes and all(x["route"] != "deliver" for x in fmt_routes)
+    assert standard_for(env.factory, ALPHA, CELL, checks_arm="fmt", posture_class=SEALED) is None
+    std = standard_for(env.factory, ALPHA, CELL, checks_arm="off", posture_class=SEALED)
+    assert std is not None and std.arm == S1
+
+
+def test_a_repository_switched_to_fmt_reads_its_default_map_on_fmt_unlicensed(env: Env) -> None:
+    """The repository's own arm (``checks=current``) moving to ``fmt`` after an ``off``
+    reading delivered leaves the default view with no proven standard on the new arm."""
+    _proven(env)
+    add_rows(env.factory, [commit(30)], arm=S1, clean=False, labels={"checks": "fmt=1"})
+    r = env.put(f"/repos/{ALPHA}", json={"checks": {"format_step": True}})
+    assert r.status_code == 200, r.text
+    (cell,) = _cells(env)
+    assert cell["checks_arm"] == "fmt" and cell["route"] != "deliver", cell
+
+
+def test_a_reading_of_one_sealed_class_never_licenses_another(env: Env) -> None:
+    """A reading counted on ``docker/copy/sealed`` never speaks for the cell read on
+    ``docker/worktree/sealed``: the posture class is part of what the evidence was counted on."""
+    _proven(env)
+    other = "docker/worktree/sealed"
+    add_rows(env.factory, [commit(30)], arm=S1, clean=False, posture_class=other)
+    r = env.get(f"/capability-map?repo={ALPHA}&posture={other}&by=class,size")
+    assert r.status_code == 200, r.text
+    (cell,) = [
+        c for c in r.json()["cells"] if (c["capability_class"], c["size"]) == ("bug.fix", "XS")
+    ]
+    assert cell["n"] == 1 and cell["route"] != "deliver", cell
+    assert cell["reason_code"] == "reading_unregistered"
+    assert standard_for(env.factory, ALPHA, CELL, checks_arm="off", posture_class=other) is None
+
+
+# --- the pool is frozen by rule, never picked on outcomes (P-138) ------------------------------
+
+
+def test_a_pool_chosen_on_outcomes_is_refused(env: Env) -> None:
+    """ADR-0026 item 2 (DL-109): the pool is every qualified commit of the cell, or every one
+    authored since a date the operator names — never a list. Grading the commits under the
+    descriptive ``A0`` arm first and registering only the ones that passed is refused
+    ``pool_not_blind``; the rule's own pool is accepted and recorded."""
+    ids = add_tasks(env.factory)
+    add_rows(env.factory, ids[:20], arm="A0", mode="blind")
+    add_rows(env.factory, ids[20:], arm="A0", mode="blind", clean=False)
+    picked = register_via_api(env, pool=ids[:20])
+    assert picked.status_code == 422, picked.text
+    assert picked.json()["error"]["code"] == "pool_not_blind"
+    whole = register_via_api(env)
+    assert whole.status_code == 201, whole.text
+    assert sorted(whole.json()["pool"]) == sorted(ids)
+    assert whole.json()["pool_rule"] == "all-qualified"
+
+
+def test_a_pool_may_start_at_a_date_the_operator_names(env: Env) -> None:
+    """A date cut is blind to outcomes (ADR-0026's held-out rule: "commits made since that
+    measurement"): the pool is every qualified commit authored at or after it."""
+    old = add_tasks(env.factory, 5, prefix="old")
+    new = add_tasks(env.factory, 25, prefix="new", authored="2026-09-01T00:00:00+00:00")
+    r = register_via_api(env, since="2026-08-15T00:00:00+00:00")
+    assert r.status_code == 201, r.text
+    assert sorted(r.json()["pool"]) == sorted(new) and not set(old) & set(r.json()["pool"])
+    assert r.json()["pool_rule"] == "qualified-since:2026-08-15T00:00:00+00:00"
+    bad = register_via_api(env, since="last tuesday")
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "invalid_reading"
+
+
+# --- imported rows are history: a reading counts only what this deployment graded (P-139) -----
+
+
+def test_rows_imported_through_the_ledger_never_count_toward_a_reading(env: Env) -> None:
+    """ADR-0026 item 2: a reading counts first attempts GRADED after its registration in the
+    sealed posture. A row an admin imports keeps every label it was exported with — posture,
+    builder executor, context arm, a ``created`` time after the registration — so it is
+    stamped ``imported`` on the way in and a reading never counts it, whether or not it
+    carried a source hash."""
+    import json
+
+    from fixtures.readings import sealed_row
+
+    add_tasks(env.factory)
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    first = r.json()["pool"][:20]
+    forged = [
+        sealed_row(c, arm=arm, created="2099-01-01T00:00:00+00:00", repo=ALPHA, cell=dict(CELL))
+        for arm in ("S3", S1)
+        for c in first
+    ]
+    body = "".join(json.dumps(x.to_dict(), sort_keys=True) + "\n" for x in forged).encode()
+    got = env.post("/ledger/import", files={"file": ("forged.jsonl", body)})
+    assert got.status_code == 200 and got.json()["imported"] == 40, got.text
+    add_oracle_and_controls(env.factory, first)
+    (cell,) = _cells(env)
+    assert cell["route"] != "deliver", cell
+    assert cell["reason_code"] == "look_pending"
+    arms = {a["arm"]: a for a in cell["reading"]["arms"]}
+    assert arms["S3"]["counted"] == 0
+
+
+def test_a_standard_found_on_s3_alone_reads_ceiling_forward_unvalidated(env: Env) -> None:
+    """product.value.111: S3 delivers and S1 misses three — the cell's only proven arm is the
+    ceiling, shown as ``ceiling S3, forward-unvalidated`` and never as a standard."""
+    add_tasks(env.factory)
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    first = r.json()["pool"][:20]
+    add_rows(env.factory, first, arm="S3")
+    add_rows(env.factory, first[:3], arm=S1, clean=False)
+    add_rows(env.factory, first[3:], arm=S1)
+    add_oracle_and_controls(env.factory, first)
+    (cell,) = _cells(env)
+    assert cell["standard"]["label"] == "ceiling S3, forward-unvalidated"
+    assert cell["standard"]["ceiling"] is True and cell["standard"]["standard"] == "S3"
+    assert cell["route"] != "deliver"

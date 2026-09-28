@@ -42,7 +42,9 @@ What is measured, and the rule for each
   (process or context), come from the bug register behind :func:`default_register` — stream
   L's prevention register over the loop's own chain; ``source`` names it.
 * **Prospective routing precision** — walk the rows in time order; before each row, route its
-  cell (repository × mode × cell key) with the ONE routing rule from the rows before it only;
+  cell (repository × mode × checks arm × apparatus × context arm × class set × cell key) with
+  the ONE routing rule from the rows before it only (a ceiling or descriptive arm never
+  delivers);
   of the rows attempted under a ``deliver`` decision, how many were clean (and working).
   Controls are not evaluated here (numeric clauses only) and the output says so.
 * **One checks arm** (ADR-0024) — a row graded with the format step or belt 6 on answers a
@@ -97,6 +99,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from crb.core.checks import ARM_OFF, ARMS
+from crb.core.context_arm import parse_arm
 from crb.core.flow import Spend, spend_of_rows
 from crb.core.ledger import (
     FAILURE_BUDGET,
@@ -939,8 +942,10 @@ class RoutingPrecision:
             "policy_version": self.policy_version,
             "controls": "not evaluated",
             "method": (
-                "rows in time order; before each row its cell (repository x mode x cell key) is "
-                "routed from the rows before it only; deliver = clean among the rows attempted "
+                "rows in time order; before each row its cell (repository x mode x checks arm "
+                "x apparatus x context arm x class set x cell key) is routed from the rows "
+                "before it only, and a ceiling (S3) or descriptive (A0) context arm never "
+                "delivers; deliver = clean among the rows attempted "
                 "under a deliver decision; deliver_working = the deterministic PROXY (clean, "
                 "lint-clean, no public-API break) among the same rows — no review is read"
             ),
@@ -963,9 +968,10 @@ def prospective_routing(
     the first — each distinct change counted once, by its first row — so a cell delivers from
     the first look its running first attempts clear (ADR-0026 item 3), reads ``human`` once a
     miss puts the last look out of reach, and ``calibrate`` before either; a size the policy
-    splits reads ``granularize``. The seeded order, the posture, the oracle and the controls
-    are not replayed (``controls: not evaluated``), and a later row never changes an earlier
-    decision."""
+    splits reads ``granularize``; an arm that does not certify — ``S3`` (a ceiling) or ``A0``
+    (descriptive) — reads ``calibrate``, as routing.v2 routes it (ADR-0026 item 4). The seeded
+    order, the posture, the oracle and the controls are not replayed (``controls: not
+    evaluated``), and a later row never changes an earlier decision."""
     outcomes: dict[tuple[str, ...], list[bool | None]] = {}
     seen: dict[tuple[str, ...], set[str]] = {}
     decisions: dict[str, int] = dict.fromkeys(ROUTES, 0)
@@ -986,6 +992,8 @@ def prospective_routing(
         so_far = outcomes.setdefault(key, [])
         if r.cell.size in policy.granularize_sizes:
             decision = ROUTE_GRANULARIZE
+        elif r.context_arm and not parse_arm(r.context_arm).certifies:
+            decision = ROUTE_CALIBRATE  # a ceiling (S3) or descriptive (A0) arm never delivers
         else:
             state = look_state(so_far, policy.rule).state
             decision = (

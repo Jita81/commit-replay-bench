@@ -476,6 +476,8 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
     expect(screen.getByTestId('cell-arm').textContent).toContain(S1)
     fireEvent.click(screen.getByTestId('cell-measured'))
     expect(screen.getByTestId('tile-standard').textContent).toContain(S1)
+    // the tile's headline VALUE itself, not the served label on its sub-line
+    expect(within(screen.getByTestId('tile-standard')).getByText(S1, { exact: true }).className).toContain('text-[24px]')
     expect(screen.getAllByTestId('cell-reading-arm')).toHaveLength(2)
     expect(screen.getByTestId('route-bar').textContent).toContain(MAP.policy.description)
     // choose one arm: the map is read on it alone, and it names no proven standard
@@ -484,6 +486,9 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
     await waitFor(() => expect(screen.getByTestId('cell-arm').textContent).toContain('S3'))
     fireEvent.click(screen.getByTestId('cell-measured'))
     expect(screen.getByTestId('tile-standard').textContent).toContain('no proven standard')
+    expect(
+      within(screen.getByTestId('tile-standard')).getByText('no proven standard', { exact: true }).className,
+    ).toContain('text-[24px]')
     expect(screen.getByTestId('cell-shortfalls').textContent).toContain('register')
     expect(screen.getByTestId('cell-readings').textContent).toContain('No reading is registered')
   })

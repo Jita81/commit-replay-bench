@@ -84,7 +84,13 @@ def _row(
         evidence_pack_hash=PACK if clean else "",
         provenance=provenance,
         # a sighted replay row of 2.4 on the global vocabulary: the one kind the export sends
-        labels={"story": "STORY-1234", "context_arm": arm, "taxonomy": taxonomy},
+        # (an unstamped row — ``arm``/``taxonomy`` empty — carries neither key: below 2.4 a
+        # row never holds a 2.4 label, even an empty one, P-135)
+        labels={
+            "story": "STORY-1234",
+            **({"context_arm": arm} if arm else {}),
+            **({"taxonomy": taxonomy} if taxonomy else {}),
+        },
         **({"apparatus_version": apparatus} if apparatus else {}),
     )
 

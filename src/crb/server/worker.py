@@ -245,6 +245,7 @@ from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
 from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
 from crb.core.stats import mean
+from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.core.workspace import Workspace, opaque_dest
 from crb.factory.author import author_from_label
@@ -2987,6 +2988,9 @@ class Worker:
                 capability_class=new.capability_class,
                 class_source=new.class_source,
                 previous_class=task.capability_class,
+                # the class-set version this label was read under (ADR-0026 item 9): the
+                # (task, version) table is folded from these events, never a stored row
+                taxonomy=GLOBAL_CLASS_SET,
                 changed=new.capability_class != task.capability_class,
                 cost_usd=labeller.usage.last.get("cost_usd"),
                 latency_ms=int(float(labeller.usage.last.get("latency_s") or 0.0) * 1000),

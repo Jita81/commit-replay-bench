@@ -6,7 +6,9 @@ What it is:   Tests for ``crb.core.routing.route`` under routing.v2, driven thro
               capability map as the product drives it: a registered reading, sealed 2.4 rows,
               the oracle evidence and the controls verdict.
 What it does: Shows a cell of many attempts on few commits routing ``calibrate``; an
-              unmeasured or thin oracle routing ``calibrate``; host-posture rows never
+              unmeasured or thin oracle routing ``calibrate`` — read over the commits the
+              reading counted only; only the standard of several delivering certifying arms
+              delivering, and a sign-off refused on the others; host-posture rows never
               delivering; the hierarchy stopping at the first arm that does not deliver (an
               ``S1`` standard, an ``S3`` ceiling that licenses nothing, no standard at all);
               every failing clause listed with its next act; a report of another apparatus
@@ -29,6 +31,7 @@ from collections.abc import Sequence
 
 import pytest
 
+from crb.core import signoff as so
 from crb.core.capability import (
     PROJECTION_CELL,
     CapabilityCell,
@@ -45,6 +48,7 @@ from crb.core.routing import (
     REASON_CONTROLS_UNMEASURED,
     REASON_DELIVER,
     REASON_INSUFFICIENT,
+    REASON_LEANER_STANDARD,
     REASON_LOOK_PENDING,
     REASON_ORACLE_THIN,
     REASON_ORACLE_UNMEASURED,
@@ -57,7 +61,7 @@ from crb.core.routing import (
     RoutingPolicy,
     route,
 )
-from fixtures.readings import S1, commits, register_reading, rows_for, sealed_row
+from fixtures.readings import BEFORE, REPO, S1, commits, register_reading, rows_for, sealed_row
 
 PASSED = ControlsVerdict(
     passed=True, constructible=6, total=7, escapes=0, run_id="ctl-1", apparatus_version="2.4"
@@ -133,6 +137,25 @@ def test_an_unmeasured_oracle_routes_calibrate() -> None:
     assert weak.route == ROUTE_HUMAN
 
 
+def test_the_oracle_is_read_over_the_commits_the_reading_counted_only() -> None:
+    """product.truth.202: "an oracle strength of at least 0.80 measured on at least half of
+    THOSE commits" — the ones the look counted. Scores on rows of the cell graded before the
+    registration (outside the counted prefix) never stand in for the counted commits'."""
+    reading, rows = proven()
+    old = [sealed_row(c, arm=S1, created=BEFORE) for c in commits(30, "old")]
+    old_scores: dict[str, float | None] = {r.task_id: 0.6 for r in old}
+    unmeasured = cell_of(S1, [*rows, *old], [reading], oracle=old_scores)
+    assert unmeasured.route == ROUTE_CALIBRATE
+    assert unmeasured.reason_code == REASON_ORACLE_UNMEASURED
+    assert unmeasured.oracle is not None and unmeasured.oracle.n_tasks == 20
+    counted = unmeasured.verdict.counted_commits if unmeasured.verdict else ()
+    thin = cell_of(
+        S1, [*rows, *old], [reading], oracle={**old_scores, **dict.fromkeys(counted[:8], 0.95)}
+    )
+    assert thin.route == ROUTE_CALIBRATE and thin.reason_code == REASON_ORACLE_THIN
+    assert thin.decision is not None and thin.decision.oracle_scored_tasks == 8
+
+
 def test_host_posture_rows_never_deliver() -> None:
     reading = register_reading(commits(40))
     host = {"posture_class": "local/inplace/host-env", "builder_executor": "host"}
@@ -178,6 +201,41 @@ def test_the_hierarchy_stops_at_the_first_arm_that_does_not_deliver() -> None:
     assert s1.route == ROUTE_HUMAN and s1.reason_code == REASON_INSUFFICIENT
     assert s1.verdict is not None and s1.verdict.blocking == "S3"
     assert s1.decision is not None and s1.decision.standard == ""
+
+
+RICHER = f"{S1}+facts@gpt-oss-120b"
+
+
+def test_only_the_standard_arm_of_several_delivering_arms_routes_deliver() -> None:
+    """ADR-0026 item 4, product.truth.202: when two certifying arms both deliver, the cell's
+    standard is the LEANER one and only it routes ``deliver``; the richer arm routes
+    ``calibrate`` (``leaner_standard``) and a sign-off on it is refused ``not_standard``."""
+    reading = register_reading(commits(40, "r"), hierarchy=("S3", RICHER, S1))
+    rows = [
+        *rows_for([True] * 20, reading.pool),
+        *rows_for([True] * 20, reading.pool, arm=RICHER),
+        *rows_for([True] * 20, reading.pool, arm=S1),
+    ]
+    lean = cell_of(S1, rows, [reading])
+    rich = cell_of(RICHER, rows, [reading])
+    assert lean.route == ROUTE_DELIVER and lean.reason_code == REASON_DELIVER
+    assert rich.route == ROUTE_CALIBRATE and rich.reason_code == REASON_LEANER_STANDARD
+    assert rich.decision is not None and rich.decision.standard == S1
+    record = so.SignoffRecord(
+        repo=REPO,
+        capability_class="bug.fix",
+        size="XS",
+        verifier="bob",
+        verifier_kind="local",
+        attestation=so.Attestation(
+            reviewed_task_id="a" * 40,
+            reviewed_row_hash="c" * 64,
+            statement="I read the accepted diff and it does what the ticket asks.",
+        ),
+    )
+    refused = [r.code for r in so.evaluate_signoff(record, rich, repo=REPO)]
+    assert f"{so.REFUSAL_NOT_STANDARD}:leaner_standard" in refused
+    assert so.evaluate_signoff(record, lean, repo=REPO) == ()
 
 
 # --- shortfalls, controls and the published bar --------------------------------------------

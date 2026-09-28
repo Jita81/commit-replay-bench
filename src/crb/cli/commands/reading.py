@@ -11,8 +11,9 @@ budget cannot cover it. ``crb reading list`` prints what is registered.
 Navigation
 ----------
 What it is:   ``crb reading register | list`` — the file workdir's twin of ``POST /readings``.
-What it does: Builds the full cell from its flags, defaults the pool to every gold-checked
-              task of the cell's class, size and language on file, refuses an unsealed posture
+What it does: Builds the full cell from its flags, freezes the pool by rule — every
+              gold-checked task of the cell's class, size and language on file, or every one
+              authored since ``--since`` (never a list, DL-109) — refuses an unsealed posture
               for a replayed arm, registers through ``crb.core.reading.register`` against the
               JSONL ledger and the readings already on file, and appends the record; lists the
               registered readings with their spend.
@@ -45,7 +46,7 @@ from crb.cli.commands import (
 )
 from crb.core.context_arm import BASE_S2, parse_arm
 from crb.core.ledger import CELL_FIELDS, LABEL_CHANGE_ID, JsonlLedger, is_sealed_class
-from crb.core.reading import RULE_LOOK_V1, RULES, Reading, ReadingRefused
+from crb.core.reading import RULE_LOOK_V1, RULES, Reading, ReadingRefused, pool_by_rule
 from crb.core.reading import register as register_reading
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
@@ -70,7 +71,11 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     reg.add_argument(
         "--hierarchy", required=True, help="arms richest first, comma-separated: S3,S1@<author>"
     )
-    reg.add_argument("--pool", default="", help="commit shas, comma-separated (default: all)")
+    reg.add_argument(
+        "--since",
+        default="",
+        help="freeze the pool from this ISO time (default: every qualified commit of the cell)",
+    )
     reg.add_argument("--rule", default=RULE_LOOK_V1, choices=sorted(RULES))
     reg.add_argument("--posture-class", required=True, help="the sealed class the reading counts")
     reg.add_argument("--author-model", default="")
@@ -146,13 +151,14 @@ def cmd_register(args: argparse.Namespace) -> int:
         and t.gold_clean is True
         and (not t.language or t.language == args.language)
     }
-    pool = [c.strip() for c in args.pool.split(",") if c.strip()] or sorted(tasks)
-    outside = [c for c in pool if c not in tasks]
-    if outside:
-        raise CliError(
-            f"{len(outside)} pool commit(s) are not gold-checked tasks of this cell on file: "
-            f"{outside[:5]}"
+    try:  # the pool is frozen by rule, never by a list (DL-109, P-138)
+        pool, pool_rule = pool_by_rule(
+            {c: str(t.authored or "") for c, t in tasks.items()}, since=args.since
         )
+    except ReadingRefused as exc:
+        raise CliError(f"{exc.code}: {exc}") from exc
+    if not pool:
+        raise CliError(f"no gold-checked task of this cell on file under {pool_rule}")
     ledger = Path(args.path).expanduser() if args.path else wd.ledger_path
     path = readings_path(args)
     try:
@@ -171,6 +177,7 @@ def cmd_register(args: argparse.Namespace) -> int:
             rule=args.rule,
             author_model=args.author_model,
             changes={c: str(tasks[c].labels.get(LABEL_CHANGE_ID, "")) for c in pool},
+            pool_rule=pool_rule,
         )
     except ReadingRefused as exc:
         raise CliError(f"{exc.code}: {exc}") from exc

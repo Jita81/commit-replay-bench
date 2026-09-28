@@ -10,7 +10,10 @@ What it does: ``adhoc`` — an unwitnessed context from the task's discovery val
               and whose witness is a real ``GoldWitness`` on the fixture repository, so a
               blamed row names a control that actually ran. Neither is a qualification a
               deployment would accept: that is measured by ``qualify_task``.
-How:          Thin wrappers over ``crb.core.qualify``.
+              ``posture_row`` stamps the labels a row of the current apparatus carries;
+              ``at_apparatus`` / ``dict_at_apparatus`` move a row to an older apparatus through
+              ``crb.core.ledger.labels_at_apparatus`` — never by hand (P-135).
+How:          Thin wrappers over ``crb.core.qualify`` and ``crb.core.ledger``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/core/qualify.py (``adhoc_context``, ``GoldWitness``, ``Qualification``),
@@ -322,3 +325,27 @@ def posture_row(**kw: Any) -> GradeRow:
     """``GradeRow(**kw)`` with :func:`with_posture_labels` applied — the test factories'
     shape for a measured row of the current apparatus."""
     return GradeRow(**with_posture_labels(kw))
+
+
+def at_apparatus(row: GradeRow, version: str, **changes: Any) -> GradeRow:
+    """``row`` rewritten at apparatus ``version`` (with ``changes``), keeping only the labels
+    a row of that apparatus carries (:func:`crb.core.ledger.labels_at_apparatus`, P-135): a
+    test that moves a 2.4 row to an older apparatus goes through here, never by hand."""
+    import dataclasses
+
+    from crb.core.ledger import labels_at_apparatus
+
+    labels = labels_at_apparatus(changes.pop("labels", row.labels), version)
+    return dataclasses.replace(row, apparatus_version=version, labels=labels, **changes)
+
+
+def dict_at_apparatus(d: dict[str, Any], version: str) -> dict[str, Any]:
+    """The ``to_dict`` form of :func:`at_apparatus`: ``d`` with its apparatus set to
+    ``version`` and only the labels a row of that apparatus carries."""
+    from crb.core.ledger import labels_at_apparatus
+
+    return {
+        **d,
+        "apparatus_version": version,
+        "labels": labels_at_apparatus(d.get("labels") or {}, version),
+    }

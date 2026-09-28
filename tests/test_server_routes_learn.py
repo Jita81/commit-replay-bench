@@ -61,6 +61,7 @@ from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND
 from crb.core.version import APPARATUS_VERSION
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
+from fixtures.posture import dict_at_apparatus
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -163,7 +164,7 @@ def _add_stale_rows(env: Env, n: int = 2, *, labels: dict[str, str] | None = Non
         )
         d.pop("failure_kind", None)
         d.pop("cost_known", None)
-        ledger.append(GradeRow.from_dict(d))
+        ledger.append(GradeRow.from_dict(dict_at_apparatus(d, "2.0")))
 
 
 def _legacy_cell(env: Env) -> str:

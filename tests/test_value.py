@@ -606,3 +606,22 @@ def test_deliver_decisions_are_served_by_mode() -> None:
     rt = value_report(rows, [], apparatus="all").to_dict()["routing"]
     assert rt["deliver"]["n"] > 0
     assert rt["deliver_by_mode"] == {"sighted": rt["deliver"]["n"]}
+
+
+@pytest.mark.parametrize("arm", ["S3", "S3+L", "A0", "A0+L"])
+def test_a_ceiling_or_descriptive_arm_never_scores_a_deliver(arm: str) -> None:
+    """routing.v2 never delivers on ``S3`` (a ceiling) or ``A0`` (descriptive) — ADR-0026
+    item 4 — so the precision proxy, which says it is routing.v2, never scores one either."""
+    rows = [
+        dataclasses.replace(vr(i, mode="sighted", kind=FAILURE_CLEAN), context_arm=arm)
+        for i in range(25)
+    ]
+    rp = prospective_routing(rows).to_dict()
+    assert rp["decisions"][ROUTE_DELIVER] == 0 and rp["deliver"]["n"] == 0
+    assert rp["decisions"][ROUTE_CALIBRATE] == 25
+    assert "context arm" in rp["method"] and "never delivers" in rp["method"]
+    certifying = [
+        dataclasses.replace(vr(i, mode="sighted", kind=FAILURE_CLEAN), context_arm="S1@opus")
+        for i in range(25)
+    ]
+    assert prospective_routing(certifying).to_dict()["decisions"][ROUTE_DELIVER] == 5

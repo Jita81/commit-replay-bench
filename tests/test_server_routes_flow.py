@@ -65,6 +65,7 @@ from crb.server.flow_record import scope_key
 from crb.server.routes.signoffs import load_signoff_records
 from crb.store.ledger import DbLedger, DbReviewLedger
 from crb.store.models import Event, Grade, User
+from fixtures.posture import at_apparatus
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -259,10 +260,7 @@ class TestMeasure:
             dataclasses.replace(base, created=f"2026-09-01T10:{i:02d}:00+00:00") for i in range(10)
         ]
         assert measure(ten, {}, {}).counts["cells_at_bar"] == 1
-        split_version = [
-            dataclasses.replace(r, apparatus_version="2.2") if i % 2 else r
-            for i, r in enumerate(ten)
-        ]
+        split_version = [at_apparatus(r, "2.2") if i % 2 else r for i, r in enumerate(ten)]
         assert measure(split_version, {}, {}).counts["cells_at_bar"] == 0
         split_mode = [
             dataclasses.replace(r, mode="blind") if i % 2 else r for i, r in enumerate(ten)

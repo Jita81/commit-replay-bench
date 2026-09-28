@@ -40,15 +40,18 @@ What it is:   The reading — registration (``register`` → a ``Reading`` the c
               ``reading.registered`` event), the seeded order, the look rule and its exact
               operating characteristic, the counting of first observed attempts per distinct
               change, the hierarchy that finds a cell's standard, and the per-cell budget.
-What it does: Refuses a registration over commits already graded under its arms at its
-              apparatus (``pool_seen``), beyond the cell's budget (``budget_spent``) or outside
-              the arm rules; evaluates each arm of a reading over the ledger's rows in the
-              seeded order; stops the hierarchy at the first arm that does not deliver; names
-              the standard, a ceiling or no proven standard, and the commits still needed.
+What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a hand-picked
+              list is ``pool_not_blind``); refuses a registration over commits already graded
+              under its arms at its apparatus (``pool_seen``), beyond the cell's budget
+              (``budget_spent``) or outside the arm rules; evaluates each arm of a reading over
+              the ledger's rows in the seeded order; stops the hierarchy at the first arm that
+              does not deliver; names the standard, a ceiling or no proven standard, and the
+              commits still needed.
 How:          ``seeded_order`` sorts the pool by its SHA-256 preimage; ``arm_reading`` walks it,
-              taking each commit's first observed ``r1`` attempt graded after registration →
+              taking each commit's first observed ``r1`` attempt this deployment graded after
+              registration on the reading's checks arm (never an imported row) →
               ``look_state`` applies the rule → ``evaluate`` reads the hierarchy →
-              ``standard_of`` answers the factory's gate.
+              ``standard_of`` answers the factory's gate on one checks arm and posture class.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 6),
               docs/adr/0025-routing-v2.md (items 1, 2 and 8 as ADR-0026 amends them)
@@ -149,7 +152,20 @@ LEFT_UNOBSERVED = "unobserved"
 REFUSAL_POOL_SEEN = "pool_seen"
 REFUSAL_BUDGET_SPENT = "budget_spent"
 REFUSAL_INVALID = "invalid_reading"
-REFUSAL_CODES: tuple[str, ...] = (REFUSAL_POOL_SEEN, REFUSAL_BUDGET_SPENT, REFUSAL_INVALID)
+#: A pool named as a list the pool rule does not give (DL-109, P-138).
+REFUSAL_POOL_NOT_BLIND = "pool_not_blind"
+REFUSAL_CODES: tuple[str, ...] = (
+    REFUSAL_POOL_SEEN,
+    REFUSAL_BUDGET_SPENT,
+    REFUSAL_INVALID,
+    REFUSAL_POOL_NOT_BLIND,
+)
+
+# --- the pool rule (DL-109) --------------------------------------------------------------
+#: Every qualified commit of the cell.
+POOL_RULE_ALL = "all-qualified"
+#: Every qualified commit of the cell authored at or after a date (``qualified-since:<iso>``).
+POOL_RULE_SINCE = "qualified-since"
 
 
 class ReadingRefused(ValueError):
@@ -329,6 +345,9 @@ class Reading:
     max_reruns: int = DEFAULT_MAX_RERUNS
     schema: str = READING_SCHEMA
     reading_id: str = ""
+    #: The rule the pool was frozen by (:func:`pool_by_rule`); ``""`` for a pool a caller of
+    #: the core supplied directly (tests, the in-code programme) — hashed when present.
+    pool_rule: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell", dict(self.cell))
@@ -382,6 +401,7 @@ class Reading:
             "max_reruns": self.max_reruns,
             "registered_at": self.registered_at,
             "actor": self.actor,
+            **({"pool_rule": self.pool_rule} if self.pool_rule else {}),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -410,12 +430,45 @@ class Reading:
             max_reruns=int(d.get("max_reruns", DEFAULT_MAX_RERUNS) or 0),
             schema=str(d.get("schema", READING_SCHEMA)),
             reading_id=str(d.get("reading_id", "")),
+            pool_rule=str(d.get("pool_rule", "") or ""),
         )
 
     def verify(self) -> bool:
         """The stored id and pool hash are the ones its body gives."""
         fresh = replace(self, reading_id="")
         return fresh.reading_id == self.reading_id and self.pool_sha256 == pool_digest(self.pool)
+
+
+def pool_by_rule(authored: Mapping[str, str], *, since: str = "") -> tuple[list[str], str]:
+    """The frozen pool of a reading and the rule that chose it (ADR-0026 item 2, DL-109):
+    every qualified commit of the cell (``authored``: commit → its authored time), or every one
+    authored at or after ``since`` — rules blind to any outcome. A hand-picked list is never a
+    pool: a list chosen after grading could hold only the commits that passed (P-138)."""
+    if not since.strip():
+        return sorted(authored), POOL_RULE_ALL
+    cut = _parse_ts(since)
+    if cut is None:
+        raise ReadingRefused(
+            f"since {since!r} is not an ISO 8601 time — a pool starts at a date, e.g. "
+            "2026-09-01T00:00:00+00:00",
+            code=REFUSAL_INVALID,
+        )
+    pool = sorted(c for c, a in authored.items() if (t := _parse_ts(a)) is not None and t >= cut)
+    return pool, f"{POOL_RULE_SINCE}:{cut.isoformat()}"
+
+
+def refuse_unless_blind(given: Sequence[str], pool: Sequence[str], rule: str) -> None:
+    """A caller that names the pool names the rule's own pool, or is refused
+    ``pool_not_blind``: the commits a reading reads are never a choice made on outcomes."""
+    if given and set(given) != set(pool):
+        extra, missing = sorted(set(given) - set(pool)), sorted(set(pool) - set(given))
+        raise ReadingRefused(
+            f"a reading's pool is frozen by its rule ({rule}: {len(pool)} commit(s)), never "
+            f"by a list — the list given adds {len(extra)} and leaves out {len(missing)} "
+            "(ADR-0026 item 2): name a date with since, or leave the pool out",
+            code=REFUSAL_POOL_NOT_BLIND,
+            detail={"extra": extra[:20], "missing": missing[:20], "rule": rule},
+        )
 
 
 def pool_digest(pool: Sequence[str]) -> str:
@@ -518,6 +571,7 @@ def register(
     budget: float | None = None,
     max_reruns: int = DEFAULT_MAX_RERUNS,
     now: str = "",
+    pool_rule: str = "",
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
@@ -601,6 +655,7 @@ def register(
         max_reruns=max_reruns,
         registered_at=now or utc_now_iso(),
         actor=actor,
+        pool_rule=pool_rule,
     )
 
 
@@ -671,11 +726,13 @@ class ArmReading:
 def _counts_for(reading: Reading, arm: str, row: GradeRow) -> bool:
     """Is ``row`` one of the rows ``arm`` of ``reading`` may count (before first-attempt)?
     Its repository, cell, apparatus, class-set version, checks arm and context arm are the
-    reading's; it is a rung ``r1`` attempt; it was graded strictly AFTER the registration
-    (whole seconds, so a row of the same second does not count); and it was graded in the
-    sealed posture class the reading names — or, for ``S2``, on held-out acceptance tests."""
+    reading's; it is a rung ``r1`` attempt this deployment graded (never an imported row, whose
+    labels were set elsewhere — P-139); it was graded strictly AFTER the registration (whole
+    seconds, so a row of the same second does not count); and it was graded in the sealed
+    posture class the reading names — or, for ``S2``, on held-out acceptance tests."""
     if (
-        row.repo != reading.repo
+        row.imported
+        or row.repo != reading.repo
         or row.context_arm != arm
         or row.apparatus_version != reading.apparatus
         or row.taxonomy != reading.taxonomy
@@ -904,8 +961,11 @@ def outcomes_for_cell(
     cell: Mapping[str, str],
     apparatus: str,
     taxonomy: str,
+    checks_arm: str,
+    posture_class: str,
 ) -> list[ReadingOutcome]:
-    """Every reading registered on exactly this cell, apparatus and class-set version."""
+    """Every reading registered on exactly this cell, apparatus, class-set version, checks arm
+    and posture class — every scope field a reading counts its rows on (P-137)."""
     want = canonical_cell_key(cell)
     return [
         evaluate(r, rows)
@@ -914,6 +974,8 @@ def outcomes_for_cell(
         and r.cell_key == want
         and r.apparatus == apparatus
         and r.taxonomy == taxonomy
+        and r.checks_arm == checks_arm
+        and r.posture_class == posture_class
     ]
 
 
@@ -925,12 +987,22 @@ def standard_of(
     cell: Mapping[str, str],
     apparatus: str,
     taxonomy: str,
+    checks_arm: str,
+    posture_class: str,
 ) -> Standard | None:
-    """The cell's proven standard (or its ceiling), or ``None`` — no proven standard. Pure: the
-    caller supplies the readings and the rows (the server's ``standard_for`` reads them)."""
+    """The cell's proven standard (or its ceiling) on one checks arm and posture class, or
+    ``None`` — no proven standard. Pure: the caller supplies the readings and the rows (the
+    server's ``standard_for`` reads them)."""
     best = latest_outcome(
         outcomes_for_cell(
-            readings, rows, repo=repo, cell=cell, apparatus=apparatus, taxonomy=taxonomy
+            readings,
+            rows,
+            repo=repo,
+            cell=cell,
+            apparatus=apparatus,
+            taxonomy=taxonomy,
+            checks_arm=checks_arm,
+            posture_class=posture_class,
         )
     )
     if best is None or best.state not in (OUTCOME_STANDARD, OUTCOME_CEILING):
@@ -1060,9 +1132,12 @@ __all__ = [
     "ARM_STATES",
     "CELL_ERROR_BUDGET",
     "LABEL_HELD_OUT",
+    "POOL_RULE_ALL",
+    "POOL_RULE_SINCE",
     "READING_EVENT_ACTION",
     "READING_SCHEMA",
     "REFUSAL_BUDGET_SPENT",
+    "REFUSAL_POOL_NOT_BLIND",
     "REFUSAL_POOL_SEEN",
     "RULES",
     "RULE_LOOK_V1",
@@ -1090,7 +1165,9 @@ __all__ = [
     "look_state",
     "outcomes_for_cell",
     "p_deliver",
+    "pool_by_rule",
     "pool_digest",
+    "refuse_unless_blind",
     "register",
     "rule_spend",
     "seed_of",

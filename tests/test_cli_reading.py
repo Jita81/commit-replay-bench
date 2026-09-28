@@ -112,15 +112,19 @@ def test_register_refuses_what_the_rules_forbid(
         == 2
     )
     assert "sealed posture" in capsys.readouterr().err
+    # the pool is frozen by rule (DL-109): there is no list to name, only a date
     assert main([*_argv(wd), "--pool", "f" * 40]) == 2
-    assert "not gold-checked tasks" in capsys.readouterr().err
+    assert "--pool" in capsys.readouterr().err
+    assert main([*_argv(wd), "--since", "last tuesday"]) == 2
+    assert "invalid_reading" in capsys.readouterr().err
+    assert main([*_argv(wd), "--since", "2026-09-01T00:00:00+00:00"]) == 2
+    assert "no gold-checked task" in capsys.readouterr().err
+    for _ in range(2):
+        assert main(_argv(wd)) == 0
+    capsys.readouterr()
+    assert main(_argv(wd)) == 2
+    assert "budget_spent" in capsys.readouterr().err
     ledger = wd / "ledger.jsonl"
     JsonlLedger(ledger).append(sealed_row(shas[3], created="2026-09-01T00:00:00+00:00"))
     assert main(_argv(wd)) == 2
     assert "pool_seen" in capsys.readouterr().err
-    fresh = [s for s in shas if s != shas[3]]
-    for i in range(2):
-        assert main([*_argv(wd), "--pool", ",".join(fresh[i * 12 : i * 12 + 12])]) == 0
-    capsys.readouterr()
-    assert main([*_argv(wd), "--pool", ",".join(fresh[24:36])]) == 2
-    assert "budget_spent" in capsys.readouterr().err

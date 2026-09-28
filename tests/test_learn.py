@@ -67,7 +67,7 @@ from crb.core.routing import (
 )
 from crb.factory.backlog import Backlog, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
-from fixtures.posture import posture_row
+from fixtures.posture import dict_at_apparatus, posture_row
 from fixtures.readings import LIVE_PASSED, book_for, live_labels
 
 PACK = "b" * 64
@@ -868,7 +868,7 @@ class TestStrengthen:
     def test_since_filter(self) -> None:
         old = _weak_cell_rows()
         stale = [
-            GradeRow.from_dict({**r.to_dict(), "apparatus_version": "2.0", "belt_set": "v4"})
+            GradeRow.from_dict({**dict_at_apparatus(r.to_dict(), "2.0"), "belt_set": "v4"})
             for r in old
         ]
         cmap = _map(stale)

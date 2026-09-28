@@ -145,6 +145,18 @@ def test_the_2_4_only_labels_are_the_labels_the_helper_adds_from_2_4() -> None:
     assert added - {lg.LABEL_FAILURE_KIND} == set(lg.V2_ONLY_LABELS)
 
 
+def test_a_row_rewritten_below_2_4_keeps_none_of_the_2_4_labels() -> None:
+    """P-135: the one rule that says which labels a row of an apparatus keeps. A 2.4 row
+    rewritten at 2.3 through :func:`labels_at_apparatus` is a row the ledger accepts, and at
+    2.4 the labels are unchanged — so no writer or test re-derives the list by hand."""
+    row = _replay(_result(lint_status=lint_mod.LINT_NONE_DETECTED))
+    assert set(lg.V2_ONLY_LABELS) <= set(row.labels)
+    older = lg.labels_at_apparatus(row.labels, "2.3")
+    assert not set(older) & set(lg.V2_KEPT_LABELS)
+    lg.GradeRow(**{**row.fields(), "apparatus_version": "2.3", "labels": older})
+    assert lg.labels_at_apparatus(row.labels, V2) == row.labels
+
+
 @pytest.mark.parametrize("key", [lg.LABEL_FAILURE_KIND, lg.LABEL_LINT_REASON, lg.LABEL_CHANGE_ID])
 def test_the_ledger_refuses_a_2_4_replay_row_without_a_label_it_must_carry(key: str) -> None:
     row = _replay(_result(lint_status=lint_mod.LINT_NONE_DETECTED))

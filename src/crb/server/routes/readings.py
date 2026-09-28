@@ -3,12 +3,14 @@
 ADR-0026 items 2 to 5: a cell is licensed only by a **reading** registered before its first
 attempt — the cell, the hierarchy of context arms richest first, any descriptive arms, the look
 rule, the share of the cell's error budget it spends, the test author's model and the frozen
-pool of qualified commits with its SHA-256. ``POST /readings`` (operator; CSRF-bound like every
-cookie-authenticated write) writes one ``reading.registered`` event under the events store's
-write lock, so two registrations can never both spend the last of a cell's budget; it is refused
-``409 pool_seen`` when a pool commit already has a graded row under an arm of the hierarchy at
-this apparatus, ``409 budget_spent`` when the budget cannot cover the rule, and ``422
-invalid_reading`` for a shape the ADR forbids. ``GET /readings`` serves every reading of a
+pool of qualified commits with its SHA-256 — frozen by RULE (every qualified commit of the cell,
+or every one authored since a date), never by a hand-picked list (DL-109). ``POST /readings``
+(operator; CSRF-bound like every cookie-authenticated write) writes one ``reading.registered``
+event under the events store's write lock, so two registrations can never both spend the last
+of a cell's budget; it is refused ``409 pool_seen`` when a pool commit already has a graded row
+under an arm of the hierarchy at this apparatus, ``422 pool_not_blind`` when the caller names a
+pool the rule does not give, ``409 budget_spent`` when the budget cannot cover the rule, and
+``422 invalid_reading`` for a shape the ADR forbids. ``GET /readings`` serves every reading of a
 repository evaluated over its rows — each arm's look state — and each cell's budget spent.
 ``standard_for`` is the seam the factory's entry gate reads (ADR-0026 item 8).
 
@@ -17,11 +19,12 @@ Navigation
 What it is:   The readings route module and the store readers the capability map, the sign-off
               write path and the factory share (``load_readings``, ``reading_book``,
               ``standard_for``).
-What it does: Registers a reading (operator): validates the cell and the pool against the
-              repository's qualified tasks, refuses an unsealed posture for a replayed arm,
-              reads the rows and the readings already registered under the lock, and writes
-              the event; lists readings with every arm's state and the budget per cell; answers
-              a cell's proven standard (or ``None``).
+What it does: Registers a reading (operator): freezes the pool by rule from the repository's
+              qualified tasks (``pool_by_rule``; a list the rule does not give is refused),
+              refuses an unsealed posture for a replayed arm, reads the rows and the readings
+              already registered under the lock, and writes the event; lists readings with
+              every arm's state and the budget per cell; answers a cell's proven standard on
+              one checks arm and posture class (or ``None``).
 How:          ``append_event_checked`` (lock → ``crb.core.reading.register`` → insert) →
               ``load_readings`` (verified events; a record that does not re-hash is skipped and
               counted) → ``ReadingBook.evaluate`` over ``DbLedger`` rows → ``standard_of``.
@@ -60,12 +63,15 @@ from crb.core.ledger import (
 from crb.core.reading import (
     READING_EVENT_ACTION,
     REFUSAL_INVALID,
+    REFUSAL_POOL_NOT_BLIND,
     RULE_LOOK_V1,
     Reading,
     ReadingRefused,
     Standard,
     budget_spent,
     cell_error_budget,
+    pool_by_rule,
+    refuse_unless_blind,
     register,
     standard_of,
 )
@@ -116,18 +122,30 @@ def standard_for(
     repo: str,
     cell: Mapping[str, str],
     *,
+    checks_arm: str,
+    posture_class: str,
     apparatus: str = APPARATUS_VERSION,
     taxonomy: str = GLOBAL_CLASS_SET,
 ) -> Standard | None:
-    """The cell's proven context standard at ``apparatus`` and ``taxonomy`` — the arm a
-    ticket's build must carry, the reading that proved it, and whether it is only a ceiling
-    (``S3`` alone: calibration builds only) — or ``None``: no proven standard. The factory's
-    entry gate reads this (ADR-0026 item 8)."""
+    """The cell's proven context standard at ``apparatus`` and ``taxonomy`` on ONE checks arm
+    and posture class — the arm a ticket's build must carry, the reading that proved it, and
+    whether it is only a ceiling (``S3`` alone: calibration builds only) — or ``None``: no
+    proven standard. The factory's entry gate reads this (ADR-0026 item 8), naming the
+    repository's own checks arm (``current_checks_arm``) and the deployment's posture class
+    (``deployment_posture_class``): both are required, so a licence never crosses an arm or a
+    posture (P-137)."""
     with factory() as s:
         readings = load_readings(s, repo)
     rows = list(DbLedger(factory).rows(repo=repo))
     return standard_of(
-        readings, rows, repo=repo, cell=dict(cell), apparatus=apparatus, taxonomy=taxonomy
+        readings,
+        rows,
+        repo=repo,
+        cell=dict(cell),
+        apparatus=apparatus,
+        taxonomy=taxonomy,
+        checks_arm=checks_arm,
+        posture_class=posture_class,
     )
 
 
@@ -168,13 +186,16 @@ def budget_by_cell(readings: Sequence[Reading]) -> list[dict[str, Any]]:
 
 
 class ReadingIn(BaseModel):
-    """A registration: the full cell, the hierarchy (richest first) and, optionally, the pool
-    (default: every qualified task of the cell's class, size and language)."""
+    """A registration: the full cell, the hierarchy (richest first) and the pool RULE — every
+    qualified task of the cell's class, size and language, or every one authored at or after
+    ``since`` (DL-109). ``pool``, when given, must be that rule's own pool: a hand-picked list
+    is refused ``pool_not_blind``."""
 
     repo: str = Field(min_length=1, max_length=64)
     cell: dict[str, str]
     hierarchy: list[str] = Field(min_length=1, max_length=8)
     pool: list[str] = Field(default_factory=list, max_length=2000)
+    since: str = Field(default="", max_length=40)
     rule: str = RULE_LOOK_V1
     descriptive: list[tuple[str, int]] = Field(default_factory=list, max_length=4)
     author_model: str = Field(default="", max_length=128)
@@ -212,7 +233,7 @@ def _change_of(task: Task) -> str:
 
 
 def _refuse(exc: ReadingRefused) -> ApiError:
-    code = 422 if exc.code == REFUSAL_INVALID else 409
+    code = 422 if exc.code in (REFUSAL_INVALID, REFUSAL_POOL_NOT_BLIND) else 409
     return ApiError(code, exc.code, str(exc), detail=dict(exc.detail))
 
 
@@ -254,14 +275,15 @@ def register_reading(
 
     def build(s: Session) -> dict[str, Any]:
         qualified = _qualified(s, body.repo, body.cell)
-        pool = list(dict.fromkeys(body.pool)) or sorted(qualified)
-        outside = [c for c in pool if c not in qualified]
-        if outside:
+        pool, pool_rule = pool_by_rule(
+            {c: str(t.authored or "") for c, t in qualified.items()}, since=body.since
+        )
+        refuse_unless_blind(list(dict.fromkeys(body.pool)), pool, pool_rule)
+        if not pool:
             raise ReadingRefused(
-                f"{len(outside)} pool commit(s) are not qualified tasks of this cell's class, "
-                "size and language — a pool freezes qualified commits only",
+                f"no qualified task of this cell's class, size and language under {pool_rule}"
+                " — a pool freezes qualified commits only",
                 code=REFUSAL_INVALID,
-                detail={"commits": outside[:20]},
             )
         reading = register(
             repo=body.repo,
@@ -280,6 +302,7 @@ def register_reading(
             author_model=body.author_model,
             changes={c: _change_of(qualified[c]) for c in pool},
             budget=budget,
+            pool_rule=pool_rule,
         )
         return reading.to_dict()
 

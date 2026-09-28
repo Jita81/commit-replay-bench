@@ -40,7 +40,12 @@ from crb.core.federated import ABSTRACT_ALLOWLIST
 from crb.core.ledger import GENESIS_HASH, GradeRow, verify_chain
 from crb.server.app import API_PREFIX
 from crb.server.routes.ledger import EXPORT_LABEL_COLUMNS
-from fixtures.posture import TEST_POSTURE_CLASS, TEST_POSTURE_ID, TEST_QUALIFICATION_ID
+from fixtures.posture import (
+    TEST_POSTURE_CLASS,
+    TEST_POSTURE_ID,
+    TEST_QUALIFICATION_ID,
+    dict_at_apparatus,
+)
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
 
 
@@ -292,11 +297,10 @@ class TestImport:
         src = env.info.rows[0].to_dict()
         v4 = GradeRow.from_dict(
             {
-                **src,
+                **dict_at_apparatus(src, "2.1"),  # the pre-belt-5 apparatus that wrote v4 rows
                 "repo": "delta",
                 "row_id": "delta-v4",
                 "belt_set": "v4",
-                "apparatus_version": "2.1",  # the pre-belt-5 apparatus that wrote v4 rows
                 "repo_lint_clean": None,
                 "evidence_pack_hash": "a" * 64,
                 "prev_hash": "",

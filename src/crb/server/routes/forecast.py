@@ -19,7 +19,9 @@ What it does: Parses a ``class:size:count`` mix (422 on a malformed item), resol
               factory would route it, and answers cost / minutes / routed counts /
               expected clean — an unmeasured component is listed, never priced. Readiness
               defaults the mix to the repo's cached change profile (409 when neither).
-How:          ``parse_mix`` → ``DbLedger.rows(repo)`` → ``forecast_build`` /
+How:          ``parse_mix`` → ``DbLedger.rows(repo)`` in the repository's own checks arm and
+              the deployment's posture class (the map's default view, so a reading licenses
+              only the rows it counted on, P-137) → ``forecast_build`` /
               ``assess_readiness`` from the core → the ``to_dict`` re-typed into the schema.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
@@ -50,10 +52,16 @@ from crb.core.forecast import (
     forecast_build,
     parse_component_key,
 )
+from crb.core.ledger import GradeRow
 from crb.core.routing import DEFAULT_POLICY
 from crb.server.auth import ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
-from crb.server.routes.capability import CHECKS_CURRENT, rows_for_arm
+from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
+from crb.server.routes.capability import (
+    CHECKS_CURRENT,
+    POSTURE_DEPLOYMENT,
+    filter_posture,
+    rows_for_arm,
+)
 from crb.server.routes.oracle import latest_controls_verdict, oracle_by_task
 from crb.server.routes.readings import reading_book
 from crb.server.routes.repos import cached_profile, get_repo_or_404
@@ -121,6 +129,16 @@ def _mix_items(mix: dict[ComponentKey, int]) -> list[ForecastMixItem]:
     return out
 
 
+def served_rows(
+    db: Session, factory: sessionmaker[Session], repo: str, settings: object
+) -> list[GradeRow]:
+    """The rows a forecast prices: the repository's own checks arm and the deployment's
+    posture class — the capability map's default view (ADR-0019 §8, ADR-0024). A view that
+    pooled posture classes would be read by no reading at all (P-137)."""
+    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
+    return filter_posture(db, repo, rows, POSTURE_DEPLOYMENT, settings).rows
+
+
 def routing_world(db: Session, factory: sessionmaker[Session], repo: str) -> dict[str, Any]:
     """What routing.v2 routes a cell on besides its rows (ADR-0025 items 3 and 4, ADR-0026):
     the repository's registered readings, the per-task oracle scores and the controls verdict
@@ -142,6 +160,8 @@ def forecast_build_route(
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
+    *,
+    settings: SettingsDep,
     repo: str = Query(min_length=1, max_length=64),
     mix: str = Query(min_length=1, max_length=20_000),
 ) -> ForecastBuildOut:
@@ -149,9 +169,9 @@ def forecast_build_route(
     get_repo_or_404(db, repo)
     parsed = parse_mix(mix)
     # All rows, every mode and apparatus: the core forecast applies its own filters and
-    # reports ``unmeasured`` for what it cannot price — in the repository's own checks arm,
-    # because a cell never pools two (ADR-0024).
-    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
+    # reports ``unmeasured`` for what it cannot price — in the repository's own checks arm
+    # and the deployment's posture class, because a cell never pools two (ADR-0024, P-137).
+    rows = served_rows(db, factory, repo, settings)
     f = forecast_build(
         parsed,
         rows,
@@ -196,6 +216,8 @@ def forecast_readiness_route(
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
+    *,
+    settings: SettingsDep,
     repo: str = Query(min_length=1, max_length=64),
     mix: str | None = Query(default=None, max_length=20_000),
 ) -> ForecastReadinessOut:
@@ -217,7 +239,7 @@ def forecast_readiness_route(
         profile = RepoChangeProfile.from_dict(dict(cached["profile"]))
         parsed = {(cls, size): n for (cls, size), n in profile.ranked()}
         source = "profile"
-    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
+    rows = served_rows(db, factory, repo, settings)
     r = assess_readiness(
         parsed,
         rows,

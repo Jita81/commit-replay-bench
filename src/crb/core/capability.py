@@ -465,9 +465,18 @@ class ReadingBook:
         return cls(tuple(evaluate(r, rs) for r in readings))
 
     def outcome_for(
-        self, repo: str, cell: CellKey, *, apparatus: str, taxonomy: str
+        self,
+        repo: str,
+        cell: CellKey,
+        *,
+        apparatus: str,
+        taxonomy: str,
+        checks_arm: str,
+        posture_class: str,
     ) -> ReadingOutcome | None:
-        """The reading that speaks for one full cell at one apparatus and class-set version."""
+        """The reading that speaks for one full cell at one apparatus, class-set version,
+        checks arm and posture class — every scope field the reading counted its rows on
+        (``_counts_for``), so a licence never crosses an arm or a posture (P-137)."""
         want = canonical_cell_key(cell)
         return latest_outcome(
             o
@@ -476,6 +485,8 @@ class ReadingBook:
             and o.reading.cell_key == want
             and o.reading.apparatus == apparatus
             and o.reading.taxonomy == taxonomy
+            and o.reading.checks_arm == checks_arm
+            and o.reading.posture_class == posture_class
         )
 
     def standard_rows(
@@ -500,15 +511,23 @@ class ReadingBook:
 
     def outcome_for_rows(self, rows: Sequence[GradeRow]) -> ReadingOutcome | None:
         """The reading of the ONE full cell ``rows`` belong to; ``None`` when they span more
-        than one repository or full cell key (a projection that pools builders or models is
-        never licensed by one model's reading)."""
+        than one repository, full cell key, checks arm or posture class (a projection that
+        pools builders or models, or a view that pools posture classes, is never licensed by
+        one reading — P-137)."""
         repos = {r.repo for r in rows}
         keys = {r.cell for r in rows}
-        if len(repos) != 1 or len(keys) != 1 or not rows:
+        checks = {r.checks_arm for r in rows}
+        postures = {r.posture_class for r in rows}
+        if not rows or any(len(s) != 1 for s in (repos, keys, checks, postures)):
             return None
         r0 = rows[0]
         return self.outcome_for(
-            r0.repo, r0.cell, apparatus=r0.apparatus_version, taxonomy=r0.taxonomy
+            r0.repo,
+            r0.cell,
+            apparatus=r0.apparatus_version,
+            taxonomy=r0.taxonomy,
+            checks_arm=r0.checks_arm,
+            posture_class=r0.posture_class,
         )
 
 
