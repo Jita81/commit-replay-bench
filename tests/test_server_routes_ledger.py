@@ -12,7 +12,9 @@ What it does: Pins that verify reports ok, ``broken_at`` on a tampered row and a
               re-chains and skips duplicates, keeps belt 5 unrecorded on pre-belt-5 rows
               (ADR-0011), points census rows at the CLI, refuses a false-Q1 row with 409 and
               malformed bodies with 422; and that every export records one
-              ``ledger.exported`` event with the actor, the format and the filter (G-184).
+              ``ledger.exported`` event with the actor, the format and the filter (G-184),
+              that an export whose recording fails every retry is refused with a 500 and no
+              byte of the ledger, and that a refused abstract export records nothing.
 How:          ``make_env`` over the seed; triggers dropped deliberately for the tamper cases.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
@@ -36,7 +38,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from crb.core.federated import ABSTRACT_ALLOWLIST
 from crb.core.ledger import GENESIS_HASH, GradeRow, verify_chain
@@ -239,6 +244,60 @@ class TestExport:
             (EXPORT_TRACE, operator, "", "abstract", {}),
         ]
         assert all(e.payload_json["at"] for e in evs)
+
+    @pytest.mark.parametrize(
+        ("role", "path"),
+        [
+            ("viewer", "/ledger/export"),
+            ("viewer", "/ledger/export?format=csv"),
+            ("operator", "/ledger/export/abstract"),
+        ],
+    )
+    def test_an_export_that_cannot_be_recorded_is_not_served(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch, role: str, path: str
+    ) -> None:
+        """DATA-RETENTION §4: every try at recording the export loses the race for the trace's
+        next ``seq``; the export is refused with a 500 and no byte of the ledger, and no event
+        is left behind. Swallowing the failure would stream the ledger unrecorded."""
+        tries: list[int] = []
+        real_commit = Session.commit
+
+        def racing_commit(self: Session) -> None:
+            if any(getattr(o, "action", None) == LEDGER_EXPORTED for o in self.new):
+                tries.append(1)
+                raise IntegrityError("INSERT INTO events", {}, Exception("UNIQUE trace_id, seq"))
+            real_commit(self)
+
+        login(env.client, role)
+        client = TestClient(env.client.app, raise_server_exceptions=False)
+        client.cookies = env.client.cookies
+        monkeypatch.setattr(Session, "commit", racing_commit)
+        r = client.get(f"{API_PREFIX}{path}")
+        monkeypatch.undo()
+        assert r.status_code == 500
+        assert "content-disposition" not in r.headers
+        assert ALPHA not in r.text and "row_hash" not in r.text
+        assert len(tries) == 3  # it re-reads the next seq and tries again, then gives up
+        with env.factory() as s:
+            assert s.execute(select(Event).where(Event.action == LEDGER_EXPORTED)).first() is None
+
+    def test_a_refused_abstract_export_records_nothing(self, env: Env) -> None:
+        """A ledger holding a false-Q1 row refuses the abstract export (409): nothing was
+        taken, so no ``ledger.exported`` event says it was."""
+        _drop_triggers(env)
+        with env.factory() as s:
+            s.execute(
+                text(
+                    "UPDATE grades SET target_green = 0 "
+                    "WHERE seq = (SELECT MIN(seq) FROM grades WHERE clean = 1)"
+                )
+            )
+            s.commit()
+        login(env.client, "operator")
+        r = env.get("/ledger/export/abstract")
+        assert r.status_code == 409 and envelope(r)["code"] == "false_q1_refused"
+        with env.factory() as s:
+            assert s.execute(select(Event).where(Event.action == LEDGER_EXPORTED)).first() is None
 
 
 def _jsonl(rows: list[GradeRow]) -> bytes:
