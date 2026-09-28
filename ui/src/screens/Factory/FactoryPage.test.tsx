@@ -34,7 +34,8 @@
  *               (`FactoryBacklog`, `FactoryTask`), src/crb/server/routes/factory.py (the
  *               shapes mirrored here), ui/src/lib/builder.ts (`builderChoice`), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Factory/FactoryPage.test.tsx
- * Touch when:   a factory action moves into the UI; a `FactoryTaskOut` field is added.
+ * Touch when:   never for a new repository; a factory action moves into the UI; a `FactoryTaskOut`
+ *               field is added.
  */
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -82,7 +83,15 @@ const TASKS: FactoryTask[] = [
 
 const HEALTH_CLI = { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: 'configured: claude_code_cli', data: { anthropic: false, claude_code_cli: true } }] }
 const HEALTH_NONE = { status: 'degraded', probes: [{ name: 'sandbox', status: 'degraded', detail: '', data: { executor: 'local' } }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false } }] }
-const MAP = { repo: 'alpha', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [{ capability_class: 'bug.fix', size: 'XS', n: 40, clean: 38, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, route: 'deliver', reason: '', cost_usd_mean: 0.34, latency_s_mean: 200, verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }], summary: { trusted_autonomy_coverage: 1, total_cells: 1, measured_cells: 1, deliver_cells: 1, n_total: 40, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } }
+// the map's own economics fold (F35): the spend estimate reads its cost per attempt over the KNOWN count
+const est = (n: number, value: number | null, reason = '') => ({ n, value, ci_low: null, ci_high: null, method: 'Student-t 95% on the known rows (n-1 df), lower bound floored at 0', reason })
+const econ = (n_attempts: number, cost_known: number, value: number | null, reason = '') => ({
+  n_attempts, n_clean: n_attempts, cost_known, cost_known_clean: cost_known, latency_known: n_attempts, latency_known_clean: n_attempts,
+  apparatus_versions: ['2.2'], posture_classes: [], checks_arms: ['off'], pooled: false, pooled_reason: '',
+  cost_per_attempt: est(cost_known, value, reason), cost_per_clean: est(cost_known, value, reason), latency_per_attempt: est(n_attempts, 200),
+})
+const NONE_KNOWN = 'no attempt recorded a known cost'
+const MAP = { repo: 'alpha', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [{ capability_class: 'bug.fix', size: 'XS', n: 40, clean: 38, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, route: 'deliver', reason: '', cost_usd_mean: 0.34, latency_s_mean: 200, verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }], summary: { trusted_autonomy_coverage: 1, total_cells: 1, measured_cells: 1, deliver_cells: 1, n_total: 40, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' }, economics: econ(40, 40, 0.34) }
 const NO_RUNS = { items: [], total: 0, limit: 10, offset: 0 }
 const CATALOGUE = {
   classes: [
@@ -263,10 +272,16 @@ describe('stepsFor — every refusal carries its reason (J-FAC-4)', () => {
 })
 
 describe('estimateFromMap — the repository’s measured mean per attempt (J-FAC-2)', () => {
-  it('is the row-weighted mean over measured cells with its n and apparatus; null when nothing is measured', () => {
-    expect(estimateFromMap(MAP.cells as never)).toEqual({ mean: 0.34, n: 40, apparatus: '2.2' })
-    expect(estimateFromMap([])).toBeNull()
-    expect(estimateFromMap([{ ...MAP.cells[0]!, route: 'NOT_YET_MEASURED', n: 0 }] as never)).toBeNull()
+  it('is the map fold cost per attempt with its known n and apparatus; null when nothing is measured', () => {
+    expect(estimateFromMap(MAP as never)).toEqual({ mean: 0.34, n: 40, apparatus: '2.2' })
+    expect(estimateFromMap(undefined)).toBeNull()
+    expect(estimateFromMap({ ...MAP, cells: [], economics: econ(0, 0, null, NONE_KNOWN) } as never)).toBeNull()
+  })
+
+  it('a known $0 is a measured $0 over the attempts with a known cost, never dropped (P-131)', () => {
+    // 40 attempts, 36 with a known cost, every known cost $0: the flat cell mean reads 0
+    const zero = { ...MAP, cells: [{ ...MAP.cells[0]!, cost_usd_mean: 0 }], economics: econ(40, 36, 0) }
+    expect(estimateFromMap(zero as never)).toEqual({ mean: 0, n: 36, apparatus: '2.2' })
   })
 })
 
@@ -367,7 +382,7 @@ describe('FactoryPage — the shipped contract', () => {
     const box = await screen.findByTestId('before-you-start')
     await waitFor(() => expect(box).toHaveTextContent('Claude Code · claude-sonnet-5 · the operator’s own CLI login'))
     // the estimate rests on the map's measured mean, with its n and apparatus, and names the band
-    await waitFor(() => expect(box).toHaveTextContent("this repository's measured mean over n = 40 attempts at apparatus 2.2"))
+    await waitFor(() => expect(box).toHaveTextContent("this repository's measured mean over n = 40 attempts with a known cost at apparatus 2.2"))
     expect(box).toHaveTextContent('$0.27 to $0.41 for 1 item at about $0.34 each')
     expect(box).toHaveTextContent('1 of 2 will be worked (1 waits on a signed gap); 1 sits in a cell that routes deliver')
     expect(box).toHaveTextContent('no spend cap yet')
@@ -406,7 +421,7 @@ describe('FactoryPage — the shipped contract', () => {
   })
 
   it('with no builder the button is disabled and the reason is the one Measure gives; the estimate says it is unmeasured', async () => {
-    mockApi(base({ 'GET /health': HEALTH_NONE, 'GET /capability-map': { ...MAP, cells: [] } }))
+    mockApi(base({ 'GET /health': HEALTH_NONE, 'GET /capability-map': { ...MAP, cells: [], economics: econ(0, 0, null, NONE_KNOWN) } }))
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
     const box = await screen.findByTestId('before-you-start')
     await waitFor(() => expect(box).toHaveTextContent('No builder is configured on this deployment — an admin adds a provider key (Settings)'))

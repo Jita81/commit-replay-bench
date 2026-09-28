@@ -10,9 +10,11 @@
  *               the summary tiles carry value + n + apparatus, that no repo gives the designed
  *               empty state, that a 503 renders the envelope (message, HTTP status, code), and
  *               — after A2 — that a failed / thin / escaped / unmeasured controls verdict gets
- *               its own pill and the split and model point appear next to the point; and
- *               that a map whose refetch fails shows the error and no controls pill, the
- *               page reading every query only through `currentData` (PR #54 review).
+ *               its own pill and the split and model point appear next to the point; that
+ *               a map whose refetch fails shows the error and no controls pill, the page
+ *               reading every query only through `currentData` (PR #54 review); and that
+ *               the open cell's cost and latency carry their known n, interval and apparatus,
+ *               an unknown reading as the dash (F35).
  * How:          `mockApi` answers `GET /capability-map` with hand-built maps; `renderApp` at
  *               `/capability?repo=…`; assertions on the `cell-*`, `tile-*`, `kind-*` and
  *               `controls-*` test ids; `qc.refetchQueries()` for a refetch; the page's own
@@ -30,6 +32,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'
+import { hintText } from '../../help/hints'
 import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { CapabilityPage } from './CapabilityPage'
@@ -129,6 +132,93 @@ describe('CapabilityPage', () => {
     // the class, not the instance: every headline tile on the page carries the map's apparatus
     for (const tile of document.querySelectorAll('[data-component="stat-tile"]')) {
       expect(tile.textContent, tile.getAttribute('data-testid') ?? tile.textContent ?? '').toContain('apparatus 2.0')
+    }
+  })
+
+  it('the open cell: cost and latency carry the known count as n, the served interval and the apparatus; an unknown is a dash, never $0.00 (F35)', async () => {
+    const T = 'Student-t 95% on the known rows (n-1 df), lower bound floored at 0'
+    const economics = {
+      n_attempts: 40,
+      n_clean: 37,
+      cost_known: 38,
+      cost_known_clean: 35,
+      latency_known: 0,
+      latency_known_clean: 0,
+      apparatus_versions: ['2.3'],
+      posture_classes: ['docker/copy/sealed'],
+      checks_arms: ['off'],
+      pooled: false,
+      pooled_reason: '',
+      cost_per_attempt: { n: 38, value: 0.012, ci_low: 0.01, ci_high: 0.014, method: T, reason: '' },
+      cost_per_clean: { n: 35, value: 0.013, ci_low: 0.011, ci_high: 0.015, method: T, reason: '' },
+      latency_per_attempt: { n: 0, value: null, ci_low: null, ci_high: null, method: T, reason: 'no attempt recorded a known latency' },
+    }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, cells: [cell({ latency_s_mean: 0, economics })] },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const tile = await screen.findByTestId('cell-measured')
+    // the grid line: the known cost, and a dash for the latency nobody recorded (not "0.0 s")
+    expect(within(tile).getByTestId('cell-cost').textContent).toBe('$0.0120')
+    expect(within(tile).getByTestId('cell-latency').textContent).toBe('—')
+    // in the grid too, a dash carries its reason: the cell's accessible name says it
+    expect(tile.getAttribute('aria-label')).toContain('cost $0.0120, latency not shown: no attempt recorded a known latency')
+    fireEvent.click(tile)
+    const cost = await screen.findByTestId('tile-cost')
+    expect(cost).toHaveTextContent('n =38')
+    expect(cost).toHaveTextContent('95% CI[$0.0100, $0.0140]')
+    expect(cost).toHaveTextContent(`38 of 40 attempts with a known cost · ${T} · apparatus 2.3 · posture docker/copy/sealed`)
+    const latency = screen.getByTestId('tile-latency')
+    expect(latency).toHaveTextContent('n =0')
+    expect(latency).toHaveTextContent('no attempt recorded a known latency')
+  })
+
+  it('a cell whose rows span two posture classes shows no cost or latency, and the tile says why (F35, ADR-0019)', async () => {
+    const T = 'Student-t 95% on the known rows (n-1 df), lower bound floored at 0'
+    const reason = 'rows from 2 posture classes (docker/copy/sealed, local/inplace/host-env) — economics are never pooled across apparatus versions, posture classes or checks arms; read one of each'
+    const withheld = { n: 40, value: null, ci_low: null, ci_high: null, method: T, reason }
+    const economics = {
+      n_attempts: 40,
+      n_clean: 37,
+      cost_known: 40,
+      cost_known_clean: 37,
+      latency_known: 40,
+      latency_known_clean: 37,
+      apparatus_versions: ['2.3'],
+      posture_classes: ['docker/copy/sealed', 'local/inplace/host-env'],
+      checks_arms: ['off'],
+      pooled: true,
+      pooled_reason: reason,
+      cost_per_attempt: withheld,
+      cost_per_clean: { ...withheld, n: 37 },
+      latency_per_attempt: withheld,
+    }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, cells: [cell({ economics })] },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const tile = await screen.findByTestId('cell-measured')
+    // the flat means still exist on the wire; the grid reads the refused fold, never them
+    expect(within(tile).getByTestId('cell-cost').textContent).toBe('—')
+    expect(within(tile).getByTestId('cell-latency').textContent).toBe('—')
+    expect(tile.getAttribute('aria-label')).toContain(`cost not shown: ${reason}, latency not shown: ${reason}`)
+    fireEvent.click(tile)
+    const latency = await screen.findByTestId('tile-latency')
+    expect(latency).toHaveTextContent('95% CI—')
+    expect(latency).toHaveTextContent('never pooled')
+    expect(latency).toHaveTextContent('posture docker/copy/sealed, local/inplace/host-env')
+  })
+
+  it('the grid legend says cost and latency are means over the attempts with a known value, and what a dash means (F35)', () => {
+    for (const id of ['map.cell.cost', 'map.cell.latency'] as const) {
+      const text = hintText(id)
+      expect(text).toMatch(/over the attempts with a known (cost|latency)/)
+      expect(text).toContain('A dash means none was recorded, or the rows span more than one apparatus version, posture class or checks arm')
+      expect(text).toContain('open the cell for the reason')
     }
   })
 
@@ -281,7 +371,7 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
     const measured = screen.getByTestId('cell-measured')
     // the accessible label carries the whole claim: n, point, the Wilson interval and the
     // apparatus + belt-set provenance (CodeRabbit on PR #6)
-    expect(measured.getAttribute('aria-label')).toBe('bug.fix S: human, n 13, point 61.5%, 95% CI 35.5% to 82.3%, false-Q1 0, apparatus 2.0 · belts v4')
+    expect(measured.getAttribute('aria-label')).toBe('bug.fix S: human, n 13, point 61.5%, 95% CI 35.5% to 82.3%, false-Q1 0, apparatus 2.0 · belts v4, cost not served, latency not served')
     expect(measured.textContent).toContain('61.5%')
     expect(measured.textContent).toContain('clean 8/13')
     const model = measured.querySelector('[data-testid="model-point"]')!
