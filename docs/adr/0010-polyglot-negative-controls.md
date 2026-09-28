@@ -180,4 +180,9 @@ apparatus version does not move.
 **Consequences.** A controls run grades up to twice as many trees (still no model, still £0).
 A bad gold now fails every catch on its task as well as its own row, which is what it means:
 nothing about that task is evidence. A report from `controls.v2` carries no witness; the
-Oracle screen shows a dash for it rather than inventing one.
+Oracle screen shows a dash for each row rather than inventing one, and a PASSED report without
+a witness — from before `controls.v3`, or stating no controls version — licenses nothing. Every
+reader reduces a report through `crb.core.oracle.controls.controls_verdict_of`, which reads it
+as unmeasured (route `calibrate`, "run a 'controls' run"), so an upgrade never leaves an
+unwitnessed pass licensing deliver: after upgrading, run the controls again on every
+repository. A failed report stays failed.

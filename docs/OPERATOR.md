@@ -886,7 +886,11 @@ Stop delivery and investigate before any further sign-off if you observe any of:
   own change graded beside it in the same posture was not clean, so the environment could not
   build or grade at that moment and the catch proves nothing. Each such row is a `VIOLATION`;
   fix the posture (qualify again, check the sandbox image and the dependency source) and
-  re-run the controls.
+  re-run the controls;
+- a controls verdict that reads `unmeasured` on a repository whose report says passed — the
+  report was written before `controls.v3`, so no gold witness stands beside its catches, and
+  it licenses nothing (the Oracle screen says so). Run the controls again; after an upgrade to
+  `controls.v3`, do this for every connected repository.
 
 **Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
 shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in
