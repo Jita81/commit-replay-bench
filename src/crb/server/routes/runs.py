@@ -895,13 +895,15 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
       run's test author included (F5b);
     * 422 ``builder_provider_mismatch`` — a rung (or the factory's test author) names a
       provider the configured OpenAI-compatible endpoint is not (P-284);
+    * 409 ``posture_unqualified`` — the ADR-0019 §3 refusal: ``qualify_first: false`` on a
+      build with nothing qualified where it would be graded can only fail
+      ``POSTURE_UNQUALIFIED`` on the worker (a database read, so it costs nothing);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
-      verification failed; one that is not fresh is verified once first — after every
-      static refusal, so a run refused for free never spends a verify (pilot D1, P-435 —
-      presence is not a working login; src/crb/server/builder_login.py);
-    * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
-      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker.
+      verification failed; one that is not fresh is verified once first — LAST, after every
+      refusal that costs nothing, so a run refused for free never spends a verify (pilot D1,
+      P-435, P-462 — presence is not a working login; src/crb/server/builder_login.py;
+      ``tests/test_builder_login.py`` holds the order).
     """
     credential_refusal(run, settings)
     factory_settings = getattr(settings, "factory", None)
@@ -910,13 +912,6 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
         author_rung(run, body.test_author, str(getattr(factory_settings, "test_author", ""))),
     )
     provider_refusal(run, settings, body.test_author)
-    login_refusal(
-        make_session_factory(db.get_bind()),  # type: ignore[arg-type]
-        run,
-        ttl_s=settings.builder.login_ttl_s,
-        binary=settings.builder.claude_binary,
-        default_author=str(getattr(factory_settings, "test_author", "")),
-    )
     if body.qualify_first is False:
         repo_row = db.get(Repo, body.repo)
         if repo_row is None:
@@ -929,6 +924,14 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
             executor=deployment_executor(settings, body.executor),
             image_ref=deployment_image(settings, repo_row),
         )
+    # last: the only refusal that can cost a verify turn (P-462)
+    login_refusal(
+        make_session_factory(db.get_bind()),  # type: ignore[arg-type]
+        run,
+        ttl_s=settings.builder.login_ttl_s,
+        binary=settings.builder.claude_binary,
+        default_author=str(getattr(factory_settings, "test_author", "")),
+    )
 
 
 @router.post(

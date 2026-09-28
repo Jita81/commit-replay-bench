@@ -245,6 +245,22 @@ def test_a_run_that_calls_no_builder_is_not_gated(
     assert fake.calls == []
 
 
+def test_a_run_refused_as_unqualified_never_spends_a_verify(
+    env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-462: ``qualify_first: false`` with nothing qualified is refused by a database read,
+    so it is refused before the login is verified — no verify turn and no verification
+    event, even when the login has no fresh verification. The order is held here, not by
+    ``submit_refusals``' docstring."""
+    fake = CountingVerifier("ok").install(monkeypatch)
+    r = _submit(env, kind="replay", qualify_first=False)
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "posture_unqualified"
+    assert fake.calls == []
+    assert _events(env, bl.VERIFIED_ACTION) == []
+    assert jobs.enqueued == []
+
+
 def test_the_refusal_never_carries_the_token(
     env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
