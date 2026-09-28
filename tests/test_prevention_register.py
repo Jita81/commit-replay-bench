@@ -7,7 +7,8 @@ What it is:   The claim-tag rule applied to the rows of ``docs/PREVENTION.md``, 
 What it does: Reads each register row and fails when its bug and first-seen cells carry no
               permitted tag (``[measured]``, ``[hypothesis]``, ``[aspiration]``, ``[gap]``),
               or carry a ``[measured]`` tag without its n, its method and its apparatus
-              version.
+              version; and reads the rows docs/dod/GAP-ANALYSIS.md projects from the
+              register, failing when one arrives there without a complete tag (P-433).
 How:          The register's ``P-nnn`` table rows, read by the claims gate's own CommonMark
               parser so a row is read however it is indented or spaced; the tag check is
               ``scripts/claims_check.py``'s own ``tag_defects``, loaded from the script, so
@@ -15,11 +16,12 @@ How:          The register's ``P-nnn`` table rows, read by the claims gate's own
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/PREVENTION.md (the register it reads), scripts/claims_check.py
-              (``tag_defects``), docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule)
+              (``tag_defects``), docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule),
+              scripts/dod_check.py and docs/dod/GAP-ANALYSIS.md (the projection it guards)
 Tested by:    tests/test_prevention_register.py
 Touch when:   never for a new repository (the register records the product's own bugs,
-              not a client's); the register gains a column, or the claims gate's tag rule
-              changes.
+              not a client's); the register gains a column, the claims gate's tag rule
+              changes, or the gap analysis projects the register differently.
 """
 
 from __future__ import annotations
@@ -124,3 +126,48 @@ def test_the_row_reader_sees_every_row_markdown_renders() -> None:
     tag_defects = _claims_check().tag_defects
     owed = [d for cells in register_rows(page) for d in row_defects(cells, tag_defects)]
     assert [d.split(":", 1)[0] for d in owed] == ["P-901", "P-902", "P-903"]
+
+
+GAP_ANALYSIS = ROOT / "docs" / "dod" / "GAP-ANALYSIS.md"
+_REGISTER_SECTION = "## Our own bugs — the prevention register"
+
+
+def projected_rows(gap_analysis: str) -> list[list[str]]:
+    """The register rows ``scripts/dod_check.py`` projects into the gap analysis: the
+    ``P-nnn`` rows of its prevention-register section, read by the same parser."""
+    section = gap_analysis.split(_REGISTER_SECTION, 1)[-1].split("\n## ", 1)[0]
+    return register_rows(section)
+
+
+def test_every_register_row_the_gap_analysis_projects_carries_its_claim_tag() -> None:
+    """PR #65 review (CodeRabbit 5337248640, P-433): the generated table of pending rows
+    stated each finding — "flipped to met", "the route now retries" — without the tag its
+    register row carries, because the generator projected the bug cell and left the
+    first-seen cell, where the tag sits, behind. Every projected row now carries a complete
+    tag, so a projection that drops it fails here."""
+    tag_defects = _claims_check().tag_defects
+    projected = projected_rows(GAP_ANALYSIS.read_text(encoding="utf-8"))
+    pending = {cells[0] for cells in _rows() if cells[6] == "pending"}
+    assert {cells[0] for cells in projected} == pending  # every pending row, and only those
+    owed: list[str] = []
+    for cells in projected:
+        defects = tag_defects(cells[1])
+        if defects is None:
+            defects = ["its projected finding carries no claim tag"]
+        owed += [f"{cells[0]}: {d}" for d in defects]
+    assert owed == [], owed
+
+
+def test_the_projection_check_refuses_a_row_projected_without_its_tag() -> None:
+    page = (
+        f"{_REGISTER_SECTION}\n\n"
+        "| id | bug | level | gap | what is missing |\n"
+        "|---|---|---|---|---|\n"
+        "| P-900 | the route now retries | gate | G-900 | x |\n"
+        "| P-901 | the route now retries [hypothesis — read from the code] | gate | G-900 | x |\n"
+        "\n## Next section\n\n| P-902 | not the register's table | gate | G-900 | x |\n"
+    )
+    tag_defects = _claims_check().tag_defects
+    rows = projected_rows(page)
+    assert [r[0] for r in rows] == ["P-900", "P-901"]
+    assert tag_defects(rows[0][1]) is None and tag_defects(rows[1][1]) == []
