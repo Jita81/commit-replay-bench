@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **One governed delivery, end to end: the entry gate reads the registered readings**
+  (the north-star Wave 2 integration; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
+  The seven Wave 2 streams are merged on `feat/ns2` with their ids renumbered after
+  `feat/ns1`'s. The factory's entry gate now reads a cell's standard from routing.v2's
+  registered readings, signed only by a sign-off on its arm, class-set version and reading
+  (`crb.server.factory_standard`). A new test walks sealed rows, a reading, a sign-off, an
+  authored test, a build, a required strength probe and a pull request on a fake forge, and
+  shows each gate stopping the chain before any spend (`product.truth.219`).
+
 - **Every public page is gated, README's measured numbers re-derive, and the quality baseline is named, never claimed**
   (north-star Wave 2, stream C; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
   The claims gate reads README, every guide, every review and every definition-of-done
@@ -22,14 +31,11 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **Audit you can prove: the audit trail is hash-chained, and the unsealed override names who set it**
   (north-star Wave 2, stream I; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
   Every `events` row is chained as it is written, and revision 0013 chains the rows already
-  there (ADR-0029, DL-091); `GET /ledger/verify` and `crb ledger verify --store` walk it, and
-  every worker start logs both chains' heads. In production the override needs
-  `CRB_ALLOW_UNSEALED_PROD_BY` (an active admin) and `_REASON`, and each start records that
-  admin (DL-090). The append-only probe proves every table (DL-092), `crb_signoffs_total`
-  counts sign-offs, and the Ledger and Posture pages name a broken audit event (P-241 to P-245).
-  From 0013 the database refuses an event written without the chain, so stop the API and the
-  worker for that upgrade and never roll back across it (DEPLOYMENT §6); between full walks,
-  at most five minutes apart, `/ledger/verify` re-hashes only new events (P-246 to P-249).
+  there (ADR-0029, DL-091); `/ledger/verify` and `crb ledger verify --store` walk it, and
+  each worker start logs both heads. In production the override names an active admin and a
+  reason, recorded at each start (DL-090). The append-only probe proves every table (DL-092).
+  From 0013 the database refuses an unchained event: stop the API and the worker for that
+  upgrade and never roll back across it (DEPLOYMENT §6).
 
 - **Gates from a lock, a run that keeps its spend cap, and click provisioned sealed**
   (north-star Wave 2, stream H; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
