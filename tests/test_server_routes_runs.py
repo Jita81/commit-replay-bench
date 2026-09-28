@@ -711,8 +711,9 @@ class TestCredentialPresence:
         """P-160, the route half of P-003's class: a second route that queues runs (Learn's
         re-measurement queue) enqueued them with no credential check, so a cell whose builder
         had no key was queued to fail at $0. Every function in the server that calls
-        ``.enqueue(`` must call ``submit_refusals`` — the one gate ``POST /runs`` applies — or
-        be named here with the reason it cannot queue a build."""
+        ``.enqueue(`` — or ``.stage(``, which puts a run on the queue inside the caller's
+        transaction (P-420) — must call ``submit_refusals``, the one gate ``POST /runs``
+        applies, or be named here with the reason it cannot queue a build."""
         import ast
 
         import crb.server as server_pkg
@@ -720,6 +721,7 @@ class TestCredentialPresence:
         exempt = {
             ("routes/runs.py", "_jobs_api"): "builds the queue adapter the gated routes call",
             ("routes/runs.py", "_enqueue"): "the queue adapter itself, called by the gated routes",
+            ("routes/runs.py", "_stage"): "the queue adapter itself, called by the gated routes",
             ("routes/repos.py", "probe_repo"): "queues kind probe only: no builder, no spend",
         }
         root = Path(server_pkg.__file__).parent
@@ -733,7 +735,8 @@ class TestCredentialPresence:
                     continue
                 calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)]
                 enqueues = any(
-                    isinstance(c.func, ast.Attribute) and c.func.attr == "enqueue" for c in calls
+                    isinstance(c.func, ast.Attribute) and c.func.attr in ("enqueue", "stage")
+                    for c in calls
                 )
                 if not enqueues:
                     continue

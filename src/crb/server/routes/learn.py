@@ -89,7 +89,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from crb.core.capability import PROJECTIONS, build_capability_map
@@ -116,7 +117,7 @@ from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, S
 from crb.server.factory_state import FactoryHome
 from crb.server.routes.capability import CHECKS_CURRENT, rows_for_arm
 from crb.server.routes.factory import _next_item_id, _refuse_if_run_active
-from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict
+from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict, oracle_by_task
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.runs import (
     append_system_event,
@@ -234,7 +235,8 @@ def derive_strengthen(
     db: Session, factory: SessionFactoryDep, repo: str, *, by: str, since: str
 ) -> StrengthenBacklog:
     """The repo's strengthening backlog (``StrengthenBacklog``) under the projection ``by``,
-    routed on the same policy and latest controls verdict the delivery gate reads."""
+    routed on the same policy, latest controls verdict and per-task oracle scores the
+    capability map and the delivery gate read."""
     if by not in PROJECTIONS:
         raise ApiError(
             422,
@@ -249,6 +251,9 @@ def derive_strengthen(
         projection=PROJECTIONS[by],
         policy=DEFAULT_POLICY,
         controls=latest_controls_verdict(db, repo),
+        # the strength the map routes under — each task's latest score — so Learn and the
+        # map never disagree about why a cell is held (P-426)
+        oracle_by_task=oracle_by_task(db, repo),
     )
     return strengthening_backlog(
         cmap,
@@ -274,6 +279,28 @@ def derive_remeasure(
     return remeasure_plan(
         rows, current_apparatus=apparatus, policy=DEFAULT_POLICY, task_labels=labels
     )
+
+
+#: Attempts at the queue's one transaction before a ``seq`` conflict on the shared
+#: ``learn:<repo>`` trace is answered 409 (P-420).
+_QUEUE_ATTEMPTS = 3
+
+
+def _lock_remeasure(db: Session) -> None:
+    """Serialise the re-measurement queue's check-then-write for the rest of this
+    transaction (P-420): SQLite takes its write lock now (``BEGIN IMMEDIATE`` — pysqlite
+    defers BEGIN until the first write, so this is safe after the route's reads),
+    PostgreSQL a transaction-scoped advisory lock (id 7337 — one id per purpose, see
+    ``crb.store.jobs``). A rollback or commit releases it."""
+    dialect = db.get_bind().dialect.name
+    if dialect == "sqlite":
+        try:
+            db.execute(text("BEGIN IMMEDIATE"))
+        except OperationalError as exc:
+            if "within a transaction" not in str(exc):
+                raise
+    elif dialect == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(7337)"))
 
 
 def in_flight_runs(db: Session, repo: str, *, cell: str, mode: str, apparatus: str) -> list[str]:
@@ -756,8 +783,12 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     refused with nothing queued; **409 ``remeasure_already_queued``** while any run an earlier
     queue of this cell (same mode and apparatus) put on the queue has not finished, naming
     those runs — the plan is derived from graded rows only, so without this a double click
-    or a second operator would spend the estimate twice; **503 ``queue_unavailable``** when
-    this server has no queue.
+    or a second operator would spend the estimate twice. The check, the runs and the
+    ``learn.remeasure.queued`` event that names them are one locked transaction (P-420): two
+    concurrent queues cannot both pass the check, and a failed insert or a lost ``seq`` race
+    leaves no run on the queue that no event names; **409 ``remeasure_concurrent_write``**
+    when other Learn writes won that race three times, with nothing queued; **503
+    ``queue_unavailable``** when this server has no queue.
     """
     get_repo_or_404(db, repo)
     if body.apparatus != APPARATUS_VERSION:
@@ -792,21 +823,17 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             detail={"modes": sorted(c.mode for c in matches)},
         )
     cell = matches[0]
-    in_flight = in_flight_runs(
-        db, repo, cell=cell.cell.label, mode=cell.mode, apparatus=body.apparatus
-    )
-    if in_flight:
-        raise ApiError(
-            409,
-            "remeasure_already_queued",
-            f"{len(in_flight)} run(s) queued for {cell.cell.label!r} ({cell.mode}) have not "
-            "finished — nothing was queued; the plan is re-read once they have graded",
-            detail={"run_ids": in_flight},
-        )
     api = require_jobs()
+    if api.stage is None:  # pragma: no cover - crb.store.jobs always offers it
+        raise ApiError(
+            503,
+            "queue_unavailable",
+            "this server's job queue cannot enqueue inside the transaction that records it, "
+            "so a re-measurement is never queued from Learn — nothing was queued",
+        )
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
     # whole or not at all (P-160 — the gate is the one POST /runs applies)
-    runs = []
+    validated_runs: list[RunCreateRequest] = []
     for request in cell.requests:
         payload = {k: v for k, v in request.to_dict().items() if k != "note"}
         try:
@@ -815,27 +842,59 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             raise ApiError(
                 422, "validation_error", f"the plan's run body does not validate: {exc}"
             ) from exc
-        run = new_run(validated, actor=operator.id)
-        submit_refusals(db, settings, validated, run)
-        runs.append(run)
-    run_ids = [api.enqueue(factory, run).id for run in runs]
-    append_system_event(
-        db,
-        trace_id=learn_trace_id(repo),
-        action="learn.remeasure.queued",  # a literal on purpose: see the constants above
-        repo=repo,
-        actor=operator.id,
-        payload={
-            "cell": cell.cell.label,
-            "mode": cell.mode,
-            "apparatus": body.apparatus,
-            "run_ids": run_ids,
-            "n_needed": cell.n_needed,
-            "est_cost_usd": round(cell.est_cost_usd, 4),
-            "cost_known": cell.cost_known,
-        },
-    )
-    db.commit()
+        submit_refusals(db, settings, validated, new_run(validated, actor=operator.id))
+        validated_runs.append(validated)
+    # P-420: the check, the runs and the event that names them are ONE serialised
+    # transaction. The lock makes a concurrent queue of any cell wait for this one to
+    # commit (so it sees these runs and is refused); the runs are staged in the same
+    # transaction as the event, so a lost ``seq`` race or a failed insert rolls every run
+    # back with it, and a retry never finds runs on the queue that no event names.
+    for attempt in range(_QUEUE_ATTEMPTS):
+        _lock_remeasure(db)
+        in_flight = in_flight_runs(
+            db, repo, cell=cell.cell.label, mode=cell.mode, apparatus=body.apparatus
+        )
+        if in_flight:
+            db.rollback()
+            raise ApiError(
+                409,
+                "remeasure_already_queued",
+                f"{len(in_flight)} run(s) queued for {cell.cell.label!r} ({cell.mode}) have "
+                "not finished — nothing was queued; the plan is re-read once they have graded",
+                detail={"run_ids": in_flight},
+            )
+        runs = [api.stage(db, new_run(v, actor=operator.id)) for v in validated_runs]
+        run_ids = [run.id for run in runs]
+        append_system_event(
+            db,
+            trace_id=learn_trace_id(repo),
+            action="learn.remeasure.queued",  # a literal on purpose: see the constants above
+            repo=repo,
+            actor=operator.id,
+            payload={
+                "cell": cell.cell.label,
+                "mode": cell.mode,
+                "apparatus": body.apparatus,
+                "run_ids": run_ids,
+                "n_needed": cell.n_needed,
+                "est_cost_usd": round(cell.est_cost_usd, 4),
+                "cost_known": cell.cost_known,
+            },
+        )
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            # another Learn write took this ``seq`` on the shared trace: nothing of this
+            # attempt was written, so it is taken again on fresh rows
+            db.rollback()
+            if attempt == _QUEUE_ATTEMPTS - 1:
+                raise ApiError(
+                    409,
+                    "remeasure_concurrent_write",
+                    "other Learn writes kept moving this repository's trace through "
+                    f"{_QUEUE_ATTEMPTS} attempts — nothing was queued; retry",
+                ) from None
     return RemeasureQueueOut(
         repo=repo,
         cell=cell.cell.label,

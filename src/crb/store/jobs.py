@@ -35,9 +35,9 @@ PostgreSQL behave identically.
 Navigation
 ----------
 What it is:   The job queue — the ``runs`` table driven as a durable, crash-safe work queue.
-What it does: Enqueues runs, hands each to exactly one worker, measures liveness by
-              heartbeat, re-queues (then abandons) runs whose worker died, refuses a stale
-              worker's writes, and supports cooperative cancellation. Every reclaim and
+What it does: Enqueues runs (or stages them in a caller's own transaction), hands each to
+              exactly one worker, measures liveness by heartbeat, re-queues (then abandons)
+              runs whose worker died, refuses a stale worker's writes, and supports cooperative cancellation. Every reclaim and
               abandonment is recorded as a ``system`` event, never silently.
 How:          ``claim_next`` flips ``queued → running`` in one locked transaction (``BEGIN
               IMMEDIATE`` / ``FOR UPDATE SKIP LOCKED``); ``heartbeat`` / ``progress`` refresh
@@ -191,6 +191,17 @@ class JobQueue:
     # --- enqueue / read ----------------------------------------------------------
     def enqueue(self, run: Run) -> Run:
         """Insert a run in ``queued`` state (id/mode/created filled in when blank)."""
+        with self._factory() as s:
+            self.stage(s, run)
+            s.commit()
+        return run
+
+    @staticmethod
+    def stage(session: Session, run: Run) -> Run:
+        """Add ``run`` to ``session`` in ``queued`` state WITHOUT committing — what
+        :meth:`enqueue` does, for a caller whose record of the enqueue must commit in the
+        same transaction as the runs (Learn's re-measurement queue: P-420). The caller
+        commits; a rollback leaves nothing on the queue."""
         if run.kind not in RUN_KINDS:
             raise ValueError(f"unknown run kind {run.kind!r}; expected one of {RUN_KINDS}")
         if not run.repo:
@@ -210,9 +221,7 @@ class JobQueue:
         for attr in ("ladder_json", "params_json", "apparatus_json", "counts_json"):
             if getattr(run, attr) is None:
                 setattr(run, attr, [] if attr == "ladder_json" else {})
-        with self._factory() as s:
-            s.add(run)
-            s.commit()
+        session.add(run)
         return run
 
     def get(self, run_id: str) -> Run | None:

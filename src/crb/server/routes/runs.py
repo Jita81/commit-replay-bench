@@ -134,6 +134,10 @@ class JobsApi:
     list_runs: (
         Callable[..., tuple[list[Run], int]] | None
     )  # (factory, *, repo, kind, status, limit, offset)
+    #: ``(session, run)`` — add a queued run to the CALLER's transaction without committing,
+    #: so a write that records the enqueue commits with the runs (P-420); ``None`` when the
+    #: queue module offers no such operation.
+    stage: Callable[[Session, Run], Run] | None = None
 
 
 def _import_optional(name: str) -> types.ModuleType | None:
@@ -154,10 +158,12 @@ def _jobs_api() -> JobsApi | None:
     cancel = getattr(mod, "request_cancel", None)
     lister = getattr(mod, "list_runs", None)
     if callable(enqueue) and callable(cancel):
+        stager = getattr(mod, "stage", None)
         return JobsApi(
             enqueue=enqueue,
             request_cancel=lambda f, rid, actor: bool(cancel(f, rid, actor=actor)),
             list_runs=lister if callable(lister) else None,
+            stage=stager if callable(stager) else None,
         )
     queue_cls = getattr(mod, "JobQueue", None)
     if queue_cls is None:
@@ -174,7 +180,16 @@ def _jobs_api() -> JobsApi | None:
         out: tuple[list[Run], int] = queue_cls(factory).list_runs(**kw)
         return out
 
-    return JobsApi(enqueue=_enqueue, request_cancel=_cancel, list_runs=_list)
+    def _stage(session: Session, run: Run) -> Run:
+        out: Run = queue_cls.stage(session, run)
+        return out
+
+    return JobsApi(
+        enqueue=_enqueue,
+        request_cancel=_cancel,
+        list_runs=_list,
+        stage=_stage if callable(getattr(queue_cls, "stage", None)) else None,
+    )
 
 
 def require_jobs() -> JobsApi:

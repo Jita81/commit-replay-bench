@@ -942,6 +942,13 @@ def load_oracle_scores(obj: Any) -> list[OracleTaskScore]:
     return out
 
 
+def strength_by_task(scores: Iterable[OracleTaskScore]) -> dict[str, float | None]:
+    """Each task's latest oracle strength (a later score of the same task wins; ``None`` =
+    unscoreable) — the reduction ``GET /oracle/{repo}`` serves and the capability map routes
+    under, so a strengthen report built from an export routes as the map does (P-426)."""
+    return {s.task_id: s.strength for s in scores}
+
+
 def _task_in_cell(cell: CapabilityCell, score: OracleTaskScore) -> bool:
     """A scored task belongs to a cell when every PROJECTED field the score carries
     (class, size) matches; fields the score cannot carry (model, builder …) are
@@ -1145,6 +1152,54 @@ def _item_for_cell(cell: CapabilityCell, *, threshold: float, registered: str) -
     )
 
 
+def _item_for_rescored_cell(
+    cell: CapabilityCell,
+    scores: Sequence[OracleTaskScore],
+    *,
+    threshold: float,
+    registered: str,
+) -> StrengthenItem:
+    """The one item an ``oracle_weak`` cell gets when every task scored in it is now strong
+    (P-426): the route was read under an older strength than the oracle ledger's latest
+    scores, so the work is to re-measure the cell under them — never a negative control,
+    which did not hold this cell."""
+    assert cell.stats is not None
+    label = cell.label
+    routed = _fmt_strength(cell.stats.oracle_strength_mean)
+    scored = min((s.strength for s in scores if s.strength is not None), default=None)
+    lowest = _fmt_strength(scored)
+    return StrengthenItem(
+        id=f"{STRENGTHEN_ID_PREFIX}{_short_hash(cell.key.label, 'rescored')}",
+        title=f"re-measure cell {label} under its tasks' latest oracle scores",
+        description=(
+            f"every task scored in cell {label} now kills its mutants (lowest latest score "
+            f"{lowest} vs threshold {threshold:.2f}), but the cell routes {cell.route} "
+            f"({cell.reason_code}) under the oracle strength its rows carry ({routed}). "
+            "The tests were strengthened after those rows were graded: re-measure the cell so "
+            "its route reads the new scores."
+        ),
+        acceptance_criteria=(
+            "the cell's tasks are graded again on the current target tests",
+            f"the mean oracle strength the cell's route reads is >= {threshold:.2f}",
+        ),
+        structural_facts=(
+            f"subject_under_test: the target tests of every task in cell {label}",
+            "behaviour_asserted: the latest oracle scores reach the cell's route",
+        ),
+        labels={
+            "source": "crb.core.learn",
+            "cell": label,
+            "reason_code": cell.reason_code,
+            "route": cell.route,
+            "oracle_strength": routed,
+            "threshold": f"{threshold:.2f}",
+            "slots": "structural",
+            "n": str(cell.n),
+        },
+        registered=registered,
+    )
+
+
 def _item_for_held_strong_cell(
     cell: CapabilityCell, *, threshold: float, registered: str
 ) -> StrengthenItem:
@@ -1254,9 +1309,16 @@ def strengthening_backlog(
                 )
             )
         if not weak:
-            # every scored task kills its mutants, yet the cell is held (a controls escape or
-            # a thin control set): the work is the control, so the flag still becomes ONE item
-            items.append(_item_for_held_strong_cell(cell, threshold=threshold, registered=when))
+            # every scored task kills its mutants, yet the cell is held: the flag still becomes
+            # ONE item, chosen by WHY it is held (P-426). A controls hold is work on the
+            # control; an oracle hold means the route still reads an older strength than the
+            # scores, so the work is to re-measure the cell under them
+            if cell.reason_code == REASON_ORACLE_WEAK:
+                items.append(
+                    _item_for_rescored_cell(cell, matched, threshold=threshold, registered=when)
+                )
+            else:
+                items.append(_item_for_held_strong_cell(cell, threshold=threshold, registered=when))
     items.sort(key=lambda i: (i.labels.get("cell", ""), i.labels.get("repo", ""), i.id))
     return StrengthenBacklog(
         items=tuple(items),
@@ -1710,6 +1772,7 @@ __all__ = [
     "render_remeasure",
     "render_strengthen",
     "row_violation_text",
+    "strength_by_task",
     "strengthening_backlog",
     "triage_refusals",
 ]
