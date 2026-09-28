@@ -45,8 +45,7 @@ except ImportError:  # pragma: no cover
 RUFF = shutil.which("ruff") or str(Path(__file__).resolve().parents[1] / ".venv" / "bin" / "ruff")
 
 
-@pytest.mark.skipif(not langs.has_tool("gofmt"), reason="gofmt not on PATH")
-@pytest.mark.toolchain("go")
+@pytest.mark.toolchain("go", "gofmt")
 def test_gofmt_rewrites_the_changed_source_and_nothing_else(tmp_path: Path) -> None:
     gorepo = langs.fixture_module("gorepo")
     root, _ = gorepo.build(tmp_path)
@@ -71,8 +70,7 @@ def test_gofmt_rewrites_the_changed_source_and_nothing_else(tmp_path: Path) -> N
     assert (root / gorepo.TEST_ADD).read_text(encoding="utf-8") == test_before
 
 
-@pytest.mark.skipif(not langs.has_tool("gofmt"), reason="gofmt not on PATH")
-@pytest.mark.toolchain("go")
+@pytest.mark.toolchain("go", "gofmt")
 def test_a_formatter_that_fails_leaves_the_file_and_says_so(tmp_path: Path) -> None:
     gorepo = langs.fixture_module("gorepo")
     root, _ = gorepo.build(tmp_path)

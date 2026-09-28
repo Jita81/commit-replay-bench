@@ -22,7 +22,9 @@ What it does: Pins that ``partition`` puts every file in exactly one shard, dete
               runs ``verify`` over all N reports and ``coverage report --fail-under=70`` on the
               combined data; each shard runs the old job's command unchanged but for the shard
               and coverage-data options, the matrix lists 1..N, the name states N, and N
-              leaves no shard empty.
+              leaves no shard empty. The fresh-clone suite is split the same N ways: its
+              aggregator needs the gates job and every shard, passes only when every part did
+              and proves the partition, and each shard fits its budget as root (P-743).
 How:          Pure calls with synthetic ids and weights; one pytest subprocess per shard over a
               suite written to ``tmp_path``; ``ci.yml`` read as text with the job parser of
               tests/test_ci_job_budget.py.
@@ -67,6 +69,13 @@ SUITE_COMMAND = '.venv/bin/pytest -q -m "not sandbox_images"'
 #: A shard's time outside its tests: checkout, install, helm, collection (about 70 s in PR
 #: #57's logs, doubled).
 SETUP_ALLOWANCE_S = 150
+#: Each aggregator whose parts load the shard plugin → that shard job. ``fresh-clone`` runs
+#: the same suite as root on a fresh clone, split the same N ways (P-743).
+SHARDED = {"test": "test-shard", "fresh-clone": "fresh-clone-shard"}
+#: The fresh-clone suite ran 63.8 min as root where the weights predict 54.5 for the runner
+#: user (its first run, 2026-09-28: no uv cache, root's own ~/.m2 and npm caches), so its
+#: shards are predicted at this multiple of the weights.
+ROOT_SLOWDOWN = 1.2
 
 
 def _shards() -> ModuleType:
@@ -380,8 +389,8 @@ def test_the_aggregator_needs_every_shard_job_and_passes_only_when_every_part_di
     body = jobs["test"]
     text = "\n".join(body) + "\n"
     loaders = {j for j, b in jobs.items() if "-p ci_test_shards" in "\n".join(b)}
-    assert loaders == {"test-shard"}
-    assert set(_needs(body)) == loaders
+    assert loaders == set(SHARDED.values()), "every job that loads the plugin is a known part"
+    assert set(_needs(body)) == {"test-shard"}
     assert re.search(r"^    if: always\(\)\s*$", text, re.M)
     steps = _steps(body)
     gate = [s for s in steps if "toJSON(needs)" in s]
@@ -448,4 +457,56 @@ def test_the_shard_count_leaves_no_shard_empty_and_fits_the_budget() -> None:
     assert heaviest <= budget_s / 2, (
         f"the heaviest of {n} shards is predicted at {heaviest / 60:.1f} min, over half of "
         f"its {budget_s // 60}-minute timeout: raise N (P-053)"
+    )
+
+
+# --- the fresh-clone suite, split the same way (P-743) ---------------------------------------
+
+
+def test_the_fresh_clone_aggregator_needs_its_shards_and_proves_their_partition() -> None:
+    """The fresh-clone suite ran unsharded until its first run took 65.9 of its 75 minutes.
+    Its shards are the same N as ``test-shard`` (one weights file, one partition), each one
+    matrix value 1..N; the aggregator keeps the one name, needs the gates job and every
+    shard, runs ``always()``, fails unless every part passed, and runs ``verify`` over all N
+    reports, which every shard uploads under its own name."""
+    n = _shard_count()
+    jobs = _jobs(CI.read_text("utf-8"))
+    agg, shard = jobs["fresh-clone"], jobs["fresh-clone-shard"]
+    assert set(_needs(agg)) == {"fresh-clone-gates", "fresh-clone-shard"}
+    assert re.search(r"^    if: always\(\)\s*$", "\n".join(agg), re.M)
+    steps = _steps(agg)
+    gate = [s for s in steps if "toJSON(needs)" in s]
+    assert len(gate) == 1 and f"jq -e '{ALL_PASSED_JQ}'" in gate[0]
+    assert not any("continue-on-error" in s for s in steps)
+    assert _matrix(shard, "shard") == [str(k) for k in range(1, n + 1)]
+    assert re.search(rf"\(\$\{{\{{ matrix\.shard \}}\}} of {n}, ", _name(shard))
+    runs = [s for s in _steps(shard) if "ci_test_shards" in s]
+    assert len(runs) == 1 and f'--shard="$SHARD/{n}"' in runs[0]
+    assert "SHARD: ${{ matrix.shard }}" in runs[0]
+    proof = [s for s in steps if "ci_test_shards.py verify" in s]
+    assert len(proof) == 1
+    cmd = " ".join(proof[0].split())
+    assert f"verify --shards {n} --python 3.12" in cmd
+    assert re.findall(r"shards/shard-(\d+)\.json", cmd) == [str(k) for k in range(1, n + 1)]
+    download = next(s for s in steps if "download-artifact" in s)
+    assert "pattern: fresh-clone-shard-*" in download
+    upload = next(s for s in _steps(shard) if "upload-artifact" in s)
+    assert "name: fresh-clone-shard-${{ matrix.shard }}" in upload
+    assert "if-no-files-found: error" in upload and "continue-on-error" not in upload
+
+
+def test_the_fresh_clone_shards_fit_their_budget_as_root() -> None:
+    """Each fresh-clone shard, predicted from the weights at the measured root slowdown plus
+    the setup allowance, stays within half of its own timeout."""
+    m = _shards()
+    n = _shard_count()
+    weights = m.load_weights()
+    parts = m.partition(dict.fromkeys(weights.files, 1), n, weights)
+    budget_s = _timeout(_jobs(CI.read_text("utf-8"))["fresh-clone-shard"]) * 60
+    heaviest = SETUP_ALLOWANCE_S + ROOT_SLOWDOWN * max(
+        sum(weights.files[f] for f in p) for p in parts
+    )
+    assert heaviest <= budget_s / 2, (
+        f"the heaviest fresh-clone shard is predicted at {heaviest / 60:.1f} min, over half of "
+        f"its {budget_s // 60}-minute timeout: raise N for both shard jobs (P-743)"
     )

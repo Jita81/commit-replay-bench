@@ -727,10 +727,7 @@ def _qualify_sha(
     return out, events
 
 
-@pytest.mark.toolchain("go")
-@pytest.mark.skipif(
-    not (langs.has_tool("go") and langs.has_tool("gofmt")), reason="go/gofmt not on PATH"
-)
+@pytest.mark.toolchain("go", "gofmt")
 def test_go_gold_that_gofmt_rejects_is_not_gold_clean(tmp_path: Path) -> None:
     """The fixture's feat commit is gofmt-clean: the gold passes belt 5 (``lint=True``).
     A later commit whose source the maintainers left un-gofmt'd — cobra #1559's shape,

@@ -65,6 +65,7 @@ from crb.core.execution import (
     ExecResult,
     LocalExecutor,
     SandboxUnavailable,
+    docker_server_version,
     make_executor,
     sequence_env,
 )
@@ -316,6 +317,30 @@ def test_docker_daemon_probe_failure_fails_closed() -> None:
         DockerExecutor(_settings(), runner=FakeRunner(FileNotFoundError("docker")))
     with pytest.raises(SandboxUnavailable, match="probe failed"):
         DockerExecutor(_settings(), runner=FakeRunner(subprocess.TimeoutExpired("docker", 30)))
+
+
+#: What a docker CLI before 29 answers a formatted ``docker info`` with when its daemon is
+#: down: the template rendered empty, the error on stderr, and exit 0 (the fresh-clone job's
+#: first run, 2026-09-28 — docs/PREVENTION.md P-741).
+_EMPTY_INFO = subprocess.CompletedProcess(
+    [],
+    0,
+    "\n",
+    "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. "
+    "Is the docker daemon running?\n",
+)
+
+
+def test_a_daemon_probe_that_names_no_server_version_fails_closed() -> None:
+    """Exit 0 alone is not an answer: the executor refuses unless the daemon named its
+    version, and says what the CLI said."""
+    with pytest.raises(SandboxUnavailable, match="not reachable: Cannot connect"):
+        DockerExecutor(_settings(), runner=FakeRunner(_EMPTY_INFO))
+    with pytest.raises(SandboxUnavailable, match="named no server version"):
+        docker_server_version("/fake/docker", runner=FakeRunner(_ok("")))
+    fr = FakeRunner(_ok("27.5.1\n"))
+    assert docker_server_version("/fake/docker", runner=fr, timeout=7) == "27.5.1"
+    assert fr.calls == [["/fake/docker", "info", "--format", "{{.ServerVersion}}"]]
 
 
 def test_docker_build_argv_has_every_hardening_flag(tmp_path: Path) -> None:

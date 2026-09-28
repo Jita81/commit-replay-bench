@@ -45,10 +45,11 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
+
+from crb.core.execution import SandboxUnavailable, docker_server_version
 
 log = logging.getLogger("crb.observability.probes")
 
@@ -129,18 +130,12 @@ def probe_docker(timeout: int = 10, *, request_id: str = "") -> ProbeResult:
             return ProbeResult(
                 "sandbox", DOWN, "docker binary not on PATH — sandboxed runs will fail closed"
             )
-        r = subprocess.run(
-            [binary, "info", "--format", "{{.ServerVersion}}"],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        if r.returncode != 0:
+        try:  # exit 0 with no version is a stopped daemon too (docs/PREVENTION.md P-741)
+            version = docker_server_version(binary, timeout=timeout)
+        except SandboxUnavailable:
             return ProbeResult(
                 "sandbox", DOWN, "docker daemon not reachable — sandboxed runs will fail closed"
             )
-        version = r.stdout.strip()
         return ProbeResult("sandbox", OK, f"docker {version}", {"version": version})
 
     return run_probe("sandbox", _read, request_id=request_id)

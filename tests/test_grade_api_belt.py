@@ -113,7 +113,6 @@ GO_CASES = {
 }
 
 
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 @pytest.mark.toolchain("go")
 @pytest.mark.parametrize("case", sorted(GO_CASES))
 def test_go_belt_six(tmp_path: Path, executor: LocalExecutor, case: str) -> None:
@@ -217,7 +216,6 @@ def test_belt_six_is_off_by_default_and_then_the_grade_and_row_are_unchanged(
 # --- Node -----------------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
 @pytest.mark.toolchain("node")
 @pytest.mark.parametrize(
     ("edit", "ok"),
