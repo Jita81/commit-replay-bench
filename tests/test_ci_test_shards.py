@@ -247,6 +247,68 @@ def test_weights_are_refreshed_from_the_reports_measured_seconds() -> None:
     assert fresh["per_test_seconds_default"] == round(9.0 / sum(SAMPLE.values()), 2)
 
 
+def _timed(durations: dict[str, float]) -> list[dict[str, Any]]:
+    """Two shard reports whose measured per-file seconds are ``durations``."""
+    r = _reports(2)
+    files = sorted(durations)
+    r[0]["durations"] = {f: durations[f] for f in files[::2]}
+    r[1]["durations"] = {f: durations[f] for f in files[1::2]}
+    return r
+
+
+def test_weights_a_run_measured_close_to_are_not_stale() -> None:
+    """A runner's speed moves a file by a quarter; a fresh table must not trip on that."""
+    m = _shards()
+    weights = m.Weights(files={"tests/test_a.py": 100.0, "tests/test_c.py": 400.0})
+    assert (
+        m.stale_weights(_timed({"tests/test_a.py": 130.0, "tests/test_c.py": 520.0}), weights) == []
+    )
+    assert m.stale_weights(_reports(2), weights) == []  # a run that measured nothing says nothing
+
+
+def test_a_file_that_outgrew_its_weight_makes_the_weights_stale() -> None:
+    """P-740: tests/test_factory_loop.py was weighed at 158 s and took 880; the budget test read
+    the weight, predicted every shard under half its timeout, and a shard crept to 81 %."""
+    m = _shards()
+    weights = m.Weights(files={"tests/test_a.py": 158.0, "tests/test_c.py": 400.0})
+    errors = m.stale_weights(_timed({"tests/test_a.py": 880.0, "tests/test_c.py": 410.0}), weights)
+    assert errors == ["tests/test_a.py took 880 s against its weight of 158 s"]
+
+
+def test_files_the_weights_do_not_list_make_them_stale_past_a_tenth_of_the_run() -> None:
+    m = _shards()
+    weights = m.Weights(files={"tests/test_a.py": 900.0})
+    assert (
+        m.stale_weights(_timed({"tests/test_a.py": 900.0, "tests/test_c.py": 90.0}), weights) == []
+    )
+    (error,) = m.stale_weights(
+        _timed({"tests/test_a.py": 900.0, "tests/test_c.py": 90.0, "tests/test_d.py": 60.0}),
+        weights,
+    )
+    assert "2 test file(s) the weights do not list took 14% of this run's seconds" in error
+    assert "the heaviest tests/test_c.py at 90 s" in error
+
+
+def test_verify_fails_on_stale_weights_and_says_how_to_refresh_them(tmp_path: Path) -> None:
+    m = _shards()
+    table = tmp_path / "weights.json"
+    table.write_text(
+        json.dumps({"per_test_seconds_default": 1.0, "files": {"tests/test_a.py": 10.0}}), "utf-8"
+    )
+    paths = []
+    for rep in _timed({"tests/test_a.py": 300.0}):
+        p = tmp_path / f"shard-{rep['shard']}.json"
+        p.write_text(json.dumps(rep), "utf-8")
+        paths.append(str(p))
+    summary = tmp_path / "summary.md"
+    env = {"GITHUB_STEP_SUMMARY": str(summary)}
+    assert m.main(["verify", "--shards", "2", "--weights", str(table), *paths], env) == 1
+    text = summary.read_text("utf-8")
+    assert "ran in exactly one of 2 shards" in text  # the partition itself is proven
+    assert "THE SHARD WEIGHTS ARE STALE" in text and "tests/test_a.py took 300 s" in text
+    assert "python3 scripts/ci_test_shards.py weights" in text
+
+
 # --- the plugin, run by pytest ------------------------------------------------------------
 
 
@@ -440,12 +502,20 @@ def test_the_shard_count_leaves_no_shard_empty_and_fits_the_budget() -> None:
     m = _shards()
     n = _shard_count()
     weights = m.load_weights()
-    counts = dict.fromkeys(weights.files, 1)
+    # every test file on disk, not only the ones the table lists: a file the table does not
+    # know weighs its test count at the default (P-740 — 68 unlisted files were invisible here)
+    counts = {
+        str(f.relative_to(ROOT)): max(1, f.read_text("utf-8").count("\ndef test_"))
+        for f in sorted((ROOT / "tests").glob("test_*.py"))
+    }
     parts = m.partition(counts, n, weights)
     assert all(parts)
     budget_s = _timeout(_jobs(CI.read_text("utf-8"))["test-shard"]) * 60
-    heaviest = SETUP_ALLOWANCE_S + max(sum(weights.files[f] for f in p) for p in parts)
+    heaviest = SETUP_ALLOWANCE_S + max(
+        sum(weights.cost(f, counts[f]) for f in p) / 100 for p in parts
+    )
     assert heaviest <= budget_s / 2, (
         f"the heaviest of {n} shards is predicted at {heaviest / 60:.1f} min, over half of "
-        f"its {budget_s // 60}-minute timeout: raise N (P-053)"
+        f"its {budget_s // 60}-minute timeout: raise N, or split the heaviest test file "
+        "(P-053, P-740)"
     )

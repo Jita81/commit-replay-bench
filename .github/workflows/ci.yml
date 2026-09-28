@@ -11,14 +11,14 @@
 #   (commit-subjects lives in commit-subjects.yml: it must re-run when a pull request's
 #             title is edited, and an edit should not re-run this whole workflow)
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
-#   test-shard     the hermetic suite (pytest -m "not sandbox_images") split six ways per Python
+#   test-shard     the hermetic suite (pytest -m "not sandbox_images") split eight ways per Python
 #                  version (3.12, 3.13) by scripts/ci_test_shards.py — whole test files,
 #                  longest-first over the measured seconds in scripts/ci_test_weights.json, so
-#                  every shard computes the same partition and the six are balanced. Each shard
+#                  every shard computes the same partition and the eight are balanced. Each shard
 #                  uploads its report (every id it collected, the ids it ran) and its coverage
 #                  data. The shards are not required contexts
 #   test           the required contexts "test (py3.12)" and "test (py3.13)": an aggregator per
-#                  version that passes only when every shard passed, the six reports prove every
+#                  version that passes only when every shard passed, the eight reports prove every
 #                  collected test ran in exactly one non-empty shard (`ci_test_shards.py verify`),
 #                  and the shards' combined coverage is >= 70 — the single job's gate, on the
 #                  same data. It ran as one job per version until py3.13 took 58 of its 60
@@ -249,24 +249,25 @@ jobs:
         run: .venv/bin/lint-imports
 
   test-shard:
-    # The hermetic suite, split six ways per Python version. It ran as one job per version
+    # The hermetic suite, split eight ways per Python version. It ran as one job per version
     # until py3.13 took 58 of its 60 minutes on PR #57 (P-053). Each shard runs the SAME
     # command the single job ran — `-m "not sandbox_images"` and nothing else deselected —
     # plus the shard plugin, which keeps only this shard's test files: longest-first over the
-    # measured per-file seconds in scripts/ci_test_weights.json, so the six are balanced and
-    # every shard computes the same partition. ~9 min of tests + ~2 min setup per shard,
-    # estimated from PR #57's two test-job logs: under half of this budget. No shard enforces
-    # coverage (a sixth of the suite covers less than the whole): `test (py…)` combines the
-    # six shards' coverage data and fails under 70 % on the union, exactly as the single job
+    # measured per-file seconds in scripts/ci_test_weights.json, so the eight are balanced and
+    # every shard computes the same partition. At most ~12 min of tests + ~2 min setup per
+    # shard, planned from three runs' measured per-file seconds (2026-09-28): under half of
+    # this budget; `test (py…)` fails when the weights go stale (P-740). No shard enforces
+    # coverage (an eighth of the suite covers less than the whole): `test (py…)` combines the
+    # eight shards' coverage data and fails under 70 % on the union, exactly as the single job
     # did. The shards are not required contexts — the `test` aggregators are.
-    name: test shard (py${{ matrix.python }}, ${{ matrix.shard }} of 6)
+    name: test shard (py${{ matrix.python }}, ${{ matrix.shard }} of 8)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       # A toolchain warm-up (npm install, Maven resolution, docker build) that fails here
       # is a repository defect, not missing infrastructure: fail, never skip.
@@ -309,7 +310,7 @@ jobs:
           PYTHONPATH: scripts
         run: >-
           .venv/bin/pytest -q -m "not sandbox_images"
-          -p ci_test_shards --shard=${{ matrix.shard }}/6
+          -p ci_test_shards --shard=${{ matrix.shard }}/8
           --shard-report=shard-report/shard-${{ matrix.shard }}.json
           --cov=crb --cov-branch --cov-report= --cov-fail-under=0
       - name: Keep this shard's report and coverage data for `test (py${{ matrix.python }})`
@@ -338,9 +339,9 @@ jobs:
     # this job carries the required one. It passes only when (1) every shard succeeded — a
     # failed, cancelled or skipped shard fails it; `needs` on a matrix job waits for every
     # leg of BOTH versions, so a red py3.13 shard also fails `test (py3.12)`: stricter, never
-    # looser; (2) this version's six reports prove the shards are one exact partition of the
-    # collected suite — every test in exactly one shard, none empty, all six collecting the
-    # same suite (scripts/ci_test_shards.py verify); (3) the six shards' coverage data,
+    # looser; (2) this version's eight reports prove the shards are one exact partition of the
+    # collected suite — every test in exactly one shard, none empty, all eight collecting the
+    # same suite (scripts/ci_test_shards.py verify); (3) the eight shards' coverage data,
     # combined, is at least 70 % — the single job's gate, on the same data. `if: always()`
     # so it runs, and fails, when a shard failed or was cancelled: a skipped required check
     # does not block a merge. tests/test_ci_test_shards.py holds all of this in place.
@@ -380,11 +381,12 @@ jobs:
           pattern: test-shard-py${{ matrix.python }}-*
           path: shards
           merge-multiple: true
-      - name: Every test ran in exactly one shard (the partition proof)
+      - name: Every test ran in exactly one shard (the partition proof), and the weights are current
         run: >-
-          python3 scripts/ci_test_shards.py verify --shards 6 --python ${{ matrix.python }}
+          python3 scripts/ci_test_shards.py verify --shards 8 --python ${{ matrix.python }}
           shards/shard-1.json shards/shard-2.json shards/shard-3.json
           shards/shard-4.json shards/shard-5.json shards/shard-6.json
+          shards/shard-7.json shards/shard-8.json
       - name: coverage >= 70 on the union of the shards
         run: |
           .venv/bin/coverage combine --keep shards/shard-*.coverage
