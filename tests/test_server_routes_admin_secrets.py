@@ -30,8 +30,8 @@ Works with:   src/crb/server/routes/admin.py (under test), src/crb/server/secret
               tests/test_server_secrets.py (the store's own suite), docs/API.md (admin, the
               ``/settings/secrets`` contract), docs/SECURITY.md (credentials, §3.3)
 Tested by:    tests/test_server_routes_admin_secrets.py
-Touch when:   a secret name is added (a shape-validation case and a never-echoed case); the
-              verify probe changes what it runs.
+Touch when:   never for a new repository; a secret name is added (a shape-validation case and
+              a never-echoed case); the verify probe changes what it runs.
 """
 
 from __future__ import annotations

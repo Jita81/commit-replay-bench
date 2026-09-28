@@ -51,8 +51,8 @@ Works with:   src/crb/server/claude_login_driver.py (the helper this spawns),
               (``CLI_TOKEN_SECRET``, ``verify_login`` — the consumer), docs/OPERATOR.md
               (the operator's walkthrough), docs/SECURITY.md#33-credentials
 Tested by:    tests/test_server_claude_login.py (a fake ``claude`` script drives every path)
-Touch when:   the CLI changes the wording of its sign-in prompt (``URL_RE`` / the driver's
-              ``PASTE_PROMPT``) or its token prefix; never for a new repository.
+Touch when:   never for a new repository; the CLI changes the wording of its sign-in prompt
+              (``URL_RE`` / the driver's ``PASTE_PROMPT``) or its token prefix.
 """
 
 from __future__ import annotations

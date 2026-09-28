@@ -18,8 +18,8 @@ Works with:   src/crb/factory/testfirst.py (under test), src/crb/core/runners/ba
               RED run), src/crb/core/workspace.py (the disposable worktree),
               src/crb/factory/build.py (stages the proof), tests/test_factory_build.py
 Tested by:    tests/test_factory_testfirst.py
-Touch when:   a runner other than pytest is used by the factory (a RED-proof case on its
-              output); the identity rule changes.
+Touch when:   never for a new repository; a runner other than pytest is used by the factory
+              (a RED-proof case on its output); the identity rule changes.
 """
 
 from __future__ import annotations

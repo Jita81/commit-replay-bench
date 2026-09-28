@@ -26,7 +26,8 @@ Works with:   src/crb/server/claude_login.py, src/crb/server/claude_login_driver
               src/crb/server/routes/admin.py, src/crb/core/secrets_file.py,
               tests/test_server_routes_admin_secrets.py (the manual-token path this joins)
 Tested by:    tests/test_server_claude_login.py
-Touch when:   the CLI's transcript changes (update ``FAKE_CLAUDE`` from a real observation first).
+Touch when:   never for a new repository; the CLI's transcript changes (update ``FAKE_CLAUDE``
+              from a real observation first).
 """
 
 from __future__ import annotations
