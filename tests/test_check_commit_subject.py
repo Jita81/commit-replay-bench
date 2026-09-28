@@ -208,6 +208,47 @@ def test_title_is_checked_because_a_squash_merge_writes_it_on_main(repo: Path) -
     assert ccs.main([*ok, "--title", "docs: the summary, and more"]) == 1
 
 
+@pytest.mark.parametrize(
+    ("title", "number"),
+    [
+        # the three squash subjects that reached main at 73, 75 and 73 characters
+        ("feat(dod): finish Wave 1 - accounts, Learn, keyboard, help (part B)", 65),
+        ("feat(dod): correct the record and measure economics and flow (part A)", 64),
+        ("fix(runners): refuse a POM whose test phase runs more than surefire", 62),
+    ],
+)
+def test_a_title_is_measured_with_the_suffix_the_squash_merge_adds(
+    repo: Path, title: str, number: int
+) -> None:
+    """docs/PREVENTION.md P-500: a squash merge writes ``<title> (#<n>)`` on main, so a title
+    that fits 72 characters on its own can still land a longer subject. These three passed the
+    gate as titles and landed on main at 73, 75 and 73 characters."""
+    head = _git(repo, "rev-parse", "HEAD")
+    ok = ["--repo", str(repo), "--range", f"{head}..{head}", "--check", "--title", title]
+    assert len(title) <= ccs.MAX_LEN
+    assert len(f"{title} (#{number})") > ccs.MAX_LEN
+    assert ccs.main([*ok, "--pr-number", str(number)]) == 1
+    # without the number the gate reserves room for the longest suffix it expects
+    assert ccs.main(ok) == 1
+
+
+def test_a_title_that_leaves_room_for_its_suffix_passes(repo: Path) -> None:
+    head = _git(repo, "rev-parse", "HEAD")
+    title = "fix(ci): count the squash suffix in the pull request title check"
+    assert len(f"{title} (#66)") <= ccs.MAX_LEN
+    ok = ["--repo", str(repo), "--range", f"{head}..{head}", "--check", "--title", title]
+    assert ccs.main([*ok, "--pr-number", "66"]) == 0
+    assert ccs.main(ok) == 0
+
+
+def test_the_workflow_passes_the_pull_request_number_with_the_title() -> None:
+    """The gate can only count the suffix if CI gives it the number, through the environment
+    like the title (a pull request field is untrusted input, never interpolated)."""
+    text = _workflow_with("commit-subjects").read_text(encoding="utf-8")
+    assert "PR_NUMBER: ${{ github.event.pull_request.number }}" in text
+    assert '--pr-number "$PR_NUMBER"' in text
+
+
 def test_ci_runs_the_gate_on_pull_requests_under_a_short_job_name() -> None:
     # the job moved to its own workflow so an edited title re-runs it (see the next test)
     ci = _workflow_with("commit-subjects").read_text(encoding="utf-8")

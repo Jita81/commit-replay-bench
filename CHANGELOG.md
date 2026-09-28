@@ -22,6 +22,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   revocable nonce, the session-bound CSRF token — and it never touches the rate limit. Every
   sign-in is an audited `auth.dev_autologin` event, and every page shows a banner.
 
+- **A pull request title is measured as the squash merge writes it**
+  ([#67](https://github.com/Jita81/commit-replay-bench/pull/67)). The commit-subject gate now
+  adds the ` (#<n>)` suffix a squash merge appends before it checks the 72-character limit:
+  CI passes the number, and a local run reserves room for four digits. #62, #64 and #65 landed
+  subjects of 73, 75 and 73 characters on `main` because the title was measured alone (P-500).
+
 - **The security and governance review's findings closed: sign-in, evidence, store, delivery**
   (the operator's internal review, streams A to D; [#63](https://github.com/Jita81/commit-replay-bench/pull/63)).
   A login attempt counts before its password is checked, the identity provider never demotes
