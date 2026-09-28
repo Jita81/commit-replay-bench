@@ -491,6 +491,20 @@ class TestActive:
             with pytest.raises(RuntimeError, match="already open"):
                 lock_users_table(s)
 
+    def test_the_users_lock_re_entry_reads_the_one_write_lock_record(
+        self, client: TestClient, app: Any
+    ) -> None:
+        """One record says a transaction holds the users lock: ``write_locks_held``, the set
+        the lock-order check (P-227) reads. Re-entry in the transaction that took the lock
+        must read that record too, not a second copy in ``Session.info`` that could drift."""
+        del client  # started: the lifespan binds the session factory
+        with app.state.session_factory() as s:
+            lock_users_table(s)
+            for key in [k for k in s.info if k != "crb.write_locks_held"]:
+                del s.info[key]  # only the write-lock record survives
+            lock_users_table(s)  # still a no-op: the record proves the lock is held
+            s.rollback()
+
     def test_a_transaction_already_open_refuses_a_deactivation_rather_than_run_unlocked(
         self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:

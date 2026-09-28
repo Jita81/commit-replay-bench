@@ -307,8 +307,11 @@ def _lock_learn_trace(db: Session) -> None:
     ``crb.store.jobs``). A rollback or commit releases it.
 
     Fails closed (P-429): when a transaction is already open, ``BEGIN IMMEDIATE`` cannot
-    run and nothing proves this session holds the write lock (a deferred ``BEGIN`` holds
-    none), so :class:`LearnLockNotHeld` is raised and nothing is written."""
+    run, and its error is no documented proof that this session holds the write lock (a
+    deferred ``BEGIN`` holds none). SQLite does take the lock before it raises — its
+    ``OP_Transaction`` step runs before ``OP_AutoCommit``'s error — so the old helper held
+    it by accident; failing closed removes the dependence on that order.
+    :class:`LearnLockNotHeld` is raised and nothing is written."""
     dialect = db.get_bind().dialect.name
     if dialect == "sqlite":
         try:

@@ -135,6 +135,9 @@ def lock_event_writes(s: Session) -> None:
     database's write lock explicitly — a no-op when the transaction has written, a wait (or
     "database is locked") when it has not — rather than swallow the refused ``BEGIN
     IMMEDIATE`` and carry on (P-429's rule: no lock helper carries on after that error).
+    SQLite does take the write lock before it refuses (``OP_Transaction`` runs before
+    ``OP_AutoCommit``'s error), so a swallowing helper held it by accident of that order;
+    the explicit write removes the dependence on it.
     PostgreSQL: a transaction-scoped advisory lock (id 7332 — one id per table, see
     ``crb.store.jobs``), re-entrant within the transaction. Other dialects: no-op."""
     dialect = s.get_bind().dialect.name

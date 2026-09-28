@@ -290,11 +290,6 @@ def count_users(db: Session) -> int:
     return int(db.execute(select(func.count(User.id))).scalar_one())
 
 
-#: ``Session.info`` key naming the transaction that took the users write lock, so taking it
-#: again inside that same transaction is a no-op rather than a refusal (P-430).
-_USERS_LOCK_HELD_BY = "crb.users_lock_held_by"
-
-
 class UsersLockNotHeld(RuntimeError):
     """The users write lock could not be taken because a transaction was already open on the
     session: the users write is refused rather than run unserialised (P-430)."""
@@ -313,15 +308,18 @@ def lock_users_table(db: Session) -> None:
     pysqlite defers BEGIN until the first write, so the lock is taken after a caller's
     reads; every caller (``set_role``, ``set_user_active`` from the route and from ``crb
     users``) only reads before it. Fails closed (P-430, P-429's class): when a transaction
-    is already open, ``BEGIN IMMEDIATE`` cannot run and nothing proves this session holds
-    the write lock (a deferred ``BEGIN`` holds none), so :class:`UsersLockNotHeld` is raised
-    and nothing is written — unless this same transaction took the lock already, which
-    holds to its end (a commit or rollback ends that proof)."""
+    is already open, ``BEGIN IMMEDIATE`` cannot run and its error is not a documented proof
+    that this session holds the write lock (a deferred ``BEGIN`` holds none; SQLite does
+    take the lock before it raises, by the order of its ``OP_Transaction`` and
+    ``OP_AutoCommit`` steps, which is why the old helper held it by accident), so
+    :class:`UsersLockNotHeld` is raised and nothing is written — unless this same
+    transaction took the lock already, which holds to its end. That proof is the one
+    record :func:`~crb.store.events.write_locks_held` keeps, which a commit or rollback
+    forgets."""
     refuse_after_events_lock(db, USERS_LOCK)
     dialect = db.get_bind().dialect.name
     if dialect == "sqlite":
-        held_by = db.info.get(_USERS_LOCK_HELD_BY)
-        if held_by is not None and held_by is db.get_transaction():
+        if USERS_LOCK in write_locks_held(db):
             return
         try:
             db.execute(text("BEGIN IMMEDIATE"))
@@ -332,7 +330,6 @@ def lock_users_table(db: Session) -> None:
                 "the users write lock was not taken: a transaction was already open on this "
                 "session, so the users write would run unserialised — nothing was written"
             ) from exc
-        db.info[_USERS_LOCK_HELD_BY] = db.get_transaction()
     elif dialect == "postgresql":
         db.execute(text("SELECT pg_advisory_xact_lock(7336)"))
     write_locks_held(db).add(USERS_LOCK)
