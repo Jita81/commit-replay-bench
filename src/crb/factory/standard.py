@@ -58,13 +58,15 @@ Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 8),
               docs/adr/0003-one-routing-rule.md (the route gate; superseded in part)
 Works with:   src/crb/factory/loop.py (``_assess`` calls ``decide_entry``; ``_deliver`` calls
-              ``own_cell_licence``), src/crb/server/factory_standard.py (the store-bound
-              readers), src/crb/server/worker.py (binds them once per run, before any build), src/crb/intake/feedback.py (the ticket's words for each stop),
+              ``own_cell_licence``), src/crb/server/factory_standard.py (the store-bound readers),
+              src/crb/server/worker.py (binds them once per run, before any build),
+              src/crb/intake/feedback.py (the ticket's words for each stop),
               src/crb/server/routes/factory.py (the calibration route and the task view)
 Tested by:    tests/test_factory_entry_gate.py
 Touch when:   never for a new repository; the organisation's validity report lands
-              (:func:`points_agreement_passed`); the operator fixes ADR-0026 item 8's size value; a new stop is added
-              (a code here, a status in loop.py, a sentence in feedback.py and the UI).
+              (:func:`points_agreement_passed`); the operator fixes ADR-0026 item 8's size value; a
+              new stop is added (a code here, a status in loop.py, a sentence in feedback.py and the
+              UI).
 Claims:       a proven standard licenses an attempt on its arm, never a merge; "not built" is
               the gate's word, never "built and withheld" (docs/EVIDENCE-AND-CLAIMS.md).
 """

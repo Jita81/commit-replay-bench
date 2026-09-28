@@ -17,8 +17,8 @@ store-level checks:
   :func:`crb.store.db.expected_triggers`) AND an ``UPDATE`` and a ``DELETE`` are refused in
   the trigger's own words on every append-only table that holds a row, on SQLite a
   ``REPLACE`` too (:func:`crb.store.ledger.assert_append_only`; on empty tables none is
-  tried and the detail says so; any other error is ``down``, never proof). A missing, moved, disabled or
-  ``WHEN``-neutered trigger = ``down``, named in ``data.missing``.
+  tried and the detail says so; any other error is ``down``, never proof). A missing,
+  moved, disabled or ``WHEN``-neutered trigger = ``down``, named in ``data.missing``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
   semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``; and
   the sign-off and review chains walked from their stored columns — a break = ``down``.

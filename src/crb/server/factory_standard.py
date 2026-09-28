@@ -1,12 +1,12 @@
 """The factory's entry-gate readers, bound to the store's registered readings (ADR-0026 item 8).
 
-The factory's gate (:func:`crb.factory.standard.gate_for`) is given three readers, bound once
-per run before any build: a cell's proven context standard, its arms' readings for the ticket
-comment, and whether the points-to-churn agreement has passed. This module binds the first
-two to routing.v2's registered readings (``crb.core.reading``, ``POST /readings``) on ONE
-apparatus, class-set version, checks arm and posture class — the repository's own checks arm
-and the deployment's posture class — and marks a standard signed only when an active, untampered sign-off
-of its cell was made on that arm, class-set version, reading and apparatus.
+The factory's gate (:func:`crb.factory.standard.gate_for`) is given three readers, bound once per
+run before any build: a cell's proven context standard, its arms' readings for the ticket comment,
+and whether the points-to-churn agreement has passed. This module binds the first two to
+routing.v2's registered readings (``crb.core.reading``, ``POST /readings``) on ONE apparatus,
+class-set version, checks arm and posture class — the repository's own checks arm and the
+deployment's posture class — and marks a standard signed only when an active, untampered sign-off of
+its cell was made on that arm, class-set version, reading and apparatus.
 
 Navigation
 ----------
@@ -22,8 +22,8 @@ What it does: Reads every registered reading of the repository and the ledger's 
               sign-off bound to its arm, class-set version and reading; a licence read of an
               arm answers only a standard of that arm. The arms' look states feed the ticket
               comment.
-How:          ``readers_in`` / ``bind_readers`` → one read of readings, rows and sign-offs → closures over
-              them; ``crb.core.reading.outcomes_for_cell`` per matching reading cell →
+How:          ``readers_in`` / ``bind_readers`` → one read of readings, rows and sign-offs →
+              closures over them; ``crb.core.reading.outcomes_for_cell`` per matching reading cell →
               ``latest_outcome`` → ``Standard``.
 Layer:        server — docs/ARCHITECTURE.md#41-c4-level-2--containers
 ADRs:         docs/adr/0026-the-context-standard.md (items 2, 6 and 8),
@@ -47,6 +47,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.core.capability import WILDCARD
 from crb.core.ledger import GradeRow
 from crb.core.reading import (
     OUTCOME_CEILING,
@@ -56,7 +57,7 @@ from crb.core.reading import (
     latest_outcome,
     outcomes_for_cell,
 )
-from crb.core.signoff import WILDCARD, SignoffRecord, active_signoffs
+from crb.core.signoff import SignoffRecord, active_signoffs
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.standard import ArmReading, CellRef, Readers, Standard, points_agreement_passed

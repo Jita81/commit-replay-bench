@@ -21,11 +21,10 @@ What it does: Resolves ``CRB_ALLOW_UNSEALED_PROD_BY`` to exactly one active admi
               anything else with :class:`OverrideRefused`; writes one ``system`` event
               ``posture.unsealed_override`` whose actor is that account and whose payload
               names the username, the reason, the process and the posture it admits.
-How:          ``record_unsealed_override`` = take the events write lock
-              (``lock_event_writes``: the trace is shared by every process start) → ``find_acknowledging_admin`` = read
-              the ``users`` table, match, check role and active → ``append_system_event`` on
-              the fixed trace ``posture:unsealed_override`` → commit (the chain's flush hook
-              hashes it).
+How:          ``record_unsealed_override`` = take the events write lock (``lock_event_writes``: the
+              trace is shared by every process start) → ``find_acknowledging_admin`` = read the
+              ``users`` table, match, check role and active → ``append_system_event`` on the fixed
+              trace ``posture:unsealed_override`` → commit (the chain's flush hook hashes it).
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0023-production-refuses-the-unsealed-posture.md,
               docs/adr/0029-the-audit-trail-is-hash-chained.md

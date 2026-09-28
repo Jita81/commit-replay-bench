@@ -6,9 +6,10 @@ What it is:   The ratchet that keeps every table's write lock in one helper, so 
               changes cannot each add their own copy of the same lock (P-224).
 What it does: Walks every module under src/crb, finds each ``pg_advisory_xact_lock(<id>)``
               literal and the function that holds it, and fails when an id is taken in more
-              than one function, when an id is computed where the walker cannot read it, or when the events lock is taken anywhere but
-              ``crb.store.events.lock_event_writes``; a synthetic tree with two helpers for one
-              id must fail, so the walker cannot pass by finding nothing.
+              than one function, when an id is computed where the walker cannot read it, or
+              when the events lock is taken anywhere but ``crb.store.events.lock_event_writes``;
+              a synthetic tree with two helpers for one id must fail, so the walker cannot pass
+              by finding nothing.
 How:          ``ast`` over the source files: a string constant carrying the lock call is
               attributed to its innermost enclosing function; the ids are grouped by owner.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
