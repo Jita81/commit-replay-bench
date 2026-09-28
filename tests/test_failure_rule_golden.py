@@ -61,8 +61,10 @@ from fixtures.posture import with_posture_labels
 #: A version's line is written once, when that version ships, and never edited.
 GOLDEN: dict[str, str] = {
     "2.3": "5f7e319ccde777ac118b0bac6b5e182b4356c419e7e6989679b7d9ec55fa473a",
-    # 2.4 (ADR-0025): the rule did not move at the bump; from here a row pins its own kind
-    "2.4": "5f7e319ccde777ac118b0bac6b5e182b4356c419e7e6989679b7d9ec55fa473a",
+    # 2.4 (ADR-0025): from here a row pins its own kind; the rule gained 3b, the S1 arm's
+    # ``authoring`` kind and its author-outage exception (stream F), before 2.4 shipped — the
+    # Wave 2 integration wrote this line on the grid that reads them (AUTHORING_ERRORS)
+    "2.4": "e5acb3be0430e2fc0ad050087aa89865fc89781a00b70cfa6adbfa74fa20b268",
 }
 #: SHA-256 of the canonical JSON of ``OUTAGE_ERROR_MARKERS_V1`` (frozen at 2.3).
 V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd544364713f"
@@ -71,7 +73,7 @@ V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd54436
 #: branch the grid never reaches still fails (P-298). Written once per version, never edited.
 GOLDEN_SOURCE: dict[str, str] = {
     "2.3": "f4931817defdcb051a19397bee4a2b32bc1ea73e8b59eb2216edc3063df21e96",
-    "2.4": "f4931817defdcb051a19397bee4a2b32bc1ea73e8b59eb2216edc3063df21e96",
+    "2.4": "869ee80395a9d636283035a2ea0b50f036298ecac6b7cbd9965a55d21602f251",
 }
 #: The hash of the frozen 2.3 rule's source (``derive_failure_kind_v1`` and what it calls).
 V1_SOURCE_SHA256 = "1768a6844c74c9e2c789635b33388b72960c656e0f91d9f916d60efdae54d842"
@@ -79,7 +81,17 @@ V1_SOURCE_SHA256 = "1768a6844c74c9e2c789635b33388b72960c656e0f91d9f916d60efdae54
 RuleFn = Callable[..., str]
 
 
-def _errors(markers: Sequence[str]) -> list[str]:
+#: The ``S1`` arm's test-author errors (ADR-0026 item 1, stream F): rule 3b's two answers —
+#: ``authoring`` against the arm, or ``outage`` when the author's own provider refused the
+#: call. They joined the grid with 2.4, the rule that reads them; the 2.3 line keeps the grid
+#: it was written on, so it is never edited.
+AUTHORING_ERRORS: tuple[str, ...] = (
+    "authoring: the author returned no test that fails on the parent",
+    "authoring: model_error: provider said USAGE LIMIT REACHED",
+)
+
+
+def _errors(markers: Sequence[str], *, authoring: bool = True) -> list[str]:
     return [
         "",
         "protocol violation: network",
@@ -87,16 +99,17 @@ def _errors(markers: Sequence[str]) -> list[str]:
         "grader exception: 429 in a test log",
         "environment: gold control red",
         *(f"model_error: provider said {m.upper()}" for m in markers),
+        *(AUTHORING_ERRORS if authoring else ()),
     ]
 
 
-def _table(rule: RuleFn, markers: Sequence[str]) -> list[Any]:
+def _table(rule: RuleFn, markers: Sequence[str], *, authoring: bool = True) -> list[Any]:
     """The rule's output over the grid: every branch, every marker."""
     out: list[Any] = []
     grid = itertools.product(
         (True, False),  # clean
         (True, False),  # disqualified
-        _errors(markers),
+        _errors(markers, authoring=authoring),
         ("", "protocol violation: archaeology"),  # builder_error
         ("", "max_turns", "wall_clock", "done"),  # stop_reason
         (True, False),  # lint_only
@@ -116,8 +129,8 @@ def _table(rule: RuleFn, markers: Sequence[str]) -> list[Any]:
     return out
 
 
-def _digest(rule: RuleFn, markers: Sequence[str]) -> str:
-    body = {"markers": list(markers), "table": _table(rule, markers)}
+def _digest(rule: RuleFn, markers: Sequence[str], *, authoring: bool = True) -> str:
+    body = {"markers": list(markers), "table": _table(rule, markers, authoring=authoring)}
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
 
@@ -136,7 +149,10 @@ def test_the_live_failure_rule_is_pinned_to_the_apparatus() -> None:
 
 
 def test_the_frozen_v1_rule_is_the_rule_as_it_stood_at_2_3() -> None:
-    assert _digest(lg.derive_failure_kind_v1, lg.OUTAGE_ERROR_MARKERS_V1) == GOLDEN["2.3"]
+    assert (
+        _digest(lg.derive_failure_kind_v1, lg.OUTAGE_ERROR_MARKERS_V1, authoring=False)
+        == GOLDEN["2.3"]
+    )
 
 
 def test_the_v1_outage_markers_are_frozen_by_their_hash() -> None:

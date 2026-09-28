@@ -98,6 +98,7 @@ import httpx
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.redact import redact_and_cap_head
@@ -114,8 +115,7 @@ from crb.factory.backlog import (
 )
 from crb.factory.evidence import EV_RED_PROOF, verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, assess, sign, slots_for
-from crb.factory.standard import CALIBRATABLE, Entry, gate_for
-from crb.factory.standard import bind as bind_standard_readers
+from crb.factory.standard import CALIBRATABLE, Entry, Readers, gate_for
 from crb.factory.testfirst import AuthoredTest
 from crb.intake.client import (
     REASON_LEASE_LOST,
@@ -125,6 +125,7 @@ from crb.intake.client import (
     TrackerClient,
     TrackerError,
 )
+from crb.server import factory_standard
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
 from crb.server.deps import (
     ApiError,
@@ -154,6 +155,8 @@ from crb.server.intake import (
     poll_repository,
     register_approved,
 )
+from crb.server.posture_view import deployment_posture_class
+from crb.server.prevention_state import checks_arm_in
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
     POSTURE_DEPLOYMENT,
@@ -1123,6 +1126,7 @@ def list_tasks(
         ).all():
             run_by_row[str(row_id)] = str(run_id or "")
     out: list[FactoryTaskOut] = []
+    readers: Readers | None = None
     for v in views:
         d = v.to_dict()
         d.pop("row_id")
@@ -1130,7 +1134,9 @@ def list_tasks(
         if d.get("entry") is None and v.status == "pending" and item is not None:
             # ADR-0026 item 8 — an item no run has reached yet is told now what the next
             # run's pre-build check will say: not built, and why (the same gate call)
-            preview = _entry_preview(home, item)
+            if readers is None:
+                readers = _readers(db, settings, repo)
+            preview = _entry_preview(home, item, readers)
             if preview is not None:
                 d["entry"] = {
                     "code": preview.code,
@@ -1266,7 +1272,19 @@ class ProbeWaiverOut(BaseModel):
     event: str
 
 
-def _entry_preview(home: FactoryHome, item: BacklogItem) -> Entry | None:
+def _readers(db: Session, settings: Any, repo: str) -> Readers:
+    """The store-bound entry-gate readers for ``repo`` — on the repository's own checks arm
+    and this deployment's posture class, as the next run's worker binds them."""
+    repo_row = db.get(Repo, repo)
+    return factory_standard.readers_in(
+        db,
+        repo,
+        checks_arm=checks_arm_in(db, repo),
+        posture_class=deployment_posture_class(settings, repo_row),
+    )
+
+
+def _entry_preview(home: FactoryHome, item: BacklogItem, readers: Readers) -> Entry | None:
     """The entry gate for an item no factory run has reached yet — the SAME call the next
     run's pre-build check makes (ADR-0026 item 8), over the repository's readers; ``None``
     when it would enter. One clause is the run's own: whether its test author is the one an
@@ -1276,7 +1294,7 @@ def _entry_preview(home: FactoryHome, item: BacklogItem) -> Entry | None:
     entry = gate_for(
         item,
         readiness,
-        bind_standard_readers(home.repo),
+        readers,
         person_test=item.id in home.authored(),
     )
     return None if entry.enters else entry
@@ -1361,7 +1379,7 @@ def fund_calibration(  # noqa: PLR0917 — FastAPI dependencies + path/body
     stop = view.status if view is not None and view.status in CALIBRATABLE else ""
     if not stop:
         # an item no run has reached yet: the gate as the next run's pre-build check reads it
-        preview = _entry_preview(home, item)
+        preview = _entry_preview(home, item, _readers(db, settings, repo))
         stop = preview.code if preview is not None and preview.code in CALIBRATABLE else ""
     if stop not in CALIBRATABLE:
         raise ApiError(
@@ -1834,6 +1852,8 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
         budget_s=budget_s,
         approval=ApprovalPolicy.from_settings(settings.intake),
         lease=intake_lease(factory, repo, ttl_s=2 * budget_s + 60),
+        # the SAME store-bound entry-gate readers the worker's timed poll binds
+        gate=_readers(db, settings, repo),
     )
     if report.busy:
         raise ApiError(

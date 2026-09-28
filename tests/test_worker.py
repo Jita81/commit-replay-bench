@@ -101,6 +101,7 @@ from crb.store.jobs import (
 )
 from crb.store.models import Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
+from fixtures.proven_cells import every_cell_proven
 
 # --- a scripted builder ----------------------------------------------------------------
 
@@ -1635,11 +1636,10 @@ def _multiply_backlog(h: Harness) -> tuple[Any, Any, Any]:
 
 
 def _proven_cells(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every cell has a proven, signed S2 standard (stream R's reader, patched at its seam —
+    """Every cell has a proven, signed S2 standard (the store-bound readers, patched at their one binding —
     ADR-0026 item 8), so a factory run BUILDS the operator-authored item."""
-    from crb.factory import standard as fs
 
-    monkeypatch.setattr(fs, "standard_for", lambda repo, cell: fs.Standard("S2", signed=True))
+    every_cell_proven(monkeypatch, "S2")
 
 
 def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(
@@ -1649,13 +1649,12 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(
     oracle → readiness → the entry gate → RED proof → build under the belts → (delivery
     refused, opt-in) → mechanical review → item outcome; a process_step=factory ledger row;
     the evidence chain under CRB_HOME/factory/<repo>/; live counts on the run. The cell has
-    a proven S2 standard here (stream R's reader, patched at its seam)."""
+    a proven S2 standard here (the store-bound readers, patched at their one binding)."""
     from crb.core.ledger import PROCESS_FACTORY
     from crb.factory import evidence as fe
-    from crb.factory import standard as fs
     from crb.server.factory_state import FactoryHome
 
-    monkeypatch.setattr(fs, "standard_for", lambda repo, cell: fs.Standard("S2", signed=True))
+    every_cell_proven(monkeypatch, "S2")
 
     home, _item, backlog = _multiply_backlog(h)
     run = h.enqueue("factory", ladder_json=["fake:m0"])

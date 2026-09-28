@@ -67,6 +67,7 @@ from crb.server.settings import GitHubAppSettings
 from crb.store.models import GitHubInstallation, Repo, Run
 from fixtures.concurrency import at_once, pause_after
 from fixtures.proven import add_rows, add_tasks
+from fixtures.proven_cells import every_cell_proven
 from fixtures.server_seed import ALPHA, THIN_CELL, Env, envelope, login, logout, make_env
 from fixtures.signoff_seed import clear_policy
 
@@ -540,14 +541,13 @@ def test_a_calibration_build_is_an_approvers_evented_act_for_an_entry_stop_only(
     the calibration route as its way forward; an approver funds ONE calibration build (the
     chain names them); a second grant while one waits is refused, and so is a grant for an
     item the gate would let in."""
-    from crb.factory import standard as fs
 
     assert _register(env, [ITEM]).status_code == 201
     home = FactoryHome(env.settings.home, ALPHA)
     url = f"/factory/{ALPHA}/items/I-1/calibration"
     login(env.client, "approver")
     # a proven cell whose standard the item carries: nothing to calibrate
-    monkeypatch.setattr(fs, "standard_for", lambda repo, cell: fs.Standard("S1@m", signed=True))
+    every_cell_proven(monkeypatch, "S1@m")
     r = env.post(url, json={"reason": "measure the cell"})
     assert r.status_code == 409 and envelope(r)["code"] == "calibration_not_answering"
     (t,) = env.get(f"/factory/{ALPHA}/tasks").json()

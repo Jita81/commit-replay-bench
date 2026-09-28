@@ -45,12 +45,12 @@ from typing import Any
 
 import pytest
 
-from crb.factory import standard as fs
 from crb.intake import client as c
 from crb.intake.fake import FAKE_TRACKER_ENV, fake_tracker_path
 from crb.server import intake as sv
 from crb.server.app import API_PREFIX
 from crb.server.secrets import TRACKER_TOKEN_SECRET
+from fixtures.proven_cells import every_cell_proven
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_settings
 
 READY_AC = [
@@ -79,11 +79,9 @@ def _board(**over: Any) -> dict[str, Any]:
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Env]:
     monkeypatch.setenv(FAKE_TRACKER_ENV, "1")
-    # the listener's MECHANICS on a cell with a proven standard (stream R's reader, patched
-    # at its seam — ADR-0026 item 8); the entry gate's stops are pinned in their own tests
-    monkeypatch.setattr(
-        fs, "standard_for", lambda repo, cell: fs.Standard("S1@claude-sonnet-5", signed=True)
-    )
+    # the listener's MECHANICS on a cell with a proven standard (the store-bound readers,
+    # patched at their one binding — ADR-0026 item 8); the entry gate's stops are pinned in their own tests
+    every_cell_proven(monkeypatch, "S1@claude-sonnet-5")
     settings = make_settings(
         tmp_path,
         intake={

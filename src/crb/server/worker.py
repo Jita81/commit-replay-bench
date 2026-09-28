@@ -272,7 +272,6 @@ from crb.factory.delivery import (
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.standard import Readers
-from crb.factory.standard import bind as bind_standard_readers
 from crb.factory.testfirst import (
     AuthoredTest,
     TestAuthor,
@@ -285,6 +284,7 @@ from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
+from crb.server import factory_standard
 from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
@@ -1015,6 +1015,10 @@ class Worker:
             approval=ApprovalPolicy.from_settings(self.settings.intake),
             lease=intake_lease(self.factory, repo, ttl_s=2 * budget_s + 60),
             then=tell_the_tickets,
+            # the ticket feedback names the SAME entry-gate stop the next run's pre-build
+            # check will: the store-bound readers, on the repository's own checks arm and
+            # this deployment's posture class
+            gate=self._standard_readers(repo),
         )
 
     def _factory_run_active(self, repo: str) -> bool:
@@ -2683,14 +2687,21 @@ class Worker:
 
         return lookup
 
-    def _standard_readers(self, repo: str) -> Readers:
-        """The entry gate's readers for one factory run (ADR-0026 item 8): the cells'
-        proven standards, their arms' readings and whether the points-to-churn agreement has
-        passed — bound ONCE, before any build. SEAM: :func:`crb.factory.standard.bind` binds
-        stream R's readers when the integration wires them; until then no reading is
-        registered, no cell has a proven standard, and an item is built only as an
-        approver's calibration build."""
-        return bind_standard_readers(repo)
+    def _standard_readers(
+        self, repo: str, *, checks_arm: str = "", posture_class: str = ""
+    ) -> Readers:
+        """The entry gate's readers for ``repo`` (ADR-0026 item 8): the cells' proven
+        standards from the registered readings (routing.v2), their arms' readings and whether
+        the points-to-churn agreement has passed — read ONCE from the store, on one checks arm
+        (the factory run's, GOV-3, else the repository's own) and one posture class (the run's
+        measured one, else this deployment's), so a standard never crosses an arm or a posture
+        (P-311). :func:`crb.server.factory_standard.bind_readers` is the one binding."""
+        return factory_standard.bind_readers(
+            self.factory,
+            repo,
+            checks_arm=checks_arm or current_checks_arm(self.factory, repo),
+            posture_class=posture_class or self._deployment_posture_class(repo),
+        )
 
     def _run_factory(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         """Forward mode (P6): run the repo's FROZEN backlog through the governed loop
@@ -2856,7 +2867,9 @@ class Worker:
             checks=checks,
             # ADR-0026 item 8 — the entry gate's readers, bound once for this run, before any
             # build
-            readers=self._standard_readers(run.repo),
+            readers=self._standard_readers(
+                run.repo, checks_arm=checks.arm, posture_class=gate.posture.posture_class
+            ),
             # the loop's overlay and lines reach an item's brief only when its standard arm
             # carries +L (ADR-0026 item 8); the loop decides per item
             learning=self._learning_snapshot(ctx),

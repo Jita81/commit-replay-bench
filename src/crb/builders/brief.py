@@ -74,26 +74,30 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from crb.builders.base import DEFAULT_RULES, BuildBrief
+from crb.core import context_arm as _arms
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_BLIND
 from crb.core.spec import RepoConfig
 
-ARM_A0 = "A0"
-ARM_S1 = "S1"
-ARM_S2 = "S2"
-ARM_S3 = "S3"
-BASES: tuple[str, ...] = (ARM_A0, ARM_S1, ARM_S2, ARM_S3)
-MODIFIER_LOOP = "+L"
+#: The arm grammar is the core's, ONE vocabulary (``crb.core.context_arm``, ADR-0026 item 1):
+#: the composer names its bases and labels through it, so a brief and a ledger row can never
+#: spell an arm two ways.
+ARM_A0 = _arms.BASE_A0
+ARM_S1 = _arms.BASE_S1
+ARM_S2 = _arms.BASE_S2
+ARM_S3 = _arms.BASE_S3
+BASES: tuple[str, ...] = _arms.BASES
+MODIFIER_LOOP = _arms.MOD_LOOP
 
 #: The provenance labels :func:`compose` stamps (ADR-0026 item 1), and the arm label.
-LABEL_CONTEXT_ARM = "context_arm"
-LABEL_CTX_TICKET = "ctx_ticket"
-LABEL_CTX_BRIEF = "ctx_brief"
-LABEL_CTX_HARNESS = "ctx_harness"
-LABEL_CTX_RULES = "ctx_rules"
-LABEL_CTX_AUTHOR = "ctx_author"
-LABEL_CTX_LIBRARY = "ctx_library"
-LABEL_CTX_REFUSED = "ctx_refused"
+LABEL_CONTEXT_ARM = _arms.LABEL_CONTEXT_ARM
+LABEL_CTX_TICKET = _arms.LABEL_CTX_TICKET
+LABEL_CTX_BRIEF = _arms.LABEL_CTX_BRIEF
+LABEL_CTX_HARNESS = _arms.LABEL_CTX_HARNESS
+LABEL_CTX_RULES = _arms.LABEL_CTX_RULES
+LABEL_CTX_AUTHOR = _arms.LABEL_CTX_AUTHOR
+LABEL_CTX_LIBRARY = _arms.LABEL_CTX_LIBRARY
+LABEL_CTX_REFUSED = _arms.LABEL_CTX_REFUSED
 CTX_LABELS: tuple[str, ...] = (
     LABEL_CTX_TICKET,
     LABEL_CTX_BRIEF,
@@ -134,22 +138,22 @@ def context_arm_for(
     library_version: str = "",
     plus_l: bool = False,
 ) -> str:
-    """SEAM (stream R, ``crb.core.context_arm.context_arm_for``): the arm id a brief
-    carried, in ADR-0026 item 1's grammar — the base (``S1`` names its test author's
-    canonical model, ``S1@<author>``), then ``+facts@<drafter>``, ``+library@<version>``
-    and ``+L`` in that order. The integration replaces this body with R's helper."""
+    """The arm id a brief carried, in ADR-0026 item 1's grammar — the base (``S1`` names its
+    test author's canonical model, ``S1@<author>``), then ``+facts@<drafter>``,
+    ``+library@<version>`` and ``+L`` in that order — built and checked by the core's
+    :class:`crb.core.context_arm.ContextArm`, so the composer and the ledger's
+    ``row_labels_at_write`` spell every arm the one way."""
     if base not in BASES:
         raise ValueError(f"a context arm's base is one of {BASES}, got {base!r}")
     if base == ARM_S1 and not author:
         raise ValueError("an S1 arm names its test author's canonical model (S1@<author>)")
-    arm = f"{base}@{author}" if base == ARM_S1 else base
-    if facts_drafter:
-        arm += f"+facts@{facts_drafter}"
-    if library_version:
-        arm += f"+library@{library_version}"
-    if plus_l:
-        arm += MODIFIER_LOOP
-    return arm
+    return _arms.ContextArm(
+        base,
+        author=author if base == ARM_S1 else "",
+        facts=facts_drafter,
+        library=library_version,
+        loop=plus_l,
+    ).id
 
 
 def arm_base(arm: str) -> str:

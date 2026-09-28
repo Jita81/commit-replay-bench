@@ -118,8 +118,7 @@ from crb.factory.evidence import (
     INTAKE_EVENT_KINDS,
 )
 from crb.factory.readiness import assess
-from crb.factory.standard import CellRef, Readers, gate_for
-from crb.factory.standard import bind as bind_standard_readers
+from crb.factory.standard import NO_READINGS, CellRef, Readers, gate_for
 from crb.intake.ado import AdoConfig, AdoTracker
 from crb.intake.client import (
     LABEL_QUEUED,
@@ -1334,7 +1333,7 @@ def _handle_ticket(
     report.read += 1  # counted once the ticket is a draft: before that it is a skip
     readiness = assess(draft.item, signoffs)
     route = route_for(draft.item)
-    readers = gate if gate is not None else bind_standard_readers(home.repo)
+    readers = gate if gate is not None else NO_READINGS
     entry = gate_for(draft.item, readiness, readers, person_test=draft.item.id in home.authored())
     arms = (
         readers.arm_readings(CellRef(draft.item.capability_class, draft.item.size_estimate))

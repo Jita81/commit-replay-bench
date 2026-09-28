@@ -31,12 +31,13 @@ is more demanding than a ceiling, a ceiling than ``S2``, ``S2`` than ``S1``. An 
 without an estimate is ``unsized`` and goes to a person — it can never claim a smaller
 cell.
 
-**Seams** (each one named function, wired at integration): :func:`standard_for` and
-:func:`arm_readings_for` are stream R's registered readings (routing.v2); until they land
-no cell has a proven standard, which is the truth on this branch — every item stops
-``no_proven_standard`` and only a calibration build is built. :func:`points_agreement_passed`
-is ADR-0026 item 9's validity report (Wave 4); until it exists the agreement has not
-passed.
+**The readers.** The gate is handed a :class:`Readers`: the server binds it to the
+store's registered readings (routing.v2) through ``crb.server.factory_standard``, on one
+checks arm and one posture class, a standard signed only by a sign-off made on its arm,
+class-set version and reading; a caller with no store uses :data:`NO_READINGS`, where no
+cell has a proven standard and only a calibration build is built.
+:func:`points_agreement_passed` is ADR-0026 item 9's validity report (Wave 4); until it
+exists the agreement has not passed.
 
 Navigation
 ----------
@@ -57,12 +58,12 @@ Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 8),
               docs/adr/0003-one-routing-rule.md (the route gate; superseded in part)
 Works with:   src/crb/factory/loop.py (``_assess`` calls ``decide_entry``; ``_deliver`` calls
-              ``own_cell_licence``), src/crb/server/worker.py (binds the readers once per run,
-              before any build), src/crb/intake/feedback.py (the ticket's words for each stop),
+              ``own_cell_licence``), src/crb/server/factory_standard.py (the store-bound
+              readers), src/crb/server/worker.py (binds them once per run, before any build), src/crb/intake/feedback.py (the ticket's words for each stop),
               src/crb/server/routes/factory.py (the calibration route and the task view)
 Tested by:    tests/test_factory_entry_gate.py
-Touch when:   stream R's readings land (replace the three seams' bodies with the real
-              readers); the operator fixes ADR-0026 item 8's size value; a new stop is added
+Touch when:   never for a new repository; the organisation's validity report lands
+              (:func:`points_agreement_passed`); the operator fixes ADR-0026 item 8's size value; a new stop is added
               (a code here, a status in loop.py, a sentence in feedback.py and the UI).
 Claims:       a proven standard licenses an attempt on its arm, never a merge; "not built" is
               the gate's word, never "built and withheld" (docs/EVIDENCE-AND-CLAIMS.md).
@@ -221,28 +222,7 @@ class ArmReading:
 StandardFor = Callable[[CellRef], "Standard | None"]
 
 
-# --- the seams (stream R's readings; ADR-0026 item 9's report) ---------------------------
-
-
-def standard_for(repo: str, cell: CellRef) -> Standard | None:
-    """SEAM (stream R, routing.v2): the cell's proven standard from the current signed map,
-    or ``None`` when no registered reading of a certifying arm delivers there. Until R's
-    readings land nothing has been registered, so nothing is proven — the true answer on
-    this branch is ``None`` for every cell. The integration replaces this body with R's
-    ``crb.core.reading`` reader; the worker binds it once per run, before any build.
-
-    A cell with an ``arm`` (a licence read) asks about THAT arm on the per-arm map: R's
-    reader answers with that arm's standard when it is proven there, else ``None`` — the
-    licence refuses any other arm it is handed either way."""
-    del repo, cell
-    return None
-
-
-def arm_readings_for(repo: str, cell: CellRef) -> tuple[ArmReading, ...]:
-    """SEAM (stream R): every measured arm of the cell with its state, n and interval, for
-    the ticket comment. Empty until R's registered readings land."""
-    del repo, cell
-    return ()
+# --- the validity report's seam (ADR-0026 item 9) -----------------------------------------
 
 
 def points_agreement_passed(repo: str) -> bool:
@@ -649,13 +629,10 @@ def gate_for(
     )
 
 
-def bind(repo: str) -> Readers:
-    """The seams bound to ``repo`` — what the worker and the intake poll hand the gate."""
-    return Readers(
-        standard_for=lambda cell: standard_for(repo, cell),
-        agreement_passed=points_agreement_passed(repo),
-        arm_readings=lambda cell: arm_readings_for(repo, cell),
-    )
+#: The readers of a caller with no store (a test, the CLI): no registered reading, so no cell
+#: has a proven standard and the gate fails closed — only a calibration build is built. The
+#: server binds the store's readings through ``crb.server.factory_standard``.
+NO_READINGS = Readers(standard_for=lambda cell: None)
 
 
 __all__ = [
@@ -667,6 +644,7 @@ __all__ = [
     "ITEM_SIZES",
     "MODIFIER_LOOP",
     "NEEDS",
+    "NO_READINGS",
     "OVERRIDABLE",
     "REASON_CEILING",
     "REASON_NONE",
@@ -689,8 +667,6 @@ __all__ = [
     "Readers",
     "Standard",
     "StandardFor",
-    "arm_readings_for",
-    "bind",
     "decide_entry",
     "gate_for",
     "licensing_rungs",
@@ -699,5 +675,4 @@ __all__ = [
     "own_cell_licence",
     "points_agreement_passed",
     "sizes_to_read",
-    "standard_for",
 ]

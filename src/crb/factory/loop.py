@@ -174,6 +174,7 @@ from crb.factory.review import (
     unscoreable,
 )
 from crb.factory.standard import (
+    NO_READINGS,
     STOP_CALIBRATION_BUILD,
     STOP_CELL_NOT_LICENSED,
     STOP_GRANULARIZE,
@@ -186,7 +187,6 @@ from crb.factory.standard import (
     Calibration,
     Entry,
     Readers,
-    bind,
     gate_for,
     licensing_rungs,
     own_cell_licence,
@@ -345,9 +345,9 @@ class FactorySpec:
     #: route gate read its licence on (GOV-3). ``None`` = the repository's own block.
     checks: ResolvedChecks | None = None
     #: The readers of the cells' proven standards (ADR-0026 item 8), bound ONCE per run to
-    #: the pre-run map. ``None`` binds the seams for the repository
-    #: (:func:`crb.factory.standard.bind`) — which fail closed: with no reading registered,
-    #: no cell has a standard, and only a calibration build is built.
+    #: the pre-run map (the worker's: ``crb.server.factory_standard.bind_readers``). ``None``
+    #: is ``crb.factory.standard.NO_READINGS`` — which fails closed: with no reading, no cell
+    #: has a standard, and only a calibration build is built.
     readers: Readers | None = None
     #: ADR-0018's sign-off clause (Wave 4, stream S): when on, a proven standard with no
     #: active sign-off stops ``unsigned_cell`` before any spend. Off until that clause ships.
@@ -381,7 +381,7 @@ class FactorySpec:
         if self.max_rework < 0:
             raise ValueError("max_rework cannot be negative")
         if self.readers is None:
-            object.__setattr__(self, "readers", bind(self.config.name))
+            object.__setattr__(self, "readers", NO_READINGS)
 
     @property
     def gate(self) -> Readers:

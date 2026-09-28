@@ -61,7 +61,7 @@ def _a_real_feedback_comment() -> str:
     idempotency.
     """
     from crb.factory.readiness import assess
-    from crb.factory.standard import bind, gate_for
+    from crb.factory.standard import NO_READINGS, gate_for
     from crb.intake.draft import draft_from
     from crb.intake.feedback import render_feedback
 
@@ -77,7 +77,7 @@ def _a_real_feedback_comment() -> str:
     )
     draft = draft_from(ticket, tracker="jira")
     readiness = assess(draft.item, [])
-    entry = gate_for(draft.item, readiness, bind("alpha"))
+    entry = gate_for(draft.item, readiness, NO_READINGS)
     return render_feedback(draft, readiness, entry=entry, cell_route=None).text
 
 

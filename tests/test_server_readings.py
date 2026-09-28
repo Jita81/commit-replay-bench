@@ -333,7 +333,12 @@ def test_rows_imported_through_the_ledger_never_count_toward_a_reading(env: Env)
     got = env.post("/ledger/import", files={"file": ("forged.jsonl", body)})
     assert got.status_code == 200 and got.json()["imported"] == 40, got.text
     add_oracle_and_controls(env.factory, first)
-    (cell,) = _cells(env)
+    # the licensing reading (``apparatus=current``) counts measured rows only (EI-2): a cell
+    # of imported rows is not measured here at all, so it cannot route deliver
+    assert _cells(env) == []
+    # read as history, under its named version, the cell is shown — and the reading counts
+    # none of the imported rows either (P-313)
+    (cell,) = _cells(env, "&apparatus=2.4")
     assert cell["route"] != "deliver", cell
     assert cell["reason_code"] == "look_pending"
     arms = {a["arm"]: a for a in cell["reading"]["arms"]}
