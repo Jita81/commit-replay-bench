@@ -97,7 +97,7 @@ from crb.store.jobs import (
     STATUS_SUCCEEDED,
     JobQueue,
 )
-from crb.store.models import Repo, Run, Task, WorkerRow
+from crb.store.models import Event, Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
 
 # --- a scripted builder ----------------------------------------------------------------
@@ -440,6 +440,52 @@ def test_a_build_that_meets_a_refused_login_records_the_login_invalid(
         assert "authentication failed (HTTP 401)" in last["detail"]
         state = bl.login_state(s, "fake", "cli", ttl_s=600)
     assert state.state == bl.STATE_INVALID
+
+
+def test_a_queued_run_whose_login_was_recorded_invalid_is_failed_before_any_build(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q1's review: the gate held at submit only. A run queued while its login worked was
+    still claimed and started after that login was recorded invalid — the overnight queue's
+    shape — spending a build attempt and writing an outage row. At claim the worker now reads
+    the login from the cache (no verify, no model call) and fails the run before any build,
+    naming the login, with a ``builder.login.refused`` event."""
+    from crb.builders.claude_code import LoginCheck, default_auth
+    from crb.server import builder_login as bl
+
+    built: list[str] = []
+    monkeypatch.setitem(
+        bl.LOGIN_VERIFIERS,
+        "fake",
+        bl.LoginVerifier(lambda a, b: LoginCheck("ok"), lambda a: ("keychain", ""), default_auth),
+    )
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: (
+        built.append("fake") or FakeBuilder(behaviour="gold", **cfg)
+    )
+    run = h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    bl.record_verification(
+        h.factory,
+        "fake",
+        "cli",
+        LoginCheck("invalid", "authentication failed (HTTP 401)"),
+        trigger=bl.TRIGGER_SETTINGS,
+        resolution=("keychain", ""),
+    )
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith(bl.LOGIN_INVALID_CODE), done.error
+    assert "fake (auth cli" in done.error and "Nothing was built" in done.error
+    assert built == []  # no builder was constructed, nothing spent
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    with h.factory() as s:
+        refused = list(s.execute(select(Event).where(Event.action == bl.REFUSED_ACTION)).scalars())
+    assert [e.payload_json["trigger"] for e in refused] == [bl.TRIGGER_CLAIM]
+    assert refused[0].payload_json["run_id"] == run.id
+    assert any(e.action == "run.refused" for e in h.events(run.id))
 
 
 def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:
@@ -1471,6 +1517,59 @@ def test_once_main(
     assert worker_main.main(argv) == worker_main.EXIT_IDLE
     idle = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert idle == {"status": "idle", "worker_id": "w-cli"}
+
+
+def test_the_worker_entry_point_records_its_metrics_listener(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q1's review: every D5 test called ``start_metrics`` directly, so ``main()`` going back to
+    the bare ``metrics.start_worker_exposition`` — the base's behaviour, which records nothing —
+    left the suite green while a real worker's ``/health`` read ``metrics: null`` on a bind
+    failure. The long-running path of the real entry point is driven here: a port another
+    process holds reads ``degraded`` for that worker."""
+    import socket
+
+    from crb.server.worker_metrics import exposition_by_worker
+
+    monkeypatch.setenv("CRB_ENV", "dev")
+    monkeypatch.setattr(worker_main.Worker, "run_forever", lambda self, stop: None)
+    monkeypatch.setattr(worker_main.signal, "signal", lambda *a, **k: None)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        port = held.getsockname()[1]
+        rc = worker_main.main(
+            [
+                "--database-url",
+                h.url,
+                "--home",
+                str(h.home),
+                "--worker-id",
+                "w-main",
+                "--metrics-port",
+                str(port),
+                "--log-format",
+                "text",
+            ]
+        )
+    assert rc == worker_main.EXIT_OK
+    recorded = exposition_by_worker(h.factory, ["w-main"])
+    assert recorded["w-main"]["state"] == "degraded", recorded
+    assert str(port) in recorded["w-main"]["reason"]
+
+
+def test_the_worker_reads_the_login_window_the_api_reads(tmp_path: Path) -> None:
+    """The claim check applies the submit gate's window: ``CRB_BUILDER__LOGIN_TTL_S`` read as
+    the API reads it, with its bounds, and no other ``CRB_BUILDER__*`` key refused here."""
+    args = worker_main.build_parser().parse_args(["--once"])
+    home = {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "dev"}
+    assert worker_main.settings_from_args(args, home).builder_login_ttl_s == 600
+    got = worker_main.settings_from_args(
+        args, {**home, "CRB_BUILDER__LOGIN_TTL_S": "120", "CRB_BUILDER__MEMORY": "8g"}
+    )
+    assert got.builder_login_ttl_s == 120
+    with pytest.raises(ValueError, match="login_ttl_s"):
+        worker_main.settings_from_args(args, {**home, "CRB_BUILDER__LOGIN_TTL_S": "5"})
 
 
 def test_main_rejects_bad_kinds_and_bad_db(

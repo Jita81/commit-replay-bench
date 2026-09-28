@@ -37,11 +37,12 @@ store-level checks:
   probe for the ``api`` role). Before the table existed the probe read running runs'
   heartbeats only, so a crashed worker with three queued runs answered ``ok "idle, 3
   queued"``.
-* ``builders``    — which builder credentials are present AND, for each present login with a
-  verify, whether it works: ``verified`` / ``unverified`` / ``invalid`` from the recorded
+* ``builders``    — which builder credentials are present AND, for each login a run could use
+  (every auth mode with a present credential or a recorded verification, not only the
+  default), whether it works: ``verified`` / ``unverified`` / ``invalid`` from the recorded
   verifications with its age (pilot D1, src/crb/server/builder_login.py) — never ``ok`` from
   presence alone, never a model call; ``degraded`` (never ``down``) naming the login and
-  where to fix it.
+  where to fix it; presence and state only, never a fingerprint or a token source (F25).
 * ``sandbox``     — the docker daemon answers (``docker`` executor) — **role-aware**:
   the sandbox is the WORKER's instrument. A process whose role is ``api`` (the
   ``serve`` container: no docker socket, by design — see ``deploy/Dockerfile``)
@@ -152,10 +153,10 @@ from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.provision.probe import probe_provision
 from crb.server.builder_login import (
     FIX_WHERE,
-    LOGIN_VERIFIERS,
     STATE_INVALID,
     STATE_UNVERIFIED,
-    login_state,
+    STATE_VERIFIED,
+    login_readings,
 )
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.flow_record import stamp_first_healthy
@@ -768,24 +769,24 @@ def probe_builder_logins(
     factory: sessionmaker[Session], settings: Settings, *, request_id: str = ""
 ) -> ProbeResult:
     """``builders``: which builder credentials are PRESENT (``probes.probe_builders``) and, for
-    each builder with a verify whose credential is present under the deployment's default auth
-    mode, whether the login WORKS — ``verified``, ``unverified`` or ``invalid`` from the recorded
+    each login a run could use — every builder with a verify, in its default auth mode and in
+    every other mode with a present credential or a recorded verification (Q1's review) —
+    whether it WORKS: ``verified``, ``unverified`` or ``invalid`` from the recorded
     verifications with its age (pilot D1, P-205). Never ``ok`` from presence alone, and never
     a model call: the cache is refreshed by a submit that finds it stale and by Verify on the
     Settings screen. ``degraded`` (never ``down`` — a dead login is the operator's to fix, and
-    the API must stay reachable for them to fix it) when a present login is invalid or not
-    verified, naming it, its age, the outcome and where to fix it."""
+    the API must stay reachable for them to fix it) when any present login is invalid, or the
+    default one is not verified, naming it, its age and where to fix it. ``/health`` answers
+    without a session, so it carries a viewer's view of each login: presence and state, never
+    the fingerprint, the token source or the verification's words (F25)."""
 
     def _read() -> ProbeResult:
         base = probes.probe_builders()
-        ttl = settings.builder.login_ttl_s
-        logins: list[dict[str, Any]] = []
         with factory() as s:
-            for name, verifier in sorted(LOGIN_VERIFIERS.items()):
-                auth = verifier.default_auth()
-                present = not verifier.missing(auth, secrets_dir=secrets_dir_for(settings))
-                state = login_state(s, name, auth, ttl_s=ttl)
-                logins.append({**state.to_dict(), "present": present, "sentence": state.sentence()})
+            readings = login_readings(
+                s, ttl_s=settings.builder.login_ttl_s, secrets_dir=secrets_dir_for(settings)
+            )
+        logins = [{**r.to_dict(full=False), "sentence": r.sentence(full=False)} for r in readings]
         data = {**base.data, "logins": logins}
         live = [x for x in logins if x["present"]]
         bad = [x for x in live if x["state"] == STATE_INVALID]
@@ -797,7 +798,7 @@ def probe_builder_logins(
                 f"fixed under {FIX_WHERE}",
                 data,
             )
-        unknown = [x for x in live if x["state"] == STATE_UNVERIFIED]
+        unknown = [x for x in live if x["default"] and x["state"] == STATE_UNVERIFIED]
         if unknown:
             return ProbeResult(
                 "builders",
@@ -806,7 +807,7 @@ def probe_builder_logins(
                 "(a run's submit also verifies it once before queuing)",
                 data,
             )
-        verified = "; ".join(x["sentence"] for x in live)
+        verified = "; ".join(x["sentence"] for x in live if x["state"] == STATE_VERIFIED)
         detail = f"{base.detail}; {verified}" if verified else base.detail
         return ProbeResult("builders", base.status, detail, data)
 

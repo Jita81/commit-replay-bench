@@ -125,10 +125,11 @@ function ago(seconds: number | null): string {
 }
 
 /**
- * The login runs use — the state the run preflight and `/health` read (pilot D1): verified,
- * not verified or invalid, with its age, source and the last outcome, and (operator and above)
- * a Verify that records the answer the next run reads. A run submitted on an invalid login is
- * refused and sent here.
+ * The logins runs use — the state the run preflight and `/health` read (pilot D1): one line per
+ * auth mode a run could use (the default first, then each mode with a stored credential or a
+ * recorded check — Q1's review), each verified, not verified or invalid, with its age, and for
+ * operators and above the source, the last outcome and a Verify of THAT mode that records the
+ * answer the next run reads. A run submitted on an invalid login is refused and sent here.
  */
 function RunsLoginLine() {
   const { can } = useAuth()
@@ -137,39 +138,58 @@ function RunsLoginLine() {
   return (
     <QueryBoundary query={logins} loading="Reading the login runs use…">
       {({ items }) => {
-        const login = items.find((x) => x.builder === 'claude_code')
-        if (!login) return null
-        const d = RUNS_LOGIN_DISPLAY[login.state] ?? RUNS_LOGIN_DISPLAY.unverified
+        const mine = items.filter((x) => x.builder === 'claude_code')
+        if (mine.length === 0) return null
         return (
-          <div className="space-y-2 border-b border-border pb-4" data-testid="claude-runs-login" data-state={login.state}>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold">The login runs use</span>
-              <Pill tone={d.tone} glyph={d.glyph} label={`The login runs use: ${d.label}`} hint="pill.settings.builder_login" data-testid="claude-runs-login-state">
-                {d.label}
-              </Pill>
-              <span className="text-xs text-on-surface-muted" data-testid="claude-runs-login-meta">
-                <code>auth: {login.auth}</code> · {login.source || 'no source'}
-                {login.fingerprint ? ` …${login.fingerprint}` : ''}
-                {login.age_s !== null ? ` · checked ${ago(login.age_s)}` : ''}
-              </span>
-            </div>
-            <p className="m-0 text-xs text-on-surface-muted" data-testid="claude-runs-login-why">
-              {login.state === 'unverified' && `${login.reason || 'not verified'} — a run's submit verifies it once, or verify it now.`}
-              {login.state === 'invalid' && `${login.status}: ${login.detail || 'no detail'}. No run on this login will be queued until it works: sign in again or store a new token below, then verify.`}
-              {login.state === 'verified' && `The last check passed; it stands for ${Math.round(login.ttl_s / 60)} min, then the next run checks it again.`}
-            </p>
-            {can('operator') && (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outlined" size="sm" onClick={() => verify.mutate('claude_code')} disabled={verify.isPending} data-testid="claude-runs-login-verify" hint="button.settings.verify_builder_login">
-                  {verify.isPending ? 'Verifying…' : 'Verify the login runs use'}
-                </Button>
-                {verify.isError && <ErrorState compact error={verify.error} />}
-              </div>
-            )}
+          <div className="space-y-3 border-b border-border pb-4">
+            {mine.map((login) => (
+              <RunsLoginMode
+                key={login.auth}
+                login={login}
+                canVerify={can('operator')}
+                verifying={verify.isPending && verify.variables?.auth === login.auth}
+                onVerify={() => verify.mutate({ builder: login.builder, auth: login.auth })}
+                error={verify.isError && verify.variables?.auth === login.auth ? verify.error : null}
+              />
+            ))}
           </div>
         )
       }}
     </QueryBoundary>
+  )
+}
+
+/** One auth mode's line: its state, its age and why, and (operators) its own Verify. */
+function RunsLoginMode({ login, canVerify, verifying, onVerify, error }: { login: BuilderLoginState; canVerify: boolean; verifying: boolean; onVerify: () => void; error: unknown }) {
+  const d = RUNS_LOGIN_DISPLAY[login.state] ?? RUNS_LOGIN_DISPLAY.unverified
+  return (
+    <div className="space-y-2" data-testid="claude-runs-login" data-state={login.state} data-auth={login.auth}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold">{login.default ? 'The login runs use (the default)' : `The login a run with auth: ${login.auth} uses`}</span>
+        <Pill tone={d.tone} glyph={d.glyph} label={`The ${login.auth} login runs use: ${d.label}`} hint="pill.settings.builder_login" data-testid="claude-runs-login-state">
+          {d.label}
+        </Pill>
+        <span className="text-xs text-on-surface-muted" data-testid="claude-runs-login-meta">
+          <code>auth: {login.auth}</code>
+          {login.source !== undefined ? ` · ${login.source || 'no source'}` : ''}
+          {login.fingerprint ? ` …${login.fingerprint}` : ''}
+          {login.age_s !== null ? ` · checked ${ago(login.age_s)}` : ''}
+        </span>
+      </div>
+      <p className="m-0 text-xs text-on-surface-muted" data-testid="claude-runs-login-why">
+        {login.state === 'unverified' && `${login.reason || 'not verified'} — a run's submit verifies it once, or verify it now.`}
+        {login.state === 'invalid' && `${login.status}${login.detail ? `: ${login.detail}` : ''}. No run on this login will be queued until it works: sign in again or store a new token below, then verify.`}
+        {login.state === 'verified' && `The last check passed; it stands for ${Math.round(login.ttl_s / 60)} min, then the next run checks it again.`}
+      </p>
+      {canVerify && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outlined" size="sm" onClick={onVerify} disabled={verifying} data-testid="claude-runs-login-verify" hint="button.settings.verify_builder_login">
+            {verifying ? 'Verifying…' : `Verify the ${login.auth} login`}
+          </Button>
+          {error !== null && <ErrorState compact error={error} />}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -48,7 +48,7 @@ from crb.builders.claude_code import LoginCheck, default_auth
 from crb.server import builder_login as bl
 from crb.server.app import API_PREFIX
 from crb.store.models import Event
-from fixtures.server_seed import ALPHA, Env, envelope, login, make_env
+from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
 from test_server_routes_runs import FakeJobs
 
 SONNET = {"builder": "claude_code", "model": "claude-sonnet-5"}
@@ -60,10 +60,22 @@ class CountingVerifier:
     """A fake verify: answers ``check`` and counts its calls; ``source`` is what a build would
     resolve now (the cache is compared with it)."""
 
-    def __init__(self, status: str = "ok", source: tuple[str, str] = ("keychain", "")) -> None:
+    def __init__(
+        self,
+        status: str = "ok",
+        source: tuple[str, str] = ("keychain", ""),
+        *,
+        present: frozenset[str] = frozenset({"cli"}),
+    ) -> None:
         self.status = status
         self.source = source
+        #: the auth modes whose credential is present — never read from this machine
+        self.present = present
         self.calls: list[tuple[str, str]] = []
+
+    def missing(self, auth: str, *, secrets_dir: Path | None = None) -> str:
+        del secrets_dir
+        return "" if auth in self.present else f"no {auth} credential"
 
     def verify(self, auth: str, binary: str) -> LoginCheck:
         self.calls.append((auth, binary))
@@ -74,7 +86,7 @@ class CountingVerifier:
         monkeypatch.setitem(
             bl.LOGIN_VERIFIERS,
             "claude_code",
-            bl.LoginVerifier(self.verify, lambda auth: self.source, default_auth),
+            bl.LoginVerifier(self.verify, lambda auth: self.source, default_auth, self.missing),
         )
         return self
 
@@ -115,18 +127,23 @@ def _events(env: Env, action: str) -> list[Event]:
 
 
 def _seed(
-    env: Env, status: str, *, age_s: float = 5.0, source: tuple[str, str] = ("keychain", "")
+    env: Env,
+    status: str,
+    *,
+    age_s: float = 5.0,
+    source: tuple[str, str] = ("keychain", ""),
+    auth: str = "cli",
 ) -> None:
-    """A verification of the claude_code ``cli`` login recorded ``age_s`` seconds ago."""
+    """A verification of the claude_code ``auth`` login recorded ``age_s`` seconds ago."""
     when = (_dt.datetime.now(_dt.UTC) - _dt.timedelta(seconds=age_s)).isoformat(timespec="seconds")
     bl.append_event(
         env.factory,
-        trace_id=bl.login_trace("claude_code", "cli"),
+        trace_id=bl.login_trace("claude_code", auth),
         stage="system",
         action=bl.VERIFIED_ACTION,
         payload={
             "builder": "claude_code",
-            "auth": "cli",
+            "auth": auth,
             "status": status,
             "detail": "pong" if status == "ok" else "authentication failed (HTTP 401)",
             "source": source[0],
@@ -157,7 +174,8 @@ def test_a_run_on_a_login_last_verified_invalid_is_refused_before_it_is_queued(
     d = err["detail"]
     assert d["builder"] == "claude_code" and d["auth"] == "cli" and d["source"] == "keychain"
     assert d["state"] == bl.STATE_INVALID and d["status"] == "invalid"
-    assert d["age_s"] is not None and d["fix_path"] == "/settings#claude-code-login"
+    # the way forward names the mode that was refused, so Settings verifies THAT login
+    assert d["age_s"] is not None and d["fix_path"] == "/settings?auth=cli#claude-code-login"
     assert jobs.enqueued == [] and fake.calls == []
     (refused,) = _events(env, bl.REFUSED_ACTION)
     assert refused.payload_json["builder"] == "claude_code" and refused.repo == ALPHA
@@ -379,3 +397,103 @@ def test_a_factory_run_on_a_dead_login_is_refused_before_its_backlog_is_pinned(
     assert jobs.enqueued == []
     (refused,) = _events(env, bl.REFUSED_ACTION)
     assert refused.payload_json["run_kind"] == "factory"
+
+
+# --- Q1's review: roles, every auth mode, odd input ---------------------------------------
+
+
+def test_a_viewer_and_an_anonymous_health_read_never_carry_the_fingerprint(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A viewer is served a login's presence and state only — never its fingerprint, source,
+    CLI version or the verification's own words (the F25 rule ``/settings/secrets`` keeps) —
+    and ``/health``, which answers without a session, carries no more than a viewer gets.
+    The operating roles still read the whole state."""
+    CountingVerifier("invalid", source=("env", TOKEN_TAIL)).install(monkeypatch)
+    _seed(env, "invalid", source=("env", TOKEN_TAIL))
+    full = env.get("/builders/logins").json()["items"]
+    assert any(x.get("fingerprint") == TOKEN_TAIL for x in full)  # the operator's view
+    login(env.client, "viewer")
+    r = env.get("/builders/logins")
+    assert r.status_code == 200 and TOKEN_TAIL not in r.text
+    for item in r.json()["items"]:
+        assert set(item) <= bl.PUBLIC_LOGIN_FIELDS, item
+    (cli,) = [x for x in r.json()["items"] if x["auth"] == "cli"]
+    assert cli["state"] == bl.STATE_INVALID and cli["present"] is True
+    logout(env.client)
+    health = env.client.get(f"{API_PREFIX}/health")
+    assert health.status_code in (200, 503) and TOKEN_TAIL not in health.text
+    probe = next(p for p in health.json()["probes"] if p["name"] == "builders")
+    for item in probe["data"]["logins"]:
+        assert set(item) <= bl.PUBLIC_LOGIN_FIELDS | {"sentence"}, item
+    assert "keychain" not in probe["detail"] and "env" not in probe["detail"].split()
+
+
+def test_a_cli_refusal_on_an_api_key_default_deployment_is_shown_and_cleared_by_its_verify(
+    env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q1's review: the probe, the Settings list and Verify read only the deployment's DEFAULT
+    auth mode (``api_key`` unless ``CRB_CLAUDE_CODE_AUTH`` says otherwise), while the run
+    dialog's "Use my Claude Code login" submits ``auth: cli``. A ``cli`` login recorded
+    invalid was invisible — ``/health`` read the builders ``ok`` from presence, the pilot's
+    D1 words — and Verify checked ``api_key``, so the refused run stayed refused. Every mode
+    with a present credential or a recorded verification is now read, and the way forward
+    verifies the mode that was refused."""
+    monkeypatch.delenv("CRB_CLAUDE_CODE_AUTH")
+    fake = CountingVerifier("invalid", present=frozenset({"cli"})).install(monkeypatch)
+    r = _submit(env)  # builder_config {"auth": "cli"}
+    assert r.status_code == 422 and envelope(r)["code"] == bl.LOGIN_INVALID_CODE
+    assert envelope(r)["detail"]["fix_path"] == "/settings?auth=cli#claude-code-login"
+    probe = _builders_probe(env)
+    assert probe["status"] == "degraded" and "login invalid" in probe["detail"], probe
+    modes = {x["auth"]: x for x in probe["data"]["logins"]}
+    assert modes["cli"]["state"] == bl.STATE_INVALID and modes["cli"]["present"] is True
+    assert modes["api_key"]["default"] is True and modes["cli"]["default"] is False
+    listed = {x["auth"]: x for x in env.get("/builders/logins").json()["items"]}
+    assert listed["cli"]["state"] == bl.STATE_INVALID
+    fake.status = "ok"
+    v = env.post("/builders/claude_code/login/verify", params={"auth": "cli"})
+    assert v.status_code == 200 and v.json()["auth"] == "cli", v.text
+    assert fake.calls[-1] == ("cli", "")
+    assert _submit(env).status_code == 201
+    after = _builders_probe(env)
+    assert "login invalid" not in after["detail"], after
+    assert {x["auth"]: x["state"] for x in after["data"]["logins"]}["cli"] == bl.STATE_VERIFIED
+
+
+@pytest.mark.parametrize("auth", ["CLI", "password"])
+def test_an_auth_mode_the_builder_does_not_have_is_refused_by_name(
+    env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, auth: str
+) -> None:
+    """Q1's review: ``{"auth": "CLI"}`` passed the presence check and then raised inside the
+    real verify — a 500. It is refused 422 with the modes the builder has, nothing queued."""
+    fake = CountingVerifier("ok").install(monkeypatch)
+    r = _submit(env, builder_config={"auth": auth})
+    assert r.status_code == 422, r.text
+    err = envelope(r)
+    assert err["code"] == "validation_error" and "api_key" in err["message"], err
+    assert jobs.enqueued == [] and fake.calls == []
+
+
+def test_a_verify_that_raises_is_recorded_and_refuses_the_run(
+    env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A verify that raises (a CLI that cannot run, a bug in a verifier) is a failed
+    verification — recorded ``error`` with the exception's words, and the run refused
+    ``builder_login_invalid`` — never an unnamed 500."""
+
+    def boom(auth: str, binary: str) -> LoginCheck:
+        raise RuntimeError("the verifier fell over")
+
+    monkeypatch.setitem(
+        bl.LOGIN_VERIFIERS,
+        "claude_code",
+        bl.LoginVerifier(boom, lambda a: ("keychain", ""), default_auth, lambda a, **k: ""),
+    )
+    r = _submit(env)
+    assert r.status_code == 422, r.text
+    assert envelope(r)["code"] == bl.LOGIN_INVALID_CODE
+    assert envelope(r)["detail"]["status"] == "error"
+    (verified,) = _events(env, bl.VERIFIED_ACTION)
+    assert "the verifier fell over" in verified.payload_json["detail"]
+    assert jobs.enqueued == []

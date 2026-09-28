@@ -25,6 +25,12 @@ What lives here
   Haiku turn), recorded, then judged. Each refusal is a ``builder.login.refused`` event.
 * **The worker's own evidence** (:func:`record_refused_login`): a build that meets a refused
   login records it ``invalid`` at once, so the next submit is refused without a verify.
+* **The claim check** (:func:`claim_refusal`): the worker reads the same state at claim, from
+  the cache only, and fails a run whose login was recorded invalid after it was queued, before
+  any build (``trigger: claim``).
+* **Every mode, by role** (:func:`login_readings`): the list and the probe read each auth mode
+  a run could use, not only the default; a viewer and ``/health`` get
+  :data:`PUBLIC_LOGIN_FIELDS` only — presence and state, never the fingerprint or source (F25).
 * **The registry** (:data:`LOGIN_VERIFIERS`): which builders expose a verify, and
   :data:`LOGIN_VERIFY_EXEMPT` says why each other one does not — a test holds every registered
   builder to one or the other, so a new builder cannot skip the gate silently.
@@ -44,7 +50,8 @@ What it does: Records every verification as one event (never a token); reads the
 How:          ``LOGIN_VERIFIERS[builder]`` = ``(verify, resolve)`` → ``latest_verification`` (one
               indexed read) → ``LoginState.of`` → at submit, a per-``(builder, auth)`` lock around
               "read → verify if stale → record" so concurrent submits verify once →
-              ``ApiError(422, "builder_login_invalid")`` + ``builder.login.refused``.
+              ``ApiError(422, "builder_login_invalid")`` + ``builder.login.refused``; at claim,
+              ``claim_refusal`` → ``record_claim_refusal``.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/builders/claude_code.py (``verify_login`` / ``login_resolution`` — the one
@@ -54,7 +61,7 @@ Works with:   src/crb/builders/claude_code.py (``verify_login`` / ``login_resolu
               src/crb/server/routes/system.py (the ``builders`` probe),
               src/crb/server/routes/admin.py
               (the stored-token verify records here), src/crb/server/worker.py (a build that
-              meets a refused login records it), src/crb/store/events.py (``append_event``),
+              meets a refused login records it; the claim check), src/crb/store/events.py (``append_event``),
               src/crb/server/settings.py (``BuilderSettings.login_ttl_s``)
 Tested by:    tests/test_builder_login.py
 Touch when:   never for a new repository; a builder gains a verify (add it to
@@ -77,6 +84,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.builders.claude_code import (
+    AUTH_MODES,
+    VERIFY_ERROR,
     VERIFY_INVALID,
     VERIFY_OK,
     LoginCheck,
@@ -112,6 +121,16 @@ TRIGGER_STORED_TOKEN = "stored_token"  # noqa: S105 — a trigger NAME, not a se
 TRIGGER_BUILD = "build"
 #: Where the person fixes a login — the refusal and the probe name it.
 FIX_WHERE = "Settings → Claude Code login"
+#: A run refused at CLAIM (the worker) rather than at submit: its login was recorded invalid
+#: after it was queued (Q1's review).
+TRIGGER_CLAIM = "claim"
+#: What a viewer, and ``/health`` (which answers without a session), are served of a login:
+#: its presence and state — never the fingerprint, the token source, the CLI version or the
+#: verification's own words (the F25 rule ``/settings/secrets`` keeps; Q1's review).
+PUBLIC_LOGIN_FIELDS: frozenset[str] = frozenset(
+    {"builder", "auth", "state", "status", "present", "default", "checked_at", "age_s"}
+    | {"ttl_s", "reason"}
+)
 #: The run kinds that call a builder (``crb.server.schemas.BUILD_KINDS`` — a replay, a measure
 #: or budget sweep, which are replay / blind runs, and a factory run).
 GATED_KINDS: frozenset[str] = frozenset({"replay", "blind", "factory"})
@@ -124,14 +143,16 @@ ResolveFn = Callable[[str], tuple[str, str]]
 
 @dataclass(frozen=True)
 class LoginVerifier:
-    """A builder's verify and its source resolution, the auth mode it defaults to, and the
+    """A builder's verify and its source resolution, the auth mode it defaults to, the
     presence check (``missing(auth, secrets_dir=…)`` → ``""`` when a credential is present —
-    P-003's check) that says whether the login is configured at all."""
+    P-003's check) that says whether the login is configured at all, and every auth mode it
+    has (each is read, not only the default — Q1's review)."""
 
     verify: VerifyFn
     resolve: ResolveFn
     default_auth: Callable[[], str]
     missing: Callable[..., str] = credential_missing
+    modes: tuple[str, ...] = AUTH_MODES
 
 
 def _claude_code_verify(auth: str, binary: str) -> LoginCheck:
@@ -148,7 +169,9 @@ LOGIN_VERIFIERS: dict[str, LoginVerifier] = {
 LOGIN_VERIFY_EXEMPT: dict[str, str] = {
     "openai_agent": (
         "an OpenAI-compatible endpoint exposes no login to verify without a model call; its key "
-        "is checked for presence at submit (P-003) and a refused key reads outage, cause auth"
+        "is checked for presence at submit (P-003), and a key the provider refuses (HTTP 401 or "
+        "403) or the worker lacks is written 'authentication failed' "
+        "(crb.builders.base.model_error_text), which the ledger reads outage, cause auth"
     ),
     "editblock": "the same OpenAI-compatible client as openai_agent — presence at submit (P-003)",
     "fixture_gold": "the test-only fixture builder applies the gold diff and calls no model",
@@ -248,6 +271,20 @@ class LoginState:
             "trigger": self.trigger,
             "reason": self.reason,
         }
+
+    def public_dict(self) -> dict[str, Any]:
+        """:meth:`to_dict` cut to :data:`PUBLIC_LOGIN_FIELDS` — a viewer's and ``/health``'s."""
+        return {k: v for k, v in self.to_dict().items() if k in PUBLIC_LOGIN_FIELDS}
+
+    def public_sentence(self) -> str:
+        """:meth:`sentence` without the token source or the verification's own words."""
+        who = f"{self.builder} (auth {self.auth})"
+        if self.state == STATE_UNVERIFIED:
+            return f"{who}: not verified — {self.reason}"
+        when = f"{self.age_s:.0f} s ago" if self.age_s is not None else "at an unknown time"
+        if self.state == STATE_VERIFIED:
+            return f"{who}: verified {when}"
+        return f"{who}: {self.status} {when}"
 
     def sentence(self) -> str:
         """One line for the probe and the refusal: the login, its state, its age and why."""
@@ -356,7 +393,14 @@ def run_verification(
     a build resolved at that moment (a builder with no verify is a ``KeyError`` — the callers
     check :data:`LOGIN_VERIFIERS` first)."""
     resolution = resolution_of(builder, auth)
-    check = LOGIN_VERIFIERS[builder].verify(auth, binary)
+    try:
+        check = LOGIN_VERIFIERS[builder].verify(auth, binary)
+    except Exception as exc:  # a verify that cannot run is a failed verification, never a 500
+        log.warning("builder login verify raised", extra={"builder": builder, "auth": auth})
+        detail = redact_and_cap(
+            f"the verify could not run: {type(exc).__name__}: {exc}", max_chars=600
+        )
+        check = LoginCheck(VERIFY_ERROR, detail)
     return record_verification(
         factory, builder, auth, check, trigger=trigger, actor=actor, resolution=resolution
     )
@@ -386,6 +430,87 @@ def record_refused_login(
         resolution=resolution_of(name, mode),
     )
     return True
+
+
+@dataclass(frozen=True)
+class LoginReading:
+    """One ``(builder, auth)`` login as the list and the probe read it: its state, whether its
+    credential is present, and whether it is the mode a run uses when it names none."""
+
+    login: LoginState
+    present: bool
+    default: bool
+
+    def to_dict(self, *, full: bool) -> dict[str, Any]:
+        """The operating roles' view (``full``) or the presence-only view (a viewer, ``/health``)."""
+        body = self.login.to_dict() if full else self.login.public_dict()
+        return {**body, "present": self.present, "default": self.default}
+
+    def sentence(self, *, full: bool) -> str:
+        return self.login.sentence() if full else self.login.public_sentence()
+
+
+def login_readings(session: Session, *, ttl_s: int, secrets_dir: Any = None) -> list[LoginReading]:
+    """Every login a run could use: for each builder with a verify, its default auth mode and
+    every other mode whose credential is present or that has a recorded verification (Q1's
+    review — a ``cli`` refusal on an ``api_key``-default deployment was invisible). The default
+    comes first. From the cache only: never a model call."""
+    out: list[LoginReading] = []
+    for name, verifier in sorted(LOGIN_VERIFIERS.items()):
+        default = verifier.default_auth()
+        for auth in sorted(verifier.modes, key=lambda m: (m != default, m)):
+            present = not verifier.missing(auth, secrets_dir=secrets_dir)
+            recorded = latest_verification(session, name, auth) is not None
+            if auth != default and not present and not recorded:
+                continue
+            state = login_state(session, name, auth, ttl_s=ttl_s)
+            out.append(LoginReading(state, present, auth == default))
+    return out
+
+
+def claim_refusal(factory: sessionmaker[Session], run: Run, *, ttl_s: int) -> LoginState | None:
+    """The invalid login a queued run would build on, read at CLAIM from the cache — no verify,
+    no model call (Q1's review: the submit gate held at submit only, so a run queued while its
+    login worked was still started after the login was recorded invalid). ``None`` when every
+    login the run would call is verified or unverified; an unverified one is left to the
+    build, which records a refusal it meets."""
+    for builder, auth in run_logins(run):
+        if auth not in LOGIN_VERIFIERS[builder].modes:
+            continue
+        with factory() as s:
+            state = login_state(s, builder, auth, ttl_s=ttl_s)
+        if state.state == STATE_INVALID:
+            return state
+    return None
+
+
+def record_claim_refusal(
+    factory: sessionmaker[Session], run: Run, login: LoginState, *, actor: str
+) -> str:
+    """One ``builder.login.refused`` event (``trigger: claim``) for a run the worker failed
+    before any build; returns the run's error line."""
+    detail = {**login.to_dict(), **_fix(login.auth)}
+    append_event(
+        factory,
+        trace_id=login_trace(login.builder, login.auth),
+        stage="system",
+        action=REFUSED_ACTION,
+        status=StepStatus.ERROR,
+        actor=actor,
+        repo=run.repo,
+        error=login.sentence(),
+        payload={**detail, "run_kind": run.kind, "run_id": run.id, "trigger": TRIGGER_CLAIM},
+    )
+    return (
+        f"{LOGIN_INVALID_CODE}: the {login.builder} login this {run.kind} run would use was "
+        f"recorded invalid after it was queued — {login.sentence()}. Nothing was built and "
+        f"nothing was spent; fix the login under {FIX_WHERE}, then submit the run again"
+    )
+
+
+def _fix(auth: str) -> dict[str, str]:
+    """Where a refused login is fixed — the Settings card, told which mode to verify."""
+    return {"fix": FIX_WHERE, "fix_path": f"/settings?auth={auth}#claude-code-login"}
 
 
 _LOCKS: dict[tuple[str, str], threading.Lock] = {}
@@ -445,14 +570,20 @@ def login_refusal(
     the token source label, the outcome and its age, and where to fix it; it is recorded as a
     ``builder.login.refused`` event. Never the token."""
     for builder, auth in run_logins(run):
+        modes = LOGIN_VERIFIERS[builder].modes
+        if auth not in modes:
+            # Q1's review: an auth the builder does not have reached the real verify and raised
+            raise ApiError(
+                422,
+                "validation_error",
+                f"builder_config auth {auth!r} is not an auth mode of {builder}: one of "
+                f"{', '.join(modes)}",
+                detail={"builder": builder, "auth": auth, "modes": list(modes)},
+            )
         state = fresh_state(factory, builder, auth, ttl_s=ttl_s, binary=binary, actor=run.actor)
         if state.state == STATE_VERIFIED:
             continue
-        detail = {
-            **state.to_dict(),
-            "fix": FIX_WHERE,
-            "fix_path": "/settings#claude-code-login",
-        }
+        detail = {**state.to_dict(), **_fix(auth)}
         append_event(
             factory,
             trace_id=login_trace(builder, auth),
@@ -481,22 +612,28 @@ __all__ = [
     "LOGIN_STATES",
     "LOGIN_VERIFIERS",
     "LOGIN_VERIFY_EXEMPT",
+    "PUBLIC_LOGIN_FIELDS",
     "REFUSED_ACTION",
     "STATE_INVALID",
     "STATE_UNVERIFIED",
     "STATE_VERIFIED",
     "TRIGGER_BUILD",
+    "TRIGGER_CLAIM",
     "TRIGGER_SETTINGS",
     "TRIGGER_STORED_TOKEN",
     "TRIGGER_SUBMIT",
     "VERIFIED_ACTION",
+    "LoginReading",
     "LoginState",
     "LoginVerifier",
+    "claim_refusal",
     "fresh_state",
     "latest_verification",
+    "login_readings",
     "login_refusal",
     "login_state",
     "login_trace",
+    "record_claim_refusal",
     "record_refused_login",
     "record_verification",
     "resolution_of",

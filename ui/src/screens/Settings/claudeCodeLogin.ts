@@ -188,22 +188,28 @@ export function useClaudeLoginSession(id: string | null): UseQueryResult<LoginSe
   })
 }
 
-/** `LoginState` (docs/API.md "Builders") — the login a run would use, as the run preflight and
- *  `/health` read it (pilot D1). Never a token: `fingerprint` is at most four characters. */
+/** `LoginState` (docs/API.md "Builders") — a login a run could use, one per auth mode, as the
+ *  run preflight and `/health` read it (pilot D1). Never a token: `fingerprint` is at most four
+ *  characters, and a viewer is served presence and state only — no `fingerprint`, `source`,
+ *  `detail`, `cli_version` or `trigger` (F25; Q1's review). */
 export interface BuilderLoginState {
   builder: string
   auth: string
   state: 'verified' | 'unverified' | 'invalid'
   status: string
-  detail: string
-  source: string
-  fingerprint: string
-  cli_version: string
+  /** Whether this mode's credential is present on the API host. */
+  present: boolean
+  /** Whether this is the mode a run uses when it names none. */
+  default: boolean
   checked_at: string | null
   age_s: number | null
   ttl_s: number
-  trigger: string
   reason: string
+  detail?: string
+  source?: string
+  fingerprint?: string
+  cli_version?: string
+  trigger?: string
 }
 
 const builderLoginsKey = ['builders', 'logins'] as const
@@ -213,12 +219,13 @@ export function useBuilderLogins(): UseQueryResult<{ items: BuilderLoginState[] 
   return useQuery({ queryKey: builderLoginsKey, queryFn: () => api<{ items: BuilderLoginState[] }>('/builders/logins') })
 }
 
-/** `POST /builders/{builder}/login/verify` — one no-tool Haiku turn, recorded for the next run. */
-export function useVerifyBuilderLogin(): UseMutationResult<BuilderLoginState, ApiError, string> {
+/** `POST /builders/{builder}/login/verify?auth=` — one no-tool Haiku turn for that auth mode,
+ *  recorded for the next run (the mode is sent, so a refused `cli` login is the one verified). */
+export function useVerifyBuilderLogin(): UseMutationResult<BuilderLoginState, ApiError, { builder: string; auth: string }> {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (builder: string) =>
-      api<BuilderLoginState>(`/builders/${encodeURIComponent(builder)}/login/verify`, { method: 'POST', timeoutMs: VERIFY_TIMEOUT_MS }),
+    mutationFn: ({ builder, auth }: { builder: string; auth: string }) =>
+      api<BuilderLoginState>(`/builders/${encodeURIComponent(builder)}/login/verify?auth=${encodeURIComponent(auth)}`, { method: 'POST', timeoutMs: VERIFY_TIMEOUT_MS }),
     onSuccess: () => qc.invalidateQueries({ queryKey: builderLoginsKey }),
   })
 }

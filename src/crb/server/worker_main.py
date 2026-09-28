@@ -83,7 +83,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from crb.core.execution import SANDBOX_TREES, TREE_COPY, DockerSettings, SandboxUnavailable
@@ -283,13 +283,22 @@ def settings_from_args(
         # CRB_PROVISION__* — the same variables the API validates (ADR-0019); off by default
         provision=ProvisionConfig.from_env(e, home=home),
         store_patches=shared.retention.patches,
+        builder_login_ttl_s=shared.builder.login_ttl_s,
     )
+
+
+class _BuilderLoginShared(BaseModel):
+    """The one ``CRB_BUILDER__*`` key the worker shares with the API's ``BuilderSettings``:
+    ``login_ttl_s``, with the API's bounds. Every other ``CRB_BUILDER__*`` key is ignored
+    here (the worker reads its builder posture elsewhere)."""
+
+    login_ttl_s: int = Field(default=600, ge=30, le=86400)
 
 
 class _SharedWithApi(BaseSettings):
     """Just the keys the worker shares with the API — ``CRB_GITHUB__*``, ``CRB_FACTORY__*``,
-    ``CRB_INTAKE__*``, ``CRB_METRICS_ENABLED``, ``CRB_METRICS_HOST`` and ``CRB_METRICS_PORT``
-    — read the way :class:`Settings` reads them (same prefix, same
+    ``CRB_INTAKE__*``, ``CRB_METRICS_ENABLED``, ``CRB_METRICS_HOST``, ``CRB_METRICS_PORT`` and
+    ``CRB_BUILDER__LOGIN_TTL_S`` — read the way :class:`Settings` reads them (same prefix, same
     nested delimiter) and nothing else: the worker must not fail on an unrelated server
     setting it does not use, and must not START on a malformed GitHub one — a bad
     ``CRB_GITHUB__API_URL`` is a configuration error the operator fixes, not a worker that
@@ -321,6 +330,9 @@ class _SharedWithApi(BaseSettings):
     #: ``CRB_RETENTION__*`` — the worker reads ``patches`` (keep every graded attempt's
     #: patch; crb.core.patches), the same block the API's settings carry.
     retention: RetentionSettings = RetentionSettings()
+    #: ``CRB_BUILDER__LOGIN_TTL_S`` — how long a login's last verification stands, read as the
+    #: API's submit gate reads it, so the worker's claim check applies the same window.
+    builder: _BuilderLoginShared = _BuilderLoginShared()
 
 
 def _shared_settings(env: dict[str, str] | None = None) -> _SharedWithApi:

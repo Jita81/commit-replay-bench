@@ -137,7 +137,7 @@ describe('RunNewDialog', () => {
             error: {
               code: 'builder_login_invalid',
               message: 'the claude_code login a blind run would use does not work: claude_code (auth cli, keychain): invalid 42 s ago — authentication failed (HTTP 401). Nothing was queued and nothing was spent — fix the login under Settings → Claude Code login (sign in again or store a new token, then Verify), and submit again',
-              detail: { builder: 'claude_code', auth: 'cli', source: 'keychain', state: 'invalid', status: 'invalid', age_s: 42, fix: 'Settings → Claude Code login', fix_path: '/settings#claude-code-login' },
+              detail: { builder: 'claude_code', auth: 'cli', source: 'keychain', state: 'invalid', status: 'invalid', age_s: 42, fix: 'Settings → Claude Code login', fix_path: '/settings?auth=cli#claude-code-login' },
             },
           },
           422,
@@ -149,7 +149,7 @@ describe('RunNewDialog', () => {
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByText('The builder’s login does not work — nothing was queued')).toBeInTheDocument()
     expect(within(alert).getByText(/authentication failed \(HTTP 401\)/)).toBeInTheDocument()
-    expect(within(alert).getByTestId('error-login-fix')).toHaveAttribute('href', '/settings#claude-code-login')
+    expect(within(alert).getByTestId('error-login-fix')).toHaveAttribute('href', '/settings?auth=cli#claude-code-login')
     expect(onCreated).not.toHaveBeenCalled()
   })
 

@@ -264,7 +264,12 @@ from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink
 from crb.observability.metrics import parse_metrics_port
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
-from crb.server.builder_login import record_refused_login
+from crb.server.builder_login import (
+    LOGIN_INVALID_CODE,
+    claim_refusal,
+    record_claim_refusal,
+    record_refused_login,
+)
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
 from crb.server.github_app import GitHubApp, GitHubAppError
@@ -505,6 +510,10 @@ class WorkerSettings:
     #: ``<home>/evidence/patches`` (crb.core.patches) — ``CRB_RETENTION__PATCHES``.
     store_patches: bool = True
     max_reclaims: int = 3
+    #: How long a builder login's last verification stands (``CRB_BUILDER__LOGIN_TTL_S``, the
+    #: value the API's submit gate reads): at claim, a login recorded invalid within it fails
+    #: the run before any build (Q1's review; src/crb/server/builder_login.py).
+    builder_login_ttl_s: int = 600
     #: The worker's own Prometheus exposition (J-TEL-1): every build / grade / cost series
     #: is recorded in THIS process, so the API's ``/metrics`` never carries them. Served by
     #: ``prometheus_client.start_http_server`` on ``metrics_host:metrics_port``
@@ -1155,6 +1164,8 @@ class Worker:
         try:
             if self.queue.is_cancel_requested(run.id):
                 status, error = STATUS_CANCELLED, ""
+            elif (dead := self._dead_login(run, emitter)) is not None:
+                status, error = STATUS_FAILED, dead
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1204,6 +1215,25 @@ class Worker:
             final_status=status,
             counts=counts,
         )
+
+    def _dead_login(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when a login it would call was
+        recorded invalid after it was queued — read from the cache, never a verify or a model
+        call (the submit gate's rule, applied again at claim: Q1's review) — else ``None``."""
+        login = claim_refusal(self.factory, run, ttl_s=self.settings.builder_login_ttl_s)
+        if login is None:
+            return None
+        error = record_claim_refusal(self.factory, run, login, actor=self.worker_id)
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=LOGIN_INVALID_CODE,
+            builder=login.builder,
+            auth=login.auth,
+        )
+        return error
 
     # --- repo / harness ----------------------------------------------------------
     def _github_installation(self, cfg: Mapping[str, Any]) -> int | None:
