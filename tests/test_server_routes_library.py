@@ -167,7 +167,7 @@ def _template(method: str, path: str) -> tuple[str, str]:
 
 
 def test_every_act_is_gated_by_role(env: Env) -> None:
-    """Each route's role gate, and — P-183 — every route of the router is probed: the retire
+    """Each route's role gate, and — P-283 — every route of the router is probed: the retire
     route's gate once went untested because this list was typed by hand."""
     probed: set[tuple[str, str]] = set()
 
@@ -226,7 +226,7 @@ def test_an_operator_sponsors_a_mined_proposal_and_a_second_person_signs_it(env:
 
 
 def test_every_act_writes_its_event_naming_the_actor_and_the_entry(env: Env) -> None:
-    """P-183: every ``library.*`` event the routes write is produced here, by the act that
+    """P-283: every ``library.*`` event the routes write is produced here, by the act that
     writes it, naming the actor and the entry — a renamed or dropped event fails."""
     tree = ast.parse(Path(library_routes.__file__).read_text(encoding="utf-8"))
     written = {
