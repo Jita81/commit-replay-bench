@@ -19,7 +19,9 @@ How:          ``json`` over the tsconfig files (they carry no comments); a path 
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   ui/tsconfig.app.json and ui/tsconfig.node.json (where ``tsBuildInfoFile`` is
-              set), ui/.gitignore (ignores ``ui/.tsbuild/``), docs/PREVENTION.md (P-150)
+              set), ui/.gitignore (which ignores the build-info directory the tsconfigs
+              name — cited in words, not as a path: a fresh clone has no such directory, so
+              the code map could not resolve it, P-155), docs/PREVENTION.md (P-150)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (the UI's own build settings); a new tsconfig with
               build info is added, or the type-check stops being ``tsc -b``.
