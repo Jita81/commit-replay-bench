@@ -1,0 +1,25 @@
+{{- if not .Values.evidenceStore.existingClaim }}
+# The evidence store the worker writes (kept patches, evidence packs, retained transcripts)
+# and the api serves — one claim, both pods (docs/PREVENTION.md P-045). Kept, like the work
+# volume: the kept patches are the product's retained output, and a `helm uninstall` must
+# not take them with it; delete the claim explicitly.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "crb.evidenceStore.claim" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: evidence-store
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.evidenceStore.accessMode }}
+  {{- with .Values.evidenceStore.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.evidenceStore.size }}
+{{- end }}

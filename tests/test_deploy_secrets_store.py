@@ -194,12 +194,30 @@ def test_a_read_write_once_store_pins_the_api_and_the_worker_to_one_node() -> No
         assert d["spec"]["template"]["spec"]["affinity"]["nodeAffinity"], d["metadata"]["name"]
 
 
+#: ReadWriteMany claims for BOTH stores the two pods share: only then is no pin needed (the
+#: evidence store follows the same rule, tests/test_deploy_evidence_store.py).
+RWX_EVIDENCE = (
+    "--set",
+    "evidenceStore.existingClaim=files",
+    "--set",
+    "evidenceStore.accessMode=ReadWriteMany",
+)
+RWX_STORES = (
+    "--set",
+    "secretsStore.existingClaim=kv",
+    "--set",
+    "secretsStore.accessMode=ReadWriteMany",
+    *RWX_EVIDENCE,
+)
+
+
 def test_an_operators_claim_replaces_the_charts_and_many_nodes_need_no_pin() -> None:
     docs = _render(
         "--set",
         "secretsStore.existingClaim=kv-secrets",
         "--set",
         "secretsStore.accessMode=ReadWriteMany",
+        *RWX_EVIDENCE,
     )
     api = _store(_deployment(docs, "api"), "api")
     assert api == _store(_deployment(docs, "worker"), "worker")
@@ -242,12 +260,7 @@ def test_a_read_write_once_store_refuses_a_worker_placement_the_api_cannot_follo
     )
     assert _node_pins(api) and _node_pins(worker)
     # ... or a claim that many nodes can mount, which needs no pin
-    rwx = (
-        "--set",
-        "secretsStore.existingClaim=kv",
-        "--set",
-        "secretsStore.accessMode=ReadWriteMany",
-    )
+    rwx = RWX_STORES
     assert not _node_pins(_deployment(_render(*WORKER_POOL, *rwx), "worker"))
 
 
@@ -373,6 +386,7 @@ def test_a_pod_map_cannot_overwrite_a_key_the_chart_sets(component: str, field: 
 CLAIM_IN_RECOVERY = {
     "worker": "`worker.workDir`",
     "secrets-store": "`secretsStore`",
+    "evidence-store": "`evidenceStore`",
     "postgres": "the database",
 }
 
@@ -515,12 +529,7 @@ def test_a_read_write_once_store_refuses_anti_affinity_that_repels_a_store_pod(c
     assert "podAntiAffinity" in err and "ReadWriteMany" in err, err
     assert "give the api the worker's placement" not in err, err
     # ... and a claim that many nodes can mount needs no pin, so the same term renders
-    rwx = (
-        "--set",
-        "secretsStore.existingClaim=kv",
-        "--set",
-        "secretsStore.accessMode=ReadWriteMany",
-    )
+    rwx = RWX_STORES
     assert not _node_pins(_deployment(_render(*_anti(*REPELLING_ANTI_AFFINITY[case]), *rwx), "api"))
 
 

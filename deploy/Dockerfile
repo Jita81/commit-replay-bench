@@ -88,13 +88,18 @@ COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 WORKDIR /app
 
-# Dependency layer: resolved from pyproject.toml alone so it caches independently of src/.
-COPY pyproject.toml README.md LICENSE /app/
+# Dependency layer: exactly the versions and hashes uv.lock pins, the same lock every CI job
+# installs from — never pyproject.toml resolved at build time, which would ship versions no
+# gate ran (docs/PREVENTION.md P-270; tests/test_ci_lock.py fails on a fresh resolution).
+# It reads only pyproject.toml and uv.lock, so it caches independently of src/.
+COPY pyproject.toml uv.lock README.md LICENSE /app/
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     set -eu; \
     uv venv /app/.venv --python /usr/local/bin/python3; \
-    UV_NO_CACHE=0 uv pip install --python /app/.venv/bin/python \
-        -r /app/pyproject.toml --extra server --extra postgres
+    uv export --locked --no-default-groups --extra server --extra postgres --no-emit-project \
+        -o /tmp/locked-requirements.txt; \
+    UV_NO_CACHE=0 uv pip install --python /app/.venv/bin/python --require-hashes -r /tmp/locked-requirements.txt; \
+    rm -f /tmp/locked-requirements.txt
 
 # The package itself (non-editable; alembic.ini + migrations ship inside the wheel).
 COPY src/ /app/src/

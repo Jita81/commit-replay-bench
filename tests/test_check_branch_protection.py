@@ -9,7 +9,10 @@ What it does: Pins that the workflow's jobs expand to the check names branch pro
               requires, a required part of an aggregator, a non-strict setting and a job name
               GitHub would cut at 100 characters; that the last reading of the setting
               (tests/fixtures/branch_protection_main.json) still matches ci.yml, so renaming or
-              adding a job fails here until the setting is read again; and that the scheduled
+              adding a job fails here until the setting is read again — or until the reading
+              names the job under ``awaiting_protection`` with the administrator's step and
+              an open gap in docs/dod that names the job, an entry that is itself refused once
+              stale or once no open gap holds it (DL-101, P-269); and that the scheduled
               workflow runs the live comparison and fails, never passes, without its token.
 How:          Calls the module's functions on fixture text and on the real ci.yml, runs
               ``main`` against the saved reading, and reads the workflow file.
@@ -22,7 +25,8 @@ Works with:   scripts/check_branch_protection.py (under test), .github/workflows
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it pins this repository's own workflow and setting);
               a job is added to or renamed in ci.yml (read the setting again after the
-              administrator updates it, and save the reading in the fixture).
+              administrator updates it, and save the reading in the fixture; until then name
+              the job under ``awaiting_protection`` with the step that remains).
 """
 
 from __future__ import annotations
@@ -257,16 +261,83 @@ def test_the_last_reading_of_the_setting_still_matches_the_workflow() -> None:
     mod = _load()
     reading = json.loads(READING.read_text(encoding="utf-8"))
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert (
-        mod.compare(
-            mod.gating_contexts(ci),
-            reading["contexts"],
-            reading["strict"],
-            mod.aggregated_parts(ci),
-        )
-        == []
+    errors, awaiting = mod.compare_reading(
+        mod.gating_contexts(ci), reading, mod.open_gaps(), mod.aggregated_parts(ci)
     )
+    assert errors == []
     assert len(reading["contexts"]) == 16
+    # a job the administrator has not yet required is named, with its step, never silent
+    fresh = "fresh-clone (every gate from uv.lock, as root, no docker daemon)"
+    step = reading["awaiting_protection"][fresh]
+    assert awaiting == [f"job {fresh!r} awaits the administrator: {step}"]
+
+
+def test_a_job_awaiting_protection_is_held_to_the_setting_and_the_workflow() -> None:
+    """The saved reading's ``awaiting_protection`` entry is honest only while the setting
+    lacks the job, a job reports it and it names the step; each lapse is a difference. A
+    reading without the entry — every live reading — still refuses the unrequired job."""
+    mod = _load()
+    jobs = mod.job_contexts(CI_TEXT)
+    gaps = {"G-930": "an administrator adds `bare` to the required checks · deploy"}
+    base = {"strict": True, "contexts": ["lint (ruff)", "test (py3.12)", "test (py3.13)"]}
+    assert mod.compare_reading(jobs, base, gaps)[0] == [
+        "job 'bare' runs on every pull request but branch protection does not require it: "
+        "it can fail and the change still merges"
+    ]
+    step = "an administrator requires it (G-930)"
+    waiting = {**base, "awaiting_protection": {"bare": step}}
+    assert mod.compare_reading(jobs, waiting, gaps) == (
+        [],
+        [f"job 'bare' awaits the administrator: {step}"],
+    )
+    now_required = {**waiting, "contexts": [*base["contexts"], "bare"]}
+    assert mod.compare_reading(jobs, now_required, gaps)[0] == [
+        "branch protection now requires 'bare': save the reading again without it under "
+        "awaiting_protection"
+    ]
+    ghost = {**waiting, "awaiting_protection": {"bare": step, "gone": "an administrator"}}
+    assert mod.compare_reading(jobs, ghost, gaps)[0] == [
+        "'gone' awaits branch protection, but no job in ci.yml reports it"
+    ]
+    silent = {**base, "awaiting_protection": {"bare": " "}}
+    assert mod.compare_reading(jobs, silent, gaps)[0] == [
+        "'bare' awaits branch protection with no step named"
+    ]
+
+
+def test_a_job_awaits_protection_only_under_an_open_gap_that_names_it() -> None:
+    """The entry is bounded by the record, not by review (DL-101, P-269): its step names a
+    gap id, the gap is open in docs/dod (it blocks a criterion that is not met), and the
+    gap's own text names the job. A job parked under the key with no gap, under a closed
+    gap, or under a gap about something else — say one dropped from the required list —
+    fails, so the saved-reading test cannot be kept green by moving a job there."""
+    mod = _load()
+    jobs = mod.job_contexts(CI_TEXT)
+    base = {"strict": True, "contexts": ["lint (ruff)", "test (py3.12)", "test (py3.13)"]}
+    gaps = {
+        "G-930": "an administrator adds `bare` to the required checks · deploy",
+        "G-111": "something else entirely · deploy",
+    }
+    no_gap = {**base, "awaiting_protection": {"bare": "an administrator requires it"}}
+    assert mod.compare_reading(jobs, no_gap, gaps)[0] == [
+        "'bare' awaits branch protection under no gap: name the open gap (G-nnn) whose "
+        "text names the job"
+    ]
+    closed = {**base, "awaiting_protection": {"bare": "an administrator requires it (G-930)"}}
+    assert mod.compare_reading(jobs, closed, {})[0] == [
+        "'bare' awaits branch protection under G-930, which is not an open gap in docs/dod "
+        "that names the job"
+    ]
+    elsewhere = {**base, "awaiting_protection": {"bare": "parked (G-111)"}}
+    assert mod.compare_reading(jobs, elsewhere, gaps)[0] == [
+        "'bare' awaits branch protection under G-111, which is not an open gap in docs/dod "
+        "that names the job"
+    ]
+    # the real record: the fixture's entry names G-930, which is open and names the job
+    reading = json.loads(READING.read_text(encoding="utf-8"))
+    (fresh,) = reading["awaiting_protection"]
+    live = mod.open_gaps()
+    assert "G-930" in reading["awaiting_protection"][fresh] and fresh in live["G-930"]
 
 
 def test_main_compares_a_saved_reading_and_fails_on_any_difference(
@@ -274,7 +345,9 @@ def test_main_compares_a_saved_reading_and_fails_on_any_difference(
 ) -> None:
     mod = _load()
     assert mod.main(["--from-json", str(READING)]) == 0
-    assert "branch protection: 16 required checks match" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert "branch protection: 16 required checks match" in said
+    assert "awaits the administrator" in said
     reading = json.loads(READING.read_text(encoding="utf-8"))
     reading["contexts"].remove(
         "dod (every route, journey and stream has its definition of done; evidence resolves)"

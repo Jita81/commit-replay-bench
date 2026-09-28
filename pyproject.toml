@@ -61,6 +61,14 @@ dev = [
 ]
 all = ["commit-replay-bench[openai,claude,server,postgres,mcp,dev]"]
 
+# Tools two CI jobs add beside the locked environment to report on it, never imported by crb:
+# pinned here so uv.lock pins them, with every dependency, by version and hash, and the jobs
+# install them from it (tests/test_ci_lock.py). A gate's verdict must not move with a
+# release nobody chose (pip-audit's is a gate).
+[dependency-groups]
+audit = ["pip==26.2.1", "pip-audit==2.10.1"]
+sbom = ["cyclonedx-bom==7.4.0"]
+
 [project.scripts]
 crb = "crb.cli.main:main"
 

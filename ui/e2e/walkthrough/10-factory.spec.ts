@@ -12,7 +12,7 @@
  *               authored test that fails today; I-2 with an unsigned structural gap); asserts
  *               the readiness and cell-route pills BEFORE the run and the "Before you run"
  *               facts (builder, items, estimate with its provenance, delivery not linked —
- *               J-FAC-1/2/3); names `fixture_gold` as the builder (every knob — the deployment's
+ *               J-FAC-1/2/3 — and no spend cap on the whole run until one is typed, F5b); names `fixture_gold` as the builder (every knob — the deployment's
  *               default would be a real model) and presses Run the factory (J-FAC-1 — the 422
  *               a run without a builder met); waits on the run page's status pill; asserts the
  *               item chain: I-1 assessed, RED proved, built under the belts but NOT clean (the
@@ -112,7 +112,9 @@ test.describe('10 factory (fixture_gold)', () => {
     await expect(box).toContainText('not linked — no pull request')
     await expect(box).toContainText('it is connected by URL, not through the GitHub App')
     await expect(box.getByRole('checkbox', { name: /Open pull requests/ })).toBeDisabled()
-    await expect(box).toContainText('no spend cap yet')
+    // F5b — the run can be told to stop at an amount: blank means no cap on the whole run
+    await expect(box).toContainText('none on the whole run — set one under Stop the run at')
+    await expect(box.getByLabel('Stop the run at (USD)')).toHaveValue('')
     await expect(box).toContainText('You can cancel the run at any point. Items already built are still charged.')
   })
 
