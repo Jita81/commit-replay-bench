@@ -39,7 +39,8 @@ Works with:   src/crb/builders/base.py (brief, budget, outcome, both guards),
               src/crb/builders/budget.py (``BudgetTracker``), src/crb/core/execution.py (the
               executor the commands run through), src/crb/core/runners/base.py (the sighted
               test tool), src/crb/builders/container.py (supplies a sealed executor)
-Tested by:    tests/test_builders_openai_agent.py
+Tested by:    tests/test_builders_openai_agent.py, tests/test_builders_endpoint.py (the
+              configured endpoint is the one called; its provider is the one stamped)
 Touch when:   never for a new repository; a build/test tool a repository needs that is not
               in ``RUN_COMMAND_ALLOWLIST`` is added there with a test; a new tool means a
               schema entry, a ``_Tools`` method and a ``dispatch`` branch together.
@@ -75,7 +76,7 @@ from crb.builders.openai_client import (
     ModelTurn,
     ToolCall,
     make_chat,
-    resolved_endpoint,
+    resolve_endpoint,
 )
 from crb.core.execution import Command, Executor, LocalExecutor
 from crb.core.redact import redact_and_cap
@@ -486,10 +487,9 @@ class OpenAIAgentBuilder:
         keep_transcript: bool = False,
     ) -> None:
         self.model = model
-        self.endpoint = endpoint
-        # the endpoint the build will call (resolved_endpoint: explicit, else the
-        # deployment's CRB_OPENAI_* / CRB_AZURE_*), so the provider column names it
-        self.provider = provider or resolved_endpoint(endpoint).provider
+        # the configured endpoint (CRB_OPENAI_BASE_URL …) when none is passed, and the
+        # provider it IS — a rung naming another provider is refused here, not stamped
+        self.endpoint, self.provider = resolve_endpoint(endpoint, provider, seam=model_fn)
         self._model_fn = model_fn
         self.executor: Executor = executor or LocalExecutor()
         self.runner_factory = runner_factory
@@ -502,6 +502,7 @@ class OpenAIAgentBuilder:
             "model": self.model,
             "provider": self.provider,
             "process": "in-process tool loop (read/search/edit/run)",
+            "endpoint": self.endpoint.to_dict(),
             "executor": self.executor.describe(),
         }
 

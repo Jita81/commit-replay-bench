@@ -21,7 +21,9 @@ How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``t
               ``pytest_runtest_setup`` hands the ``network`` marker's hosts to
               ``conftest_langs.require_network``. ``_no_host_claude_cli`` pins
               ``claude_cli_on_path`` to ``False`` for every test, so no test passes or fails on
-              whether this machine has the ``claude`` CLI (P-037).
+              whether this machine has the ``claude`` CLI (P-037); ``_no_host_endpoint_env``
+              clears the ``CRB_OPENAI_*`` / ``CRB_AZURE_*`` variables, so no test builds
+              against the endpoint this machine's shell names (P-277).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
@@ -31,7 +33,7 @@ Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives fro
               tests/fixtures/tmptree.py (``restore_removable``, the finaliser's walk)
 Tested by:    tests/test_grade.py, tests/test_mine.py, tests/test_workspace.py (every consumer),
               tests/test_conftest_langs.py (the network gate), tests/test_tmp_tree_hygiene.py
-              (the finaliser)
+              (the finaliser), tests/test_endpoint_env_isolation.py (the endpoint variables)
 Touch when:   never for a new repository; add a fixture here only when three or more core test
               modules need the same object — language, store and server fixtures live in their
               own helper modules so this file stays the core suite's.
@@ -125,3 +127,26 @@ def _no_host_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     import crb.builders.claude_code as claude_code
 
     monkeypatch.setattr(claude_code, "claude_cli_on_path", lambda: False)
+
+
+#: The deployment's endpoint variables ``EndpointConfig.from_env`` reads (P-277).
+_HOST_ENDPOINT_ENV = (
+    "CRB_OPENAI_BASE_URL",
+    "CRB_OPENAI_KEY_ENV",
+    "CRB_OPENAI_TIMEOUT_S",
+    "CRB_OPENAI_MAX_TOKENS",
+    "CRB_OPENAI_MAX_RETRIES",
+    "CRB_AZURE_ENDPOINT",
+    "CRB_AZURE_DEPLOYMENT",
+    "CRB_AZURE_API_VERSION",
+    "CRB_AZURE_KEY_ENV",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_host_endpoint_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test starts with no OpenAI-compatible endpoint configured, as on CI: a builder
+    or test author built with no explicit endpoint calls Cerebras. A test that needs another
+    endpoint sets the variables itself (tests/test_builders_endpoint.py)."""
+    for name in _HOST_ENDPOINT_ENV:
+        monkeypatch.delenv(name, raising=False)
