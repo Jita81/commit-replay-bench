@@ -947,7 +947,10 @@ product sends no email, so you pass the link on yourself, by whatever channel yo
 uses. The person opens it, chooses their own password, and the account is activated at that
 moment. A link expires (72 hours by default, 1 to 336), works once, and can be withdrawn with a
 recorded reason while it is unused; an accepted one is an account, so deactivate the account
-instead. Only the link's SHA-256 hash is stored: a lost link is re-invited, never recovered.
+instead. If you let the person in another way — activate the account or set its password on the
+Users card — the link is withdrawn at that moment, with the reason `superseded` on the
+invitation, so a copy of it that is still in somebody's inbox cannot later reset the password
+they use. Only the link's SHA-256 hash is stored: a lost link is re-invited, never recovered.
 
 The card and Home's task 7 both read `GET /two-person-readiness`, which answers whether a
 sign-off the two-person rule would accept is possible at all — an account that can sign, that

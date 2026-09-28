@@ -12,7 +12,10 @@ What it does: Pins that an invitation creates an INACTIVE account nobody can sig
               the same 401 (and that five wrong ones trip the limiter: 429), that only an
               admin may invite or revoke and only a signing role may be invited, that every
               write lands as one ``user.*`` event with actor and target and never a token or
-              a password, and that two-person readiness answers Home's task 7 honestly: an
+              a password, that a link never outlives another way into the same account — the
+              admin's activate and password routes withdraw it, and the accept route refuses
+              and withdraws it for an account found already open (P-153) — and that
+              two-person readiness answers Home's task 7 honestly: an
               admin alone is not ready, an approver who has never signed in is not ready, and
               an approver who has signed in with somebody else on the deployment is — but a
               viewer is not that somebody (it can neither run nor sign), and for one
@@ -291,6 +294,108 @@ def test_revoking_an_accepted_invitation_is_refused_and_says_what_to_do_instead(
     assert r.status_code == 422
     r = client.post(f"{API_PREFIX}/invitations/missing/revoke", json={"reason": "whatever"})
     assert r.status_code == 404
+
+
+# --- a link never outlives another way into the same account (P-153) ------------------
+
+
+def _accept(app: Any, token: str, password: str) -> Any:
+    return TestClient(app).post(
+        f"{API_PREFIX}/invitations/accept", json={"token": token, "password": password}
+    )
+
+
+def test_a_leaked_link_cannot_reset_an_account_the_admin_already_activated(
+    client: TestClient, app: Any
+) -> None:
+    """The independent verifiers' attack on stream S, kept as its regression (P-153). The
+    admin invites Bob, then lets him in from the Users card instead — activates the account
+    and sets its password. Bob signs in and works. Whoever holds the unused link must not be
+    able to spend it: a 200 here would set a new password, end Bob's sessions and hand a
+    signing account to somebody else, which defeats the two-person rule the link exists to
+    serve."""
+    login(client)
+    made = invite(client, "bob")
+    uid = made["invitation"]["user_id"]
+    assert client.put(f"{API_PREFIX}/users/{uid}/active", json={"active": True}).status_code == 200
+    r = client.put(f"{API_PREFIX}/users/{uid}/password", json={"password": CHOSEN_PW})
+    assert r.status_code == 200, r.text
+    bob = TestClient(app)
+    login(bob, "bob", CHOSEN_PW)
+    attack = _accept(app, made["token"], "the-attacker-chose-this")
+    assert attack.status_code == 401 and err(attack)["code"] == "invalid_token"
+    # Bob is still signed in and still owns his password; the attacker's does not work
+    assert bob.get(f"{API_PREFIX}/auth/me").status_code == 200
+    refused = TestClient(app).post(
+        f"{API_PREFIX}/auth/login",
+        json={"username": "bob", "password": "the-attacker-chose-this"},
+    )
+    assert refused.status_code == 401
+
+
+@pytest.mark.parametrize("other_way_in", ["activate", "role_and_active", "password"])
+def test_letting_the_person_in_another_way_withdraws_the_link_on_the_record(
+    client: TestClient, app: Any, other_way_in: str
+) -> None:
+    """Every admin route that opens the account — activating it (on its own or with a role
+    change) or setting its password — withdraws the pending link in the same transaction,
+    with the reason on the invitation and a ``user.invite_revoked`` event, so the list says
+    why the link no longer works instead of leaving it ``pending`` until it expires."""
+    login(client)
+    made = invite(client, "carol")
+    uid, inv_id = made["invitation"]["user_id"], made["invitation"]["id"]
+    if other_way_in == "activate":
+        r = client.put(f"{API_PREFIX}/users/{uid}/active", json={"active": True})
+    elif other_way_in == "role_and_active":
+        r = client.put(f"{API_PREFIX}/users/{uid}/role", json={"role": "approver", "active": True})
+    else:
+        r = client.put(f"{API_PREFIX}/users/{uid}/password", json={"password": CHOSEN_PW})
+    assert r.status_code == 200, r.text
+    (listed,) = client.get(f"{API_PREFIX}/invitations").json()["items"]
+    assert listed["id"] == inv_id and listed["state"] == "revoked"
+    assert listed["revoked_reason"].startswith("superseded")
+    revoked = [e for e in events_for(app, uid) if e.action == "user.invite_revoked"]
+    assert len(revoked) == 1 and revoked[0].payload_json["invitation"] == inv_id
+    assert revoked[0].actor == client.get(f"{API_PREFIX}/auth/me").json()["id"]
+    assert revoked[0].payload_json["reason"].startswith("superseded")
+    assert made["token"] not in str(revoked[0].payload_json)
+    r = _accept(app, made["token"], "the-attacker-chose-this")
+    assert r.status_code == 401 and err(r)["code"] == "invalid_token"
+    # a later admin act on the same account withdraws nothing twice
+    client.put(f"{API_PREFIX}/users/{uid}/password", json={"password": "yet-another-password"})
+    assert len([e for e in events_for(app, uid) if e.action == "user.invite_revoked"]) == 1
+
+
+def test_an_account_opened_outside_the_routes_refuses_the_link_and_withdraws_it(
+    client: TestClient, app: Any
+) -> None:
+    """Belt and braces: an account that became usable by a path that did not withdraw the
+    link — the break-glass CLI, a restore, a direct write — refuses it at the accept route
+    too, with the same indistinguishable 401, and the refusal withdraws the link on the
+    record so the admin's list stops calling it pending."""
+    login(client)
+    made = invite(client, "dave")
+    uid = made["invitation"]["user_id"]
+    with session(app)() as s:
+        user = s.get(User, uid)
+        assert user is not None
+        user.active = True
+        s.commit()
+    r = _accept(app, made["token"], "the-attacker-chose-this")
+    assert r.status_code == 401 and err(r)["code"] == "invalid_token"
+    (listed,) = client.get(f"{API_PREFIX}/invitations").json()["items"]
+    assert listed["state"] == "revoked" and listed["revoked_reason"].startswith("superseded")
+    revoked = [e for e in events_for(app, uid) if e.action == "user.invite_revoked"]
+    assert len(revoked) == 1 and revoked[0].actor == "system"
+    # an account somebody has already signed in to is the same: never a second way in
+    other = invite(client, "erin")
+    with session(app)() as s:
+        user = s.get(User, other["invitation"]["user_id"])
+        assert user is not None
+        user.last_login = _dt.datetime.now(_dt.UTC).isoformat()
+        s.commit()
+    r = _accept(app, other["token"], "the-attacker-chose-this")
+    assert r.status_code == 401 and err(r)["code"] == "invalid_token"
 
 
 # --- what Home's task 7 reads ---------------------------------------------------------
