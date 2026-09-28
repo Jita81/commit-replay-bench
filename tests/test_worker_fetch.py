@@ -24,7 +24,8 @@ Works with:   src/crb/server/worker.py (``_fetch_default_branch``, ``_fetch_befo
               ``_sync_outcomes`` — under test), tests/fixtures/remote.py, tests/test_worker.py,
               tests/test_worker_clone.py (the clone half)
 Tested by:    tests/test_worker_fetch.py
-Touch when:   the fetch rule (which kinds, which branch) or its events change (docs/API.md
+Touch when:   never for a new repository; the fetch rule (which kinds, which branch) or its
+              events change (docs/API.md
               and docs/GITHUB-APP.md §5 first).
 """
 

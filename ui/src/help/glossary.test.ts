@@ -12,7 +12,7 @@
  * ADRs:         none
  * Works with:   ui/src/help/glossary.ts, ui/src/help/docs.ts (`isDocName`)
  * Tested by:    ui/src/help/glossary.test.ts
- * Touch when:   a term is added.
+ * Touch when:   never for a new repository; a term is added.
  */
 import { describe, expect, it } from 'vitest'
 import { isDocName } from './docs'

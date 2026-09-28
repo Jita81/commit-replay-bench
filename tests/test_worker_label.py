@@ -27,7 +27,8 @@ Works with:   src/crb/server/worker.py (under test), src/crb/core/classify.py (t
               for), src/crb/store/models.py (the ``tasks`` row), tests/test_cli_tasks.py (the
               same labelling over the file workdir), tests/test_worker.py
 Tested by:    tests/test_worker_label.py
-Touch when:   the label event or the task row's label fields change; a new outage text shape
+Touch when:   never for a new repository; the label event or the task row's label fields
+              change; a new outage text shape
               must be recognised as not-a-label.
 """
 
