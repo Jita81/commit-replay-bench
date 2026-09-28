@@ -23,9 +23,8 @@
  *               file), ui/src/screens/NotFoundPage.tsx (the `*` route)
  * Tested by:    ui/e2e/smoke.spec.ts (login and the shell), ui/e2e/walkthrough/01-login.spec.ts;
  *               screen tests mount screens directly through ui/src/test/utils.tsx
- * Touch when:   a screen is added — one `<Route>` here, its `NAV` entry in
- *               ui/src/components/Layout.tsx and its `HELP` entry in ui/src/help/help.ts;
- *               never for a new repository.
+ * Touch when:   never for a new repository; a screen is added — one `<Route>` here, its `NAV` entry
+ *               in ui/src/components/Layout.tsx and its `HELP` entry in ui/src/help/help.ts.
  */
 import { Navigate, Route, Routes } from 'react-router'
 import { Layout } from './components/Layout'

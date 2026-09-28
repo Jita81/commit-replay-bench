@@ -98,7 +98,7 @@ def test_the_gate_catches_the_sentences_it_was_written_for() -> None:
     ]
     for sentence in said:
         assert overclaims(sentence), sentence
-    fixed = "an item whose cell’s standard nobody has signed off is not built at all"
+    fixed = "an item whose cell's standard nobody has signed off is not built at all"
     assert overclaims(fixed) == []
     assert overclaims("an item in a deliver cell nobody has signed off is not built at all") == []
     # a "not built" that is not about signing is somebody else's sentence

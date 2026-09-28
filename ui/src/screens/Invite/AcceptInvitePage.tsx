@@ -27,8 +27,8 @@
  *               ui/src/screens/Login/LoginPage.tsx (where it sends the person next),
  *               src/crb/server/routes/invitations.py (the route it posts to)
  * Tested by:    ui/src/screens/Invite/AcceptInvitePage.test.tsx
- * Touch when:   the accept body or the minimum password length changes (they are the server's,
- *               `MIN_PASSWORD_LENGTH`); never for a new repository.
+ * Touch when:   never for a new repository; the accept body or the minimum password length
+ *               changes (they are the server's, `MIN_PASSWORD_LENGTH`).
  */
 import { useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'

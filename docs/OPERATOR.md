@@ -1057,7 +1057,7 @@ and no setting waives it. Rather than typing a password on somebody else's behal
 with a password nobody knows and mints a one-time link which is shown to you **once** — this
 product sends no email, so you pass the link on yourself, by whatever channel your organisation
 uses. The person opens it, chooses their own password, and the account is activated at that
-moment. A link expires (72 hours by default, 1 to 336), works once, and can be withdrawn with a
+moment. A link expires at the time chosen when it is made (in hours: 72 by default, from 1 to 336), works once, and can be withdrawn with a
 recorded reason while it is unused; an accepted one is an account, so deactivate the account
 instead. If you let the person in another way — activate the account or set its password on the
 Users card — the link is withdrawn at that moment, with the reason `superseded` on the
@@ -1068,9 +1068,9 @@ The card and Home's task 7 both read `GET /two-person-readiness`, which answers 
 sign-off the two-person rule would accept is possible at all — an account that can sign, that
 has signed in, and a second account that has too and can run the measurements or sign them.
 A viewer is not that second account: it can do neither. Home asks it of the repository it shows,
-so task 7 stays Incomplete while the only account that can sign is the one that queued every
+so task 7 is not completed while the only account that can sign is the one that queued every
 run of that repository — the bootstrap admin alone never completes it. It counts **accounts,
-not people**: two accounts held by one person would pass it and still be wrong, and it says so.
+not people**: one person holding a second account would pass it and still be wrong, and it says so.
 
 **Forgot the admin password?** On the API host: `crb users set-password admin` (the
 bootstrap username, or whichever `crb users list` shows as an active admin), type the new

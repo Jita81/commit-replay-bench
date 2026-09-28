@@ -69,7 +69,7 @@ describe('PosturePage — sources, go-live and print', () => {
         expect(dd, `${g}: ${dd.querySelector('dt')?.textContent}`).toHaveTextContent(/Source: /)
       }
     }
-    expect(rows).toBe(24)
+    expect(rows).toBe(25)
     expect(screen.getByText('Source: GET /version — the package’s licence in pyproject.toml').closest('dd')).toHaveTextContent('Apache-2.0')
     vi.unstubAllGlobals()
     mockApi(base('viewer', { 'GET /version': () => envelope(503, 'unavailable', 'down') }))

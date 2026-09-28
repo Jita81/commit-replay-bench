@@ -21,7 +21,7 @@ Works with:   src/crb/store/models.py (``DecisionDue``), src/crb/store/migrate.p
               src/crb/server/decisions.py (the derivation and the upsert),
               src/crb/server/routes/decisions.py (serves the age with the row)
 Tested by:    tests/test_store_migrate.py, tests/test_server_decisions.py
-Touch when:   never — a released revision is immutable.
+Touch when:   never for a new repository; never — a released revision is immutable.
 """
 
 from __future__ import annotations

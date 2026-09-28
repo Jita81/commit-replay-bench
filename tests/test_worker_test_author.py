@@ -26,7 +26,8 @@ Works with:   src/crb/server/worker.py (``Worker._test_author``, ``_run_factory`
               src/crb/factory/author.py (the author this builds),
               tests/test_factory_author.py (the invariant at the ``FactorySpec`` boundary)
 Tested by:    tests/test_worker_test_author.py
-Touch when:   another factory deployment setting is added; the label spelling changes.
+Touch when:   never for a new repository; another factory deployment setting is added; the label
+              spelling changes.
 """
 
 from __future__ import annotations

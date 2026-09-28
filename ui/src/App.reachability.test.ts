@@ -22,8 +22,8 @@
  *               and instrument row), ui/src/help/hints-ratchet.instrument.tsx (the per-route
  *               hint ratchet, which does NOT check reachability)
  * Tested by:    itself
- * Touch when:   a route is added — link to it from a screen or the nav, or add it below with
- *               the reason it has no door.
+ * Touch when:   never for a new repository; a route is added — link to it from a screen or the nav,
+ *               or add it below with the reason it has no door.
  */
 import { describe, expect, it } from 'vitest'
 

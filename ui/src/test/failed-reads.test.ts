@@ -52,7 +52,6 @@ const NOT_YET_READ: ReadonlySet<string> = new Set([
   'screens/Decisions/useDecisionCount.ts::v',
   'screens/Factory/FactoryPage.tsx::map',
   'screens/Factory/FactoryPage.tsx::runs',
-  'screens/Posture/PosturePage.tsx::version',
   'screens/Runs/EvidenceDrawer.tsx::reviews',
   'screens/Runs/EvidenceDrawer.tsx::task',
   'screens/Runs/RunNewDialog.tsx::repos',

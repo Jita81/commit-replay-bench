@@ -22,7 +22,7 @@ Works with:   src/crb/store/models.py (``Invitation``), src/crb/store/migrate.py
               src/crb/server/routes/invitations.py (the routes that write it),
               src/crb/server/routes/admin.py (``record_user_event`` — the audit trail)
 Tested by:    tests/test_store_migrate.py, tests/test_server_invitations.py
-Touch when:   never — a released revision is immutable.
+Touch when:   never for a new repository; never — a released revision is immutable.
 """
 
 from __future__ import annotations

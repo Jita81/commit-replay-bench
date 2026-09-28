@@ -22,8 +22,9 @@
  *               ui/src/help/docs.ts (`DocAnchor` for `readMore`),
  *               docs/EVIDENCE-AND-CLAIMS.md (the source of the definitions)
  * Tested by:    ui/src/help/glossary.test.ts, ui/src/help/help.test.ts (every anchor resolves)
- * Touch when:   a term is added to a screen — add it here first; a threshold in the routing
- *               rule changes (update `deliver` and `oracle_strength` with the ADR).
+ * Touch when:   never for a new repository; a term is added to a screen — add it here first; a
+ *               threshold in the routing rule changes (update `deliver` and `oracle_strength` with
+ *               the ADR).
  */
 import type { DocAnchor } from './docs'
 

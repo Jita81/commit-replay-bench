@@ -37,10 +37,10 @@ Works with:   tests/fixtures/server_seed.py (the seed it extends), src/crb/core/
               (the consumers)
 Tested by:    tests/test_server_routes_signoffs.py, tests/test_server_routes_capability.py,
               tests/test_server_routes_forecast.py
-Touch when:   the sign-off policy gains a clause (add the helper that clears it honestly and a
-              409 case in the route tests); the ``oracle.score`` or ``controls.report`` event
-              shape changes in the worker (mirror it here — the helpers must stay the worker's
-              shapes).
+Touch when:   never for a new repository; the sign-off policy gains a clause (add the helper that
+              clears it honestly and a 409 case in the route tests); the ``oracle.score`` or
+              ``controls.report`` event shape changes in the worker (mirror it here — the helpers
+              must stay the worker's shapes).
 """
 
 from __future__ import annotations

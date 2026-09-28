@@ -33,8 +33,8 @@ from typing import Any
 import pytest
 
 from crb.core.oracle.adequacy import DEFAULT_POLICY
-from crb.core.version import APPARATUS_VERSION
 from crb.core.oracle.controls import CONTROLS_VERSION, UNWITNESSED_DETAIL
+from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepEvent
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.runs import event_to_model

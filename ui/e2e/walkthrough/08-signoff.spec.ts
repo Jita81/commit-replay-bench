@@ -76,7 +76,6 @@ const N_TASKS = 18 // 16 clean rows already clear Wilson lower ≥ 0.80; two spa
 const MIN = 60_000
 /** The persona account 07 created and 11-screens uses; it is not the signer here. */
 const APPROVER = 'walk-approver'
-const APPROVER_PASS = personaPassword(APPROVER)
 /** The second person who signs: invited from Settings, arrives through the one-time link (G-518, G-478). */
 const INVITEE = 'walk-invitee'
 const INVITEE_PASS = personaPassword(INVITEE)

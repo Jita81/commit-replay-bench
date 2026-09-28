@@ -30,7 +30,7 @@ import { hintText } from '../../help/hints'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import { LedgerPage } from './LedgerPage'
 
-const VERIFY = { rows: 3, ok: true, false_q1_total: 0, broken_at: null }
+const VERIFY = { rows: 3, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, clean_without_pack: 0, events: { rows: 0, chain_ok: true, broken_at: null, detail: '0 events, chain intact', head_row_hash: '' } }
 const NONE = { items: [], total: 0, limit: 100, offset: 0 }
 
 function setup(route: string) {

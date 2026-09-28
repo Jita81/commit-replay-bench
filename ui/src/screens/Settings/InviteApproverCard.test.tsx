@@ -19,8 +19,8 @@
  *               src/crb/server/routes/invitations.py (the routes it calls),
  *               ui/src/screens/Home/HomePage.test.tsx (task 7 reads the same readiness)
  * Tested by:    itself
- * Touch when:   an invitation state is added, or the readiness reading gains a field a person
- *               reads.
+ * Touch when:   never for a new repository; an invitation state is added, or the readiness
+ *               reading gains a field a person reads.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

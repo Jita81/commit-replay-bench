@@ -391,7 +391,7 @@ export const HELP: ScreenHelp[] = [
     route: '/invite',
     purpose: 'This is where an invited person joins. An admin created your account switched off and gave you a one-time link; choosing your own password here switches it on.',
     next: {
-      viewer: 'Choose a password of at least 12 characters, then sign in with your username and that password. If the link is refused it was used, withdrawn or out of date: ask the admin who invited you for a new one.',
+      viewer: 'Choose a password as long as the form asks, then sign in with your username and that password. If the link is refused it was used, withdrawn or out of date: ask the admin who invited you for a new one.',
     },
     readMore: [
       { to: 'OPERATOR#9-users', label: 'Accounts, roles and invitations' },

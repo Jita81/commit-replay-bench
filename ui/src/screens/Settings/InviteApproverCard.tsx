@@ -26,8 +26,8 @@
  *               ui/src/screens/Home/HomePage.tsx (task 7 reads the same readiness),
  *               src/crb/server/routes/invitations.py (the routes)
  * Tested by:    ui/src/screens/Settings/InviteApproverCard.test.tsx
- * Touch when:   an invitation state is added (a pill tone here and the server's own word);
- *               never for a new repository.
+ * Touch when:   never for a new repository; an invitation state is added (a pill tone here
+ *               and the server's own word).
  */
 import { useMemo, useState, type FormEvent } from 'react'
 import { useInvitations, useInvite, useRevokeInvitation, useTwoPersonReadiness } from '../../api/hooks'
@@ -42,6 +42,7 @@ import { DocLink } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
+import { readAmount } from '../../lib/amount'
 import { fmtDate } from '../../lib/format'
 
 /** The roles worth an invitation — the server refuses any other (`INVITABLE_ROLES`). */
@@ -75,6 +76,9 @@ export function stateMeaning(inv: Invitation): string {
   }
 }
 
+/** The server's range for a link's life (`POST /invitations` `expires_hours`, 1 to 336). */
+const MAX_EXPIRY_HOURS = 336
+
 export function InviteApproverCard() {
   const readiness = useTwoPersonReadiness()
   const invitations = useInvitations(true)
@@ -88,12 +92,18 @@ export function InviteApproverCard() {
   const [made, setMade] = useState<InvitationCreated | null>(null)
   const [copied, setCopied] = useState(false)
 
+  // P-265: the expiry is typed text read by one rule — a blank, a fraction or an hour outside
+  // the server's range is said at the field and never sent as a silent default
+  const expiry = readAmount(hours, { min: 1, whole: true })
+  const expiryHours = expiry.kind === 'ok' && expiry.value <= MAX_EXPIRY_HOURS ? expiry.value : null
+
   const submit = (e: FormEvent) => {
     e.preventDefault()
+    if (expiryHours === null) return
     setMade(null)
     setCopied(false)
     invite.mutate(
-      { username, role, display_name: display, email, expires_hours: Number(hours) || 72 },
+      { username, role, display_name: display, email, expires_hours: expiryHours },
       {
         onSuccess: (created) => {
           setMade(created)
@@ -212,9 +222,17 @@ export function InviteApproverCard() {
               </option>
             ))}
           </SelectField>
-          <TextField label="Link expires in (hours)" hint="field.invitations.expires" type="number" min={1} max={336} value={hours} onChange={(e) => setHours(e.target.value)} />
+          <TextField
+            label="Link expires in (hours)"
+            hint="field.invitations.expires"
+            type="text"
+            inputMode="numeric"
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+            error={expiryHours === null ? `Enter a whole number of hours from 1 to ${MAX_EXPIRY_HOURS}.` : undefined}
+          />
           <div className="flex items-end">
-            <Button type="submit" variant="filled" disabled={invite.isPending} hint="button.invitations.invite">
+            <Button type="submit" variant="filled" disabled={invite.isPending || expiryHours === null} hint="button.invitations.invite">
               {invite.isPending ? 'Inviting…' : 'Invite'}
             </Button>
           </div>

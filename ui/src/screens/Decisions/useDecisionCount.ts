@@ -78,7 +78,9 @@ function notFound(err: unknown): boolean {
  */
 export function useDecisionAges(enabled: boolean): Record<string, DueRow> {
   const due = useQuery({ queryKey: keys.decisionAges, queryFn: () => api<DueList>('/decisions'), enabled, retry: false, staleTime: 60_000 })
-  return useMemo(() => Object.fromEntries((due.data?.items ?? []).map((r) => [`${r.repo}|${r.kind}|${r.key}`, r])), [due.data])
+  // a failed read gives no ages — never a zero, which would read as "due just now"
+  const failed = due.isError
+  return useMemo(() => Object.fromEntries((failed ? [] : (due.data?.items ?? [])).map((r) => [`${r.repo}|${r.kind}|${r.key}`, r])), [due.data, failed])
 }
 
 /**

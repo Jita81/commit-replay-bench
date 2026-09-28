@@ -188,17 +188,17 @@ export function libraryDecisions(repo: string, library: LibraryIndex | null | un
     const who = e.sponsor_name || e.sponsor
     const mine = me !== '' && e.sponsor === me
     if (e.status === 'proposed' && !e.sponsor) {
-      out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} was proposed by ${e.entry.proposed_by} and needs a person to sponsor it`, evidence: `${e.entry.kind} · ${e.entry.title}`, act: 'Sponsor', href, role: 'operator' })
+      out.push({ kind: 'entry_to_sign', repo, key: e.entry_id, title: `${e.entry_id} was proposed by ${e.entry.proposed_by} and needs a person to sponsor it`, evidence: `${e.entry.kind} · ${e.entry.title}`, act: 'Sponsor', href, role: 'operator' })
     } else if (e.status === 'proposed' && mine) {
-      out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} waits for another approver to sign it — you sponsored it`, evidence: `sponsored by ${who} · ${e.entry.title}`, act: 'Read', href, role: 'viewer' })
+      out.push({ kind: 'entry_to_sign', repo, key: e.entry_id, title: `${e.entry_id} waits for another approver to sign it — you sponsored it`, evidence: `sponsored by ${who} · ${e.entry.title}`, act: 'Read', href, role: 'viewer' })
     } else if (e.status === 'proposed') {
-      out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} waits for a second person to sign it`, evidence: `sponsored by ${who} · ${e.entry.title}`, act: 'Sign', href, role: 'approver' })
+      out.push({ kind: 'entry_to_sign', repo, key: e.entry_id, title: `${e.entry_id} waits for a second person to sign it`, evidence: `sponsored by ${who} · ${e.entry.title}`, act: 'Sign', href, role: 'approver' })
     } else if (e.status === 'stale' && mine) {
-      out.push({ kind: 'entry_stale', repo, title: `${e.entry_id} went stale: ${e.stale?.path ?? 'its source file'} changed or went — you sponsored it, so another approver signs it again`, evidence: `at ${e.stale?.head_commit.slice(0, 12) ?? 'the head'} · ${e.approver ? `signed by ${e.approver_name || e.approver}` : 'not yet signed'}`, act: 'Read', href, role: 'viewer' })
+      out.push({ kind: 'entry_stale', repo, key: e.entry_id, title: `${e.entry_id} went stale: ${e.stale?.path ?? 'its source file'} changed or went — you sponsored it, so another approver signs it again`, evidence: `at ${e.stale?.head_commit.slice(0, 12) ?? 'the head'} · ${e.approver ? `signed by ${e.approver_name || e.approver}` : 'not yet signed'}`, act: 'Read', href, role: 'viewer' })
     } else if (e.status === 'stale') {
-      out.push({ kind: 'entry_stale', repo, title: `${e.entry_id} went stale: ${e.stale?.path ?? 'its source file'} changed or went`, evidence: `at ${e.stale?.head_commit.slice(0, 12) ?? 'the head'} · ${e.approver ? `signed by ${e.approver_name || e.approver}` : 'not yet signed'}`, act: 'Sign again or retire', href, role: 'approver' })
+      out.push({ kind: 'entry_stale', repo, key: e.entry_id, title: `${e.entry_id} went stale: ${e.stale?.path ?? 'its source file'} changed or went`, evidence: `at ${e.stale?.head_commit.slice(0, 12) ?? 'the head'} · ${e.approver ? `signed by ${e.approver_name || e.approver}` : 'not yet signed'}`, act: 'Sign again or retire', href, role: 'approver' })
     } else if (e.status === 'retired' && e.retired?.by === 'measurement') {
-      out.push({ kind: 'entry_retired', repo, title: `${e.entry_id} was retired by measurement`, evidence: `reading ${e.retired.reading_id} · ${e.retired.reason}`, act: 'Read why', href, role: 'viewer' })
+      out.push({ kind: 'entry_retired', repo, key: e.entry_id, title: `${e.entry_id} was retired by measurement`, evidence: `reading ${e.retired.reading_id} · ${e.retired.reason}`, act: 'Read why', href, role: 'viewer' })
     }
   }
   return out
@@ -238,6 +238,7 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
         out.push({
           kind: 'not_built',
           repo,
+          key: t.id,
           title: `${label} is not built — ${t.entry.code.replace(/_/g, ' ')}`,
           evidence: `${t.capability_class} × ${t.size}${t.entry.needs.length > 0 ? ` · attach ${t.entry.needs.join(', ')}` : ''}`,
           act: fund ? 'Fund a calibration build' : 'Decide',

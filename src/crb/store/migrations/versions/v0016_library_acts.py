@@ -21,9 +21,8 @@ Works with:   src/crb/store/models.py (``LibraryActRow``; ``APPEND_ONLY_TABLES``
               src/crb/store/library.py (appends and reads the acts),
               src/crb/core/library.py (the act a row holds)
 Tested by:    tests/test_store_migrate.py, tests/test_store_library.py
-Touch when:   never — a released revision is immutable. The number is stream L's
-              reservation in north-star Wave 4; at merge this revision's ``down_revision`` is
-              re-pointed at the head it lands on, and the integration renumbers it.
+Touch when:   never for a new repository; never — a released revision is immutable (stream L
+              of north-star Wave 4, renumbered 0016 after 0015 at the Wave 4 integration).
 """
 
 from __future__ import annotations

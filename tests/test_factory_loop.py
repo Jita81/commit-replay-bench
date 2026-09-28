@@ -904,9 +904,7 @@ class TestSignedCellClause:
     def test_an_unsigned_standard_stops_before_any_spend(
         self, pyrepo: pr.PyRepo, tmp_path: Path, deliver: bool
     ) -> None:
-        rig = _rig(
-            pyrepo, tmp_path, deliver=deliver, creds=_creds(), readers=self.UNSIGNED_S2
-        )
+        rig = _rig(pyrepo, tmp_path, deliver=deliver, creds=_creds(), readers=self.UNSIGNED_S2)
         out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
         assert out.status == fl.STATUS_UNSIGNED_CELL == "unsigned_cell"
         assert out.proof is None and not out.builds and out.delivery is None

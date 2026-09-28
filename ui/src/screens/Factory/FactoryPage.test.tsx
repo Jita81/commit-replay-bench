@@ -337,7 +337,7 @@ describe('FactoryPage — the shipped contract', () => {
       route_hint: 'human',
       build_status: 'not_built',
       last_event: 'item.outcome',
-      refusal: { step: 'entry', reason: why, reason_code: 'unsigned_cell' },
+      refusal: { step: 'entry', reason: why, reason_code: 'unsigned_cell', measured_route: '' },
       entry: { code: 'unsigned_cell', reason: why, reason_code: 'unsigned_cell', needs: [] },
     }
     mockApi(base({ 'GET /factory/alpha/tasks': [unsigned, TASKS[1]] }))

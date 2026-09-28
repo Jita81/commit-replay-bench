@@ -13,7 +13,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **The library's miners: proposals from a repository's own files, never signed**
-  (north-star Wave 4, stream M; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-m)).
+  (north-star Wave 4, stream M; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   *Propose from the files* and `POST /library/{repo}/mine` run five miners over the clone at a
   pinned commit, at no model cost: decision records, code owners and layout, lint settings,
   tests, and the change profile. Each proposal cites its file and commit and waits for a
@@ -23,7 +23,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   G-677).
 
 - **The context library: two people sign what a repository's people know, and each work type has a page**
-  (north-star Wave 4, stream L; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-l)).
+  (north-star Wave 4, stream L; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   Entries of six kinds, with an id `<kind>/<slug>` and their provenance, are proposed by a
   sponsor and signed by a different approver (`same_person` refused); a miner or a model is
   never a person. Every act is appended to a hash-chained table (revision 0016) and is an
@@ -31,26 +31,26 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `/library/:repo` shows one page per work type, and Decisions lists entries to sign, gone
   stale or retired by measurement. No entry reaches a builder's brief (DL-113 to DL-115).
 
-- **The second person is real** (north-star Wave 4, stream S; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-s)).
+- **The second person is real** (north-star Wave 4, stream S; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   An admin invites an approver from Settings with a one-time link that expires and is
-  recorded as an event; the approver chooses their own password at `/invite`. A cell that
-  routes deliver with no active sign-off stops before any spend (ADR-0018, re-read against
-  ADR-0026); `deliver_override` lifts only that clause, for one named run. Home task 7 asks
+  recorded as an event; the approver chooses their own password at `/invite`. An item whose
+  cell's proven standard nobody has signed stops before any spend, on by default (ADR-0018,
+  re-read against ADR-0026); a second approver's override lifts only that clause, for one run. Home task 7 asks
   the two-person readiness of the repository it shows, so the bootstrap admin alone never
   completes it. A decision shows how long it has waited. The sign-off gate shows the
   evidence's posture class and says what to do after each refusal.
 
 - **Go live on evidence: each checklist line proven, attested or unproven**
-  (north-star Wave 4, stream P; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-p)).
-  `GET /golive` reads the fourteen lines of DEPLOYMENT §8: five proven by the product's own
-  checks, nine the operator's acts that an admin records on Settings as dated
+  (north-star Wave 4, stream P; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
+  `GET /golive` reads the fifteen lines of DEPLOYMENT §8: five proven by the product's own
+  checks, ten the operator's acts that an admin records on Settings as dated
   `golive.attested` events (ADR-0031, DL-108). `/posture` lists both, names every row's
   source, prints for a review board and carries the go-live journey's eyebrow. A private
   mirror's credential reaches the fetch alone; uv, poetry and pylock locks are provisioned;
   a damaged sealed set is quarantined and what cites it revoked (DL-109, DL-110).
 
 - **Truth on the instrument screens: failed reads are said, exports are recorded, catches are witnessed**
-  (north-star Wave 4, stream T; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-t4)).
+  (north-star Wave 4, stream T; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A failed read on Connect or the Measure estimate is an error with Retry, and a ratchet stops
   the next screen showing a fallback instead; Repos reads every page and re-reads a list that
   moved; the Ledger shows linked filters as chips; every ledger export is recorded first, or

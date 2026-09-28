@@ -24,8 +24,8 @@
  *               ui/src/help/help.ts and ui/src/help/glossary.ts (`DocAnchor` in `readMore`),
  *               ui/src/components/Help.tsx (`DocLink`), ui/vite.config.ts (`server.fs.allow`)
  * Tested by:    ui/src/help/docs.test.ts, ui/src/help/help.test.ts (every anchor resolves)
- * Touch when:   a guide is added for readers of the UI — add it to `DOC_NAMES`, the glob and
- *               `DOC_TITLES`; never for a new repository.
+ * Touch when:   never for a new repository; a guide is added for readers of the UI — add it to
+ *               `DOC_NAMES`, the glob and `DOC_TITLES`.
  */
 
 /** The guides the UI bundles, in the order /help lists them. */

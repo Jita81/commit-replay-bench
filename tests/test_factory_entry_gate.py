@@ -139,7 +139,9 @@ def test_a_ticket_missing_its_standards_slots_stops_needs_context(
     refused = rig.evidence.events_for("I-1", fe.EV_ENTRY_REFUSED)[0].payload
     assert refused["code"] == STOP_NEEDS_CONTEXT and refused["needs"] == ["expected_behaviour"]
 
-    rig2 = _rig(pyrepo, _sub(tmp_path, "s2"), readers=_readers(lambda c: Standard(ARM_S2, signed=True)))
+    rig2 = _rig(
+        pyrepo, _sub(tmp_path, "s2"), readers=_readers(lambda c: Standard(ARM_S2, signed=True))
+    )
     out2 = rig2.loop().run_item(multiply_item())  # no person's test attached
     assert out2.status == fl.STATUS_NEEDS_CONTEXT
     refused2 = rig2.evidence.events_for("I-1", fe.EV_ENTRY_REFUSED)[0].payload
@@ -269,7 +271,10 @@ def test_the_builder_gets_exactly_the_standard_arms_context(
 
     builder2 = MultiBuilder()
     rig2 = _rig(
-        pyrepo, _sub(tmp_path, "s2"), readers=_readers(lambda c: Standard(ARM_S2, signed=True)), builder=builder2
+        pyrepo,
+        _sub(tmp_path, "s2"),
+        readers=_readers(lambda c: Standard(ARM_S2, signed=True)),
+        builder=builder2,
     )
     out2 = rig2.loop().run_item(multiply_item(), authored=person)
     assert out2.status == fl.STATUS_ACCEPTED
@@ -692,7 +697,9 @@ def test_a_factory_s2_row_is_not_a_routing_first_attempt_without_held_out_accept
     assert row.labels[LABEL_ACCEPTANCE] == ACCEPTANCE_NONE
     assert not counts_as_s2_first_attempt(row.labels)
 
-    rig2 = _rig(pyrepo, _sub(tmp_path, "s2"), readers=_readers(lambda c: Standard(ARM_S2, signed=True)))
+    rig2 = _rig(
+        pyrepo, _sub(tmp_path, "s2"), readers=_readers(lambda c: Standard(ARM_S2, signed=True))
+    )
     out2 = rig2.loop().run_item(multiply_item(), authored=authored_multiply())
     assert out2.status == fl.STATUS_ACCEPTED
     (row2,) = list(rig2.ledger.rows())

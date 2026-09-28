@@ -180,8 +180,8 @@ describe('PosturePage', () => {
     expect(delivery).toHaveTextContent('a pull request opens only for a cell the capability map routes deliver under routing.v1')
     // ADR-0018 — the second clause of the same gate, read from this deployment's own settings
     // (the settings query is only enabled once /auth/me has answered admin, so it lands later)
-    await waitFor(() => expect(delivery).toHaveTextContent('a signed cell as well as a deliver route: the factory does not build an item in a cell that routes deliver until a person has attested that cell'))
-    expect(delivery).toHaveTextContent('an approver may lift the sign-off clause for one run, and never the route; the override is an event on the chain naming the approver and the clause')
+    await waitFor(() => expect(delivery).toHaveTextContent('a signed cell as well as a deliver route: the factory does not build an item until a person has signed off its cell’s proven standard'))
+    expect(delivery).toHaveTextContent('a second approver — never the person who queued the run — may lift the sign-off clause for one run, and never the route; the override is an event on the chain naming the approver and the clause')
     expect(delivery).toHaveTextContent('installation tokens minted per push, never stored')
     // admins get the Settings link on rows they can act on
     expect(screen.getAllByRole('link', { name: 'Settings' }).length).toBeGreaterThan(0)

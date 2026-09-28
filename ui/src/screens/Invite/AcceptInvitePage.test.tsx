@@ -19,7 +19,7 @@
  *               ui/src/help/hints-ratchet.shell.tsx (the same screen under the hint ratchet),
  *               src/crb/server/routes/invitations.py (the route it posts to)
  * Tested by:    itself
- * Touch when:   the accept body or the password floor changes.
+ * Touch when:   never for a new repository; the accept body or the password floor changes.
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

@@ -14,7 +14,7 @@
  * ADRs:         none
  * Works with:   ui/src/help/docs.ts, docs/EVIDENCE-AND-CLAIMS.md (an anchor source)
  * Tested by:    ui/src/help/docs.test.ts
- * Touch when:   a guide is added to the bundle.
+ * Touch when:   never for a new repository; a guide is added to the bundle.
  */
 import { describe, expect, it } from 'vitest'
 import dataRetention from '../../../docs/DATA-RETENTION.md?raw'
