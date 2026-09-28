@@ -1413,9 +1413,15 @@ held-out tests are too weak to route, and the tests to strengthen. Strengthen th
 repository (the product never writes a customer's tests), score the oracle again
 (§3.1), re-run the controls, then re-measure the cell.
 
-**Re-measure — read it after an upgrade changes the apparatus.** Each cell stamped with an older
-apparatus shows how many rows it still needs, the estimated cost and the `POST /runs` bodies to
-queue. Queue the ones worth paying for from **Runs**; nothing is queued for you.
+**Top up — read it after registering a reading, and after an upgrade changes the apparatus.**
+A cell is licensed only by a reading registered before its first attempt, and only rows graded
+after it count. Each registered reading waiting on its look shows the commits it still needs,
+the estimated cost and the run that would grade them: queue it from the row, after reading the
+estimate. A cell with rows but no reading at the current apparatus — stale after an upgrade,
+or never registered — is offered nothing to replay: register a reading of it first
+(`crb reading register`, or `POST /readings`), because a replay graded before registration
+never counts and makes those commits unusable in the reading that could. Nothing is queued for
+you.
 
 
 ## 14. The context library

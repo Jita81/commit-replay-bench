@@ -18,7 +18,8 @@
  * How:          `useFlow(repo)` once per repository (five panels, one request) → the stream's
  *               entry → a `StatTile` per lead time and one for the spend, a definition list of
  *               counts, and the not-captured list; `fmtDuration` / `fmtUsd` do the formatting
- *               and the hint id comes from `FLOW_HINTS` keyed by the server's own key.
+ *               and the hint id comes from `FLOW_HINTS` keyed by the server's own key; a
+ *               count named in `FLOW_COUNT_HINTS` carries its own label and hover.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useFlow`), ui/src/api/types.ts (`Flow`, `StreamFlow`),
@@ -29,7 +30,8 @@
  *               (the MEASURE criteria these figures answer)
  * Tested by:    ui/src/components/FlowPanel.test.tsx, ui/src/help/hints-ratchet.test.tsx
  * Touch when:   never for a new repository; a stream gains a milestone pair (add its `flow.<key>`
- *               hint — the panel picks the figure up on its own).
+ *               hint — the panel picks the figure up on its own) or a count a reader cannot
+ *               read from its key alone (add it to `FLOW_COUNT_HINTS` with its hint).
  * Claims:       Every figure here is derived from stored records and carries its n
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */
@@ -61,6 +63,21 @@ const FLOW_HINTS: Record<string, HintId> = {
   finding_to_remeasurement: 'flow.finding_to_remeasurement',
   password_set_to_signed_in: 'flow.password_set_to_signed_in',
   installed_to_healthy: 'flow.installed_to_healthy',
+}
+
+/**
+ * The counts that explain themselves on their own (every number carries its own hover): a plain
+ * label and a hint per server key. A count not named here is read under the shared
+ * `flow.counts` hint with its key in words.
+ */
+const FLOW_COUNT_HINTS: Record<string, { label: string; hint: HintId }> = {
+  guard_rows_refused: { label: 'Rows the guard refused', hint: 'flow.learn.guard_rows_refused' },
+  guard_false_positives: { label: 'Refused, but decided honest (false positives)', hint: 'flow.learn.guard_false_positives' },
+  guard_right_refusals: { label: 'Refused, and decided rightly refused', hint: 'flow.learn.guard_right_refusals' },
+  guard_rows_undecided: { label: 'Refused rows nobody has decided', hint: 'flow.learn.guard_rows_undecided' },
+  classes_found: { label: 'Bug classes found', hint: 'flow.learn.classes_found' },
+  classes_with_a_change: { label: 'Classes a change is aimed at', hint: 'flow.learn.classes_with_a_change' },
+  classes_remeasured: { label: 'Classes measured again under a change', hint: 'flow.learn.classes_remeasured' },
 }
 
 /** Which apparatus versions a spend's rows came from, in words ('' when it covers no row). */
@@ -181,12 +198,21 @@ export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
       </div>
       {counts.length > 0 && (
         <Hint as="dl" id="flow.counts" className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 border-t border-border pt-3 text-[13px] sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
-          {counts.map(([key, value]) => (
-            <div key={key} className="contents">
-              <dt className="border-b border-border py-1 text-on-surface-muted">{words(key)}</dt>
-              <dd className="num border-b border-border py-1 text-right">{fmtInt(value)}</dd>
-            </div>
-          ))}
+          {counts.map(([key, value]) => {
+            const own = FLOW_COUNT_HINTS[key]
+            return (
+              <div key={key} className="contents">
+                {own ? (
+                  <Hint as="dt" id={own.hint} className="border-b border-border py-1 text-on-surface-muted" data-testid={`flow-count-${key}`}>
+                    {own.label}
+                  </Hint>
+                ) : (
+                  <dt className="border-b border-border py-1 text-on-surface-muted">{words(key)}</dt>
+                )}
+                <dd className="num border-b border-border py-1 text-right">{fmtInt(value)}</dd>
+              </div>
+            )
+          })}
         </Hint>
       )}
       {s.not_captured.length > 0 && (

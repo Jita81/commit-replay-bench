@@ -437,7 +437,8 @@ const REFUSALS = {
     undecided: 1,
     decided_groups: 1,
     undecided_groups: 1,
-    note: 'a row is a false positive when a person decided its class honest',
+    unclassed: 0,
+    note: 'a row is a false positive when every class it fell into was decided honest',
   },
   note: '',
 }
@@ -452,21 +453,22 @@ const STRENGTHEN = {
 const REMEASURE = {
   repo: 'alpha',
   current_apparatus: '2.2',
-  min_n: 10,
+  min_n: 20,
   rows_total: 40,
   rows_stale: 12,
   cells: [
-    { label: 'bug.fix · XS', reason: 'stale', mode: 'sighted', capability_class: 'bug.fix', size: 'XS', n_stale: 12, stale_versions: ['2.1'], n_current: 4, n_needed: 6, n_requested: 6, short_by: 0, est_cost_usd: 2.4, cost_known: true, requests: [{ kind: 'replay', limit: 6 }], note: '', in_flight_run_ids: [] },
-    // a cell whose runs are queued and unfinished: the page shows them in place of Queue
-    { label: 'bug.fix · S', reason: 'stale', mode: 'sighted', capability_class: 'bug.fix', size: 'S', n_stale: 3, stale_versions: ['2.1'], n_current: 0, n_needed: 10, n_requested: 10, short_by: 0, est_cost_usd: 1.1, cost_known: true, requests: [{ kind: 'replay', limit: 10 }], note: '', in_flight_run_ids: ['r1'] },
-    // a thin cell (G-565): current rows, too few; some can be queued, the rest are short
-    { label: 'feature.add · M', reason: 'thin', mode: 'sighted', capability_class: 'feature.add', size: 'M', n_stale: 0, stale_versions: [], n_current: 12, n_needed: 8, n_requested: 5, short_by: 3, est_cost_usd: 1.5, cost_known: true, requests: [{ kind: 'replay', limit: 5 }], note: 'mine more history: this cell has 5 commit(s) it has not graded on apparatus 2.2 and needs 8, so 3 cannot be asked for without repeating a commit', in_flight_run_ids: [] },
-    // a thin cell with no commit left: nothing to queue, and the page says to mine more
-    { label: 'test.add · XS', reason: 'thin', mode: 'sighted', capability_class: 'test.add', size: 'XS', n_stale: 0, stale_versions: [], n_current: 15, n_needed: 5, n_requested: 0, short_by: 5, est_cost_usd: 0, cost_known: true, requests: [], note: 'mine more history: this cell has 0 commit(s) it has not graded on apparatus 2.2 and needs 5, so 5 cannot be asked for without repeating a commit', in_flight_run_ids: [] },
+    // a registered reading waiting on its look: its pending commits, priced, with Queue
+    { label: 'bug.fix · XS', key: 'bug.fix · XS|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_1', next_look: 20, mode: 'sighted', n_stale: 0, stale_versions: [], n_current: 14, n_needed: 6, n_requested: 6, short_by: 0, est_cost_usd: 2.4, est_minutes: 6, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay', limit: 6 }], note: '', in_flight_run_ids: [] },
+    // a reading whose runs are queued and unfinished: the page shows them in place of Queue
+    { label: 'bug.fix · S', key: 'bug.fix · S|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_2', next_look: 20, mode: 'sighted', n_stale: 0, stale_versions: [], n_current: 10, n_needed: 10, n_requested: 10, short_by: 0, est_cost_usd: 1.1, est_minutes: 5, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay', limit: 10 }], note: '', in_flight_run_ids: ['r1'] },
+    // a reading this plan cannot compose a replay for: queued by hand from Runs
+    { label: 'feature.add · M', key: 'feature.add · M|blind|S1@claude-opus-5', reason: 'look_pending', next_act: 'runs', arm: 'S1@claude-opus-5', reading_id: 'rdg_3', next_look: 20, mode: 'blind', n_stale: 0, stale_versions: [], n_current: 0, n_needed: 20, n_requested: 0, short_by: 20, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'S1@claude-opus-5 counts only rows whose failing test claude-opus-5 wrote; this deployment’s test author is not configured', in_flight_run_ids: [] },
+    // a stale cell with no reading: register one first, nothing to queue
+    { label: 'test.add · XS', key: 'test.add · XS|sighted|', reason: 'stale', next_act: 'register', arm: '', reading_id: '', next_look: null, mode: 'sighted', n_stale: 12, stale_versions: ['2.1'], n_current: 0, n_needed: 20, n_requested: 0, short_by: 0, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'register a reading of this cell at apparatus 2.2 first', in_flight_run_ids: [] },
   ],
   up_to_date: [],
-  cannot_clear: ['docs.update · S|sighted'],
-  summary: { cells_stale: 2, cells_thin: 2, n_needed_total: 29, n_requested_total: 21, short_by_total: 8, est_cost_usd_total: 5.0, est_minutes_total: 20, cost_known_cells: 4 },
+  cannot_clear: [{ label: 'docs.update · S', mode: 'sighted', arm: 'S3', state: 'undecided', reason: 'its reading’s pool ended before the look at 20 (15 read): mine more history', next_act: 'mine', reading_id: 'rdg_4' }],
+  summary: { cells_pending: 3, cells_stale: 1, cells_thin: 0, n_needed_total: 36, n_requested_total: 16, short_by_total: 20, est_cost_usd_total: 3.5, est_minutes_total: 11, cost_known_cells: 3 },
   note: '',
 }
 
@@ -522,7 +524,11 @@ const FLOW = {
     flowStream('measure', 'Measure', ['queued_to_graded']),
     flowStream('decide-and-license', 'Decide & license', ['accepted_to_signed']),
     flowStream('manufacture-and-deliver', 'Manufacture & deliver', ['registered_to_pr']),
-    flowStream('learn', 'Learn', ['refusal_to_strengthening', 'finding_to_remeasurement']),
+    {
+      ...flowStream('learn', 'Learn', ['refusal_to_strengthening', 'finding_to_remeasurement']),
+      // the learn stream's own counts, each explained on hover (G-536)
+      counts: { refusals: 2, guard_rows_refused: 5, guard_false_positives: 1, guard_right_refusals: 2, guard_rows_undecided: 2, classes_found: 3, classes_with_a_change: 1, classes_remeasured: 1 },
+    },
     flowStream('run-the-platform', 'Run the platform', ['password_set_to_signed_in']),
   ],
 }
