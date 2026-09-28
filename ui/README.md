@@ -15,6 +15,11 @@ npm run dev                      # http://localhost:5173, proxies /api → http:
 ```
 
 Point the proxy elsewhere with `CRB_API_ORIGIN=http://host:port npm run dev`.
+
+The proxy adds `X-Forwarded-For` to any request from another machine
+(`src/dev/apiProxy.ts`), so the API never mistakes it for a browser on this one. With
+automatic sign-in on (`CRB_AUTH__DEV_AUTOLOGIN`, ADR-0027), do not start the dev server
+with `--host`.
 Cookies (`crb_session`, `crb_csrf`) stay same-origin through the proxy, and the
 SSE stream at `/api/v1/runs/{id}/events` is passed through unbuffered.
 

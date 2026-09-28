@@ -23,6 +23,10 @@ Invariants
   warned about in ``dev`` (:func:`temp_dir_reason`); ``CRB_ALLOW_TEMP_HOME=true`` is the
   explicit opt-out for a throwaway evaluation. macOS documents those paths as temporary
   and its periodic clean-up removes untouched files there.
+* **Automatic sign-in is a development-stack convenience only** (ADR-0027).
+  ``CRB_AUTH__DEV_AUTOLOGIN=<username>`` is refused unless ``CRB_ENV=dev`` and the API binds a
+  loopback address (:func:`dev_autologin_refusal_for`), and it is refused whenever
+  ``CRB_LOCAL_AUTH_ENABLED=false`` (it signs in a local account); there is no override flag.
 
 Navigation
 ----------
@@ -31,18 +35,21 @@ What it is:   The server's configuration model — every ``CRB_*`` variable the 
 What it does: Parses the environment into typed, nested settings (OIDC, bootstrap admin,
               retention, sandbox, builder container, factory); refuses to start in ``prod`` without a
               strong ``CRB_SECRET_KEY``, with a short bootstrap password or with a ``CRB_HOME``
-              under an OS-managed temporary directory (``dev`` warns), or with the host builder
-              or the local executor unless ``CRB_ALLOW_UNSEALED_PROD=1`` (ADR-0023); keeps secret
+              under an OS-managed temporary directory (``dev`` warns), with the host builder
+              or the local executor unless ``CRB_ALLOW_UNSEALED_PROD=1`` (ADR-0023), or with
+              automatic sign-in outside ``dev`` or on a non-loopback bind (ADR-0027); keeps secret
               values as ``SecretStr`` and exposes only ``redacted_dict`` for display. Defines
               the role ladder and ``MIN_PASSWORD_LENGTH`` the auth module enforces.
 How:          ``pydantic-settings`` with ``CRB_`` prefix and ``__`` nesting; CSV-or-JSON
               list fields via ``NoDecode`` + a ``before`` validator; an ``after`` validator
               generates a dev-only ephemeral key, applies the temporary-home guard
-              (``temp_dir_reason``), resolves the builder's default executor for the env and
-              applies ``unsealed_prod_refusal``.
+              (``temp_dir_reason``), resolves the builder's default executor for the env,
+              applies ``unsealed_prod_refusal``, refuses automatic sign-in where it may not run
+              (``dev_autologin_refusal_for``) and logs the prod warnings.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
-              docs/adr/0023-production-refuses-the-unsealed-posture.md
+              docs/adr/0023-production-refuses-the-unsealed-posture.md,
+              docs/adr/0027-dev-autologin-on-loopback.md
 Works with:   src/crb/server/worker_main.py (the worker applies ``unsealed_prod_refusal`` to
               its own reading of the same environment), src/crb/server/app.py (reads
               ``resolved_database_url``, cookie security, CORS; src/crb/server/auth.py reads
@@ -56,7 +63,8 @@ Works with:   src/crb/server/worker_main.py (the worker applies ``unsealed_prod_
               feeds), docs/DEPLOYMENT.md#21-environment-reference (the operator-facing list;
               §1.1 the temporary-directory rule)
 Tested by:    tests/test_server_app.py, tests/test_server_system.py, tests/test_server_auth.py,
-              tests/test_settings_home_guard.py, tests/test_settings_posture.py
+              tests/test_settings_home_guard.py, tests/test_settings_posture.py,
+              tests/test_server_dev_autologin.py
 Touch when:   never for a new repository (repositories are configured in the database, not
               the environment); adding a variable means adding it here, to ``redacted_dict``
               (never a secret value), to docs/DEPLOYMENT.md#21-environment-reference and to
@@ -65,6 +73,7 @@ Touch when:   never for a new repository (repositories are configured in the dat
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
@@ -213,6 +222,46 @@ def temp_dir_reason(path: Path | str, environ: Mapping[str, str] | None = None) 
                     f"{shown} resolves under {label or candidate}, an OS-managed temporary "
                     "directory"
                 )
+    return None
+
+
+#: The characters a username may use. Defined here, not in ``crb.server.auth`` (which imports
+#: this module), so ``validate_username`` and the ``CRB_AUTH__DEV_AUTOLOGIN`` check share it.
+USERNAME_CHARS: frozenset[str] = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._@-"
+)
+
+
+def is_loopback_host(host: str) -> bool:
+    """Whether ``host`` — an IP literal (brackets allowed) or a name — can only mean this
+    machine: ``localhost``, any address in ``127.0.0.0/8`` or ``::1``. Anything else,
+    including the wildcard binds ``0.0.0.0`` and ``::`` and every other name, is not."""
+    raw = host.strip().lower().removeprefix("[").removesuffix("]")
+    if raw == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(raw).is_loopback
+    except ValueError:
+        return False
+
+
+def dev_autologin_refusal_for(env: str, bind_host: str) -> str | None:
+    """Why automatic sign-in may not be switched on for this ``env`` and bind address, or
+    ``None`` when it may (ADR-0027). ``Settings`` raises it at start-up and
+    :func:`crb.server.main.serve` again for the address it will really bind, because
+    ``crb serve --host`` does not pass through ``CRB_BIND_HOST``. There is no override."""
+    if env != "dev":
+        return (
+            f"CRB_AUTH__DEV_AUTOLOGIN is allowed only when CRB_ENV=dev (this is CRB_ENV={env}); "
+            "automatic sign-in is for a development stack on one machine and is never "
+            "switched on in production"
+        )
+    if not is_loopback_host(bind_host):
+        return (
+            f"CRB_AUTH__DEV_AUTOLOGIN is allowed only when the API binds a loopback address "
+            f"(127.0.0.1, ::1 or localhost), not {bind_host!r}: on any other address the "
+            "stack could be reached from another machine"
+        )
     return None
 
 
@@ -636,6 +685,35 @@ class IntakeSettings(BaseModel):
         }
 
 
+class AuthSettings(BaseModel):
+    """Sign-in options beyond the local and organisation accounts (``CRB_AUTH__*``).
+
+    ``dev_autologin`` names one local account that a browser on THIS machine is signed in as
+    without a password (ADR-0027). Empty — the default — means off. The settings refuse it
+    unless ``CRB_ENV=dev`` and the bind address is loopback, and the route admits only a
+    loopback peer that names a loopback host and carries no forwarding header
+    (:func:`crb.server.auth.dev_autologin_refusal`).
+    """
+
+    dev_autologin: str = ""
+
+    @field_validator("dev_autologin")
+    @classmethod
+    def _username_shaped(cls, v: str) -> str:
+        # a typo fails at start-up with the rule, not on the first page load with a 403
+        raw = v.strip()
+        if raw and (not (2 <= len(raw) <= 64) or any(c not in USERNAME_CHARS for c in raw)):
+            raise ValueError(
+                "CRB_AUTH__DEV_AUTOLOGIN must be the username of a local account "
+                "(2-64 characters from A-Z a-z 0-9 . _ @ -), or empty for off"
+            )
+        return raw
+
+    def redacted(self) -> dict[str, Any]:
+        """The ``/settings`` view: which account, if any, is signed in automatically."""
+        return {"dev_autologin": self.dev_autologin}
+
+
 class Settings(BaseSettings):
     """The top-level settings object: one instance per app, built from the environment
     (or by a test with keyword arguments). See the module docstring for the invariants."""
@@ -664,6 +742,8 @@ class Settings(BaseSettings):
     oidc: OidcSettings = Field(default_factory=OidcSettings)
     github: GitHubAppSettings = Field(default_factory=GitHubAppSettings)
     local_auth_enabled: bool = True
+    #: Automatic sign-in for a development stack (ADR-0027); off unless a username is named.
+    auth: AuthSettings = Field(default_factory=AuthSettings)
     bootstrap_admin: BootstrapAdmin = Field(default_factory=BootstrapAdmin)
     #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string).
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
@@ -788,6 +868,15 @@ class Settings(BaseSettings):
                     "for a throwaway evaluation"
                 )
             log.warning("CRB_HOME %s; %s", reason, TEMP_HOME_ADVICE)
+        if self.auth.dev_autologin:
+            refusal_a = dev_autologin_refusal_for(self.env, self.bind_host)
+            if refusal_a:
+                raise ValueError(refusal_a)
+            if not self.local_auth_enabled:
+                raise ValueError(
+                    "CRB_AUTH__DEV_AUTOLOGIN signs in a local account, but "
+                    "CRB_LOCAL_AUTH_ENABLED=false turns local accounts away; unset one of them"
+                )
         # ADR-0023: the builder's default follows the env, then production refuses the
         # unsealed posture unless the operator said so on purpose
         if self.builder.executor is None:
@@ -891,6 +980,7 @@ class Settings(BaseSettings):
             "session_ttl": self.session_ttl,
             "cookie_secure": self.resolved_cookie_secure,
             "local_auth_enabled": self.local_auth_enabled,
+            "auth": self.auth.redacted(),
             "github": {
                 "enabled": self.github.enabled,
                 "app_id": self.github.app_id,
@@ -952,6 +1042,8 @@ __all__ = [
     "SEALED_EXECUTOR",
     "TEMP_DIR_ROOTS",
     "TEMP_HOME_ADVICE",
+    "USERNAME_CHARS",
+    "AuthSettings",
     "BootstrapAdmin",
     "BuilderSettings",
     "FactorySettings",
@@ -963,7 +1055,9 @@ __all__ = [
     "SandboxSettings",
     "Settings",
     "default_builder_executor",
+    "dev_autologin_refusal_for",
     "factory_builds_posture",
+    "is_loopback_host",
     "temp_dir_reason",
     "unsealed_prod_refusal",
 ]

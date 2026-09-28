@@ -86,7 +86,10 @@ What it does: Readiness aggregates the store probes (db, migrations at head, app
               the fixed ``failure_detail`` naming the request id, the exception logged, never
               served;
               liveness checks the database only; ``/metrics``
-              refreshes the ledger gauges then renders the shared registry.
+              refreshes the ledger gauges then renders the shared registry; ``/health`` and
+              ``/version`` say whether automatic sign-in is on (never which account, and
+              ``on`` only to a caller that could use it), and
+              ``probe_dev_autologin`` is the doctor line that warns while it is.
 How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the
               request id → ``probes.aggregate`` → stamp;
               ``migrations_result`` turns a ``HeadStatus`` into the probe (``crb doctor``
@@ -97,10 +100,13 @@ How:          ``collect_health`` = the probe list, each under ``probes.run_probe
 Layer:        server — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0011-repo-lint-belt.md (belt 5 in the false-Q1 predicate),
-              docs/adr/0023-production-refuses-the-unsealed-posture.md (the ``posture`` key)
+              docs/adr/0023-production-refuses-the-unsealed-posture.md (the ``posture`` key),
+              docs/adr/0027-dev-autologin-on-loopback.md (the ``dev_autologin`` field)
 Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe`` /
-              ``failure_detail`` and ``aggregate``), src/crb/observability/build_stamp.py
-              (the ``build`` probe and the ``served`` block),
+              ``failure_detail`` and ``aggregate``; its sibling build_stamp.py is the
+              ``build`` probe and the ``served`` block),
+              src/crb/server/auth.py (``dev_autologin_refusal`` — who is told automatic
+              sign-in is on),
               src/crb/store/migrate.py (``head_status_on`` — the one head check; the ledger
               probe calls ``assert_append_only`` in src/crb/store/ledger.py; the
               ``append_only`` probe counts ``expected_triggers`` from src/crb/store/db.py),
@@ -114,7 +120,7 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe
               docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface (the
               ``migrations`` contract the other documents copy)
 Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py,
-              tests/test_settings_posture.py
+              tests/test_settings_posture.py, tests/test_server_dev_autologin.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
               (``skipped`` elsewhere), whether it may fail readiness, and putting its read
               under ``probes.run_probe`` (never an exception in a ``detail``); a new belt means
@@ -145,6 +151,7 @@ from crb.intake.client import STOP_ADVICE, TRACKER_TOKEN_SECRET
 from crb.observability import build_stamp, metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.provision.probe import probe_provision
+from crb.server.auth import dev_autologin_refusal
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.flow_record import stamp_first_healthy
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
@@ -749,6 +756,43 @@ def probe_intake(
     return probes.run_probe("intake", _read, request_id=request_id)
 
 
+def dev_autologin_state(settings: Settings, request: Request | None = None) -> str:
+    """``on`` / ``off``: whether automatic sign-in is switched on (ADR-0027). ``/health``
+    says it at the top level — beside the probes, not as one, so a development stack's
+    readiness is not lowered by a setting the operator chose — and names no account.
+
+    Given the ``request``, it says ``on`` only to a caller the route would sign in
+    (:func:`crb.server.auth.dev_autologin_refusal` finds nothing); any other caller — another
+    machine, a proxied request, another host name — reads ``off``, exactly what a stack
+    without it serves, so the answer tells a caller that cannot use it nothing. ``crb doctor``
+    reads the settings directly (:func:`probe_dev_autologin`), so the operator is never told
+    ``off`` while it is on."""
+    if not settings.auth.dev_autologin:
+        return "off"
+    if request is not None and dev_autologin_refusal(request) is not None:
+        return "off"
+    return "on"
+
+
+def probe_dev_autologin(settings: Settings | None) -> ProbeResult:
+    """``crb doctor``'s ``dev_autologin`` line: ``ok`` "off", or ``degraded`` (``warn``) with
+    the account named while it is on; ``skipped`` when the settings could not be read."""
+    if settings is None:
+        return ProbeResult(
+            "dev_autologin", SKIPPED, "not checked: the settings could not be read", {}
+        )
+    name = settings.auth.dev_autologin
+    if not name:
+        return ProbeResult("dev_autologin", OK, "off", {"enabled": False})
+    return ProbeResult(
+        "dev_autologin",
+        DEGRADED,
+        f"on — a browser on this machine is signed in as {name!r} without a password "
+        "(CRB_AUTH__DEV_AUTOLOGIN); development stacks only, never use in production",
+        {"enabled": True, "username": name},
+    )
+
+
 #: ``collect_health`` without the app's mounted UI directory (a caller outside a request):
 #: the probe then resolves the candidates itself.
 UI_DIST_UNKNOWN: Any = object()
@@ -788,10 +832,12 @@ def collect_health(
     *,
     role: str | None = None,
     request_id: str = "",
+    request: Request | None = None,
     ui_dist: Path | None = UI_DIST_UNKNOWN,
 ) -> dict[str, Any]:
     """The deep probe (readiness). ``role`` defaults to :func:`process_role``;
-    ``request_id`` is what a failed read's detail names (the route passes the middleware's).
+    ``request_id`` is what a failed read's detail names (the route passes the middleware's);
+    ``request`` decides who is told that automatic sign-in is on (:func:`dev_autologin_state`).
     Every probe runs under :func:`probes.run_probe` — the observability probes here too,
     so no probe in the body can serve an exception."""
     role = process_role() if role is None else role
@@ -812,6 +858,7 @@ def collect_health(
         probe_served(settings, request_id=rid, ui_dist=ui_dist),
     ]
     out = _stamp(probes.aggregate(results), role)
+    out["dev_autologin"] = dev_autologin_state(settings, request)
     # ADR-0023: where tests and the builder run, and whether production runs unsealed under
     # CRB_ALLOW_UNSEALED_PROD — a fact every viewer of the Posture page is owed, not a probe
     # (it cannot fail; it is what this deployment was told)
@@ -845,7 +892,9 @@ def health(
     """Readiness: 503 only on ``down`` — ``degraded`` still serves (with caveats)."""
     state = request.app.state
     mounted = state.ui_dist if getattr(state, "ui_mounted", False) else UI_DIST_UNKNOWN
-    out = collect_health(factory, settings, request_id=request_id(request), ui_dist=mounted)
+    out = collect_health(
+        factory, settings, request_id=request_id(request), ui_dist=mounted, request=request
+    )
     # ADR-0028: the first green read is the go-live stream's end mark, stamped once
     stamp_first_healthy(factory, str(out["status"]))
     if out["status"] == DOWN:
@@ -894,6 +943,10 @@ def version(request: Request) -> dict[str, Any]:
         # whether an organisation sign-in exists is a fact the login page and the posture
         # page both need before anyone is signed in; it names no provider and no secret
         "oidc_enabled": getattr(request.app.state, "oidc_client", None) is not None,
+        # the banner every page shows while automatic sign-in is on must render on the
+        # sign-in page too, before anyone has a role; it names no account, and only a caller
+        # the route would sign in is told it is on (ADR-0027)
+        "dev_autologin": dev_autologin_state(request.app.state.settings, request) == "on",
     }
 
 
@@ -908,8 +961,10 @@ __all__ = [
     "SKIPPED",
     "collect_health",
     "collect_liveness",
+    "dev_autologin_state",
     "ledger_counts",
     "migrations_result",
+    "probe_dev_autologin",
     "probe_migrations",
     "probe_provision_role",
     "probe_worker",

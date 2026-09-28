@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A development stack signs a browser in on its own machine; production cannot**
+  ([#58](https://github.com/Jita81/commit-replay-bench/pull/58)). `CRB_AUTH__DEV_AUTOLOGIN=<username>`
+  (off by default, ADR-0027, DL-240) signs a browser on the same computer in as one local account.
+  The server refuses it outside `CRB_ENV=dev`, on a non-loopback bind and with
+  `CRB_LOCAL_AUTH_ENABLED=false`, and the container image refuses to start with it set. A request
+  from another machine, through a forwarding proxy (the UI's Vite proxy now marks one) or naming
+  another `Host` is answered as if it were off. The session is the one a password issues — the
+  revocable nonce, the session-bound CSRF token — and it never touches the rate limit. Every
+  sign-in is an audited `auth.dev_autologin` event, and every page shows a banner.
+
 - **A pull request title is measured as the squash merge writes it**
   ([#67](https://github.com/Jita81/commit-replay-bench/pull/67)). The commit-subject gate now
   adds the ` (#<n>)` suffix a squash merge appends before it checks the 72-character limit:

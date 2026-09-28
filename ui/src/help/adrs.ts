@@ -61,6 +61,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0022', 'An operator approves a ticket before it is registered; one pass per repository'],
   ['0023', 'Production refuses the unsealed posture unless an evented override says so'],
   ['0024', '"Clean" means working, by construction: the format step, the finish gate, belt 6 `api_stable`, and one switchboard'],
+  ['0027', 'Automatic sign-in for a development stack, on loopback only'],
   ['0028', 'The moments the flow reading needs are recorded when they happen, never derived'],
 ]
 

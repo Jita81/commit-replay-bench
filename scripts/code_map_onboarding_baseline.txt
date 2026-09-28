@@ -3,7 +3,6 @@
 # This list only shrinks: when you edit one of these files, put onboarding a client
 # repository first in its ``Touch when`` ("never for a new repository; ...") and delete its
 # line here — scripts/code_map.py --check fails until you do. Never add a line.
-deploy/entrypoint.sh
 scripts/check_release_tag.py
 src/crb/builders/budget.py
 src/crb/builders/egress_proxy.py
@@ -124,7 +123,6 @@ ui/src/help/glossary.test.ts
 ui/src/help/glossary.ts
 ui/src/help/hints-collector.ts
 ui/src/help/hints-hover.instrument.test.tsx
-ui/src/help/hints-ratchet.shell.tsx
 ui/src/lib/builder.test.ts
 ui/src/lib/builder.ts
 ui/src/lib/jsonObject.test.ts
