@@ -342,7 +342,9 @@ def _set_active(args: argparse.Namespace, active: bool) -> int:
         user = _local_user(db, args.username)
         # Idempotency and the last-admin guard are decided under the users lock on a
         # re-read row (set_user_active), not on the snapshot _local_user returned.
-        if not set_user_active(db, user, active):
+        # sign_in=None: run without the service's settings, so every active admin counts
+        # (the break-glass operator has host access, which is itself the recovery path)
+        if not set_user_active(db, user, active, sign_in=None):
             print(f"{args.username} is already {verb} in {where}")
             return EXIT_OK
         record_user_event(db, action=f"user.{verb}", actor=actor(), target=user)
@@ -350,10 +352,8 @@ def _set_active(args: argparse.Namespace, active: bool) -> int:
             print(f"activated {args.username} in {where}")
         else:
             print(
-                f"deactivated {args.username} in {where}: refused while inactive. "
-                f"Re-activating within "
-                f"the session lifetime restores sessions issued before — "
-                f"`crb users set-password {args.username}` ends them for good."
+                f"deactivated {args.username} in {where}: refused while inactive, and "
+                f"every session it held has ended — re-activating it brings none back."
             )
         return EXIT_OK
 
@@ -367,7 +367,7 @@ def cmd_activate(args: argparse.Namespace) -> int:
 
 def cmd_deactivate(args: argparse.Namespace) -> int:
     """Disable an account (never the last active admin): every request is refused while it
-    is inactive. Re-activation restores sessions issued before; ``set-password`` ends them."""
+    is inactive, and every session it held ends for good (re-activation brings none back)."""
     return _set_active(args, False)
 
 

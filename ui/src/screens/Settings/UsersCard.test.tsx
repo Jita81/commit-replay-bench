@@ -126,14 +126,14 @@ describe('UsersCard', () => {
     await waitFor(() => expect(screen.getByTestId('user-active-ada')).toBeChecked())
   })
 
-  it('reactivating says the earlier sessions work again and how to end them', async () => {
+  it('reactivating says the account can sign in and that its earlier sessions stay ended', async () => {
     admin({
       'GET /users': list(ADA, { ...LEAVER, active: false }),
       'PUT /users/u2/active': { ...LEAVER, active: true },
     })
     renderApp(<UsersCard />)
     await userEvent.click(await screen.findByTestId('user-active-cliff'))
-    await waitFor(() => expect(screen.getByTestId('users-said')).toHaveTextContent(/is active again and can sign in.*sign it out everywhere, or set a password, to end them/))
+    await waitFor(() => expect(screen.getByTestId('users-said')).toHaveTextContent(/is active again and can sign in\. The sessions it held before it was turned off stay ended/))
   })
 
   it('the last active admin cannot be deactivated or demoted: both controls are disabled before they are used, and say why', async () => {

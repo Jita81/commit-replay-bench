@@ -74,8 +74,10 @@ export function isLocalAccount(u: User): boolean {
  * The server decides this under the users lock on re-read rows; this is the SAME rule applied
  * to the list the screen already holds, so the control is disabled before it is used instead
  * of the page reporting a 409 after the fact. When the rule and the server disagree (a second
- * admin was activated in another browser), the server is the one that decides: the screen only
- * ever stops an act, never permits one.
+ * admin was activated in another browser, or the other admin is one nobody can sign in as — a
+ * local admin with local sign-in off, which the server does not count and this list cannot
+ * tell), the server is the one that decides: the screen only ever stops an act, never permits
+ * one.
  */
 export function lastActiveAdmin(users: readonly User[]): string {
   const admins = users.filter((u) => u.role === 'admin' && u.active)
@@ -289,7 +291,7 @@ export function UsersCard() {
                   onSuccess: (x) =>
                     setSaid(
                       next
-                        ? `${x.username || x.display_name} is active again and can sign in. Sessions it held less than the session lifetime ago work again — sign it out everywhere, or set a password, to end them.`
+                        ? `${x.username || x.display_name} is active again and can sign in. The sessions it held before it was turned off stay ended.`
                         : `${x.username || x.display_name} is deactivated and is refused on its very next request.`,
                     ),
                   // the server is the one that decides: a refusal puts the control back

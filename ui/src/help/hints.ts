@@ -1699,7 +1699,7 @@ export const HINTS = {
   'col.settings.active':
     'Whether the account can sign in. A deactivated account is refused on its very next request.',
   'toggle.settings.user_active':
-    'Turn an account off when the person leaves, and back on when they return. Deactivating refuses the account on its very next request; reactivating within the session lifetime (8 hours by default) restores the sessions it already held, so set a password as well to end them for good. The last active admin cannot be deactivated — activate or create a second admin first.',
+    'Turn an account off when the person leaves, and back on when they return. Deactivating refuses the account on its very next request and ends every session it held, so reactivating it brings none of them back: the person signs in again. The last active admin cannot be deactivated — activate or create a second admin first.',
   'col.settings.last_login':
     'How long ago the account last signed in successfully. "Never" means it has not been used since it was created.',
   'stat.settings.last_login':

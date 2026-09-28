@@ -25,7 +25,8 @@ What it is:   The database ``EventSink`` and the readers the SSE route and the w
 What it does: Writes every ``StepEvent`` as one ``events`` row and never raises into the run
               (drops are counted and logged); reads a trace's events in ``seq`` order with a
               resume cursor; allocates the next ``seq`` for out-of-band system events under
-              the same write lock the ledger uses.
+              the same write lock the ledger uses, and lends that lock to a caller that
+              reads a trace's ``seq`` itself (``lock_event_seq``: the server's audited commit).
 How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one transaction
               with a per-row fallback; ``read_events`` = ``seq > after`` ordered by
               ``(seq, id)`` with a clamped limit; ``append_event`` = lock → ``max(seq)+1`` →
@@ -51,7 +52,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.observability.events import StepEvent, StepStatus
@@ -118,6 +119,23 @@ def _lock(s: Session) -> None:
     dialect = s.get_bind().dialect.name
     if dialect == "sqlite":
         s.execute(text("BEGIN IMMEDIATE"))
+    elif dialect == "postgresql":
+        s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
+
+
+def lock_event_seq(s: Session) -> None:
+    """Take the ``events`` write lock for the rest of ``s``'s transaction — the one every
+    ``seq`` allocation here takes — before a caller reads a trace's last ``seq``, so two
+    writers to one trace cannot pick the same next one. SQLite: ``BEGIN IMMEDIATE`` (a
+    transaction that already wrote holds the write lock, and is left as it is); PostgreSQL:
+    the ``events`` advisory lock. Other dialects: no-op (the caller's retry covers them)."""
+    dialect = s.get_bind().dialect.name
+    if dialect == "sqlite":
+        try:
+            s.execute(text("BEGIN IMMEDIATE"))
+        except OperationalError as exc:
+            if "within a transaction" not in str(exc):
+                raise
     elif dialect == "postgresql":
         s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
 
@@ -316,5 +334,6 @@ __all__ = [
     "append_event",
     "count_events",
     "last_seq",
+    "lock_event_seq",
     "read_events",
 ]
