@@ -133,7 +133,7 @@ export const HELP: ScreenHelp[] = [
       operator: 'Rows marked “approver acts” are not yours — a Sign a gap row needs an approver. Decide and Review rows on factory items are yours, and so are Strengthen the tests (a cell held until its tests are stronger) and Queue re-measurement (a cell measured on an earlier apparatus), which open Learn; Read opens the rest.',
       approver: 'Attest opens the sign-off form with the cell chosen; Sign a gap opens the item on the Factory. Decline by doing nothing: an unsigned cell keeps its route.',
     },
-    numbers: 'n on a row is the attempts in that cell; the bracket is its 95 % Wilson interval; the code after it is the routing reason. A stale row was signed under an earlier apparatus and licenses nothing until re-signed.',
+    numbers: 'n on a row is the attempts in that cell; the bracket is its 95 % Wilson interval; the code after it is the routing reason. On a re-measurement row, the rows needed are those that reach the rule’s first look, the dollar figure is an estimate at the cell’s own cost per row (or “cost not known”), and builder/model@provider is what it is re-measured on. A stale row was signed under an earlier apparatus and licenses nothing until re-signed.',
     terms: ['cell', 'wilson', 'reason_code', 'signoff', 'stale', 'apparatus', 'false_q1'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-6--before-anyone-signs-anything', label: 'Before anyone signs anything' },

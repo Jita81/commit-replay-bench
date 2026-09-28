@@ -2828,7 +2828,8 @@ def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: 
     assert ("not_built", "I-2") in rows, rows
     rec = rows[("not_built", "I-2")]
     assert rec.repo == pr.REPO_NAME and rec.first_due and rec.resolved == ""
-    assert rec.act_role in {"approver", "operator"} and "is not built" in rec.title
+    # no proven standard: an approver funds the calibration build (never an operator's Decide)
+    assert rec.act_role == "approver" and "is not built" in rec.title
     # the stamp is the decision's, not the reader's: a later pass does not move it
     assert h.worker.refresh_decisions(now=1000.0 + 3 * DECISIONS_REFRESH_S) == 1
     with h.factory() as db:

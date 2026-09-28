@@ -66,6 +66,22 @@ const CONTROLS = { schema: 'x', apparatus: { apparatus_version: '2.2', controls_
 const ORACLE = { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }, { task_id: 't2', strength: 0.7 }], cells: [], apparatus_versions: ['2.2'] }
 const REPO = { name: 'alpha', language: 'python', runner: 'pytest', url: '', last_run: null, created: '2026-09-01T00:00:00Z', updated: '2026-09-02T00:00:00Z', config: {} }
 
+/**
+ * `GET /decisions?repo=alpha` as the server serves it to `role`: the unsigned deliver cell (an
+ * approver's Attest) and the held human cell (an operator's Strengthen the tests, G-535), each
+ * fitted to the reader — the act only for a role that can take it, `Read` otherwise.
+ */
+function inbox(role: 'viewer' | 'approver', extra: object[] = []) {
+  const acts = role !== 'viewer'
+  const row = (over: object) => ({ repo: 'alpha', evidence: '', reason_code: '', signoff: null, due_since: '2026-09-28T09:00:00+00:00', age_s: 60, ...over })
+  const items = [
+    row({ kind: 'signoff_due', key: 'bug.fix|XS', title: 'bug.fix × XS clears the bar — attest it or decline', role: 'approver', act: acts ? 'Attest' : 'Read', can_act: acts, href: '/signoff?repo=alpha&cell=bug.fix%7CXS' }),
+    row({ kind: 'strengthen', key: 'bug.fix|S', title: 'bug.fix × S is held until its tests are stronger', role: 'operator', act: acts ? 'Strengthen the tests' : 'Read', can_act: acts, href: '/learn?repo=alpha#strengthen' }),
+    ...extra.map(row),
+  ]
+  return { items, total: items.length, as_of: '2026-09-28T09:01:00+00:00', repos: ['alpha'], measured: ['alpha'], errors: [] }
+}
+
 const ROUTES = {
   'GET /auth/me': PRINCIPAL,
   'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
@@ -75,6 +91,7 @@ const ROUTES = {
   'GET /oracle/alpha': ORACLE,
   'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
   'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+  'GET /decisions': inbox('approver'),
 }
 
 describe('ResultsPage', () => {
@@ -209,7 +226,7 @@ describe('ResultsPage', () => {
   })
 
   it('a viewer is never offered an act they cannot take: Read and who acts, and "sign-off due" as plain text', async () => {
-    mockApi({ ...ROUTES, 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+    mockApi({ ...ROUTES, 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /decisions': inbox('viewer') })
     renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     await waitFor(() => expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument())
     expect(screen.queryByRole('link', { name: 'Attest' })).toBeNull()
@@ -493,26 +510,50 @@ describe('ResultsPage', () => {
     const cell = screen.getByTestId('cell-bug.fix-XS')
     expect(cell).not.toHaveTextContent(/signed 15 Sep/)
     expect(cell).toHaveTextContent('sign-off not loaded')
-    // without the sign-offs the page cannot say what waits on a person, so it never says nothing does
-    expect(screen.queryByText('Nothing is waiting on a person here')).toBeNull()
-    expect(screen.queryByRole('list', { name: 'Decisions for alpha' })).toBeNull()
-    expect(screen.getByTestId('decisions-failed')).toHaveTextContent('the request failed')
+    // what waits on a person is the server's inbox, which read the sign-offs itself: it is still served
+    expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument()
+    expect(screen.queryByTestId('decisions-failed')).toBeNull()
     // Try again asks again
     await userEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(calls).toBe(3))
   })
 
-  it('factory tasks that fail on a refetch never leave their decisions shown as current', async () => {
-    const TASK = { id: 'T-1', title: 'Add a retry', capability_class: 'bug.fix', size: 'XS', kind: 'feature', status: 'ready', outcome_reason: '', dor_gaps: ['acceptance'], value_gaps: [], route_hint: '', red_proof: null, build_status: '', pr_url: null, review_verdict: null, last_event: '' }
+  it('an inbox that fails on a refetch never leaves its decisions shown as current', async () => {
     let calls = 0
-    mockApi({ ...ROUTES, 'GET /factory/alpha/tasks': () => (++calls === 1 ? json([TASK]) : envelope(500, 'internal', 'boom')) })
+    mockApi({ ...ROUTES, 'GET /decisions': () => (++calls === 1 ? json(inbox('approver')) : envelope(500, 'internal', 'boom')) })
     const { qc } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
-    await waitFor(() => expect(screen.getByText('T-1 Add a retry is blocked on 1 structural gap')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('bug.fix × XS clears the bar — attest it or decline')).toBeInTheDocument())
     await qc.refetchQueries()
-    await waitFor(() => expect(screen.getByTestId('decisions-failed')).toBeInTheDocument())
+    const failed = await screen.findByTestId('decisions-failed')
     expect(calls).toBe(2)
-    expect(screen.queryByText('T-1 Add a retry is blocked on 1 structural gap')).toBeNull()
+    expect(failed).toHaveTextContent('The inbox did not load (HTTP 500 · internal)')
+    expect(screen.queryByText('bug.fix × XS clears the bar — attest it or decline')).toBeNull()
     expect(screen.queryByText('Nothing is waiting on a person here')).toBeNull()
+    // Try again asks again
+    await userEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(calls).toBe(3))
+  })
+
+  it('a repository whose inputs the server could not read is said, never shown as nothing waiting', async () => {
+    mockApi({ ...ROUTES, 'GET /decisions': { ...inbox('approver'), items: [], total: 0, errors: [{ repo: 'alpha', status: 500, code: 'internal_error', message: 'x' }] } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const failed = await screen.findByTestId('decisions-failed')
+    expect(failed).toHaveTextContent('could not read this repository’s inputs')
+    expect(screen.queryByText('Nothing is waiting on a person here')).toBeNull()
+  })
+
+  it('the panel’s count is the served count for this repository, every kind included — the number its Decisions card shows', async () => {
+    // a re-measurement is a kind the browser never derived; the served count includes it
+    const remeasure = { kind: 'remeasure', key: 'replay|bug.fix|XS|python|editblock|m|p|sighted', title: 'bug.fix × XS (sighted) was measured under apparatus 2.1, not 2.2', role: 'operator', act: 'Queue re-measurement', can_act: true, href: '/learn?repo=alpha#remeasure' }
+    const served = inbox('approver', [remeasure])
+    const { calls } = mockApi({ ...ROUTES, 'GET /decisions': served })
+    const { container } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const list = await screen.findByRole('list', { name: 'Decisions for alpha' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(served.items.length)
+    expect(container.querySelector('[data-hint="stat.results.waiting_count"]')).toHaveTextContent(`${served.items.length} for this repository`)
+    expect(within(list).getByRole('link', { name: 'Queue re-measurement' })).toHaveAttribute('href', '/learn?repo=alpha#remeasure')
+    // one request, for this repository
+    expect(calls.filter((c) => c.path === '/decisions').map((c) => c.url.replace(/^\/api\/v1/, ''))).toEqual(['/decisions?repo=alpha'])
   })
 
   it('a repository that fails on a refetch never leaves an old in-flight banner shown as current', async () => {
@@ -562,13 +603,15 @@ describe('ResultsPage', () => {
     oracle: 'every instrument tile tells a failed request from a missing report',
     pool: 'a failed pool request says so and offers a retry',
     signoffs: 'sign-offs that fail on a refetch',
-    tasks: 'factory tasks that fail on a refetch',
+    inbox: 'an inbox that fails on a refetch',
     repoDetail: 'a repository that fails on a refetch',
     run: 'a run poll that fails says so with a retry',
   }
 
   it('every query the page reads has a test for what the page shows when it fails', () => {
-    const read = [...pageSource.matchAll(/currentData\((\w+)\)/g)].map((m) => m[1]).sort()
+    // the inbox is read through `useDecisions`, which keeps no old rows after a failed read
+    const inboxRead = /\bconst (\w+) = useDecisions\(/.exec(pageSource)?.[1]
+    const read = [...[...pageSource.matchAll(/currentData\((\w+)\)/g)].map((m) => m[1]), ...(inboxRead ? [inboxRead] : [])].sort()
     expect(read).toEqual(Object.keys(FAILURE_PINNED).sort())
     for (const name of Object.values(FAILURE_PINNED)) expect(testSource).toContain(`it('${name}`)
   })

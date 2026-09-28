@@ -176,7 +176,7 @@ export const HINTS = {
   'nav.decisions':
     'Step 3: everything waiting on a person across every repository. The number is how many decisions are ready now.',
   'nav.decisions_count':
-    'How many decisions are waiting on a person right now, across every repository. It counts sign-offs due, gaps to sign and factory items to decide; it is not a quality figure.',
+    'How many decisions are waiting on a person right now, across every repository. It counts every row on the Decisions page — sign-offs due or gone stale, cells to strengthen or re-measure, factory items to decide, preventions and library entries to sign; it is not a quality figure.',
   'nav.factory':
     'Step 4: deliver new work under the baseline — a frozen backlog, a RED proof, a build under the belts and a pull request only where the map routes deliver.',
   'nav.posture':
@@ -436,7 +436,7 @@ export const HINTS = {
   'button.results.all_decisions':
     'Every decision waiting on a person, across every repository.',
   'stat.results.waiting_count':
-    'How many decisions are waiting on a person for this repository alone: sign-offs due, gaps to sign and factory items to decide.',
+    'How many decisions are waiting on a person for this repository alone — the same rows, and the same number, as its card on the Decisions page. A sign-off gone stale is listed there in its own section.',
 
   // ── /library/:repo (screens/Library/LibraryPage.tsx) — the context library, ADR-0026 item 10
   'link.library.back':
@@ -546,13 +546,13 @@ export const HINTS = {
   'stat.decisions.waiting':
     'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
-    'The cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker.',
+    'On a cell row: the cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker. On a re-measurement row: the rows needed to reach the rule’s first look, the estimated cost (or “cost not known” when no row recorded one), and the builder/model@provider it is re-measured on. On a factory or library row: what is missing or waiting.',
   'button.decisions.act':
-    'Take this decision. It opens the sign-off form with the cell chosen, the factory item, or the ledger row, depending on the kind.',
+    'Opens the page where this decision is taken — the sign-off form with the cell chosen, the Factory item, Learn (to strengthen the tests or queue a re-measurement), the Library entry, or the Ledger, depending on the kind. Nothing is recorded until you act there.',
   'button.decisions.read':
     'Read the decision without acting. The role that can act is named under the button.',
   'stat.decisions.who_acts':
-    'The role that takes this decision. You can read it; a person with that role, or a higher one, acts on it. Admins give roles on the Users page.',
+    'The role that takes this decision. You can read it; a person with that role, or a higher one, acts on it. Admins give roles in the Users card on the Settings page.',
   'tile.decisions.stale':
     'A cell signed under an earlier apparatus, or on a checks arm the repository no longer grades under (the format step or the public-API check was switched since). It is kept as history and licenses nothing until an approver re-signs it on the current instrument or revokes it.',
   'button.decisions.resign':

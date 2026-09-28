@@ -14,12 +14,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **One served Decisions inbox, and honest run, task and oracle pages**
   (north-star Wave 6, stream Decisions; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-dec)).
-  `GET /decisions` now derives every row once, fits each act to the reader's role and carries
-  an ETag; `?count=1` feeds the nav badge in one request and never writes the clock. A cell
-  held by its tests and a cell measured on an old apparatus each become a row. ADR-0003 says
-  merge outcomes and review verdicts feed no routing clause. A refused cancel, an unknown task
-  and a failed read now say what happened; task rows link to their pages; Runs states its
-  200-run limit (DL-303, P-610, P-611).
+  `GET /decisions` derives every row once and fits each act to the reader's role; `?count=1`
+  feeds the nav badge in one request. Every act re-reads both, one broken repository no longer
+  blanks the inbox, and the Results panel reads the same rows. A held cell and a stale cell
+  each become a row. ADR-0003 says merge outcomes and review verdicts feed no routing clause.
+  A cancel that fails says why, an unknown task says so, and task rows link to their pages,
+  by keyboard too (DL-303, DL-304, P-610 to P-619).
 
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).

@@ -17,15 +17,17 @@ the inbox and back into it has been waiting since it first arrived, and the read
 
 The Results page still folds the cell and item rows for one repository in the browser
 (``decisionsFor``), so the two derivations are pinned to each other: one fixture,
-``tests/fixtures/decisions_parity.json``, is read by ``tests/test_server_decisions.py`` and
-``ui/src/screens/Decisions/decisions.test.ts``, and both must produce its expected rows.
+``ui/src/screens/Decisions/decisions.parity.json``, is read by
+``tests/test_server_decisions.py`` and ``ui/src/screens/Decisions/decisions.test.ts``, and both
+must produce its expected rows.
 
 Two rows are the server's alone, because only it holds their inputs without a fan-out:
 ``strengthen`` (G-535 — a cell held by its oracle or its controls, the reasons
 :data:`crb.core.learn.STRENGTHEN_REASONS` names, which the Learn page's strengthening backlog
 lists) and ``remeasure`` (a cell whose evidence predates the apparatus in force, from
-:func:`crb.core.learn.remeasure_plan`; only STALE cells — a thin cell's top-up stays on Learn,
-where the plan offers it, so the inbox does not fill with every early cell). A held cell is
+:func:`crb.core.learn.remeasure_plan`; only STALE cells — a thin cell is not raised in the
+inbox, so it does not fill with every early cell; pricing and offering a thin cell's top-up is
+G-565's, and nothing offers it yet). A held cell is
 one row, never two: ``strengthen`` replaces ``routed_human`` for it.
 
 A sign-off that went stale is its own row, ``signoff_stale``, keyed by the sign-off's id and
@@ -104,6 +106,10 @@ KIND_ITEM_HUMAN = "item_human"
 KIND_STRENGTHEN = "strengthen"
 KIND_ROUTED_HUMAN = "routed_human"
 KIND_REMEASURE = "remeasure"
+#: The one re-measurement-plan reason the inbox raises. A plan cell carries no ``reason``
+#: today (every cell is stale); a cell another reason puts in the plan — ``thin``, G-565's
+#: top-up — is Learn's to offer, not a Decisions row.
+REMEASURE_STALE = "stale"
 KIND_ENTRY_RETIRED = "entry_retired"
 
 #: kind → its rank in the list (lower blocks more).
@@ -385,8 +391,10 @@ def remeasure_rows(
 ) -> list[DecisionRow]:
     """One ``remeasure`` row per cell of the re-measurement plan (:func:`crb.core.learn.
     remeasure_plan`, as ``GET /learn/remeasure`` serves it): its evidence predates the
-    apparatus in force and the current rows do not reach the rule's first look. A cell whose
-    queued runs have not finished (``in_flight``: ``(label, mode)``) asks nobody for anything.
+    apparatus in force and the current rows do not reach the rule's first look. Only a STALE
+    cell is a row: a cell whose ``reason`` is anything but :data:`REMEASURE_STALE` (a missing
+    one reads as stale) is skipped. A cell whose queued runs have not finished (``in_flight``:
+    ``(label, mode)``) asks nobody for anything.
     The evidence line says the rows needed and the estimate, or that the cost is not known —
     never a zero that reads as free."""
     if not plan:
@@ -396,7 +404,7 @@ def remeasure_rows(
     out: list[DecisionRow] = []
     for c in plan.get("cells", []) or []:
         label, mode = str(c.get("label", "")), str(c.get("mode", ""))
-        if (label, mode) in busy:
+        if (label, mode) in busy or str(c.get("reason", "") or REMEASURE_STALE) != REMEASURE_STALE:
             continue
         cell = dict(c.get("cell") or {})
         cls, size = str(cell.get("capability_class", "")), str(cell.get("size", ""))

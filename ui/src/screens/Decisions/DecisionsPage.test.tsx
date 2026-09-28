@@ -29,6 +29,8 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DecisionList, DecisionRowOut } from '../../api/types'
+import { helpFor } from '../../help/help'
+import { HINTS } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
 import { DecisionsPage } from './DecisionsPage'
@@ -121,6 +123,28 @@ describe('DecisionsPage', () => {
     expect(stale).toHaveTextContent('Re-measure')
     expect(stale).toHaveTextContent('20 rows needed · cost not known')
     expect(within(stale).getByRole('link', { name: 'Queue re-measurement' })).toHaveAttribute('href', '/learn?repo=alpha#remeasure')
+    // every number on the re-measurement row explains itself: the evidence hover names the rows
+    // needed, the estimate and the builder/model@provider; the act's hover says it opens Learn
+    const evidence = within(stale).getByText(/20 rows needed/).closest('[data-hint]')!
+    expect(evidence).toHaveAttribute('data-hint', 'stat.decisions.evidence')
+    const bubble = await expectHintOpens(evidence, 'stat.decisions.evidence')
+    expect(bubble).toHaveTextContent('the rows needed to reach the rule’s first look')
+    expect(bubble).toHaveTextContent('the estimated cost (or “cost not known” when no row recorded one)')
+    expect(bubble).toHaveTextContent('builder/model@provider')
+    expect(HINTS['button.decisions.act']).toMatch(/Learn \(to strengthen the tests or queue a re-measurement\)/)
+    expect(HINTS['button.decisions.act']).toMatch(/Nothing is recorded until you act there/)
+    expect(helpFor('/decisions')?.numbers).toMatch(/On a re-measurement row, the rows needed are those that reach the rule’s first look/)
+  })
+
+  it('who acts names where roles are given: the Users card on the Settings page (there is no Users page)', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /decisions': list([row({ act: 'Read', can_act: false })]) })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    const who = await screen.findByText('approver acts')
+    const trigger = who.closest('[data-hint]')!
+    expect(trigger).toHaveAttribute('data-hint', 'stat.decisions.who_acts')
+    const bubble = await expectHintOpens(trigger, 'stat.decisions.who_acts')
+    expect(bubble).toHaveTextContent('Admins give roles in the Users card on the Settings page.')
+    expect(HINTS['stat.decisions.who_acts']).not.toMatch(/Users page/)
   })
 
   it('a library entry waiting for its second person is a decision even before the repository is measured', async () => {
