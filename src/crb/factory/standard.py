@@ -129,21 +129,26 @@ def _author(arm: str) -> str:
 @dataclass(frozen=True)
 class CellRef:
     """One cell to read: its class and size, and — for a licence — the building rung's
-    builder and model and the context ARM the build carried (empty for the class × size
-    standard). The map is per arm (ADR-0026 items 1 and 6, ``?arm=``): a licence read asks
-    whether THAT arm is proven in the cell, and the licence also refuses a standard of any
-    other arm, whatever the reader answers."""
+    builder, model and provider and the context ARM the build carried (empty for the class ×
+    size standard). The map is per arm (ADR-0026 items 1 and 6, ``?arm=``): a licence read
+    asks whether THAT arm is proven in the cell, and the licence also refuses a standard of
+    any other arm, whatever the reader answers. The provider is one of the cell's seven
+    fields: the same model name served by a provider no row measured is another cell
+    (P-340)."""
 
     capability_class: str
     size: str
     builder: str = ""
     model: str = ""
     arm: str = ""
+    provider: str = ""
 
     def key(self) -> str:
         parts = [self.capability_class, self.size]
         if self.builder or self.model:
             parts += [self.builder, self.model]
+        if self.provider:
+            parts.append(f"@{self.provider}")
         if self.arm:
             parts.append(self.arm)
         return "|".join(parts)
@@ -152,6 +157,8 @@ class CellRef:
         out = {"capability_class": self.capability_class, "size": self.size}
         if self.builder or self.model:
             out |= {"builder": self.builder, "model": self.model}
+        if self.provider:
+            out["provider"] = self.provider
         if self.arm:
             out["arm"] = self.arm
         return out
@@ -523,19 +530,19 @@ def _licenses_arm(std: Standard | None, arm: str) -> bool:
 def licensing_rungs(
     capability_class: str,
     size: str,
-    rungs: Iterable[tuple[str, str]],
+    rungs: Iterable[tuple[str, str, str]],
     *,
     arm: str,
     standard_for: StandardFor,
-) -> list[tuple[str, str]]:
-    """The ``(builder, model)`` rungs whose own cell at ``size`` licenses delivery of a
-    build on ``arm`` — the class × size × builder × model × arm projection, never one that
-    pools models or arms."""
-    out: list[tuple[str, str]] = []
-    for builder, model in rungs:
-        std = standard_for(CellRef(capability_class, size, builder, model, arm))
+) -> list[tuple[str, str, str]]:
+    """The ``(builder, model, provider)`` rungs whose own cell at ``size`` licenses delivery
+    of a build on ``arm`` — the class × size × builder × model × provider × arm projection,
+    never one that pools models, providers or arms (P-340)."""
+    out: list[tuple[str, str, str]] = []
+    for builder, model, provider in rungs:
+        std = standard_for(CellRef(capability_class, size, builder, model, arm, provider))
         if _licenses_arm(std, arm):
-            out.append((builder, model))
+            out.append((builder, model, provider))
     return out
 
 
@@ -548,13 +555,14 @@ def own_cell_licence(
     model: str,
     arm: str,
     standard_for: StandardFor,
+    provider: str = "",
 ) -> Licence:
     """The delivered change's OWN cell — its class, the size tier of the build's churn, the
-    final rung's builder and model, and the context ``arm`` the build carried — must
-    license delivery (ADR-0025 item 12, ADR-0026 item 6): its standard must be that arm. A
-    change larger than its estimate whose own cell does not license it stops
+    final rung's builder, model and provider (P-340), and the context ``arm`` the build
+    carried — must license delivery (ADR-0025 item 12, ADR-0026 item 6): its standard must be
+    that arm. A change larger than its estimate whose own cell does not license it stops
     ``size_exceeds_licence``; any other unlicensed cell stops ``cell_not_licensed``."""
-    cell = CellRef(capability_class, measured, builder, model, arm)
+    cell = CellRef(capability_class, measured, builder, model, arm, provider)
     std = standard_for(cell)
     if _licenses_arm(std, arm):
         return Licence("", "", cell, std, estimate, measured)

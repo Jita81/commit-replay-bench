@@ -1803,8 +1803,18 @@ class FirstAttempt:
 
     @property
     def routes(self) -> bool:
-        """Counts toward the bar: gold-checked and graded with belt 5 not switched off."""
-        return self.gold_checked and not self.lint_disabled
+        """Counts toward the bar: gold-checked, and not an attempt belt 5 could have changed
+        while it was switched off (:func:`lint_could_change`) — a lint-disabled MISS still
+        counts, so switching belt 5 off never helps a cell (ADR-0025 item 5, P-342)."""
+        return self.gold_checked and not lint_could_change(self.row)
+
+
+def lint_could_change(row: GradeRow) -> bool:
+    """Whether belt 5, switched off by configuration for ``row``, could have changed its
+    outcome: only an attempt that passed every other belt (clean with belt 5 off, not
+    disqualified) — a red target or a disqualified build fails whatever the linter says. The
+    one rule a reading's count and a cell's first attempts apply (P-342)."""
+    return row.lint_reason == LINT_DISABLED_BY_CONFIG and bool(row.clean) and not row.disqualified
 
 
 def change_of(row: GradeRow) -> str:

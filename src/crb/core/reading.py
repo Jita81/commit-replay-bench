@@ -83,7 +83,13 @@ from typing import TYPE_CHECKING, Any
 
 from crb.core.context_arm import BASE_S2, parse_arm
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
-from crb.core.ledger import CELL_FIELDS, FAILURE_HARNESS, FAILURE_OUTAGE, LABEL_HELD_OUT
+from crb.core.ledger import (
+    CELL_FIELDS,
+    FAILURE_HARNESS,
+    FAILURE_OUTAGE,
+    LABEL_HELD_OUT,
+    lint_could_change,
+)
 from crb.core.stats import Interval, wilson_interval
 
 if TYPE_CHECKING:
@@ -794,7 +800,10 @@ def arm_reading(
             observed = r
             break
         if observed is not None:
-            if observed.lint_reason == "disabled_by_config":
+            # belt 5 off lets an attempt leave only when belt 5 could have changed it: one
+            # that passed every other belt. A miss (a red target, a disqualified build) is
+            # the miss it is — erasing it would let switching the linter off help (P-342)
+            if lint_could_change(observed):
                 out.append(
                     CommitReading(commit, change, None, LEFT_LINT_DISABLED, observed.row_hash)
                 )

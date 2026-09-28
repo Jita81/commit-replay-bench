@@ -69,6 +69,14 @@ BASE_S2 = "S2"
 BASE_S3 = "S3"
 BASES: tuple[str, ...] = (BASE_A0, BASE_S1, BASE_S2, BASE_S3)
 
+#: The mode a REPLAY writes each arm's rows in: ``A0`` (the ticket only) and ``S1`` (a test
+#: another model wrote, graded on the commit's held-out tests) blind, ``S3`` (the commit's own
+#: tests) sighted. The one statement of it: :func:`context_arm_for` derives ``A0``/``S3`` from
+#: the mode, the worker's replay ``S1`` arm refuses any other, and the test fixtures stamp
+#: their rows from it, so no reader is tested on a row shape the writer never produces
+#: (P-338).
+REPLAY_MODE: dict[str, str] = {BASE_A0: "blind", BASE_S1: "blind", BASE_S3: "sighted"}
+
 MOD_FACTS = "+facts@"
 MOD_LIBRARY = "+library@"
 MOD_LOOP = "+L"
@@ -198,6 +206,22 @@ def parse_arm(arm: str) -> ContextArm:
     )
 
 
+def mode_admits(row_mode: str, row_arm: str, mode: str) -> bool:
+    """Whether a reader asking for ``mode`` (``sighted``, ``blind`` or ``all``) keeps a row
+    written in ``row_mode`` on ``row_arm`` — THE rule every map, route and sign-off reader
+    applies (P-338). ``mode`` splits the descriptive and ceiling arms and the rows from
+    before 2.4 that carry no arm; a CERTIFYING arm (``S1@<author>``, ``S2``) is kept whatever
+    the mode, because a reading proves it on the mode its writer runs it in (the replay
+    ``S1`` arm is blind, :data:`REPLAY_MODE`) and a map reads one arm per cell — dropping it
+    by mode left the standard a reading proved unrouted and unsignable."""
+    if mode in ("all", row_mode):
+        return True
+    try:
+        return bool(row_arm) and parse_arm(row_arm).certifies
+    except ValueError:
+        return False
+
+
 def is_arm(arm: str) -> bool:
     """``True`` for a string inside the grammar."""
     return bool(_ARM_RE.match((arm or "").strip()))
@@ -243,9 +267,9 @@ def context_arm_for(
         raise ValueError(f"test_source {test_source!r} is not {TEST_AUTHORED!r} or {TEST_PERSON!r}")
     elif process_step == "factory":
         raise ValueError("a factory build's arm names whose failing test it was given")
-    elif mode == "blind":
+    elif mode == REPLAY_MODE[BASE_A0]:
         base = ContextArm(BASE_A0)
-    elif mode == "sighted":
+    elif mode == REPLAY_MODE[BASE_S3]:
         base = ContextArm(BASE_S3)
     else:
         raise ValueError(f"mode {mode!r} is neither 'sighted' nor 'blind'")
@@ -285,6 +309,7 @@ __all__ = [
     "BASE_S3",
     "LABEL_CONTEXT_ARM",
     "PROVENANCE_LABELS",
+    "REPLAY_MODE",
     "TEST_AUTHORED",
     "TEST_PERSON",
     "ContextArm",
@@ -293,6 +318,7 @@ __all__ = [
     "context_arm_for",
     "is_arm",
     "loop_on",
+    "mode_admits",
     "parse_arm",
     "rows_for_context_arm",
 ]

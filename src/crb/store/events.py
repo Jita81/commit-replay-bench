@@ -631,7 +631,10 @@ class EventChainVerifier:
         row = s.get(Event, w.last_id, populate_existing=True)
         if row is None or row.row_hash != w.head:
             return False
-        if event_row_hash(_stored_values(row), row.prev_hash) != w.head:
+        try:
+            if event_row_hash(_stored_values(row), row.prev_hash) != w.head:
+                return False
+        except (TypeError, ValueError):  # an unreadable row: the full walk names it (P-344)
             return False
         n = s.execute(select(func.count(Event.id)).where(Event.id <= w.last_id)).scalar_one()
         return int(n) == w.rows

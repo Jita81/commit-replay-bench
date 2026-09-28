@@ -533,6 +533,30 @@ def test_a_probe_waiver_is_an_approvers_act_bound_to_the_red_proofs_bytes(env: E
     )
 
 
+def test_the_approver_who_queued_a_factory_run_cannot_waive_its_strength_probe(
+    env: Env,
+) -> None:
+    """P-339 (GOV-4 applied to the waiver): the probe waiver lifts a REQUIRED gate, so it is a
+    second person's act, as the route-gate override and the sign-off are. An approver with a
+    factory run on the repository still queued or running is refused 409 ``same_actor``;
+    another approver may waive it."""
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    home.evidence(actor="worker").record_red_proof({"item_id": "I-1", "test_sha256": "a" * 64})
+    login(env.client, "approver")
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
+    r = env.post("/runs", json={**body, "deliver": True})
+    assert r.status_code == 201, r.text
+    url = f"/factory/{ALPHA}/items/I-1/probe-waiver"
+    waiver = {"reason": "a constant table", "test_sha256": "a" * 64}
+    r = env.post(url, json=waiver)
+    assert r.status_code == 409 and envelope(r)["code"] == "same_actor", r.text
+    assert not home.evidence().events_for("I-1", EV_PROBE_WAIVED)
+    login(env.client, "admin")  # an admin holds the approver role and queued nothing
+    r = env.post(url, json=waiver)
+    assert r.status_code == 201, r.text
+
+
 def test_a_calibration_build_is_an_approvers_evented_act_for_an_entry_stop_only(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:

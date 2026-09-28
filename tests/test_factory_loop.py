@@ -427,7 +427,7 @@ def test_no_oracle_when_no_test_and_no_author(pyrepo: pr.PyRepo, tmp_path: Path)
     rig = _rig(pyrepo, tmp_path, test_author=None)
     # an S1 cell (the rig's standard for S): the arm's oracle is the test author's, and
     # there is none
-    out = rig.loop().run_item(multiply_item(size_estimate="S"))
+    out = rig.loop().run_item(multiply_item(size_estimate="S"), authored=authored_multiply())
     assert out.status == fl.STATUS_NO_ORACLE
     assert rig.evidence.events_for("I-1", fe.EV_RED_REFUSED)
 
@@ -765,6 +765,58 @@ def test_a_change_larger_than_its_licence_is_withheld_size_exceeds_licence(
     )
     out2 = rig2.loop().run_item(multiply_item(), authored=oracle)
     assert out2.delivery is None and not rig2.prs
+
+
+def test_a_change_smaller_than_its_estimate_is_licensed_by_its_own_measured_cell(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-335: the route gate re-read the measured cell only when the change measured LARGER
+    than its estimate, so a change estimated S that measured XS was delivered on the S
+    cell's route although the XS cell — the change's own — routed ``human`` (a weak oracle
+    there). ``manufacture-and-deliver.truth.16`` and ADR-0025 item 12 name the measured
+    cell's route whatever the direction: a smaller change whose cell does not route
+    ``deliver`` is withheld with both sizes and the measured cell's own reason."""
+    reads: list[str] = []
+
+    def route_for(item: BacklogItem) -> dict[str, Any] | None:
+        reads.append(item.size_estimate)
+        return DELIVER_ROUTE if item.size_estimate == "S" else HUMAN_ROUTE
+
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        readers=S2_EVERYWHERE,
+        route_decision_for=route_for,
+    )
+    out = rig.loop().run_item(multiply_item(size_estimate="S"), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED, (out.status, out.error)
+    measured = [r for r in rig.ledger.rows() if r.clean][-1].size
+    assert measured == "XS"  # the change that would be delivered is smaller
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is None
+    assert not rig.pushes and not rig.prs
+    assert reads == ["S", "XS"]  # the declared cell at readiness, the measured one after
+    (refused,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    ev = refused.payload
+    assert ev["reason_code"] == "oracle_weak" and ev["measured_route"] == "human"
+    assert ev["size_estimate"] == "S" and ev["size_measured"] == "XS"
+    # the same change in a measured cell that routes deliver is delivered
+    rig2 = _rig(
+        pyrepo,
+        tmp_path / "b",
+        deliver=True,
+        creds=_creds(),
+        readers=S2_EVERYWHERE,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+    )
+    assert (
+        rig2.loop()
+        .run_item(multiply_item(size_estimate="S"), authored=authored_multiply())
+        .delivery
+        is not None
+    )
+    assert len(rig2.prs) == 1
 
 
 def test_a_larger_change_is_delivered_when_its_measured_cell_routes_deliver(

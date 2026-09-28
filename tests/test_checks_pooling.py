@@ -50,6 +50,7 @@ from sqlalchemy import select
 
 from crb.core import capability as cap
 from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, RepoChecks, arm_of, resolve
+from crb.core.context_arm import mode_admits
 from crb.core.federated import export_abstract
 from crb.core.ledger import (
     GENESIS_HASH,
@@ -310,17 +311,22 @@ def test_the_scorecards_headline_reads_one_arm() -> None:
 
 
 def _append_api_rows(
-    env: Env, n: int, *, mode: str = "sighted", cell: tuple[str, str] = ("bug.fix", "S")
+    env: Env, n: int, *, mode: str | None = None, cell: tuple[str, str] = ("bug.fix", "S")
 ) -> list[GradeRow]:
     """Append ``n`` belt-6 rows (the adapter's stamp) cloned from the newest clean row of
-    ``cell`` — sighted, current apparatus, the posture and arm the cell is read in (a proven
-    cell's sealed rows once ``clear_policy`` ran) — through the write path."""
+    ``cell`` the map reads — current apparatus, the posture and arm the cell is read in (a
+    proven cell's sealed rows once ``clear_policy`` ran; its standard ``S1`` arm is written
+    blind, P-338) — through the write path, in the template's own mode unless ``mode``
+    names another."""
     ledger = DbLedger(env.factory)
     template = next(
         r
         for r in reversed(list(ledger.rows(repo=ALPHA)))
-        if r.clean and (r.capability_class, r.size) == cell and r.mode == "sighted"
+        if r.clean
+        and (r.capability_class, r.size) == cell
+        and mode_admits(r.mode, r.context_arm, "sighted")
     )
+    mode = mode or template.mode
     out = []
     for i in range(n):
         d = template.to_dict()

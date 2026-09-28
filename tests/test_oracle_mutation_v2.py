@@ -240,3 +240,24 @@ def test_a_stamp_whose_rule_is_not_its_apparatus_rule_is_refused(apparatus: str,
         ms.MutationProvenance(apparatus_version=apparatus, mutation_version=rule)
     ok = ms.MutationProvenance(apparatus_version=apparatus)
     assert ok.mutation_version == ms.mutation_version(apparatus)
+
+
+def test_a_change_with_more_files_than_the_cap_samples_every_file() -> None:
+    """P-343: files were taken in path order up to ``max_mutants``, so a change with more
+    files holding a candidate than the cap never mutated the files that sort after the cap —
+    always the same alphabetically-late ones — against ADR-0025 item 7's "reaches every
+    file". The plan rises to one mutant per such file; below the cap it is unchanged."""
+    from crb.core.oracle.mutant import Mutant
+
+    def cands(path: str) -> list[Mutant]:
+        return [
+            Mutant(f"m{k}", "cmp_flip", k + 1, 0, f"flip {k}", f"# {path} {k}", path)
+            for k in range(3)
+        ]
+
+    many = {f"src/m{i:02d}.py": cands(f"src/m{i:02d}.py") for i in range(25)}
+    sample = ms.sample_mutants("a" * 40, many, ms.DEFAULT_MAX_MUTANTS)
+    assert {m.path for m in sample} == set(many) and len(sample) == 25
+    few = {p: many[p] for p in sorted(many)[:10]}  # 10 files, 30 candidates: the cap holds
+    assert len(ms.sample_mutants("a" * 40, few, ms.DEFAULT_MAX_MUTANTS)) == ms.DEFAULT_MAX_MUTANTS
+    assert ms.sample_mutants("a" * 40, many, 0) == []

@@ -358,6 +358,7 @@ export const ACTION_HELP: Record<string, string> = {
   'review.probe': 'The review probed the delivered change.',
   'review.verdict': 'The review’s verdict was recorded; it is advisory to a person, never a route.',
   'review.recorded': 'The review was written to the chain.',
+  'review.waiver_refused': 'A waiver of the strength probe was ignored: it named the person who queued this run, and only a second approver may waive the probe.',
   'rework.start': 'The item went back for another build after a review finding.',
   'rework.refused': 'The reviewer asked for a stronger test and none could be had: no rebuild against the same test; the item goes to a person.',
   'horizon.checkpoint': 'The factory recorded a checkpoint of the whole backlog’s state.',

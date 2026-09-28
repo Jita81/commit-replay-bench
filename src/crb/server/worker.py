@@ -202,6 +202,7 @@ from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
+from crb.core.context_arm import BASE_S1, REPLAY_MODE
 from crb.core.deps import DepsProvider, ProvisionRefused
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import (
@@ -2461,7 +2462,7 @@ class Worker:
         check the factory applies)."""
         if str(ctx.params.get("arm") or "") != ARM_S1:
             return None
-        if mode != "blind":
+        if mode != REPLAY_MODE[BASE_S1]:
             raise ValueError(
                 "arm S1 is graded on the commit's held-out tests: run it as a blind replay"
             )
@@ -2591,8 +2592,8 @@ class Worker:
     def _served_map(
         self, repo: str, *, run_id: str = "", posture_class: str = "", checks_arm: str = ""
     ) -> tuple[CapabilityMap, dict[str, str]]:
-        """The (class × size) map ``GET /capability-map`` serves by default — sighted rows,
-        the current apparatus, the repository's own checks arm (or ``checks_arm``: the arm a
+        """The (class × size) map ``GET /capability-map`` serves by default — sighted rows
+        and every certifying arm's rows (``mode_admits``, P-338), the current apparatus, the repository's own checks arm (or ``checks_arm``: the arm a
         factory run grades on, GOV-3), this deployment's posture class (or
         ``posture_class``), the latest controls verdict, sign-offs overlaid — without the
         rows of ``run_id``; and the scope it was read in (apparatus × posture class × checks

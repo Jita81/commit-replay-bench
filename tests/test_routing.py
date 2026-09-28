@@ -436,3 +436,32 @@ def test_a_decision_cannot_be_built_without_the_upper_end_of_its_interval() -> N
 
 def test_routes_constant_lists_every_route() -> None:
     assert set(rt.ROUTES) == {"deliver", "calibrate", "granularize", "human", "do_not_ship"}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("min_oracle_strength", 0.9),
+        ("min_oracle_share", 0.75),
+        ("min_controls_share", 0.6),
+        ("max_controls_escapes", 1),
+        ("cell_error_budget", 0.01),
+    ],
+)
+def test_the_published_bar_moves_with_every_threshold_it_names(field: str, value: Any) -> None:
+    """P-347: ``describe()`` typed "at least half", "at least half its controls" and "let no
+    measurement control escape" instead of reading the policy, so a tightened policy kept
+    publishing the old bar and the claims gate, which compares README with ``describe()``,
+    stayed green. Every threshold the sentence names is rendered from its field."""
+    from dataclasses import replace
+
+    from crb.core.routing import DEFAULT_POLICY
+
+    # a looser threshold must carry its own version string (it is not the published bar)
+    extra = {"version": "routing.v2-local"} if field == "max_controls_escapes" else {}
+    moved = replace(DEFAULT_POLICY, **{field: value}, **extra)
+    assert moved.describe() != DEFAULT_POLICY.describe(), field
+    if extra:  # the version string alone must not be what moved
+        assert "let at most 1 measurement control escape" in moved.describe()
+    else:
+        assert f"{value:.0%}" in moved.describe() or f"{value:.2f}" in moved.describe()

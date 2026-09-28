@@ -240,14 +240,54 @@ def lock_findings(lock: dict[str, Any], pyproject: dict[str, Any]) -> list[str]:
     return findings
 
 
+#: The UI gates run in one subshell line of the gates script, exactly this.
+UI_GATES_LINE = (
+    "(cd ui && npm ci --no-audit --no-fund --legacy-peer-deps && npm run typecheck "
+    "&& npx vitest run)"
+)
+#: The one way the gates script may be run: bash with errexit, nounset and pipefail, as a
+#: file (P-346).
+GATES_INVOCATION = (
+    'env "PATH=$PATH" HOME=/root bash -euo pipefail "$RUNNER_TEMP/gates.sh" < /dev/null'
+)
+_HEREDOC = re.compile(r"<<'GATES'\n(.*?)\n\s*GATES\s*(?:\n|$)", re.S)
+
+
+def _gates_script(runs: str) -> list[str]:
+    """The lines of the heredoc that writes ``gates.sh``, stripped."""
+    m = _HEREDOC.search(runs)
+    return [line.strip() for line in m.group(1).splitlines()] if m else []
+
+
 def fresh_clone_findings(ci_text: str) -> list[str]:
-    """Each condition of product.evidence.205 the ``fresh-clone`` job no longer holds."""
+    """Each condition of product.evidence.205 the ``fresh-clone`` job no longer holds.
+
+    The job is parsed, not searched (P-346): a gate counts only as an exact line of the
+    gates script (so ``|| true``, ``--co``, ``-k`` or ``--deselect`` on it is a finding), the
+    script runs only as ``bash -euo pipefail`` of the file, and neither the job nor a step
+    carries an ``if:`` or ``continue-on-error`` — a skipped required check does not block a
+    merge."""
     jobs = yaml.safe_load(ci_text)["jobs"]
     job = jobs.get("fresh-clone")
     if job is None:
         return ["ci.yml has no fresh-clone job"]
     runs = "\n".join(str(s.get("run", "")) for s in job.get("steps", []))
-    findings = [f"the fresh-clone job does not run {g!r}" for g in GATES if g not in runs]
+    script = _gates_script(runs)
+    findings: list[str] = []
+    if str(job.get("if", "always()")).strip() not in ("always()", "${{ always() }}"):
+        findings.append(f"the fresh-clone job runs only if {job['if']!r}")
+    if job.get("continue-on-error"):
+        findings.append("the fresh-clone job may fail without failing the check")
+    for step in job.get("steps", []):
+        if "if" in step or step.get("continue-on-error"):
+            findings.append(f"a fresh-clone step can be skipped or ignored: {step.get('name')!r}")
+    for g in GATES:
+        exact = UI_GATES_LINE if g in ("npm run typecheck", "npx vitest run") else g
+        if exact not in script:
+            findings.append(f"the fresh-clone job does not run {g!r} as its own line")
+    lines = [line.strip() for line in runs.splitlines()]
+    if GATES_INVOCATION not in lines:
+        findings.append("the gates script is not run as bash -euo pipefail of the file")
     required = {
         "the daemon is stopped": "sudo systemctl stop docker.socket docker.service",
         "the step fails while a daemon answers": "if docker info >/dev/null 2>&1; then",
@@ -413,6 +453,55 @@ def test_the_lock_check_refuses_a_dependency_added_without_relocking() -> None:
 
 def test_the_fresh_clone_job_runs_every_gate_as_root_without_docker() -> None:
     assert fresh_clone_findings(CI.read_text(encoding="utf-8")) == []
+
+
+def _planted_job(edit: Any) -> str:
+    text = CI.read_text(encoding="utf-8")
+    head, job = text.split("\n  fresh-clone:\n", 1)
+    job, tail = job.split("\n  ui-unit:\n", 1)
+    return f"{head}\n  fresh-clone:\n{edit(job)}\n  ui-unit:\n{tail}"
+
+
+@pytest.mark.parametrize(
+    ("what", "edit"),
+    [
+        ("an if on the job", lambda j: j.replace("    name:", "    if: false\n    name:", 1)),
+        (
+            "a gate that cannot fail",
+            lambda j: j.replace(".venv/bin/mypy\n", ".venv/bin/mypy || true\n", 1),
+        ),
+        (
+            "the suite only collected",
+            lambda j: j.replace(
+                "pytest -q -p no:cacheprovider", "pytest --co -q -p no:cacheprovider"
+            ),
+        ),
+        (
+            "a deselected suite",
+            lambda j: j.replace('-m "not sandbox_images"', '-m "not sandbox_images" -k store'),
+        ),
+        (
+            "the script never run",
+            lambda j: j.replace(
+                'bash -euo pipefail "$RUNNER_TEMP/gates.sh"', 'bash -c true "$RUNNER_TEMP/gates.sh"'
+            ),
+        ),
+        (
+            "a step that may fail",
+            lambda j: j.replace(
+                "      - name: Every gate on a fresh clone",
+                "      - continue-on-error: true\n        name: Every gate on a fresh clone",
+            ),
+        ),
+    ],
+)
+def test_the_fresh_clone_check_refuses_a_neutered_job(what: str, edit: Any) -> None:
+    """P-346: the check matched substrings, so a job with ``if: false``, a gate run as
+    ``… || true``, the suite collected but not run, or the gates script never executed all
+    passed it. Each shape is a finding."""
+    planted = _planted_job(edit)
+    assert planted != CI.read_text(encoding="utf-8"), what
+    assert fresh_clone_findings(planted) != [], what
 
 
 @pytest.mark.parametrize("dropped", [*GATES, "sudo systemctl stop docker.socket docker.service"])

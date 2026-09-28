@@ -115,6 +115,29 @@ def test_a_probe_waiver_bound_to_the_tests_bytes_is_the_only_way_past(
     assert not mut.required and any(f.kind == rv.FINDING_PROBE_WAIVED for f in mut.findings)
 
 
+def test_the_runs_own_actor_never_waives_its_strength_probe(
+    pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-339: a waiver on the chain whose approver is the run's own actor is not a waiver —
+    one person would take an unscoreable oracle to a pull request (GOV-4's two-person rule,
+    as the route-gate override and the sign-off apply it). The loop records the refusal and
+    stops ``oracle_not_scoreable``; the same waiver from another approver lets it through."""
+    monkeypatch.setattr(rv, "score_task", _unscoreable)
+    authored = authored_multiply()
+    rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds(), actor="approver:ada")
+    rig.evidence.record_probe_waiver(
+        "I-1", approver="approver:ada", reason="mine to waive", test_sha256=authored.sha256
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored)
+    assert out.status == fl.STATUS_ORACLE_NOT_SCOREABLE and not rig.prs and not rig.pushes
+    refused = rig.evidence.events_for("I-1", fe.EV_ROUTE)
+    assert any(e.payload.get("waiver_refused") == "same_actor" for e in refused)
+    rig.evidence.record_probe_waiver(
+        "I-1", approver="approver:bea", reason="a constant table", test_sha256=authored.sha256
+    )
+    assert rig.loop().run_item(multiply_item(), authored=authored).delivery is not None
+
+
 def test_a_weak_oracle_is_a_major_finding_never_a_required_failure(
     pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -191,27 +191,42 @@ def test_the_s1_author_is_never_a_build_rungs_model(pyrepo: pr.PyRepo) -> None:
     assert _worker()._s1_arm(_ctx(pyrepo, sink), ladder, "blind") is None
 
 
+class _SdkStatusError(Exception):
+    """The shape of the OpenAI SDK's status errors that the production path reads — the
+    class name, ``status_code`` and ``response`` (``openai_client._status_of``) — built here
+    so the test needs no optional extra: CI installs only ``server``, ``postgres``, ``mcp``
+    and ``dev`` from the lock (P-330)."""
+
+    def __init__(self, message: str, *, response: Any) -> None:
+        super().__init__(message)
+        self.response = response
+        self.status_code = response.status_code
+
+
+#: The SDK's class for each status, by the name the row's error text carries.
+_SDK_CLASS = {
+    400: "BadRequestError",
+    401: "AuthenticationError",
+    402: "APIStatusError",
+    429: "RateLimitError",
+    503: "InternalServerError",
+}
+
+
 def _provider_refusal(status: int) -> Any:
     """An author whose provider answers ``status``, raised exactly as the real author's chat
     raises it: through :func:`crb.builders.openai_client.with_retries` (``OpenAIChat``'s
     path), so the row carries the production text, never a hand-typed one."""
     import httpx
-    import openai
 
     from crb.builders.openai_client import with_retries
 
     request = httpx.Request("POST", "https://provider.invalid/v1/chat/completions")
     response = httpx.Response(status, request=request, json={"error": {"message": "no"}})
-    kinds = {
-        400: openai.BadRequestError,
-        401: openai.AuthenticationError,
-        402: openai.APIStatusError,
-        429: openai.RateLimitError,
-        503: openai.InternalServerError,
-    }
+    kind = type(_SDK_CLASS[status], (_SdkStatusError,), {})
 
     def call() -> Any:
-        raise kinds[status](f"Error code: {status} - refused", response=response, body=None)
+        raise kind(f"Error code: {status} - refused", response=response)
 
     def author(ws: Any, subject: str, message: str) -> tuple[str, str]:
         return with_retries(call, max_retries=1, sleep=lambda s: None)  # type: ignore[no-any-return]
@@ -314,3 +329,36 @@ def test_an_s1_run_whose_test_author_has_no_credential_is_refused_at_submit(
             "/runs", json={k: v for k, v in body.items() if k not in ("arm", "test_author")}
         )
         assert r.status_code == 201, r.text
+
+
+def test_the_fixtures_write_each_arm_in_the_mode_its_writer_writes_it(
+    pyrepo: pr.PyRepo,
+) -> None:
+    """P-338: the reading fixtures stamped ``S1`` rows ``sighted``, a shape no writer
+    produces — the replay ``S1`` arm runs blind — so the route map and the sign-off, which
+    read sighted rows only, passed on the fixture and could never see a real ``S1`` row.
+    ``REPLAY_MODE`` is the one table: the arm derivation and the worker's ``S1`` refusal
+    agree with it, and the fixtures stamp from it."""
+    from crb.core.context_arm import BASE_A0, BASE_S1, BASE_S3, REPLAY_MODE, context_arm_for
+    from crb.observability.events import MemorySink
+    from fixtures.readings import sealed_row
+    from test_worker_test_author import _ctx, _worker
+
+    assert context_arm_for(process_step="replay", mode=REPLAY_MODE[BASE_A0]) == BASE_A0
+    assert context_arm_for(process_step="replay", mode=REPLAY_MODE[BASE_S3]) == BASE_S3
+    ladder = EscalationLadder((Rung("editblock", "gpt-oss-120b"),))
+    other = _ctx(pyrepo, MemorySink(), arm="S1", test_author="editblock:qwen-3-coder")
+    wrong = "sighted" if REPLAY_MODE[BASE_S1] == "blind" else "blind"
+    with pytest.raises(ValueError, match="blind replay"):
+        _worker()._s1_arm(other, ladder, wrong)
+    assert _worker()._s1_arm(other, ladder, REPLAY_MODE[BASE_S1]) is not None
+    for arm in ("A0", "S1@t1", "S3"):
+        base = arm.split("@")[0]
+        assert sealed_row("c" * 40, arm=arm).mode == REPLAY_MODE[base], arm
+    # the one mode rule every map, route and sign-off reader applies: a certifying arm is
+    # kept whatever the mode; the descriptive and ceiling arms stay split by it
+    from crb.core.context_arm import mode_admits
+
+    assert mode_admits("blind", "S1@t1", "sighted") and mode_admits("sighted", "S2", "blind")
+    assert not mode_admits("blind", "A0", "sighted") and not mode_admits("sighted", "S3", "blind")
+    assert not mode_admits("blind", "", "sighted") and mode_admits("blind", "A0", "all")

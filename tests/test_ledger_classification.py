@@ -284,3 +284,40 @@ def test_a_2_4_factory_row_without_its_kind_is_refused() -> None:
     made = _factory(_result(clean=False, belts=g.Belts(True, False), lint_status="not_reached"), V2)
     with pytest.raises(lg.LedgerIntegrityError, match=lg.LABEL_FAILURE_KIND):
         lg.GradeRow(**_without(made, lg.LABEL_FAILURE_KIND))
+
+
+def test_an_imported_2_4_row_keeps_the_kind_it_was_imported_with(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P-345: an imported row of 2.4 with no pinned kind was re-derived at every read by the
+    LIVE rule, so editing the live outage markers (as the next apparatus may) moved the kind
+    of a 2.4 history row with no change to its hashed body — against ADR-0025's "never
+    re-derive the kind of a row of 2.4 or later". The import pins the kind inside the
+    hashed body by the rule of the row's apparatus, and a later marker edit moves nothing."""
+    from crb.store.ledger import import_stamp
+
+    source = lg.GradeRow.from_dict(
+        {
+            "repo": "r",
+            "task_id": SHA,
+            "clean": False,
+            "tests_unmodified": True,
+            "target_green": None,
+            "no_new_failures": None,
+            "source_changed": None,
+            "apparatus_version": V2,
+            "error": "model_error: gateway 504 from upstream",
+            "provenance": "imported:ledger",
+            "labels": {"imported": "true"},
+        }
+    )
+    assert lg.LABEL_FAILURE_KIND not in source.labels
+    stamped = lg.GradeRow.from_dict(import_stamp(source, imported_by="admin", imported_at="t"))
+    assert stamped.labels[lg.LABEL_FAILURE_KIND] == stamped.failure_kind == lg.FAILURE_HARNESS
+    monkeypatch.setattr(lg, "OUTAGE_ERROR_MARKERS", (*lg.OUTAGE_ERROR_MARKERS, "504"))
+    assert source.failure_kind == lg.FAILURE_OUTAGE  # the unpinned row would have moved
+    assert stamped.failure_kind == lg.FAILURE_HARNESS
+    old = lg.GradeRow.from_dict({**source.to_dict(), "apparatus_version": "2.3", "labels": {}})
+    assert (
+        lg.LABEL_FAILURE_KIND not in import_stamp(old, imported_by="a", imported_at="t")["labels"]
+    )  # below 2.4 the frozen rule reads it, and the label is 2.4-only

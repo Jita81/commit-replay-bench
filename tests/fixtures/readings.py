@@ -27,7 +27,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from crb.core.capability import ReadingBook
-from crb.core.context_arm import parse_arm
+from crb.core.context_arm import REPLAY_MODE, parse_arm
 from crb.core.ledger import GradeRow
 from crb.core.reading import RULE_LOOK_V1, Reading, register
 from crb.core.routing import ControlsVerdict
@@ -88,7 +88,8 @@ def sealed_row(
         "created": created,
         "trial": trial,
         "error": error,
-        "mode": "blind" if arm.startswith("A0") else "sighted",
+        # the mode a replay writes the arm in — the writer's own table (P-338)
+        "mode": REPLAY_MODE.get(parse_arm(arm).base, "sighted"),
         **(cell or CELL),
         **kw,
     }

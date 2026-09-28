@@ -100,14 +100,30 @@ EVENT_CHAIN_UNHASHED: tuple[str, ...] = ()
 _INT_FIELDS = frozenset({"seq", "duration_ms"})
 
 
+class UnreadableEvent(ValueError):
+    """A stored value is not of its column's type — an edit made underneath the triggers
+    (P-344). The walk reports the row by id; it never raises."""
+
+
 def _normal(key: str, value: Any) -> Any:
+    """A stored value as the hash reads it. A value of another type is refused, never
+    coerced: ``int()`` would truncate a fractional ``seq`` back to the hashed value on SQLite,
+    and ``dict()`` of a JSON array or string raises (P-344)."""
     if value is None:
         return None
     if key in _INT_FIELDS:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise UnreadableEvent(f"{key} is {type(value).__name__}, not an integer")
+        if isinstance(value, float) and not value.is_integer():
+            raise UnreadableEvent(f"{key} is {value!r}, not an integer")
         return int(value)
     if key == "cost_usd":
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise UnreadableEvent(f"cost_usd is {type(value).__name__}, not a number")
         return float(value)
     if key == "payload":
+        if not isinstance(value, Mapping):
+            raise UnreadableEvent(f"payload is {type(value).__name__}, not an object")
         return json.loads(json.dumps(dict(value)))
     return str(value)
 
@@ -185,9 +201,16 @@ def walk_event_chain(
                 detail = (
                     f"event id {rid}: prev_hash mismatch (a row before it was removed or moved)"
                 )
-            elif stored_hash != event_row_hash(row, stored_prev):
-                broken_at = rid
-                detail = f"event id {rid}: row_hash mismatch (the row was edited)"
+            else:
+                try:
+                    recomputed = event_row_hash(row, stored_prev)
+                except (UnreadableEvent, TypeError, ValueError) as exc:
+                    broken_at = rid
+                    detail = f"event id {rid}: row unreadable (edited): {exc}"
+                else:
+                    if stored_hash != recomputed:
+                        broken_at = rid
+                        detail = f"event id {rid}: row_hash mismatch (the row was edited)"
         prev = stored_hash
         head = stored_hash
     if broken_at is None:
@@ -209,6 +232,7 @@ __all__ = [
     "EVENT_CHAIN_UNHASHED",
     "GENESIS_HASH",
     "EventChainReport",
+    "UnreadableEvent",
     "event_body",
     "event_row_hash",
     "walk_event_chain",

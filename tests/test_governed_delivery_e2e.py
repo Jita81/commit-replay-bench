@@ -513,3 +513,100 @@ def test_a_calibration_build_is_built_and_never_delivers(
     assert not forge.pushes and not forge.prs
     refused = spec.evidence.events_for("E-1", fe.EV_DELIVERY_REFUSED)
     assert refused and refused[-1].payload["reason_code"] == "calibration_build"
+
+
+# --- the sign-off chain the gate reads is the whole chain --------------------------------
+
+
+def _revoke(env: Env, signoff_id: str, note: str) -> None:
+    login(env.client, "approver")
+    r = env.post(f"/signoffs/{signoff_id}/revoke", json={"note": note})
+    assert r.status_code == 200, r.text
+
+
+def _delete_signoff(env: Env, signoff_id: str) -> None:
+    """What EI-6's threat model allows: DDL rights on the store — drop the trigger that
+    keeps the sign-off chain append-only and delete a row."""
+    from sqlalchemy import text
+
+    with env.factory() as s:
+        s.execute(text("DROP TRIGGER signoffs_no_delete"))
+        s.execute(text("DELETE FROM signoffs WHERE signoff_id = :i"), {"i": signoff_id})
+        s.commit()
+
+
+def _signoff_ids(env: Env) -> list[tuple[str, bool]]:
+    from sqlalchemy import select
+
+    from crb.store.models import Signoff
+
+    with env.factory() as s:
+        return [
+            (str(r.signoff_id), bool(r.revoke))
+            for r in s.execute(select(Signoff).order_by(Signoff.seq)).scalars()
+        ]
+
+
+def test_a_revocation_deleted_from_the_middle_of_the_chain_revives_nothing(
+    env: Env, pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-336: the gate's store-bound reader dropped tampered rows one at a time and never
+    walked the chain, so deleting the XS cell's revocation from the middle of the chain
+    brought its attestation back for the delivery gate alone, while ``/ledger/verify`` and
+    every other reader saw the break. The gate reads the one sign-off reader
+    (``load_signoff_records``): a broken chain lifts nothing."""
+    rows_xs = _prove(env, CELL_XS, s3=[True] * FIRST_LOOK, s1=[True] * FIRST_LOOK, prefix="xs")
+    rows_s = _prove(env, CELL_S, s3=[True] * FIRST_LOOK, s1=[True] * FIRST_LOOK, prefix="s")
+    xs = _sign(env, CELL_XS, rows_xs)
+    s_cell = _sign(env, CELL_S, rows_s)
+    _revoke(env, xs["id"], "re-examined")
+    xs_revocation = _signoff_ids(env)[-1][0]
+    _revoke(env, s_cell["id"], "re-examined")
+    _sign(env, CELL_S, rows_s)  # the XS revocation now sits in the middle of the chain
+    before = _readers(env).standard_for(CellRef("bug.fix", "XS"))
+    assert before is not None and before.signed is False
+    _delete_signoff(env, xs_revocation)
+    login(env.client, "viewer")
+    assert env.get("/ledger/verify").json()["signoffs"]["chain_ok"] is False
+    std = _readers(env).standard_for(CellRef("bug.fix", "XS"))
+    assert std is not None and std.signed is False
+    _refused(env, pyrepo, tmp_path, fl.STATUS_UNSIGNED_CELL)
+
+
+def test_the_latest_sign_off_row_deleted_is_seen_through_its_event(
+    env: Env, pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-337: the sign-off chain had no anchor for its head, so deleting its LAST row (a
+    revocation) left a shorter chain that still linked from genesis: ``/ledger/verify``
+    reported it intact and the revoked attestation came back for every reader. Every
+    sign-off and revocation event carries its row's hash on the hash-chained audit trail
+    (ADR-0029), so a row an event names and the chain lacks breaks the chain."""
+    xs, _s = _proven_and_signed(env)
+    _revoke(env, xs["id"], "re-examined")
+    last, revoke = _signoff_ids(env)[-1]
+    assert revoke
+    _delete_signoff(env, last)
+    login(env.client, "viewer")
+    verify = env.get("/ledger/verify").json()
+    assert verify["signoffs"]["chain_ok"] is False and verify["ok"] is False
+    assert "missing" in verify["signoffs"]["detail"]
+    std = _readers(env).standard_for(CellRef("bug.fix", "XS"))
+    assert std is not None and std.signed is False
+    _refused(env, pyrepo, tmp_path, fl.STATUS_UNSIGNED_CELL)
+
+
+def test_a_build_through_a_provider_no_row_measured_is_not_licensed(
+    env: Env, pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-340: the licence keyed on builder and model only, so the same model name served
+    by a provider no row ever measured was licensed by another provider's reading and
+    delivered. The provider is one of the cell's seven fields and the licence reads it: a
+    ladder whose rung names another provider holds no licence, and nothing is built."""
+    _proven_and_signed(env)
+    _refused(
+        env,
+        pyrepo,
+        tmp_path,
+        fl.STATUS_NOT_LICENSED,
+        ladder=(Rung(BUILDER, MODEL, "never-measured"),),
+    )
