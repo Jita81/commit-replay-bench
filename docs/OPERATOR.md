@@ -1041,7 +1041,8 @@ the checks on each request apply, so use `crb serve` for a stack with automatic 
 `GET /version` report `dev_autologin` — `on` only to a browser on this computer that it would
 sign in; anyone else sees `off`, as on a stack without it. Every automatic sign-in logs one warning line and
 writes an `auth.dev_autologin` event on the account's trace, with the account as the actor
-and the client address. To switch it off, remove the variable and restart. The design and its
+and the client address, and the `user.signed_in` event every sign-in writes (ADR-0028 §8,
+`by` = `dev_autologin`). To switch it off, remove the variable and restart. The design and its
 limits are in [ADR-0027](adr/0027-dev-autologin-on-loopback.md) and
 [SECURITY.md §3.8](SECURITY.md#38-automatic-sign-in-on-a-development-stack).
 

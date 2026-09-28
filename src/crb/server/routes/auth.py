@@ -244,7 +244,8 @@ def dev_autologin(
     everywhere" and a password change end it exactly as they do a typed password's session.
     It checks no password, so the login limiter is neither consulted nor reset — not the
     address's bucket, and not the account's own, which a password success clears. Every sign-in
-    appends ``auth.dev_autologin`` on the account's trace and logs one warning line."""
+    appends ``auth.dev_autologin`` on the account's trace and the ``user.signed_in`` event every
+    sign-in writes (ADR-0028 §8, ``by`` = ``dev_autologin``), and logs one warning line."""
     username = settings.auth.dev_autologin
     if not username:
         raise ApiError(404, *_AUTOLOGIN_OFF)
