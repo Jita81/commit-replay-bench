@@ -100,8 +100,19 @@ that programme, none yet measured under apparatus 2.2]**.
    under, the same resolution the worker applies (`crb.server.prevention_state.
    current_checks_arm`). That covers the capability map and `/routes` (where `?checks=<arm>`
    selects another arm), the delivery gate and the Factory page's cell routes, the Learn
-   plans, the forecast and the review cells. The worker's calibrated budget and escalation
-   yield read the run's own arm. The CLI (`crb route`, `crb learn strengthen|remeasure`)
+   plans, the forecast and the review cells. **The factory path is graded on the arm that
+   licenses it** (amended 2026-09-27, governance review GOV-3; DL-084): the worker resolves a
+   factory run's switches exactly as a replay's (`params.checks` over the learning overlay of
+   the repository's block), every build runs the format step when it is on and belt 6 in
+   forward mode when it is on (the task commit carries only the oracle, so there is no gold
+   to mirror: a public symbol the change adds is the feature asked for, a change or removal
+   of an existing one is a finding — `crb.core.api_surface.evaluate(forward=True)`), the
+   factory row carries the `checks` stamp, and the route gate reads the map on that same arm
+   (`Worker._route_lookup(checks_arm=)`), so a factory row's arm is the arm its delivery was
+   licensed on. The finish gate runs in the replay adapter only; a factory row with it
+   switched on says `finish_gate=skipped=not_on_the_factory_path`, never a silent pass. The
+   worker's calibrated budget and escalation yield read the run's own arm. The CLI
+   (`crb route`, `crb learn strengthen|remeasure`)
    takes `--checks` (default `off`), and `crb ledger stats` prints one cell per key and arm.
    The scorecard keys its cells and its prospective routing by arm, and its headline (the
    north star, the rates, precision, process loss and the per-repository roll-ups) reads one

@@ -540,6 +540,204 @@ def test_route_gate_override_by_an_approver_is_itself_on_the_record(
     assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_DELIVERY)
 
 
+#: A cell the map refuses for the honesty floor: a clean row in it failed a belt (false-Q1).
+FALSE_Q1_ROUTE: dict[str, Any] = {
+    "route": "do_not_ship",
+    "reason": "1 false-Q1 row(s) in cell — evidence untrusted",
+    "reason_code": "false_q1",
+    "policy_version": "routing.v1",
+    "n": 12,
+    "false_q1": 1,
+}
+
+
+def test_no_override_delivers_on_a_false_q1_cell(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    """GOV-1 (governance review 2026-09-27): false-Q1 = 0 is the honesty floor. A sign-off can
+    never lift a false-Q1 cell (``NON_OVERRIDABLE_REFUSALS``), and neither can the route
+    gate's one-run override: the item is built, graded and reviewed, nothing is pushed, and
+    the refusal on the chain names the floor and the approver whose override it refused."""
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        route_decision_for=lambda item: FALSE_Q1_ROUTE,
+        deliver_override_by="approver:ada",
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is None
+    assert not rig.pushes and not rig.prs
+    (refused,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    ev = refused.payload
+    assert ev["override_refused"] == "false_q1" and ev["override_by"] == "approver:ada"
+    assert ev["measured_route"] == "do_not_ship" and ev["reason_code"] == "false_q1"
+    assert "false-Q1" in ev["reason"] and "no override" in ev["reason"]
+    routes = [e.payload for e in rig.evidence.events_for("I-1", fe.EV_ROUTE)]
+    assert not [r for r in routes if r.get("override_by")]  # nothing was overridden
+    # a cell whose summary carries a false-Q1 row is held to the floor whatever its word
+    rig2 = _rig(
+        pyrepo,
+        tmp_path / "b",
+        deliver=True,
+        creds=_creds(),
+        route_decision_for=lambda item: {**HUMAN_ROUTE, "false_q1": 2},
+        deliver_override_by="approver:ada",
+    )
+    out2 = rig2.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out2.delivery is None and not rig2.prs
+    (refused2,) = rig2.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    assert refused2.payload["override_refused"] == "false_q1"
+
+
+def test_the_route_gate_override_is_never_the_runs_own_actor(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """GOV-4: the override licenses a delivery the map refused, so — like a sign-off
+    (ADR-0016) — it is never granted by the actor of the run that produced the evidence. The
+    loop refuses it at the gate and records the refusal; an override read live at the gate
+    (a second approver's act while the run works) is honoured, and read only there."""
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        route_decision_for=lambda item: HUMAN_ROUTE,
+        deliver_override_by="tester",  # the rig's run actor
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out.delivery is None and not rig.prs
+    (refused,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    assert refused.payload["override_refused"] == "same_actor"
+    assert refused.payload["override_by"] == "tester"
+    # the live seam: nobody granted at readiness, a second approver granted before the gate
+    grants: list[str] = []
+    rig2 = _rig(
+        pyrepo,
+        tmp_path / "b",
+        deliver=True,
+        creds=_creds(),
+        route_decision_for=lambda item: HUMAN_ROUTE,
+        deliver_override_for=lambda: grants[-1] if grants else "",
+    )
+    loop2 = rig2.loop()
+    grants.append("approver:grace")
+    out2 = loop2.run_item(multiply_item(), authored=authored_multiply())
+    assert out2.delivery is not None and len(rig2.prs) == 1
+    override = [
+        e.payload
+        for e in rig2.evidence.events_for("I-1", fe.EV_ROUTE)
+        if e.payload.get("override_by")
+    ]
+    assert len(override) == 1 and override[0]["override_by"] == "approver:grace"
+    # the live seam naming the run's actor is refused the same way
+    rig3 = _rig(
+        pyrepo,
+        tmp_path / "c",
+        deliver=True,
+        creds=_creds(),
+        route_decision_for=lambda item: HUMAN_ROUTE,
+        deliver_override_for=lambda: "tester",
+    )
+    out3 = rig3.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert out3.delivery is None and not rig3.prs
+
+
+def _padded(n: int) -> tuple[str, AuthoredTest]:
+    """A multiply edit padded with ``n`` extra functions (so the diff measures larger than
+    XS) and the operator's oracle that exercises every one of them."""
+    extra = "".join(f"\n\ndef pad_{i}(x: int) -> int:\n    return x + {i}\n" for i in range(n))
+    names = ", ".join(f"pad_{i}" for i in range(n))
+    oracle = AuthoredTest(
+        "tests/test_multiply.py",
+        f"from calc import multiply, {names}\n\n\ndef test_multiply():\n"
+        "    assert multiply(3, 4) == 12\n\n\ndef test_pads():\n"
+        + "".join(f"    assert pad_{i}(1) == {1 + i}\n" for i in range(n)),
+        OPERATOR,
+    )
+    return MULTIPLY_DEF + extra, oracle
+
+
+def test_a_change_larger_than_its_licence_is_withheld_size_exceeds_licence(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """GOV-2 (governance review 2026-09-27): the route gate read the cell of the item's
+    DECLARED size (a ticket's story points); the build's row records the MEASURED size of
+    the diff. A cell licensed for XS changes never licenses a larger one: the measured cell
+    is read (from the same pre-run map) and, when it does not route ``deliver``, the item
+    is withheld ``size_exceeds_licence`` with both sizes on the chain."""
+    edit, oracle = _padded(12)
+    reads: list[str] = []
+
+    def route_for(item: BacklogItem) -> dict[str, Any] | None:
+        reads.append(item.size_estimate)
+        return DELIVER_ROUTE if item.size_estimate == "XS" else HUMAN_ROUTE
+
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        route_decision_for=route_for,
+    )
+    item = multiply_item()
+    assert item.size_estimate == "XS"
+    out = rig.loop().run_item(item, authored=oracle)
+    measured = [r for r in rig.ledger.rows() if r.clean][-1].size
+    assert measured not in ("XS", "")  # the change that would be delivered is larger
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is None
+    assert not rig.pushes and not rig.prs
+    assert reads == ["XS", measured]  # the declared cell at readiness, the measured one after
+    (refused,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    ev = refused.payload
+    assert ev["reason_code"] == "size_exceeds_licence"
+    assert ev["size_estimate"] == "XS" and ev["size_measured"] == measured
+    assert ev["measured_route"] == "human"
+    # even an approver's override does not stretch an XS licence over an unmeasured cell's
+    # refusal of the floor — but it may override a measured cell's ordinary refusal
+    rig2 = _rig(
+        pyrepo,
+        tmp_path / "b",
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        route_decision_for=lambda item: (
+            DELIVER_ROUTE if item.size_estimate == "XS" else FALSE_Q1_ROUTE
+        ),
+        deliver_override_by="approver:ada",
+    )
+    out2 = rig2.loop().run_item(multiply_item(), authored=oracle)
+    assert out2.delivery is None and not rig2.prs
+
+
+def test_a_larger_change_is_delivered_when_its_measured_cell_routes_deliver(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """GOV-2: the licence is the measured cell's — when it routes ``deliver`` the pull
+    request opens, its body names both sizes and quotes the measured cell's route."""
+    edit, oracle = _padded(12)
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        route_decision_for=lambda item: {
+            **DELIVER_ROUTE,
+            "n": 30 if item.size_estimate != "XS" else 12,
+        },
+    )
+    out = rig.loop().run_item(multiply_item(), authored=oracle)
+    measured = [r for r in rig.ledger.rows() if r.clean][-1].size
+    assert out.delivery is not None and len(rig.prs) == 1
+    body = rig.prs[0]["body"]
+    assert (
+        f"- size: estimated `XS`, measured `{measured}` — licensed on the (`bug.fix`, "
+        f"`{measured}`) cell" in body
+    )
+    assert "- route: **deliver**" in body
+
+
 def test_route_is_read_once_per_item_at_readiness_before_any_build(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:

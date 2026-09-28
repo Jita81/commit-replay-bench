@@ -112,6 +112,7 @@ OUT_KEYS = {
     "approver_name",
     "verifier_kind",
     "stale",
+    "stale_reason",
     "apparatus_current",
     "checks_arm",
     "checks_arm_current",
@@ -1291,6 +1292,48 @@ class TestListAndRevoke:
         clear_policy(env)
         assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
         assert verify_signoff_rows(_signoffs(env)) == 2
+
+    def test_a_row_with_no_apparatus_stamp_is_served_stale_and_asks_for_a_re_sign(
+        self, env: Env
+    ) -> None:
+        """GOV-6 (governance review 2026-09-27): a stored sign-off whose cell carries no
+        apparatus stamp cannot show it covers the rows read now, so it is served ``stale``
+        with the reason named — the Decisions inbox lists it for re-signing — and it is not
+        ``active``; a freshly written one is stamped, current and active."""
+        from crb.core.evidence import utc_now_iso
+        from crb.server.routes.signoffs import signoff_hash as _hash
+
+        with env.factory() as s:
+            row = Signoff(
+                signoff_id="nostamp0" * 4,
+                repo=ALPHA,
+                cell_json={
+                    **dict.fromkeys(
+                        ("process_step", "language", "builder", "model", "provider"), "*"
+                    ),
+                    "capability_class": "bug.fix",
+                    "size": "S",
+                    "evidence_n": "40",
+                    "evidence_false_q1": "0",
+                },
+                tier="human-verified",
+                verifier="old-approver",
+                note="signed before the apparatus stamp",
+                revoke=False,
+                evidence_rows=40,
+                created=utc_now_iso(),
+                prev_hash=GENESIS_HASH,
+            )
+            row.row_hash = _hash(row)
+            s.add(row)
+            s.commit()
+        item = env.get(f"/signoffs?repo={ALPHA}").json()["items"][0]
+        assert item["stale"] is True and item["active"] is False
+        assert item["stale_reason"] == "no_apparatus_stamp"
+        clear_policy(env)
+        sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
+        fresh = env.get(f"/signoffs/{sid}").json()
+        assert fresh["stale"] is False and fresh["stale_reason"] == "" and fresh["active"] is True
 
     def test_row_signed_under_policy_v1_is_served_as_v1_and_still_verifies(self, env: Env) -> None:
         """A record written under ``signoff-policy.v1`` (its thresholds carry no

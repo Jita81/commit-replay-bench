@@ -208,6 +208,11 @@ _EV_CI_LOW = "evidence_ci_low"
 _EV_CI_HIGH = "evidence_ci_high"
 _EV_FQ1 = "evidence_false_q1"
 _EV_APPARATUS = "evidence_apparatus"
+#: Why a served sign-off is ``stale`` (``SignoffWithPolicyOut.stale_reason``), first match wins.
+STALE_NO_APPARATUS_STAMP = "no_apparatus_stamp"
+STALE_APPARATUS_MOVED = "apparatus_moved"
+STALE_CHECKS_ARM_MOVED = "checks_arm_moved"
+STALE_POSTURE_MOVED = "posture_moved"
 # signoff-policy.v1+ snapshot keys (absent on rows written before the policy).
 _EV_ORACLE = "evidence_oracle_strength"
 _POLICY_VERSION = "policy_version"
@@ -992,8 +997,9 @@ def signoff_out(
         cell_false_q1(session, row.repo, scope_of(row)) if row.repo != WILDCARD else (0, [])
     )
     cj = dict(row.cell_json or {})
-    # stale = stamped on an apparatus that no longer matches the instrument reading now;
-    # a v1 record (no stamp) is not judged here
+    # stale = stamped on an apparatus that no longer matches the instrument reading now — or
+    # carrying no stamp at all (a v1 record): it cannot show it covers the rows read now, so
+    # it is stale on every apparatus and the inbox asks for a re-sign (GOV-6)
     stamped = {v.strip() for v in str(cj.get(_EV_APPARATUS, "") or "").split(",") if v.strip()}
     # … or signed on a checks arm other than the one the repository's cells are read on now
     # (ADR-0024); a record from before the switchboard was signed on ``off``
@@ -1002,12 +1008,18 @@ def signoff_out(
     # … or signed on evidence graded in another posture class than the one the deployment
     # grades the repository in now (ADR-0019 §8)
     signed_posture = str(cj.get(_EV_POSTURE, "") or "")
-    stale = (
-        (bool(stamped) and APPARATUS_VERSION not in stamped)
-        or (bool(arm_now) and signed_arm != arm_now)
-        or (bool(posture_current) and bool(signed_posture) and signed_posture != posture_current)
+    reasons = (
+        (STALE_NO_APPARATUS_STAMP, not stamped),
+        (STALE_APPARATUS_MOVED, bool(stamped) and APPARATUS_VERSION not in stamped),
+        (STALE_CHECKS_ARM_MOVED, bool(arm_now) and signed_arm != arm_now),
+        (
+            STALE_POSTURE_MOVED,
+            bool(posture_current) and bool(signed_posture) and signed_posture != posture_current,
+        ),
     )
     tampered = signoff_tampered(row)
+    stale_reason = next((code for code, holds in reasons if holds), "")
+    stale = bool(stale_reason)
     active = (
         revocation is None
         and not _superseded(row, all_rows)
@@ -1035,6 +1047,7 @@ def signoff_out(
         active=active,
         current_false_q1=current_fq1,
         stale=stale,
+        stale_reason=stale_reason,
         apparatus_current=APPARATUS_VERSION,
         checks_arm=signed_arm,
         checks_arm_current=arm_now,

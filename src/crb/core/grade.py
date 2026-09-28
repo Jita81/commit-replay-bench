@@ -519,6 +519,7 @@ def grade(
     on_event: EventFn | None = None,
     evaluate_lint: bool = True,
     evaluate_api: bool = False,
+    api_forward: bool = False,
 ) -> GradeResult:
     """Grade the trial worktree ``ws`` for ``task``. Never raises for a test failure;
     raises :class:`SandboxUnavailable` (infrastructure) so the run can stop — and
@@ -540,6 +541,10 @@ def grade(
 
     ``evaluate_api=True`` evaluates belt 6 (ADR-0024) once belts 1–4 have been judged;
     OFF by default — the run or the repository's ``checks.api_stable`` switches it on.
+    ``api_forward=True`` is forward mode's belt 6 (the factory: the task commit carries only
+    the oracle, so there is no gold to mirror): a public symbol the change ADDS is the
+    feature the item asked for; a change or removal of an existing one is a finding
+    (:func:`crb.core.api_surface.evaluate`, ADR-0024 §6).
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}")
@@ -922,7 +927,9 @@ def grade(
                 lint_error = f"lint: {lint_run.error}"
             elif lint_run.ok is False and not note:
                 note = f"lint: {lint_run.note}"
-        api_run = _belt_six(ws, task, changed, on_event) if evaluate_api else None
+        api_run = (
+            _belt_six(ws, task, changed, on_event, forward=api_forward) if evaluate_api else None
+        )
         belts = Belts(
             tests_unmodified=True,
             target_green=True,
@@ -972,12 +979,18 @@ def grade(
 
 
 def _belt_six(
-    ws: Workspace, task: TaskSpec, changed: Sequence[str], on_event: EventFn | None
+    ws: Workspace,
+    task: TaskSpec,
+    changed: Sequence[str],
+    on_event: EventFn | None,
+    *,
+    forward: bool = False,
 ) -> ApiRun:
     """Belt 6 over the changed non-test files (deleted ones included — a removed file
     removes its API): the parent and the replayed commit read from the object store, the
-    trial from the worktree (:class:`~crb.core.api_surface.WorkspaceTrees`)."""
-    run = evaluate_api_surface(changed, WorkspaceTrees(ws))
+    trial from the worktree (:class:`~crb.core.api_surface.WorkspaceTrees`); ``forward`` —
+    no gold (the factory), additions allowed."""
+    run = evaluate_api_surface(changed, WorkspaceTrees(ws), forward=forward)
     _emit(
         on_event,
         "grade.belt",

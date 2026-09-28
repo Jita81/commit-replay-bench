@@ -576,7 +576,7 @@ export const HINTS = {
   'stat.factory.deliverable':
     'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; the rest are built and withheld.',
   'field.factory.override':
-    'Let this run open pull requests for items whose cell does not route deliver. The override is recorded on the evidence chain under your name. Approver only.',
+    'The route gate’s override is a second approver’s act: queue the run without it, then another approver grants it on the run’s page. It is recorded under their name and never overrides the honesty floor: a cell with a wrong clean verdict stays withheld.',
   'details.factory.own_builder':
     'Name a registered builder and model for this run instead of the deployment’s default. Blank keeps the builder above.',
   'field.factory.own_builder':
@@ -1053,6 +1053,8 @@ export const HINTS = {
     'The mode, builder, model, provider and ladder this run graded under. A rate quoted without these is not a claim.',
   'link.run.repo':
     'The repository this run worked; opens its overview, tasks and configuration.',
+  'button.run.deliver_override':
+    'Let this factory run open pull requests for items whose cell does not route deliver. A second approver’s act: the person who queued the run cannot grant it. Recorded under your name on the run’s trace; it never overrides the honesty floor: a cell with a wrong clean verdict stays withheld.',
   'button.run.cancel':
     'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
   'chart.run.progress':

@@ -25,8 +25,9 @@ stream once the run is terminal; a client disconnect stops the poll loop.
 
 Navigation
 ----------
-What it is:   The ``/runs`` API — create, list, inspect, cancel a run; its per-task table;
-              its stored and streamed StepEvents.
+What it is:   The ``/runs`` API — create, list, inspect, cancel a run; a second approver's
+              route-gate override on a factory run; its per-task table; its stored and
+              streamed StepEvents.
 What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_config, retain,
               outage_stop, preflight, budget_profile, escalation, checks, learning) into a
               queued ``Run`` row, refusing at submit (422 ``builder_credential_missing``,
@@ -34,6 +35,8 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               ``submit_refusals``, the one gate every route that queues a run calls; serves
               run views with counts re-derived from the ledger when the worker wrote none; streams
               events as SSE with resume-by-seq; cancellation is a flag the worker honours;
+              the route gate's override is refused at enqueue and granted only by an approver
+              who did not queue the run, as an event (GOV-4, ADR-0003 amendment 2026-09-27);
               and owns the out-of-band ``system`` event writers the other routes share
               (``append_system_event``, and ``commit_audited``: an event and its change in
               one commit, the trace's ``seq`` read under the events lock).
@@ -87,7 +90,7 @@ from crb.builders.openai_client import credential_missing as openai_credential_m
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.observability.events import StepEvent, StepStatus
-from crb.server.auth import OperatorDep, ViewerDep, require_role_now
+from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
@@ -765,6 +768,19 @@ def create_run(
     if body.kind != KIND_FACTORY and any(v is not None for v in factory_only.values()):
         named = sorted(k for k, v in factory_only.items() if v is not None)
         raise ApiError(422, "validation_error", f"{named} apply to factory runs only")
+    if body.deliver_override:
+        # GOV-4 (governance review 2026-09-27): the override licenses a delivery the map
+        # refused, so — like a sign-off (ADR-0016) — it is never granted by the person who
+        # queues the run that produces the evidence. It is a second approver's act on the
+        # queued or running run; nothing is queued here.
+        require_role_now(operator, "approver")
+        raise ApiError(
+            409,
+            "same_actor",
+            "the route gate's override is a second approver's act: queue the run without "
+            "it, then another approver grants it with POST /runs/{id}/deliver-override",
+            detail={"grant": "POST /runs/{id}/deliver-override"},
+        )
     api = require_jobs()
     run = new_run(body, actor=operator.id)
     submit_refusals(db, settings, body, run)
@@ -788,15 +804,63 @@ def create_run(
             # G-904 — this run's test-author rung (or ``none``); the worker refuses one
             # that is also a rung on the ladder before anything is built
             params["test_author"] = body.test_author.strip()
-        if body.deliver_override:
-            # the route gate's override is an APPROVER's act, stamped with their identity
-            # (external review 2026-09-16 point 36 → DL-038)
-            require_role_now(operator, "approver")
-            params["deliver_override_by"] = operator.id
         run.params_json = params
     run = api.enqueue(factory, run)
     stored = db.get(Run, run.id)
     return run_out(db, stored if stored is not None else run)
+
+
+@router.post(
+    "/runs/{run_id}/deliver-override",
+    response_model=RunOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR},
+    summary="A second approver overrides a factory run's route gate (GOV-4)",
+)
+def grant_deliver_override(run_id: str, approver: ApproverDep, db: DbDep) -> RunOut:
+    """The route gate's one-run override as a second approver's evented act (GOV-4,
+    ADR-0003 amendment 2026-09-27): on a queued or running factory run that delivers,
+    granted by an approver who is NOT the run's actor, named on the run
+    (``params.deliver_override_by``) and on a ``system/run.deliver_override`` event on the
+    run's trace, in one transaction. The worker reads it live at each item's gate; it never
+    lifts a false-Q1 cell (the honesty floor). 409 ``not_a_factory_run`` /
+    ``run_terminal`` / ``delivery_off`` / ``same_actor`` / ``override_already_granted``."""
+    run = _get_run(db, run_id)
+    params = dict(run.params_json or {})
+    if run.kind != KIND_FACTORY:
+        raise ApiError(409, "not_a_factory_run", "only a factory run has a route gate")
+    if run.status in TERMINAL_STATUSES:
+        raise ApiError(
+            409, "run_terminal", f"run is already {run.status}", detail={"status": run.status}
+        )
+    if not params.get("deliver"):
+        raise ApiError(
+            409, "delivery_off", "this run does not deliver: there is no route gate to override"
+        )
+    if approver.id == run.actor:
+        raise ApiError(
+            409,
+            "same_actor",
+            "you queued this run: its route gate is overridden by a second approver "
+            "(ADR-0016's two-person rule)",
+        )
+    if params.get("deliver_override_by"):
+        raise ApiError(
+            409,
+            "override_already_granted",
+            "the route gate's override is already granted for this run",
+            detail={"deliver_override_by": params["deliver_override_by"]},
+        )
+    run.params_json = {**params, "deliver_override_by": approver.id}
+    append_system_event(
+        db,
+        trace_id=run.id,
+        action="run.deliver_override",
+        repo=run.repo,
+        actor=approver.id,
+        payload={"run_actor": run.actor, "status_at_grant": run.status},
+    )
+    db.commit()
+    return run_out(db, _get_run(db, run_id))
 
 
 @router.get("/runs/{run_id}", response_model=RunOut, responses={401: _ERR, 404: _ERR})
