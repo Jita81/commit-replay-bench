@@ -375,6 +375,7 @@ export const ACTION_HELP: Record<string, string> = {
   'user.role_override_refused': 'The identity provider’s claims would have left no active admin who can sign in by a way this deployment has switched on (a local password, or the identity provider), so the role was kept; fix the claims at the provider or add a second admin who can sign in.',
   'user.sessions_ended': 'The account signed out: every session it held, on every device, ended.',
   'user.login': 'The account signed in, with a local password or through the organisation’s identity provider.',
+  'auth.dev_autologin': 'A development stack signed a browser on its own machine in as this account without a password (automatic sign-in, never in production).',
   'user.login_failed': 'A sign-in was refused: a wrong password, or the account is turned off. Nothing that was typed is recorded.',
   'review.created': 'A human review of an accepted patch was recorded, anchored to the bytes read.',
   'review.refused': 'A review was refused because its patch hash did not match the pack.',
