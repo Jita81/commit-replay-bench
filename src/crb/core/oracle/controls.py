@@ -89,7 +89,10 @@ What it does: Proves the instrument rejects what it must (gold clean, noop red, 
               reported and never hidden, a cheat that cannot honestly be built reads
               ``not_constructible``, a harness error is always a VIOLATION; every catch
               carries a gold witness graded beside it in the same posture, and a catch
-              whose witness is not clean is a VIOLATION (G-952).
+              whose witness is not clean is a VIOLATION (G-952); ``controls_verdict_of`` is
+              the one reduction of a stored report for routing, and a passed report with no
+              witness (before ``controls.v3``) reads as unmeasured there, licensing nothing
+              (P-176).
 How:          Per task: RED check at the parent (else ``skip``) → per control: fresh
               ``Workspace`` + tests overlaid → ``TamperGuard.snapshot`` → the control's edit
               (dispatched on ``RepoConfig.language``; Go/JS compile- or syntax-checked) →
@@ -105,8 +108,11 @@ Works with:   src/crb/core/grade.py (the grader every control goes through),
               text-level transforms this dispatches to), src/crb/core/test_infra.py (belt 1b
               — why an ``env_poison`` row is expected ``caught by belt 1``),
               src/crb/core/runners/base.py (the RED check and the compile probes),
-              src/crb/server/worker.py (the ``controls`` run kind)
-Tested by:    tests/test_oracle_controls.py, tests/test_oracle_controls_go.py,
+              src/crb/server/worker.py (the ``controls`` run kind),
+              src/crb/core/routing.py (``ControlsVerdict``, which ``controls_verdict_of``
+              builds), src/crb/server/routes/oracle.py, src/crb/server/flow.py and
+              src/crb/cli/commands/learn.py (the readers of ``controls_verdict_of``)
+Tested by:    tests/test_oracle_controls.py, tests/test_server_routes_oracle.py, tests/test_oracle_controls_go.py,
               tests/test_oracle_controls_js.py
 Touch when:   never for a new repository (a repo whose regression control reads
               ``not_constructible`` needs a wider ``belt_scope`` in its config, not an edit
@@ -137,6 +143,7 @@ from crb.core.grade import MODE_SIGHTED, GradeContext, GradeResult, grade
 from crb.core.oracle import controls_go, controls_js
 from crb.core.qualify import adhoc_context
 from crb.core.redact import redact_and_cap
+from crb.core.routing import ControlsVerdict
 from crb.core.runners.base import BaseRunner, tail_of
 from crb.core.spec import BELT_AFFECTED_DIRS, BELT_TARGET_ONLY, Language, RepoConfig, TaskSpec
 from crb.core.version import APPARATUS_VERSION
@@ -145,6 +152,41 @@ from crb.core.workspace import Workspace, opaque_dest
 CONTROLS_SCHEMA = "crb.negative_controls.v1"
 #: v2: Go + JavaScript transforms; v3: a gold witness beside every catch (G-952, ADR-0010).
 CONTROLS_VERSION = "controls.v3"
+#: The first controls version whose catches each carry a gold witness (G-952).
+WITNESSED_FROM = 3
+_CONTROLS_VERSION_RE = re.compile(r"controls\.v(\d+)")
+
+
+def report_is_witnessed(report: Mapping[str, Any]) -> bool:
+    """``True`` when a controls report — a ``controls.report`` payload or a controls run's
+    ``counts_json`` — was written with a gold witness beside every catch: its
+    ``controls_version`` (top level, or under ``apparatus``) is ``controls.v3`` or later.
+
+    A report from before the witness, or one that states no version, cannot show that its
+    "caught" rows were not an environment that could not build, so it licenses nothing
+    (P-176): routing reads it as unmeasured and asks for the controls to be run again.
+    """
+    version = report.get("controls_version")
+    apparatus = report.get("apparatus")
+    if not version and isinstance(apparatus, Mapping):
+        version = apparatus.get("controls_version")
+    m = _CONTROLS_VERSION_RE.fullmatch(str(version or ""))
+    return m is not None and int(m.group(1)) >= WITNESSED_FROM
+
+
+def controls_verdict_of(
+    report: Mapping[str, Any], *, run_id: str = "", created: str = ""
+) -> ControlsVerdict:
+    """One controls report — a ``controls.report`` payload or a controls run's
+    ``counts_json`` — reduced for routing, the one reduction every reader uses (the map,
+    the sign-off, the Oracle screen's verdict, the flow's first pass, ``crb learn``). A
+    PASSED report that is not :func:`report_is_witnessed` licenses nothing: it reads as
+    :meth:`~crb.core.routing.ControlsVerdict.unmeasured` until the controls are run again
+    (P-176). A failed report stays failed, witnessed or not."""
+    if report.get("passed") and not report_is_witnessed(report):
+        return ControlsVerdict.unmeasured()
+    return ControlsVerdict.from_counts(report, run_id=run_id, created=created)
+
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 

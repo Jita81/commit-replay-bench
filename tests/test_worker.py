@@ -1182,6 +1182,11 @@ def test_controls_run_records_report(h: Harness) -> None:
     assert report.stage == "oracle" and report.payload["schema"] == nc.CONTROLS_SCHEMA
     assert [r["control"] for r in report.payload["rows"]] == list(nc.CONTROLS)
     assert report.payload["apparatus"]["worker"] == "w-test"
+    # both the report and the run's counts say they were witnessed, so routing reads either as
+    # passed; a pre-witness report reads as unmeasured (P-176)
+    assert c["controls_version"] == report.payload["apparatus"]["controls_version"]
+    assert nc.report_is_witnessed(c) and nc.report_is_witnessed(report.payload)
+    assert nc.controls_verdict_of(c).passed and nc.controls_verdict_of(report.payload).passed
 
 
 def test_controls_violation_fails_the_gate(h: Harness) -> None:

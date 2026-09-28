@@ -13,7 +13,9 @@
  *               tests could not tell a cheat from an implementation), not as an instrument
  *               failure. Each caught control shows its gold witness — the commit's own change
  *               graded beside it in the same posture — and a red witness reads as an
- *               instrument failure (G-952). A 404 on controls is the designed "not measured
+ *               instrument failure (G-952); a passed report the server reads as unmeasured
+ *               has no witness (it predates `controls.v3`) and the gate says it licenses
+ *               nothing until the controls run again (P-176). A 404 on controls is the designed "not measured
  *               yet" state with the run button.
  * How:          `useOracle` → tiles computed from the tasks (mean over scored tasks only;
  *               unscoreable never averaged in) → two `DataTable`s; `ControlsSection` reads the
@@ -163,9 +165,15 @@ function ControlsSection({ repo }: { repo: string }) {
   // with no verdict (a bare to_dict) is pending, never derived open from the counts.
   const v = c.verdict
   const verdictOk = v ? (v.state === 'passed' ? true : v.state === 'unmeasured' ? null : false) : null
+  // P-176: a passed report the server reads as unmeasured has no gold witness beside its
+  // catches (it was written before controls.v3), so it licenses nothing until the controls re-run
+  const unwitnessed = v && c.passed && v.state === 'unmeasured'
+  const version = typeof c.apparatus?.controls_version === 'string' ? c.apparatus.controls_version : 'before controls.v3'
   const verdictDetail = !v
     ? 'no verdict served with this report'
-    : `${v.state}${v.measured ? ` · ${fmtInt(v.constructible)} of ${fmtInt(v.total)} constructible (${Math.round(v.share * 100)}%) · ${fmtInt(v.escapes)} escape(s)${v.complete ? '' : ' · run cancelled part-way'}` : ''}${v.run_id ? ` · run ${shortId(v.run_id)}` : ''}`
+    : unwitnessed
+      ? `unmeasured · no gold witness beside its catches (${version}): run the controls again before anything here can deliver`
+      : `${v.state}${v.measured ? ` · ${fmtInt(v.constructible)} of ${fmtInt(v.total)} constructible (${Math.round(v.share * 100)}%) · ${fmtInt(v.escapes)} escape(s)${v.complete ? '' : ' · run cancelled part-way'}` : ''}${v.run_id ? ` · run ${shortId(v.run_id)}` : ''}`
   return (
     <div className="space-y-4">
       <Hint as="div" id="gate.oracle.controls">

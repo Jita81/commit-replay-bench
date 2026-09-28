@@ -24,7 +24,9 @@ What it does: Pins, per control on the fixture's ``fix`` task: gold goes green w
               fragment of the task's sha, each mapped on an event instead (assessment
               2026-09-25 B1); and that every catch carries a clean gold witness graded
               beside it in the same posture, while a posture that stops building turns
-              each catch into a VIOLATION (G-952).
+              each catch into a VIOLATION (G-952), each witness graded with the very runner,
+              executor, config and grade context of the control beside it; and that only a
+              report stating ``controls.v3`` or later is witnessed (P-176).
 How:          ``fixtures.oracle_repo`` (module-scoped) → ``make_task`` through the real miner →
               ``controls_for_task`` with a real ``PytestRunner`` + ``LocalExecutor``; no docker,
               no network, no model.
@@ -239,6 +241,71 @@ def test_a_posture_that_stops_building_makes_no_control_look_caught(
     d = report.to_dict()
     assert d["witnessed"] == 2 and d["witness_failures"] == 2 and d["violations"] == 2
     assert "| witness |" in report.render_markdown()
+
+
+def test_the_gold_witness_grades_with_the_very_posture_the_control_graded_with(
+    fixture_repo, fix_task, harness, scratch, monkeypatch
+):
+    """Being "in the same posture" is checked, not assumed: every grade the controls make — each
+    control and each gold witness beside a catch — receives the identical runner, executor,
+    config, grade context and graded spec objects. A witness graded on another executor (a
+    local one outside the sealed sandbox) would grade clean while the sealed posture could not
+    build, so a copy or a fresh instance of any of them fails here."""
+    real_grade = nc.grade
+    calls: list[tuple[str, dict]] = []
+    witnessing: list[str] = []
+
+    def spy(ws, task, **kw):
+        calls.append((witnessing.pop() if witnessing else "control", {"task": task, **kw}))
+        return real_grade(ws, task, **kw)
+
+    def on_event(action, payload):
+        if action == "controls.witness":
+            witnessing.append(f"witness:{payload['control']}")
+
+    monkeypatch.setattr(nc, "grade", spy)
+    rows = nc.controls_for_task(
+        fixture_repo.git,
+        fix_task,
+        scratch=scratch,
+        controls=(nc.GOLD, nc.NOOP, nc.STUB),
+        on_event=on_event,
+        **harness,
+    )
+    assert [r.witness for r in rows] == ["", nc.OBS_CLEAN, nc.OBS_CLEAN]
+    kinds = [k for k, _ in calls]
+    assert kinds == ["control", "control", "witness:noop", "control", "witness:stub"]
+    first = calls[0][1]
+    assert first["executor"] is harness["executor"] and first["runner"] is harness["runner"]
+    assert first["config"] is harness["config"]
+    for kind, kw in calls[1:]:
+        for name in ("executor", "runner", "config", "ctx", "task"):
+            assert kw[name] is first[name], f"{kind} graded with another {name}"
+        for name in ("mode", "timeout", "evaluate_lint"):
+            assert kw[name] == first[name], f"{kind} graded with another {name}"
+
+
+@pytest.mark.parametrize(
+    ("report", "witnessed"),
+    [
+        ({"apparatus": {"controls_version": "controls.v3"}}, True),
+        ({"controls_version": "controls.v4"}, True),
+        ({"controls_version": "controls.v10"}, True),
+        ({"apparatus": {"controls_version": "controls.v2"}}, False),
+        ({"controls_version": "controls.v1"}, False),
+        ({"apparatus": {}}, False),
+        ({}, False),
+        ({"controls_version": "controls.v3-rc"}, False),
+    ],
+)
+def test_only_a_report_from_controls_v3_on_is_witnessed(report, witnessed):
+    """P-176: a report is read as witnessed only when it states controls.v3 or later; an
+    earlier or missing stamp licenses nothing, and a failed report stays failed."""
+    assert nc.report_is_witnessed(report) is witnessed
+    passed = nc.controls_verdict_of({**report, "passed": True, "n_rows": 7})
+    assert passed.measured is witnessed and passed.passed is witnessed
+    failed = nc.controls_verdict_of({**report, "passed": False, "n_rows": 7})
+    assert failed.measured and not failed.passed
 
 
 # --- the other commit shapes -----------------------------------------------------------------

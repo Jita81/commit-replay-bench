@@ -83,7 +83,7 @@ def pass_controls(
         actor="worker-1",
         payload={
             "schema": "crb.negative_controls.v1",
-            "apparatus": {"apparatus_version": "2.1"},
+            "apparatus": {"apparatus_version": "2.1", "controls_version": "controls.v3"},
             "n_tasks": 2,
             "n_rows": n_rows,
             "violations": 0 if passed else 1,

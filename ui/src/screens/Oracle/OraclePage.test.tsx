@@ -14,7 +14,8 @@
  *               strength carries the Wilson interval of its served killed / mutants, the
  *               Strong and Adequate tiles name the served policy's floors, and the About
  *               block repeats no floor that could drift from them (G-204); each caught control
- *               shows its gold witness, a red one as an instrument failure (G-952).
+ *               shows its gold witness, a red one as an instrument failure (G-952); a passed
+ *               report the server reads as unmeasured says it licenses nothing (P-176).
  * How:          `mockApi` + `renderApp` at `/oracle?repo=…` per role.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0010-polyglot-negative-controls.md
@@ -150,5 +151,17 @@ describe('OraclePage', () => {
     const witnesses = screen.getAllByTestId('controls-witness').map((e) => e.textContent)
     expect([...witnesses].sort()).toEqual(['clean', 'red — instrument failure'])
     expect(screen.getByRole('columnheader', { name: /Gold witness/ })).toBeInTheDocument()
+  })
+
+  it('a passed report from before the gold witness says it licenses nothing and asks for the controls again (P-176)', async () => {
+    mockApi({
+      'GET /auth/me': VIEWER,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      'GET /oracle/alpha': SCORED,
+      'GET /oracle/alpha/controls': { repo: 'alpha', run_id: 'r1', passed: true, apparatus: { controls_version: 'controls.v2' }, n_rows: 7, n_tasks: 1, violations: 0, escapes: 0, not_constructible: 0, skipped: 0, rows: [], verdict: { state: 'unmeasured', measured: false, passed: false, constructible: 0, total: 0, share: 0, escapes: 0, complete: true, run_id: '' } },
+    })
+    renderApp(<OraclePage />, { route: '/oracle?repo=alpha' })
+    await screen.findByText('Negative-control rows')
+    expect(screen.getByText(/unmeasured · no gold witness beside its catches \(controls\.v2\): run the controls again before anything here can deliver/)).toBeInTheDocument()
   })
 })

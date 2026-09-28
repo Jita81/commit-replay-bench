@@ -133,7 +133,11 @@ def controls_report(
         seq=1,
         payload={
             "schema": "crb.negative_controls.v1",
-            "apparatus": {"apparatus_version": "2.0", "complete": complete},
+            "apparatus": {
+                "apparatus_version": "2.0",
+                "controls_version": "controls.v3",
+                "complete": complete,
+            },
             "n_tasks": 2,
             "n_rows": n_rows,
             "violations": 0 if passed else 7,
