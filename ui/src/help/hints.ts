@@ -458,7 +458,7 @@ export const HINTS = {
   'col.library.signed_at':
     'The day the entry was signed. A new version needs a new signature.',
   'col.library.provenance':
-    'Where the entry came from: a file at a commit, the graded rows it was learned from, or the person who wrote it. An entry from a file goes stale when the file changes.',
+    'Where the entry came from: a file at a commit, the graded rows it was learned from, or the person who wrote it. A file and commit are as the proposer gave them; after each mine the product reads the file at the head, and the entry goes stale when it differs. Graded rows are checked against the ledger.',
   'col.library.effect':
     'What the entry does to a builder’s pass rate. Unmeasured until an arm with the entry is read against the same arm without it.',
   'col.library.size':
@@ -478,7 +478,7 @@ export const HINTS = {
   'col.library.evidenced':
     'Whether a switched-on check evidences part of the characteristic here. Not evidenced says nothing either way.',
   'tag.library.evidence':
-    'A standard or convention with a check the repository runs counts as evidence. Without one it is advisory: shown and signed, but no evidence.',
+    'A standard or convention counts as evidence only when the product’s quality table counts its check for the characteristic it names, and the repository runs that check. Otherwise it is advisory: shown and signed, but no evidence.',
   'col.library.kind':
     'Which of the six kinds the entry is: component, work type, decision, convention, pattern or standard.',
   'col.library.title':
@@ -518,7 +518,7 @@ export const HINTS = {
   'field.library.characteristic':
     'The ISO/IEC 25010:2023 characteristic a standard refines. A standard must name one; a convention may.',
   'field.library.check':
-    'The name of the repository’s check that evidences the entry. Without a check the repository runs, the entry is advisory.',
+    'The name of the repository’s check that evidences the entry. It counts only if the quality table counts that check for the characteristic named and the repository runs it; otherwise the entry is advisory.',
   'button.library.propose':
     'Record the proposal with you as its sponsor. Nothing is signed until a different approver signs it.',
 

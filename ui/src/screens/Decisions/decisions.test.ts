@@ -20,13 +20,13 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Decisions/decisions.ts (under test)
  * Tested by:    ui/src/screens/Decisions/decisions.test.ts
- * Touch when:   a human act is added to the product.
+ * Touch when:   never for a new repository; a human act is added to the product.
  */
 
 import { describe, expect, it } from 'vitest'
 import type { CapabilityCell, FactoryTask, Signoff } from '../../api/types'
 import { REGISTER } from '../Learn/register.fixture'
-import { LIBRARY, SIGNED } from '../Library/library.fixture'
+import { LIBRARY, PROPOSED, SIGNED } from '../Library/library.fixture'
 import { decisionsFor, evidenceStats } from './decisions'
 
 function cell(over: Partial<CapabilityCell>): CapabilityCell {
@@ -135,5 +135,18 @@ describe('decisionsFor', () => {
     const unsigned = { ...staleEntry, approver: '', approver_name: '', signed_at: '' }
     const [row] = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], library: { ...LIBRARY, entries: [unsigned] } })
     expect(row?.evidence).toMatch(/· not yet signed$/)
+  })
+
+  it('an entry the viewer sponsored waits for another approver: never their Sign, never their re-signature', () => {
+    const mine = PROPOSED.sponsor
+    const rows = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], library: LIBRARY, me: mine })
+    const own = rows.filter((r) => r.kind !== 'entry_retired' && r.act !== 'Sponsor')
+    expect(own.map((r) => [r.act, r.role, r.title])).toEqual([
+      ['Read', 'viewer', 'convention/lint went stale: .golangci.yml changed or went — you sponsored it, so another approver signs it again'],
+      ['Read', 'viewer', 'convention/context-first waits for another approver to sign it — you sponsored it'],
+    ])
+    // another approver still sees their Sign
+    const theirs = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], library: LIBRARY, me: 'someone-else' })
+    expect(theirs.filter((r) => r.act === 'Sign')).toHaveLength(1)
   })
 })

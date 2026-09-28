@@ -36,7 +36,8 @@
  *               ui/src/screens/Factory/FactoryPage.tsx (`?item=` scrolls to the item),
  *               src/crb/factory/loop.py (the route gate whose withholding shows here)
  * Tested by:    ui/src/screens/Decisions/decisions.test.ts
- * Touch when:   a new human act is added to the product (a row kind here, its surface there).
+ * Touch when:   never for a new repository; a new human act is added to the product (a row kind
+ *               here, its surface there).
  */
 
 import type { CapabilityCell, FactoryTask, LibraryIndex, PreventionRegister, Signoff } from '../../api/types'
@@ -140,17 +141,24 @@ export function preventionDecisions(repo: string, register: PreventionRegister |
  * (an approver's act — or, for a mined or drafted proposal nobody has adopted, an operator's
  * Sponsor), a signed entry whose source file changed (an approver re-signs or retires it), and
  * an entry the measurement retired (anyone reads why). Each links to the library's index.
+ * `me` is the viewer's account id: an entry they sponsored is never theirs to sign or re-sign
+ * (the API refuses it `same_person`), so its row is a read-only one naming who acts.
  */
-export function libraryDecisions(repo: string, library: LibraryIndex | null | undefined): Decision[] {
+export function libraryDecisions(repo: string, library: LibraryIndex | null | undefined, me = ''): Decision[] {
   if (!library) return []
   const out: Decision[] = []
   const href = `/library/${encodeURIComponent(repo)}#index`
   for (const e of library.entries) {
     const who = e.sponsor_name || e.sponsor
+    const mine = me !== '' && e.sponsor === me
     if (e.status === 'proposed' && !e.sponsor) {
       out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} was proposed by ${e.entry.proposed_by} and needs a person to sponsor it`, evidence: `${e.entry.kind} · ${e.entry.title}`, act: 'Sponsor', href, role: 'operator' })
+    } else if (e.status === 'proposed' && mine) {
+      out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} waits for another approver to sign it — you sponsored it`, evidence: `sponsored by ${who} · ${e.entry.title}`, act: 'Read', href, role: 'viewer' })
     } else if (e.status === 'proposed') {
       out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} waits for a second person to sign it`, evidence: `sponsored by ${who} · ${e.entry.title}`, act: 'Sign', href, role: 'approver' })
+    } else if (e.status === 'stale' && mine) {
+      out.push({ kind: 'entry_stale', repo, title: `${e.entry_id} went stale: ${e.stale?.path ?? 'its source file'} changed or went — you sponsored it, so another approver signs it again`, evidence: `at ${e.stale?.head_commit.slice(0, 12) ?? 'the head'} · ${e.approver ? `signed by ${e.approver_name || e.approver}` : 'not yet signed'}`, act: 'Read', href, role: 'viewer' })
     } else if (e.status === 'stale') {
       out.push({ kind: 'entry_stale', repo, title: `${e.entry_id} went stale: ${e.stale?.path ?? 'its source file'} changed or went`, evidence: `at ${e.stale?.head_commit.slice(0, 12) ?? 'the head'} · ${e.approver ? `signed by ${e.approver_name || e.approver}` : 'not yet signed'}`, act: 'Sign again or retire', href, role: 'approver' })
     } else if (e.status === 'retired' && e.retired?.by === 'measurement') {
@@ -161,7 +169,7 @@ export function libraryDecisions(repo: string, library: LibraryIndex | null | un
 }
 
 /** The rows for one repository, ordered by what blocks what. */
-export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; signoffs: Signoff[]; tasks: FactoryTask[]; register?: PreventionRegister | null; library?: LibraryIndex | null }): Decision[] {
+export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; signoffs: Signoff[]; tasks: FactoryTask[]; register?: PreventionRegister | null; library?: LibraryIndex | null; me?: string }): Decision[] {
   const { repo } = input
   const q = `repo=${encodeURIComponent(repo)}`
   const out: Decision[] = []
@@ -207,7 +215,7 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
   }
 
   out.push(...preventionDecisions(repo, input.register))
-  out.push(...libraryDecisions(repo, input.library))
+  out.push(...libraryDecisions(repo, input.library, input.me))
 
   return out.sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || a.title.localeCompare(b.title))
 }

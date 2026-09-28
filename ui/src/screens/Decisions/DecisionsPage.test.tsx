@@ -20,14 +20,14 @@
  *               ui/src/help/hints.ts (the copy the hover test expects),
  *               ui/src/help/hints-collector.ts (`unhinted`)
  * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx
- * Touch when:   a row kind or its verb changes.
+ * Touch when:   never for a new repository; a row kind or its verb changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
-import { LIBRARY } from '../Library/library.fixture'
+import { LIBRARY, PROPOSED } from '../Library/library.fixture'
 import { DecisionsPage } from './DecisionsPage'
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
@@ -81,6 +81,23 @@ describe('DecisionsPage', () => {
     expect(within(row).getByRole('link', { name: 'Sign' })).toHaveAttribute('href', '/library/alpha#index')
     expect(row).toHaveTextContent('Library entry to sign')
     expect(screen.getByText('convention/lint went stale: .golangci.yml changed or went')).toBeInTheDocument()
+  })
+
+  it('the sponsor of an entry is offered no Sign for it: another approver signs', async () => {
+    const own = { ...PROPOSED, sponsor: PRINCIPAL.id, sponsor_name: PRINCIPAL.display_name }
+    mockApi({
+      'GET /auth/me': PRINCIPAL, // an approver
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': () => envelope(404, 'not_found', 'never measured'),
+      'GET /signoffs': () => envelope(404, 'not_found', 'none'),
+      'GET /library/alpha': { ...LIBRARY, entries: [own] },
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    const title = 'convention/context-first waits for another approver to sign it — you sponsored it'
+    await waitFor(() => expect(screen.getByText(title)).toBeInTheDocument())
+    const row = screen.getByText(title).closest('li')!
+    expect(within(row).queryByRole('link', { name: 'Sign' })).toBeNull()
+    expect(within(row).getByRole('link', { name: 'Read' })).toHaveAttribute('href', '/library/alpha#index')
   })
 
   it('the kicker names the apparatus as a term', async () => {

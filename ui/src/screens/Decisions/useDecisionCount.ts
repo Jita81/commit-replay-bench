@@ -9,7 +9,8 @@
  * What it does: Keeps the Decisions page and the header badge on the same numbers (one
  *               query set, cached by TanStack), and adds the "signed but stale" rows the
  *               inbox lists separately — a sign-off the API marks `stale` because the
- *               apparatus has moved since it was made.
+ *               apparatus has moved since it was made. Passes the viewer's account id, so
+ *               an entry they sponsored is never offered to them to sign.
  * How:          `useQueries` over the connected repositories; `ready` when every query has
  *               either data or the 404 that means "no backlog"; null count until then.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -17,7 +18,7 @@
  * Works with:   ui/src/screens/Decisions/decisions.ts, ui/src/screens/Decisions/DecisionsPage.tsx,
  *               ui/src/components/Layout.tsx (the badge), ui/src/api/hooks.ts
  * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx
- * Touch when:   a row source is added.
+ * Touch when:   never for a new repository; a row source is added.
  */
 
 import { useQueries, useQuery } from '@tanstack/react-query'
@@ -25,6 +26,7 @@ import { useMemo } from 'react'
 import { api, isApiError, qs } from '../../api/client'
 import { keys, useAllRepos } from '../../api/hooks'
 import type { CapabilityMap, FactoryTask, LibraryIndex, Page, PreventionRegister, Signoff } from '../../api/types'
+import { useAuth } from '../../lib/auth'
 import { libraryKey } from '../Library/useLibrary'
 import { type Decision, decisionsFor, libraryDecisions } from './decisions'
 
@@ -48,6 +50,7 @@ function notFound(err: unknown): boolean {
 }
 
 export function useDecisions(): DecisionsState {
+  const me = useAuth().me?.id ?? ''
   const repos = useAllRepos()
   const names = useMemo(() => (repos.data?.items ?? []).map((r) => r.name), [repos.data])
   const maps = useQueries({
@@ -114,17 +117,17 @@ export function useDecisions(): DecisionsState {
       }
       if (!m?.data || !s?.data) {
         // a permitted 404: never measured / no sign-offs — only the library can be waiting on a person
-        const lib = libraryDecisions(repo, l?.data ?? null)
+        const lib = libraryDecisions(repo, l?.data ?? null, me)
         if (lib.length > 0) byRepo[repo] = lib
         return
       }
-      byRepo[repo] = decisionsFor({ repo, cells: m.data.cells, signoffs: s.data.items, tasks: t?.data ?? [], register: g?.data ?? null, library: l?.data ?? null })
+      byRepo[repo] = decisionsFor({ repo, cells: m.data.cells, signoffs: s.data.items, tasks: t?.data ?? [], register: g?.data ?? null, library: l?.data ?? null, me })
       for (const so of s.data.items) if (so.stale && !so.revoked) stale.push({ repo, signoff: so })
     })
     // `connected` is every repository on record; `byRepo` only those with a measured map — an
     // unmeasured repository is connected and has no decisions, not "no repository"
     return { ready, decisions: Object.values(byRepo).flat(), stale, byRepo, connected: names, errors }
-  }, [repos.data, repos.isError, repos.error, names, maps, signoffs, tasks, registers, libraries])
+  }, [repos.data, repos.isError, repos.error, names, maps, signoffs, tasks, registers, libraries, me])
 }
 
 /** The nav badge's number: decisions + stale sign-offs; null until every repo answered. */
