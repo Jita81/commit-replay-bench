@@ -73,7 +73,7 @@ export const HINTS = {
   'kind.harness':
     'Attempts that failed in the executor, sandbox, parser, setup or model API, or whose failure the humans’ own change also showed when run again in the same posture. The instrument failed, not the model; they count against autonomy until the instrument is fixed.',
   'kind.outage':
-    'Calls the model provider refused (a usage limit, a 429 or a dead credential). Nothing was observed, so these sit outside n.',
+    'Calls the model provider refused (a usage limit, a 429 or a dead credential). Nothing was observed, so these sit outside n. “Login” counts those refused because this deployment’s own login was rejected, which the operator fixes on Settings.',
   'kind.disqualified':
     'Attempts disqualified for tampering with a test or a malformed oracle. They are excluded and sit outside n, counted neither clean nor failed.',
   'stat.shared.model_rate':
@@ -1699,6 +1699,12 @@ export const HINTS = {
     'Paste a token to store. Never shown again after saving; only its last four characters are reported.',
   'button.settings.token_save':
     'Store the token on the server for the worker to use.',
+  'pill.settings.builder_login':
+    'Whether the login runs use works: verified means its last check passed within the time shown; unverified means it has not been checked recently; invalid means the last check failed, and no run on it will be queued.',
+  'button.settings.verify_builder_login':
+    'Checks the login runs use by running Claude Code once with no tools on the cheapest model, then records the answer that the next run and the health page read.',
+  'link.builder_login_fix':
+    'Opens the Claude Code login card on Settings, where you can sign in again or store a new token and then verify it.',
   'button.settings.verify_login':
     'Try the stored token once, through the builder’s own environment, and report whether it was accepted; allowed once every 10 seconds.',
   'button.settings.remove_token':
@@ -1869,6 +1875,8 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.refused',
   'flow.counts',
   'flow.not_captured',
+  // ErrorState's way forward from a login refusal (pilot D1): any screen that submits a run
+  'link.builder_login_fix',
 ]
 
 /**

@@ -257,8 +257,10 @@ def test_start_worker_exposition_honours_the_switches(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     caplog.set_level("INFO", logger="crb.observability.metrics")
-    assert metrics.start_worker_exposition(9464, enabled=False) is False
-    assert metrics.start_worker_exposition(0, enabled=True) is False
+    off = metrics.start_worker_exposition(9464, enabled=False)
+    assert off.state == metrics.EXPOSITION_OFF and off.reason == "disabled" and not off.listening
+    zero = metrics.start_worker_exposition(0, enabled=True)
+    assert zero.state == metrics.EXPOSITION_OFF and zero.reason == "port 0" and zero.port == 0
     assert "exposition off" in caplog.text
     # the default bind is loopback, never every interface: the series name repositories,
     # builders, per-repository cost and installation ids (CRB_METRICS_HOST opts a container in)
@@ -268,32 +270,95 @@ def test_start_worker_exposition_honours_the_switches(
         seen.update(port=port, addr=addr)
 
     monkeypatch.setattr(metrics, "start_http_server", fake_start)
-    assert metrics.start_worker_exposition(9464) is True
+    on = metrics.start_worker_exposition(9464)
+    assert on.listening and on.port == 9464 and on.addr == metrics.LOOPBACK
     assert seen == {"port": 9464, "addr": metrics.LOOPBACK} and metrics.LOOPBACK == "127.0.0.1"
-    assert metrics.start_worker_exposition(9464, addr=metrics.ALL_INTERFACES) is True
+    assert metrics.start_worker_exposition(9464, addr=metrics.ALL_INTERFACES).listening
     assert seen["addr"] == "0.0.0.0"
+
+
+def _scrape(port: int) -> str:
+    import urllib.request
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=1) as r:
+                return str(r.read().decode())
+        except OSError:
+            time.sleep(0.05)
+    return ""
 
 
 def test_start_worker_exposition_serves_the_registry_on_a_free_port(registry: Any) -> None:
     import socket
-    import urllib.request
 
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     metrics.queue_depth.set(3)
-    assert metrics.start_worker_exposition(port, addr="127.0.0.1") is True
-    deadline = time.monotonic() + 5
-    body = ""
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=1) as r:
-                body = r.read().decode()
-            break
-        except OSError:
-            time.sleep(0.05)
-    assert "crb_queue_depth 3.0" in body
+    served = metrics.start_worker_exposition(port, addr="127.0.0.1")
+    assert served.listening and served.port == port
+    assert "crb_queue_depth 3.0" in _scrape(port)
     assert threading.active_count() >= 1
+
+
+def test_a_port_another_stack_holds_leaves_the_listener_degraded_and_named(
+    registry: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Pilot D5 (P-436): a second stack on one machine found 9464 taken. The bind failure
+    must never raise into the worker, and must come back as a state the worker records —
+    ``degraded``, the port it asked for and the reason — so ``/health`` can say it, rather
+    than a log line nobody reads."""
+    import socket
+
+    caplog.set_level("INFO", logger="crb.observability.metrics")
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        port = held.getsockname()[1]
+        got = metrics.start_worker_exposition(port, addr="127.0.0.1")
+    assert got.state == metrics.EXPOSITION_DEGRADED and not got.listening
+    assert got.requested == str(port) and got.port == 0
+    assert got.reason.startswith(f"could not bind 127.0.0.1:{port}")
+    assert "CRB_METRICS_PORT=auto" in got.reason  # the way forward travels with the reason
+    assert got.to_dict()["state"] == "degraded"
+    assert "could not bind" in caplog.text
+
+
+@pytest.mark.parametrize("addr", ["a" * 300, "bad\x00host"])
+def test_a_host_the_resolver_cannot_encode_leaves_the_listener_degraded(
+    registry: Any, addr: str
+) -> None:
+    """Q1's review: the "never raises into the worker" rule held for ``OSError`` only; a
+    ``CRB_METRICS_HOST`` label longer than 63 characters raised ``UnicodeError`` (IDNA) out of
+    ``start_http_server`` and ended the worker. Any address that cannot be bound is
+    ``degraded``, named, and the worker keeps running."""
+    got = metrics.start_worker_exposition(metrics.METRICS_PORT_AUTO, addr=addr)
+    assert got.state == metrics.EXPOSITION_DEGRADED and not got.listening
+    assert got.reason.startswith("could not bind"), got.reason
+
+
+def test_auto_binds_a_free_port_and_reports_the_one_it_chose(
+    registry: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``CRB_METRICS_PORT=auto``: the operating system picks a free port, and the port it
+    picked is in the returned state (what ``/health`` shows) and in the log."""
+    caplog.set_level("INFO", logger="crb.observability.metrics")
+    metrics.queue_depth.set(5)
+    got = metrics.start_worker_exposition(metrics.METRICS_PORT_AUTO, addr="127.0.0.1")
+    assert got.listening and got.requested == "auto" and got.port > 0
+    assert f"127.0.0.1:{got.port}/metrics" in caplog.text
+    assert "crb_queue_depth 5.0" in _scrape(got.port)
+
+
+def test_the_metrics_port_setting_reads_a_number_auto_or_zero() -> None:
+    assert metrics.parse_metrics_port("9464") == 9464
+    assert metrics.parse_metrics_port(0) == 0
+    assert metrics.parse_metrics_port(" AUTO ") == metrics.METRICS_PORT_AUTO
+    for bad in ("70000", "-1", "nine", ""):
+        with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
+            metrics.parse_metrics_port(bad)
 
 
 def test_noop_when_the_client_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -304,7 +369,8 @@ def test_noop_when_the_client_is_absent(monkeypatch: pytest.MonkeyPatch) -> None
     noop.set(1)
     noop.observe(2.0)
     assert metrics.render() == b"" and metrics.available() is False
-    assert metrics.start_worker_exposition(9464) is False
+    absent = metrics.start_worker_exposition(9464)
+    assert absent.state == metrics.EXPOSITION_OFF and absent.reason == "prometheus_client missing"
 
 
 # --- the documentation ratchet ----------------------------------------------------------

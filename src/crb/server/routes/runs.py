@@ -98,6 +98,7 @@ from crb.core.grade import BELT_NAMES
 from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
+from crb.server.builder_login import login_refusal
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
@@ -121,6 +122,7 @@ from crb.server.schemas import (
 )
 from crb.server.secrets import secrets_dir_for
 from crb.server.spend_cap import unpriced_rungs
+from crb.store.db import make_session_factory
 from crb.store.events import lock_event_writes
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
@@ -889,12 +891,17 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
 
     * 422 ``builder_credential_missing`` — a builder this run would call has no credential
       (P-003; presence only);
+    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
+      run's test author included (F5b);
     * 422 ``builder_provider_mismatch`` — a rung (or the factory's test author) names a
       provider the configured OpenAI-compatible endpoint is not (P-284);
+    * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
+      presence check reads, an ``S1`` test author included) has a login whose last
+      verification failed; one that is not fresh is verified once first — after every
+      static refusal, so a run refused for free never spends a verify (pilot D1, P-435 —
+      presence is not a working login; src/crb/server/builder_login.py);
     * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
-      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker;
-    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
-      run's test author included (F5b).
+      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker.
     """
     credential_refusal(run, settings)
     factory_settings = getattr(settings, "factory", None)
@@ -903,6 +910,13 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
         author_rung(run, body.test_author, str(getattr(factory_settings, "test_author", ""))),
     )
     provider_refusal(run, settings, body.test_author)
+    login_refusal(
+        make_session_factory(db.get_bind()),  # type: ignore[arg-type]
+        run,
+        ttl_s=settings.builder.login_ttl_s,
+        binary=settings.builder.claude_binary,
+        default_author=str(getattr(factory_settings, "test_author", "")),
+    )
     if body.qualify_first is False:
         repo_row = db.get(Repo, body.repo)
         if repo_row is None:

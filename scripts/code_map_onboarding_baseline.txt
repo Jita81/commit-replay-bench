@@ -111,7 +111,6 @@ ui/src/lib/jsonObject.ts
 ui/src/lib/theme.ts
 ui/src/lib/verdict.test.ts
 ui/src/main.tsx
-ui/src/screens/Capability/FailureSplit.tsx
 ui/src/screens/Capability/ReasonCode.tsx
 ui/src/screens/Connect/GitHubConnectDialog.test.tsx
 ui/src/screens/Connect/GitHubConnectDialog.tsx
@@ -130,6 +129,5 @@ ui/src/screens/Runs/EvidenceDrawer.tsx
 ui/src/screens/Runs/telemetry.test.ts
 ui/src/screens/Runs/telemetry.ts
 ui/src/screens/Settings/SettingsPage.test.tsx
-ui/src/screens/Settings/claudeCodeLogin.ts
 ui/src/test/setup.ts
 ui/src/test/utils.tsx

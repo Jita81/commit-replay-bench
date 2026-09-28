@@ -138,11 +138,18 @@ def test_the_2_4_only_labels_are_the_labels_the_helper_adds_from_2_4() -> None:
     """The list the refusal reads is the list the helper writes: every label the helper adds
     at 2.4 that it does not write at 2.3 is in ``V2_ONLY_LABELS`` — except ``failure_kind``,
     which a row below 2.4 has always carried when it was not clean."""
-    res = _result(lint_status=lint_mod.LINT_NONE_DETECTED)
-    kw: dict[str, Any] = {"error": "", "change_id": CHANGE}
-    added = set(lg.row_labels_at_write(res, apparatus_version=V2, **kw)) - set(
-        lg.row_labels_at_write(res, apparatus_version="2.3", **kw)
-    )
+    added: set[str] = set()
+    red = g.Belts(True, None, None, None)
+    for res, error in (
+        (_result(lint_status=lint_mod.LINT_NONE_DETECTED), ""),
+        # an outage row: the helper adds its cause from 2.4 (pilot D1), so the refusal must
+        # name that label too
+        (_result(clean=False, belts=red, lint_status=lint_mod.LINT_NOT_REACHED), AUTH_401),
+    ):
+        kw: dict[str, Any] = {"error": error, "change_id": CHANGE}
+        added |= set(lg.row_labels_at_write(res, apparatus_version=V2, **kw)) - set(
+            lg.row_labels_at_write(res, apparatus_version="2.3", **kw)
+        )
     assert added - {lg.LABEL_FAILURE_KIND} == set(lg.V2_ONLY_LABELS)
 
 
@@ -150,12 +157,15 @@ def test_a_row_rewritten_below_2_4_keeps_none_of_the_2_4_labels() -> None:
     """P-317: the one rule that says which labels a row of an apparatus keeps. A 2.4 row
     rewritten at 2.3 through :func:`labels_at_apparatus` is a row the ledger accepts, and at
     2.4 the labels are unchanged — so no writer or test re-derives the list by hand."""
-    row = _replay(_result(lint_status=lint_mod.LINT_NONE_DETECTED))
-    assert set(lg.V2_ONLY_LABELS) <= set(row.labels)
-    older = lg.labels_at_apparatus(row.labels, "2.3")
-    assert not set(older) & set(lg.V2_KEPT_LABELS)
-    lg.GradeRow(**{**row.fields(), "apparatus_version": "2.3", "labels": older})
-    assert lg.labels_at_apparatus(row.labels, V2) == row.labels
+    # a clean row and an outage row between them carry every 2.4-only label: the outage
+    # cause (pilot D1) sits on an outage row only
+    rows = [_replay(_result(lint_status=lint_mod.LINT_NONE_DETECTED)), _outage(AUTH_401)]
+    assert set(lg.V2_ONLY_LABELS) <= set().union(*(r.labels for r in rows))
+    for row in rows:
+        older = lg.labels_at_apparatus(row.labels, "2.3")
+        assert not set(older) & set(lg.V2_KEPT_LABELS)
+        lg.GradeRow(**{**row.fields(), "apparatus_version": "2.3", "labels": older})
+        assert lg.labels_at_apparatus(row.labels, V2) == row.labels
 
 
 @pytest.mark.parametrize("key", [lg.LABEL_FAILURE_KIND, lg.LABEL_LINT_REASON, lg.LABEL_CHANGE_ID])
@@ -321,3 +331,154 @@ def test_an_imported_2_4_row_keeps_the_kind_it_was_imported_with(
     assert (
         lg.LABEL_FAILURE_KIND not in import_stamp(old, imported_by="a", imported_at="t")["labels"]
     )  # below 2.4 the frozen rule reads it, and the label is 2.4-only
+
+
+# --- the cause of an outage (pilot D1, P-435) -------------------------------------------
+
+#: What the claude_code builder records when the login it presented is refused (the pilot's
+#: canary 79cb7521: a keychain login answered HTTP 401 and the row read `outage`).
+AUTH_401 = "model_error: authentication failed (HTTP 401) — run `claude login` as the worker's user"
+USAGE_LIMIT = "model_error: you have hit your limit · resets 5pm"
+
+
+def _outage(error: str, apparatus: str = V2) -> lg.GradeRow:
+    red = g.Belts(True, None, None, None)
+    return lg.grade_row_from_result(
+        _result(clean=False, belts=red, error=error, lint_status=lint_mod.LINT_NOT_REACHED),
+        _task(),
+        pack_hash="c" * 64,
+        apparatus_version=apparatus,
+    )
+
+
+def test_a_2_4_outage_row_names_a_refused_login_as_its_own_cause() -> None:
+    """Pilot D1: a login this deployment presented was refused (HTTP 401) and the row was
+    filed as a provider outage — the right denominator, the wrong reader's story. From 2.4 the
+    row pins WHY the call never happened: ``auth`` (a local credential fault the operator
+    fixes) or ``provider`` (a usage limit, a 429, an overload) — still ``outage``, still
+    outside every ``n``."""
+    auth = _outage(AUTH_401)
+    assert auth.failure_kind == lg.FAILURE_OUTAGE and not auth.eligible
+    assert auth.labels[lg.LABEL_OUTAGE_CAUSE] == lg.OUTAGE_CAUSE_AUTH
+    assert auth.outage_cause == lg.OUTAGE_CAUSE_AUTH
+    limit = _outage(USAGE_LIMIT)
+    assert limit.failure_kind == lg.FAILURE_OUTAGE
+    assert limit.outage_cause == lg.OUTAGE_CAUSE_PROVIDER
+    split = lg.failure_split([auth, limit])
+    assert split.n == 0 and split.outage == 2 and split.outage_auth == 1
+    assert split.to_dict()["outage_auth"] == 1
+
+
+def test_an_outage_row_below_2_4_carries_no_cause() -> None:
+    """The cause is a 2.4 label (DL-094 (2), P-305): a 2.3 row is written as before and reads
+    no cause — never one derived after the fact."""
+    row = _outage(AUTH_401, apparatus="2.3")
+    assert row.failure_kind == lg.FAILURE_OUTAGE
+    assert lg.LABEL_OUTAGE_CAUSE not in row.labels and row.outage_cause == ""
+
+
+def test_the_ledger_refuses_an_outage_cause_that_does_not_fit_its_row() -> None:
+    auth = _outage(AUTH_401)
+    with pytest.raises(lg.LedgerIntegrityError, match=lg.LABEL_OUTAGE_CAUSE):
+        lg.GradeRow(**_without(auth, lg.LABEL_OUTAGE_CAUSE))  # a 2.4 outage row names it
+    with pytest.raises(ValueError, match="outage_cause"):
+        lg.GradeRow(**_with(auth, **{lg.LABEL_OUTAGE_CAUSE: "weather"}))
+    clean = _replay(_result(lint_status=lint_mod.LINT_NONE_DETECTED))
+    with pytest.raises(ValueError, match="outage_cause"):
+        lg.GradeRow(**_with(clean, **{lg.LABEL_OUTAGE_CAUSE: lg.OUTAGE_CAUSE_AUTH}))
+    old = _outage(AUTH_401, apparatus="2.3")
+    with pytest.raises(ValueError, match="outage_cause"):
+        lg.GradeRow(**_with(old, **{lg.LABEL_OUTAGE_CAUSE: lg.OUTAGE_CAUSE_AUTH}))
+
+
+@pytest.mark.parametrize(
+    ("error", "cause"),
+    [
+        (AUTH_401, "auth"),
+        ("model_error: authentication failed (HTTP 403) — check ANTHROPIC_API_KEY", "auth"),
+        ("model_error: OAuth access token is invalid", "auth"),
+        (USAGE_LIMIT, "provider"),
+        ("model_error: 529 overloaded", "provider"),
+        ("model_error: 429 rate_limit", "provider"),
+        ("model_error: some other trouble", ""),  # harness, not an outage
+        ("", ""),
+    ],
+)
+def test_the_outage_cause_rule(error: str, cause: str) -> None:
+    kind = lg.derive_failure_kind(clean=False, disqualified=False, error=error)
+    assert lg.derive_outage_cause(kind, error) == cause
+
+
+def test_every_auth_marker_is_one_the_failure_rule_reads_as_an_outage() -> None:
+    """A cause is read only on an ``outage`` row, so an auth marker the failure rule never
+    reads as an outage on its own is dead: a refused credential phrased that way would read
+    ``harness`` (against autonomy) with no cause at all. Every auth marker is itself a live
+    outage marker (Q1's review: three of six were not)."""
+    for marker in lg.AUTH_ERROR_MARKERS:
+        text = f"model_error: provider said {marker}"
+        assert lg.derive_failure_kind(clean=False, disqualified=False, error=text) == (
+            lg.FAILURE_OUTAGE
+        ), marker
+        assert marker in lg.OUTAGE_ERROR_MARKERS, marker
+
+
+class _SdkError(Exception):
+    """An OpenAI-compatible SDK error: the HTTP status on the exception (``status_code``)."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _credential_refusals() -> list[BaseException]:
+    """The real shapes a refused key reaches an OpenAI-compatible builder in (openai_agent,
+    editblock — the Cerebras route): wrapped by the client's retry, raised by the SDK, a 403,
+    and a key the worker does not have at all."""
+    from crb.builders.openai_client import MissingCredential, ModelCallError
+
+    return [
+        ModelCallError(
+            "model call failed after 1 attempt(s): AuthenticationError: Error code: 401 - "
+            "{'message': 'Wrong API Key', 'type': 'invalid_request_error'}",
+            status=401,
+        ),
+        _SdkError(
+            "Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-...'}}", 401
+        ),
+        _SdkError("Error code: 403 - {'error': {'message': 'Permission denied'}}", 403),
+        MissingCredential("CEREBRAS_API_KEY is not set"),
+    ]
+
+
+@pytest.mark.parametrize("exc", _credential_refusals(), ids=["wrapped", "sdk", "403", "missing"])
+def test_a_builder_names_a_refused_credential_in_the_words_the_ledger_reads(
+    exc: BaseException,
+) -> None:
+    """Q1's review: an OpenAI-compatible builder wrote a refused key as
+    ``model_error: ModelCallError: … Error code: 401 …``, which the failure rule read
+    ``harness`` — against autonomy and inside ``n`` — with no cause, so a local credential
+    fault on the Cerebras route was blamed on the harness and the login was never recorded
+    invalid. Every builder now writes a refused or absent credential through ONE function in
+    the ledger's own words: ``outage``, cause ``auth``."""
+    from crb.builders.base import model_error_text
+
+    text = model_error_text(exc)
+    kind = lg.derive_failure_kind(clean=False, disqualified=False, error=text)
+    assert kind == lg.FAILURE_OUTAGE, text
+    assert lg.derive_outage_cause(kind, text) == lg.OUTAGE_CAUSE_AUTH, text
+    assert type(exc).__name__ in text  # the builder's own words are kept after the marker
+
+
+def test_a_builder_error_that_is_not_a_credential_keeps_its_own_words() -> None:
+    from crb.builders.base import model_error_text
+    from crb.builders.openai_client import ModelCallError
+
+    boom = ModelCallError(
+        "model call failed after 5 attempt(s): InternalServerError: 500", status=500
+    )
+    assert model_error_text(boom) == f"model_error: ModelCallError: {boom}"
+    assert (
+        lg.derive_failure_kind(clean=False, disqualified=False, error=model_error_text(boom))
+        == lg.FAILURE_HARNESS
+    )
+    assert model_error_text(ValueError("bad reply")) == "model_error: ValueError: bad reply"

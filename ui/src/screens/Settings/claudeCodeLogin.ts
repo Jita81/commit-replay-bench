@@ -12,7 +12,8 @@
  * What it is:   The hooks and types for the operator-supplied Claude Code token:
  *               `useSecrets` (statuses), `useSaveClaudeCodeToken` (PUT), `useRemoveClaudeCodeToken`
  *               (DELETE), `useVerifyClaudeCodeToken` (one no-tool Haiku turn through the
- *               builder's own environment).
+ *               builder's own environment), and the login runs use: `useBuilderLogins`
+ *               (`GET /builders/logins`) and `useVerifyBuilderLogin` (its Verify — pilot D1).
  * What it does: Mirrors a contract in which the API never returns a token value — every
  *               response is a `SecretStatus` (presence, at most the last four characters, who
  *               and when), a viewer's `SecretPresence` (`{name, present}` only) or a
@@ -30,9 +31,9 @@
  *               (round-trips a shape-valid fake token without the value ever appearing in
  *               the page), tests/test_server_routes_admin_secrets.py (no response carries
  *               a value)
- * Touch when:   a second operator secret is added to `/settings/secrets` (docs/API.md
- *               "Admin") — generalise the path constant and the status lookup; never for a
- *               new repository.
+ * Touch when:   never for a new repository; a second operator secret is added to
+ *               `/settings/secrets` (docs/API.md "Admin") — generalise the path constant and
+ *               the status lookup.
  */
 
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
@@ -184,5 +185,47 @@ export function useClaudeLoginSession(id: string | null): UseQueryResult<LoginSe
     enabled: id !== null,
     retry: false,
     refetchInterval: (q) => (q.state.data && LOGIN_TERMINAL.has(q.state.data.state) ? false : 1000),
+  })
+}
+
+/** `LoginState` (docs/API.md "Builders") — a login a run could use, one per auth mode, as the
+ *  run preflight and `/health` read it (pilot D1). Never a token: `fingerprint` is at most four
+ *  characters, and a viewer is served presence and state only — no `fingerprint`, `source`,
+ *  `detail`, `cli_version` or `trigger` (F25; Q1's review). */
+export interface BuilderLoginState {
+  builder: string
+  auth: string
+  state: 'verified' | 'unverified' | 'invalid'
+  status: string
+  /** Whether this mode's credential is present on the API host. */
+  present: boolean
+  /** Whether this is the mode a run uses when it names none. */
+  default: boolean
+  checked_at: string | null
+  age_s: number | null
+  ttl_s: number
+  reason: string
+  detail?: string
+  source?: string
+  fingerprint?: string
+  cli_version?: string
+  trigger?: string
+}
+
+const builderLoginsKey = ['builders', 'logins'] as const
+
+/** `GET /builders/logins` — read from the recorded verifications; never calls a model. */
+export function useBuilderLogins(): UseQueryResult<{ items: BuilderLoginState[] }, ApiError> {
+  return useQuery({ queryKey: builderLoginsKey, queryFn: () => api<{ items: BuilderLoginState[] }>('/builders/logins') })
+}
+
+/** `POST /builders/{builder}/login/verify?auth=` — one no-tool Haiku turn for that auth mode,
+ *  recorded for the next run (the mode is sent, so a refused `cli` login is the one verified). */
+export function useVerifyBuilderLogin(): UseMutationResult<BuilderLoginState, ApiError, { builder: string; auth: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ builder, auth }: { builder: string; auth: string }) =>
+      api<BuilderLoginState>(`/builders/${encodeURIComponent(builder)}/login/verify?auth=${encodeURIComponent(auth)}`, { method: 'POST', timeoutMs: VERIFY_TIMEOUT_MS }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: builderLoginsKey }),
   })
 }

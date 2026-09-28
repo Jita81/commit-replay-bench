@@ -1041,3 +1041,76 @@ def test_live_claude_code_cli_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert session.get("model") == cc.DEFAULT_MODEL
     assert not out.violated
     ws.remove()
+
+
+def test_verify_login_in_api_key_mode_probes_the_key_a_build_would_forward(
+    secrets_home: Path, tmp_path: Path
+) -> None:
+    """Pilot D1 (P-435): the run preflight verifies the login a run would use, in either auth
+    mode. In ``api_key`` mode that is ``--bare`` with the worker's key forwarded — exactly the
+    build's own environment — and the check names the source ``env`` with at most four
+    characters of the key, never the key."""
+    ok = [ev_init(), ev_result(num_turns=1, cost=0.0, result="pong")]
+    spawn = FakeSpawn(ok)
+    check = cc.verify_login(auth=cc.AUTH_API_KEY, binary="/x/claude", spawn=spawn, cwd=tmp_path)
+    assert check.status == cc.VERIFY_OK and check.source == cc.TOKEN_SOURCE_ENV
+    assert "--bare" in spawn.argv and cc.CLI_OAUTH_TOKEN_ENV not in spawn.env
+    key = spawn.env["ANTHROPIC_API_KEY"]
+    assert check.fingerprint == key[-4:] and key not in json.dumps(check.to_dict())
+    cli = FakeSpawn(ok)
+    cc.verify_login(auth=cc.AUTH_CLI, binary="/x/claude", spawn=cli, cwd=tmp_path)
+    assert "--bare" not in cli.argv and "ANTHROPIC_API_KEY" not in cli.env
+    with pytest.raises(ValueError, match="auth"):
+        cc.verify_login(auth="password", binary="/x/claude", spawn=FakeSpawn(ok), cwd=tmp_path)
+
+
+def test_login_resolution_names_where_a_build_would_take_its_login(
+    secrets_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the preflight compares a cached verification against, read without calling a
+    model: the source label and at most four characters — a changed token is a new login."""
+    assert cc.login_resolution(cc.AUTH_CLI) == (cc.TOKEN_SOURCE_KEYCHAIN, "")
+    _store(secrets_home)
+    assert cc.login_resolution(cc.AUTH_CLI) == (cc.TOKEN_SOURCE_SECRETS_FILE, "FILE")
+    source, fp = cc.login_resolution(cc.AUTH_API_KEY)
+    assert source == cc.TOKEN_SOURCE_ENV and len(fp) == 4
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert cc.login_resolution(cc.AUTH_API_KEY) == (cc.TOKEN_SOURCE_NONE, "")
+
+
+def test_a_result_the_api_refused_names_the_refused_login_in_the_ledger_words(
+    tmp_path: Path,
+) -> None:
+    """Q1's review: the CLI can end a build with a result it marks ``is_error`` and
+    ``api_error_status`` 401 (``Invalid API key · Please run /login``) without retrying first.
+    ``verify_login`` reads that as a refused login; the build wrote it as a bare
+    ``model_error: success: Invalid API key …``, which the failure rule read ``harness`` —
+    so the login was never recorded invalid and the row counted against autonomy. The build
+    now names it as the verify does: ``authentication failed (HTTP 401)``."""
+    from crb.core import ledger as lg
+
+    for status in (401, 403):
+        _fx, _ws, out = _setup(
+            tmp_path / str(status),
+            FakeSpawn(
+                [
+                    json.dumps(
+                        {
+                            "type": "result",
+                            "subtype": "success",
+                            "is_error": True,
+                            "api_error_status": status,
+                            "result": "Invalid API key · Please run /login",
+                            "num_turns": 1,
+                            "total_cost_usd": 0,
+                            "usage": {},
+                        }
+                    )
+                ]
+            ),
+        )
+        (err,) = [e for e in out.errors if e.startswith("model_error")]
+        assert f"authentication failed (HTTP {status})" in err and "Invalid API key" in err
+        kind = lg.derive_failure_kind(clean=False, disqualified=False, error=err)
+        assert kind == lg.FAILURE_OUTAGE
+        assert lg.derive_outage_cause(kind, err) == lg.OUTAGE_CAUSE_AUTH

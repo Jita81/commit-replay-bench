@@ -283,9 +283,16 @@ from crb.factory.testfirst import (
 from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
+from crb.observability.metrics import parse_metrics_port
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
 from crb.server import factory_standard
+from crb.server.builder_login import (
+    LOGIN_INVALID_CODE,
+    claim_refusal,
+    record_claim_refusal,
+    record_refused_login,
+)
 from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
@@ -516,15 +523,21 @@ class WorkerSettings:
     #: ``<home>/evidence/patches`` (crb.core.patches) — ``CRB_RETENTION__PATCHES``.
     store_patches: bool = True
     max_reclaims: int = 3
+    #: How long a builder login's last verification stands (``CRB_BUILDER__LOGIN_TTL_S``, the
+    #: value the API's submit gate reads): at claim, a login recorded invalid within it fails
+    #: the run before any build (Q1's review; src/crb/server/builder_login.py).
+    builder_login_ttl_s: int = 600
     #: The worker's own Prometheus exposition (J-TEL-1): every build / grade / cost series
     #: is recorded in THIS process, so the API's ``/metrics`` never carries them. Served by
     #: ``prometheus_client.start_http_server`` on ``metrics_host:metrics_port``
     #: (``CRB_METRICS_HOST``, default loopback like the API's bind — a container sets
-    #: ``0.0.0.0``; ``CRB_METRICS_PORT``, default 9464; ``0`` = off) when ``metrics_enabled``
-    #: (``CRB_METRICS_ENABLED``, the same switch the API reads) and the client is installed.
+    #: ``0.0.0.0``; ``CRB_METRICS_PORT``, default 9464; ``0`` = off; ``auto`` = a free port
+    #: the operating system picks, reported on ``/health`` — pilot D5) when
+    #: ``metrics_enabled`` (``CRB_METRICS_ENABLED``, the same switch the API reads) and the
+    #: client is installed.
     metrics_enabled: bool = True
     metrics_host: str = "127.0.0.1"
-    metrics_port: int = 9464
+    metrics_port: int | str = 9464
     #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
     #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
     github: GitHubAppSettings = field(default_factory=GitHubAppSettings)
@@ -570,8 +583,7 @@ class WorkerSettings:
         object.__setattr__(self, "kinds", tuple(self.kinds))
         if self.poll_s <= 0 or self.heartbeat_s <= 0 or self.stale_after_s <= 0:
             raise ValueError("poll_s, heartbeat_s and stale_after_s must be positive")
-        if not 0 <= int(self.metrics_port) <= 65535:
-            raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
+        object.__setattr__(self, "metrics_port", parse_metrics_port(self.metrics_port))
         if not str(self.metrics_host).strip():
             raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
         executor_kind(self.executor)  # P-308: an empty or unknown kind never starts a worker
@@ -1231,6 +1243,8 @@ class Worker:
                     "system", "run.credential_refused", status=StepStatus.ERROR, error=refused
                 )
                 status, error = STATUS_FAILED, refused
+            elif (dead := self._dead_login(run, emitter)) is not None:
+                status, error = STATUS_FAILED, dead
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1296,6 +1310,32 @@ class Worker:
                 "nothing was built"
             )
         return ""
+
+    def _dead_login(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when a login it would call was
+        recorded invalid after it was queued — read from the cache, never a verify or a model
+        call (the submit gate's rule, applied again at claim: Q1's review) — else ``None``.
+        The claim hook's second check, after :meth:`_credential_gone` (G-707): a credential
+        that is present can still be one the provider refuses."""
+        login = claim_refusal(
+            self.factory,
+            run,
+            ttl_s=self.settings.builder_login_ttl_s,
+            default_author=str(getattr(self.settings.factory, "test_author", "") or ""),
+        )
+        if login is None:
+            return None
+        error = record_claim_refusal(self.factory, run, login, actor=self.worker_id)
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=LOGIN_INVALID_CODE,
+            builder=login.builder,
+            auth=login.auth,
+        )
+        return error
 
     # --- repo / harness ----------------------------------------------------------
     def _github_installation(self, cfg: Mapping[str, Any]) -> int | None:
@@ -2383,6 +2423,15 @@ class Worker:
             if is_outage_error(attempt.error):
                 streak["n"] += 1
                 streak["last"] = attempt.error
+                # pilot D1: a refused LOGIN is recorded invalid at once, so the next submit on
+                # it is refused before it is queued (src/crb/server/builder_login.py)
+                record_refused_login(
+                    self.factory,
+                    attempt.builder.name,
+                    str((p.get("builder_config") or {}).get("auth", "") or ""),
+                    attempt.error,
+                    actor=self.worker_id,
+                )
             else:
                 streak["n"] = 0
             return attempt

@@ -248,6 +248,7 @@ class TestCapabilityMap:
                 "disqualified",
                 "lint_evaluated",
                 "outage",
+                "outage_auth",
                 "api",
             }
             assert c["capability_class"] != "*" and c["size"] != "*" and c["language"] == "*"
@@ -300,6 +301,7 @@ class TestCapabilityMap:
             "harness": 0,
             "disqualified": 0,
             "outage": 0,
+            "outage_auth": 0,  # of the outages, the refused logins (pilot D1)
             "lint_evaluated": 0,  # the seed's repo configures no linter: belt 5 never evaluated
             "api": 0,  # belt 6 is opt-in (ADR-0024): never switched on for the seed
         }
@@ -451,6 +453,7 @@ class TestCapabilityMap:
             "harness": 1,
             "disqualified": 0,
             "outage": 0,
+            "outage_auth": 0,  # of the outages, the refused logins (pilot D1)
             "lint_evaluated": 0,
             "api": 0,
         }

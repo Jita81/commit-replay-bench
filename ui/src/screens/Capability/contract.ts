@@ -109,6 +109,8 @@ export interface FailureSplit {
   lint_evaluated?: number
   /** Provider outages (usage limit / 429 / dead credential): the call never happened; outside n. */
   outage?: number
+  /** Of `outage`, the calls refused because this deployment's own login was rejected (pilot D1). */
+  outage_auth?: number
   /** Belts 1–4 held; belt 6 found a public-API change the maintainers' commit did not make (opt-in). */
   api?: number
   /** The `S1` arm's test author produced no failing test (ADR-0026 item 1): inside n, never the model's. */

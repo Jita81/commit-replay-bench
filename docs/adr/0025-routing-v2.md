@@ -220,7 +220,14 @@ measure next. The core stays standard-library only (ADR-0008).
    `APPARATUS_VERSION` by a golden table, so changing either fails that test until the
    apparatus moves and the old rule is frozen beside the V1 copy. A measured `replay` row of
    2.4 or later must carry `gold_clean=True`: qualification already makes it so (ADR-0019 §4),
-   and the ledger now refuses anything else.
+   and the ledger now refuses anything else. An `outage` row of 2.4 or later also pins why the
+   call never happened — `labels.outage_cause`, `auth` (the login this deployment presented
+   was refused) or `provider`, by one pinned rule (`crb.core.ledger.derive_outage_cause`) at
+   write, inside the row hash; the kind stays `outage`, outside every `n` (pilot D1, DL-233).
+   The labels only 2.4 defines are one list, `crb.core.ledger.V2_ONLY_LABELS`: `lint_reason`,
+   `change_id`, `context_arm`, `taxonomy` and `outage_cause`. A row below 2.4 carrying any of
+   them is refused at write and on read, and a row rewritten below 2.4 drops them all
+   (`labels_at_apparatus`).
 
 7. **Oracle scoring v2** (`crb.core.oracle.mutation`, `MUTATION_V2 = "mutation.v2"`, read
    through `mutation_version()`).

@@ -6,7 +6,10 @@
  * ----------
  * What it is:   The Settings card for the `claude setup-token` value the `auth: cli` builder
  *               mode uses.
- * What it does: Shows presence, the ≤ 4-character fingerprint and provenance (who set it,
+ * What it does: Heads with the login runs use (pilot D1): verified, not verified or invalid with
+ *               its age, and for operators a Verify that records what the next run reads — a
+ *               run refused `builder_login_invalid` is sent here (`#claude-code-login`).
+ *               Shows presence, the ≤ 4-character fingerprint and provenance (who set it,
  *               when) to operators and above — a viewer is served, and shown, presence
  *               only (`{name, present}`); admins can paste a token (a `type="password"`
  *               field, cleared the moment the server accepts it — the value is not kept in
@@ -52,6 +55,9 @@ import {
   useStartClaudeLogin,
   useSubmitClaudeLoginCode,
   useVerifyClaudeCodeToken,
+  useBuilderLogins,
+  useVerifyBuilderLogin,
+  type BuilderLoginState,
   type LoginCheck,
   type LoginCheckStatus,
   type LoginSession,
@@ -99,6 +105,90 @@ function StatusLine({ status }: { status: SecretListItem | undefined }) {
       <span className="text-xs text-on-surface-muted" data-testid="claude-login-provenance">
         set by <span className="font-semibold">{status.set_by || 'mounted file'}</span> · {fmtDate(status.set_at)}
       </span>
+    </div>
+  )
+}
+
+/** Tone / glyph / wording per state of the login runs use (pilot D1); only `verified` is green. */
+const RUNS_LOGIN_DISPLAY: Record<BuilderLoginState['state'], { tone: Tone; glyph: string; label: string }> = {
+  verified: { tone: 'green', glyph: '✓', label: 'verified' },
+  unverified: { tone: 'amber', glyph: '?', label: 'not verified' },
+  invalid: { tone: 'red', glyph: '✕', label: 'invalid — runs are refused' },
+}
+
+/** How long ago, in words a person reads at a glance. */
+function ago(seconds: number | null): string {
+  if (seconds === null) return ''
+  if (seconds < 90) return `${Math.round(seconds)} s ago`
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min ago`
+  return `${Math.round(seconds / 3600)} h ago`
+}
+
+/**
+ * The logins runs use — the state the run preflight and `/health` read (pilot D1): one line per
+ * auth mode a run could use (the default first, then each mode with a stored credential or a
+ * recorded check — Q1's review), each verified, not verified or invalid, with its age, and for
+ * operators and above the source, the last outcome and a Verify of THAT mode that records the
+ * answer the next run reads. A run submitted on an invalid login is refused and sent here.
+ */
+function RunsLoginLine() {
+  const { can } = useAuth()
+  const logins = useBuilderLogins()
+  const verify = useVerifyBuilderLogin()
+  return (
+    <QueryBoundary query={logins} loading="Reading the login runs use…">
+      {({ items }) => {
+        const mine = items.filter((x) => x.builder === 'claude_code')
+        if (mine.length === 0) return null
+        return (
+          <div className="space-y-3 border-b border-border pb-4">
+            {mine.map((login) => (
+              <RunsLoginMode
+                key={login.auth}
+                login={login}
+                canVerify={can('operator')}
+                verifying={verify.isPending && verify.variables?.auth === login.auth}
+                onVerify={() => verify.mutate({ builder: login.builder, auth: login.auth })}
+                error={verify.isError && verify.variables?.auth === login.auth ? verify.error : null}
+              />
+            ))}
+          </div>
+        )
+      }}
+    </QueryBoundary>
+  )
+}
+
+/** One auth mode's line: its state, its age and why, and (operators) its own Verify. */
+function RunsLoginMode({ login, canVerify, verifying, onVerify, error }: { login: BuilderLoginState; canVerify: boolean; verifying: boolean; onVerify: () => void; error: unknown }) {
+  const d = RUNS_LOGIN_DISPLAY[login.state] ?? RUNS_LOGIN_DISPLAY.unverified
+  return (
+    <div className="space-y-2" data-testid="claude-runs-login" data-state={login.state} data-auth={login.auth}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold">{login.default ? 'The login runs use (the default)' : `The login a run with auth: ${login.auth} uses`}</span>
+        <Pill tone={d.tone} glyph={d.glyph} label={`The ${login.auth} login runs use: ${d.label}`} hint="pill.settings.builder_login" data-testid="claude-runs-login-state">
+          {d.label}
+        </Pill>
+        <span className="text-xs text-on-surface-muted" data-testid="claude-runs-login-meta">
+          <code>auth: {login.auth}</code>
+          {login.source !== undefined ? ` · ${login.source || 'no source'}` : ''}
+          {login.fingerprint ? ` …${login.fingerprint}` : ''}
+          {login.age_s !== null ? ` · checked ${ago(login.age_s)}` : ''}
+        </span>
+      </div>
+      <p className="m-0 text-xs text-on-surface-muted" data-testid="claude-runs-login-why">
+        {login.state === 'unverified' && `${login.reason || 'not verified'} — a run's submit verifies it once, or verify it now.`}
+        {login.state === 'invalid' && `${login.status}${login.detail ? `: ${login.detail}` : ''}. No run on this login will be queued until it works: sign in again or store a new token below, then verify.`}
+        {login.state === 'verified' && `The last check passed; it stands for ${Math.round(login.ttl_s / 60)} min, then the next run checks it again.`}
+      </p>
+      {canVerify && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outlined" size="sm" onClick={onVerify} disabled={verifying} data-testid="claude-runs-login-verify" hint="button.settings.verify_builder_login">
+            {verifying ? 'Verifying…' : `Verify the ${login.auth} login`}
+          </Button>
+          {error !== null && <ErrorState compact error={error} />}
+        </div>
+      )}
     </div>
   )
 }
@@ -270,8 +360,9 @@ export function ClaudeCodeLoginCard() {
   }
 
   return (
-    <Card title={<Hint id="tile.settings.claude_login">Claude Code login</Hint>} eyebrow="claude setup-token · auth: cli">
+    <Card id="claude-code-login" title={<Hint id="tile.settings.claude_login">Claude Code login</Hint>} eyebrow="claude setup-token · auth: cli">
       <div className="space-y-4">
+        <RunsLoginLine />
         <QueryBoundary query={secrets} loading="Loading login status…">
           {(list) => <StatusLine status={claudeCodeStatus(list)} />}
         </QueryBoundary>

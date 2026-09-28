@@ -21,6 +21,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   sign-off, an authored test, a build, a required strength probe and a pull request on a fake
   forge, and shows each gate stopping the chain before any spend (`product.truth.219`).
 
+- **A run cannot start on a dead login; a worker whose metrics port is taken keeps running and says so; the migrations probe tells the truth**
+  (north-star Wave 2, stream Q1; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
+  pilot D1, D5, D7; DL-233, DL-234; P-435 to P-445). A run
+  on a login that failed its check is refused at submit, or failed at claim. `/health` and Settings show each auth mode's login state, never calling a
+  model; viewers see presence only. Every builder names a refused key alike, so from
+  apparatus 2.4 an outage says "your login" apart from "the provider".
+  `CRB_METRICS_PORT=auto` picks a free port. A store at head is compared with the models.
+
 - **Every public page is gated, README's measured numbers re-derive, and the quality baseline is named, never claimed**
   (north-star Wave 2, stream C; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
   The claims gate reads README, every guide, every review and every definition-of-done

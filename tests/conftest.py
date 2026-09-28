@@ -4,9 +4,10 @@ and a test that does need the network is skipped, with the reason, when it is no
 Navigation
 ----------
 What it is:   The pytest conftest of the hermetic core suite — five function-scoped fixtures
-              over the Python fixture repository, the setup gate for network tests, one
-              autouse pin of a host fact, one autouse guard of the ``CRB_*`` environment, and
-              the session finaliser that keeps the base temporary directory deletable.
+              over the Python fixture repository, the setup gate for network tests, two
+              autouse pins (a host fact and the builder login verify), one autouse guard of
+              the ``CRB_*`` environment, and the session finaliser that keeps the base
+              temporary directory deletable.
 What it does: Builds a fresh ``pyrepo`` (three commits) per test and derives from it the
               ``runner`` (a real ``PytestRunner``), a ``LocalExecutor``, the mined
               ``feat_task`` and a sighted ``trial`` worktree that is removed afterwards. Nothing
@@ -21,11 +22,13 @@ How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``t
               ``pytest_runtest_setup`` hands the ``network`` marker's hosts to
               ``conftest_langs.require_network``. ``_no_host_claude_cli`` pins
               ``claude_cli_on_path`` to ``False`` for every test, so no test passes or fails on
-              whether this machine has the ``claude`` CLI (P-037); ``_no_host_endpoint_env``
-              clears the ``CRB_OPENAI_*`` / ``CRB_AZURE_*`` variables, so no test builds
-              against the endpoint this machine's shell names (P-277); ``_no_crb_env_leak``
-              puts every ``CRB_*`` variable back after each test, so no test (and no code
-              under test that writes one) hands a home or a setting to the next (P-310).
+              whether this machine has the ``claude`` CLI (P-037); ``_no_real_builder_login``
+              pins the run preflight's claude_code login verify to a fake ``ok`` (pilot D1);
+              ``_no_host_endpoint_env`` clears the ``CRB_OPENAI_*`` / ``CRB_AZURE_*``
+              variables, so no test builds against the endpoint this machine's shell names
+              (P-277); ``_no_crb_env_leak`` puts every ``CRB_*`` variable back after each test,
+              so no test (and no code under test that writes one) hands a home or a setting to
+              the next (P-310).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
@@ -164,3 +167,31 @@ def _no_host_endpoint_env(monkeypatch: pytest.MonkeyPatch) -> None:
     endpoint sets the variables itself (tests/test_builders_endpoint.py)."""
     for name in _HOST_ENDPOINT_ENV:
         monkeypatch.delenv(name, raising=False)
+
+
+#: What the suite's fake login verify answers: a working login, from a labelled test source.
+FAKE_LOGIN_SOURCE = ("test", "")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_builder_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test runs with the claude_code login verify pinned to a fake that answers ``ok``:
+    the run preflight (src/crb/server/builder_login.py, pilot D1) verifies a login before a
+    build is queued, and no test may run the real ``claude`` CLI or call a model — nor pass or
+    fail on whether this machine has a working login (P-037). A test of the gate installs its
+    own verifier. Skipped where the server extra is not installed."""
+    try:
+        from crb.builders.claude_code import LoginCheck, default_auth
+        from crb.server import builder_login
+    except ImportError:  # pragma: no cover — a core-only environment
+        return
+
+    def verify(auth: str, binary: str) -> LoginCheck:
+        del auth, binary
+        return LoginCheck("ok", "pong", source=FAKE_LOGIN_SOURCE[0])
+
+    monkeypatch.setitem(
+        builder_login.LOGIN_VERIFIERS,
+        "claude_code",
+        builder_login.LoginVerifier(verify, lambda auth: FAKE_LOGIN_SOURCE, default_auth),
+    )

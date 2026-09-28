@@ -188,6 +188,38 @@ def test_a_jsonl_export_reads_through_the_grade_row(vb: ModuleType, tmp_path: Pa
     assert v.failure_kind == "budget" and v.row_hash == row.row_hash and v.detail == "max_turns"
 
 
+def test_the_scorecard_says_your_login_apart_from_the_provider(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """Pilot D1 (P-435): the campaign's process-loss line reads a refused login as "your
+    login", not as the provider's outage, from the cause the row pinned at write."""
+    row = posture_row(
+        repo="alpha",
+        task_id="a" * 40,
+        clean=False,
+        tests_unmodified=True,
+        target_green=None,
+        no_new_failures=None,
+        source_changed=None,
+        mode="blind",
+        gold_clean=True,
+        apparatus_version="2.4",
+        error="model_error: authentication failed (HTTP 401) — run `claude login`",
+        labels={
+            "failure_kind": "outage",
+            "lint_reason": "not_reached",
+            "change_id": "e" * 40,
+            "outage_cause": "auth",
+        },
+    ).chained("0" * 64)
+    p = tmp_path / "ledger.jsonl"
+    p.write_text(json.dumps(row.to_dict()) + "\n", encoding="utf-8")
+    (v,) = vb.read_ledger(p)
+    assert v.failure_kind == "outage" and v.outage_cause == "auth"
+    out = vb.render_markdown([v], [], apparatus="all")
+    assert "| outage by cause: your login / the provider / not recorded | 1 / 0 / 0 |" in out
+
+
 def test_the_markdown_carries_n_method_and_apparatus_on_every_figure(
     vb: ModuleType, tmp_path: Path
 ) -> None:

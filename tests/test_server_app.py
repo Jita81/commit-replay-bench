@@ -204,6 +204,7 @@ class TestFactory:
         assert mounted == [  # core (W2-A) + domain (W2-B), sorted — the seam mounts every module
             "admin",
             "auth",
+            "builders",
             "capability",
             "factory",
             "flow",
