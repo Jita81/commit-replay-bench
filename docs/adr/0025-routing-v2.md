@@ -32,8 +32,8 @@ bar the code applies is not the bar README publishes. README's "Not a licence to
 reads "n ≥ 10, point ≥ 0.90, Wilson-low ≥ 0.80, false-Q1 = 0, oracle ≥ 0.80, controls
 passed". Read against `origin/feat/value` (`8fabbd7`, PR #57, which holds main and #50) and
 `origin/feat/posture` (`b1fd424`, PR #56, apparatus 2.3), the code applies something weaker
-**[measured — method: reading both branches on 2026-09-26; each point is a fact about the
-code, not a rate]**:
+**[measured — n = 2 branches read (`8fabbd7`, `b1fd424`), method: reading both branches on
+2026-09-26; apparatus n/a — each point is a fact about the code, not a graded rate]**:
 
 - **`n` counts attempts.** `CellStats.n` is every eligible row: every ladder rung and every
   rerun of one commit adds one, and the Wilson interval treats them as independent.
@@ -384,8 +384,10 @@ measure next. The core stays standard-library only (ADR-0008).
       and the final rung's builder, model and provider — must route `deliver` in that same
       map, or the item stops `size_exceeds_licence` (the build is larger than the estimate) or
       `cell_not_licensed`; when the measured size differs from the estimate, larger or
-      smaller, the route gate reads the measured cell's route (P-335). Both sizes and both
-      cells go on the evidence and in the stop. No override lifts this: `deliver_override`
+      smaller, the route gate reads the measured cell's route (P-335). This supersedes the
+      last sentence of ADR-0003 decision 3 ("a smaller change keeps the estimate's cell"):
+      a smaller change is licensed by its measured cell, never by the estimate's. Both sizes
+      and both cells go on the evidence and in the stop. No override lifts this: `deliver_override`
       lifts only the sign-off clause at the entry gate (ADR-0026 items 6 and 8), never
       `cell_not_licensed` or `size_exceeds_licence`.
     - **A reviewer model leaves findings, never a verdict** (superseding ADR-0013 decision 3
@@ -498,7 +500,8 @@ measure next. The core stays standard-library only (ADR-0008).
 ## Consequences
 
 **What becomes easier.**
-- A `deliver` is defensible from the ledger: at least ten distinct commits, each counted once
+- A `deliver` is defensible from the ledger: at least 20 distinct changes (the first look of
+  `look.v1`), in a reading registered before the first attempt, each counted once
   by its first observed attempt, at one apparatus, with an oracle scored on at least half of
   them and a complete controls report — the sentence README prints, because README prints
   what `RoutingPolicy.describe()` returns.

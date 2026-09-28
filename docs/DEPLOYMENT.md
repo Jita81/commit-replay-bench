@@ -79,7 +79,8 @@ admits a temporary home for a throwaway evaluation only (the walkthrough harness
 
 A second stack — a pilot beside the operator's own, a rehearsal beside a campaign — needs its
 own everything, or the two will fight (pilot D5, 2026-09-27: the second worker could not bind
-the metrics port the first one held).
+the metrics port the first one held **[measured — n = 1 bind failure, method: the pilot
+worker's own log (`worker.log`, P-436), apparatus 2.3]**).
 
 - **Its own root.** A different `CRB_HOME` and `CRB_DATABASE_URL`, both persistent (§1.1).
   A second stack never shares the first one's store: each worker would claim the other's runs.
@@ -96,7 +97,8 @@ the metrics port the first one held).
 ```bash
 export CRB_HOME=~/crb-pilot/home CRB_ENV=dev CRB_DATABASE_URL="sqlite:///$HOME/crb-pilot/crb.db"
 export CRB_METRICS_PORT=auto
-crb migrate && crb serve --host 127.0.0.1 --port 8001 &
+crb migrate                                   # in the foreground: the store is at head first
+crb serve --host 127.0.0.1 --port 8001 &      # only the API goes to the background
 crb worker --home "$CRB_HOME" --executor local
 ```
 

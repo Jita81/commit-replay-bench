@@ -116,8 +116,8 @@ default**.
   registered before its first attempt, over a frozen pool read in its seeded order, counts
   each distinct change once by its first observed attempt at rung r1 in the sealed posture
   and finds 20 of the first 20, 29 of the first 30 or 38 of the first 40 clean (the look
-  rule look.v1, read only at those looks); the reading's hierarchy is read richest arm first
-  and stops at the first arm that does not deliver, `S3` alone is a ceiling that licenses
+  rule look.v1, read only at those looks); the reading's hierarchy is read from the richest
+  arm first and stops at the first arm that does not deliver, `S3` alone is a ceiling that licenses
   nothing, only `S1@<author>` and `S2` certify, and `A0` is descriptive; every reading on a
   cell spends its rule's chance of delivering at a true rate of 0.80 (0.0210 for look.v1)
   from one error budget of 0.05 per cell; and the cell also needs false-Q1 = 0, an oracle

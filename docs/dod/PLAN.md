@@ -154,7 +154,10 @@ of that stream stays in Wave 4.
 | X · a configured builder endpoint | G-611 | every OpenAI-compatible builder and the labeller call the endpoint `CRB_OPENAI_BASE_URL` names, stamp its provider and use its timeout, reply length and retry count (`product.truth.26`, brought in from the parked `feat/w3-x`); the factory's test author stamps the provider of the endpoint it calls and refuses a rung naming another (`product.truth.27`) |
 
 **Status on `feat/ns2`.** Built and verified: T, G, R, F, H, I (but G-709), X and C's claims
-work (but G-994, G-996, G-995 and G-998). Not built, and carried forward to the list after Wave 4: E2
+work (but G-994, G-996, G-995 and G-998) **[measured — n = 8 streams, method: each stream's
+criteria read met by `scripts/dod_check.py --check` only on evidence that resolves, and the
+full test suite run on the branch; apparatus n/a, a finding about the product's own code, not
+a graded row]**. Not built, and carried forward to the list after Wave 4: E2
 (G-989, G-990, G-991 — `measure.truth.30` and `truth.31` stay unmet), S0 (G-477 —
 `home.truth.13` and `sign-off-a-cell.truth.3` stay unmet), C's check that a criterion kept its
 words (G-994), its scheduled mutation pass (G-996), one owner per shared defect class (G-995)
