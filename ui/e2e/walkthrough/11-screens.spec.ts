@@ -67,8 +67,9 @@
  *               stdout.
  * How:          Playwright; `signIn` from support.ts; the routes list is built from the
  *               primary repo, the run and the task found through the API as the admin;
- *               `AxeBuilder` with the WCAG tags; the bubble is found through the trigger's
- *               `aria-describedby`, never by text, so the spec needs no import from src.
+ *               axe with the WCAG tags (ui/e2e/axe.ts); the bubble is found through the
+ *               trigger's `aria-describedby`, never by text, so the spec needs no import from
+ *               src.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts (`env`, `signIn`, `primary`, the seeding helpers),
@@ -84,7 +85,7 @@
  *               added (add its route and slug to `routes()`); a persona is added (the shards
  *               pick it up; a fifth persona makes one shard run two).
  */
-import AxeBuilder from '@axe-core/playwright'
+import { axeViolations } from '../axe'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -205,7 +206,6 @@ async function shot(page: Page, persona: string, slug: string, width: number): P
   await page.screenshot({ path, fullPage: true, animations: 'disabled' })
 }
 
-const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 
 /**
  * Routes that still scroll sideways at 375 px, by slug, each with the gap that tracks it.
@@ -425,8 +425,8 @@ async function hintSample(page: Page, where: string, width: number): Promise<voi
     expect(text.length, `${where}: hint ${id} is too short to explain anything`).toBeGreaterThanOrEqual(40)
     expect(text.trim().endsWith('.'), `${where}: hint ${id} is not a sentence`).toBe(true)
     expect(await tip.locator('a').count(), `${where}: hint ${id} contains a link`).toBe(0)
-    const a11y = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
-    expect(a11y.violations, `${where}: axe with hint ${id} open: ${JSON.stringify(a11y.violations, null, 2)}`).toEqual([])
+    const violations = await axeViolations(page)
+    expect(violations, `${where}: axe with hint ${id} open: ${JSON.stringify(violations, null, 2)}`).toEqual([])
     await page.keyboard.press('Escape')
     await expect(tip, `${where}: hint ${id} did not close on Escape`).toBeHidden()
     if (width === 375) await page.mouse.move(0, 0)

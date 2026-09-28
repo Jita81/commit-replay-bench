@@ -17,7 +17,7 @@
  *               shell. No server is contacted.
  * How:          `page.route` intercepts every `/api/v1` request and answers from inline
  *               fixtures (`/auth/me` 401 or a principal, `/ledger/verify`, `/health`,
- *               `/version`); `AxeBuilder` with the WCAG 2.1 AA tags.
+ *               `/version`); axe with the WCAG 2.1 AA tags (ui/e2e/axe.ts).
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/playwright.config.ts (builds, serves `dist/` and ignores the walkthrough),
@@ -26,10 +26,10 @@
  *               index route's `RequireAuth`), ui/src/App.tsx (the `<Route index>` this
  *               visits), .github/workflows/ci.yml (the `ui-smoke` job that runs this)
  * Tested by:    ui/e2e/smoke.spec.ts
- * Touch when:   the login page, the shell's nav, the index route or the auth redirect
- *               changes; never for a new repository.
+ * Touch when:   never for a new repository; the login page, the shell's nav, the index route or the
+ *               auth redirect changes.
  */
-import AxeBuilder from '@axe-core/playwright'
+import { axeViolations } from './axe'
 import { expect, test, type Page } from '@playwright/test'
 
 const envelope = (status: number, code: string, message: string) => ({
@@ -68,8 +68,8 @@ test.describe('login page', () => {
     const oidc = page.getByRole('link', { name: 'Sign in with organisation account' })
     await expect(oidc).toHaveAttribute('href', /^\/api\/v1\/auth\/oidc\/start/)
 
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
-    expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([])
+    const violations = await axeViolations(page)
+    expect(violations, JSON.stringify(violations, null, 2)).toEqual([])
   })
 
   test('a protected route redirects to /login with ?next=', async ({ page }) => {
@@ -115,8 +115,8 @@ test.describe('shell', () => {
     await expect(page.getByTestId('ledger-gate')).toHaveAttribute('data-state', 'OPEN')
     await expect(page.getByRole('link', { name: 'Export JSONL' })).toHaveAttribute('href', '/api/v1/ledger/export?format=jsonl')
 
-    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
-    expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([])
+    const violations = await axeViolations(page)
+    expect(violations, JSON.stringify(violations, null, 2)).toEqual([])
   })
 
   test('unknown routes render the 404 inside the shell', async ({ page }) => {
