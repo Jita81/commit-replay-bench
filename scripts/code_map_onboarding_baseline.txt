@@ -124,7 +124,6 @@ tests/test_posture_e2e_docker.py
 tests/test_provision_fetch.py
 tests/test_provision_go.py
 tests/test_provision_python.py
-tests/test_public_docs.py
 tests/test_qualify.py
 tests/test_redact.py
 tests/test_release_tag.py
@@ -137,7 +136,6 @@ tests/test_runners_node.py
 tests/test_runners_parsers.py
 tests/test_sandbox_docker.py
 tests/test_server_admin_users.py
-tests/test_server_auth.py
 tests/test_server_claude_login.py
 tests/test_server_github_app.py
 tests/test_server_reaper.py

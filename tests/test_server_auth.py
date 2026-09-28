@@ -24,7 +24,8 @@ Works with:   src/crb/server/auth.py (under test), src/crb/server/routes/auth.py
               src/crb/store/models.py (the ``users`` table), docs/SECURITY.md (authentication
               and authorisation, §3.4), docs/DEPLOYMENT.md (Entra ID → ``CRB_OIDC__*``, §4.1)
 Tested by:    tests/test_server_auth.py
-Touch when:   a role is added to the ladder (the map and the RBAC matrices in every route
+Touch when:   never for a new repository (onboarding one adds no role or sign-in path); a
+              role is added to the ladder (the map and the RBAC matrices in every route
               suite); the OIDC claims mapping changes; never so that a mutating route skips CSRF.
 """
 
