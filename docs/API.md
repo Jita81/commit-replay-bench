@@ -67,11 +67,11 @@ its sentence and link here; `crb doctor`'s `migrations` line renders the same
 
 | Method | Path | Role | Body / Returns |
 |---|---|---|---|
-| POST | `/auth/login` | – | `{username, password}` → principal; sets cookies. **429 `rate_limited`** (`Retry-After`) after five failures per minute for one username from one address, or twenty per minute from one address whatever the usernames — per API process; production also limits `/auth/login` at the proxy ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)) |
+| POST | `/auth/login` | – | `{username, password}` → principal; sets cookies. **429 `rate_limited`** (`Retry-After`) after five failures per minute for one username from one address, or twenty per minute from one address whatever the usernames — per API process; production also limits `/auth/login` at the proxy ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)). A successful sign-in writes `user.signed_in` (`by: local`); a refused one writes nothing |
 | POST | `/auth/logout` | any | 204; clears the cookies and, for a current session, ends **every** session of the account on every device (the account's session nonce is rotated; the next request of any of them is **401 `session_revoked`**). Idempotent: a stale or absent cookie ends nothing |
 | GET | `/auth/me` | any | `{id, display_name, email, role, issuer}` |
 | GET | `/auth/oidc/start` | – | 302 to provider (state in cookie) |
-| GET | `/auth/oidc/callback` | – | 302 to `/` after establishing session |
+| GET | `/auth/oidc/callback` | – | 302 to `/` after establishing session; writes `user.signed_in` (`by: oidc`) |
 | GET | `/auth/csrf` | any | `{token}` — this session's CSRF token (and the cookie re-set) |
 
 ## Repos
@@ -156,7 +156,7 @@ One read per repository, every value stream. It is a **derivation, not a store**
 come from moments already recorded (a `repo.created` event, a run's `created`, a graded row's
 `created`, a `controls.report`, a sign-off's `created` and the row its approver attested, the
 factory chain's `intake.registered` / `backlog.frozen` / `delivery.opened` / `delivery.merged`, a
-`user.password_set` event and the account's next sign-in), and the spend from the graded rows'
+`user.password_set` event and the account's first `user.signed_in` event after it), and the spend from the graded rows'
 `cost_usd` with `cost_known` honoured. Nothing is written.
 
 Three rules the client can rely on. **An unmeasured figure is `null`, never 0**: `median_s`,

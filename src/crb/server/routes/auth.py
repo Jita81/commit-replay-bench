@@ -134,6 +134,8 @@ def login(
         raise ApiError(401, "invalid_credentials", "username or password is incorrect")
     limiter.reset(body.username, ip)
     user.last_login = _now()
+    # every sign-in, not just the latest: a recovery is timed to the FIRST after a reset
+    record_user_event(db, action="user.signed_in", actor=user.id, target=user, by="local")
     db.commit()
     request.state.user_id = user.id
     cv = credential_version(user)
@@ -310,6 +312,7 @@ def oidc_callback(
             issuer=issuer,
         )
     user.last_login = _now()
+    record_user_event(db, action="user.signed_in", actor=user.id, target=user, by="oidc")
     db.commit()
     request.state.user_id = user.id
     response = RedirectResponse(pending.next_path, status_code=status.HTTP_302_FOUND)

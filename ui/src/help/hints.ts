@@ -138,7 +138,7 @@ export const HINTS = {
   'flow.installed_to_healthy':
     'From this deployment’s install to the first time /health read green. The install is dated only when the server was first started on an empty database; a deployment upgraded to this release shows a dash with the reason rather than a guessed date.',
   'flow.password_set_to_signed_in':
-    'From an admin setting someone else’s password to that person signing in again: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted. Only an admin sees it, as only an admin sees the accounts.',
+    'From an admin setting someone else’s password to that person’s first sign-in after it: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted. Only an admin sees it, as only an admin sees the accounts.',
   'flow.spend':
     'What this stream spent, summing only the rows whose cost is a measurement. A row that reported no price is never counted as zero, so the figure is a floor and the line underneath says how many rows are missing from it.',
   'flow.spend_total':
