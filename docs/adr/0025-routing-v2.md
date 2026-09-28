@@ -9,11 +9,11 @@ below are read as ADR-0026 item 6 rewrites them, and each carries a note saying 
 `routing.POLICY_VERSION` → `routing.v2`, `routing.CONTROLS_POLICY_VERSION` →
 `controls-gate.v2`, `signoff.SIGNOFF_POLICY_VERSION` → `signoff-policy.v4`,
 `signoff.SIGNOFF_SCHEMA` → `crb.signoff.v5` (the v4 body frozen) and
-`oracle.mutation.MUTATION_VERSION` → `mutation.v2`. Every row of 2.4 also stamps its context
-arm (`labels.context_arm`) and its class-set version (`labels.taxonomy`) — ADR-0026 items 1 and
-9 ride this one bump. No belt, no belt set (`v5`), no size tier, no global class and no
-`CELL_FIELDS` entry moves, so a clean row means at 2.4 what it meant at 2.3. What moves is
-what rows license: which rows a route reads, how it counts them, what else
+`oracle.mutation.mutation_version()` → `mutation.v2` (`MUTATION_V2`). Every row of 2.4 also
+stamps its context arm (`labels.context_arm`) and its class-set version (`labels.taxonomy`) —
+ADR-0026 items 1 and 9 ride this one bump. No belt, no belt set (`v5`), no size tier, no global
+class and no `CELL_FIELDS` entry moves, so a clean row means at 2.4 what it meant at 2.3. What
+moves is what rows license: which rows a route reads, how it counts them, what else
 must have been measured, and what the factory may deliver on them. Routing is part of the
 apparatus (ADR-0003, Consequences), and rows of two apparatus versions are never pooled.
 
@@ -135,8 +135,10 @@ measure next. The core stays standard-library only (ADR-0008).
    task until an attempt observes the builder — the instrument's failure is held against
    autonomy until the instrument is fixed and the commit measured again (ADR-0003's fail-closed
    rule), never against that commit for the whole apparatus. The task **routes** when its first
-   attempt was gold-checked (`gold_clean is True`) and graded with belt 5 not switched off by
-   configuration; otherwise it is left out whatever its outcome, and counted. `CellStats`
+   attempt was gold-checked (`gold_clean is True`) and is not an attempt belt 5 could have
+   changed while switched off by configuration (one that passed every other belt); a
+   lint-disabled attempt that failed another belt is the miss it is (P-342). Any other first
+   attempt is left out, and counted. `CellStats`
    gains:
    - `n_tasks` — the routing tasks, the number the bar reads (the old count of distinct
      eligible tasks is kept as `n_tasks_eligible`);
@@ -173,7 +175,7 @@ measure next. The core stays standard-library only (ADR-0008).
 3. **Nothing unmeasured delivers: the oracle.** A route reads `OracleEvidence`
    (`crb.core.routing`). For each task it takes the **minimum** strength over that task's
    scoreable `oracle.score` events whose provenance names `mutation_version ==
-   MUTATION_VERSION` (`mutation.v2`, item 7) and the reading's apparatus. A minimum cannot
+   mutation_version()` (`mutation.v2`, item 7) and the reading's apparatus. A minimum cannot
    rise when a task is scored again, so re-scoring a flaky suite until it reads higher does
    nothing; "latest wins" is gone. The cell's strength is the mean of those minimums over its
    routing tasks that have one, and `scored_tasks / n_tasks` is its share. No scored task
@@ -200,7 +202,8 @@ measure next. The core stays standard-library only (ADR-0008).
    of apparatus 2.4 or later carries the hashed label `lint_reason`. The ledger refuses such a
    row without the label, with `not_requested`, with `evaluated` while `repo_lint_clean` is
    `None` (or the reverse), or with `error` on a clean row. A task whose first attempt ran
-   with belt 5 switched off does not route (item 2), and a cell whose reading has not
+   with belt 5 switched off, and that passed every other belt, does not route (item 2) — a
+   lint-disabled miss still counts (P-342) — and a cell whose reading has not
    delivered that holds such a task routes `calibrate` with `lint_disabled`. The fix is a
    person's — the loop may never write `lint.disabled` (ADR-0020 §1) — and it is to switch
    belt 5 back on and measure new commits. Switching belt 5 off can therefore never help a
@@ -219,11 +222,13 @@ measure next. The core stays standard-library only (ADR-0008).
    2.4 or later must carry `gold_clean=True`: qualification already makes it so (ADR-0019 §4),
    and the ledger now refuses anything else.
 
-7. **Oracle scoring v2** (`crb.core.oracle.mutation`, `MUTATION_VERSION = "mutation.v2"`).
+7. **Oracle scoring v2** (`crb.core.oracle.mutation`, `MUTATION_V2 = "mutation.v2"`, read
+   through `mutation_version()`).
    - Every candidate of every changed file is generated, with no cap per file. Within a file
      the candidates are ranked by the SHA-256 of `task_id|path|line|col|op`; files are taken
-     in path order, one candidate each in turn, up to `max_mutants` (default 20). The sample
-     is deterministic, seeded by the commit, and reaches every file; the provenance records the
+     in path order, one candidate each in turn, up to `max_mutants` (default 20), or one per
+     file when more files than that hold a candidate (P-343). The sample is deterministic,
+     seeded by the commit, and reaches every file; the provenance records the
      sampler (`hash-rr.v1`) and the candidates per file.
    - A mutant whose run timed out is `timeout`, and one whose run exited 0 with a parse error
      is `unattributed`. Neither is a kill or an escape: both leave the numerator and the
@@ -337,7 +342,9 @@ measure next. The core stays standard-library only (ADR-0008).
     proven standard, never `no_proven_standard`, `size_exceeds_licence` or
     `cell_not_licensed`. The advisory model reviewer (assessment C5, the last bullet) is
     **deferred**: it strains the non-goal "not an AI's opinion of an AI's work", and no
-    criterion names it.
+    criterion names it. The two review probes built from negative controls and the evented
+    operator sizing (`intake.sized`) are **deferred** too: no criterion names them and
+    nothing builds them yet (P-333); the bullets below say so where they appear.
     - **The strength probe is required** (amending ADR-0021). `MutationStrengthProbe` runs
       with `required=True` and `max_mutants=DEFAULT_MAX_MUTANTS` under the v2 sampler. A build
       it cannot score stops `oracle_not_scoreable` — no rework, no delivery — with the
@@ -345,26 +352,35 @@ measure next. The core stays standard-library only (ADR-0008).
       waiver for one item (`POST /factory/{repo}/items/{item_id}/probe-waiver` with a reason;
       403 below approver), recorded as `review.probe_waived` on the factory chain with the
       authored test's SHA-256: it holds only while that test is byte-identical, and the pull
-      request names the approver and the reason.
-    - **Two negative controls become review probes.** `HardcodeCheatProbe` and `StubProbe`
-      build `hardcode_cheat` and `stub` (`crb.core.oracle.controls.construct_control`)
+      request names the approver and the reason. The waiver is a second approver's act
+      (ADR-0016's two-person rule, as GOV-4 applies it to the route-gate override): the API
+      refuses it 409 `same_actor` to an approver who queued a factory run on the repository
+      that is still queued or running, and the loop ignores a waiver that names the run's own
+      actor and records `review.waiver_refused` (P-339).
+    - *Deferred:* **Two negative controls become review probes.** `HardcodeCheatProbe` and
+      `StubProbe` build `hardcode_cheat` and `stub` (`crb.core.oracle.controls.construct_control`)
       against the authored test on the base tree. A test that passes a cheat or a stub is a
       major `weak_oracle` finding and takes the existing `oracle_needs_strengthening` stop
       (ADR-0013, amendment of 2026-09-21); a control the language cannot construct is an info
       finding.
     - **An item without points is `unsized`.** `crb.intake.draft.size_for` returns `unsized`
       when there are no points, never `S`, and readiness routes the item `human` until the
-      ticket gains points or an operator sizes it (evented `intake.sized`).
+      ticket gains points or an operator registers the item with a `size_estimate` (the
+      evented `intake.sized` act is deferred).
     - **The licence is the delivered change's own cell.** The gate reads the map once per run,
       before any build, with the run's own rows excluded (ADR-0003, 2026-09-19), in two
-      projections: class × size for the record, and class × size × builder × model, which
-      licenses. With delivery on, an item for which no rung of the ladder holds a `deliver`
-      cell at its estimated size stops before any build (`not_licensed`, $0). After an
+      projections: class × size for the record, and class × size × builder × model × provider,
+      which licenses — the provider is one of the cell's seven fields (P-340). With delivery
+      on, an item for which no rung of the ladder holds a `deliver` cell at its estimated size
+      stops before any build (`not_licensed`, $0). After an
       accepting review, the change's own cell — its class, the size tier of the build's churn,
-      and the final rung's builder and model — must route `deliver` in that same map, or the
-      item stops `size_exceeds_licence` (the build is larger than the estimate) or
-      `cell_not_licensed`. Both sizes and both cells go on the evidence and in the stop.
-      `deliver_override` still overrides, and its event names both cells.
+      and the final rung's builder, model and provider — must route `deliver` in that same
+      map, or the item stops `size_exceeds_licence` (the build is larger than the estimate) or
+      `cell_not_licensed`; when the measured size differs from the estimate, larger or
+      smaller, the route gate reads the measured cell's route (P-335). Both sizes and both
+      cells go on the evidence and in the stop. No override lifts this: `deliver_override`
+      lifts only the sign-off clause at the entry gate (ADR-0026 items 6 and 8), never
+      `cell_not_licensed` or `size_exceeds_licence`.
     - **A reviewer model leaves findings, never a verdict** (superseding ADR-0013 decision 3
       for a model). `CRB_FACTORY__REVIEWER` (a rung label; unset by default) is refused when
       its model is the test author's or any build rung's (`canonical_model`, C3).

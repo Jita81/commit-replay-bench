@@ -516,17 +516,21 @@ def sample_mutants(
 ) -> list[Mutant]:
     """The ``hash-rr.v1`` sample: each file's candidates ranked by :func:`rank_key` (ties
     by description, then source), files taken in path order, one candidate each in turn,
-    until ``max_mutants`` are taken or every file is exhausted."""
+    until ``max_mutants`` are taken or every file is exhausted. The sample reaches every
+    file (ADR-0025 item 7): when more files hold a candidate than ``max_mutants``, the plan
+    rises to one mutant per such file, so the files that sort last are never the ones left
+    unmutated (P-343). ``max_mutants`` of 0 plans nothing."""
     ranked = {
         path: sorted(ms, key=lambda m: (rank_key(task_id, m), m.description, m.mutated_source))
         for path, ms in per_file.items()
     }
     paths = sorted(ranked)
+    cap = max(max_mutants, sum(1 for p in paths if ranked[p])) if max_mutants > 0 else 0
     out: list[Mutant] = []
     depth = 0
-    while len(out) < max_mutants and any(depth < len(ranked[p]) for p in paths):
+    while len(out) < cap and any(depth < len(ranked[p]) for p in paths):
         for p in paths:
-            if len(out) >= max_mutants:
+            if len(out) >= cap:
                 break
             if depth < len(ranked[p]):
                 out.append(ranked[p][depth])

@@ -125,6 +125,7 @@ from crb.server.settings import (
     OidcSettings,
     Settings,
 )
+from crb.store.events import USERS_LOCK, refuse_after_events_lock, write_locks_held
 from crb.store.models import User
 
 with warnings.catch_warnings():
@@ -295,7 +296,13 @@ def count_users(db: Session) -> int:
 def lock_users_table(db: Session) -> None:
     """Serialise a read-then-write on ``users`` for the rest of this transaction: SQLite
     takes its write lock now (``BEGIN IMMEDIATE``), Postgres a transaction-scoped advisory
-    lock (id 7336 — one id per table, see ``crb.store.jobs``). Other dialects: no-op."""
+    lock (id 7336 — one id per table, see ``crb.store.jobs``). Other dialects: no-op.
+
+    It is taken BEFORE the ``events`` write lock in a transaction, never after it: every
+    admin act holds it and then records its event, so the other order deadlocks on
+    PostgreSQL. Asking for it after the events lock raises
+    :class:`~crb.store.events.LockOrderError` at once, on every dialect (P-227)."""
+    refuse_after_events_lock(db, USERS_LOCK)
     dialect = db.get_bind().dialect.name
     if dialect == "sqlite":
         # pysqlite defers BEGIN until the first write, so this is safe after the auth
@@ -307,6 +314,7 @@ def lock_users_table(db: Session) -> None:
                 raise
     elif dialect == "postgresql":
         db.execute(text("SELECT pg_advisory_xact_lock(7336)"))
+    write_locks_held(db).add(USERS_LOCK)
 
 
 def count_active_admins(db: Session) -> int:

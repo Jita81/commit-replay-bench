@@ -15,13 +15,16 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               statement short of DDL rewrites an append-only row (SQLite's REPLACE,
               PostgreSQL's TRUNCATE and upsert — EI-4, EI-5), that the ``append_only`` probe
               goes down on a disabled, moved, missing or ``WHEN``-neutered trigger (which the
-              next start re-creates) and on an accepted REPLACE, and never claims an UPDATE it
-              did not try on an empty ledger, that a PostgreSQL application role that does
-              not own the tables starts with no DDL and cannot remove the protection nor
-              issue table DDL, and that a system event holds its trace's ``seq`` until it
-              commits (EI-1) and the events write lock holds a second writer until the first
-              commits (P-196), and that the decisions clock joins a concurrent first stamp in
-              both dialects (P-357).
+              next start re-creates where the application owns the tables, and only the
+              owner's ``crb migrate`` where it does not) and on an accepted REPLACE, and never
+              claims an UPDATE it did not try on an empty ledger, that a PostgreSQL
+              application role that does not own the tables starts with no DDL and cannot
+              remove the protection nor issue table DDL, that a system event holds its
+              trace's ``seq`` until it commits (EI-1) and the events write lock holds a second
+              writer until the first commits (P-196), and that the ``users`` lock is never
+              taken after the ``events`` lock, so an organisation sign-in and an admin act at
+              once never deadlock (P-227), and that the decisions clock joins a concurrent first stamp
+              in both dialects (P-357).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -702,6 +705,144 @@ def test_the_pg_function_raises_the_one_append_only_text() -> None:
     assert store_db.append_only_error_text("grades") in store_db._sqlite_trigger_sql(
         "grades", "grades_no_update"
     )
+
+
+def test_a_trigger_missing_on_a_split_role_store_is_restored_by_the_owner_not_the_application(
+    backend: Backend,
+) -> None:
+    """DEPLOYMENT §3.3 said the next start re-creates a trigger that is not live. That holds
+    only where the application owns the tables: on a split-role store the owner may drop a
+    trigger, the probe goes ``down`` naming it, and the application role's own start
+    (``init_db``) is refused — it may not issue trigger DDL — so the guide sends the operator
+    to ``crb migrate`` as the owner, which restores it."""
+    import secrets
+
+    from sqlalchemy.engine import make_url
+
+    from crb.observability.probes import DOWN, OK
+    from crb.server.routes.system import probe_append_only
+    from crb.store import migrate
+
+    if backend.dialect != "postgresql":
+        pytest.skip("SQLite has no roles: the application and the owner are one (DEPLOYMENT §3.3)")
+    migrate.upgrade(backend.url)
+    role, password = f"crb_app_{secrets.token_hex(4)}", secrets.token_hex(16)
+    with backend.engine.begin() as c:
+        schema = c.execute(text("SELECT current_schema()")).scalar_one()
+        others = sorted(set(inspect(backend.engine).get_table_names()) - set(APPEND_ONLY_TABLES))
+        c.execute(text(f"CREATE ROLE {role} LOGIN PASSWORD '{password}'"))
+        c.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO {role}"))
+        c.execute(text(f"GRANT SELECT, INSERT ON {', '.join(APPEND_ONLY_TABLES)} TO {role}"))
+        c.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {', '.join(others)} TO {role}"))
+        c.execute(text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO {role}"))
+        c.execute(text("DROP TRIGGER grades_no_delete ON grades"))  # the owner may
+    app_url = (
+        make_url(backend.url)
+        .set(username=role, password=password)
+        .render_as_string(hide_password=False)
+    )
+    app = store_db.make_engine(app_url)
+    try:
+        probe = probe_append_only(store_db.make_session_factory(app))
+        assert probe.status == DOWN and probe.data["missing"] == ["grades_no_delete"]
+        with pytest.raises(DBAPIError, match=r"permission denied|must be owner"):
+            store_db.init_db(app)  # the API's and the worker's start cannot restore it
+        assert probe_append_only(store_db.make_session_factory(app)).status == DOWN
+        migrate.upgrade(backend.url)  # `crb migrate` as the owner
+        assert probe_append_only(store_db.make_session_factory(app)).status == OK
+    finally:
+        app.dispose()
+        with backend.engine.begin() as c:
+            c.execute(text(f"DROP OWNED BY {role}"))
+            c.execute(text(f"DROP ROLE {role}"))
+
+
+def test_the_users_lock_is_never_taken_after_the_events_lock(backend: Backend) -> None:
+    """P-227: the organisation sign-in under ``role_from_claims=always`` took the ``events``
+    write lock (the audited commit) and then the ``users`` lock, while every admin act takes
+    ``users`` and then ``events``; on PostgreSQL the two orders deadlock. The one order is
+    ``users`` before ``events`` in a transaction, and taking them the other way round is
+    refused at once — on either dialect, so a test on SQLite catches it too. Re-taking a
+    lock the transaction already holds is not an inversion."""
+    from crb.server.auth import lock_users_table
+    from crb.store.events import LockOrderError, lock_event_writes
+
+    store_db.init_db(backend.engine)
+    with backend.factory() as s:
+        lock_event_writes(s)
+        with pytest.raises(LockOrderError, match="users lock"):
+            lock_users_table(s)
+        s.rollback()
+    with backend.factory() as s:  # the order the rule names, and re-entry, both hold
+        lock_users_table(s)
+        lock_event_writes(s)
+        lock_users_table(s)
+        s.commit()
+    with backend.factory() as s:  # a new transaction starts with no lock held
+        lock_event_writes(s)
+        s.commit()
+        lock_users_table(s)
+        s.commit()
+
+
+def test_an_organisation_sign_in_and_an_admin_act_at_once_never_deadlock(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-227, end to end: an ``always`` sign-in held just before it takes the ``users`` lock,
+    and an admin deactivating another account held just after it took it, both released at
+    once. On PostgreSQL the sign-in once held the ``events`` lock there, the database
+    detected the deadlock and the sign-in failed (``DeadlockDetected``, a 500). Now both
+    complete: the sign-in takes ``users`` first, so it waits for the admin's commit."""
+    import os
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    import crb.server.routes.admin as admin_routes
+    import crb.server.routes.auth as auth_routes
+    from crb.server.app import create_app
+    from fixtures.concurrency import at_once, pause_after
+    from fixtures.server_seed import API_PREFIX, add_users, login, make_settings, user_id
+
+    try:
+        from tests.test_server_auth import OIDC_SETTINGS, FakeOidc, _oidc_login
+    except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
+        from test_server_auth import OIDC_SETTINGS, FakeOidc, _oidc_login
+
+    for key in [k for k in os.environ if k.startswith("CRB_")]:
+        monkeypatch.delenv(key, raising=False)
+    store_db.init_db(backend.engine)
+    add_users(backend.factory)
+    fake = FakeOidc({"sub": "entra-oid-1", "name": "Ada", "groups": ["grp-crb-admins"]})
+    settings = make_settings(tmp_path, oidc={**OIDC_SETTINGS, "role_from_claims": "always"})
+    app = create_app(settings, backend.factory, oidc_client=fake)
+    with TestClient(app) as admin:
+        login(admin, "admin")
+        _oidc_login(app, settings).__exit__(None, None, None)  # the account exists
+        gate = threading.Barrier(2)
+        real_lock = auth_routes.lock_users_table
+
+        def sign_in_waits_before_users(db: object) -> None:
+            with contextlib.suppress(threading.BrokenBarrierError):
+                gate.wait(timeout=5)
+            real_lock(db)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(auth_routes, "lock_users_table", sign_in_waits_before_users)
+        pause_after(monkeypatch, admin_routes, "set_user_active", gate, timeout=5)
+
+        def sign_in() -> int:
+            c = _oidc_login(app, settings)
+            c.__exit__(None, None, None)
+            return 302
+
+        viewer = user_id("viewer1")
+        results = at_once(
+            sign_in,
+            lambda: (
+                admin.put(f"{API_PREFIX}/users/{viewer}/active", json={"active": False}).status_code
+            ),
+        )
+    assert results == [302, 200], results
 
 
 # ---------------------------------------------------------------------------

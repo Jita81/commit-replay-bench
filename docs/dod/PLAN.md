@@ -61,8 +61,10 @@ from the integration tree, with every stream's ids renumbered to follow the base
 order. It awaits the operator's merge. The gaps the streams opened are placed in Wave 2, Wave 4
 or the list after Wave 4 below, and the checker now refuses a ranked gap in no table (P-189).
 Wave 2's streams (T, then C, I, H, X, F, and R on G) are integrated on
-`feat/ns2`, cut from `feat/ns1`'s head, their ids renumbered after `feat/ns1`'s in merge
-order and their seams wired (the entry gate reads the registered readings through one
+`feat/ns2`, cut from `feat/ns1` at `1240f6bf` and brought to its later head, `46f87156` (the
+PR #63 review fixes), by a merge on 28 September; Wave 2's own prevention rows moved up by
+eight, after `feat/ns1`'s `P-227` to `P-234` (P-334), their other ids renumbered after
+`feat/ns1`'s in merge order and their seams wired (the entry gate reads the registered readings through one
 binding, `crb.server.factory_standard`); it awaits the operator's merge after `feat/ns1`. No
 later wave has started.
 
@@ -114,6 +116,7 @@ Five of these streams restart work parked on 25 September (`feat/w2-m`, `feat/w2
 | A1 · keyboard, phone and nav · `feat/ns1-a1` | G-905, F26, G-192, G-196, G-197, G-292, G-914, G-919, G-448, G-301 | the five keyboard steps; the phone menu under 640 px; `/login` swept before sign-in; nav entries at `viewer`; the `/repos` journey eyebrow |
 | A2 · wayfinding and help · `feat/ns1-a2` | G-926, G-911, G-164, G-165, G-166, G-148, G-149, G-150, G-156, G-157, G-413, G-414 | the shell screens' About blocks; the approver's Home; Home shows its failed reads; the help pages' gaps; the orient walkthrough, timed |
 | B · evidence and import (the security and governance review, EI-2, EI-3, EI-6) · `fix/audit-b` | G-755, G-756, G-757, G-758, G-759 | imported rows stamped inside their hash and audited, never counted by a sign-off or the route that licenses delivery; no attestation of an imported or pack-less row; the worker never appends a clean row without its kept pack; the sign-off and review chains verified by `/ledger/verify`, `GET /signoffs/verify` and `/health` |
+| A · the security review's auth findings · `fix/audit-a` | G-750, G-751, G-752, G-753, G-754 | the operator's internal security and governance review (2026-09-27): the login limiter reserves an attempt before it checks the password, so a burst cannot outrun it (AUTH-1); the identity provider's claims never demote the last active admin (AUTH-2); deactivation ends an account's sessions for good (AUTH-3); every credential change and every sign-out is an event naming who made it (EI-8); the re-check's two residuals — the last-admin count takes only admins who can sign in, and a finished Claude sign-in is recorded with its own time though nobody reads it back (G-754) |
 
 **Done when:** on the merged branch, `GAP-ANALYSIS.md` no longer lists G-532, G-912, F23, F35,
 G-905, G-911, G-919 or F26, and G-925 is replaced by narrower gaps for what nothing records;
@@ -140,16 +143,24 @@ of that stream stays in Wave 4.
 
 | stream | gaps | what ships |
 |---|---|---|
-| C · claims | G-929, G-660, G-674, G-994, G-996, G-995, G-998 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the ISO/IEC 25010 characteristic-to-check table and the rule that refuses a conformity claim; a scheduled mutation pass that proves the evidence of a met criterion or a closed prevention row can fail, and a check that a criterion flipped to met kept its words; one owner per shared defect class in a wave, so parallel streams stop fixing one class several ways; a `[measured]` tag whose method names a source the repository does not carry is refused |
-| I · audit | G-663, F51, G-601, G-924, G-972, G-709 | an audit event naming who set the unsealed override; the `events` table hash-chained and verified; the head `row_hash` served and logged at worker start; `crb_signoffs_total`; the append-only probe on every table; the migration job's own owner URL in the chart and compose, so the API and the worker connect as a role that does not own the ledger |
+| C · claims | G-929, G-660, G-674, G-994, G-996, G-995, G-998 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the ISO/IEC 25010 characteristic-to-check table and the rule that refuses a conformity claim; **not built on `feat/ns2`, carried forward:** a scheduled mutation pass that proves the evidence of a met criterion or a closed prevention row can fail, and a check that a criterion flipped to met kept its words; one owner per shared defect class in a wave, so parallel streams stop fixing one class several ways; a `[measured]` tag whose method names a source the repository does not carry is refused |
+| I · audit | G-663, F51, G-601, G-924, G-972, G-709 | an audit event naming who set the unsealed override; the `events` table hash-chained and verified; the head `row_hash` served and logged at worker start; `crb_signoffs_total`; the append-only probe on every table; **not built on `feat/ns2`, carried forward (G-709):** the migration job's own owner URL in the chart and compose, so the API and the worker connect as a role that does not own the ledger |
 | G · the grade says why | G-973, G-974, G-971, G-953, G-954, G-955 | `lint_status`; `failure_kind` stamped at write; `mutation.v2`; the executor and mining edge cases; a distinct commit counted as a distinct change (one task per patch-id, a revert paired with its original); the files the tests wrote kept in the pack |
 | R · routing.v2 and the context arms | G-661, G-932, G-678 | ADR-0025 committed as ADR-0026 amends it; apparatus 2.4; registered readings with a frozen pool and a seeded order; the look rule, the hierarchy and the per-cell budget; the context arm and class-set version on every row, never pooled; the map, `/routes`, `/value`, sign-offs and the delivery gate read one arm and one version; the cell's standard served |
 | F · the factory's licence and entry | G-662, G-975, G-707, G-934, G-671, G-933 | the required, scoreable strength probe; the delivered change's own cell; the credential re-check at claim; one brief composer for replay and the factory, and the replay `S1` arm; the leak guard; readiness reads the cell's standard, stops `no_proven_standard` or `needs_context` before any spend, runs calibration builds that never deliver, and applies the size rule |
-| H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970, G-987 | `uv.lock` and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap; the reaper test on a fake clock; shared evidence directories; the docker-wait sites and their ratchet; one retrying helper for every system event's trace seq |
-| E2 · economics in one scope | G-990, G-991, G-989 | a cell's flat cost and latency means, the Pareto frontier, the best config and the forecast's price read one apparatus version and one posture class or are withheld; `GET /value` filters by posture class and refuses to pool two; a help-copy ratchet ties "not yet served" sentences to the API's fields (opened by Wave 1's stream E) |
-| S0 · the approver task · from `feat/w2-s` | G-477 | Home task 7 reads the real two-person readiness: Completed only when an approver other than the operator who would queue exists, never on the bootstrap admin alone |
-| A · the security review's auth findings · `fix/audit-a` | G-750, G-751, G-752, G-753, G-754 | the operator's internal security and governance review (2026-09-27): the login limiter reserves an attempt before it checks the password, so a burst cannot outrun it (AUTH-1); the identity provider's claims never demote the last active admin (AUTH-2); deactivation ends an account's sessions for good (AUTH-3); every credential change and every sign-out is an event naming who made it (EI-8); the re-check's two residuals — the last-admin count takes only admins who can sign in, and a finished Claude sign-in is recorded with its own time though nobody reads it back (G-754) |
+| H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970 | `uv.lock` and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap; the reaper test on a fake clock; shared evidence directories; the docker-wait sites and their ratchet |
+| E2 · economics in one scope | G-990, G-991, G-989 | **not built on `feat/ns2`, carried forward:** a cell's flat cost and latency means, the Pareto frontier, the best config and the forecast's price read one apparatus version and one posture class or are withheld; `GET /value` filters by posture class and refuses to pool two; a help-copy ratchet ties "not yet served" sentences to the API's fields (opened by Wave 1's stream E) |
+| S0 · the approver task · from `feat/w2-s` | G-477 | **not built on `feat/ns2`, carried forward:** Home task 7 reads the real two-person readiness: Completed only when an approver other than the operator who would queue exists, never on the bootstrap admin alone |
 | X · a configured builder endpoint | G-611 | every OpenAI-compatible builder and the labeller call the endpoint `CRB_OPENAI_BASE_URL` names, stamp its provider and use its timeout, reply length and retry count (`product.truth.26`, brought in from the parked `feat/w3-x`); the factory's test author stamps the provider of the endpoint it calls and refuses a rung naming another (`product.truth.27`) |
+
+**Status on `feat/ns2`.** Built and verified: T, G, R, F, H, I (but G-709), X and C's claims
+work (but G-994, G-996, G-995 and G-998). Not built, and carried forward to the list after Wave 4: E2
+(G-989, G-990, G-991 — `measure.truth.30` and `truth.31` stay unmet), S0 (G-477 —
+`home.truth.13` and `sign-off-a-cell.truth.3` stay unmet), C's check that a criterion kept its
+words (G-994), its scheduled mutation pass (G-996), one owner per shared defect class (G-995)
+and its refusal of a `[measured]` source the repository does not carry (G-998), and I's
+migration-owner URL (G-709). `product.evidence.205` stays `partial` on G-664 until the
+`fresh-clone` job has run green on the pull request's CI. G-660 is Wave 3's, by design.
 
 **Done when:** truth.202, truth.203, posture.204, roles.7, evidence.205, go-live.15, go-live.20,
 claims.21, value.111, truth.206, truth.207, truth.214, truth.216 and claims.210 read `met`, as
@@ -233,7 +244,13 @@ These are not wave items; each unblocks the work named beside it.
 | cut 2.0.0b1: the tag, the chart as an OCI artifact, a `v*` tag-protection ruleset | G-604 (release.22) | after Wave 4 |
 | a penetration test | F46, named in G-317's line | before go-live |
 | add a fine-grained token with Administration: read as the secret `BRANCH_PROTECTION_TOKEN` | G-930 (`product.evidence.6`): the daily `branch-protection` workflow goes green | any time |
-| accept ADR-0026 and fix its [operator] values: the per-cell budget, the first look, the size rule, the class-set split and thresholds, the export | Wave 2's R and F | before Wave 2 builds past T |
+| accept ADR-0026 and fix its [operator] values: the per-cell budget, the first look, the size rule, the class-set split and thresholds | Wave 2's R and F, built on the proposals | now: Wave 2 is built on them |
+| once ADR-0026 is accepted, drop the `[operator]` markers on the values it fixed | the record reads as decided | after the acceptance |
+| merge `feat/ns1`, then open the pull request for `feat/ns2` and replace the `pull/new/feat/ns2` links in CHANGELOG with `pull/<n>` | Wave 2 on `main`; G-997's twin for Wave 2 | after `feat/ns1` merges |
+| run CI on the `feat/ns2` pull request, so the `fresh-clone` job and the other new jobs have their first runs | G-664 (`product.evidence.205`) | when the pull request opens |
+| add `fresh-clone` to `main`'s required checks | G-930's list; a skipped job no longer passes a merge | after its first green run |
+| upgrade across revision 0013 as DEPLOYMENT says: scale the API and the worker to 0, run the migration, never `helm rollback` across 0013 | the hash-chained audit trail on a running stack | at the first deploy of Wave 2 |
+| rebuild the shared development environment from `uv.lock` with CI's extras | G-766 | now |
 | register and fund the Wave 3 readings | Wave 3 | after Wave 2 |
 | a person-labelled sample and a second person for class sets and library entries | Wave 5 | after Wave 4 |
 
@@ -246,7 +263,8 @@ These are not wave items; each unblocks the work named beside it.
 | doors and wayfinding | G-907, G-977, G-236, G-444, G-253, G-260, G-293, G-366, G-228, G-396, G-979 |
 | proof through each journey's own doors | G-428, G-300, G-380, G-399, G-446, G-109, G-119, G-125, G-133, G-238, G-256, G-268, G-183 |
 | time, cost and non-goals in words | G-302, G-401, G-430, G-447, G-978, G-908, G-382, G-402, G-429, G-140, G-185, G-207, G-262, G-263, G-269 |
-| what Wave 2 left open: the walkthrough's sealed reading, and a spend cap that is a ceiling | G-956, G-963 |
+| what Wave 2 left open: the walkthrough's sealed reading, a spend cap that is a ceiling, the approver task, economics in one scope, the migration job's owner URL, the fresh-clone job's first CI run, and C's evidence checks | G-956, G-963, G-477, G-990, G-991, G-989, G-709, G-664, G-994, G-996, G-995, G-998 |
+| what the Wave 2 review found in our own process: the gate environment, the plan's record, accepted ADRs and a stale base | G-766, G-767, G-768, G-769 |
 | the product | F43, G-604, F21, G-600 |
 
 ## What each wave must do to its own artefacts

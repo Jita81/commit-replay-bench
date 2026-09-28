@@ -712,19 +712,37 @@ def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> No
     when the reader is an admin; otherwise (``""``) such a session waits for an admin read."""
     if st.state != STATE_DONE:
         return
-    actor = str(broker.meta(st.id).get("started_by_id") or observer)
+
+    def recorded() -> bool:
+        return (
+            db.execute(
+                select(Event.id)
+                .where(
+                    Event.trace_id == SECRETS_TRACE,
+                    Event.action == "settings.secret_set",
+                    Event.payload_json["session"].as_string() == st.id,
+                )
+                .limit(1)
+            ).first()
+            is not None
+        )
+
+    # The common case — a session recorded long ago — takes no lock and commits nothing: a
+    # read every role polls must not serialise against every writer (P-230). Only a session
+    # with no record takes the events lock, and it is checked again under it.
+    if recorded():
+        db.rollback()
+        return
+    try:
+        meta = broker.meta(st.id)
+    except (LoginError, OSError, ValueError):  # removed or damaged since it was listed
+        meta = {}
+    actor = str(meta.get("started_by_id") or observer)
     if not actor:
         return
 
     def write() -> None:
-        seen: list[Any] = list(
-            db.execute(
-                select(Event.payload_json).where(
-                    Event.trace_id == SECRETS_TRACE, Event.action == "settings.secret_set"
-                )
-            ).scalars()
-        )
-        if any(isinstance(p, dict) and p.get("session") == st.id for p in seen):
+        if recorded():
             return
         stamp = {"stored_at": st.stored_at} if st.stored_at else {}
         _record_secret_change(

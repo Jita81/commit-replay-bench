@@ -64,7 +64,6 @@ tests/test_legacy.py
 tests/test_mcp_server.py
 tests/test_node_eras.py
 tests/test_observability_logging.py
-tests/test_observability_metrics.py
 tests/test_oracle_adequacy.py
 tests/test_oracle_controls_js.py
 tests/test_oracle_mutation.py
@@ -72,7 +71,6 @@ tests/test_oracle_mutation_text.py
 tests/test_oracle_sealed_corpus.py
 tests/test_redact.py
 tests/test_release_tag.py
-tests/test_routing.py
 tests/test_runners_parsers.py
 tests/test_server_github_app.py
 tests/test_server_reaper.py
@@ -123,7 +121,6 @@ ui/src/screens/Capability/FailureSplit.tsx
 ui/src/screens/Capability/ReasonCode.tsx
 ui/src/screens/Connect/GitHubConnectDialog.test.tsx
 ui/src/screens/Connect/GitHubConnectDialog.tsx
-ui/src/screens/Ledger/LedgerPage.test.tsx
 ui/src/screens/Repos/RepoConfigForm.tsx
 ui/src/screens/Repos/RepoConfigTab.test.tsx
 ui/src/screens/Repos/RepoConfigTab.tsx

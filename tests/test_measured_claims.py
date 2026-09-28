@@ -50,6 +50,7 @@ import importlib.util
 import json
 import re
 import sys
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -184,12 +185,22 @@ _WORD_NUMBER = re.compile(
 _FIGURE = re.compile(rf"(?<![\d.,]){_NUM}(?![\d])")
 
 
+def _unwrap_code(text: str) -> str:
+    """``text`` in NFKC (``⅔`` → ``2⁄3``) with every inline code span replaced by its
+    content, so a figure in backticks is read as the figure it is (P-348)."""
+    text = unicodedata.normalize("NFKC", text)
+    return re.sub(r"(`+)(.+?)\1", lambda m: f" {m.group(2)} ", text)
+
+
 def stated_numbers(text: str) -> list[str]:
     """Every figure the text states, once each, where it stands: every number in digits
     ("49", "0.891", "1,071", "54", the 9 and the 10 of "9-in-10") and every number written
     in words ("ninety", "fifty-four"). Dates, apparatus versions, confidence levels and
-    numbers that name rather than count (``_IDENTIFIER``) are not figures (P-247)."""
-    text = cc._strip_markup(text)
+    numbers that name rather than count (``_IDENTIFIER``) are not figures (P-247). A figure
+    inside inline code is still a figure, and a Unicode fraction ("⅔") reads as its digits
+    (NFKC): the code span is unwrapped, never dropped, so only what ``_IDENTIFIER`` names
+    (`mutation.v2`, `r1`) is skipped (P-348)."""
+    text = cc._strip_markup(_unwrap_code(text))
     text = _APPARATUS_TEXT.sub(" ", text)
     text = _DATE.sub(" ", text)
     text = cc._CONFIDENCE_PERCENT_RE.sub(" ", text)
@@ -247,7 +258,8 @@ def problems(claim: Claim, root: Path = ROOT) -> list[str]:
         found.append(
             f"the tag names apparatus {stated_apparatus}; the rows are {derived.apparatus}"
         )
-    rest = " ".join(cc._strip_markup(claim.text).split())  # the tag is part of the text
+    # the tag is part of the text; code spans are unwrapped, never dropped (P-348)
+    rest = " ".join(cc._strip_markup(_unwrap_code(claim.text)).split())
     for phrase in derived.phrases():
         pattern = _phrase_re(phrase)
         if not pattern.search(rest):
@@ -364,6 +376,9 @@ def _census_paragraph() -> str:
         "{p} In all, ninety percent of the cell's attempts were clean.\n",
         "{p} That is 9-in-10 clean.\n",
         "{p} Its clean count was fifty-four.\n",
+        # a figure in inline code, and a Unicode fraction, are figures too (P-348)
+        "{p} (`90%` of all attempts)\n",
+        "{p} Two thirds, ⅔, were clean.\n",
         # a checklist item the measured paragraph introduces is covered by its tag too
         "{p}\n\n- [x] 99% of all 1,071 rows were clean.\n",
     ],

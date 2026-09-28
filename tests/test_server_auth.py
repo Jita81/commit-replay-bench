@@ -1723,6 +1723,34 @@ def test_the_recovery_hints_state_the_numbers_the_server_enforces() -> None:
     assert "reactivating it brings none of them back" in _hint("toggle.settings.user_active")
 
 
+def test_the_current_password_hint_states_the_address_wide_limit_too() -> None:
+    """recover-an-account.truth.4: ``PUT /users/me/password`` reserves its attempt in the
+    login limiter, so BOTH of its buckets govern the current-password field — five a minute
+    for this account from this address, and twenty a minute from this address whatever the
+    account. The hint stated only the first; a person behind a shared address could be
+    refused with no number on the screen that explained it."""
+    from crb.server.auth import LoginRateLimiter
+
+    limiter = LoginRateLimiter()
+    words = {20: "Twenty", 10: "Ten", 30: "Thirty"}
+    tries = _hint("field.settings.my_current_password")
+    assert f"{words[limiter.ip_limit]} a minute from this address".lower() in tries.lower(), tries
+
+
+def test_the_last_admin_copy_names_the_admin_who_can_sign_in() -> None:
+    """P-200's rule counts only admins who can sign in by a path the deployment has switched
+    on, but the active toggle's hint and the ``user.role_override_refused`` line still said
+    "the last active admin", so an administrator could keep a second admin nobody can sign in
+    as and read the screen as safe. Both now name the admin who can sign in."""
+    import re
+
+    assert "another active admin can still sign in" in _hint("toggle.settings.user_active")
+    verdict = Path("ui/src/lib/verdict.ts").read_text(encoding="utf-8")
+    m = re.search(r"'user\.role_override_refused':\s*'((?:[^'\\]|\\.)*)'", verdict)
+    assert m, "no user.role_override_refused line"
+    assert "no active admin who can sign in" in m.group(1)
+
+
 def test_every_sign_in_record_commits_through_the_retry() -> None:
     """P-153: the retrying commit (DL-068) once covered local sign-in only; the organisation
     callback wrote ``user.login`` and called ``db.commit()`` itself, so a lost race answered a

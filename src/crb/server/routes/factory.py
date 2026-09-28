@@ -1169,7 +1169,8 @@ def _cell_routes(
     db: DbDep, factory: SessionFactoryDep, repo: str, settings: Settings
 ) -> dict[str, CellRouteOut]:
     """``class|size`` → the map's decision, from exactly the reading the worker's delivery
-    gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows on the current
+    gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows and every
+    certifying arm's rows (``mode_admits``, P-338) on the current
     apparatus in the repository's own ``checks`` arm (ADR-0024), the repo's latest controls
     verdict, sign-offs overlaid.
 
@@ -1359,9 +1360,33 @@ def waive_probe(  # noqa: PLR0917 — FastAPI dependencies + path/body
     db: DbDep,
     settings: SettingsDep,
 ) -> ProbeWaiverOut:
+    """ADR-0025 item 12 as ADR-0016's two-person rule applies it (P-339): the waiver lifts a
+    REQUIRED gate, so the approver who queued a factory run on this repository that is
+    still queued or running may not waive its probe — 409 ``same_actor`` — as they may not
+    override its route gate; the loop refuses a waiver naming the run's actor too, for a
+    waiver granted before the run was queued. 409 ``probe_waiver_stale`` when the bytes are
+    not the latest RED proof's."""
     get_repo_or_404(db, repo)
     home = _home(settings, repo)
     _backlog_item(home, repo, item_id)
+    own = db.execute(
+        select(Run.id)
+        .where(
+            Run.repo == repo,
+            Run.kind == "factory",
+            Run.actor == approver.id,
+            Run.status.in_(ACTIVE_STATUSES),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if own is not None:
+        raise ApiError(
+            409,
+            "same_actor",
+            f"you queued factory run {own} on {repo}: its strength probe is waived by a "
+            "second approver (ADR-0016's two-person rule)",
+            detail={"run_id": own},
+        )
     ev = home.evidence(actor=approver.id)
     proofs = ev.events_for(item_id, EV_RED_PROOF)
     current = str(proofs[-1].payload.get("test_sha256", "")) if proofs else ""

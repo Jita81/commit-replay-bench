@@ -583,6 +583,30 @@ def test_a_probe_waiver_is_an_approvers_act_bound_to_the_red_proofs_bytes(env: E
     )
 
 
+def test_the_approver_who_queued_a_factory_run_cannot_waive_its_strength_probe(
+    env: Env,
+) -> None:
+    """P-339 (GOV-4 applied to the waiver): the probe waiver lifts a REQUIRED gate, so it is a
+    second person's act, as the route-gate override and the sign-off are. An approver with a
+    factory run on the repository still queued or running is refused 409 ``same_actor``;
+    another approver may waive it."""
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    home.evidence(actor="worker").record_red_proof({"item_id": "I-1", "test_sha256": "a" * 64})
+    login(env.client, "approver")
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
+    r = env.post("/runs", json={**body, "deliver": True})
+    assert r.status_code == 201, r.text
+    url = f"/factory/{ALPHA}/items/I-1/probe-waiver"
+    waiver = {"reason": "a constant table", "test_sha256": "a" * 64}
+    r = env.post(url, json=waiver)
+    assert r.status_code == 409 and envelope(r)["code"] == "same_actor", r.text
+    assert not home.evidence().events_for("I-1", EV_PROBE_WAIVED)
+    login(env.client, "admin")  # an admin holds the approver role and queued nothing
+    r = env.post(url, json=waiver)
+    assert r.status_code == 201, r.text
+
+
 def test_a_calibration_build_is_an_approvers_evented_act_for_an_entry_stop_only(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -760,6 +784,56 @@ def test_factory_delivery_fields_and_the_second_approver_override(env: Env) -> N
     login(env.client, "admin")
     r = env.post(f"/runs/{r.json()['id']}/deliver-override")
     assert r.status_code == 409 and envelope(r)["code"] == "not_a_factory_run"
+
+
+def test_two_approvers_granting_one_override_at_once_grant_it_once(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-228: ``POST /runs/{id}/deliver-override`` read ``deliver_override_by`` with no lock
+    and wrote it later, so two approvers granting at the same moment both passed the
+    ``override_already_granted`` check: the trace recorded two grants while the run named
+    one (the last commit won). The check and the grant are now one step under the events
+    write lock, re-read under it: exactly one grant, one event, and the other approver is
+    refused naming the one who granted it."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    import crb.server.routes.runs as runs_routes
+    from crb.store.models import Event
+    from fixtures.server_seed import user_id
+
+    assert _register(env, [ITEM]).status_code == 201
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
+    r = env.post("/runs", json={**body, "deliver": True})
+    assert r.status_code == 201, r.text
+    run_id = r.json()["id"]
+    login(env.client, "approver")
+    with TestClient(env.client.app) as other:
+        login(other, "admin")
+        pause_after(monkeypatch, runs_routes, "_get_run")
+        results = at_once(
+            lambda: env.post(f"/runs/{run_id}/deliver-override"),
+            lambda: other.post(f"{API_PREFIX}/runs/{run_id}/deliver-override"),
+        )
+    codes = sorted(getattr(r, "status_code", type(r).__name__) for r in results)
+    assert codes == [200, 409], [getattr(r, "text", r) for r in results]
+    won = next(r for r in results if r.status_code == 200)
+    lost = next(r for r in results if r.status_code == 409)
+    grantor = won.json()["factory"]["deliver_override_by"]
+    assert grantor in {user_id("appr1"), user_id("root")}
+    assert envelope(lost)["code"] == "override_already_granted"
+    assert envelope(lost)["detail"]["deliver_override_by"] == grantor
+    with env.factory() as s:
+        run = s.get(Run, run_id)
+        assert run is not None and run.params_json["deliver_override_by"] == grantor
+        grants = list(
+            s.execute(
+                select(Event).where(
+                    Event.trace_id == run_id, Event.action == "run.deliver_override"
+                )
+            ).scalars()
+        )
+    assert [e.actor for e in grants] == [grantor]
 
 
 def test_task_view_folds_the_refusal_reason_and_the_build_ids(env: Env) -> None:

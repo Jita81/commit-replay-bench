@@ -498,6 +498,7 @@ def test_a_change_larger_than_its_licence_stops_size_exceeds_licence(
         "size": "S",
         "builder": "fake",
         "model": "multi",
+        "provider": "fake",  # the licence reads the provider too (P-340)
         "arm": ARM_S2,
     }
 

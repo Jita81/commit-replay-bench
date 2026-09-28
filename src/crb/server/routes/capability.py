@@ -80,7 +80,7 @@ from crb.core.capability import (
     trusted_autonomy_coverage,
 )
 from crb.core.checks import ARMS
-from crb.core.context_arm import arms_present, is_arm
+from crb.core.context_arm import arms_present, is_arm, mode_admits
 from crb.core.economics import Economics, fold_economics
 from crb.core.ledger import (
     CELL_FIELDS,
@@ -377,11 +377,13 @@ def rows_for_mode(rows: Iterable[GradeRow], mode: str) -> list[GradeRow]:
     oracle is visible in one and held out in the other — and ``mode`` is not part of
     the cell key, so a map must never pool them: a blind budget ladder diluted every
     sighted cell on the live stack (2026-09-15). Default ``sighted``; ``blind`` for the
-    blind map; ``all`` only when a reader asks for the pooled view explicitly."""
-    rs = list(rows)
-    if mode == "all":
-        return rs
-    return [r for r in rs if r.mode == mode]
+    blind map; ``all`` only when a reader asks for the pooled view explicitly.
+
+    From apparatus 2.4 a certifying context arm (``S1@<author>``, ``S2``) is kept whatever
+    the mode (:func:`crb.core.context_arm.mode_admits`, ADR-0026 item 1): the replay ``S1``
+    arm is written blind, and dropping it by mode left every standard a reading proves
+    unrouted and unsignable (P-338). A map still reads one arm per cell."""
+    return [r for r in rows if mode_admits(r.mode, r.context_arm, mode)]
 
 
 def parse_by(by: str | None) -> tuple[str, ...]:

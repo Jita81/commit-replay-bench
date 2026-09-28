@@ -189,6 +189,23 @@ def test_a_reading_counts_only_rung_r1_in_the_sealed_posture() -> None:
     assert arm_reading(reading, "S3", escalated).look.counted == 0
 
 
+def test_a_reading_counts_no_row_of_another_checks_arm_or_class_set_version() -> None:
+    """ADR-0024 and ADR-0026 item 9: a reading is registered on one checks arm and one
+    class-set version, and a row graded under another counts nothing toward it — the same
+    cell, after registration, sealed, rung ``r1``. Removing either clause of the count once
+    passed every test (P-341)."""
+    reading = register_reading(commits(40))
+    assert reading.checks_arm == "off" and reading.taxonomy == "global/classes@v1"
+    same = rows_for([True] * 20, reading.pool)
+    assert arm_reading(reading, "S3", same).look.counted == 20
+    other_checks = rows_for([True] * 20, reading.pool, labels={"checks": "fmt=1"})
+    assert other_checks[0].checks_arm != reading.checks_arm
+    assert arm_reading(reading, "S3", other_checks).look.counted == 0
+    other_classes = rows_for([True] * 20, reading.pool, labels={"taxonomy": "acme/classes@v2"})
+    assert other_classes[0].taxonomy != reading.taxonomy
+    assert arm_reading(reading, "S3", other_classes).look.counted == 0
+
+
 # --- registration --------------------------------------------------------------------
 
 
@@ -259,6 +276,36 @@ def test_a_first_attempt_graded_with_belt_5_switched_off_leaves_the_pool() -> No
     got = arm_reading(reading, "S3", rows)
     assert [(c.commit, c.left) for c in got.left] == [(off, "lint_disabled")]
     assert off not in got.counted_commits and got.look.state == STATE_DELIVER
+
+
+def test_a_miss_graded_with_belt_5_switched_off_is_still_a_miss() -> None:
+    """P-342: a first attempt graded with belt 5 off left the pool whatever its outcome, so a
+    MISS whose target test stayed red — nothing to do with the linter — was erased and the
+    next commit took its place: switching belt 5 off turned a pending look into ``deliver``.
+    Only an attempt belt 5 could have changed (one that passed every other belt) leaves; a
+    lint-disabled miss counts as the miss it is."""
+    reading = register_reading(commits(40))
+    off = reading.pool[0]
+    miss = {"lint_reason": "disabled_by_config"}
+    rows = [
+        sealed_row(off, clean=False, labels=miss, target_green=False),
+        *rows_for([True] * 20, reading.pool[1:]),
+    ]
+    got = arm_reading(reading, "S3", rows)
+    assert not got.left and off in got.counted_commits
+    assert (got.look.counted, got.look.clean) == (21, 20)
+    assert got.look.state != STATE_DELIVER
+    on = [sealed_row(off, clean=False, target_green=False), *rows[1:]]
+    assert arm_reading(reading, "S3", on).look.state == got.look.state
+    # the cell's first attempts read the same rule: the lint-disabled miss routes, a
+    # lint-disabled pass does not
+    from crb.core.ledger import cell_stats
+
+    stats = cell_stats(rows)
+    assert stats.n_tasks_lint_disabled == 1
+    assert (stats.n_tasks, stats.task_clean) == (21, 20)
+    passed = cell_stats([sealed_row(off, labels=miss), *rows[1:]])
+    assert (passed.n_tasks, passed.task_clean) == (20, 20)
 
 
 def test_a_rerun_of_a_missed_commit_never_replaces_its_first_attempt() -> None:

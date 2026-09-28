@@ -748,7 +748,7 @@ class FactoryLoop:
         )
         self._emit("route.decided", item.id, route=r.route_hint, reason=r.reason, cell_route=cell)
         if s.deliver and entry.calibration is None:
-            rungs = [(rung.builder, rung.model) for rung in s.ladder]
+            rungs = [(rung.builder, rung.model, rung.provider) for rung in s.ladder]
             if not licensing_rungs(
                 item.capability_class,
                 item.size_estimate,
@@ -762,9 +762,10 @@ class FactoryLoop:
                     Entry(
                         STOP_NOT_LICENSED,
                         f"delivery is on and no rung of this run's ladder "
-                        f"({', '.join(f'{b}:{m}' for b, m in rungs)}) holds a licence for "
-                        f"{entry.arm} in the {item.capability_class} {item.size_estimate} "
-                        "cell for its own builder and model: not built",
+                        f"({', '.join(f'{b}:{m}@{p}' if p else f'{b}:{m}' for b, m, p in rungs)}) "
+                        f"holds a licence for {entry.arm} in the {item.capability_class} "
+                        f"{item.size_estimate} cell for its own builder, model and provider: "
+                        "not built",
                         reason_code=STOP_NOT_LICENSED,
                         standard=entry.standard,
                         cells=entry.cells,
@@ -993,8 +994,8 @@ class FactoryLoop:
             self._emit("delivery.skipped", item.id, status=StepStatus.SKIPPED, reason="opt-in off")
             return None, ""
         # THE LICENCE OF THE DELIVERED CHANGE (ADR-0025 item 12, C4): the change's OWN cell —
-        # its class, the size tier of the churn actually built, the final rung's builder and
-        # model, and the arm the build carried — must license delivery in the map read
+        # its class, the size tier of the churn actually built, the final rung's builder,
+        # model and provider, and the arm the build carried — must license delivery in the map read
         # before the run. Both sizes and both cells go on the evidence; nothing (no
         # override) lifts this.
         built_by = final.pack.builder
@@ -1005,6 +1006,7 @@ class FactoryLoop:
             measured=final.task.size,
             builder=built_by.name if built_by is not None else rung_builder,
             model=built_by.model if built_by is not None else rung_model,
+            provider=built_by.provider if built_by is not None else "",
             arm=arm,
             standard_for=s.gate.standard_for,
         )
@@ -1046,12 +1048,13 @@ class FactoryLoop:
         # route `deliver` — or in a cell nobody has measured — opens no pull request; the
         # withholding and the measured route are on the evidence chain. The route was read
         # ONCE, at readiness, before this build's row landed (DL-045) — never re-read here,
-        # unless the change measures larger than the item's estimate: the route gate covers
-        # the size DELIVERED (GOV-2), so the measured cell's route — from the same pre-run
-        # map — is the one read. No override lifts it (ADR-0026 item 8:
-        # ``deliver_override`` lifts the sign-off clause only, at the entry gate).
+        # unless the change measures another size than the item's estimate, larger OR
+        # smaller: the route gate covers the size DELIVERED (GOV-2, P-335), so the measured
+        # cell's route — from the same pre-run map — is the one read. No override lifts it
+        # (ADR-0026 item 8: ``deliver_override`` lifts the sign-off clause only).
         declared, delivered = item.size_estimate, final.task.size
-        resized = _tier(delivered) > _tier(declared)
+        resized = bool(delivered) and delivered != declared
+        larger = _tier(delivered) > _tier(declared)
         if resized:
             route = self._map_route(dc_replace(item, size_estimate=delivered))
         sizes = {"size_estimate": declared, "size_measured": delivered} if resized else {}
@@ -1069,7 +1072,8 @@ class FactoryLoop:
                     f"where the item was estimated {declared}, and the ({item.capability_class}, "
                     f"{delivered}) cell licenses no delivery: {why}"
                 )
-                reason_code = REASON_SIZE_EXCEEDS_LICENCE
+                if larger:
+                    reason_code = REASON_SIZE_EXCEEDS_LICENCE
             s.evidence.record_delivery_refused(
                 item.id,
                 f"route gate: {why}",
@@ -1154,8 +1158,10 @@ class FactoryLoop:
     def _probe_waiver(self, item: BacklogItem, test_sha256: str) -> ProbeWaiver | None:
         """The newest approver's waiver of the strength probe on the item's chain that is
         bound to exactly ``test_sha256`` (ADR-0025 item 12); ``None`` when there is none —
-        a waiver for other bytes is not a waiver."""
+        a waiver for other bytes is not a waiver, and nor is one whose approver is the run's
+        own actor (ADR-0016's two-person rule, P-339): that refusal is on the chain."""
         found: ProbeWaiver | None = None
+        actor = self.spec.actor
         for ev in self.spec.evidence.events_for(item.id, EV_PROBE_WAIVED):
             w = ProbeWaiver(
                 approver=str(ev.payload.get("approver", "")),
@@ -1163,8 +1169,31 @@ class FactoryLoop:
                 test_sha256=str(ev.payload.get("test_sha256", "")),
                 event_id=ev.event_id,
             )
-            if w.applies_to(test_sha256):
-                found = w
+            if not w.applies_to(test_sha256):
+                continue
+            if actor and w.approver == actor:
+                why = (
+                    f"probe waiver refused — {w.approver} queued this run; the strength "
+                    "probe is waived by a second approver (ADR-0016's two-person rule)"
+                )
+                self.spec.evidence.record_route(
+                    item.id,
+                    ROUTE_HUMAN,
+                    why,
+                    reason_code="waiver_refused",
+                    waiver_refused="same_actor",
+                    waiver_by=w.approver,
+                    waiver_event=w.event_id,
+                )
+                self._emit(
+                    "review.waiver_refused",
+                    item.id,
+                    status=StepStatus.SKIPPED,
+                    waiver_refused="same_actor",
+                    waiver_by=w.approver,
+                )
+                continue
+            found = w
         return found
 
     def _require_scoreable(

@@ -337,8 +337,14 @@ with no trigger firing (`ALTER TABLE … ALTER COLUMN … TYPE … USING`, `DROP
 TABLE`) — on a single-role deployment the application IS the owner and can. A trigger that
 is missing, disabled or re-created with any definition other than the installer's (a `WHEN`
 that never holds) makes `/health`'s `append_only` probe `down` with its name in
-`data.missing`, and the next start re-creates it. The proof is
-`tests/test_store_db.py::test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_protection`,
+`data.missing`. Where the application owns the tables (a single-role deployment, and SQLite)
+the next start re-creates it. With the roles split, the application role cannot: its start
+is refused (`permission denied`), so restore the trigger as the owner with `crb migrate`
+(`CRB_DATABASE_URL=<owner URL> crb migrate`) before you restart the API and the worker. The
+proofs are
+`tests/test_store_db.py::test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_protection`
+and
+`tests/test_store_db.py::test_a_trigger_missing_on_a_split_role_store_is_restored_by_the_owner_not_the_application`,
 run on PostgreSQL in CI.
 
 The chart and the compose file still give the migration job, the API and the worker one
@@ -795,7 +801,8 @@ backup rehearsal, the digest check, the alert rules and the penetration test are
       `database at <rev> = code head` — its contract is
       [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
       line. `append_only` proves every trigger live on every append-only table and an
-      UPDATE and a DELETE refused, in the trigger's own words, on each table that holds a row, `ledger` reads `false_q1=0`, `builders`
+      UPDATE and a DELETE refused, in the trigger's own words, on each table that holds a row
+      (on an empty table no write is tried), `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
       worker owns it; prove it with `crb doctor` on the worker host). The line is proven
       only while every probe is `ok` or `skipped`.

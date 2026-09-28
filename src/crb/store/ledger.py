@@ -72,11 +72,13 @@ from crb.core.evidence import EvidencePack
 from crb.core.ledger import (
     GENESIS_HASH,
     IMPORTED_PROVENANCE_PREFIX,
+    LABEL_FAILURE_KIND,
     LABEL_IMPORTED,
     LABEL_SOURCE_ROW_HASH,
     PROVENANCE_IMPORTED_LEDGER,
     GradeRow,
     LedgerIntegrityError,
+    is_v2_apparatus,
     verify_chain,
 )
 from crb.core.review import (
@@ -269,11 +271,17 @@ def import_stamp(
     ``imported:ledger`` (a source row already ``imported:…`` keeps its own), ``actor``
     ``import``, and the labels ``imported`` (``true``), ``imported_by`` (the admin), ``imported_at``,
     ``import_sha256`` (the file), ``source_actor``, ``source_provenance`` and
-    ``source_row_hash`` — the last ALWAYS present, empty when the source row had no hash.
+    ``source_row_hash`` — the last ALWAYS present, empty when the source row had no hash —
+    and, on a row of 2.4 or later that carries none, its ``failure_kind`` (P-345).
     Every value is inside the hashed body, so the stamp cannot be removed without the chain
     saying so. The file's ``oracle_strength`` is kept as the source recorded it; no reader
     that licenses anything reads it (the oracle comes from this deployment's scores)."""
     labels = dict(row.labels)
+    if is_v2_apparatus(row.apparatus_version) and LABEL_FAILURE_KIND not in labels:
+        # a 2.4 row's kind is read verbatim, never re-derived (ADR-0025): pin it here, inside
+        # the hashed body, by the rule of the row's apparatus — the live rule at import
+        # would otherwise move with every later edit of the outage markers (P-345)
+        labels[LABEL_FAILURE_KIND] = row.failure_kind
     labels[LABEL_IMPORTED] = "true"  # a reading never counts it (P-321)
     labels.setdefault(LABEL_SOURCE_ROW_HASH, row.row_hash or "")
     labels.setdefault("source_actor", row.actor)

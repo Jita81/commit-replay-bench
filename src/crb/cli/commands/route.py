@@ -43,7 +43,7 @@ from crb.cli.commands import (
 )
 from crb.core.capability import PROJECTION_CELL, ReadingBook, build_capability_map
 from crb.core.checks import ARM_OFF, ARMS
-from crb.core.context_arm import is_arm
+from crb.core.context_arm import is_arm, mode_admits
 from crb.core.ledger import DEFAULT_READ_ARM, JsonlLedger, rows_for_checks, rows_for_reading
 from crb.core.reading import Reading
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DO_NOT_SHIP, RoutingPolicy
@@ -205,7 +205,7 @@ def cmd_route(args: argparse.Namespace) -> int:
     rows = [
         r
         for r in rows_for_reading(by_checks, apparatus=apparatus, arm=args.arm)
-        if r.mode == args.mode or r.context_arm
+        if mode_admits(r.mode, r.context_arm, args.mode)
     ]
     by_arm: dict[str, int] = {}
     for r in every:

@@ -497,6 +497,63 @@ def test_a_stored_sign_in_nobody_read_back_is_recorded_by_the_secrets_list(
     assert TOKEN not in str(ev.payload_json)
 
 
+def test_reading_the_secrets_list_never_waits_for_the_write_lock_once_recorded(
+    client: TestClient, tmp_path: Path, fake_claude: Path
+) -> None:
+    """P-230: every ``GET /settings/secrets`` — which every role reads, and Settings, Runs and
+    the builder checks load — took the events WRITE lock and committed for each finished
+    sign-in, even one recorded long ago, so a read serialised against every writer (the
+    worker's appends, sign-ins, audit events). With another writer holding the lock the read
+    waited out SQLite's busy timeout and failed. Once the sign-in is on the record a read
+    takes no lock: it answers while a writer holds it, and records nothing twice."""
+    from sqlalchemy import text
+
+    _login(client)
+    _finish_unwatched(client, tmp_path, fake_claude)
+    assert client.get(f"{API_PREFIX}/settings/secrets").status_code == 200  # records it
+    assert len(_login_events(client.app)) == 1
+    with client.app.state.session_factory() as writer:
+        writer.execute(text("BEGIN IMMEDIATE"))  # another writer holds the write lock
+        started = time.monotonic()
+        r = client.get(f"{API_PREFIX}/settings/secrets")
+        waited = time.monotonic() - started
+        writer.rollback()
+    assert r.status_code == 200, r.text
+    assert waited < 5.0, f"the read waited {waited:.1f} s for the write lock"
+    assert len(_login_events(client.app)) == 1
+
+
+def test_a_damaged_sign_in_session_never_breaks_the_secrets_list_or_the_start(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    """P-231: ``done_sessions`` — now read by the secrets list, each sign-in read and the API's
+    start — caught only ``LoginError``. A session directory removed while it was listed (a
+    dangling entry), a ``meta.json`` that is not JSON and one with no ``expires_at`` each
+    raised out of it, so ``GET /settings/secrets`` answered 500 for every role, and the
+    ``KeyError`` stopped the API from starting. An unreadable session is skipped; a finished
+    one beside it is still recorded."""
+    import json
+
+    (tmp_path / "home" / "secrets").mkdir(parents=True, mode=0o700)
+    settings = make_settings(tmp_path, fake_claude)
+    with TestClient(create_app(settings)) as c:
+        _login(c)
+        sid, _ = _finish_unwatched(c, tmp_path, fake_claude)
+    sessions = tmp_path / "home" / "secrets" / cl.SESSIONS_SUBDIR
+    (sessions / ("a" * 32)).symlink_to(tmp_path / "gone")  # listed, then gone
+    for name, meta in (("b" * 32, "{not json"), ("c" * 32, json.dumps({"started_at": "x"}))):
+        (sessions / name).mkdir(mode=0o700)
+        (sessions / name / "meta.json").write_text(meta, encoding="utf-8")
+    broker = cl.LoginBroker(tmp_path / "home" / "secrets", claude_binary=str(fake_claude))
+    assert [st.id for st in broker.done_sessions()] == [sid]
+    app = create_app(settings)
+    with TestClient(app) as c:  # the start records the finished one, and does not stop
+        (ev,) = _login_events(app)
+        assert ev.payload_json["session"] == sid
+        _login(c)
+        assert c.get(f"{API_PREFIX}/settings/secrets").status_code == 200
+
+
 def test_a_stored_sign_in_nobody_read_back_is_recorded_at_the_next_start(
     tmp_path: Path, fake_claude: Path
 ) -> None:

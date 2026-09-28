@@ -128,6 +128,7 @@ from crb.core.capability import (
     task_oracle_strength,
 )
 from crb.core.checks import ARM_OFF, LABEL_CHECKS, arm_from_label
+from crb.core.context_arm import mode_admits
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import (
     BELT_SET_V3_LEGACY,
@@ -201,7 +202,7 @@ from crb.server.schemas_signoff import (
     SignoffRouteOut,
     SignoffWithPolicyOut,
 )
-from crb.store.models import EvidencePackRow, Grade, Repo, Run, Signoff, Task, User
+from crb.store.models import Event, EvidencePackRow, Grade, Repo, Run, Signoff, Task, User
 
 router = APIRouter(tags=["signoffs"])
 _ERR = {"model": ErrorEnvelope}
@@ -354,9 +355,37 @@ def signoff_chain_intact(rows: Sequence[Signoff]) -> bool:
     return True
 
 
+#: The audit events that carry a sign-off row's ``row_hash`` (J-TEL-8), each written in the
+#: same transaction as its row: the sign-off chain's anchor on the hash-chained audit trail
+#: (ADR-0029). A chain cut at its end still links from genesis, so only a row an event names
+#: and the chain lacks shows the cut (P-337).
+SIGNOFF_ROW_EVENTS = ("signoff.created", "signoff.revoked")
+
+
+def _trail_row_hashes(session: Session) -> list[str]:
+    """Every sign-off ``row_hash`` the audit trail's sign-off events name, in event order."""
+    q = select(Event.payload_json).where(Event.action.in_(SIGNOFF_ROW_EVENTS)).order_by(Event.id)
+    out: list[str] = []
+    payload: Any
+    for payload in session.execute(q).scalars():
+        h = payload.get("row_hash") if isinstance(payload, Mapping) else None
+        if isinstance(h, str) and h:
+            out.append(h)
+    return out
+
+
+def signoff_rows_missing(session: Session, rows: Sequence[Signoff]) -> list[str]:
+    """The ``row_hash`` of every sign-off row the audit trail names that ``rows`` (the whole
+    store's chain) does not hold, in the order the events were written."""
+    have = {r.row_hash for r in rows}
+    return [h for h in _trail_row_hashes(session) if h not in have]
+
+
 def signoff_store_intact(session: Session) -> bool:
-    """:func:`signoff_chain_intact` over every stored sign-off row, whatever its repository."""
-    return signoff_chain_intact(load_signoff_rows(session))
+    """:func:`signoff_chain_intact` over every stored sign-off row, whatever its repository,
+    with every row the audit trail names still in it (P-337)."""
+    rows = load_signoff_rows(session)
+    return signoff_chain_intact(rows) and not signoff_rows_missing(session, rows)
 
 
 def _iter_signoffs(session: Session, batch: int = 1000) -> Iterable[Signoff]:
@@ -383,8 +412,12 @@ def verify_signoffs(session: Session) -> SignoffVerifyOut:
     prev = GENESIS_HASH
     broken_at: int | None = None
     detail = ""
+    have: set[str] = set()
+    last_seq = 0
     for r in _iter_signoffs(session):
         rows += 1
+        have.add(r.row_hash)
+        last_seq = r.seq
         edited = signoff_tampered(r)
         tampered += int(edited)
         if broken_at is None:
@@ -393,6 +426,14 @@ def verify_signoffs(session: Session) -> SignoffVerifyOut:
             elif edited:
                 broken_at, detail = r.seq, f"seq {r.seq}: row_hash mismatch (row edited)"
         prev = r.row_hash
+    if broken_at is None:
+        cut = [h for h in _trail_row_hashes(session) if h not in have]
+        if cut:
+            broken_at = last_seq + 1
+            detail = (
+                f"{len(cut)} sign-off row(s) the audit trail names are missing from the chain "
+                f"(first {cut[0][:12]}…) — rows were deleted"
+            )
     chain_ok = broken_at is None
     if chain_ok:
         detail = f"{rows} rows, chain intact"
@@ -575,9 +616,10 @@ def load_signoff_records(session: Session, repo: str | None = None) -> list[Sign
     over the whole store), no record is returned. A per-row check is not enough — an
     edited row's scope, repository and kind are the editor's choice, so no reading of it can
     be trusted to withdraw what it withdrew (EI-6, 2026-09-27). ``/signoffs/verify`` and the
-    ``/health`` ``ledger`` probe name the break."""
+    ``/health`` ``ledger`` probe name the break. So does a row the audit trail names that the
+    chain no longer holds — its last row deleted leaves a chain that still links (P-337)."""
     rows = load_signoff_rows(session)
-    if not signoff_chain_intact(rows):
+    if not signoff_chain_intact(rows) or signoff_rows_missing(session, rows):
         return []
     return [to_record(r) for r in rows if not repo or r.repo in (repo, WILDCARD)]
 
@@ -610,11 +652,13 @@ def cell_false_q1(session: Session, repo: str, scope: CellKey) -> tuple[int, lis
 def cell_rows(
     session: Session, repo: str, scope: CellKey, arm: str, posture_class: str
 ) -> list[GradeRow]:
-    """The scope's SIGHTED rows on the CURRENT apparatus and on the ``checks`` ``arm`` as
+    """The scope's SIGHTED rows — and, from 2.4, every row on a certifying arm, which
+    :func:`measured_cell` reads one arm of (:func:`crb.core.context_arm.mode_admits`; the
+    replay ``S1`` arm is written blind, P-338) — on the CURRENT apparatus and on the ``checks`` ``arm`` as
     :class:`GradeRow` (raises ``FalseQ1Violation`` on a bad row — call :func:`cell_false_q1`
     first so the refusal is explicit, not incidental). A sign-off is a claim about the
-    current instrument on the sighted measurement: rows from an older belt set, blind
-    attempts, or rows graded with the format step or belt 6 switched differently never lift
+    current instrument on the cell's standard arm: rows from an older belt set, blind
+    attempts with no arm, or rows graded with the format step or belt 6 switched differently never lift
     the cell (EVIDENCE-AND-CLAIMS §5, ADR-0024; the capability map applies the same
     defaults — its ``checks`` default is :func:`checks_arm_in`). Only rows this deployment
     MEASURED count: an imported row is a record of someone else's measurement and never
@@ -622,14 +666,17 @@ def cell_rows(
     q = (
         _scope_where(select(Grade), repo, scope)
         .where(
-            Grade.mode == "sighted",
             Grade.apparatus_version == APPARATUS_VERSION,
             Grade.provenance == PROVENANCE_MEASURED,
         )
         .order_by(Grade.seq)
     )
     grades: Iterable[Grade] = session.execute(q).scalars()
-    rows = [GradeRow.from_dict(grade_to_dict(g)) for g in grades]
+    rows = [
+        r
+        for r in (GradeRow.from_dict(grade_to_dict(g)) for g in grades)
+        if mode_admits(r.mode, r.context_arm, "sighted")
+    ]
     # ADR-0019 §8: and in the posture class the deployment grades the repository in
     return [r for r in rows_for_checks(rows, arm) if r.posture_class == posture_class]
 
@@ -1831,6 +1878,7 @@ __all__ = [
     "CODE_POLICY_INVALID",
     "CODE_REFUSED",
     "FALSE_Q1_PREDICATE",
+    "SIGNOFF_ROW_EVENTS",
     "AttestationRefused",
     "CellOracle",
     "ResolvedAttestation",
@@ -1852,6 +1900,7 @@ __all__ = [
     "signoff_chain_intact",
     "signoff_hash",
     "signoff_out",
+    "signoff_rows_missing",
     "signoff_store_intact",
     "signoff_tampered",
     "to_record",

@@ -160,6 +160,33 @@ def test_a_tampered_event_is_found_underneath_the_triggers(
     assert not report.ok and report.broken_at == broken_at and word in report.detail
 
 
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "UPDATE events SET payload_json = '[1, 2]' WHERE id = 3",
+        "UPDATE events SET payload_json = '\"s\"' WHERE id = 3",
+        "UPDATE events SET seq = 3.9 WHERE id = 3",
+        "UPDATE events SET duration_ms = 7.8 WHERE id = 3",
+    ],
+    ids=["payload-array", "payload-string", "seq-fraction", "duration-fraction"],
+)
+def test_an_event_edited_to_another_type_is_a_named_break_never_an_exception(
+    db: Backend, tamper: str
+) -> None:
+    """P-344: the hash normalisation called ``dict()`` and ``int()`` on the stored values
+    unguarded, so an edit that changed a value's type raised out of the walk — ``/ledger/
+    verify``, which "never raises", answered 500 — and on SQLite ``int()`` truncated a
+    fractional ``seq`` or ``duration_ms`` back to the hashed value, so that edit went
+    unseen. A value of the wrong type is an unreadable row, reported by id."""
+    _write_through_every_writer(db)
+    assert verify_events(db.factory).ok
+    _drop_event_triggers(db)
+    with db.engine.begin() as c:
+        c.execute(text(tamper))
+    report = verify_events(db.factory)
+    assert not report.ok and report.broken_at == 3 and "event id 3" in report.detail
+
+
 def test_two_writers_at_once_do_not_fork_the_chain(db: Backend) -> None:
     errors: list[BaseException] = []
     per_writer = 25

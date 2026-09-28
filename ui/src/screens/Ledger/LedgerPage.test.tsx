@@ -18,7 +18,8 @@
  *               docs/adr/0029-the-audit-trail-is-hash-chained.md
  * Works with:   ui/src/screens/Ledger/LedgerPage.tsx (the code under test), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Ledger/LedgerPage.test.tsx
- * Touch when:   an export or a filter is added, or `GET /ledger/verify` gains a part.
+ * Touch when:   never for a new repository; an export or a filter is added, or `GET /ledger/verify`
+ *               gains a part.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

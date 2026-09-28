@@ -78,6 +78,7 @@ from crb.core.context_arm import BASE_S2, parse_arm
 from crb.core.ledger import CellStats, is_v2_apparatus
 from crb.core.reading import (
     CELL_ERROR_BUDGET,
+    NULL_RATE,
     RULE_LOOK_V1,
     VERDICT_CEILING,
     VERDICT_DELIVER,
@@ -454,6 +455,18 @@ def _looks_phrase(rule: str) -> str:
     return ", ".join(parts[:-1]) + " or " + parts[-1]
 
 
+def _share_phrase(share: float) -> str:
+    """``0.5`` → ``"at least half"``; any other share as a percentage (P-347)."""
+    return "at least half" if share == 0.5 else f"at least {share:.0%}"
+
+
+def _escapes_phrase(n: int) -> str:
+    """``0`` → ``"let no measurement control escape"`` (P-347)."""
+    if n == 0:
+        return "let no measurement control escape"
+    return f"let at most {n} measurement control{'s' if n != 1 else ''} escape"
+
+
 @dataclass(frozen=True)
 class RoutingPolicy:
     """The thresholds of the rule. The defaults ARE the published rule (ADR-0025 as ADR-0026
@@ -545,7 +558,8 @@ class RoutingPolicy:
     def describe(self) -> str:
         """The published bar as ONE sentence (ADR-0025 item 10, ADR-0026 item 6). README's
         "Not a licence to deploy" carries it between the ``routing-bar`` markers and
-        ``scripts/claims_check.py --check`` fails on any byte of difference."""
+        ``scripts/claims_check.py --check`` fails on any byte of difference. Every threshold
+        in it is rendered from the policy's own fields, never typed (P-347)."""
         return (
             f"A cell routes `deliver` ({self.version}) only for its standard context arm, "
             "when a reading registered before its first attempt, over a frozen pool read in "
@@ -555,13 +569,14 @@ class RoutingPolicy:
             "is read richest arm first and stops at the first arm that does not deliver, `S3` "
             "alone is a ceiling that licenses nothing, only `S1@<author>` and `S2` certify, "
             "and `A0` is descriptive; every reading on a cell spends its rule's chance of "
-            f"delivering at a true rate of 0.80 ({rule_spend(self.rule):.4f} for {self.rule}) "
-            f"from one error budget of {self.cell_error_budget:.2f} per cell; and the cell "
-            "also needs false-Q1 = 0, an oracle strength of at least "
-            f"{self.min_oracle_strength:.2f} under `mutation.v2` measured on at least half of "
-            "the commits the reading counted, and a complete negative-controls report at the "
-            "same apparatus that passed, exercised at least half its controls and let no "
-            "measurement control escape."
+            f"delivering at a true rate of {NULL_RATE:.2f} ({rule_spend(self.rule):.4f} for "
+            f"{self.rule}) from one error budget of {self.cell_error_budget:.2f} per cell; and "
+            "the cell also needs false-Q1 = 0, an oracle strength of at least "
+            f"{self.min_oracle_strength:.2f} under `mutation.v2` measured on "
+            f"{_share_phrase(self.min_oracle_share)} of the commits the reading counted, and a "
+            "complete negative-controls report at the same apparatus that passed, exercised "
+            f"{_share_phrase(self.min_controls_share)} its controls and "
+            f"{_escapes_phrase(self.max_controls_escapes)}."
         )
 
 

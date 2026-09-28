@@ -5,18 +5,19 @@ run before any build: a cell's proven context standard, its arms' readings for t
 and whether the points-to-churn agreement has passed. This module binds the first two to
 routing.v2's registered readings (``crb.core.reading``, ``POST /readings``) on ONE apparatus,
 class-set version, checks arm and posture class — the repository's own checks arm and the
-deployment's posture class — and marks a standard signed only when an active, untampered sign-off of
-its cell was made on that arm, class-set version, reading and apparatus.
+deployment's posture class — and marks a standard signed only when an active sign-off of its
+cell was made on that arm, class-set version, reading and apparatus, read through the one
+sign-off reader, which lifts nothing from a broken chain (P-336).
 
 Navigation
 ----------
 What it is:   The server-side binding of the factory entry gate's readers to the store: the
               one place a factory cell (class × size, or a licence's class × size × builder
-              × model × arm) is answered from the registered readings.
+              × model × provider × arm) is answered from the registered readings.
 What it does: Reads every registered reading of the repository and the ledger's rows once;
               for a cell, evaluates the readings registered on a cell of that class and size
-              (and, for a licence, that builder and model) at the current apparatus and the
-              global class set, on the repository's checks arm and the deployment's posture
+              (and, for a licence, that builder, model and provider) at the current apparatus
+              and the global class set, on the repository's checks arm and the deployment's posture
               class, and answers the latest proven standard (or its ``S3`` ceiling) as the
               factory's :class:`~crb.factory.standard.Standard`, signed only by an active
               sign-off bound to its arm, class-set version and reading; a licence read of an
@@ -62,18 +63,20 @@ from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.standard import ArmReading, CellRef, Readers, Standard, points_agreement_passed
 from crb.server.routes.readings import load_readings
-from crb.server.routes.signoffs import load_signoff_rows, signoff_tampered, to_record
+from crb.server.routes.signoffs import load_signoff_records
 from crb.store.ledger import rows_in
 
 
 def _matches(reading_cell: Mapping[str, str], cell: CellRef) -> bool:
     """A reading's (full) cell answers a factory cell of the same class and size — and, for a
-    licence read, of the same builder and model."""
+    licence read, of the same builder, model and provider (P-340)."""
     if reading_cell.get("capability_class") != cell.capability_class:
         return False
     if reading_cell.get("size") != cell.size:
         return False
     if cell.builder and reading_cell.get("builder", "") != cell.builder:
+        return False
+    if cell.provider and reading_cell.get("provider", "") != cell.provider:
         return False
     return not (cell.model and reading_cell.get("model", "") != cell.model)
 
@@ -220,9 +223,11 @@ def readers_over(
 
 def readers_in(session: Session, repo: str, *, checks_arm: str, posture_class: str) -> Readers:
     """The gate's readers for ``repo``, read ONCE in ``session`` (the pre-run map): its
-    registered readings, its rows and its untampered sign-offs."""
+    registered readings, its rows and its sign-offs — none when the sign-off chain is broken."""
     readings = load_readings(session, repo)
-    records = [to_record(r) for r in load_signoff_rows(session, repo) if not signoff_tampered(r)]
+    # the ONE sign-off reader (P-336): a broken chain, or a row the audit trail names that
+    # the chain lacks, lifts nothing — never a per-row filter of its own
+    records = load_signoff_records(session, repo)
     rows = rows_in(session, repo)
 
     def signed(cell: CellRef, arm: str, reading_id: str) -> bool:
