@@ -765,7 +765,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           {
             key: 'Items',
             hint: 'summary.factory.items',
-            value: `${worked} of ${total} can be built${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell that routes deliver${funded ? `, ${funded} as a funded calibration build` : ''}; the rest open no pull request`,
+            value: `${worked} of ${total} can be built${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell this deployment would deliver from${funded ? `, ${funded} as a funded calibration build` : ''}; the rest open no pull request`,
             note: 'Readiness and the entry gate are assessed again at the run: an item whose cell has no proven context standard, or with an unsigned structural gap, is not built and nothing is spent on it.',
           },
           {
@@ -808,7 +808,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             Open pull requests where the map routes <code>deliver</code>
             {tasks && (
               <Hint id="stat.factory.deliverable" className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
-                {deliverable} of {tasks.length} items sit in a cell that routes <code>deliver</code> today; the rest open no pull request
+                {deliverable} of {tasks.length} items sit in a cell this deployment would deliver from today; an item whose cell’s standard nobody has signed off is not built at all, and the rest open no pull request (ADR-0018)
               </Hint>
             )}
           </span>
@@ -1141,7 +1141,8 @@ function GapForm({ repo, task: t }: { repo: string; task: FactoryTask }) {
   )
 }
 
-/** How many items sit in a cell the map routes `deliver` — what a run could actually deliver. */
+/** How many items sit in a cell this deployment would deliver from — the WHOLE gate the server
+ * computed (route + signed cell under the deployment's posture, ADR-0018), never half of it. */
 export function deliverableCount(tasks: FactoryTask[]): number {
   return tasks.filter((t) => t.cell_route?.deliverable).length
 }
@@ -1170,11 +1171,11 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
   return (
     <>
       {r.deliverable ? (
-        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver — ${prov}: a clean build may open a pull request`} hint="factory.cell_route.deliverable" data-testid={`cell-route-${t.id}`}>
+        <Pill tone="green" glyph="✓" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes deliver${r.signed ? ' and a person has signed it off' : ''} — ${prov}: a clean build may open a pull request`} hint="factory.cell_route.deliverable" data-testid={`cell-route-${t.id}`}>
           routes deliver
         </Pill>
       ) : (
-        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: an item in it opens no pull request — ${r.reason}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
+        <Pill tone="amber" glyph="⊘" size="xs" label={`Cell ${t.capability_class} × ${t.size} routes ${r.route} (${r.reason_code}) — ${prov}: an item in it opens no pull request — ${withheldWhy(r)}`} hint="factory.cell_route.withheld" data-testid={`cell-route-${t.id}`}>
           routes {r.route} · no pull request
         </Pill>
       )}
@@ -1183,6 +1184,13 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
       </Hint>
     </>
   )
+}
+
+/** Which clause holds this cell back (ADR-0018 as amended by ADR-0026 item 8) — the route, or
+ * the missing sign-off on the cell's proven standard, which stops an item before it is built.
+ * Said in the reader's words, never as a code on its own. */
+function withheldWhy(r: NonNullable<FactoryTask['cell_route']>): string {
+  return r.route === 'deliver' && r.signed === false ? 'the cell routes deliver but its standard carries no sign-off, so an item here is not built — a second approver may lift the sign-off clause for one run, never a missing standard' : r.reason
 }
 
 function pct(x: number): string {

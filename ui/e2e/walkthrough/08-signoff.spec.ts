@@ -19,10 +19,12 @@
  *    one cell. Under `routing.v2` it still routes `calibrate` `posture_unsealed`: tier 1 has
  *    no sealed posture and no registered reading, so no cell of a walkthrough delivers
  *    (G-956). The admin who queued every run is REFUSED by the two-person rule
- *    (`same_actor`) — shown before they try, never overridable. A second person
- *    (`walk-approver`, created through `POST /users`) names an accepted row and affirms it,
- *    and is still refused: the gate names the reading and the sealed posture, the API
- *    answers 409, nothing is written and the map's tier does not move.
+ *    (`same_actor`) — shown before they try, never overridable. A second person is INVITED
+ *    from Settings (`walk-invitee`, G-518): the admin reads the one-time link once, the
+ *    approver opens it in their own browser, chooses a password and is active — and the same
+ *    link is refused a second time. That approver reads Home task 7 Completed, names an
+ *    accepted row and affirms it, and is still refused: the gate names the reading and the
+ *    sealed posture, the API answers 409, nothing is written and the map's tier does not move.
  *
  * Navigation
  * ----------
@@ -33,16 +35,20 @@
  *               (0 escapes; its oracle scores ≥ 0.80 once measured), onboarded, probed, mined,
  *               put through controls, an oracle run and 18 clean `fixture_gold` replays, clears
  *               every clause but the sealed posture and the reading; that the admin who queued
- *               those runs is refused `same_actor` before they try; and that a second person is
- *               refused on the reading and the posture, with nothing written.
+ *               those runs is refused `same_actor` before they try; that an approver invited from
+ *               Settings accepts the one-time link (which then refuses a second use) and reads
+ *               Home task 7 Completed; and that this second person is refused on the reading
+ *               and the posture, with nothing written.
  * How:          Seeding goes through `POST /repos` / `POST /runs` with the CSRF header (the
- *               pytest seed fixture is not touched); the approver persona is created with
- *               `POST /users` (idempotent, the stable `personaPassword`, as 11-screens does);
- *               the attempt is driven through the form (`attest-row`, `attest-read`,
- *               `attest-statement`) and the API.
+ *               pytest seed fixture is not touched); the signer is invited through the
+ *               Settings form and accepts in its own browser context (skipped on a rerun that
+ *               finds the account; the stable `personaPassword`), and `walk-approver` is still
+ *               ensured with `POST /users` for 11-screens; the sign-off itself is driven through the form (`attest-row`, `attest-read`,
+ *               `attest-statement`, `signoff-recorded`).
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0025-routing-v2.md, docs/adr/0026-the-context-standard.md (item 6)
- * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Signoff/SignoffPage.tsx and
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Settings/InviteApproverCard.tsx,
+ *               ui/src/screens/Invite/AcceptInvitePage.tsx, ui/src/screens/Signoff/SignoffPage.tsx and
  *               ui/src/screens/Signoff/contract.ts (the screen under test),
  *               src/crb/core/signoff.py (the clauses asserted), src/crb/server/routes/signoffs.py,
  *               src/crb/builders/fixture_gold.py (the clean rows),
@@ -52,7 +58,9 @@
  * Touch when:   never for a new repository (the seeded repository is this spec's own fixture);
  *               a refusal clause or a policy default changes (src/crb/core/signoff.py) — the
  *               expected clause list must follow; when the walkthrough can grade in the sealed
- *               posture and register a reading (G-956), the approver signs again here.
+ *               posture and register a reading (G-956), the approver signs again here, reaches the cell
+ *               through Decisions → Attest, and revokes and re-signs it (G-478); the invitation
+ *               path changes.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -66,9 +74,13 @@ test.describe.configure({ mode: 'serial' })
 const SIGNABLE_NAME = 'walk-signable'
 const N_TASKS = 18 // 16 clean rows already clear Wilson lower ≥ 0.80; two spare
 const MIN = 60_000
-/** The second person: the same persona account 11-screens uses, so a rerun reuses it. */
+/** The persona account 07 created and 11-screens uses; it is not the signer here. */
 const APPROVER = 'walk-approver'
 const APPROVER_PASS = personaPassword(APPROVER)
+/** The second person who signs: invited from Settings, arrives through the one-time link (G-518, G-478). */
+const INVITEE = 'walk-invitee'
+const INVITEE_PASS = personaPassword(INVITEE)
+const INVITEE_NAME = 'Walk invitee'
 
 /**
  * A calculator repo whose per-commit tests are parametrised — the negative control
@@ -239,6 +251,54 @@ test.describe('08 sign-off policy', () => {
     await ensurePersona(page, APPROVER, 'approver')
   })
 
+  test('an admin invites an approver from Settings; the approver accepts the one-time link, and it works only once', async ({ browser, page }) => {
+    const users = (await apiGet(page.request, '/users')) as { items: Array<{ username: string }> }
+    if (!users.items.some((u) => u.username === INVITEE)) {
+      await page.goto('/settings')
+      const form = page.getByRole('form', { name: 'Invite an approver' })
+      await expect(form).toBeVisible()
+      await field(form, 'Username').fill(INVITEE)
+      await field(form, 'Display name').fill(INVITEE_NAME)
+      await field(form, 'Role').selectOption('approver')
+      await field(form, 'Link expires in (hours)').fill('24')
+      await form.getByRole('button', { name: 'Invite' }).click()
+      const shown = page.getByTestId('invitation-link')
+      await expect(shown).toContainText(`${INVITEE} is invited as approver`)
+      await expect(shown).toContainText('shown once and cannot be recovered')
+      await expect(page.getByTestId(`invitation-state-${INVITEE}`)).toHaveText('waiting')
+      const link = new URL(((await page.getByTestId('invitation-url').textContent()) ?? '').trim(), env.baseUrl)
+      expect(link.pathname).toBe('/invite')
+      expect(link.searchParams.get('token') ?? '').not.toBe('')
+
+      // the approver, in their own browser: the link, a password twice, and the account is active
+      const theirs = await browser.newContext({ baseURL: env.baseUrl })
+      try {
+        const them = await theirs.newPage()
+        await them.goto(`${link.pathname}${link.search}`)
+        await field(them, 'New password').fill(INVITEE_PASS)
+        await field(them, 'New password again').fill(INVITEE_PASS)
+        await them.getByRole('button', { name: 'Set my password' }).click()
+        await expect(them.getByTestId('invite-accepted')).toContainText(`${INVITEE} is now active as approver`)
+        // the same link a second time is refused: it worked once
+        const again = await theirs.newPage()
+        await again.goto(`${link.pathname}${link.search}`)
+        await field(again, 'New password').fill(`${INVITEE_PASS}-2`)
+        await field(again, 'New password again').fill(`${INVITEE_PASS}-2`)
+        await again.getByRole('button', { name: 'Set my password' }).click()
+        await expect(again.getByTestId('error-state')).toContainText('This invitation link cannot be used')
+        // and they sign in with the password they chose, which nobody else has seen
+        await signIn(them, INVITEE, INVITEE_PASS)
+      } finally {
+        await theirs.close()
+      }
+      await page.reload()
+      await expect(page.getByTestId(`invitation-state-${INVITEE}`)).toHaveText('accepted')
+    }
+    // the API agrees: the invitation is spent, and the account it made is the second person
+    const invitations = (await apiGet(page.request, '/invitations')) as { items: Array<{ username: string; state: string }> }
+    expect(invitations.items.find((i) => i.username === INVITEE)?.state).toBe('accepted')
+  })
+
   test('the admin who queued the runs is refused by the two-person rule (same_actor) before trying', async ({ page }) => {
     await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)
     const gate = page.getByTestId('signoff-gate')
@@ -290,7 +350,11 @@ test.describe('08 sign-off policy', () => {
     await page.goto('/home')
     await page.getByRole('button', { name: 'Sign out', exact: true }).click()
     await expect(page).toHaveURL(/\/login/)
-    await signIn(page, APPROVER, APPROVER_PASS)
+    await signIn(page, INVITEE, INVITEE_PASS)
+    // Home task 7 for this repository reads Completed now a second person has arrived
+    await page.goto(`/home?repo=${SIGNABLE_NAME}`)
+    await expect(page.getByRole('list', { name: 'Tasks' }).getByRole('listitem').nth(6)).toContainText('Completed')
+    // no cell of tier 1 clears the bar (G-956), so Decisions offers no Attest: pick the cell
     await page.goto(`/signoff?repo=${SIGNABLE_NAME}`)
     const gate = page.getByTestId('signoff-gate')
     await expect(gate).toBeVisible()

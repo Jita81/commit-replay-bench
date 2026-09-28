@@ -20,7 +20,7 @@
  *               copy points at the card that shows it (G-255, G-204); the matcher is pinned
  *               on its own strings, and the one non-policy number (the password floor) is on
  *               a list that only shrinks.
- * How:          Reads `ui/src/App.tsx` and the eight guides as `?raw` text so the ratchet
+ * How:          Reads `ui/src/App.tsx` and the nine guides as `?raw` text so the ratchet
  *               needs no React; `matchPath` through `helpFor`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -32,12 +32,12 @@
  */
 import { describe, expect, it } from 'vitest'
 import appSource from '../App.tsx?raw'
-import { isDocName, slugify, type DocAnchor } from './docs'
+import { docPath, isDocName, slugify, type DocAnchor } from './docs'
 import { TERMS, type TermId } from './glossary'
 import { HELP, helpFor } from './help'
 
 /** The guides' text, eagerly, keyed by file name — the same files ui/src/help/docs.ts bundles. */
-const DOC_TEXT = import.meta.glob('../../../docs/{ONBOARDING-A-REPO,OPERATOR,EVIDENCE-AND-CLAIMS,GITHUB-APP,SECURITY,DATA-RETENTION,LEARNING-LOOP,DEPLOYMENT}.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+const DOC_TEXT = import.meta.glob(['../../../docs/{ONBOARDING-A-REPO,OPERATOR,EVIDENCE-AND-CLAIMS,GITHUB-APP,SECURITY,DATA-RETENTION,LEARNING-LOOP,DEPLOYMENT}.md', '../../../docs/reviews/human-review-guide.md'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
 /** Every `<Route path="…">` in App.tsx, read from the source so the ratchet cannot drift from the table. */
 function appRoutePaths(): string[] {
@@ -51,7 +51,7 @@ function concrete(pattern: string): string {
 
 /** The heading slugs of a bundled doc, with GitHub's -1/-2 suffixes for duplicates. */
 function headingSlugs(name: string): Set<string> {
-  const text = DOC_TEXT[`../../../docs/${name}.md`] ?? ''
+  const text = DOC_TEXT[`../../../docs/${isDocName(name) ? docPath(name) : name}.md`] ?? ''
   const seen = new Map<string, number>()
   const out = new Set<string>()
   let fence = false
@@ -140,6 +140,12 @@ describe('HELP ratchet', () => {
     expect(learn.purpose).toContain('the prevention register lists every bug class')
     expect(learn.purpose).toMatch(/three reports list refusals .* weak oracles .* evidence that has gone stale/)
     expect(learn.purpose).toContain('The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.')
+  })
+
+  it('the /signoff About block links the Step 6 human-review guide and says where the read of a diff is recorded (G-481)', () => {
+    const h = helpFor('/signoff')!
+    expect(h.readMore.map((r) => r.to)).toContain('HUMAN-REVIEW-GUIDE')
+    expect(h.next.approver).toContain('run’s Review panel')
   })
 
   it('copy lint: a term word appears only when the term is on the screen; plain English throughout', () => {

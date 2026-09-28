@@ -6,7 +6,8 @@
       │   no proven standard, or only an S3 ceiling ──▶ no_proven_standard
       │   missing what the standard arm needs ──▶ needs_context
       │   (an approver's calibration grant admits either as a calibration build)
-      │   proven but unsigned, where a signed cell is required ──▶ unsigned_cell
+      │   proven but unsigned, where a signed cell is required (ADR-0018's sign-off
+      │   clause, on by default) ──▶ unsigned_cell
       │     (the ONLY clause ``deliver_override`` lifts — a second approver's, never the
       │     run's own actor's, never on a false-Q1 cell: a refused one is on the chain)
       │ an unsigned structural gap ──▶ not_ready
@@ -30,7 +31,8 @@
       │   model) must license it ──▶ size_exceeds_licence / cell_not_licensed
     deliver — ONLY an `accept` verdict reaches it (ADR-0021); OPT-IN, default OFF; fails
       │   closed on missing creds; gated on the route read at readiness (DL-038, DL-045),
-      │   re-read on the measured cell when the change measures larger (GOV-2)
+      │   re-read on the measured cell when the change measures larger (GOV-2), which no
+      │   override lifts (ADR-0026 item 8)
       ▼   ──▶ delivery_failed
     accepted
 
@@ -82,7 +84,11 @@ ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0013-external-review-is-advisory-and-recorded.md (amended
               2026-09-21: a weak_oracle verdict never rebuilds against an unchanged oracle),
               docs/adr/0021-factory-review-before-delivery.md (review before delivery; only
-              `accept` delivers; a later non-accept closes the open pull request)
+              `accept` delivers; a later non-accept closes the open pull request),
+              docs/adr/0018-a-signed-cell-licenses-delivery.md (the sign-off clause, default
+              ON, and what an override may be claimed to mean),
+              docs/adr/0026-the-context-standard.md (item 8: the clause stops before any
+              spend; the override lifts it and nothing else)
 Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory/readiness.py
               + src/crb/factory/testfirst.py + src/crb/factory/build.py +
               src/crb/factory/review.py + src/crb/factory/delivery.py (the steps, in order),
@@ -91,8 +97,11 @@ Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory
 Tested by:    tests/test_factory_loop.py
 Touch when:   never for a new repository (delivery is switched on per run, not per repo);
               adding a status means ``STATUSES`` here, the UI's factory screen and
-              docs/API.md#factory-phase-p6; changing the step order is a governance change
-              — an ADR (ADR-0021 is the current order).
+              docs/API.md#factory-phase-p6; adding a clause to the gate means a
+              stop code here, the pre-run prediction in
+              src/crb/server/routes/factory.py (``_cell_routes``) and the posture row, so
+              what is predicted and what is enforced never disagree; changing the step order
+              is a governance change — an ADR (ADR-0021 is the current order).
 """
 
 from __future__ import annotations
@@ -349,9 +358,12 @@ class FactorySpec:
     #: is ``crb.factory.standard.NO_READINGS`` — which fails closed: with no reading, no cell
     #: has a standard, and only a calibration build is built.
     readers: Readers | None = None
-    #: ADR-0018's sign-off clause (Wave 4, stream S): when on, a proven standard with no
-    #: active sign-off stops ``unsigned_cell`` before any spend. Off until that clause ships.
-    require_signed_cell: bool = False
+    #: ADR-0018's sign-off clause, as amended by ADR-0026 item 8. Default True: a proven
+    #: standard with no active sign-off on its arm, class-set version and reading — in any
+    #: cell the size rule reads — stops ``unsigned_cell`` BEFORE ANY SPEND. False
+    #: (``CRB_FACTORY__REQUIRE_SIGNED_CELL=false``) removes this clause only, never the entry
+    #: gate; the served posture says which is in force, so it is never a silent choice.
+    require_signed_cell: bool = True
     #: The prevention loop's snapshot for this run (ADR-0020). A factory brief carries its
     #: overlay and lines when, and ONLY when, the item's standard arm carries ``+L``
     #: (ADR-0026 item 8): the loop switch never adds context the standard arm lacks.
@@ -450,6 +462,9 @@ _ROUTE_SUMMARY_KEYS: tuple[str, ...] = (
     "false_q1",
     "policy_version",
     "apparatus_versions",
+    # ADR-0018: whether a human had attested the cell when the route was read — the sign-off
+    # clause's reading, so the chain quotes the licence as well as the route
+    "verification_tier",
 )
 
 
@@ -500,6 +515,27 @@ def _override_refusal(route: Mapping[str, Any] | None, override_by: str, *, acto
     if actor and override_by == actor:
         return OVERRIDE_REFUSED_SAME_ACTOR
     return ""
+
+
+def _licence_line(entry: Entry) -> str:
+    """What licensed this item at the entry gate, for the pull request's reader (ADR-0018):
+    a signed cell, an approver's per-run override of the sign-off clause — one person, one
+    run, never a human attestation of the cell — or a deployment that does not require a
+    signed cell. Never "signed" unless the standard itself carries an active sign-off."""
+    if entry.override_by:
+        return (
+            f"**unsigned cell** — opened under a per-run override of the sign-off clause by "
+            f"approver `{entry.override_by}`, not a human attestation of the cell"
+        )
+    if entry.standard is not None and entry.standard.signed:
+        return (
+            f"**signed cell** — the cell's proven standard (`{entry.standard.arm}`) carries an "
+            "active sign-off"
+        )
+    return (
+        "**unsigned cell** — this deployment does not require a signed cell "
+        "(`CRB_FACTORY__REQUIRE_SIGNED_CELL=false`)"
+    )
 
 
 def _waiver_notes(verdict: ReviewVerdict) -> tuple[str, ...]:
@@ -928,6 +964,7 @@ class FactoryLoop:
         rework_n: int = 0,
         after_verdict: str = "",
         arm: str = "",
+        licence_line: str = "",
     ) -> tuple[DeliveryResult | None, str]:
         """The LAST step: delivery of a build the review ACCEPTED (ADR-0021) — skipped and
         RECORDED when opt-in is off; a failure stops the item (``delivery_failed``).
@@ -1068,6 +1105,7 @@ class FactoryLoop:
                 verdict=verdict.verdict,
                 repo_id=self.credentials_key,
                 waivers=_waiver_notes(verdict),
+                licence_line=licence_line,
             )
         except DeliveryError as exc:
             s.evidence.record_delivery_refused(
@@ -1468,6 +1506,7 @@ class FactoryLoop:
                     rework_n=reworks,
                     after_verdict=verdicts[-2].verdict if len(verdicts) > 1 else "",
                     arm=arm,
+                    licence_line=_licence_line(entry),
                 )
                 status = STATUS_ACCEPTED
             else:
@@ -1615,6 +1654,7 @@ __all__ = [
     "STATUS_REJECTED",
     "STATUS_REWORK_EXHAUSTED",
     "STATUS_ROUTED_HUMAN",
+    "STATUS_UNSIGNED_CELL",
     "FactoryLoop",
     "FactorySpec",
     "ItemOutcome",

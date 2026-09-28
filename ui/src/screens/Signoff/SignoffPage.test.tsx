@@ -820,3 +820,104 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(box.closest('[data-hint]')).toHaveAttribute('data-hint', 'field.signoff.read_affirmation')
   })
 })
+
+describe('SignoffPage — the second person’s gate says everything before anyone signs (stream S)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const base = (over: Record<string, unknown> = {}) => ({
+    'GET /auth/me': PRINCIPAL,
+    'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+    'GET /capability-map': MAP,
+    'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+    'GET /signoffs/policy': { ...POLICY, policy_version: 'signoff-policy.v9' },
+    'GET /signoffs/preview': preview(),
+    ...over,
+  })
+
+  it('the eyebrow and the "Evidence meets" row name the policy the server serves, never one built into the page (G-284)', async () => {
+    mockApi(base())
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const gate = await screen.findByTestId('signoff-gate')
+    // before any cell is chosen the preview has not answered: the served policy is read
+    await waitFor(() => expect(gate.textContent).toContain('policy signoff-policy.v9'))
+    expect(gateRow(gate, 'Evidence meets').textContent).toContain('Evidence meets signoff-policy.v9')
+    expect(gate.textContent).not.toContain('signoff-policy.v3')
+  })
+
+  it('when the served policy cannot be read, the gate says so rather than naming a version it never read (G-284)', async () => {
+    mockApi(base({ 'GET /signoffs/policy': () => envelope(503, 'signoff_policy_invalid', 'CRB_SIGNOFF__N_MIN is not a number') }))
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const gate = await screen.findByTestId('signoff-gate')
+    await waitFor(() => expect(gate.textContent).toContain('the server’s policy could not be read'))
+    expect(gateRow(gate, 'Evidence meets').textContent).toContain('Evidence meets the policy in force')
+    expect(gate.textContent).not.toMatch(/signoff-policy\.v\d/)
+  })
+
+  it('"Why a sign-off can be refused" lists the two-person rule as the seventh clause, which cannot be relaxed (G-285)', async () => {
+    mockApi(base())
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    await screen.findByTestId('signoff-gate')
+    const why = screen.getByText('Why a sign-off can be refused').closest('details')!
+    expect(within(why).getAllByRole('listitem')).toHaveLength(7)
+    expect(why).toHaveTextContent('you produced the evidence you would sign')
+    expect(why).toHaveTextContent('same_actor')
+    expect(why).toHaveTextContent('the two-person rule')
+  })
+
+  it('each number-based refusal names the next action and links the screen that changes the number (G-476)', async () => {
+    const refusals: SignoffRefusal[] = [
+      { code: 'thin_cell', message: 'n=4 < n_min=10', threshold: 10, observed: 4, overridable: true },
+      ESCAPE_REFUSALS[0]!,
+      ESCAPE_REFUSALS[1]!,
+      ESCAPE_REFUSALS[2]!,
+      ATTESTATION_MISSING,
+    ]
+    mockApi(base({ 'GET /signoffs/preview': preview({ refusals }) }))
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const list = await screen.findByTestId('signoff-refusals')
+    const want: Array<[string, string, string]> = [
+      ['thin_cell', 'Measure more of this repository', '/connect/r/measure'],
+      ['controls_escapes', 'Run the controls again', '/connect/r'],
+      ['oracle_weak', 'Strengthen the tests on Learn', '/learn?repo=r'],
+      ['route_not_deliver', 'Read why on Routing', '/routing?repo=r'],
+    ]
+    for (const [family, label, href] of want) {
+      const next = within(list).getByTestId(`refusal-next-${family}`)
+      expect(within(next).getByRole('link', { name: label })).toHaveAttribute('href', href)
+      expect(next.textContent!.length).toBeGreaterThan(label.length + 20) // a sentence, not only a link
+    }
+    // a clause that already says its own way forward gets no second line
+    expect(within(list).queryByTestId('refusal-next-attestation_missing')).toBeNull()
+  })
+
+  it('the gate says whether the evidence was graded in the sealed posture, as advice that never holds the gate (G-480)', async () => {
+    const host = preview({ evidence: { ...preview().evidence, posture_class: 'local/inplace/host-env', sealed_posture: false } })
+    mockApi(base({ 'GET /signoffs/preview': host }))
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    await waitFor(() => expect(gateRow(gate, 'Graded in the sealed posture').textContent).toContain('local/inplace/host-env'))
+    const row = gateRow(gate, 'Graded in the sealed posture')
+    expect(row.textContent).toMatch(/!\s*advisory, not satisfied:/)
+    expect(row.textContent).toContain('not the sealed posture, so this is a development reading (Step 6)')
+    expect(row.textContent).toContain('signing is not refused on it')
+    expect(row.querySelector('[data-hint]')).toHaveAttribute('data-hint', 'gate.signoff.posture')
+  })
+
+  it('the sealed posture reads satisfied, naming the class (G-480)', async () => {
+    const sealed = preview({ evidence: { ...preview().evidence, posture_class: 'docker/copy/sealed', sealed_posture: true } })
+    mockApi(base({ 'GET /signoffs/preview': sealed }))
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    await waitFor(() => expect(gateRow(gate, 'Graded in the sealed posture').textContent).toMatch(/✓\s*satisfied:/))
+    expect(gateRow(gate, 'Graded in the sealed posture').textContent).toContain('docker/copy/sealed — the docker executor with sealed dependencies')
+  })
+})

@@ -115,7 +115,7 @@ from crb.factory.backlog import (
 )
 from crb.factory.evidence import EV_RED_PROOF, verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, assess, sign, slots_for
-from crb.factory.standard import CALIBRATABLE, Entry, Readers, gate_for
+from crb.factory.standard import CALIBRATABLE, CellRef, Entry, Readers, StandardFor, gate_for
 from crb.factory.testfirst import AuthoredTest
 from crb.intake.client import (
     REASON_LEASE_LOST,
@@ -335,7 +335,15 @@ class CellRouteOut(BaseModel):
     ci_low: float = 0.0
     ci_high: float = 0.0
     apparatus_versions: list[str] = []
-    #: True only when the gate would let a clean build of this item open a pull request.
+    #: The cell's verification tier with the repo's sign-offs overlaid — ``human-verified``
+    #: or ``ab-confirmed`` means a person has attested it (the sign-off clause, ADR-0018,
+    #: which stops an unsigned item before any spend); ``automated-pass`` means the ledger alone, ``""`` unmeasured.
+    verification_tier: str = ""
+    #: Has a human attested this cell (an active sign-off on the current apparatus)?
+    signed: bool = False
+    #: True only when the gate would let a clean build of this item open a pull request —
+    #: BOTH clauses under this deployment's posture: the route says ``deliver`` and, while
+    #: ``CRB_FACTORY__REQUIRE_SIGNED_CELL`` is on (the default), the cell is signed.
     deliverable: bool = False
 
 
@@ -1136,7 +1144,9 @@ def list_tasks(
             # run's pre-build check will say: not built, and why (the same gate call)
             if readers is None:
                 readers = _readers(db, settings, repo)
-            preview = _entry_preview(home, item, readers)
+            preview = _entry_preview(
+                home, item, readers, require_signed_cell=settings.factory.require_signed_cell
+            )
             if preview is not None:
                 d["entry"] = {
                     "code": preview.code,
@@ -1156,12 +1166,21 @@ def list_tasks(
 
 
 def _cell_routes(
-    db: DbDep, factory: SessionFactoryDep, repo: str, settings: object
+    db: DbDep, factory: SessionFactoryDep, repo: str, settings: Settings
 ) -> dict[str, CellRouteOut]:
     """``class|size`` → the map's decision, from exactly the reading the worker's delivery
     gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows on the current
     apparatus in the repository's own ``checks`` arm (ADR-0024), the repo's latest controls
-    verdict, sign-offs overlaid."""
+    verdict, sign-offs overlaid.
+
+    ``settings.factory.require_signed_cell`` is the deployment's posture
+    (``CRB_FACTORY__REQUIRE_SIGNED_CELL``, ADR-0018): ``deliverable`` is computed under the
+    SAME two clauses the loop enforces — the route, and the sign-off the entry gate reads
+    on the cell's proven standard (``standard_for``, ADR-0026 item 8: signed on its arm,
+    class-set version and reading) — so what the screen predicts before a run spends
+    anything and what the gate does cannot disagree."""
+    require_signed_cell = settings.factory.require_signed_cell
+    standard_for = _readers(db, settings, repo).standard_for
     rows = rows_for_arm(
         factory,
         repo,
@@ -1179,6 +1198,7 @@ def _cell_routes(
             continue
         d = c.decision
         st = c.stats
+        signed = _standard_signed(standard_for, c.key.capability_class, c.key.size)
         out[f"{c.key.capability_class}|{c.key.size}"] = CellRouteOut(
             route=d.route,
             reason_code=d.reason_code,
@@ -1188,9 +1208,19 @@ def _cell_routes(
             ci_low=st.ci.low if st is not None else 0.0,
             ci_high=st.ci.high if st is not None else 0.0,
             apparatus_versions=list(st.apparatus_versions) if st is not None else [],
-            deliverable=d.route == ROUTE_DELIVER,
+            verification_tier=c.verification_tier or "",
+            signed=signed,
+            deliverable=d.route == ROUTE_DELIVER and (signed or not require_signed_cell),
         )
     return out
+
+
+def _standard_signed(standard_for: StandardFor, capability_class: str, size: str) -> bool:
+    """Whether the cell's proven standard carries an active sign-off — the SAME reading the
+    entry gate's sign-off clause makes (:func:`crb.factory.standard.decide_entry`); a cell
+    with no proven standard, or only a ceiling, is never signed."""
+    std = standard_for(CellRef(capability_class, size))
+    return std is not None and std.licenses and std.signed
 
 
 @router.post(
@@ -1284,7 +1314,9 @@ def _readers(db: Session, settings: Any, repo: str) -> Readers:
     )
 
 
-def _entry_preview(home: FactoryHome, item: BacklogItem, readers: Readers) -> Entry | None:
+def _entry_preview(
+    home: FactoryHome, item: BacklogItem, readers: Readers, *, require_signed_cell: bool
+) -> Entry | None:
     """The entry gate for an item no factory run has reached yet — the SAME call the next
     run's pre-build check makes (ADR-0026 item 8), over the repository's readers; ``None``
     when it would enter. One clause is the run's own: whether its test author is the one an
@@ -1296,6 +1328,7 @@ def _entry_preview(home: FactoryHome, item: BacklogItem, readers: Readers) -> En
         readiness,
         readers,
         person_test=item.id in home.authored(),
+        require_signed_cell=require_signed_cell,
     )
     return None if entry.enters else entry
 
@@ -1379,7 +1412,12 @@ def fund_calibration(  # noqa: PLR0917 — FastAPI dependencies + path/body
     stop = view.status if view is not None and view.status in CALIBRATABLE else ""
     if not stop:
         # an item no run has reached yet: the gate as the next run's pre-build check reads it
-        preview = _entry_preview(home, item, _readers(db, settings, repo))
+        preview = _entry_preview(
+            home,
+            item,
+            _readers(db, settings, repo),
+            require_signed_cell=settings.factory.require_signed_cell,
+        )
         stop = preview.code if preview is not None and preview.code in CALIBRATABLE else ""
     if stop not in CALIBRATABLE:
         raise ApiError(
@@ -1843,6 +1881,7 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
             else None
         ),
         item_url=item_url_for(settings.public_url, repo),
+        require_signed_cell=settings.factory.require_signed_cell,
         run_active=lambda: _active_factory_run(db, repo) is not None,
         actor=operator.id,
         force=bool(body.force) if body else False,

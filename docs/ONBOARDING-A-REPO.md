@@ -155,6 +155,14 @@ you cannot change it per repository, only read it.
 
 ## Step 7 — Sign off (approver)
 
+**Time and cost.** About half an hour of the approver's own reading, most of it one accepted
+diff [hypothesis — the [human-review guide](reviews/human-review-guide.md) budgets about 30
+minutes for its sign-off step; no approver's time has been measured]. **£0**: a sign-off
+reads rows the ledger already holds and calls no model. A **re-sign after an apparatus
+change** is £0 as well, but it can only follow a re-measurement on the new apparatus
+(Step 4, the money step), because a sign-off never carries evidence across an apparatus
+move (ADR-0015).
+
 Sign-off is a **policy decision refused at write** (signoff-policy v3,
 [EVIDENCE-AND-CLAIMS §6a](EVIDENCE-AND-CLAIMS.md)): the cell must have `n ≥ 10`, the rule
 must say `deliver`, the controls must have passed with 0 escapes, the oracle must be
@@ -167,6 +175,13 @@ failing clause listed, shown on the Sign-off page before you try. A sign-off is 
 hash-chained row that records who signed and what kind of account it was; it is revoked by a
 newer row, never deleted.
 
+Step 7 is before step 8 in the code as well as in this guide: by default the factory does
+**not build** an item in a cell nobody has signed off, however well that cell measures — it
+stops `unsigned_cell` before any spend, so no pull request can follow
+([ADR-0018](adr/0018-a-signed-cell-licenses-delivery.md), as amended by ADR-0026 item 8). A
+sign-off expires with the apparatus, so after an apparatus move building in that cell waits
+for a fresh signature.
+
 ## Step 8 — Forward mode (when a cell is trusted)
 
 Register a frozen backlog (`POST /factory/{repo}/backlog`): items with structural facts
@@ -175,6 +190,18 @@ gaps can be signed by an approver; **value** gaps never), proves the test RED, b
 under the same belts, reviews independently with the verdict recorded before any edit,
 and — only when you switch delivery on — opens a branch + PR, never touching the default
 branch. Every step is in the evidence chain ([API.md](API.md) "Factory").
+
+**What licenses that pull request** (ADR-0018): the item's (class × size) cell must route
+`deliver` **and** carry your approver's sign-off. A missing signature stops the item before
+any spend (`unsigned_cell` on the item's chain: nothing is built); a cell that does not route
+`deliver` is built, graded and reviewed and its delivery is withheld, with the route on the
+chain. The Factory screen says which items would be
+delivered before you spend anything. An approver may lift the sign-off clause — and only
+that clause, never the route — for one run; that override is one person licensing one run
+under their own name — it is not a sign-off, and the pull request body says so. A
+deployment that decides to drop the sign-off clause sets
+`CRB_FACTORY__REQUIRE_SIGNED_CELL=false`, and the Posture page then says that is what it is
+running.
 
 ---
 

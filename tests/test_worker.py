@@ -30,7 +30,10 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               the worker's liveness bound — the check-in still lands. And (ADR-0023) that a
               production worker stamps the unsealed-production override into every run's
               apparatus and every pack, and refuses a run that asks for the local executor
-              without it.
+              without it. And that the idle loop calls every idle step under its guard and
+              survives each one raising (P-326), and that the production path stops an
+              unsigned deliver cell before any spend unless the setting turns the clause off
+              (ADR-0018).
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
               / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -43,8 +46,9 @@ Works with:   src/crb/server/worker.py (under test), src/crb/store/jobs.py (the 
               tests/test_worker_clone.py and tests/test_worker_budget_ladder.py (the same
               harness for one kind or seam each; so are the other test_worker_*.py files)
 Tested by:    tests/test_worker.py
-Touch when:   never for a new repository; a run kind is added (``stage_for``, a run case here and
-              the queue's ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
+Touch when:   never for a new repository (the fixture repository stands in for every one); a
+              run kind is added (``stage_for``, a run case here and the queue's
+              ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
               ``succeeded`` honestly.
 """
 
@@ -1914,6 +1918,13 @@ def test_route_lookup_reads_the_map_as_it_stood_before_the_run(
     assert cells[0] is None and len(cells) == 2
     assert cells[1] == {k: before_second[k] for k in cells[1]}  # the evidence-facing slice
     assert cells[1]["n"] == 1 and cells[1]["apparatus_versions"] == [rows[-1].apparatus_version]
+    # ADR-0018 — every decision carries the cell's verification tier, so the delivery gate's
+    # second clause reads the same pre-run reading: nobody has signed this cell, and the
+    # chain says so rather than leaving the licence unrecorded
+    assert everything["verification_tier"] == "automated-pass"
+    assert cells[1]["verification_tier"] == "automated-pass"
+    # and the whole gate's answer, so the intake pass labels a ticket what a run would do
+    assert everything["signed"] is False and everything["deliverable"] is False
 
 
 def test_every_finished_run_stamps_the_cells_that_first_route_deliver(
@@ -2604,3 +2615,268 @@ def test_a_factory_run_builds_nothing_in_a_cell_with_no_proven_standard(h: Harne
     assert list(h.worker.ledger.rows(run_id=run.id)) == []
     kinds = [e.kind for e in home.events()]
     assert fe.EV_ENTRY_REFUSED in kinds and fe.EV_RED_PROOF not in kinds
+
+
+def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: Harness) -> None:
+    """G-516: the decisions inbox is derived, so before the clock a decision existed only
+    while somebody had the page open. The worker's idle pass re-derives every repository's
+    inbox and stamps ``decisions_due`` — with no browser anywhere near it — and it is
+    throttled by its own timer so a fast idle loop does not reduce the whole ledger every
+    50 ms."""
+    from crb.factory.backlog import BacklogItem
+    from crb.server.decisions import due_records
+    from crb.server.worker import DECISIONS_REFRESH_S
+
+    home, item, _ = _multiply_backlog(h)
+    # nothing has been assessed yet: nothing is due, and the pass records nothing rather
+    # than inventing a row
+    assert h.worker.refresh_decisions(now=1000.0) == 1
+    with h.factory() as db:
+        assert due_records(db) == []
+    # not due again until the interval has passed (the idle loop calls it every poll)
+    assert h.worker.refresh_decisions(now=1000.0 + DECISIONS_REFRESH_S / 2) == 0
+    # a second item with no structural facts: the run refuses it at readiness, which is a
+    # decision waiting on an approver
+    gapped = BacklogItem(
+        id="I-2",
+        title="Add divide to calc",
+        kind=item.kind,
+        description="calc needs divide(a, b).",
+        acceptance_criteria=("divide(8, 4) == 2",),
+        capability_class="bug.fix",
+        size_estimate="XS",
+        structural_facts=(),
+    )
+    home.register_backlog([item, gapped], actor="tester")
+    h.enqueue("factory", ladder_json=["fake:m0"])
+    assert h.run_one().status == STATUS_SUCCEEDED
+    assert h.worker.refresh_decisions(now=1000.0 + DECISIONS_REFRESH_S) == 1
+    with h.factory() as db:
+        rows = {(r.kind, r.key): r for r in due_records(db)}
+    assert ("gap_unsigned", "I-2") in rows, rows
+    rec = rows[("gap_unsigned", "I-2")]
+    assert rec.repo == pr.REPO_NAME and rec.first_due and rec.resolved == ""
+    assert rec.role == "approver" and "structural gap" in rec.title
+    # the stamp is the decision's, not the reader's: a later pass does not move it
+    assert h.worker.refresh_decisions(now=1000.0 + 3 * DECISIONS_REFRESH_S) == 1
+    with h.factory() as db:
+        again = {(r.kind, r.key): r for r in due_records(db)}[("gap_unsigned", "I-2")]
+    assert again.first_due == rec.first_due and again.last_seen >= rec.last_seen
+
+
+# --- the idle loop's own steps (P-326) --------------------------------------------------
+
+
+def test_the_idle_loop_runs_the_decisions_clock_and_survives_each_idle_step_raising(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-516's clock runs with nobody looking only if the loop itself calls it: this drives
+    the real ``run_forever`` over an empty queue. And every idle step is under the loop's
+    guard — the decisions pass and the intake poll each raise on their first call (a
+    ``database is locked``, a unique-key race) and the loop goes round again and calls them
+    both a second time, where before one raise ended the worker (P-326)."""
+    from sqlalchemy.exc import OperationalError
+
+    calls: dict[str, int] = {"poll_intake": 0, "refresh_decisions": 0}
+    iterated_twice = threading.Event()
+
+    def flaky(name: str) -> Callable[..., int]:
+        def step(now: float | None = None) -> int:
+            calls[name] += 1
+            if calls[name] == 1:
+                raise OperationalError("SELECT 1", {}, Exception("database is locked"))
+            if all(n >= 2 for n in calls.values()):
+                iterated_twice.set()
+            return 0
+
+        return step
+
+    for name in calls:
+        monkeypatch.setattr(h.worker, name, flaky(name))
+    stop = threading.Event()
+    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
+    t.start()
+    ok = iterated_twice.wait(timeout=10)
+    stop.set()
+    t.join(timeout=5)
+    assert ok, f"the loop did not survive an idle step raising: {calls}"
+    assert not t.is_alive()
+    assert set(worker_mod.IDLE_STEPS) == set(calls)
+
+
+def test_run_forever_makes_no_call_outside_the_guard() -> None:
+    """The class, not the instance (P-326): a step added to the idle loop as a bare call
+    would take the worker down the first time it raised. ``run_forever`` may call only
+    methods that guard themselves (the check-in and the reaper say "never raises" and
+    catch), ``run_once`` inside its ``try``, and the idle steps through the guarded runner
+    that reads ``IDLE_STEPS``. Anything else fails here, before it fails in production."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(Worker.run_forever)))
+    guarded: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Try) and any(
+            isinstance(hd.type, ast.Name) and hd.type.id == "Exception" for hd in node.handlers
+        ):
+            for inner in node.body:
+                guarded |= {id(n) for n in ast.walk(inner)}
+    self_guarding = {"_checkin_if_due", "reap", "checkin", "_run_idle_steps"}
+    bare = [
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+        and id(node) not in guarded
+        and node.func.attr not in self_guarding
+    ]
+    assert bare == [], f"run_forever calls {bare} outside its guard: add it to IDLE_STEPS"
+    assert "_run_idle_steps" in inspect.getsource(Worker.run_forever)
+
+
+def test_the_decisions_pass_never_raises_and_one_repository_cannot_spoil_the_next(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``refresh_decisions`` says it never raises. The independent verifiers made it: a
+    ``GET /decisions`` committing the same first stamp between the pass's read and its
+    commit raised ``IntegrityError`` out of the pass, and a repository whose failure left
+    the session needing a rollback made the final commit raise too. Now each repository is
+    its own transaction and the clock joins a concurrent first stamp (P-326, P-329)."""
+    from types import SimpleNamespace
+
+    from crb.server import decisions as dec
+    from crb.server.decisions import DecisionRow
+    from crb.store.models import DecisionDue
+
+    with h.factory() as s:
+        s.add(
+            Repo(
+                name="aaa-broken",
+                language="python",
+                runner="pytest",
+                clone_path="/nope",
+                config_json={},
+            )
+        )
+        s.commit()
+    row = DecisionRow(kind="signoff_due", key="bug.fix|XS", title="sign it", role="approver")
+
+    def rows_for(db: Any, factory: Any, settings: Any, name: str, **kw: Any) -> list[Any]:
+        if name == "aaa-broken":  # a failure that leaves the session needing a rollback
+            for ident in ("a" * 32, "b" * 32):
+                db.add(DecisionDue(id=ident, repo=name, kind="k", key="k", title="", role=""))
+            db.flush()
+        return [row]
+
+    monkeypatch.setattr(worker_mod, "decision_rows_for", rows_for)
+    monkeypatch.setattr(h.worker, "_served_map", lambda repo, **kw: (SimpleNamespace(cells=[]), {}))
+    original = dec.due_records
+    raced: list[bool] = []
+
+    def racing(db: Any, repo: str = "") -> Any:
+        seen = original(db, repo)
+        if repo == pr.REPO_NAME and not raced:
+            raced.append(True)
+            with h.factory() as other:  # GET /decisions, stamping the same row first
+                dec.record_due(other, repo, [row], now="2026-09-01T09:00:00+00:00")
+                other.commit()
+        return seen
+
+    monkeypatch.setattr(dec, "due_records", racing)
+    assert h.worker.refresh_decisions(now=1000.0) == 1  # the good repository, and no raise
+    assert raced
+    with h.factory() as s:
+        recs = {(r.repo, r.kind, r.key): r for r in original(s)}
+    assert set(recs) == {(pr.REPO_NAME, "signoff_due", "bug.fix|XS")}
+    assert recs[(pr.REPO_NAME, "signoff_due", "bug.fix|XS")].first_due.startswith("2026-09-01")
+
+
+# --- the sign-off clause on the production path (ADR-0018) ------------------------------
+
+
+def test_the_worker_stops_an_unsigned_deliver_cell_before_any_spend_unless_configured_off(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``decide-and-license.handoff.13`` says the FACTORY reads the sign-off before any
+    spend. The loop's own tests hand it a spec; this one runs ``Worker.run_one`` — the
+    production path — over a cell that routes ``deliver`` and whose proven standard carries
+    no sign-off (the entry gate's readers, ADR-0026 item 8): the item stops ``unsigned_cell``,
+    with ``entry.refused`` on the run and nothing proven RED or built. With
+    ``CRB_FACTORY__REQUIRE_SIGNED_CELL=false`` the worker hands the loop the clause switched
+    off and the same cell builds; so does a signed standard with the clause on. A worker
+    that dropped the setting would fail the first half."""
+    import argparse
+    from dataclasses import replace as dc_replace
+    from types import SimpleNamespace
+
+    from crb.factory import evidence as fe
+    from crb.factory.standard import Readers, Standard
+    from crb.server import factory_standard
+    from crb.server.settings import FactorySettings
+
+    unsigned = Readers(standard_for=lambda cell: Standard("S2", signed=False))
+    monkeypatch.setattr(factory_standard, "bind_readers", lambda *_a, **_k: unsigned)
+    monkeypatch.setattr(factory_standard, "readers_in", lambda *_a, **_k: unsigned)
+    home, _item, _ = _multiply_backlog(h)
+    _cmap, scope = h.worker._served_map(pr.REPO_NAME)
+    decision = SimpleNamespace(
+        route="deliver",
+        to_dict=lambda: {"route": "deliver", "reason_code": "deliver", "n": 30},
+    )
+
+    def served(tier: str, earned: bool) -> Callable[..., Any]:
+        cell = SimpleNamespace(
+            key=SimpleNamespace(capability_class="bug.fix", size="XS"),
+            decision=decision,
+            stats=None,
+            verification_tier=tier,
+            earned=earned,
+        )
+        return lambda repo, **kw: (SimpleNamespace(cells=[cell]), scope)
+
+    def run_and_read() -> tuple[Any, list[str], list[str]]:
+        before = len(home.events())
+        run = h.enqueue("factory", ladder_json=["fake:m0"])
+        done = h.run_one()
+        assert done.status == STATUS_SUCCEEDED, done.error
+        kinds = [e.kind for e in home.events()[before:]]
+        actions = [e.action for e in h.events(run.id) if e.stage == "factory"]
+        return done, kinds, actions
+
+    # unsigned, the clause on (the default): stopped before any spend
+    monkeypatch.setattr(h.worker, "_served_map", served("automated-pass", False))
+    assert h.worker.settings.factory.require_signed_cell is True
+    done, kinds, actions = run_and_read()
+    assert done.counts_json["by_status"] == {"unsigned_cell": 1}
+    assert "entry.refused" in actions
+    assert fe.EV_BUILD not in kinds and fe.EV_RED_PROOF not in kinds
+    # the same cell, the clause switched off in the worker's own environment: built
+    args = argparse.Namespace(
+        home="",
+        executor="",
+        image="",
+        kinds="factory",
+        database_url="",
+        worker_id="",
+        poll=2.0,
+        heartbeat=10.0,
+        stale_after=120.0,
+        keep_worktrees=False,
+        metrics_port=None,
+        metrics_host="",
+    )
+    off = worker_main.settings_from_args(args, env={"CRB_FACTORY__REQUIRE_SIGNED_CELL": "false"})
+    assert off.factory.require_signed_cell is False
+    h.worker.settings = dc_replace(h.worker.settings, factory=off.factory)
+    done, kinds, actions = run_and_read()
+    assert done.counts_json["by_status"] == {"accepted": 1}
+    assert "entry.refused" not in actions and fe.EV_BUILD in kinds
+    # a signed standard, the clause back on: built
+    h.worker.settings = dc_replace(h.worker.settings, factory=FactorySettings())
+    every_cell_proven(monkeypatch, "S2")
+    done, kinds, actions = run_and_read()
+    assert done.counts_json["by_status"] == {"accepted": 1}
+    assert "entry.refused" not in actions and fe.EV_BUILD in kinds

@@ -201,6 +201,22 @@ def test_a_ticket_without_points_asks_for_them() -> None:
     assert "Story points" in f.text and "unsized" in f.text
 
 
+def test_an_unsigned_standard_is_not_labelled_ready_and_the_comment_says_why() -> None:
+    """ADR-0018 as amended by ADR-0026 item 8: the route is not the whole licence. When the
+    cell's proven standard carries no sign-off, the entry gate — the same call the run makes,
+    with the deployment's sign-off clause — stops the item ``unsigned_cell``, so the ticket
+    must not promise `ready`; and when the server's reading says the deliver cell would not
+    deliver, the comment says why. With the clause off, the same ticket is ready."""
+    unsigned = Readers(standard_for=lambda _cell: Standard("S1@claude-sonnet-5", signed=False))
+    route = _deliver_route(deliverable=False)
+    f = _render(_ready_ticket(), route, readers=unsigned, require_signed_cell=True)
+    assert f.label == c.LABEL_NOT_DELIVERABLE
+    assert "would not be built yet" in f.text
+    assert "a person has signed off the cell's proven standard" in f.text
+    off = _render(_ready_ticket(), _deliver_route(), readers=unsigned, require_signed_cell=False)
+    assert off.label == c.LABEL_READY
+
+
 def test_needs_info_beats_not_deliverable_so_the_person_is_asked_first() -> None:
     # a ticket that is BOTH missing a slot and on an unmeasured cell asks for the
     # information first: answering it is the only step the person can take.

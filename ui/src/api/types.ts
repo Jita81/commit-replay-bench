@@ -1618,7 +1618,8 @@ export interface FactoryTask {
   row_hash?: string
   /** F28 — the capability map's route for the item's (class × size) cell, from the same
    * signed map the delivery gate reads; `route: ''` = nobody has measured the cell. */
-  cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; deliverable: boolean }
+  /** `deliverable` is the whole licence under this deployment's posture (ADR-0018 as amended by ADR-0026 item 8): the route says `deliver` and, while `require_signed_cell` is on, `signed` is true — the cell's proven standard carries an active sign-off; an item whose cell's standard is unsigned is not built at all. `verification_tier` is the map's tier, for the record. */
+  cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; verification_tier?: string; signed?: boolean; deliverable: boolean }
   /** ADR-0026 item 8 — the entry gate's stop since the last readiness pass: the item was NOT BUILT.
    *  `code`: `no_proven_standard` · `needs_context` · `unsigned_cell` · `granularize` · `not_licensed` ·
    *  `unsized`; `needs` is what the ticket must carry. `null` = the item entered (optional for older mocks). */
@@ -1685,6 +1686,76 @@ export interface UserCreateRequest {
   password: string
 }
 
+// ---------------------------------------------------------------------------
+// Invitations and two-person readiness — `src/crb/server/routes/invitations.py` (G-518)
+// ---------------------------------------------------------------------------
+
+/** The state an invitation is in, as the server decides it (accepted wins over expired). */
+export type InvitationState = 'pending' | 'accepted' | 'expired' | 'revoked'
+
+/** One invitation as the API reports it — never the token and never its hash. */
+export interface Invitation {
+  id: string
+  user_id: string
+  username: string
+  display_name: string
+  email: string
+  role: Role
+  state: InvitationState
+  created: string
+  expires: string
+  accepted: string
+  revoked: string
+  created_by: string
+  revoked_reason: string
+  /** ISO time of the invited account's last sign-in; empty while it has never arrived. */
+  last_login: string
+}
+
+/** `POST /invitations` body. */
+export interface InviteRequest {
+  username: string
+  role: Role
+  display_name: string
+  email: string
+  expires_hours: number
+}
+
+/**
+ * `POST /invitations` response — the ONE place the token appears. It is not stored anywhere
+ * else, so a lost link is re-invited, never recovered.
+ */
+export interface InvitationCreated {
+  invitation: Invitation
+  accept_url: string
+  token: string
+  /** True when the deployment has no public URL, so `accept_url` is a path, not a link. */
+  public_url_missing: boolean
+}
+
+/** `POST /invitations/accept` response: the account is live and the next step is to sign in. */
+export interface InvitationAccepted {
+  username: string
+  display_name: string
+  role: Role
+  accepted: string
+}
+
+/**
+ * `GET /two-person-readiness` — can this deployment produce a sign-off the two-person rule
+ * accepts? It counts ACCOUNTS, not people, and its `reason` says so.
+ */
+export interface TwoPersonReadiness {
+  ready: boolean
+  reason_code: 'ready' | 'no_approver' | 'approver_never_signed_in' | 'single_person' | 'runner_is_the_only_signer'
+  reason: string
+  approvers_active: number
+  approvers_signed_in: number
+  other_active_accounts: number
+  accounts_signed_in: number
+  invitations_pending: number
+}
+
 /** Whether a builder's credential is present — never its value. */
 export interface BuilderConfigured {
   name: string
@@ -1708,6 +1779,8 @@ export interface Settings {
     sandbox?: { executor: string; image?: string }
     /** Dependency provisioning for the sealed sandbox (ADR-0019; `CRB_PROVISION__*`). */
     provision?: { enabled?: boolean }
+    /** `FactorySettings.redacted()`: the test author and the delivery licence posture (ADR-0018). */
+    factory?: { test_author: string; require_signed_cell: boolean }
   }
 }
 

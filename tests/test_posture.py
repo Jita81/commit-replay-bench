@@ -187,3 +187,17 @@ def test_the_expected_class_is_the_workers_choice_of_executor_tree_and_provider(
         "local/inplace/host-env"
     )
     assert expected_posture_class("", tree="", provisioning=True) == "local/inplace/sealed"
+
+
+def test_only_the_docker_executor_with_sealed_dependencies_is_the_sealed_posture() -> None:
+    """G-480: the class ONBOARDING Step 6 asks evidence to be graded in before anyone signs
+    is the docker executor with sealed dependencies, whatever the tree presentation; the
+    host executor is a development reading even with a sealed dependency set."""
+    from crb.core.posture import expected_posture_class, is_sealed_class
+
+    assert is_sealed_class("docker/copy/sealed") and is_sealed_class("docker/readonly/sealed")
+    assert is_sealed_class(expected_posture_class("docker", tree="copy", provisioning=False))
+    assert not is_sealed_class("local/inplace/sealed")
+    assert not is_sealed_class(expected_posture_class("local", tree="", provisioning=True))
+    assert not is_sealed_class("docker/copy/host-env")
+    assert not is_sealed_class("") and not is_sealed_class("docker")

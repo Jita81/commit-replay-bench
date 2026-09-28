@@ -1,6 +1,6 @@
 /**
  * The architecture decision records, bundled into the UI at build time and served at
- * /help/docs/ADR-nnnn beside the eight guides.
+ * /help/docs/ADR-nnnn beside the nine guides.
  *
  * Why bundle rather than link to the repository: a screen cites an ADR (ADR-0015 on the
  * sign-off, ADR-0016 on the two-person rule) and a reviewer following it must be able to read
@@ -55,6 +55,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0015', 'A sign-off expires with the apparatus: stale at read, never edited'],
   ['0016', 'The two-person rule is a policy clause, not an apparatus move'],
   ['0017', 'The ticket is the backlog item; the column is the consent gate'],
+  ['0018', 'A signed cell licenses delivery: the gate reads the sign-off as well as the route'],
   ['0019', 'Qualification is posture-relative: a task is proven in the posture that grades it, its dependencies are provisioned per task outside the test container, and the model is blamed only with a witness from that posture'],
   ['0020', 'A bug is closed by prevention: every failure class gets the strongest change it admits, and is closed only when the attempts that saw the change stop showing it'],
   ['0021', 'The factory reviews before it delivers; only an accepted build opens a pull request'],

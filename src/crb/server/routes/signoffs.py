@@ -141,6 +141,7 @@ from crb.core.ledger import (
     LedgerIntegrityError,
     rows_for_checks,
 )
+from crb.core.posture import is_sealed_class
 from crb.core.redact import redact
 from crb.core.routing import ControlsVerdict
 from crb.core.signoff import (
@@ -1499,6 +1500,8 @@ def preview_signoff(
             oracle=SignoffOracleOut(**oracle.to_dict()),
             apparatus_versions=[] if s is None else list(s.apparatus_versions),
             checks_arm=arm,
+            posture_class=posture,
+            sealed_posture=is_sealed_class(posture),
             belt_sets=list(cell.belt_sets),
             model_n=cell.model_n,
             model_point=None if cell.model_point is None else round(cell.model_point, 4),

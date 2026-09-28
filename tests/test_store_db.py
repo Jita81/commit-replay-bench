@@ -20,7 +20,8 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               not own the tables starts with no DDL and cannot remove the protection nor
               issue table DDL, and that a system event holds its trace's ``seq`` until it
               commits (EI-1) and the events write lock holds a second writer until the first
-              commits (P-196).
+              commits (P-196), and that the decisions clock joins a concurrent first stamp in
+              both dialects (P-329).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -685,3 +686,42 @@ def test_the_pg_function_raises_the_one_append_only_text() -> None:
     assert store_db.append_only_error_text("grades") in store_db._sqlite_trigger_sql(
         "grades", "grades_no_update"
     )
+
+
+# ---------------------------------------------------------------------------
+# the decisions clock's first stamp, on both dialects (P-329)
+# ---------------------------------------------------------------------------
+
+
+def test_a_concurrent_first_decision_stamp_is_joined_on_both_dialects(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``record_due`` writes a decision's first stamp with ``INSERT … ON CONFLICT DO
+    NOTHING`` in the dialect's own words, then reads the row back. Here the other stamper
+    commits the same ``(repo, kind, key)`` between this pass's read and its write: the pass
+    joins the earlier row — its ``first_due`` kept, ``last_seen`` moved — on SQLite and on
+    PostgreSQL alike, where a plain insert raised ``IntegrityError`` (P-329)."""
+    from crb.server import decisions as dec
+
+    store_db.init_db(backend.engine)
+    row = dec.DecisionRow(kind="signoff_due", key="bug.fix|S", title="sign it", role="approver")
+    original = dec.due_records
+    raced: list[bool] = []
+
+    def racing(db: object, repo: str = "") -> object:
+        seen = original(db, repo)  # type: ignore[arg-type]
+        if not raced:
+            raced.append(True)
+            with backend.factory() as other:
+                dec.record_due(other, "alpha", [row], now="2026-09-01T09:00:00+00:00")
+                other.commit()
+        return seen
+
+    monkeypatch.setattr(dec, "due_records", racing)
+    with backend.factory() as s:
+        dec.record_due(s, "alpha", [row], now="2026-09-01T10:00:00+00:00")
+        s.commit()
+    with backend.factory() as s:
+        (rec,) = original(s, "alpha")
+        assert raced and rec.first_due == "2026-09-01T09:00:00+00:00"
+        assert rec.last_seen == "2026-09-01T10:00:00+00:00" and rec.resolved == ""

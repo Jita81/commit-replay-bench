@@ -161,12 +161,14 @@ test.describe('07 settings + accessibility', () => {
 
     // the persona may already exist (a rerun, or 11-screens on an earlier run): create it once
     if ((await users.getByRole('cell', { name: APPROVER, exact: true }).count()) === 0) {
-      await field(page, 'Username').fill(APPROVER)
-      await field(page, 'Display name').fill('Walk approver')
-      await field(page, 'Email').fill(`${APPROVER}@example.org`)
-      await field(page, 'Role').selectOption('approver')
-      await field(page, 'Initial password').fill(pass)
-      await page.getByRole('button', { name: 'Create local user' }).click()
+      // the invitation card asks for a Username too: the form's own name tells them apart
+      const create = page.getByRole('form', { name: 'Create a local user' })
+      await field(create, 'Username').fill(APPROVER)
+      await field(create, 'Display name').fill('Walk approver')
+      await field(create, 'Email').fill(`${APPROVER}@example.org`)
+      await field(create, 'Role').selectOption('approver')
+      await field(create, 'Initial password').fill(pass)
+      await create.getByRole('button', { name: 'Create local user' }).click()
       await expect(page.getByTestId('users-created')).toContainText(`Account ${APPROVER} created as approver`)
     }
 

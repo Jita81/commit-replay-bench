@@ -46,7 +46,9 @@ import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { FactoryPage, deliverableCount, estimateFromMap, nextId, refusalSentence, stepsFor, withEvolution } from './FactoryPage'
 
 const NO_ROUTE = { route: '', reason_code: '', reason: '', n: 0, point: 0, ci_low: 0, ci_high: 0, apparatus_versions: [], deliverable: false }
-const DELIVER = { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], deliverable: true }
+const DELIVER = { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], verification_tier: 'human-verified', signed: true, deliverable: true }
+/** ADR-0018 — measured exactly as well, and nobody has signed it: the server says not deliverable. */
+const DELIVER_UNSIGNED = { ...DELIVER, verification_tier: 'automated-pass', signed: false, deliverable: false }
 const CALIBRATE = { route: 'calibrate', reason_code: 'ci_low_below_bar', reason: 'the lower bound sits under the bar', n: 24, point: 0.96, ci_low: 0.8, ci_high: 0.99, apparatus_versions: ['2.2'], deliverable: false }
 const NOT_LINKED = { can_deliver: false, reason_code: 'not_linked' as const, reason: 'Delivery is not possible for this repository: it is connected by URL, not through the GitHub App. Connect it through the GitHub App with Contents: write and Pull requests: write, then Sync installations in Settings.', full_name: '', default_branch: '', installation_id: null, account_login: '' }
 const LINKED = { can_deliver: true, reason_code: 'ok' as const, reason: '', full_name: 'acme/cobra', default_branch: 'main', installation_id: 77, account_login: 'acme' }
@@ -322,7 +324,34 @@ describe('FactoryPage — the shipped contract', () => {
     expect(screen.getByTestId('cell-route-I-1')).toHaveTextContent('routes deliver')
     expect(screen.getByTestId('cell-route-I-1-prov')).toHaveTextContent('n = 40 · 95 % [84 %, 99 %] · apparatus 2.2')
     expect(screen.getByTestId('cell-route-I-2')).toHaveTextContent('not measured · not built')
-    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell that routes deliver today')
+    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell this deployment would deliver from today')
+  })
+
+  it('an item whose cell’s proven standard nobody has signed is not built, and the entry gate says so (ADR-0018, ADR-0026 item 8)', async () => {
+    const why = 'the bug.fix XS cell’s standard is proven but has no active sign-off: not built'
+    const unsigned: FactoryTask = {
+      ...TASKS[0]!,
+      cell_route: DELIVER_UNSIGNED,
+      pr_url: null,
+      status: 'unsigned_cell',
+      route_hint: 'human',
+      build_status: 'not_built',
+      last_event: 'item.outcome',
+      refusal: { step: 'entry', reason: why, reason_code: 'unsigned_cell' },
+      entry: { code: 'unsigned_cell', reason: why, reason_code: 'unsigned_cell', needs: [] },
+    }
+    mockApi(base({ 'GET /factory/alpha/tasks': [unsigned, TASKS[1]] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('cell-route-I-1')).toBeInTheDocument())
+    // the cell's own pill: the route is deliver and still no pull request, and why
+    const pill = screen.getByTestId('cell-route-I-1')
+    expect(pill).toHaveTextContent('routes deliver · no pull request')
+    expect(pill).toHaveAttribute('aria-label', expect.stringContaining('the cell routes deliver but its standard carries no sign-off, so an item here is not built'))
+    // the entry gate's stop, by its code, never "routed to a person"
+    expect(screen.getByTestId('entry-I-1')).toHaveTextContent('Not built · unsigned_cell')
+    expect(screen.getAllByText('Not built — cell not signed off').length).toBeGreaterThan(0)
+    // nothing this deployment would deliver from today
+    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('0 of 2 items sit in a cell this deployment would deliver from today; an item whose cell’s standard nobody has signed off is not built at all')
   })
 
   it('an item whose cell has no proven standard reads not built, names what to attach, and offers an approver a calibration build (ADR-0026 item 8)', async () => {
@@ -444,7 +473,7 @@ describe('FactoryPage — the shipped contract', () => {
     // the estimate rests on the map's measured mean, with its n and apparatus, and names the band
     await waitFor(() => expect(box).toHaveTextContent("this repository's measured mean over n = 40 attempts with a known cost at apparatus 2.2"))
     expect(box).toHaveTextContent('$0.27 to $0.41 for 1 item at about $0.34 each')
-    expect(box).toHaveTextContent('1 of 2 can be built (1 waits on a signed gap); 1 sits in a cell that routes deliver; the rest open no pull request')
+    expect(box).toHaveTextContent('1 of 2 can be built (1 waits on a signed gap); 1 sits in a cell this deployment would deliver from; the rest open no pull request')
     // ADR-0026 item 8 — the page states its limit where the person acts
     expect(box).toHaveTextContent('An item whose cell has no proven context standard, or that lacks what the standard needs, is not built. An approver’s calibration build is recorded as one and never delivers.')
     expect(box).toHaveTextContent('none on the whole run — set one under Stop the run at')

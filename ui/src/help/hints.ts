@@ -447,6 +447,8 @@ export const HINTS = {
     'How many of the decisions above belong to this repository; each is listed under it.',
   'pill.decisions.kind':
     'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, or delivery withheld by the route.',
+  'stat.decisions.waiting':
+    'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
     'The cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker.',
   'button.decisions.act':
@@ -460,7 +462,7 @@ export const HINTS = {
 
   // ── /signoff (screens/Signoff/SignoffPage.tsx)
   'details.signoff.why_refused':
-    'The six clauses the server checks before it records a sign-off. Two of them (false-Q1 and the attestation) cannot be relaxed by any deployment setting.',
+    'Every clause the server checks before it records a sign-off — seven of them. Three (false-Q1, the attestation and the two-person rule) cannot be relaxed by any deployment setting.',
   'gate.signoff.banner':
     'Every clause of the sign-off policy with its observed value against the threshold, evaluated before you try. Open only when every row holds; a refusal after pressing Sign off is the gate working.',
   'gate.signoff.measured':
@@ -479,6 +481,10 @@ export const HINTS = {
     'A sign-off is written only for the cell’s standard context arm, and only when that arm’s registered reading delivers at a look. A cell with no proven standard, or whose reading waits for its next look, cannot be signed.',
   'gate.signoff.attestation':
     'You have named one accepted row and affirmed you read its diff. This clause cannot be relaxed: the attestation is hash-chained with the sign-off.',
+  'gate.signoff.posture':
+    'Whether the evidence was graded in the sealed posture ONBOARDING Step 6 asks for: the docker executor with sealed dependencies. Advisory — the server does not refuse a sign-off on it — but evidence graded on the host is a development reading.',
+  'link.signoff.refusal_next':
+    'The screen where the number that failed can change: more attempts on Measure, the controls again on the walk, stronger tests on Learn, or the rule’s reason on Routing.',
   'gate.signoff.second_person':
     'The two-person rule: the server refuses your sign-off if you queued the run that produced the attested row, or if you are the only person behind the cell. No setting can relax it; the refusal code is same_actor.',
   'button.signoff.sign':
@@ -586,7 +592,7 @@ export const HINTS = {
   'field.factory.deliver':
     'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, an item the entry gate admits is built and graded locally only. The gate stops the rest either way.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; an item in any other cell opens no pull request.',
+    'How many items sit right now in a cell this deployment would open a pull request from: the map routes it deliver AND the cell’s proven standard is signed off. It is read at this moment and changes as measurement and sign-off change. An item whose cell’s standard is not signed off is not built at all; an item in any other cell opens no pull request.',
   'field.factory.override':
     'Lift a missing sign-off for this run only: a second approver’s act — queue the run without it, then another approver grants it on the run’s page, under their name. An item whose cell has a proven standard nobody has signed off is then built. It never lifts a missing standard, missing context, a calibration build or a cell with a wrong clean verdict.',
   'item.factory.entry_stop':
@@ -773,6 +779,8 @@ export const HINTS = {
     'The four roles and what each may do: read, start runs, sign cells, administer.',
   'summary.posture.separation':
     'The two-person rule and how it is enforced: the server refuses a sign-off whose approver produced the evidence, so an operator who queued the runs cannot also sign them.',
+  'summary.posture.delivery_licence':
+    'What has to be true before this deployment builds and delivers in someone else’s repository: the cell’s route, and — while the default is in force — a person’s sign-off on that cell. Without the sign-off an item in a cell that routes deliver is not built at all; in a cell that routes elsewhere it is built and its delivery withheld.',
   'summary.posture.source_control':
     'Whether the GitHub App is registered, how many installations it has, and that its tokens are minted per use and never stored.',
   'summary.posture.executor':
@@ -796,7 +804,7 @@ export const HINTS = {
   'summary.posture.route_gate':
     'A pull request opens only for a cell the map routes deliver under the named policy.',
   'summary.posture.override':
-    'An approver may override the gate for one run; the override is an event on the chain naming them and the route it overrode.',
+    'An approver may lift the sign-off clause for one run — never the route. The override is an event on the chain naming them and the clause.',
   'summary.posture.credentials':
     'Installation tokens are minted per push and never stored.',
   'summary.posture.retention':
@@ -1744,6 +1752,51 @@ export const HINTS = {
     'A builder provider and whether its credential is configured on the worker. Configured or not is all the API reports; the secret itself is never returned.',
   'tile.settings.retention':
     'The retention settings in force: what raw artefacts are kept and for how long. Zero raw retention by default.',
+  // --- inviting the second person (G-518) ---------------------------------------------
+  'pill.invitations.two_person':
+    'Whether this deployment could produce a sign-off the two-person rule accepts: an account that can sign, that has signed in, and a second account that has too. It counts accounts, not people.',
+  'stat.invitations.two_person':
+    'The reading behind the pill: why a sign-off is or is not possible here, how many accounts that can sign have actually signed in, and how many invitations are still waiting.',
+  'stat.invitations.link':
+    'The invitation you have just made: who it is for, the role it grants and when the link stops working.',
+  'col.invitations.account':
+    'The sign-in name of the account the invitation creates. It exists already and is inactive until the link is used.',
+  'col.invitations.role':
+    'The role the account gets when the invitation is accepted. Only a role that can sign a cell may be invited.',
+  'col.invitations.state':
+    'Where the invitation stands: waiting for the person, accepted, expired, or withdrawn by an admin. Accepted rows also say whether that account has ever signed in.',
+  'col.invitations.invited':
+    'When the invitation was made, and by implication how long it has been waiting for the person to use it.',
+  'col.invitations.act':
+    'What an admin can do to this invitation: withdraw a link that has not been used. An accepted one is an account — deactivate the account instead.',
+  'button.invitations.invite':
+    'Create the account inactive and mint a one-time link. Nobody is emailed: the link is shown to you once, and you pass it on.',
+  'button.invitations.copy':
+    'Copy the one-time link to the clipboard. It is shown once and cannot be recovered — make a new invitation if you lose it.',
+  'button.invitations.revoke':
+    'Stop this link working. The inactive account is left as it is, and the withdrawal is recorded with a reason.',
+  'field.invitations.username':
+    'The name the invited person will type at sign-in. It cannot be one an account already uses.',
+  'field.invitations.display':
+    'The name shown next to the account in the product. Optional.',
+  'field.invitations.email':
+    'Recorded on the account so an operator can tell whose it is. Nothing is sent to it — this product emails nobody.',
+  'field.invitations.role':
+    'The role the invitation grants. Approver is the one a sign-off needs; admin also administers the deployment.',
+  'field.invitations.expires':
+    'How long the link works for, in hours (1 to 336). A shorter window is safer; an expired link is re-invited, never revived.',
+  'field.invite.password':
+    'The password you choose for your own account. At least 12 characters; nobody — including the admin who invited you — can read it.',
+  'field.invite.password_again':
+    'The same password again. The two are compared here, before anything is sent.',
+  'button.invite.accept':
+    'Set this password and activate your account. The link is then spent, and you sign in with the password you chose.',
+  'stat.invite.accepted':
+    'Your account is active and holds the role the invitation granted. The next step is to sign in with the password you just chose.',
+  'stat.invite.no_token':
+    'This page needs the one-time token from your invitation link. Without it there is nothing to accept.',
+  'link.invite.sign_in':
+    'Go to the sign-in page and use the password you have just chosen.',
   'col.settings.users':
     'The account’s sign-in name, display name, email, where it is issued (local or the OpenID provider) and when it was created.',
   'col.settings.role':
@@ -1941,6 +1994,8 @@ export const MIN_HINTS: Record<string, number> = {
   // by name (G-909): both login fields, both sign-in buttons; a Read more and a guide link;
   // the guide's way back; the 404's one way out.
   '/login': 4,
+  // the invitation link's own page, outside the shell: both password fields and the button
+  '/invite': 3,
   '/help': 2,
   '/help/docs/:name': 1,
   '*': 1,

@@ -1048,6 +1048,30 @@ crb users deactivate <name>          # refused for the last active admin (last_a
 crb users activate <name>            # can sign in again; old sessions stay ended
 ```
 
+### Inviting the second person
+
+A sign-off needs a **second person**: the API refuses one from whoever produced the evidence
+(`same_actor`, [ADR-0016](adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md)),
+and no setting waives it. Rather than typing a password on somebody else's behalf, invite them:
+**Settings → Invite an approver** (or `POST /invitations`). That creates the account **inactive**
+with a password nobody knows and mints a one-time link which is shown to you **once** — this
+product sends no email, so you pass the link on yourself, by whatever channel your organisation
+uses. The person opens it, chooses their own password, and the account is activated at that
+moment. A link expires (72 hours by default, 1 to 336), works once, and can be withdrawn with a
+recorded reason while it is unused; an accepted one is an account, so deactivate the account
+instead. If you let the person in another way — activate the account or set its password on the
+Users card — the link is withdrawn at that moment, with the reason `superseded` on the
+invitation, so a copy of it that is still in somebody's inbox cannot later reset the password
+they use. Only the link's SHA-256 hash is stored: a lost link is re-invited, never recovered.
+
+The card and Home's task 7 both read `GET /two-person-readiness`, which answers whether a
+sign-off the two-person rule would accept is possible at all — an account that can sign, that
+has signed in, and a second account that has too and can run the measurements or sign them.
+A viewer is not that second account: it can do neither. Home asks it of the repository it shows,
+so task 7 stays Incomplete while the only account that can sign is the one that queued every
+run of that repository — the bootstrap admin alone never completes it. It counts **accounts,
+not people**: two accounts held by one person would pass it and still be wrong, and it says so.
+
 **Forgot the admin password?** On the API host: `crb users set-password admin` (the
 bootstrap username, or whichever `crb users list` shows as an active admin), type the new
 password at the prompt, sign in. **Locked out with no admin at all** (every admin
@@ -1065,7 +1089,8 @@ deployment; disabling it at the provider stops it everywhere.
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
 `user.deactivated`, `user.sessions_revoked`, `user.sessions_ended` (a sign-out),
-`user.role_overridden`, `user.role_override_refused`) with the actor (the
+`user.role_overridden`, `user.role_override_refused`, `user.invited`,
+`user.invite_accepted`, `user.invite_revoked`) with the actor (the
 admin's user id, or `cli:<os user>`) and the target; never the password. The History names
 an actor by the account's username; an actor whose account has since been deleted keeps its id. Each sign-in is one
 too: `user.login`, and `user.login_failed` with the actor `anonymous` — a refused name that
