@@ -76,11 +76,15 @@ def _fetch_events(h: Harness, run_id: str) -> list:
 
 
 def test_factory_run_fetches_and_fast_forwards_the_default_branch_before_it_builds(
-    h: Harness, remote: str, tmp_path: Path
+    h: Harness, remote: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """F39 end to end: run 1 clones (a fresh clone is at the remote's head — no fetch);
     a commit lands on the remote; run 2 fetches, fast-forwards ``main`` from the old sha to
-    the new one, records it, and the RED proof and the build start from the NEW base."""
+    the new one, records it, and the RED proof and the build start from the NEW base. The
+    cell has a proven S2 standard (stream R's reader, patched at its seam — ADR-0026)."""
+    from crb.factory import standard as fs
+
+    monkeypatch.setattr(fs, "standard_for", lambda repo, cell: fs.Standard("S2", signed=True))
     add_url_repo(h, remote)
     home, _item, _backlog = _multiply_backlog(h)
     run1 = h.enqueue("factory", ladder_json=["fake:m0"])

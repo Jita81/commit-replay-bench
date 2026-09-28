@@ -1214,3 +1214,25 @@ def test_a_2_2_row_without_posture_labels_still_verifies(tmp_path: Path) -> None
     assert led.verify() == 2
     back = next(iter(led.rows()))
     assert back.posture_id == "" and back.apparatus_version == "2.2"
+
+
+def test_every_failure_kind_has_a_place_in_the_split() -> None:
+    """P-277: a failure kind added to ``FAILURE_KINDS`` without a place in
+    ``failure_split`` made the split refuse every cell holding one ("n must equal the sum of
+    its eligible kinds") — found when the ``authoring`` kind landed (ADR-0026 item 1). Every
+    kind an eligible row can carry must be counted inside ``n``."""
+    from types import SimpleNamespace
+
+    outside = {lg.FAILURE_DISQUALIFIED, lg.FAILURE_OUTAGE}
+    for kind in lg.FAILURE_KINDS:
+        if kind in outside:
+            continue
+        row = SimpleNamespace(
+            eligible=True,
+            failure_kind=kind,
+            disqualified=False,
+            cost_known=True,
+            repo_lint_clean=None,
+        )
+        split = lg.failure_split([row])  # type: ignore[list-item]
+        assert split.n == 1, kind

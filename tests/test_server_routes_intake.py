@@ -45,6 +45,7 @@ from typing import Any
 
 import pytest
 
+from crb.factory import standard as fs
 from crb.intake import client as c
 from crb.intake.fake import FAKE_TRACKER_ENV, fake_tracker_path
 from crb.server import intake as sv
@@ -78,6 +79,11 @@ def _board(**over: Any) -> dict[str, Any]:
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Env]:
     monkeypatch.setenv(FAKE_TRACKER_ENV, "1")
+    # the listener's MECHANICS on a cell with a proven standard (stream R's reader, patched
+    # at its seam — ADR-0026 item 8); the entry gate's stops are pinned in their own tests
+    monkeypatch.setattr(
+        fs, "standard_for", lambda repo, cell: fs.Standard("S1@claude-sonnet-5", signed=True)
+    )
     settings = make_settings(
         tmp_path,
         intake={
@@ -595,8 +601,10 @@ def test_a_ready_ticket_lands_as_a_draft_until_an_operator_registers_it(
     (row,) = body["rows"]
     assert row["awaiting_approval"] is True and row["registered"] is False
     # unqueued, and labelled with the product's readiness word for this deployment: the
-    # test cell routes nothing to `deliver`, so the draft reads not-deliverable (not ready)
-    assert row["label"] == c.LABEL_NOT_DELIVERABLE
+    # entry gate admits it, so it is ready — it will be built even though the test cell
+    # routes nothing to `deliver`, which only withholds the pull request (P-288) — and the
+    # label stays true once registered (queued, below)
+    assert row["label"] == c.LABEL_READY
     assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404
     # the Register act is an operator's (the role ladder test pins the refusals below it),
     # and it names the revision the operator read

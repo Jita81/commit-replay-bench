@@ -718,6 +718,12 @@ class RunCreateRequest(BaseModel):
     #: opt out, never in (the switch is the repository's, thrown by an operator). Stored as
     #: ``params.learning`` only when set; the Phase B campaign's off arm uses it.
     learning: Literal["off"] | None = None
+    #: ``blind`` runs only: the context arm to replay instead of the run's own (ADR-0026
+    #: item 1). ``S1``: the test author (``test_author``, else the deployment's
+    #: ``CRB_FACTORY__TEST_AUTHOR``; never a model on the ladder) writes one failing test in
+    #: a sealed checkout of each commit's parent, it must be RED there, the builder builds
+    #: against it and the grade is the commit's held-out tests. Stored as ``params.arm``.
+    arm: Literal["S1"] | None = None
     #: ``factory`` runs only: the frozen backlog this run is meant to work. When set it
     #: must equal the repo's ACTIVE backlog hash or the request is refused (409
     #: ``backlog_hash_mismatch``); the active hash is always stamped into
@@ -735,9 +741,10 @@ class RunCreateRequest(BaseModel):
     deliver: bool | None = None
     deliver_override: bool | None = None
     max_rework: int | None = Field(default=None, ge=0, le=5)
-    #: ``factory`` runs only. The rung that writes the failing test for an item nobody
-    #: authored an oracle for — ``builder:model[:provider]``, the same spelling as a build
-    #: rung, or ``none`` for no author. Absent = the deployment's ``CRB_FACTORY__TEST_AUTHOR``.
+    #: ``factory`` runs, and ``blind`` runs on ``arm: S1``. The rung that writes the failing
+    #: test for an item nobody authored an oracle for (or, on ``S1``, for each replayed
+    #: commit) — ``builder:model[:provider]``, the same spelling as a build rung, or ``none``
+    #: for no author. Absent = the deployment's ``CRB_FACTORY__TEST_AUTHOR``.
     #: The author rung and the build rung are never the same rung: a label that is also on
     #: this run's ladder is refused before anything is built.
     test_author: str | None = Field(default=None, max_length=200)

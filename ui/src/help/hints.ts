@@ -580,11 +580,25 @@ export const HINTS = {
   'field.factory.spend_cap':
     'The most this factory run should spend, in US dollars. The run stops before an item that could take its spend past it, but an item whose attempts have no cost cap of their own can take it past by up to one item. Blank means no cap on the whole run.',
   'field.factory.deliver':
-    'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
+    'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, an item the entry gate admits is built and graded locally only. The gate stops the rest either way.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; the rest are built and withheld.',
+    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; an item in any other cell opens no pull request.',
   'field.factory.override':
-    'The route gate’s override is a second approver’s act: queue the run without it, then another approver grants it on the run’s page. It is recorded under their name and never overrides the honesty floor: a cell with a wrong clean verdict stays withheld.',
+    'Lift a missing sign-off for this run only: a second approver’s act — queue the run without it, then another approver grants it on the run’s page, under their name. An item whose cell has a proven standard nobody has signed off is then built. It never lifts a missing standard, missing context, a calibration build or a cell with a wrong clean verdict.',
+  'item.factory.entry_stop':
+    'Why the factory did not build this item: the entry gate’s stop, by its code, and what the ticket must carry. Nothing was spent on it.',
+  'item.factory.calibration_pending':
+    'An approver has funded one calibration build of this item. The next factory run builds it to measure its cell; it never opens a pull request.',
+  'field.factory.calibration_reason':
+    'Why you fund one calibration build of this item. The reason is recorded on the evidence chain under your name.',
+  'button.factory.fund_calibration':
+    'Fund one calibration build: the next factory run builds the item to measure its cell, and it never opens a pull request. Approver only.',
+  'field.factory.waiver_reason':
+    'Why the strength probe may be skipped for this exact test. The waiver holds only while the test is byte for byte the same.',
+  'button.factory.waive_probe':
+    'Waive the required strength probe for this test’s exact bytes, under your name. The pull request names you and the reason. Approver only.',
+  'note.factory.not_built':
+    'The factory’s limit on what it builds: an item enters only when its cell has a proven context standard and the ticket carries what that standard needs.',
   'details.factory.own_builder':
     'Name a registered builder and model for this run instead of the deployment’s default. Blank keeps the builder above.',
   'field.factory.own_builder':
@@ -602,9 +616,9 @@ export const HINTS = {
   'factory.cell_route.deliverable':
     'The item’s cell routes deliver on the signed map right now, so a clean build may open a pull request. The n, rate with interval and apparatus follow.',
   'factory.cell_route.withheld':
-    'The item’s cell routes something other than deliver (the reason code follows), so a clean build is withheld: built, graded and reviewed, no pull request.',
+    'The item’s cell routes something other than deliver (the reason code follows), so no pull request opens for it. Whether it is built is the entry gate’s decision: only when its cell has a proven context standard, and then it is built, graded and reviewed.',
   'factory.cell_route.unmeasured':
-    'Nobody has measured this class and size on this repository, so delivery would be withheld.',
+    'Nobody has measured this class and size on this repository, so an item in it is not built and nothing is spent on it.',
   'item.factory.cell_prov':
     'The cell’s attempts (n), clean rate with its 95 % Wilson interval, and the apparatus that graded them, as the route gate read them.',
   'item.factory.status':
@@ -732,9 +746,11 @@ export const HINTS = {
   'pill.intake.needs_info':
     'The acceptance test still needs something this ticket does not say. Nothing is built and nothing is spent until it is answered on the ticket.',
   'pill.intake.ready':
-    'Every question the acceptance test needs is answered and the change can be offered as a pull request once it is built.',
+    'The ticket answers every question the acceptance test needs and carries what its cell’s context standard needs, so it will be built, graded and reviewed. A pull request opens only if its cell routes deliver; the comment on the ticket says which.',
   'pill.intake.not_deliverable':
-    'The change will still be built, but it will be held back rather than offered as a pull request, because the evidence for work of this kind and size does not license delivery.',
+    'This ticket will not be built: its cell has no proven context standard, or the standard is a ceiling or not signed off. The comment names each measured arm and the way forward.',
+  'pill.intake.entry_stop':
+    'Why this ticket will not be built yet, by the entry gate’s code, and what to attach to the ticket. Nothing is spent until it is answered.',
   'pill.intake.queued':
     'This ticket is now a registered item in the frozen backlog and is waiting for a factory run.',
 

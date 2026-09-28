@@ -69,7 +69,7 @@ import { fmtDate, fmtInt } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
 
 /** The four labels the product sets, as a reader meets them. The tone is the meaning: amber
- *  = it is waiting on you, red = it will be built but held back, green = it is on its way. */
+ *  = it is waiting on you, red = it will not be built (ADR-0026 item 8), green = it is on its way. */
 const LABEL_DISPLAY: Record<string, { tone: Tone; label: string; hint: HintId }> = {
   'crb:needs-info': { tone: 'amber', label: 'needs information', hint: 'pill.intake.needs_info' },
   'crb:ready': { tone: 'blue', label: 'ready', hint: 'pill.intake.ready' },
@@ -210,6 +210,16 @@ function Row({
           <Hint id="item.intake.register_off">
             <span>The listener is off, and registering writes on the ticket. Switch the listener on to register it.</span>
           </Hint>
+        </p>
+      )}
+      {row.entry_stop && (
+        // ADR-0026 item 8 — the entry gate's stop: this ticket is NOT BUILT while it stands
+        <p className="mt-2 text-sm" data-testid={`intake-entry-${row.key}`}>
+          <Pill tone="amber" glyph="⊘" size="xs" label={`Not built: ${row.entry_stop}`} hint="pill.intake.entry_stop">
+            not built · {row.entry_stop}
+          </Pill>{' '}
+          <span>{row.entry_reason}</span>
+          {row.entry_needs && row.entry_needs.length > 0 && <span className="block text-xs">Attach to the ticket: {row.entry_needs.join(', ')}.</span>}
         </p>
       )}
       {row.stopped && (

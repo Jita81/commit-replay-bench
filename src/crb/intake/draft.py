@@ -16,7 +16,8 @@ facts              an acceptance-criteria line of the form ``slot: text`` whose
                    structural fact. A line naming another class's slot is left
                    as prose: the product never invents an answer.
 size               story points → a tier (``points`` column below). No estimate
-                   is ``S`` and the reason says so.
+                   is ``unsized`` — never a tier it might not be — and the item goes to a
+                   person (ADR-0025 item 12); the reason says so.
 kind               an explicit ``crb:kind=`` tag, else ``infra`` for an
                    ``infra.``/``ci.`` class, else ``code``.
 class              the classifier (:func:`classify`), which SERVES ITS
@@ -72,6 +73,7 @@ from crb.factory.backlog import (
     KINDS,
     LEVEL_L1,
     LEVELS,
+    SIZE_UNSIZED,
     BacklogItem,
 )
 from crb.factory.readiness import CATALOGUE, slots_for
@@ -96,7 +98,9 @@ _FACT_LINE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_]*)\s*[:=]\s*(\S.*)$")
 
 #: Story points → size tier. Upper bound (inclusive) → tier; above the last bound is XL.
 POINTS_TO_SIZE: tuple[tuple[float, str], ...] = ((1.0, "XS"), (3.0, "S"), (8.0, "M"), (20.0, "L"))
-SIZE_WITHOUT_POINTS = "S"
+#: A ticket with no estimate is ``unsized`` (ADR-0025 item 12): it can never claim a
+#: smaller cell than the change it turns out to be, so it goes to a person to be sized.
+SIZE_WITHOUT_POINTS = SIZE_UNSIZED
 
 #: Cue groups per capability class. A group is a tuple of alternative phrases; matching
 #: ANY phrase in a group scores the group once, so repeating a synonym cannot inflate a
@@ -463,8 +467,9 @@ def size_for(points: float | None) -> tuple[str, str]:
     if points is None or points <= 0:
         return (
             SIZE_WITHOUT_POINTS,
-            f"The ticket carries no estimate, so the size is {SIZE_WITHOUT_POINTS} by default. "
-            "Put story points on the ticket to change it.",
+            "The ticket carries no estimate, so it is unsized and goes to a person: the product "
+            "will not guess a size that could be smaller than the change. Put story points on "
+            "the ticket.",
         )
     for upper, tier in POINTS_TO_SIZE:
         if points <= upper:

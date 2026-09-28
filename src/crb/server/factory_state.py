@@ -46,8 +46,9 @@ What it is:   The factory's file-backed state for one repository under ``CRB_HOM
 What it does: Registers and freezes a backlog (history kept), registers evolutions onto
               it, opens the evidence chain and the gap-sign-off ledger, stores
               operator-authored tests, derives the per-item task view (with each pull
-              request's outcome and each item's supersession) from the evidence events,
-              syncs delivered pull requests' outcomes, and counts deliveries per cell.
+              request's outcome, each item's supersession, the entry gate's stop and an
+              approver's unspent calibration grant — ADR-0026 item 8) from the evidence
+              events, syncs delivered pull requests' outcomes, and counts deliveries per cell.
 How:          Plain JSON/JSONL under ``<home>/factory/<repo>/``; the backlog is hashed by
               ``crb.factory.backlog`` before it is written, and every registration holds
               one OS-level lock (``registration`` — ``flock`` on ``backlog.json.lock``)
@@ -91,11 +92,13 @@ from crb.factory.backlog import Backlog, BacklogError, BacklogItem
 from crb.factory.delivery import repository_mismatch
 from crb.factory.evidence import (
     EV_BUILD,
+    EV_CALIBRATION_FUNDED,
     EV_DELIVERY,
     EV_DELIVERY_CLOSED,
     EV_DELIVERY_MERGED,
     EV_DELIVERY_REFUSED,
     EV_DELIVERY_UPDATED,
+    EV_ENTRY_REFUSED,
     EV_GAP_SIGNOFF,
     EV_ITEM_OUTCOME,
     EV_READINESS,
@@ -106,8 +109,17 @@ from crb.factory.evidence import (
     FactoryEvent,
     FactoryEvidence,
     JsonlFactoryStore,
+    spent_grants,
 )
 from crb.factory.readiness import SLOT_STRUCTURAL, SLOT_VALUE, JsonlGapSignoffLedger
+from crb.factory.standard import (
+    STOP_GRANULARIZE,
+    STOP_NEEDS_CONTEXT,
+    STOP_NO_PROVEN_STANDARD,
+    STOP_NOT_LICENSED,
+    STOP_UNSIGNED_CELL,
+    STOP_UNSIZED,
+)
 from crb.factory.testfirst import AuthoredTest
 from crb.server.github_app import PR_CLOSED, PR_MERGED, PR_OPEN, GitHubAppError, PullRequest
 
@@ -144,9 +156,28 @@ class Refusal:
         }
 
 
+#: The entry gate's stops (ADR-0026 item 8): each is recorded as ``entry.refused`` (the
+#: refusal a reader sees, step ``entry``) and a ``route.decided`` to a person that carries
+#: the code — the route event must not overwrite the entry refusal it echoes.
+ENTRY_STOPS: frozenset[str] = frozenset(
+    {
+        STOP_UNSIZED,
+        STOP_GRANULARIZE,
+        STOP_NO_PROVEN_STANDARD,
+        STOP_NEEDS_CONTEXT,
+        STOP_UNSIGNED_CELL,
+        STOP_NOT_LICENSED,
+    }
+)
+
+
 def _refusal_of(ev: FactoryEvent) -> Refusal | None:
     """The refusal an event records, or None when it is not one."""
     p = ev.payload
+    if ev.kind == EV_ENTRY_REFUSED:
+        return Refusal("entry", str(p.get("reason", "")), reason_code=str(p.get("code", "")))
+    if ev.kind == EV_ROUTE and str(p.get("reason_code", "")) in ENTRY_STOPS:
+        return None
     if ev.kind == EV_ROUTE and str(p.get("route", "")) == ROUTE_HUMAN_WORD:
         step = "review" if p.get("after_verdict") else "readiness"
         return Refusal(step, str(p.get("reason", "")))
@@ -165,6 +196,32 @@ def _refusal_of(ev: FactoryEvent) -> Refusal | None:
             "dependency", f"waiting on {blocked}" if blocked else "waiting on a dependency"
         )
     return None
+
+
+def _entry_view(ev: FactoryEvent | None) -> dict[str, Any] | None:
+    """The entry stop a task view serves (None when the item entered)."""
+    if ev is None:
+        return None
+    p = ev.payload
+    return {
+        "code": str(p.get("code", "")),
+        "reason": str(p.get("reason", "")),
+        "reason_code": str(p.get("reason_code", "")),
+        "needs": [str(x) for x in (p.get("needs") or ())],
+    }
+
+
+def _grant_view(ev: FactoryEvent | None, spent: set[str]) -> dict[str, Any] | None:
+    """An approver's calibration grant no run has spent (None otherwise)."""
+    if ev is None or ev.event_id in spent:
+        return None
+    p = ev.payload
+    return {
+        "approver": str(p.get("approver", "")),
+        "reason": str(p.get("reason", "")),
+        "created": ev.created,
+        "event": ev.event_id,
+    }
 
 
 @dataclass(frozen=True)
@@ -254,6 +311,15 @@ class TaskView:
     #: this one (then ``status`` reads ``superseded``); "" when neither.
     supersedes: str = ""
     superseded_by: str = ""
+    #: ADR-0026 item 8 — the entry gate's newest stop since the item's last readiness pass
+    #: (``code``, ``reason``, ``reason_code``, ``needs``); None when the item entered.
+    entry: Mapping[str, Any] | None = None
+    #: An approver's calibration grant no run has spent yet (``approver``, ``reason``,
+    #: ``created``, ``event``); None when there is none.
+    calibration: Mapping[str, Any] | None = None
+    #: The SHA-256 of the test the item's newest RED proof carries — what an approver's
+    #: strength-probe waiver must name (ADR-0025 item 12); "" before a RED proof.
+    test_sha256: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -281,6 +347,9 @@ class TaskView:
             "outcome": self.outcome.to_dict() if self.outcome else None,
             "supersedes": self.supersedes,
             "superseded_by": self.superseded_by,
+            "entry": dict(self.entry) if self.entry else None,
+            "calibration": dict(self.calibration) if self.calibration else None,
+            "test_sha256": self.test_sha256,
         }
 
 
@@ -578,6 +647,9 @@ class FactoryHome:
         latest_delivery: dict[str, FactoryEvent] = {}
         # (item, pr_number) → its outcome event (merged / closed); at most one per PR
         outcomes: dict[tuple[str, int], FactoryEvent] = {}
+        entries: dict[str, FactoryEvent] = {}  # the entry stop since the last readiness
+        grants: dict[str, FactoryEvent] = {}  # the newest calibration grant
+        spent: set[str] = set()  # grant event ids a run claimed (P-290)
         for ev in self.events():
             if ev.item_id:
                 latest.setdefault(ev.item_id, {})[ev.kind] = ev  # newest wins per kind
@@ -585,6 +657,12 @@ class FactoryHome:
                 if ev.kind == EV_READINESS:
                     # a new pass over the item: the last pass's refusal no longer stands
                     refusals.pop(ev.item_id, None)
+                    entries.pop(ev.item_id, None)
+                if ev.kind == EV_ENTRY_REFUSED:
+                    entries[ev.item_id] = ev
+                if ev.kind == EV_CALIBRATION_FUNDED:
+                    grants[ev.item_id] = ev
+                spent |= spent_grants((ev,))  # claimed, or consumed by an older outcome
                 refusal = _refusal_of(ev)
                 if refusal is not None:
                     refusals[ev.item_id] = refusal
@@ -665,6 +743,9 @@ class FactoryHome:
                     outcome=pr_outcome,
                     supersedes=item.supersedes,
                     superseded_by=replaced_by,
+                    entry=_entry_view(entries.get(item.id)),
+                    calibration=_grant_view(grants.get(item.id), spent),
+                    test_sha256=str(proof.payload.get("test_sha256", "")) if proof else "",
                 )
             )
         return views

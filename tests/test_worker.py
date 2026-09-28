@@ -1634,14 +1634,28 @@ def _multiply_backlog(h: Harness) -> tuple[Any, Any, Any]:
     return home, item, backlog
 
 
-def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -> None:
+def _proven_cells(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every cell has a proven, signed S2 standard (stream R's reader, patched at its seam —
+    ADR-0026 item 8), so a factory run BUILDS the operator-authored item."""
+    from crb.factory import standard as fs
+
+    monkeypatch.setattr(fs, "standard_for", lambda repo, cell: fs.Standard("S2", signed=True))
+
+
+def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The forward-mode loop as a run kind: a frozen backlog with an operator-authored
-    oracle → readiness → RED proof → build under the belts → (delivery refused, opt-in)
-    → mechanical review → item outcome; a process_step=factory ledger row; the evidence
-    chain under CRB_HOME/factory/<repo>/; live counts on the run."""
+    oracle → readiness → the entry gate → RED proof → build under the belts → (delivery
+    refused, opt-in) → mechanical review → item outcome; a process_step=factory ledger row;
+    the evidence chain under CRB_HOME/factory/<repo>/; live counts on the run. The cell has
+    a proven S2 standard here (stream R's reader, patched at its seam)."""
     from crb.core.ledger import PROCESS_FACTORY
     from crb.factory import evidence as fe
+    from crb.factory import standard as fs
     from crb.server.factory_state import FactoryHome
+
+    monkeypatch.setattr(fs, "standard_for", lambda repo, cell: fs.Standard("S2", signed=True))
 
     home, _item, backlog = _multiply_backlog(h)
     run = h.enqueue("factory", ladder_json=["fake:m0"])
@@ -1701,8 +1715,8 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     assert refused[-1].payload["policy_version"] == "routing.v1"
     withheld = [e.action for e in h.events(gated.id) if e.stage == "factory"]
     assert "delivery.withheld" in withheld and "delivery.opened" not in withheld
-    # a second approver's override reaches delivery — which then fails closed on the missing
-    # credentials, the next gate in line — and the override is on the evidence chain
+    # a second approver's override lifts the sign-off clause and nothing else (ADR-0026
+    # item 8): the route gate still withholds, and nothing reaches a remote
     ada = _approver(h, "ada")
     h.enqueue(
         "factory",
@@ -1711,10 +1725,8 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     )
     overridden = h.run_one()
     assert overridden.status == STATUS_SUCCEEDED
-    assert overridden.counts_json["by_status"] == {"delivery_failed": 1}
-    routes = [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
-    assert routes and routes[-1].payload["override_by"] == ada
-    assert "delivery.override" in [
+    assert overridden.counts_json["by_status"] == {"accepted": 1}
+    assert "delivery.withheld" in [
         e.action for e in h.events(overridden.id) if e.stage == "factory"
     ]
     # a run queued against a backlog that was re-registered before the worker claimed it
@@ -1761,16 +1773,25 @@ def _approver(h: Harness, name: str, role: str = "approver") -> str:
 
 
 def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) -> None:
-    """GOV-4 (governance review 2026-09-27): the route gate's override licenses a delivery
-    the map refused, so the worker honours ``deliver_override_by`` only when it names a
-    person with the approver role who is NOT the run's actor — and reads it live at the
-    gate, so a second approver's grant made while the run works reaches it. Anything else
-    is withheld, and a same-actor override is refused on the chain."""
+    """GOV-4 (governance review 2026-09-27) under ADR-0026 item 8: the override lifts only
+    the sign-off clause at the entry gate, and the worker honours ``deliver_override_by``
+    only when it names a person with the approver role who is NOT the run's actor — read
+    live at each item's gate, so a second approver's grant made while the run works reaches
+    it. A same-actor override is refused on the chain; an id that is no approver is never
+    an override; no override opens a pull request the route gate withheld."""
     from crb.factory import evidence as fe
 
     home, _item, _ = _multiply_backlog(h)
     tester = _approver(h, "tester")
-    # the run's own actor named as the approver: refused, recorded
+
+    def refusals() -> list[dict[str, Any]]:
+        return [
+            e.payload
+            for e in home.events()
+            if e.kind == fe.EV_ROUTE and e.payload.get("override_refused")
+        ]
+
+    # the run's own actor named as the approver: refused, recorded, and still no PR
     h.enqueue(
         "factory",
         ladder_json=["fake:m0"],
@@ -1779,11 +1800,12 @@ def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) 
     )
     own = h.run_one()
     assert own.counts_json["by_status"] == {"accepted": 1}
-    refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED]
-    assert refused[-1].payload["override_refused"] == "same_actor"
-    # an id that is no account, and an account below approver: never an override
+    assert refusals()[-1]["override_refused"] == "same_actor"
+    assert refusals()[-1]["override_by"] == tester
+    # an id that is no account, and an account below approver: never an override at all
     viewer = _approver(h, "vera", role="viewer")
     for who in ("approver:ada", viewer):
+        before = len(refusals())
         h.enqueue(
             "factory",
             ladder_json=["fake:m0"],
@@ -1791,31 +1813,27 @@ def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) 
             params_json={"deliver": True, "deliver_override_by": who},
         )
         assert h.run_one().counts_json["by_status"] == {"accepted": 1}
+        assert len(refusals()) == before  # the worker never passed it to the gate
         last = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED][-1].payload
-        assert last["reason"].startswith("route gate:") and "override_by" not in last
-    # the live read: the grant lands on the run's row after the claim, before the gate
-    grace = _approver(h, "grace")
+        assert last["reason"].startswith("route gate:")
+    # the live read: a grant written on the run's row after the claim, before the gate,
+    # reaches the gate (the run's own actor here, so the gate's refusal proves it was read)
     run = h.enqueue("factory", ladder_json=["fake:m0"], actor=tester, params_json={"deliver": True})
     real = h.worker._route_lookup
 
     def granting(*a: Any, **kw: Any) -> Callable[[Any], Any]:
-        lookup = real(*a, **kw)
-
-        def read(item: Any) -> Any:
-            with h.factory() as s:
-                row = s.get(Run, run.id)
-                assert row is not None
-                row.params_json = {**dict(row.params_json or {}), "deliver_override_by": grace}
-                s.commit()
-            return lookup(item)
-
-        return read
+        with h.factory() as s:
+            row = s.get(Run, run.id)
+            assert row is not None
+            row.params_json = {**dict(row.params_json or {}), "deliver_override_by": tester}
+            s.commit()
+        return real(*a, **kw)
 
     h.worker._route_lookup = granting  # type: ignore[method-assign]
+    before = len(refusals())
     granted = h.run_one()
-    assert granted.counts_json["by_status"] == {"delivery_failed": 1}  # past the gate
-    overrides = [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
-    assert overrides[-1].payload["override_by"] == grace
+    assert granted.counts_json["by_status"] == {"accepted": 1}
+    assert len(refusals()) == before + 1 and refusals()[-1]["override_by"] == tester
 
 
 def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness) -> None:
@@ -1849,10 +1867,13 @@ def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness)
     assert seen is not None and seen["n"] == 1
 
 
-def test_route_lookup_reads_the_map_as_it_stood_before_the_run(h: Harness) -> None:
+def test_route_lookup_reads_the_map_as_it_stood_before_the_run(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """DL-045 (B-1b finding 2 — PR bodies said ``n=27`` where the freeze saw 26): the
     worker's route lookup for a run EXCLUDES that run's own ledger rows, so a clean build
     cannot nudge the cell that licenses its own delivery. Rows of every other run count."""
+    _proven_cells(monkeypatch)
     home, item, _ = _multiply_backlog(h)
     first = h.enqueue("factory", ladder_json=["fake:m0"])
     assert h.run_one().status == STATUS_SUCCEEDED
@@ -2480,9 +2501,12 @@ def test_mine_in_docker_without_provisioning_says_what_to_do(
     assert skips and all(e.payload.get("code") == "QUAL_ENV_UNLOADABLE" for e in skips)
 
 
-def test_route_gate_reads_the_deployment_posture_only(h: Harness) -> None:
+def test_route_gate_reads_the_deployment_posture_only(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """ADR-0019 §8: a cell measured in another posture never licenses a delivery here. The
     same factory rows read under the worker's own class count; under another class, none."""
+    _proven_cells(monkeypatch)
     home, item, _ = _multiply_backlog(h)
     first = h.enqueue("factory", ladder_json=["fake:m0"])
     assert h.run_one().status == STATUS_SUCCEEDED
@@ -2515,3 +2539,53 @@ def test_repository_checks_and_run_overrides_reach_the_row_and_belt_six(
     assert done.apparatus_json["extra"]["checks"]["sources"]["api_stable"] == "repo"
     belts = [e for e in harness.events(run.id) if e.action == "grade.belt"]
     assert [e.payload["belt"] for e in belts][-1] == "api_stable"
+
+
+def test_a_run_whose_builder_credential_went_after_it_was_queued_stops_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-050 / G-707: the submit check passed, then the key went (a restore without the
+    secrets store, a token removed in Settings). The worker re-checks the credential's
+    PRESENCE when it claims the run — never reading the secret — and fails it before any
+    attempt with the submit check's code: no row, no builder call."""
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    run = h.enqueue("replay", ladder_json=["editblock:m"], builder="editblock", model="m")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_credential_missing: ")
+    assert "nothing was built" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    claimed = [e.action for e in h.events(run.id) if e.stage == "system"]
+    assert "run.credential_refused" in claimed
+
+
+def test_an_s1_run_whose_test_authors_credential_went_stops_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-050 / G-707 for the S1 arm's test author: the claim-time check names every builder
+    the run would call, the author's included, so a dead author key fails the run before
+    any attempt instead of writing an authoring failure per commit."""
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    run = h.enqueue("blind", params_json={"arm": "S1", "test_author": "editblock:gpt-oss-120b"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_credential_missing: ")
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+
+
+def test_a_factory_run_builds_nothing_in_a_cell_with_no_proven_standard(h: Harness) -> None:
+    """ADR-0026 item 8, as the worker runs it: with no registered reading (the seam's truth
+    until stream R lands) the item stops ``no_proven_standard`` before any spend, delivery
+    off — no RED proof, no build, no row — and the stop is on the chain."""
+    from crb.factory import evidence as fe
+
+    home, _item, _backlog = _multiply_backlog(h)
+    run = h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.counts_json["by_status"] == {"no_proven_standard": 1}
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    kinds = [e.kind for e in home.events()]
+    assert fe.EV_ENTRY_REFUSED in kinds and fe.EV_RED_PROOF not in kinds

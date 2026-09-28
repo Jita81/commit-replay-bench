@@ -53,15 +53,21 @@ What it is:   The seam between the stdlib orchestrator and the builder registry 
               ⇄ ``EscalationLadder``, and ``build_fn_for``, the ``BuildFn`` the run calls.
 What it does: Per attempt: resolves the rung, refuses the attempt before any builder call when the
               grader's test command cannot start (src/crb/builders/toolcheck.py — ``runner tool
-              missing: <tool>``, nothing spent), derives the brief (never ``src_files``; nothing
-              test-shaped in blind mode), runs one ``builder.build`` — on the host or against a
-              sealed checkout in a container — writes the redacted transcript to a file, maps the
-              outcome to a ``BuildAttempt`` and discards the source edits of any errored attempt so
-              it can never grade clean-with-error. A sealed attempt whose container kill went
-              UNCONFIRMED (cancel / wall clock; the daemon never reported it stopped) is never
-              silent: the outcome's errors and ``extra`` say so, the attempt's pack notes carry
-              ``kill_confirmed: false``, and ``on_kill_unconfirmed`` hands the container to the
-              caller (the worker records it and reaps it).
+              missing: <tool>``, nothing spent), composes the brief through THE composer
+              (``crb.builders.brief.compose``: never ``src_files``; nothing test-shaped in blind
+              mode; the context arm and its provenance on the row; learned lines held out and
+              time-ordered, and any line naming a token the commit introduced refused), on arm
+              ``S1`` first has the test author write a test in a sealed checkout of the parent and
+              proves it RED (removing it before the grade; an author whose provider refused the
+              call is recorded ``model_error:`` so the ledger reads an outage — P-285), stamps
+              every attempt with the run's one arm (P-287), runs one ``builder.build`` — on the host
+              or against a sealed checkout in a container — writes the redacted transcript to a
+              file, maps the outcome to a ``BuildAttempt`` and discards the source edits of any
+              errored attempt so it can never grade clean-with-error. A sealed attempt whose
+              container kill went UNCONFIRMED (cancel / wall clock; the daemon never reported it
+              stopped) is never silent: the outcome's errors and ``extra`` say so, the attempt's
+              pack notes carry ``kill_confirmed: false``, and ``on_kill_unconfirmed`` hands the
+              container to the caller (the worker records it and reaps it).
 How:          ``ladder_from_spec`` → ``rung_index`` → ``build``: ``sighted_test_command``
               (services up, env prefix) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
               ``builder.build`` / ``sealed_build`` (``SealedCheckout`` + ``ContainerSession``
@@ -111,6 +117,19 @@ from crb.builders.base import (
     Rung,
     emit,
 )
+from crb.builders.brief import (
+    ARM_A0,
+    ARM_S1,
+    ARM_S3,
+    LABEL_CONTEXT_ARM,
+    LABEL_CTX_AUTHOR,
+    TICKET_MESSAGE,
+    S1Arm,
+    Ticket,
+    compose,
+    context_arm_for,
+    novel_tokens,
+)
 from crb.builders.budget import budget_for_rung
 from crb.builders.container import (
     SEALABLE_BUILDERS,
@@ -120,6 +139,7 @@ from crb.builders.container import (
     SessionFactory,
     UnconfirmedKill,
 )
+from crb.builders.openai_client import ModelCallError
 from crb.builders.toolcheck import runner_tool_missing
 from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
 from crb.core.deps import TaskDeps
@@ -139,7 +159,8 @@ from crb.core.formatting import FormatRun, formatters_for, run_formatters
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import GradeRow, JsonlLedger
 from crb.core.lint import LintPlan, fix_commands, run_plan
-from crb.core.prevention import LearningSnapshot
+from crb.core.playbook import taught_before
+from crb.core.prevention import AUTO_OFF, LearningSnapshot
 from crb.core.redact import redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
 from crb.core.runners.base import BaseRunner
@@ -161,6 +182,64 @@ BudgetForTaskFn = Callable[[TaskSpec, str, Rung, Budget], tuple[Budget, Mapping[
 #: ``BuildOutcome.extra`` keys a sealed attempt stamps when its kill went unconfirmed.
 EXTRA_KILL_CONFIRMED = "kill_confirmed"
 EXTRA_CONTAINER = "container"
+
+
+#: An ``S1`` attempt whose test author produced no RED test (ADR-0026 item 1): the row's
+#: failure kind is ``authoring`` — against the arm, never the builder, never ``harness``.
+AUTHORING_PREFIX = "authoring: "
+
+#: ``shas -> {sha: sortable commit-date key}`` — the time-order rule's reader.
+CommitDatesFn = Callable[[Sequence[str]], Mapping[str, str]]
+
+
+def git_commit_dates(repo: Any, shas: Sequence[str]) -> dict[str, str]:
+    """``{sha: committer date}`` for each sha the repository holds, as a zero-padded epoch
+    so the strings sort in time order whatever the committer's time zone (one ``git show``
+    per sha; an unknown sha has no date — and a line it taught is then dropped)."""
+    out: dict[str, str] = {}
+    for sha in shas:
+        try:
+            r = repo.run("show", "-s", "--format=%ct", sha)
+        except Exception as exc:  # an unreadable sha has no date: its lines are dropped
+            _LOG.debug("no commit date for %s: %s", sha, exc)
+            continue
+        raw = (r.stdout or "").strip() if getattr(r, "ok", False) else ""
+        if raw.isdigit():
+            out[sha] = f"{int(raw):012d}"
+    return out
+
+
+def loop_on(learning: LearningSnapshot | None) -> bool:
+    """Whether the repository's loop switch is part of this run's arm (``+L``)."""
+    return learning is not None and not learning.opted_out and learning.auto_apply != AUTO_OFF
+
+
+#: The HTTP statuses that mean the provider refused the key itself: nothing was observed.
+_AUTH_STATUSES: frozenset[int] = frozenset({401, 403})
+
+
+def author_error(exc: BaseException) -> str:
+    """The text an ``S1`` test author's exception is recorded as.
+
+    A failed provider call (a :class:`~crb.builders.openai_client.ModelCallError` anywhere
+    in the chain) is written ``model_error: …``, the head every builder writes for the same
+    failure, so :func:`crb.core.ledger.authoring_outage` classifies the author's rate limit,
+    quota, overloaded server or refused key as an ``outage`` exactly as it would the
+    builder's (docs/PREVENTION.md P-005, P-285). Any other exception — the author ran and
+    could not produce a test — stays as it is, an ``authoring`` failure."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, ModelCallError):
+            auth = (
+                f"authentication failed (HTTP {cur.status}) — "
+                if cur.status in _AUTH_STATUSES
+                else ""
+            )
+            return f"model_error: {auth}{type(cur).__name__}: {cur}"
+        cur = cur.__cause__ or cur.__context__
+    return f"{type(exc).__name__}: {exc}"
 
 
 def unconfirmed_kill_error(kill: UnconfirmedKill) -> str:
@@ -589,6 +668,8 @@ def build_fn_for(
     budget_for_task: BudgetForTaskFn | None = None,
     checks: ResolvedChecks | None = None,
     learning: LearningSnapshot | None = None,
+    s1: S1Arm | None = None,
+    commit_dates: CommitDatesFn | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -644,9 +725,163 @@ def build_fn_for(
         after the held-out rule and the leak gate for that task, and only when the builder's
         own shell guard accepts every command a line recommends; what was read and what was
         dropped is stamped on the attempt (``learn_lines`` / ``learn_dropped`` /
-        ``learn_playbook``). ``None`` adds nothing.
+        ``learn_playbook``). ``None`` adds nothing. A line reaches commit T only when every
+        other commit that taught it is OLDER than T by commit date (ADR-0026 item 7,
+        :func:`crb.core.playbook.taught_before`), and every brief is composed by
+        :func:`crb.builders.brief.compose`, whose leak guard refuses a line naming a token
+        the commit introduced (``ctx_refused``).
+    s1:
+        The replay ``S1`` arm (ADR-0026 item 1): the test author writes one failing test in
+        a sealed checkout of the parent, it must be RED there, the builder builds against
+        it, and the authored test is gone before the held-out grade. An authoring failure is
+        an ``authoring:`` attempt error — the ``authoring`` failure kind, never the
+        builder's. ``None`` (the default) builds the run's own arm.
+    commit_dates:
+        ``shas -> {sha: ISO commit date}`` for the time-order rule; ``None`` reads them
+        from the task's repository (harness-side, never shown to the builder).
     """
     index = rung_index(ladder)
+    dates_cache: dict[str, str] = {}
+
+    def dates_of(repo: Any, shas: Sequence[str]) -> dict[str, str]:
+        """Commit dates for the time-order rule, read once per sha for the run."""
+        want = [x for x in dict.fromkeys(shas) if x and x not in dates_cache]
+        if want:
+            got = commit_dates(want) if commit_dates is not None else git_commit_dates(repo, want)
+            for x in want:
+                dates_cache[x] = str(got.get(x, ""))
+        return {x: dates_cache.get(x, "") for x in shas}
+
+    def context_lines(
+        ws: Workspace, task: TaskSpec
+    ) -> tuple[list[str], list[str], list[str], dict[str, str]]:
+        """The loop's lines for this task: held out, TIME-ORDERED, leak-gated and guarded
+        (``texts``, ``ids``, ``dropped``, text → id) — before the composer's own guard."""
+        if learning is None or not learning.lines:
+            return [], [], [], {}
+        teachers = [t for ln in learning.lines for t in ln.taught_by_tasks]
+        dates = dates_of(ws.repo, [task.task_id, *teachers])
+        timed, late = taught_before(
+            learning.lines, task.task_id, task_date=dates.get(task.task_id, ""), dates=dates
+        )
+        snap = replace(learning, lines=tuple(timed))
+        texts, ids, dropped = snap.lines_for(
+            task.task_id,
+            target_tests=task.target_tests,
+            test_files=task.test_files,
+            src_files=task.src_files,
+            refuses=GitArchaeologyGuard(ws.root).check_shell,
+        )
+        return texts, ids, [*late, *dropped], dict(zip(texts, ids, strict=True))
+
+    #: the S1 arm's authored test per worktree: (path, the parent's bytes or None)
+    authored_in: dict[str, tuple[str, bytes | None]] = {}
+
+    def remove_authored(ws: Workspace) -> None:
+        """Take the authored test out of the worktree (restoring the parent's bytes when
+        the path existed there) — before the grade overlays the held-out tests."""
+        held = authored_in.pop(str(ws.root), None)
+        if held is None:
+            return
+        path, original = held
+        target = ws.root / path
+        if original is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.write_bytes(original)
+        emit(on_event, BUILDER_EVENT_PREFIX + "author_test.removed", path=path)
+
+    def author_s1(
+        ws: Workspace, task: TaskSpec, rung_label: str, mode: str
+    ) -> tuple[str, str] | BuildAttempt:
+        """The ``S1`` arm's author step (ADR-0026 items 1 and 7): the configured test author
+        writes ONE failing test in a sealed one-commit checkout of the parent — in every
+        posture — from the message and the parent's example tests; it must be RED at the
+        parent here. Any failure is an ``authoring:`` attempt: it counts against the arm and
+        is never the builder's."""
+        assert s1 is not None
+        rung = index.get(rung_label)
+        ref = BuilderRef(
+            name=rung.builder if rung else rung_label,
+            model=rung.model if rung else "",
+            provider=rung.provider if rung else "",
+            mode=mode,
+        )
+        stamp = {
+            LABEL_CONTEXT_ARM: run_arm(mode),
+            **({LABEL_CTX_AUTHOR: s1.author_stamp} if s1.author_stamp else {}),
+        }
+
+        def fail(why: str) -> BuildAttempt:
+            emit(
+                on_event,
+                BUILDER_EVENT_PREFIX + "author_test.failed",
+                task=task.task_id,
+                error=why[:200],
+            )
+            return BuildAttempt(ref, error=_prefixed(AUTHORING_PREFIX, why), labels=stamp)
+
+        dest = ws.root.parent / f"{ws.root.name}-s1-author"
+        try:
+            with SealedCheckout.create(ws, dest) as sealed:
+                emit(
+                    on_event,
+                    BUILDER_EVENT_PREFIX + "author_test.start",
+                    task=task.task_id,
+                    commit=sealed.commit,
+                )
+                path, content = s1.author(sealed.workspace(), task.subject, message(task))
+        except SandboxUnavailable:
+            raise
+        except Exception as exc:
+            return fail(f"the test author failed: {author_error(exc)}")
+        path = path.strip().lstrip("/")
+        if not path or ".." in path.split("/") or not config.is_test(path):
+            return fail(f"{path!r} is not a test path for {config.name!r}")
+        if path in task.test_files:
+            return fail(f"{path!r} is a held-out test's path; the authored test must be its own")
+        target = ws.root / path
+        original = target.read_bytes() if target.is_file() else None
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        authored_in[str(ws.root)] = (path, original)
+        try:
+            valid = runner.is_valid_oracle(ws.root, path)
+            red = runner.run(executor, ws.root, runner.target_scope([path])) if valid else None
+        except SandboxUnavailable:
+            raise
+        except Exception as exc:
+            remove_authored(ws)
+            return fail(f"harness error proving RED: {type(exc).__name__}: {exc}")
+        if red is None or red.timed_out or red.green or red.parse_error or not red.failing:
+            remove_authored(ws)
+            why = (
+                "defines no test"
+                if red is None
+                else "timed out"
+                if red.timed_out
+                else "passes at the parent"
+                if red.green
+                else "failed without attributable test ids"
+            )
+            return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
+        return path, content
+
+    def arm_of(mode: str) -> str:
+        """The run's own arm: blind ``A0``, sighted ``S3``, with ``+L`` when the repository's
+        loop switch is on for the run (ADR-0026 item 1)."""
+        base = ARM_S3 if mode == MODE_SIGHTED else ARM_A0
+        return context_arm_for(base=base, plus_l=loop_on(learning))
+
+    def run_arm(mode: str) -> str:
+        """The arm EVERY attempt of this run is stamped with — ``S1@<author>`` (with ``+L``
+        when the loop is on) on the ``S1`` arm, else :func:`arm_of` — worked out once, so an
+        authoring failure or a harness refusal lands in the same arm as a success
+        (docs/PREVENTION.md P-287)."""
+        if s1 is not None:
+            return context_arm_for(base=ARM_S1, author=s1.author_model, plus_l=loop_on(learning))
+        return arm_of(mode)
+
     #: the finish gate's parent verdicts per (task, mode, commands) — see ``baseline_for``
     baselines: dict[tuple[str, str, tuple[CheckCommand, ...]], dict[str, bool | None]] = {}
     overrides = dict(builder_overrides or {})
@@ -703,7 +938,7 @@ def build_fn_for(
         attempt is discarded by the caller regardless."""
         assert container is not None
         dest = ws.root.parent / f"{ws.root.name}-sealed"
-        tests = task.test_files if brief.sighted else ()
+        tests = brief.test_files if brief.sighted else ()
         with SealedCheckout.create(ws, dest, test_files=tests, carry_files=carry_files) as sealed:
             emit(
                 on_event,
@@ -770,10 +1005,11 @@ def build_fn_for(
 
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         """The ``BuildFn``: one attempt of ``task`` on ``rung_label`` in ``mode``. The ONE
-        exit every attempt leaves by, so the ``checks`` stamp is on each of them — a
-        refusal before spend, a builder that could not be built or raised, and an error
-        the core would otherwise record unstamped (ADR-0024 §5 and §6: a row's arm is read
-        from the stamp, so an unstamped row of a checks-on run would join arm ``off``)."""
+        exit every attempt leaves by, so the ``checks`` stamp and the run's context arm are
+        on each of them — a refusal before spend, a builder that could not be built or
+        raised, and an error the core would otherwise record unstamped (ADR-0024 §5 and §6,
+        ADR-0026 item 1: a row's arm is read from the stamp, so an unstamped row of a
+        checks-on run would join arm ``off``, and an unstamped S1 row no arm at all)."""
         try:
             attempt = attempt_of(ws, task, mode, rung_label)
         except SandboxUnavailable:
@@ -783,9 +1019,19 @@ def build_fn_for(
                 BuilderRef(name=rung_label, mode=mode),
                 error=f"{type(exc).__name__}: {exc}"[:500],
             )
-        if checks is None or LABEL_CHECKS in attempt.labels:
+        finally:
+            # the S1 arm: the authored test is gone before the held-out grade (ADR-0026)
+            remove_authored(ws)
+        stamps: dict[str, str] = {}
+        if LABEL_CONTEXT_ARM not in attempt.labels:
+            # a refusal before compose is still this run's attempt: the arm's row, never
+            # an unstamped one a per-arm reading drops (P-287)
+            stamps[LABEL_CONTEXT_ARM] = run_arm(mode)
+        if checks is not None and LABEL_CHECKS not in attempt.labels:
+            stamps[LABEL_CHECKS] = checks.label()
+        if not stamps:
             return attempt
-        return replace(attempt, labels={**attempt.labels, LABEL_CHECKS: checks.label()})
+        return replace(attempt, labels={**attempt.labels, **stamps})
 
     def attempt_of(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         """One attempt, unstamped — only :func:`build` calls it."""
@@ -819,27 +1065,78 @@ def build_fn_for(
         gate = _gate_setup(ws, task, mode, test_command or harness_command)
         if isinstance(gate, str):
             return _failed_attempt(rung_label, mode, gate)
-        brief = BuildBrief.from_task(
-            task,
-            mode=mode,
-            message=message(task),
-            test_command=test_command,
-            harness_command=harness_command,
-            config=config,
-            finish_checks=gate.lines if gate is not None else (),
-        )
-        learn_labels: dict[str, str] = {}
-        if learning is not None:
-            texts, ids, dropped = learning.lines_for(
-                task.task_id,
-                target_tests=task.target_tests,
-                test_files=task.test_files,
-                src_files=task.src_files,
-                refuses=GitArchaeologyGuard(ws.root).check_shell,
+        texts, _ids, dropped, id_of = context_lines(ws, task)
+        # the gold post-image is the commit's source AND its own (held-out) tests: a token
+        # only the held-out test introduced — an expected value, a test's name — is the
+        # answer too. The set is harness-side; the builder never sees it (ADR-0026 item 7)
+        novel = (
+            novel_tokens(
+                ws.repo,
+                parent=ws.parent,
+                commit=task.task_id,
+                paths=(*task.src_files, *task.test_files),
             )
-            if texts:
-                brief = replace(brief, playbook=tuple(texts))
-            learn_labels = learning.task_labels(ids, dropped, texts)
+            if texts
+            else frozenset()
+        )
+        s1_test: tuple[str, str] | None = None
+        if s1 is not None:
+            authored = author_s1(ws, task, rung_label, mode)
+            if isinstance(authored, BuildAttempt):
+                return authored
+            s1_test = authored
+        ticket = Ticket(task.subject, message(task), TICKET_MESSAGE)
+        if s1_test is not None:
+            # the S1 arm: the builder is shown the AUTHORED test only; the commit's own tests
+            # stay held out for the grade (ADR-0026 item 1)
+            s1_path = s1_test[0]
+            s1_scope = tuple(runner.target_scope([s1_path]))
+            composed = compose(
+                run_arm(mode),
+                ticket,
+                repo=task.repo,
+                language=task.language,
+                mode=MODE_SIGHTED,
+                config=config,
+                test_files=(s1_path,),
+                target_tests=s1_scope,
+                test_command=sighted_test_command(
+                    runner, executor, ws.root, s1_scope, authored=task.authored
+                ),
+                harness_command=harness_command,
+                finish_checks=gate.lines if gate is not None else (),
+                learned=texts,
+                novel=novel,
+                author=s1.author_stamp if s1 is not None else "",
+                retrospective=True,
+                root=str(ws.root),
+            )
+        else:
+            composed = compose(
+                arm_of(mode),
+                ticket,
+                repo=task.repo,
+                language=task.language,
+                mode=mode,
+                config=config,
+                test_files=task.test_files,
+                target_tests=task.target_tests,
+                test_command=test_command,
+                harness_command=harness_command,
+                finish_checks=gate.lines if gate is not None else (),
+                learned=texts,
+                novel=novel,
+                retrospective=True,
+                root=str(ws.root),
+            )
+        brief = composed.brief
+        kept_ids = [id_of[t] for t in brief.playbook if t in id_of]
+        refused_ids = [id_of[t] for t in composed.refused if t in id_of]
+        learn_labels: dict[str, str] = dict(composed.labels)
+        if learning is not None:
+            learn_labels |= learning.task_labels(
+                kept_ids, [*dropped, *refused_ids], list(brief.playbook)
+            )
         rung_budget = budget_for_rung(rung, budget)
         spend_labels: dict[str, str] = {}
         if budget_for_task is not None:

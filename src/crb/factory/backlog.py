@@ -65,6 +65,11 @@ from typing import Any
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.spec import SIZE_TIER_NAMES, UNCLASSIFIED
 
+#: Every size an item may carry: the tiers, and ``unsized`` for an item nobody estimated
+#: (ADR-0025 item 12 — it routes to a person and can never claim a smaller cell).
+SIZE_UNSIZED = "unsized"
+ITEM_SIZES: tuple[str, ...] = (*SIZE_TIER_NAMES, SIZE_UNSIZED)
+
 BACKLOG_SCHEMA = "crb.backlog.v1"
 
 KIND_CODE = "code"
@@ -145,9 +150,9 @@ class BacklogItem:
             raise BacklogError(f"item {self.id}: kind must be one of {KINDS}, got {self.kind!r}")
         if self.level not in LEVELS:
             raise BacklogError(f"item {self.id}: level must be one of {LEVELS}, got {self.level!r}")
-        if self.size_estimate not in SIZE_TIER_NAMES:
+        if self.size_estimate not in ITEM_SIZES:
             raise BacklogError(
-                f"item {self.id}: size_estimate must be one of {SIZE_TIER_NAMES}, got {self.size_estimate!r}"
+                f"item {self.id}: size_estimate must be one of {ITEM_SIZES}, got {self.size_estimate!r}"
             )
         if self.supersedes == self.id:
             raise BacklogError(f"item {self.id} cannot supersede itself")

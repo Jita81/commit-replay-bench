@@ -1383,8 +1383,9 @@ export interface FactoryBacklog {
 
 /** J-FAC-4 — why the loop stopped an item, as recorded on the chain; `step` names where. */
 export interface FactoryRefusal {
-  /** `review` = the rule-3 stop (DL-045): routed human AFTER a verdict, never a readiness refusal. */
-  step: 'readiness' | 'red' | 'delivery' | 'review' | 'dependency'
+  /** `review` = the rule-3 stop (DL-045): routed human AFTER a verdict, never a readiness refusal;
+   *  `entry` = the entry gate stopped the item before any spend (ADR-0026 item 8). */
+  step: 'readiness' | 'red' | 'delivery' | 'review' | 'dependency' | 'entry'
   reason: string
   reason_code: string
   measured_route: string
@@ -1411,7 +1412,10 @@ export interface FactoryEvolutionPrefill {
 /** The stopped item's next action: the evolutions route, one sentence saying what must be
  *  different, whether the POST should carry a stronger oracle, and the draft itself. */
 export interface FactoryWayForward {
-  action: 'register_evolution'
+  /** `register_evolution`: POST the superseding item to `route`; `fund_calibration`: an approver POSTs a
+   *  reason to `route` (ADR-0026 item 8 — one calibration build, never a pull request); `sign_off_cell`:
+   *  a second person signs the cell (`/signoffs`). */
+  action: 'register_evolution' | 'fund_calibration' | 'sign_off_cell'
   route: string
   supersedes: string
   /** One sentence: what must be different about the superseding item. `''` on an older server. */
@@ -1462,6 +1466,31 @@ export interface FactoryTask {
   /** F28 — the capability map's route for the item's (class × size) cell, from the same
    * signed map the delivery gate reads; `route: ''` = nobody has measured the cell. */
   cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; deliverable: boolean }
+  /** ADR-0026 item 8 — the entry gate's stop since the last readiness pass: the item was NOT BUILT.
+   *  `code`: `no_proven_standard` · `needs_context` · `unsigned_cell` · `granularize` · `not_licensed` ·
+   *  `unsized`; `needs` is what the ticket must carry. `null` = the item entered (optional for older mocks). */
+  entry?: FactoryEntryStop | null
+  /** An approver's calibration grant no run has spent yet; `null` = none. */
+  calibration?: FactoryCalibrationGrant | null
+  /** The SHA-256 of the test the newest RED proof carries — what a strength-probe waiver names. */
+  test_sha256?: string
+}
+
+/** Why the entry gate stopped an item before any spend (ADR-0026 item 8). */
+export interface FactoryEntryStop {
+  code: string
+  reason: string
+  /** `no_proven_standard`: `none` or `ceiling`; `needs_context`: the arm's base (`S1`, `S2`). */
+  reason_code: string
+  needs: string[]
+}
+
+/** An approver's funded calibration build, not yet built by a run (never a pull request). */
+export interface FactoryCalibrationGrant {
+  approver: string
+  reason: string
+  created: string
+  event: string
 }
 
 /** `GET /factory/catalogue` — what a backlog item may be made of (F24: the freeze form asks these). */
@@ -1655,6 +1684,14 @@ export interface IntakeRow {
   awaiting_approval?: boolean
   /** Who created the ticket, as the tracker names them (the allowlist's input). */
   author?: string
+  /** ADR-0026 item 8 — the entry gate's stop for this ticket (`no_proven_standard`, `needs_context`,
+   *  `unsigned_cell`, `granularize`, `unsized`); `''` = it enters. The item is NOT BUILT while it stands. */
+  entry_stop?: string
+  entry_reason?: string
+  /** What the ticket must carry: the missing slots, or `a failing test`. */
+  entry_needs?: string[]
+  /** The cell's standard arm (`S1@<author>`, `S2`), `''` when none is proven. */
+  standard?: string
 }
 
 /** What the last poll did, and why it stopped if it did. */

@@ -49,6 +49,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   retries are validated variables with stated defaults. The test author no longer takes the
   run's provider, so a Claude ladder with a Cerebras author runs (ADR-0021).
 
+- **A ticket is built only on its cell's proven context standard; one composer writes every brief**
+  (north-star Wave 2, stream F; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
+  An item stops before any spend when its cell has no proven standard, or it lacks what the
+  standard's arm needs; an approver may fund one calibration build, which never opens a pull
+  request. A pull request opens only when the change's own cell licenses the arm it was
+  built on. The strength probe is required, keys are checked again at claim, and replay and
+  the factory share one composer with a leak guard and a replay `S1` arm (DL-098 to DL-100).
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

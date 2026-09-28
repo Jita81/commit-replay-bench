@@ -835,6 +835,34 @@ export function useSignGap(): UseMutationResult<unknown, ApiError, { repo: strin
   })
 }
 
+/** `POST /factory/{repo}/items/{id}/calibration` (approver) — fund ONE calibration build of an item the
+ * entry gate stopped for a missing standard or context (ADR-0026 item 8); it never opens a pull request. */
+export function useFundCalibration(): UseMutationResult<unknown, ApiError, { repo: string; itemId: string; reason: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, itemId, reason }) =>
+      api<unknown>(`/factory/${encodeURIComponent(repo)}/items/${encodeURIComponent(itemId)}/calibration`, { method: 'POST', body: { reason } }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(v.repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryEvidence(v.repo) })
+    },
+  })
+}
+
+/** `POST /factory/{repo}/items/{id}/probe-waiver` (approver) — waive the required strength probe for the
+ * item's test, bound to its SHA-256 (ADR-0025 item 12); 409 `probe_waiver_stale` for other bytes. */
+export function useWaiveProbe(): UseMutationResult<unknown, ApiError, { repo: string; itemId: string; reason: string; testSha256: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, itemId, reason, testSha256 }) =>
+      api<unknown>(`/factory/${encodeURIComponent(repo)}/items/${encodeURIComponent(itemId)}/probe-waiver`, { method: 'POST', body: { reason, test_sha256: testSha256 } }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(v.repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryEvidence(v.repo) })
+    },
+  })
+}
+
 /** `POST /factory/{repo}/backlog` (operator) — freeze a backlog; 409 while a factory run is active. */
 export function useRegisterBacklog(): UseMutationResult<FactoryBacklog, ApiError, { repo: string; body: unknown }> {
   const qc = useQueryClient()

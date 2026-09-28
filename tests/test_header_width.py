@@ -45,7 +45,7 @@ WIDTH = 100
 #: wrapped since); tests/ and ui/src added by the value merge at the count main carried,
 #: each one lower after the merge train rewrote one known line in each (integration/next),
 #: and one lower again when the north-star branch took main in and rewrapped a Touch when.
-BASELINES: dict[str, int] = {"python": 23, "tests": 9, "ui": 51}
+BASELINES: dict[str, int] = {"python": 22, "tests": 9, "ui": 51}
 #: The same lines by identity (path + a digest of the line), so a new long line cannot
 #: hide behind one wrapped elsewhere in the same count (the swap the value wave made).
 KNOWN = Path(__file__).parent / "fixtures" / "header_width_known.txt"

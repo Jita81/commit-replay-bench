@@ -71,7 +71,9 @@ What it does: Names a worktree by an opaque per-worktree token (``opaque_dest``,
               clone; overlays the commit's test or source files; enumerates what the builder
               changed from the filesystem against the parent tree so nothing the builder does
               to git's own views (index bits, a moved HEAD, an exclude rule) can hide a file;
-              proves the target tests are byte-identical to the commit's; reports every
+              proves the target tests are byte-identical to the commit's; counts the diff's
+              lines by each hunk's declared counts (``diff_file_counts``), so a content
+              line shaped like a file header is still counted (P-286); reports every
               git-view violation as tamper evidence rather than a verdict.
 How:          ``create`` → ``git worktree add`` at the parent + per-language fixups recorded
               in ``harness_files`` → the builder edits → ``enforce_integrity`` (HEAD, gitdir,
@@ -234,6 +236,62 @@ class DiffStats:
             "deletions": self.deletions,
             "diff_sha256": self.diff_sha256,
         }
+
+
+_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+
+
+def _diff_path(name: str) -> str:
+    """``a/x`` / ``b/x`` → ``x``; ``/dev/null`` → ``""``."""
+    name = name.split("\t", 1)[0]
+    if name == "/dev/null":
+        return ""
+    return name[2:] if name[:2] in ("a/", "b/") else name
+
+
+def diff_file_counts(text: str) -> tuple[tuple[str, int, int], ...]:
+    """``(path, additions, deletions)`` per file of a unified diff, in diff order.
+
+    A hunk's body is read by the line counts its ``@@ -a,b +c,d @@`` header declares, so
+    every line inside it is content, whatever it starts with: an added line whose text is
+    ``++ b/<path>`` (``+++ b/<path>`` in the diff) is an addition, never a file header, and
+    a deleted ``-- x`` is a deletion (docs/PREVENTION.md P-286). Outside a hunk only the
+    ``diff --git`` / ``---`` / ``+++`` headers name the file; a deleted file is named by its
+    old path. Pure, so the parse is tested without git.
+    """
+    out: list[tuple[str, int, int]] = []
+    path: str | None = None
+    adds = dels = old_left = new_left = 0
+    for line in text.splitlines():
+        if old_left > 0 or new_left > 0:
+            tag = line[:1]
+            if tag == "\\":  # "\ No newline at end of file" belongs to no side
+                continue
+            if tag == "+":
+                adds += 1
+                new_left -= 1
+            elif tag == "-":
+                dels += 1
+                old_left -= 1
+            else:  # a context line
+                old_left -= 1
+                new_left -= 1
+            continue
+        if line.startswith("diff --git "):
+            if path is not None:
+                out.append((path, adds, dels))
+            path, adds, dels = "", 0, 0
+            continue
+        if line.startswith("--- ") and path == "":
+            path = _diff_path(line[4:])
+        elif line.startswith("+++ "):
+            path = _diff_path(line[4:]) or (path or "")
+        elif (m := _HUNK_HEADER.match(line)) is not None:
+            old_left = int(m.group(1)) if m.group(1) is not None else 1
+            new_left = int(m.group(2)) if m.group(2) is not None else 1
+    if path is not None:
+        out.append((path, adds, dels))
+    return tuple(out)
 
 
 #: Marker in :attr:`Workspace.harness_files` for a symlink the harness created.
@@ -834,18 +892,14 @@ class Workspace:
         text = self.patch_text()  # the hash covers the FULL diff; ``exclude`` only
         adds = dels = 0  # filters the files and counts below
         files: list[str] = []
-        current: str | None = None
-        for line in text.splitlines():
-            if line.startswith("+++ b/"):
-                current = line[6:]
-                if current not in ex:
-                    files.append(current)
-            elif current in ex:
+        # a hunk's lines are read by its header's counts, never by their prefix: a content
+        # line shaped like a file header cannot end the count early (P-286)
+        for path, a, d in diff_file_counts(text):
+            if not path or path in ex:
                 continue
-            elif line.startswith("+") and not line.startswith("+++"):
-                adds += 1
-            elif line.startswith("-") and not line.startswith("---"):
-                dels += 1
+            files.append(path)
+            adds += a
+            dels += d
         return DiffStats(tuple(files), adds, dels, sha256_bytes(text.encode("utf-8")))
 
     def patch_text(self) -> str:

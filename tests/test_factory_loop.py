@@ -49,6 +49,7 @@ from typing import Any
 import pytest
 
 from crb.builders.base import BuildBrief, BuildOutcome, Rung
+from crb.builders.brief import ARM_S2
 from crb.core.execution import LocalExecutor
 from crb.core.ledger import PROCESS_FACTORY, JsonlLedger, false_q1_total
 from crb.core.runners.pytest_runner import PytestRunner
@@ -60,6 +61,7 @@ from crb.factory import readiness as rd
 from crb.factory import review as rv
 from crb.factory.backlog import KIND_CODE, KIND_OPERATOR, Backlog, BacklogError, BacklogItem
 from crb.factory.delivery import DeliveryError, GitCredentials, StaticProvider
+from crb.factory.standard import CellRef, Readers, Standard
 from crb.factory.testfirst import AuthoredTest, SameIdentityError
 from crb.observability.events import Emitter, MemorySink, StepStatus
 from fixtures import pyrepo as pr
@@ -269,6 +271,10 @@ def _rig(pyrepo: pr.PyRepo, tmp_path: Path, **overrides: Any) -> Rig:
         # the route gate: delivery tests that want a PR must say the cell routes `deliver`
         # (the map's word), the way the worker feeds the map's decision to the loop
         "route_decision_for": lambda item: DELIVER_ROUTE,
+        # the entry gate (ADR-0026 item 8): every cell here has a proven, signed standard —
+        # S2 (a person's test) for XS, where the operator-authored multiply item sits, and
+        # S1 on the fake author for the rest; a test of the gate passes its own readers
+        "readers": PROVEN,
     }
     kw.update(overrides)
     return Rig(
@@ -296,6 +302,14 @@ HUMAN_ROUTE: dict[str, Any] = {
     "policy_version": "routing.v1",
     "n": 12,
 }
+
+
+def _proven(cell: CellRef) -> Standard:
+    return Standard(ARM_S2 if cell.size == "XS" else "S1@t1", signed=True)
+
+
+#: A proven, signed standard in every cell (the gate's own tests pass their own readers).
+PROVEN = Readers(standard_for=_proven)
 
 
 # --- spec guards ------------------------------------------------------------------
@@ -356,13 +370,22 @@ def test_unsigned_structural_gap_is_refused_and_recorded(pyrepo: pr.PyRepo, tmp_
     rig = _rig(pyrepo, tmp_path)
     item = _items()[3]
     out = rig.loop().run_item(item)
-    assert out.status == fl.STATUS_NOT_READY and out.proof is None and not out.builds
+    # ADR-0026 item 8: the cell's standard is S1, which needs the structural facts the test
+    # author reads — a ticket missing them stops `needs_context`, naming them, before spend
+    assert out.status == fl.STATUS_NEEDS_CONTEXT and out.proof is None and not out.builds
     assert out.readiness is not None and {g.slot for g in out.readiness.blocking_gaps} == {
         "request_shape",
         "response_shape",
         "error_contract",
     }
-    assert rig.kinds("I-4") == [fe.EV_READINESS, fe.EV_ROUTE, fe.EV_ITEM_OUTCOME]
+    assert rig.kinds("I-4") == [
+        fe.EV_READINESS,
+        fe.EV_ENTRY_REFUSED,
+        fe.EV_ROUTE,
+        fe.EV_ITEM_OUTCOME,
+    ]
+    refused = rig.evidence.events_for("I-4", fe.EV_ENTRY_REFUSED)[0].payload
+    assert set(refused["needs"]) == {"request_shape", "response_shape", "error_contract"}
     assert rig.evidence.events_for("I-4", fe.EV_ROUTE)[0].payload["route"] == rd.ROUTE_HUMAN
     assert rig.builder.calls == 0 and not rig.author.calls
     # sign the gaps → the same item now builds (with a test the author supplies)
@@ -402,7 +425,9 @@ def test_test_first_route_uses_the_author_rung(pyrepo: pr.PyRepo, tmp_path: Path
 
 def test_no_oracle_when_no_test_and_no_author(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     rig = _rig(pyrepo, tmp_path, test_author=None)
-    out = rig.loop().run_item(multiply_item())
+    # an S1 cell (the rig's standard for S): the arm's oracle is the test author's, and
+    # there is none
+    out = rig.loop().run_item(multiply_item(size_estimate="S"))
     assert out.status == fl.STATUS_NO_ORACLE
     assert rig.evidence.events_for("I-1", fe.EV_RED_REFUSED)
 
@@ -514,9 +539,11 @@ def test_route_gate_withholds_delivery_when_nothing_is_measured(
     assert "no capability-map route" in ev["reason"] and ev["measured_route"] == ""
 
 
-def test_route_gate_override_by_an_approver_is_itself_on_the_record(
+def test_route_gate_is_not_lifted_by_an_approvers_override(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
+    """ADR-0026 item 8: ``deliver_override`` lifts the sign-off clause and nothing else — a
+    cell whose route is not ``deliver`` still opens no pull request, override or not."""
     rig = _rig(
         pyrepo,
         tmp_path,
@@ -526,18 +553,10 @@ def test_route_gate_override_by_an_approver_is_itself_on_the_record(
         deliver_override_by="approver:ada",
     )
     out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
-    assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
-    assert len(rig.pushes) == 1 and len(rig.prs) == 1
-    routes = [e.payload for e in rig.evidence.events_for("I-1", fe.EV_ROUTE)]
-    override = [r for r in routes if r.get("override_by")]
-    assert len(override) == 1
-    assert override[0]["route"] == "deliver" and override[0]["measured_route"] == "human"
-    assert (
-        override[0]["override_by"] == "approver:ada" and override[0]["reason_code"] == "oracle_weak"
-    )
-    assert "route gate overridden by approver:ada" in override[0]["reason"]
-    kinds = rig.kinds("I-1")
-    assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_DELIVERY)
+    assert out.status == fl.STATUS_ACCEPTED and out.delivery is None
+    assert not rig.pushes and not rig.prs
+    ev = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)[0].payload
+    assert ev["reason"].startswith("route gate: the cell routes human")
 
 
 #: A cell the map refuses for the honesty floor: a clean row in it failed a belt (false-Q1).
@@ -1128,7 +1147,7 @@ def test_full_loop_on_frozen_backlog(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
         "I-1": fl.STATUS_ACCEPTED,
         "I-2": fl.STATUS_ACCEPTED,
         "I-3": fl.STATUS_ACCEPTED,
-        "I-4": fl.STATUS_NOT_READY,
+        "I-4": fl.STATUS_NEEDS_CONTEXT,
         "I-5": fl.STATUS_ROUTED_HUMAN,
         "I-6": fl.STATUS_BLOCKED,
     }
@@ -1203,7 +1222,7 @@ def test_a_dependency_is_resolved_through_its_evolution_before_the_block_check(
     assert backlog.resolve("I-4") == "I-4b" and backlog.resolve("I-6") == "I-6"
     outcomes = rig.loop().run_backlog(backlog, expected_hash=backlog.backlog_hash)
     assert [(o.item_id, o.status) for o in outcomes] == [
-        ("I-4b", fl.STATUS_NOT_READY),
+        ("I-4b", fl.STATUS_NEEDS_CONTEXT),
         ("I-6", fl.STATUS_BLOCKED),
     ]
     blocked = rig.evidence.events_for("I-6", fe.EV_ITEM_OUTCOME)

@@ -29,6 +29,15 @@ recorded before any edit — :mod:`crb.factory.loop`). This module serves its re
 * ``POST /factory/{repo}/tasks/{id}/signoff-gap`` (approver) — sign one structural
   gap: appended to the hash-chained gap ledger and echoed into the evidence chain.
   Value slots cannot be signed (the DoR gate refuses them by design).
+* ``POST /factory/{repo}/items/{item_id}/probe-waiver`` (approver) — waive the required
+  strength probe for the item's authored test, bound to the SHA-256 its latest RED proof
+  carries (409 ``probe_waiver_stale`` otherwise): ``review.probe_waived`` on the chain, and
+  the pull request names the approver and the reason (ADR-0025 item 12).
+* ``POST /factory/{repo}/items/{item_id}/calibration`` (approver) — fund ONE calibration
+  build of an item the entry gate stopped ``no_proven_standard`` or ``needs_context``
+  (ADR-0026 item 8): ``calibration.funded`` on the chain naming the approver; the next run
+  builds it with its arm on the row, and it never opens a pull request (409
+  ``calibration_not_answering`` for any other stop, ``calibration_pending`` while one waits).
 * ``GET /factory/{repo}/evidence`` — the chain, oldest first.
 * ``GET /factory/{repo}/intake`` — the watched column as the last read saw it: the
   listener (default OFF), the deployment's tracker connection (no secret), the last
@@ -94,9 +103,19 @@ from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.redact import redact_and_cap_head
 from crb.core.routing import ROUTE_DELIVER
 from crb.core.spec import SIZE_TIER_NAMES
-from crb.factory.backlog import KINDS, LEVELS, BacklogError, BacklogFrozen, BacklogItem
-from crb.factory.evidence import verify_events
-from crb.factory.readiness import CATALOGUE, SLOT_VALUE, sign, slots_for
+from crb.factory.backlog import (
+    ITEM_SIZES,
+    KINDS,
+    LEVELS,
+    SIZE_UNSIZED,
+    BacklogError,
+    BacklogFrozen,
+    BacklogItem,
+)
+from crb.factory.evidence import EV_RED_PROOF, verify_events
+from crb.factory.readiness import CATALOGUE, SLOT_VALUE, assess, sign, slots_for
+from crb.factory.standard import CALIBRATABLE, Entry, gate_for
+from crb.factory.standard import bind as bind_standard_readers
 from crb.factory.testfirst import AuthoredTest
 from crb.intake.client import (
     REASON_LEASE_LOST,
@@ -169,7 +188,11 @@ class BacklogItemIn(BaseModel):
     description: str = Field(default="", max_length=8000)
     acceptance_criteria: list[str] = Field(default_factory=list, max_length=50)
     capability_class: str = Field(default="(unclassified)", max_length=64)
-    size_estimate: str = Field(default="S", max_length=4)
+    #: No estimate is ``unsized`` — the gate sends it to a person — never a size it did not
+    #: claim (ADR-0026 item 8; P-289). One of the ladder's sizes or ``unsized``.
+    size_estimate: str = Field(
+        default=SIZE_UNSIZED, max_length=16, pattern=rf"^({'|'.join(ITEM_SIZES)})$"
+    )
     structural_facts: list[str] = Field(default_factory=list, max_length=100)
     depends_on: list[str] = Field(default_factory=list, max_length=50)
     level: str = "L1"
@@ -359,12 +382,54 @@ class WayForwardOut(BaseModel):
     true when the stop was about the test itself.
     """
 
+    #: ``register_evolution`` (POST the superseding item to ``route``), ``fund_calibration``
+    #: (an approver POSTs a reason to ``route`` — ADR-0026 item 8) or ``sign_off_cell``.
     action: str = "register_evolution"
     route: str
     supersedes: str
     what_to_change: str = ""
     needs_authored_test: bool = False
     prefill: EvolutionPrefillOut | None = None
+
+
+class EntryStopOut(BaseModel):
+    """Why the entry gate stopped the item before any spend (ADR-0026 item 8)."""
+
+    #: ``no_proven_standard`` · ``needs_context`` · ``unsigned_cell`` · ``granularize`` ·
+    #: ``not_licensed`` · ``unsized``.
+    code: str
+    reason: str
+    #: ``no_proven_standard``: ``none`` or ``ceiling``; ``needs_context``: the arm's base.
+    reason_code: str = ""
+    #: What the ticket must carry: the missing slots, or ``a failing test``.
+    needs: list[str] = []
+
+
+class CalibrationGrantOut(BaseModel):
+    """An approver's funded calibration build, not yet spent by a run."""
+
+    approver: str
+    reason: str
+    created: str
+    event: str
+
+
+class CalibrationIn(BaseModel):
+    """An approver funds ONE calibration build of an item the entry gate stopped for a
+    missing standard or missing context (ADR-0026 item 8): recorded as one, stamped with its
+    arm, and never able to open a pull request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class CalibrationOut(BaseModel):
+    item_id: str
+    approver: str
+    reason: str
+    answers: str
+    event: str
 
 
 class FactoryTaskOut(BaseModel):
@@ -403,15 +468,26 @@ class FactoryTaskOut(BaseModel):
     supersedes: str = ""
     superseded_by: str = ""
     #: The served link for a stopped item (a readiness / red / review refusal, a rejected
-    #: or rework-exhausted verdict, no oracle): the evolutions route that supersedes it.
+    #: or rework-exhausted verdict, no oracle): the evolutions route that supersedes it —
+    #: or, for an item with no proven standard, an approver's calibration build.
     #: null while the item is not stopped or already superseded.
     way_forward: WayForwardOut | None = None
+    #: ADR-0026 item 8 — the entry gate's stop since the last readiness pass; null = entered.
+    entry: EntryStopOut | None = None
+    #: An approver's calibration grant no run has spent yet; null = none.
+    calibration: CalibrationGrantOut | None = None
+    #: The SHA-256 of the test the newest RED proof carries (what a probe waiver names).
+    test_sha256: str = ""
 
 
 #: The statuses whose way forward is a superseding evolution (the loop stopped the item
 #: for a reason a revised item answers); a dependency block or a delivery refusal is not.
 _STOPPED_STATUSES = frozenset(
     {
+        "oracle_not_scoreable",
+        "needs_context",
+        "granularize",
+        "size_exceeds_licence",
         "not_ready",
         "not_red",
         "no_oracle",
@@ -421,6 +497,11 @@ _STOPPED_STATUSES = frozenset(
     }
 )
 _STOPPED_STEPS = frozenset({"readiness", "red", "review"})
+#: The entry stops whose way forward is not an evolution (ADR-0026 item 8).
+STATUS_NO_PROVEN_STANDARD_WORD = "no_proven_standard"
+#: The entry stops a revised item answers (the missing context, a split).
+_EVOLVE_ENTRY_STOPS = frozenset({"needs_context", "granularize"})
+STATUS_UNSIGNED_CELL_WORD = "unsigned_cell"
 
 #: Per stopped status: the sentence naming what must be different about the superseding
 #: item, and whether the POST should carry an oracle of its own. A stop about the TEST
@@ -429,6 +510,25 @@ _WHAT_TO_CHANGE: dict[str, tuple[str, bool]] = {
     "oracle_needs_strengthening": (
         "Strengthen the test so it fails for the reason the review gave, then register "
         "this item with the stronger test attached.",
+        True,
+    ),
+    "needs_context": (
+        "Add what the cell's standard needs — the structural facts the test author reads, "
+        "or a failing test a person wrote — then register this item with it.",
+        False,
+    ),
+    "granularize": (
+        "Split the item into smaller ones: the size rule reads the next larger cell too, "
+        "and changes that large are split before any attempt.",
+        False,
+    ),
+    "size_exceeds_licence": (
+        "Split the item: the change built was larger than the cell its licence came from.",
+        False,
+    ),
+    "oracle_not_scoreable": (
+        "Attach a test the strength probe can score — one that exercises the lines the change "
+        "touches — or ask an approver to waive the probe for this test's exact bytes.",
         True,
     ),
     "no_oracle": (
@@ -514,9 +614,57 @@ def _way_forward(
         return None
     refusal = dict(view.get("refusal") or {})
     status = str(view.get("status") or "")
-    stopped = status in _STOPPED_STATUSES or refusal.get("step") in _STOPPED_STEPS
+    item_id = str(view.get("id", ""))
+    entry_code = str(dict(view.get("entry") or {}).get("code", ""))
+    if STATUS_NO_PROVEN_STANDARD_WORD in (status, entry_code):
+        # ADR-0026 item 8: nothing a revised item says proves the cell — measure it, or an
+        # approver funds one calibration build (never a pull request); none while one waits
+        if view.get("calibration"):
+            return None
+        return WayForwardOut(
+            action="fund_calibration",
+            route=f"/factory/{repo}/items/{item_id}/calibration",
+            supersedes=item_id,
+            what_to_change=(
+                "Measure the cell, or an approver funds one calibration build: it is recorded "
+                "as one and never opens a pull request."
+            ),
+        )
+    if STATUS_UNSIGNED_CELL_WORD in (status, entry_code):
+        return WayForwardOut(
+            action="sign_off_cell",
+            route="/signoffs",
+            supersedes=item_id,
+            what_to_change=(
+                "A second person signs the cell off, or an approver's named override lifts "
+                "only the sign-off for one run."
+            ),
+        )
+    stopped = (
+        status in _STOPPED_STATUSES
+        or refusal.get("step") in _STOPPED_STEPS
+        or entry_code in _EVOLVE_ENTRY_STOPS
+    )
     if not stopped:
         return None
+    if "needs_context" in (status, entry_code):
+        entry = dict(view.get("entry") or {})
+        needs = [str(n) for n in entry.get("needs") or ()]
+        test = "a failing test" in needs
+        what = (
+            "Attach a failing test a person wrote, then register this item with it."
+            if test
+            else "Add the structural facts the cell's standard needs, each as a `slot: text` "
+            f"line: {', '.join(needs)}."
+        )
+        reason = str(view.get("outcome_reason") or refusal.get("reason") or "")
+        return WayForwardOut(
+            route=f"/factory/{repo}/backlog/evolutions",
+            supersedes=item_id,
+            what_to_change=what,
+            needs_authored_test=test,
+            prefill=_prefill(item, taken=taken, reason=reason) if item is not None else None,
+        )
     what, needs_test = _WHAT_TO_CHANGE.get(status, _DEFAULT_WHAT_TO_CHANGE)
     reason = str(view.get("outcome_reason") or refusal.get("reason") or "")
     return WayForwardOut(
@@ -978,6 +1126,18 @@ def list_tasks(
     for v in views:
         d = v.to_dict()
         d.pop("row_id")
+        item = items.get(v.id)
+        if d.get("entry") is None and v.status == "pending" and item is not None:
+            # ADR-0026 item 8 — an item no run has reached yet is told now what the next
+            # run's pre-build check will say: not built, and why (the same gate call)
+            preview = _entry_preview(home, item)
+            if preview is not None:
+                d["entry"] = {
+                    "code": preview.code,
+                    "reason": preview.reason,
+                    "reason_code": preview.reason_code,
+                    "needs": list(preview.needs),
+                }
         out.append(
             FactoryTaskOut(
                 **d,
@@ -1084,6 +1244,149 @@ def signoff_gap(  # noqa: PLR0917 — FastAPI dependencies + path/body
         verifier=record.verifier,
         signed_at=record.signed_at,
         row_hash=record.row_hash,
+    )
+
+
+class ProbeWaiverIn(BaseModel):
+    """An approver's waiver of the required strength probe for ONE authored test's exact
+    bytes (ADR-0025 item 12): ``test_sha256`` must be the test the item's latest RED proof
+    carries — the approver waives what they read, never a test written since."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=2000)
+    test_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ProbeWaiverOut(BaseModel):
+    item_id: str
+    approver: str
+    reason: str
+    test_sha256: str
+    event: str
+
+
+def _entry_preview(home: FactoryHome, item: BacklogItem) -> Entry | None:
+    """The entry gate for an item no factory run has reached yet — the SAME call the next
+    run's pre-build check makes (ADR-0026 item 8), over the repository's readers; ``None``
+    when it would enter. One clause is the run's own: whether its test author is the one an
+    ``S1@<author>`` standard names — a run parameter the preview cannot know — so the run
+    may still stop ``needs_context`` for it."""
+    readiness = assess(item, home.gap_ledger().for_item(item.id))
+    entry = gate_for(
+        item,
+        readiness,
+        bind_standard_readers(home.repo),
+        person_test=item.id in home.authored(),
+    )
+    return None if entry.enters else entry
+
+
+def _backlog_item(home: FactoryHome, repo: str, item_id: str) -> BacklogItem:
+    """The registered item (active or evolution), or 404."""
+    backlog = home.load_backlog()
+    if backlog is None:
+        raise ApiError(404, "not_found", f"no backlog registered for {repo!r}")
+    item = next((i for i in (*backlog.items, *backlog.evolutions) if i.id == item_id), None)
+    if item is None:
+        raise ApiError(404, "not_found", f"no item {item_id!r} in the backlog of {repo!r}")
+    return item
+
+
+@router.post(
+    "/factory/{repo}/items/{item_id}/probe-waiver",
+    response_model=ProbeWaiverOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
+    summary="Waive the strength probe for the item's authored test, bound to its bytes (approver)",
+)
+def waive_probe(  # noqa: PLR0917 — FastAPI dependencies + path/body
+    repo: str,
+    item_id: str,
+    body: ProbeWaiverIn,
+    approver: ApproverDep,
+    db: DbDep,
+    settings: SettingsDep,
+) -> ProbeWaiverOut:
+    get_repo_or_404(db, repo)
+    home = _home(settings, repo)
+    _backlog_item(home, repo, item_id)
+    ev = home.evidence(actor=approver.id)
+    proofs = ev.events_for(item_id, EV_RED_PROOF)
+    current = str(proofs[-1].payload.get("test_sha256", "")) if proofs else ""
+    if current != body.test_sha256:
+        raise ApiError(
+            409,
+            "probe_waiver_stale",
+            "the waiver must name the test the item's latest RED proof carries"
+            + (f" (sha256 {current})" if current else " (no RED proof is on record)"),
+            detail={"current_test_sha256": current},
+        )
+    event = ev.record_probe_waiver(
+        item_id, approver=approver.id, reason=body.reason, test_sha256=body.test_sha256
+    )
+    return ProbeWaiverOut(
+        item_id=item_id,
+        approver=approver.id,
+        reason=body.reason,
+        test_sha256=body.test_sha256,
+        event=event.event_id,
+    )
+
+
+@router.post(
+    "/factory/{repo}/items/{item_id}/calibration",
+    response_model=CalibrationOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
+    summary="Fund one calibration build of an item the entry gate stopped (approver)",
+)
+def fund_calibration(  # noqa: PLR0917 — FastAPI dependencies + path/body
+    repo: str,
+    item_id: str,
+    body: CalibrationIn,
+    approver: ApproverDep,
+    db: DbDep,
+    settings: SettingsDep,
+) -> CalibrationOut:
+    """ADR-0026 item 8: an approver may fund an item stopped ``no_proven_standard`` (a
+    ceiling included) or ``needs_context`` only as a calibration build — evented here, built
+    by the next factory run with its arm on the row, and never able to open a pull request.
+    One grant funds one run, which claims it on the chain before any spend
+    (``calibration.claimed``); a second grant while one waits is refused."""
+    get_repo_or_404(db, repo)
+    home = _home(settings, repo)
+    item = _backlog_item(home, repo, item_id)
+    view = next((v for v in home.task_views() if v.id == item_id), None)
+    stop = view.status if view is not None and view.status in CALIBRATABLE else ""
+    if not stop:
+        # an item no run has reached yet: the gate as the next run's pre-build check reads it
+        preview = _entry_preview(home, item)
+        stop = preview.code if preview is not None and preview.code in CALIBRATABLE else ""
+    if stop not in CALIBRATABLE:
+        raise ApiError(
+            409,
+            "calibration_not_answering",
+            "a calibration build answers an item stopped for a missing standard or missing "
+            f"context (no_proven_standard, needs_context); this item is {stop or 'pending'}",
+            detail={"status": stop},
+        )
+    if view is not None and view.calibration:
+        raise ApiError(
+            409,
+            "calibration_pending",
+            "a calibration build is already funded for this item and no run has built it yet",
+            detail={"calibration": dict(view.calibration)},
+        )
+    event = home.evidence(actor=approver.id).record_calibration(
+        item_id, approver=approver.id, reason=body.reason, answers=stop
+    )
+    return CalibrationOut(
+        item_id=item_id,
+        approver=approver.id,
+        reason=body.reason,
+        answers=stop,
+        event=event.event_id,
     )
 
 
@@ -1196,6 +1499,13 @@ class IntakeRowOut(BaseModel):
     awaiting_approval: bool = False
     #: Who created the ticket, as the tracker names them (the allowlist's input).
     author: str = ""
+    #: ADR-0026 item 8 — the entry gate's stop for this ticket (``no_proven_standard``,
+    #: ``needs_context``, ``unsigned_cell``, ``granularize``, ``unsized``; "" = it enters),
+    #: its sentence, what the ticket must carry and the cell's standard arm.
+    entry_stop: str = ""
+    entry_reason: str = ""
+    entry_needs: list[str] = Field(default_factory=list)
+    standard: str = ""
 
 
 class IntakePollOut(BaseModel):

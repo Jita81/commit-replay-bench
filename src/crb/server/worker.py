@@ -109,20 +109,22 @@ Honesty properties
 Navigation
 ----------
 What it is:   The worker process — the only thing that executes a run (the API never does).
-What it does: Polls the job queue, claims one run, dispatches by kind (setup, probe, mine,
-              label, replay, blind, oracle, controls, factory), streams StepEvents, writes
-              grade rows through the append-only ledger with the run's labels stamped,
-              records the apparatus, and marks the run succeeded / failed / cancelled
-              honestly (all-attempts-errored is a failure; a provider outage streak stops
-              the run; so does a spend cap, before an attempt or item that could pass it —
-              src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
-              skips it). Fetches and
-              fast-forwards the clone's default branch before a factory run (refusing the
-              run when it cannot) and syncs delivered pull requests' outcomes first. Checks in to the
-              ``workers`` table every ``heartbeat_s`` (idle or not, with the reaper's
-              pending count) and records every worker-side metric, including deliveries
-              by outcome and real installation-token mints. Reaps a container whose kill
-              went unconfirmed on every poll and puts the outcome on the run's trace.
+What it does: Polls the job queue, claims one run — re-checking a build run's builder
+              credential by presence when it claims it, and failing it before any attempt with
+              the submit check's code when it is gone (P-050) — dispatches by kind (setup,
+              probe, mine, label, replay, blind, oracle, controls, factory), streams
+              StepEvents, writes grade rows through the append-only ledger with the run's
+              labels stamped, records the apparatus, and marks the run succeeded / failed /
+              cancelled honestly (all-attempts-errored is a failure; a provider outage streak
+              stops the run; so does a spend cap, before an attempt or item that could pass it
+              — src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
+              skips it). Fetches and fast-forwards the clone's default branch before a factory
+              run (refusing the run when it cannot) and syncs delivered pull requests'
+              outcomes first. Checks in to the ``workers`` table every ``heartbeat_s`` (idle
+              or not, with the reaper's pending count) and records every worker-side metric,
+              including deliveries by outcome and real installation-token mints. Reaps a
+              container whose kill went unconfirmed on every poll and puts the outcome on the
+              run's trace.
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -174,6 +176,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -190,6 +193,7 @@ from crb.builders.adapter import (
     rungs_from_entries,
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
+from crb.builders.brief import ARM_S1, S1Arm
 from crb.builders.budget import budget_for_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import UnconfirmedKill
@@ -251,12 +255,12 @@ from crb.core.run import run as core_run
 from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
 from crb.core.secrets_file import SecretsStore
-from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
+from crb.core.spec import POOL_HARD, POOL_STANDARD, UNCLASSIFIED, RepoConfig, TaskSpec
 from crb.core.stats import mean
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.core.workspace import Workspace, opaque_dest
 from crb.factory.author import author_from_label
-from crb.factory.backlog import BacklogItem
+from crb.factory.backlog import KIND_CODE, BacklogItem
 from crb.factory.delivery import (
     GitCredentials,
     GitCredentialsProvider,
@@ -265,12 +269,21 @@ from crb.factory.delivery import (
     github_open_pr_fn,
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
-from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
+from crb.factory.standard import Readers
+from crb.factory.standard import bind as bind_standard_readers
+from crb.factory.testfirst import (
+    AuthoredTest,
+    TestAuthor,
+    assert_distinct_identity,
+    author_label,
+    canonical_model,
+)
 from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
+from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
 from crb.server.github_app import GitHubApp, GitHubAppError
@@ -300,6 +313,7 @@ from crb.server.routes.capability import (
 from crb.server.routes.grades import pack_verified
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
+from crb.server.routes.runs import credential_refusal
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
     ROLE_RANK,
@@ -1192,8 +1206,16 @@ class Worker:
         counts: dict[str, Any] = {}
         started = time.monotonic()
         try:
+            refused = "" if self.queue.is_cancel_requested(run.id) else self._credential_gone(run)
             if self.queue.is_cancel_requested(run.id):
                 status, error = STATUS_CANCELLED, ""
+            elif refused:
+                # P-050: the credential went between submit and claim — stop before any
+                # attempt with the submit check's own code (presence only, nothing read)
+                emitter.emit(
+                    "system", "run.credential_refused", status=StepStatus.ERROR, error=refused
+                )
+                status, error = STATUS_FAILED, refused
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1243,6 +1265,22 @@ class Worker:
             final_status=status,
             counts=counts,
         )
+
+    def _credential_gone(self, run: Run) -> str:
+        """P-050 / G-707: the submit-time credential check (``POST /runs``'s
+        ``credential_refusal``), run again when the worker CLAIMS a build run — queued or
+        reclaimed — because a credential present at submit can be gone by then. PRESENCE
+        ONLY: the check names the variable or the file, never reads a value into anything
+        this returns. ``""`` when every builder the run would call has its credential."""
+        try:
+            credential_refusal(run, SimpleNamespace(home=self.home, factory=self.settings.factory))
+        except ApiError as exc:
+            why = exc.message.removesuffix(" — nothing was queued")
+            return (
+                f"{exc.code}: {why} — the worker checked again when it claimed the run; "
+                "nothing was built"
+            )
+        return ""
 
     # --- repo / harness ----------------------------------------------------------
     def _github_installation(self, cfg: Mapping[str, Any]) -> int | None:
@@ -2305,6 +2343,7 @@ class Worker:
             # absent label = every switch OFF under the default block (rows as before)
             checks=checks if checks.any_on or not checks.repo.is_default else None,
             learning=learning,
+            s1=self._s1_arm(ctx, ladder, mode),
         )
         self._progress(ctx, 0, total)
 
@@ -2398,6 +2437,46 @@ class Worker:
             first = next((r.error for r in self.ledger.rows(run_id=spec.run_id) if r.error), "")
             return STATUS_FAILED, counts, f"all {summary.rows} attempt(s) errored: {first}"[:1000]
         return STATUS_SUCCEEDED, counts, ""
+
+    def _s1_arm(self, ctx: RunContext, ladder: EscalationLadder, mode: str) -> S1Arm | None:
+        """The replay ``S1`` arm (ADR-0026 item 1) when the run asks for it (``params.arm``),
+        else ``None``. Refused before anything is built when it cannot be honest: ``S1``
+        grades on the commit's held-out tests, so it runs blind; it needs a test author; and
+        the author's model is never a build rung's (DL-050, DL-059 C3 — the same identity
+        check the factory applies)."""
+        if str(ctx.params.get("arm") or "") != ARM_S1:
+            return None
+        if mode != "blind":
+            raise ValueError(
+                "arm S1 is graded on the commit's held-out tests: run it as a blind replay"
+            )
+        author = self._test_author(ctx, ladder)
+        if author is None:
+            raise ValueError(
+                "arm S1 needs a test author: set CRB_FACTORY__TEST_AUTHOR or the run's "
+                "test_author (a rung whose model is not on this run's ladder)"
+            )
+        label = author_label(author)
+        for i, rung in enumerate(ladder.rungs, start=1):
+            assert_distinct_identity(label, rung.label, role=f"build rung {i}")
+        config = ctx.config
+
+        def write(workspace: Any, subject: str, message: str) -> tuple[str, str]:
+            item = BacklogItem(
+                id="s1-replay",
+                title=(subject or "the change")[:160],
+                kind=KIND_CODE,
+                description=message,
+                capability_class=UNCLASSIFIED,
+            )
+            test = author.author(workspace, item, facts={}, config=config, on_event=ctx.on_event)
+            return test.path, test.content
+
+        return S1Arm(
+            author=write,
+            author_model=canonical_model(author.model) or author.model,
+            author_stamp=str(getattr(author, "provider", "") or author.name),
+        )
 
     def _learning_snapshot(self, ctx: RunContext) -> LearningSnapshot:
         """The prevention loop's snapshot for this run; a chain that cannot be read gives
@@ -2593,6 +2672,15 @@ class Worker:
 
         return lookup
 
+    def _standard_readers(self, repo: str) -> Readers:
+        """The entry gate's readers for one factory run (ADR-0026 item 8): the cells'
+        proven standards, their arms' readings and whether the points-to-churn agreement has
+        passed — bound ONCE, before any build. SEAM: :func:`crb.factory.standard.bind` binds
+        stream R's readers when the integration wires them; until then no reading is
+        registered, no cell has a proven standard, and an item is built only as an
+        approver's calibration build."""
+        return bind_standard_readers(repo)
+
     def _run_factory(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         """Forward mode (P6): run the repo's FROZEN backlog through the governed loop
         (:class:`crb.factory.loop.FactoryLoop`) — readiness gate, RED proof, build ladder
@@ -2749,11 +2837,18 @@ class Worker:
             route_decision_for=self._route_lookup(
                 run.repo, run.id, gate.posture.posture_class, checks_arm=checks.arm
             ),
-            # GOV-4: the override is a second approver's act, read LIVE at each gate from the
-            # run's row (a grant made while the run works reaches the next gate); honoured only
-            # for a person with the approver role — the loop refuses the run's own actor
+            # GOV-4: the override is a second approver's act, read LIVE at each item's entry
+            # gate from the run's row (a grant made while the run works reaches the next
+            # item); honoured only for a person with the approver role — the loop refuses the
+            # run's own actor — and it lifts only the sign-off clause (ADR-0026 item 8)
             deliver_override_for=lambda: self._deliver_override(run.id),
             checks=checks,
+            # ADR-0026 item 8 — the entry gate's readers, bound once for this run, before any
+            # build
+            readers=self._standard_readers(run.repo),
+            # the loop's overlay and lines reach an item's brief only when its standard arm
+            # carries +L (ADR-0026 item 8); the loop decides per item
+            learning=self._learning_snapshot(ctx),
             run_id=run.id,
             actor=run.actor,
             timeout=ctx.timeout,

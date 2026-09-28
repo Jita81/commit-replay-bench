@@ -41,6 +41,7 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryBacklog, FactoryEvolutionPrefill, FactoryTask } from '../../api/types'
+import { HINTS } from '../../help/hints'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { FactoryPage, deliverableCount, estimateFromMap, nextId, refusalSentence, stepsFor, withEvolution } from './FactoryPage'
 
@@ -251,6 +252,17 @@ describe('stepsFor — every refusal carries its reason (J-FAC-4)', () => {
     expect(delivery.detail).toBe('Delivery withheld — the route gate: bug.fix × XS routes calibrate (ci_low_below_bar: the lower bound sits under the bar). Built, graded and reviewed; no pull request opened.')
   })
 
+  it('the route gate and the entry gate are told apart: a cell that does not route deliver opens no pull request, and only the entry gate says not built', () => {
+    // the route gate withholds the pull request of an item that was built, graded and reviewed
+    expect(HINTS['factory.cell_route.withheld']).toContain('no pull request opens for it')
+    expect(HINTS['factory.cell_route.withheld']).toContain('Whether it is built is the entry gate’s decision')
+    expect(HINTS['factory.cell_route.withheld']).not.toContain('not built')
+    // with delivery off, the entry gate still stops what it stops: not every item is built
+    expect(HINTS['field.factory.deliver']).toContain('an item the entry gate admits is built and graded locally only')
+    expect(HINTS['field.factory.deliver']).not.toContain('every item is built')
+    expect(HINTS['stat.factory.deliverable']).toContain('opens no pull request')
+  })
+
   it('delivery that was off for the run says so; a refused push is a failure with the reason', () => {
     const off = task({ status: 'accepted', route_hint: 'build', red_proof: true, build_status: 'clean', review_verdict: 'accept', cell_route: DELIVER, refusal: { step: 'delivery', reason: 'delivery is opt-in and OFF — built and graded locally only', reason_code: '', measured_route: '' } })
     expect(stepsFor(off)[4]).toMatchObject({ status: 'skipped', detail: 'Delivery withheld — delivery was off for this run. Built and graded locally only.' })
@@ -309,8 +321,55 @@ describe('FactoryPage — the shipped contract', () => {
     // F28 / J-FAC-14 — the pill is short; the n · point [interval] · apparatus wrap after it
     expect(screen.getByTestId('cell-route-I-1')).toHaveTextContent('routes deliver')
     expect(screen.getByTestId('cell-route-I-1-prov')).toHaveTextContent('n = 40 · 95 % [84 %, 99 %] · apparatus 2.2')
-    expect(screen.getByTestId('cell-route-I-2')).toHaveTextContent('not measured · withheld')
+    expect(screen.getByTestId('cell-route-I-2')).toHaveTextContent('not measured · not built')
     expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('1 of 2 items sit in a cell that routes deliver today')
+  })
+
+  it('an item whose cell has no proven standard reads not built, names what to attach, and offers an approver a calibration build (ADR-0026 item 8)', async () => {
+    const reason = 'no context standard is proven for the bug.fix XS cell: it is not built. Measure the cell, or an approver may fund one calibration build, which never opens a pull request'
+    const stopped: FactoryTask = {
+      ...TASKS[0]!,
+      status: 'no_proven_standard',
+      review_verdict: null,
+      build_status: 'not_built',
+      red_proof: null,
+      pr_url: null,
+      cell_route: NO_ROUTE,
+      pack_hash: '',
+      row_hash: '',
+      run_id: '',
+      refusal: { step: 'entry', reason, reason_code: 'no_proven_standard', measured_route: '' },
+      entry: { code: 'no_proven_standard', reason, reason_code: 'none', needs: [] },
+      way_forward: { action: 'fund_calibration', route: '/factory/alpha/items/I-1/calibration', supersedes: 'I-1', what_to_change: 'Measure the cell, or an approver funds one calibration build: it is recorded as one and never opens a pull request.' },
+    }
+    const context: FactoryTask = {
+      ...TASKS[1]!,
+      status: 'needs_context',
+      dor_gaps: [],
+      entry: { code: 'needs_context', reason: 'the feature.add S cell’s standard is S2, which needs a failing test a person wrote, attached to the ticket before any build', reason_code: 'S2', needs: ['a failing test'] },
+    }
+    const { calls } = mockApi(
+      base({
+        'GET /auth/me': { ...PRINCIPAL, role: 'approver' },
+        'GET /factory/alpha/tasks': [stopped, context],
+        'POST /factory/alpha/items/I-1/calibration': () => json({ item_id: 'I-1', approver: 'u-1', reason: 'measure', answers: 'no_proven_standard', event: 'e' }, 201),
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    expect(within(row).getByTestId('item-status-I-1')).toHaveTextContent('Not built — no proven standard')
+    expect(within(row).getByTestId('entry-I-1')).toHaveTextContent('Not built · no_proven_standard')
+    expect(within(row).getByTestId('step-I-1-readiness')).toHaveTextContent('Not built — no context standard is proven for the bug.fix XS cell')
+    expect(within(row).getByTestId('refusal-I-1')).toHaveTextContent('Not built: no context standard is proven')
+    expect(within(row).getByTestId('refusal-I-1')).not.toHaveTextContent('withheld')
+    const row2 = screen.getByTestId('factory-item-I-2')
+    expect(within(row2).getByTestId('entry-I-2')).toHaveTextContent('Not built · needs_context — attach: a failing test')
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const form = within(row).getByRole('form', { name: 'Fund a calibration build of I-1' })
+    await userEvent.type(within(form).getByLabelText('Why fund a calibration build'), 'measure the cell once')
+    await userEvent.click(within(form).getByRole('button', { name: 'Fund a calibration build' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/factory/alpha/items/I-1/calibration')).toBe(true))
+    expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))).toEqual({ reason: 'measure the cell once' })
   })
 
   it('a stopped item shows what to change and the replacement item already drafted (G-904)', async () => {
@@ -385,7 +444,9 @@ describe('FactoryPage — the shipped contract', () => {
     // the estimate rests on the map's measured mean, with its n and apparatus, and names the band
     await waitFor(() => expect(box).toHaveTextContent("this repository's measured mean over n = 40 attempts with a known cost at apparatus 2.2"))
     expect(box).toHaveTextContent('$0.27 to $0.41 for 1 item at about $0.34 each')
-    expect(box).toHaveTextContent('1 of 2 will be worked (1 waits on a signed gap); 1 sits in a cell that routes deliver')
+    expect(box).toHaveTextContent('1 of 2 can be built (1 waits on a signed gap); 1 sits in a cell that routes deliver; the rest open no pull request')
+    // ADR-0026 item 8 — the page states its limit where the person acts
+    expect(box).toHaveTextContent('An item whose cell has no proven context standard, or that lacks what the standard needs, is not built. An approver’s calibration build is recorded as one and never delivers.')
     expect(box).toHaveTextContent('none on the whole run — set one under Stop the run at')
     expect(box).toHaveTextContent('You can cancel the run at any point. Items already built are still charged.')
     const { default: userEvent } = await import('@testing-library/user-event')
@@ -518,9 +579,10 @@ describe('FactoryPage — the shipped contract', () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     await userEvent.click(deliver)
     expect(box).toHaveTextContent('on — a clean build in a deliver cell pushes a branch to acme/cobra and opens a pull request against main; nothing is written to main.')
-    // GOV-4: the override is a SECOND approver's act on the run's page — never asked for at enqueue
-    expect(within(box).queryByRole('checkbox', { name: /Override the route gate/ })).toBeNull()
-    expect(within(box).getByTestId('factory-override-note')).toHaveTextContent('An override of the route gate is a second approver’s act: once this run is queued, another approver grants it on the run’s page, under their name.')
+    // GOV-4 + ADR-0026 item 8: the override is a SECOND approver's act on the run's page —
+    // never asked for at enqueue — and it lifts a missing sign-off, and only that
+    expect(within(box).queryByRole('checkbox', { name: /Lift a missing sign-off|Override the route gate/ })).toBeNull()
+    expect(within(box).getByTestId('factory-override-note')).toHaveTextContent('A missing sign-off is lifted for one run by a second approver: once this run is queued, another approver grants it on the run’s page, under their name. It lifts only the sign-off — never a missing standard, missing context, a calibration build or a cell with a false-Q1 row.')
     await userEvent.click(screen.getByRole('button', { name: /^Run the factory/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
     const body = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))
@@ -649,7 +711,7 @@ describe('FactoryPage — the shipped contract', () => {
       expect(details).not.toHaveAttribute('open')
       expect(within(details).getByTestId('step-I-2-readiness')).toHaveTextContent('2 structural gaps unsigned: method_path, response_shape')
       // the cell-route pill is short; the numbers follow in their own span
-      expect(within(row).getByTestId('cell-route-I-2')).toHaveTextContent('not measured · withheld')
+      expect(within(row).getByTestId('cell-route-I-2')).toHaveTextContent('not measured · not built')
       const wide = screen.getByTestId('factory-item-I-1')
       expect(within(wide).getByTestId('cell-route-I-1')).toHaveTextContent('routes deliver')
       expect(within(wide).getByTestId('cell-route-I-1-prov')).toHaveTextContent('n = 40 · 95 % [84 %, 99 %] · apparatus 2.2')

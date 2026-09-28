@@ -156,11 +156,11 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/factory',
-    purpose: 'Deliver new work under the same rules as replay: a frozen backlog, a failing test proved before any build, a build inside the sandbox, and a branch and pull request only where the map routes deliver. Every step is on the evidence chain.',
+    purpose: 'Deliver new work under the same rules as replay: a frozen backlog, an item built only when its cell has a proven context standard and the item carries what it needs, a failing test proved before any build, a build inside the sandbox, and a branch and pull request only where the change’s own cell licenses it. Every step is on the evidence chain.',
     next: {
       viewer: 'Read each item’s chain: readiness, RED proof, build, delivery, review, outcome. A PR link opens the pull request in the repository.',
-      operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a deliver cell today; the rest are built and withheld.',
-      approver: 'Items blocked on a structural gap wait for your signature. Overriding the route gate is recorded on the chain under your name.',
+      operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a deliver cell today; the rest open no pull request.',
+      approver: 'Items blocked on a structural gap wait for your signature, and an item whose cell has no proven standard waits for a calibration build only you can fund. Lifting a missing sign-off for one run is recorded on the chain under your name.',
     },
     numbers: '“k of m items sit in a cell that routes deliver” is read from the map at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['red_proof', 'route_gate', 'cell', 'deliver', 'evidence_pack', 'apparatus', 'belt', 'wilson'],

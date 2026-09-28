@@ -688,15 +688,23 @@ CREDENTIAL_EXEMPT: dict[str, str] = {
 }
 
 
-def run_builders(run: Run) -> list[str]:
+def run_builders(run: Run, *, default_author: str = "") -> list[str]:
     """Every builder the run can call: the run's own and each rung's (a ``builder:model``
-    label or an object rung; ``rN`` labels are the run's own builder)."""
+    label or an object rung; ``rN`` labels are the run's own builder) — and, on the replay
+    ``S1`` arm (ADR-0026 item 1), its test author's (``params.test_author``, else the
+    deployment's ``default_author``), whose dead key would otherwise write an authoring
+    failure for every commit at $0 (docs/PREVENTION.md P-003's class)."""
     names = [run.builder] if run.builder else []
     for entry in run.ladder_json or []:
         if isinstance(entry, Mapping):
             names.append(str(entry.get("builder", "")))
         elif isinstance(entry, str) and ":" in entry:
             names.append(entry.split(":", 1)[0])
+    params = dict(run.params_json or {})
+    if str(params.get("arm") or "") == "S1":
+        author = str(params.get("test_author") or default_author or "").strip()
+        if ":" in author:
+            names.append(author.split(":", 1)[0])
     return list(dict.fromkeys(n for n in names if n))
 
 
@@ -710,7 +718,9 @@ def credential_refusal(run: Run, settings: Any) -> None:
     if run.kind not in BUILD_KINDS:
         return
     cfg = dict((run.params_json or {}).get("builder_config") or {})
-    for name in run_builders(run):
+    factory = getattr(settings, "factory", None)
+    default_author = str(getattr(factory, "test_author", "") or "")
+    for name in run_builders(run, default_author=default_author):
         check = CREDENTIAL_CHECKS.get(name)
         if check is None:
             continue
@@ -911,12 +921,17 @@ def create_run(
 ) -> RunOut:
     if db.get(Repo, body.repo) is None:
         raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+    s1 = body.arm is not None
+    if s1 and body.kind != "blind":
+        # ADR-0026 item 1: the S1 arm is graded on the commit's HELD-OUT tests
+        raise ApiError(422, "validation_error", "arm S1 applies to blind runs only")
     factory_only = {
         "backlog_hash": body.backlog_hash,
         "deliver": body.deliver,
         "deliver_override": body.deliver_override,
         "max_rework": body.max_rework,
-        "test_author": body.test_author,
+        # a blind run on the S1 arm names its test author too
+        "test_author": None if s1 else body.test_author,
     }
     if body.kind != KIND_FACTORY and any(v is not None for v in factory_only.values()):
         named = sorted(k for k, v in factory_only.items() if v is not None)
@@ -936,6 +951,13 @@ def create_run(
         )
     api = require_jobs()
     run = new_run(body, actor=operator.id)
+    if s1:
+        # set before the refusals: the credential check names the S1 test author's builder
+        run.params_json = {
+            **dict(run.params_json or {}),
+            "arm": body.arm,
+            **({"test_author": body.test_author.strip()} if body.test_author is not None else {}),
+        }
     submit_refusals(db, settings, body, run)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the

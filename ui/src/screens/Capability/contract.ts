@@ -52,7 +52,7 @@ import type { Tone } from '../../lib/verdict'
 // ---------------------------------------------------------------------------
 
 /** `crb.core.ledger.GradeRow.failure_kind` — `''` is clean; `lint` = belts 1–4 held, belt 5 rejected (ADR-0011); `api` = belts 1–4 held, belt 6 rejected (ADR-0024, opt-in). */
-export type FailureKind = '' | 'builder_red' | 'lint' | 'api' | 'budget' | 'protocol' | 'harness' | 'outage' | 'disqualified'
+export type FailureKind = '' | 'builder_red' | 'lint' | 'api' | 'budget' | 'protocol' | 'harness' | 'outage' | 'authoring' | 'disqualified'
 
 /** `crb.core.routing.REASON_CODES`, in evaluation order. */
 export type ReasonCode =
@@ -100,6 +100,8 @@ export interface FailureSplit {
   outage?: number
   /** Belts 1–4 held; belt 6 found a public-API change the maintainers' commit did not make (opt-in). */
   api?: number
+  /** The `S1` arm's test author produced no failing test (ADR-0026 item 1): inside n, never the model's. */
+  authoring?: number
 }
 
 export interface RoutingPolicyWithControls extends RoutingPolicy {

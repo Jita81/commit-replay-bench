@@ -30,6 +30,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Intake } from '../../api/types'
+import { HINTS } from '../../help/hints'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import { IntakePage } from './IntakePage'
 
@@ -228,6 +229,48 @@ describe('IntakePage', () => {
     expect(row.textContent).toContain('needs information')
     expect(row.textContent).toContain('nothing is registered until the questions are answered')
     expect(row.textContent).toContain('1 question(s) the acceptance test needs answered')
+  })
+
+  it('a ticket whose cell has no proven standard says it will not be built, and one missing its standard’s context names what to attach (ADR-0026 item 8)', async () => {
+    const none: Intake['rows'][number] = {
+      ...READY_ROW,
+      key: '4715',
+      label: 'crb:not-deliverable',
+      entry_stop: 'no_proven_standard',
+      entry_reason: 'no context standard is proven for the bug.fix S cell: it is not built. Measure the cell, or an approver may fund one calibration build, which never opens a pull request',
+      entry_needs: [],
+      standard: '',
+    }
+    const needs: Intake['rows'][number] = {
+      ...READY_ROW,
+      key: '4716',
+      label: 'crb:needs-info',
+      registered: false,
+      entry_stop: 'needs_context',
+      entry_reason: 'the bug.fix S cell’s standard is S2, which needs a failing test a person wrote, attached to the ticket before any build',
+      entry_needs: ['a failing test'],
+      standard: 'S2',
+    }
+    setup({ ...ON, rows: [none, needs] })
+    const row = await screen.findByTestId('intake-row-4715')
+    expect(within(row).getByTestId('intake-entry-4715')).toHaveTextContent('not built · no_proven_standard')
+    expect(within(row).getByTestId('intake-entry-4715')).toHaveTextContent('an approver may fund one calibration build, which never opens a pull request')
+    expect(row.textContent).toContain('not deliverable')
+    const row2 = screen.getByTestId('intake-row-4716')
+    expect(within(row2).getByTestId('intake-entry-4716')).toHaveTextContent('not built · needs_context')
+    expect(within(row2).getByTestId('intake-entry-4716')).toHaveTextContent('Attach to the ticket: a failing test.')
+  })
+
+  it('the intake pills tell the two gates apart: only a stop says not built, and ready promises no pull request its cell does not route (P-288)', () => {
+    const notBuilt = /not (be )?built|nothing is built/i
+    // the two stops before any build say so; the two labels of an admitted ticket never do
+    expect(HINTS['pill.intake.not_deliverable']).toMatch(notBuilt)
+    expect(HINTS['pill.intake.needs_info']).toMatch(notBuilt)
+    for (const id of ['pill.intake.ready', 'pill.intake.queued'] as const) {
+      expect(HINTS[id]).not.toMatch(notBuilt)
+    }
+    expect(HINTS['pill.intake.ready']).toContain('it will be built, graded and reviewed')
+    expect(HINTS['pill.intake.ready']).toContain('A pull request opens only if its cell routes deliver')
   })
 
   it('an unmeasured cell is named as unmeasured, never shown as a zero rate', async () => {
