@@ -108,7 +108,7 @@ describe('LibraryPage', () => {
     const run = (proposed: number, unchanged: number) => ({
       repo: 'alpha',
       commit: 'a'.repeat(40),
-      miners: ['adrs@1', 'owners@1', 'lint@1', 'tests@1', 'change-profile@1'],
+      miners: ['adrs@1', 'owners@1', 'lint@2', 'tests@1', 'change-profile@1'],
       counts: { proposed, unchanged, held: 0, refused: 0, noted: 1, failed: 0 },
       proposed: proposed ? [mined] : [],
       outcomes: [],
