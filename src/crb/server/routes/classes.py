@@ -68,14 +68,22 @@ from crb.core.class_sets import (
     OVERRIDE_RATE_MAX,
     PER_CLASS_MIN,
     REFUSAL_CONFIRMATION_LABEL,
+    REFUSAL_EXAMPLE_LABEL,
+    REFUSAL_REPO_TAKEN,
+    REFUSAL_SPONSOR_LABEL,
     SAMPLE_MIN,
     SPLIT_SEED,
+    STATUS_REVOKED,
+    Case,
     ClassRule,
     ClassSetRefused,
     ClassSetVersion,
     OrgClass,
     VersionState,
     classify,
+    example_keys,
+    examples_of,
+    global_parents,
     routes,
 )
 from crb.core.ledger import LedgerIntegrityError
@@ -88,7 +96,7 @@ from crb.core.library import (
     signed_context,
 )
 from crb.core.redact import redact
-from crb.core.taxonomy import UNCLASSIFIED
+from crb.core.taxonomy import CLASS_DEFINITIONS, UNCLASSIFIED
 from crb.factory.readiness import slots_for
 from crb.factory.standard import CellRef
 from crb.observability.events import StepStatus
@@ -125,7 +133,6 @@ _ERR = {"model": ErrorEnvelope}
 CODE_REFUSED = "class_set_refused"
 SIZES: tuple[str, ...] = ("XS", "S", "M", "L", "XL")
 FIRST_LOOK = 20
-EXAMPLES = 5
 
 
 def _trace(org: str) -> str:
@@ -240,6 +247,10 @@ def classes_index(_viewer: ViewerDep, db: DbDep, factory: SessionFactoryDep) -> 
         "orgs": [{"org": o, "versions": v} for o, v in orgs.items()],
         "repos": sorted(db.execute(select(Repo.name)).scalars()),
         "thresholds": thresholds(),
+        # the parents a class may name, with what each means — the proposal form lists them
+        "global_classes": [
+            {"slug": k, "definition": CLASS_DEFINITIONS[k]} for k in global_parents()
+        ],
     }
 
 
@@ -266,11 +277,12 @@ def _class_counts(version: ClassSetVersion, cases: Sequence[Any]) -> list[dict[s
     summary="One class-set version: its classes and rules, the split, the validity report, the verdict",
 )
 def version_detail(
-    org: str, n: int, _viewer: ViewerDep, db: DbDep, factory: SessionFactoryDep
+    org: str, n: int, viewer: ViewerDep, db: DbDep, factory: SessionFactoryDep
 ) -> dict[str, Any]:
     state = _state(factory, org, n)
     verdict, report = _verdict(db, state)
     cases = cases_for(db, state.version)
+    report = _withhold_agreement(report, factory, state, cases, viewer.id)
     return {
         **_summary(db, state, verdict),
         "report": report,
@@ -278,6 +290,50 @@ def version_detail(
         "class_counts": _class_counts(state.version, cases),
         "thresholds": thresholds(),
     }
+
+
+def _offered(version: ClassSetVersion, cases: Sequence[Case]) -> list[Case]:
+    """The derivation commits a person may label: every one but the classes' example commits,
+    which a class's page shows as the rule's answer (P-686)."""
+    shown = example_keys(cases)
+    return [c for c in cases if c.split == DERIVATION and (c.repo, c.task_id) not in shown]
+
+
+def _my_labels(factory: Any, version_id: str, who: str) -> dict[tuple[str, str], str]:
+    return {
+        (r.repo, r.task_id): r.capability_class
+        for r in _store(factory).labels(version_id, source=SOURCE_PERSON)
+        if r.labeller == who
+    }
+
+
+def _withhold_agreement(
+    report: dict[str, Any], factory: Any, state: VersionState, cases: Sequence[Case], who: str
+) -> dict[str, Any]:
+    """The report as ``who`` may read it: while they have labelled some but not all of the
+    version's sample, the agreement's κ is withheld from them — seen after each label, it would
+    tell them whether their label matched the rule's (P-686)."""
+    offered = {(c.repo, c.task_id) for c in _offered(state.version, cases)}
+    mine = len(set(_my_labels(factory, state.version_id, who)) & offered)
+    if not 0 < mine < len(offered):
+        return report
+    measures = [
+        m
+        if m["name"] != "agreement"
+        else {
+            **m,
+            "value": None,
+            "state": "withheld",
+            "detail": {},
+            "words": (
+                f"Withheld from you while you label this version's sample: you have labelled "
+                f"{mine} of {len(offered)} commits. It shows when you have labelled them all, "
+                "so each label stays your own reading."
+            ),
+        }
+        for m in report["measures"]
+    ]
+    return {**report, "measures": measures}
 
 
 def _library_states(factory: Any, repo: str) -> dict[str, EntryState]:
@@ -314,12 +370,13 @@ def class_page(
         for t in db.execute(select(Task).where(Task.repo.in_(version.repos))).scalars()
     }
     mine = [c for c in cases if classify(version, c.fields).slug == slug]
-    # example commits are derivation commits only: a confirmation commit is kept for the licence
+    # example commits are derivation commits, set aside from the labelled sample (P-686); a
+    # confirmation commit is kept for the licence
     examples = [
         {"repo": c.repo, "sha": c.task_id, "subject": subjects.get((c.repo, c.task_id), ""),
          "size": c.size, "proxy": c.fields.proxy}
-        for c in mine if c.split == DERIVATION
-    ][:EXAMPLES]  # fmt: skip
+        for c in examples_of(version, cases)[slug]
+    ]  # fmt: skip
     signed_slots: list[str] = []
     context: list[dict[str, Any]] = []
     for repo in version.repos:
@@ -360,9 +417,10 @@ def class_page(
             posture_class=deployment_posture_class(settings, repo_row),
         )
         for size in SIZES:
+            # only commits a reading of the class can pool: those mined under its parent (P-682)
             confirming = sum(
                 1 for c in mine if c.repo == repo and c.size == size and c.split == CONFIRMATION
-                and c.qualified
+                and c.qualified and c.mined_class == klass.parent
             )  # fmt: skip
             std = readers.standard_for(
                 CellRef(klass.parent, size, taxonomy=version.version_id, org_class=slug)
@@ -394,6 +452,7 @@ def class_page(
         "title": klass.title,
         "definition": klass.definition,
         "parent": klass.parent,
+        "parent_definition": CLASS_DEFINITIONS.get(klass.parent, ""),
         "rule": klass.rule.to_dict(),
         "rule_words": rule_in_words(klass.rule),
         "entry_id": klass.entry_id,
@@ -425,12 +484,14 @@ def rule_in_words(rule: ClassRule) -> str:
 
 
 def _next_measurement(verdict: Mapping[str, Any], confirming: int) -> str:
+    """The next step for one size, said once per row; why the set does not route is said once
+    above the table (the page's route line), never repeated on every row."""
     have = f"{confirming} qualified confirmation commit{'s' if confirming != 1 else ''} so far"
     if not verdict.get("routes"):
-        return f"No proven standard: the class set routes nothing yet ({verdict.get('words', '')}) — {have}."
+        return f"Wait for the class set to route; {have}."
     return (
-        f"No proven standard. Register a reading of this class (S3, then S1) on its confirmation "
-        f"commits; a first look needs {FIRST_LOOK} — {have}."
+        f"Register a reading of this class (S3, then S1) on its confirmation commits; a first "
+        f"look needs {FIRST_LOOK}, and it has {have.removesuffix(' so far')}."
     )
 
 
@@ -455,17 +516,17 @@ def label_queue(
 ) -> dict[str, Any]:
     state = _state(factory, org, n)
     version = state.version
-    mine: dict[tuple[str, str], str] = {}
-    for r in _store(factory).labels(version.version_id, source=SOURCE_PERSON):
-        if r.labeller == operator.id:
-            mine[(r.repo, r.task_id)] = r.capability_class
+    sponsor = operator.id == state.sponsor
+    mine = _my_labels(factory, version.version_id, operator.id)
     tasks = {
         (t.repo, t.task_id): t
         for t in db.execute(select(Task).where(Task.repo.in_(version.repos))).scalars()
     }
     items: list[dict[str, Any]] = []
-    for c in cases_for(db, version):
-        if c.split != DERIVATION or (repo and c.repo != repo):
+    # the sponsor is offered nothing: the rule is their own words, so their labels would
+    # measure its author against it (P-684); nor is any class's example commit (P-686)
+    for c in [] if sponsor else _offered(version, cases_for(db, version)):
+        if repo and c.repo != repo:
             continue
         t = tasks[(c.repo, c.task_id)]
         spec = dict(t.spec_json or {})
@@ -493,6 +554,7 @@ def label_queue(
         "labelled_by_me": sum(1 for x in items if x["my_label"]),
         "sample_min": SAMPLE_MIN,
         "per_class_min": PER_CLASS_MIN,
+        "sponsor": sponsor,
     }
 
 
@@ -521,14 +583,28 @@ def add_label(
     klass = body.capability_class
     if klass != UNCLASSIFIED and version.class_of(klass) is None:
         raise _invalid(f"{version.version_id} has no class {klass!r}", "class")
-    if version.split(body.repo, body.task_id) != DERIVATION:
-        exc = ClassSetRefused(
+    refusal: ClassSetRefused | None = None
+    if operator.id == state.sponsor:
+        refusal = ClassSetRefused(
+            "you sponsored this class set: its rule is your own words, so your labels would "
+            "check the rule against its author — another person labels its sample (P-684)",
+            code=REFUSAL_SPONSOR_LABEL,
+        )
+    elif version.split(body.repo, body.task_id) != DERIVATION:
+        refusal = ClassSetRefused(
             "this commit is in the confirmation set: a person labels derivation commits only, "
             "so the commits a class set is licensed on are never the ones it was checked on "
             "(ADR-0026 item 9)",
             code=REFUSAL_CONFIRMATION_LABEL,
         )
-        raise _refused(db, exc, org=org, actor=operator.id, act="label", vid=version.version_id)
+    elif (body.repo, body.task_id) in example_keys(cases_for(db, version)):
+        refusal = ClassSetRefused(
+            "this commit is one of a class's example commits, shown on its page as the rule's "
+            "answer, so it is never labelled (P-686)",
+            code=REFUSAL_EXAMPLE_LABEL,
+        )
+    if refusal is not None:
+        raise _refused(db, refusal, org=org, actor=operator.id, act="label", vid=version.version_id)
     _store(factory).add_labels(
         version.version_id, [(body.repo, body.task_id, klass)], source=SOURCE_PERSON,
         labeller=operator.id,
@@ -600,7 +676,9 @@ def _class_from(factory: Any, c: ClassIn, i: int) -> OrgClass:
             entry_repo=entry_repo,
         )
     except ValueError as exc:
-        raise _invalid(str(exc), "classes", str(i)) from exc
+        # name the class the refusal is about, so a person proposing many knows which line
+        words = str(exc).removeprefix(f"{slug}: ")
+        raise _invalid(f"Class {i + 1} ({slug or 'no slug'}): {words}", "classes", str(i)) from exc
 
 
 def _propose(
@@ -626,6 +704,20 @@ def _propose(
             )  # fmt: skip
     current = _versions(factory, org)
     top = max((s.version.n for s in current.values()), default=0)
+    # one organisation's class sets per repository: two would each claim its tickets, and the
+    # intake would pick one by the order of their names (P-685)
+    for other in _versions(factory).values():
+        taken = sorted(set(other.version.repos) & set(repos))
+        if other.version.org != org and other.status != STATUS_REVOKED and taken:
+            exc = ClassSetRefused(
+                f"{', '.join(taken)} already has {other.version_id}, {other.version.org}'s: a "
+                "repository's commits and tickets are described by one organisation's classes. "
+                "Revoke that version first, or propose under its organisation",
+                code=REFUSAL_REPO_TAKEN,
+            )
+            raise _refused(
+                db, exc, org=org, actor=who.id, act=ACT_PROPOSE, vid=f"{org}/classes@v{top + 1}"
+            )
     try:
         version = ClassSetVersion(
             org=org,

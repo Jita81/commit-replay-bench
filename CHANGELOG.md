@@ -16,10 +16,11 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   (north-star Wave 4b, stream CLS; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4b-cls)).
   Classes of work (`/classes`) lets an organisation propose its own class set, each class a
   child of a global class, with one rule that reads only what a ticket carries. Commits are
-  split into derivation and confirmation sets before any class exists. People label a
-  derivation sample blind; the validity report checks the rule against them; a second person
-  signs. Until then the set routes nothing at intake, at the entry gate, in runs or in readings
-  (DL-330 to DL-332, P-680).
+  split into derivation and confirmation sets before any class exists. People other than the
+  sponsor label a derivation sample, never shown the rule's answer; the validity report
+  checks the rule against them; a second person signs. Until then the set routes nothing at
+  intake, at the entry gate, in runs or readings. One organisation owns a repository's classes
+  (DL-330 to DL-333, P-680 to P-689).
 
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).

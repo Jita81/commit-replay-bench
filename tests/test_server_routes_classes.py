@@ -17,7 +17,12 @@ What it does: Walks a version from proposal (an operator, its sponsor; every com
               N+1 from a signed library work-type entry (the DL-044 seam) and refuses a rule
               whose component the library does not name; pins every role gate and event; and
               registers a reading of an organisation class only over its confirmation commits,
-              refused while the version does not route.
+              refused while the version does not route or on a cell that is not its parent's;
+              pins that the sponsor is offered nothing to label, that a class's example commits
+              are never offered, that the agreement is withheld from a person part-way through
+              their sample, that one organisation's class sets describe a repository, that a
+              backlog item cannot carry an organisation's class by hand, and that a refusal names
+              the class it is about.
 How:          ``fixtures.server_seed.make_env`` (SQLite, the four role accounts, ``alpha``), the
               fixture organisation's commits inserted as ``Task`` rows, ``login`` per role.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -131,9 +136,12 @@ def _events(env: Env, prefix: str = "class_set.") -> list[Event]:
         )
 
 
-def _label_all(env: Env, n: int = 1) -> int:
-    """Label every derivation commit of version ``n`` as the rule would (the person agrees)."""
+def _label_all(env: Env, n: int = 1, *, role: str = "admin", back: str = "operator") -> int:
+    """As ``role`` (never the sponsor), label every derivation commit version ``n`` offers as
+    the rule would (the person agrees), then sign back in as ``back``."""
+    _as(env, role)
     queue = env.get(f"/classes/{ORG}/v/{n}/label-queue").json()
+    assert queue["sponsor"] is False, "the sponsor is offered nothing to label"
     rule = {"parser": "parser-fix", "parse": "parser-fix", "cli": "cli-fix", "flag": "cli-fix"}
     done = 0
     for item in queue["items"]:
@@ -145,6 +153,7 @@ def _label_all(env: Env, n: int = 1) -> int:
         )
         assert r.status_code == 201, r.text
         done += 1
+    _as(env, back)
     return done
 
 
@@ -206,7 +215,15 @@ def test_the_sponsor_cannot_sign_and_a_second_person_can(env: Env) -> None:
 
 
 def test_the_labelling_screen_is_blind_and_takes_derivation_commits_only(env: Env) -> None:
-    _propose(env, PARSER, CLI, CHORE)
+    _as(env, "approver")
+    _propose(env, PARSER, CLI, CHORE)  # appr1 sponsors it
+    # the sponsor is offered nothing, and their own label is refused: the rule is their words
+    own = env.get(f"/classes/{ORG}/v/1/label-queue").json()
+    assert (own["sponsor"], own["items"]) == (True, [])
+    r = env.post(
+        f"/classes/{ORG}/v/1/labels", json={"repo": ALPHA, "task_id": sha(1), "class": "cli-fix"}
+    )
+    assert r.status_code == 409 and envelope(r)["detail"]["code"] == "sponsor_label"
     # another person's label is never shown to this one
     _as(env, "admin")
     queue = env.get(f"/classes/{ORG}/v/1/label-queue").json()
@@ -226,6 +243,18 @@ def test_the_labelling_screen_is_blind_and_takes_derivation_commits_only(env: En
         assert set(item) == {"repo", "task_id", "message", "ticket", "diff", "my_label"}
         assert item["my_label"] == ""  # the admin's label is not this person's
         assert set(item["diff"]) == {"source_files", "test_files", "churn"}
+    # no commit a class's page shows as the rule's example is ever offered, or taken (P-686)
+    shown = {
+        x["sha"]
+        for slug in ("parser-fix", "cli-fix", "chore")
+        for x in env.get(f"/classes/{ORG}/v/1/classes/{slug}").json()["examples"]
+    }
+    assert shown and not shown & {x["task_id"] for x in queue["items"]}
+    r = env.post(
+        f"/classes/{ORG}/v/1/labels",
+        json={"repo": ALPHA, "task_id": sorted(shown)[0], "class": "cli-fix"},
+    )
+    assert r.status_code == 409 and envelope(r)["detail"]["code"] == "example_commit"
     # a confirmation commit is refused, with a reason, and the refusal is recorded
     confirming = next(sha(i) for i in range(200) if split_of(ALPHA, sha(i)) == "confirmation")
     r = env.post(
@@ -245,6 +274,8 @@ def test_the_labelling_screen_is_blind_and_takes_derivation_commits_only(env: En
     assert ok.status_code == 201 and ok.json()["labeller"] == user_id("op1")
     labelled = [e for e in _events(env) if e.action == "class_set.labelled"]
     assert [e.actor for e in labelled] == [user_id("root"), user_id("op1")]
+    refused = [e.payload_json["code"] for e in _events(env) if e.action == "class_set.refused"]
+    assert refused == ["sponsor_label", "example_commit", "confirmation_commit"]
 
 
 def test_a_signed_version_whose_report_passes_routes_and_its_class_page_reads_in_plain_words(
@@ -329,6 +360,22 @@ def test_a_using_team_adds_a_class_as_a_signed_work_type_entry_the_dl_044_seam(e
         "parent_class": "bug.fix",
     }
     proposed = env.post(f"/library/{ALPHA}/entries", json=entry).json()
+    # proposed but not signed, the entry is not a class: neither from the library nor by name
+    unsigned = env.post(
+        f"/classes/{ORG}/versions/from-library",
+        json={"repos": [ALPHA], "rules": {"lexer-fix": {"words": ["lexer"]}}},
+    )
+    assert (
+        unsigned.status_code == 422 and "sign one in the library" in envelope(unsigned)["message"]
+    )
+    by_name = env.post(
+        f"/classes/{ORG}/versions",
+        json={"repos": [ALPHA], "classes": [PARSER, {"entry_repo": ALPHA,
+              "entry_slug": "lexer-fix", "rule": {"words": ["lexer"]}}]},
+    )  # fmt: skip
+    assert by_name.status_code == 422
+    assert "has no signed work-type entry 'lexer-fix'" in envelope(by_name)["message"]
+    assert [v["n"] for v in env.get("/classes").json()["orgs"][0]["versions"]] == [1]
     _as(env, "approver")
     env.post(
         f"/library/{ALPHA}/entries/work-type/lexer-fix/sign", json={"version": proposed["version"]}
@@ -347,6 +394,9 @@ def test_a_using_team_adds_a_class_as_a_signed_work_type_entry_the_dl_044_seam(e
     assert v2["version_id"] == "acme/classes@v2" and v2["version"]["based_on"] == V1
     slugs = [c["slug"] for c in v2["version"]["classes"]]
     assert slugs == ["parser-fix", "cli-fix", "lexer-fix"]
+    # version N+1 is proposed, not routing, and its sponsor still cannot sign it
+    assert (v2["status"], v2["route"]["code"]) == ("proposed", "class_set_unsigned")
+    assert v2["sponsor"] == user_id("op1")  # its sponsor; the next test pins same_person
     lexer = v2["version"]["classes"][2]
     assert (lexer["entry_id"], lexer["entry_repo"], lexer["parent"]) == (
         "work-type/lexer-fix",
@@ -416,3 +466,148 @@ def test_a_reading_of_an_organisation_class_reads_confirmation_commits_only(env:
     r2 = env.post("/readings", json={**body, "org_class": "cli-fix"})
     assert r2.status_code == 201, r2.text
     assert not set(r2.json()["pool"]) & set(pool)
+
+
+def test_the_sponsor_of_version_n_plus_one_cannot_sign_it(env: Env) -> None:
+    _as(env, "approver")
+    _propose(env, PARSER, CLI)
+    entry = {
+        "kind": "work-type", "slug": "lexer-fix", "title": "A fix to the lexer",
+        "statement": "A change to how source text is split into tokens.", "parent_class": "bug.fix",
+    }  # fmt: skip
+    proposed = env.post(f"/library/{ALPHA}/entries", json=entry).json()
+    _as(env, "admin")
+    env.post(
+        f"/library/{ALPHA}/entries/work-type/lexer-fix/sign", json={"version": proposed["version"]}
+    )
+    _as(env, "approver")
+    v2 = env.post(
+        f"/classes/{ORG}/versions/from-library",
+        json={"repos": [ALPHA], "rules": {"lexer-fix": {"words": ["lexer"]}}},
+    ).json()
+    assert (v2["version_id"], v2["route"]["code"]) == ("acme/classes@v2", "class_set_unsigned")
+    own = env.post(f"/classes/{ORG}/v/2/sign", json={"digest": v2["digest"]})
+    assert own.status_code == 409 and envelope(own)["detail"]["code"] == "same_person"
+    _as(env, "admin")
+    other = env.post(f"/classes/{ORG}/v/2/sign", json={"digest": v2["digest"]})
+    assert other.status_code == 200 and other.json()["status"] == "signed"
+
+
+def test_a_reading_of_an_organisation_class_sits_on_its_parents_cell_and_counts_what_it_can_pool(
+    env: Env,
+) -> None:
+    moved = [sha(i) for i in range(200) if i % 2 and i % 7 != 6][:40]  # parser commits
+    with env.factory() as s:
+        for t in s.execute(select(Task).where(Task.task_id.in_(moved))).scalars():
+            t.capability_class = "docs.update"  # the miner read their paths as docs
+        s.commit()
+    v = _propose(env, PARSER, CLI, CHORE)
+    _label_all(env)
+    _as(env, "approver")
+    env.post(f"/classes/{ORG}/v/1/sign", json={"digest": v["digest"]})
+    _as(env, "operator")
+    confirming = {c for c in moved if split_of(ALPHA, c) == "confirmation"}
+    report = env.get(f"/classes/{ORG}/v/1").json()["report"]
+    measurability = next(m for m in report["measures"] if m["name"] == "measurability")
+    assert measurability["detail"]["other_parent"] >= len(confirming) > 0
+    assert "mined under another global class" in measurability["words"]
+    # the class page counts only what a reading of parser-fix can pool: its bug.fix commits
+    page = env.get(f"/classes/{ORG}/v/1/classes/parser-fix").json()
+    s_cell = next(x for x in page["sizes"] if x["size"] == "S")
+    body = {
+        "repo": ALPHA, "cell": CELL, "hierarchy": ["S3", S1], "posture_class": SEALED,
+        "author_model": AUTHOR, "taxonomy": V1, "org_class": "parser-fix",
+    }  # fmt: skip
+    reading = env.post("/readings", json=body)
+    assert reading.status_code == 201, reading.text
+    assert s_cell["confirmation"] == len(reading.json()["pool"])
+    assert not confirming & set(reading.json()["pool"])
+    # a reading of parser-fix on another global class's cell is refused: it would be an
+    # orphan cell no gate reads
+    other = env.post(
+        "/readings", json={**body, "cell": {**CELL, "capability_class": "docs.update"}}
+    )
+    assert other.status_code == 422 and "a child of bug.fix" in envelope(other)["message"]
+
+
+def test_a_backlog_item_cannot_carry_an_organisations_class_by_hand(env: Env) -> None:
+    routing = {
+        "id": "I-9", "title": "Fix the parser", "capability_class": "bug.fix",
+        "size_estimate": "S", "labels": {"taxonomy": V1, "org_class": "parser-fix"},
+    }  # fmt: skip
+    r = env.post(f"/factory/{ALPHA}/backlog", json={"items": [routing]})
+    assert r.status_code == 422, r.text
+    assert "written by an organisation's class set at intake" in str(r.json())
+    fine = {**routing, "labels": {"team": "parser"}}
+    assert env.post(f"/factory/{ALPHA}/backlog", json={"items": [fine]}).status_code == 201
+    evo = env.post(
+        f"/factory/{ALPHA}/backlog/evolutions",
+        json={"item": {**routing, "id": "I-10", "labels": {"class_by": "rule"}}},
+    )
+    assert evo.status_code == 422
+
+
+def test_one_organisations_class_sets_describe_a_repository(env: Env) -> None:
+    _propose(env, PARSER, CLI, CHORE)
+    r = env.post("/classes/aaa/versions", json={"repos": [ALPHA], "classes": [PARSER]})
+    assert r.status_code == 409, r.text
+    err = envelope(r)
+    assert err["detail"]["code"] == "repository_has_a_class_set"
+    assert "acme/classes@v1" in err["message"]
+    assert env.get("/classes").json()["orgs"][0]["org"] == "acme"
+    _as(env, "approver")
+    env.post(f"/classes/{ORG}/v/1/revoke", json={"reason": "moving the repository to aaa"})
+    _as(env, "operator")
+    moved = env.post("/classes/aaa/versions", json={"repos": [ALPHA], "classes": [PARSER]})
+    assert moved.status_code == 201, moved.text
+
+
+def test_the_agreement_is_withheld_from_a_person_part_way_through_their_sample(env: Env) -> None:
+    v = _propose(env, PARSER, CLI, CHORE)
+    del v
+    _as(env, "admin")
+    queue = env.get(f"/classes/{ORG}/v/1/label-queue").json()["items"]
+
+    def agreement() -> dict[str, Any]:
+        report = env.get(f"/classes/{ORG}/v/1").json()["report"]
+        return next(m for m in report["measures"] if m["name"] == "agreement")
+
+    assert agreement()["state"] == "fail"  # nothing labelled yet: nothing of theirs to learn
+    first = queue[0]
+    env.post(
+        f"/classes/{ORG}/v/1/labels",
+        json={"repo": ALPHA, "task_id": first["task_id"], "class": "parser-fix"},
+    )
+    part = agreement()
+    assert (part["state"], part["value"], part["detail"]) == ("withheld", None, {})
+    assert f"you have labelled 1 of {len(queue)} commits" in part["words"]
+    # another person still reads it
+    _as(env, "viewer")
+    assert agreement()["state"] == "fail" and agreement()["value"] is not None
+    _as(env, "admin")
+    rule = {"parser": "parser-fix", "parse": "parser-fix", "cli": "cli-fix", "flag": "cli-fix"}
+    for item in queue[1:]:
+        words = item["message"].replace("--", " ").split()
+        klass = next((rule[w] for w in words if w in rule), "chore")
+        env.post(
+            f"/classes/{ORG}/v/1/labels",
+            json={"repo": ALPHA, "task_id": item["task_id"], "class": klass},
+        )
+    done = agreement()
+    assert done["state"] in ("pass", "fail") and done["value"] is not None
+
+
+def test_the_index_lists_the_global_parents_and_a_refusal_names_its_class(env: Env) -> None:
+    parents = env.get("/classes").json()["global_classes"]
+    assert {"slug": "bug.fix", "definition": parents[[p["slug"] for p in parents].index(
+        "bug.fix")]["definition"]} in parents  # fmt: skip
+    assert "(unclassified)" not in {p["slug"] for p in parents}
+    bad = {**CLI, "parent": "bugfix"}
+    r = env.post(f"/classes/{ORG}/versions", json={"repos": [ALPHA], "classes": [PARSER, bad]})
+    assert r.status_code == 422
+    message = envelope(r)["message"]
+    assert message.startswith("Class 2 (cli-fix): its parent 'bugfix' is not a global class")
+    assert "bug.fix" in message and "feature.add" in message
+    page = _propose(env, PARSER)
+    assert page["version_id"] == V1
+    assert env.get(f"/classes/{ORG}/v/1/classes/parser-fix").json()["parent_definition"]

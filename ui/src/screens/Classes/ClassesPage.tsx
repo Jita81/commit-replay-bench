@@ -10,14 +10,18 @@
  *               the page for one class in the user's words (what the work is, example commits,
  *               what a ticket in it must carry, the context its builder would get and what is
  *               proven per size); the labelling screen; and the proposal form.
- * What it does: Lets an operator propose the organisation's next version (and so sponsor it)
- *               and label derivation commits blind — the screen shows the commit's message, its
- *               linked ticket and a diff summary, never the rule's class, another person's label
- *               or an outcome — and a DIFFERENT approver sign it; the sponsor's own Sign button
- *               is disabled and says why (the API refuses it too, 409 `same_person`). A
- *               revocation is appended with a reason. The route verdict is said in words
- *               wherever the version is shown, so an unsigned or failing version reads "routes
- *               nothing". Every refusal is shown beside the control that made it, focused.
+ * What it does: Lets an operator propose the organisation's next version (and so sponsor it),
+ *               listing the global classes a class may refine; lets a person who is not the
+ *               sponsor label derivation commits — the screen shows the commit's message, its
+ *               linked ticket, a diff summary and what each class means, never the rule's class
+ *               for that commit, another person's label or an outcome, and the agreement is
+ *               withheld from them until their sample is done — and a DIFFERENT approver sign
+ *               it; the sponsor's own Sign button is disabled and says why (the API refuses it
+ *               too, 409 `same_person`). A revocation is appended with a reason. The route
+ *               verdict is said in words wherever the version is shown, naming only the checks
+ *               that stop routing. Every refusal and every failed read is shown in words; focus
+ *               follows each act (the next commit after a label, the result after signing, the
+ *               class's heading when its page opens).
  * How:          `useClassSets` + `useClassSetVersion` + `useClassPage` + `useLabelQueue` +
  *               `useClassSetAct`; tables through `DataTable` with a hint on every column; forms
  *               through `Field`; every element a reader meets is a hint trigger (`*.classes.*`).
@@ -36,7 +40,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
-import type { ClassLabelQueue, ClassPage, ClassSetMeasure, ClassSetStatus, ClassSetVersionDetail, ClassSetVersionSummary } from '../../api/types'
+import type { ClassLabelQueue, ClassPage, ClassSetIndex, ClassSetMeasure, ClassSetStatus, ClassSetVersionDetail, ClassSetVersionSummary } from '../../api/types'
 import { Card } from '../../components/Card'
 import { type Column, DataTable } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
@@ -44,7 +48,7 @@ import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextArea, TextField } from '../../components/Field'
 import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
-import { BackLink, InsetText, Kicker, Lede, PageTitle, SecondaryButton, StartButton, Tag, type TagTone, WarningButton } from '../../components/govuk'
+import { BackLink, Details, InsetText, Kicker, Lede, PageTitle, SecondaryButton, StartButton, Tag, type TagTone, WarningButton } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
 import { useClassPage, useClassSetAct, useClassSets, useClassSetVersion, useLabelQueue } from './useClasses'
 
@@ -71,9 +75,36 @@ function value(m: ClassSetMeasure): string {
   return `${(m.value * 100).toFixed(1)}%`
 }
 
+/** The server's words set as the page's: an apostrophe inside a word is typographic (’). */
+function typeset(words: string): string {
+  return words.replace(/(\p{L})'(\p{L})/gu, '$1’$2')
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+/** The State cell of one measure: the points check says what it decides, never "fail" (P-688). */
+function measureTag(m: ClassSetMeasure) {
+  if (m.name === 'size_agreement') {
+    const used = m.state === 'pass'
+    return (
+      <Tag tone={used ? 'green' : 'grey'} hint="tag.classes.points" data-testid={`measure-${m.name}`}>
+        {used ? 'points size tickets' : 'points not used'}
+      </Tag>
+    )
+  }
+  const tone: TagTone = m.state === 'pass' ? 'green' : m.state === 'fail' ? 'red' : 'grey'
+  return (
+    <Tag tone={tone} hint="tag.classes.measure_state" data-testid={`measure-${m.name}`}>
+      {m.state === 'not_applicable' ? 'not applicable' : m.state}
+    </Tag>
+  )
+}
+
 function refusal(err: unknown): string {
   if (!err) return ''
-  if (isApiError(err)) return err.message
+  if (isApiError(err)) return typeset(err.message)
   return err instanceof Error ? err.message : String(err)
 }
 
@@ -97,7 +128,7 @@ function RouteLine({ route }: { route: ClassSetVersionSummary['route'] }) {
       <Tag tone={route.routes ? 'green' : 'grey'} hint="tag.classes.routes" data-testid="class-set-route">
         {route.routes ? 'Routes' : 'Routes nothing'}
       </Tag>{' '}
-      {route.words}
+      {typeset(route.words)}
     </InsetText>
   )
 }
@@ -108,12 +139,17 @@ function VersionSection({ detail, meId, onPage }: { detail: ClassSetVersionDetai
   const revoke = useClassSetAct()
   const [reason, setReason] = useState('')
   const [asked, setAsked] = useState(false)
+  const [signedWords, setSignedWords] = useState('')
+  const signedRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (signedWords) signedRef.current?.focus()
+  }, [signedWords])
   const counts = new Map(detail.class_counts.map((c) => [c.class, c]))
   const classes: Column<ClassSetVersionDetail['version']['classes'][number]>[] = [
     { key: 'class', header: 'Class', hint: 'col.classes.class', mono: true, cell: (c) => c.slug },
     { key: 'title', header: 'What it is', hint: 'col.classes.definition', cell: (c) => c.title },
     { key: 'parent', header: 'Global parent', hint: 'col.classes.parent', mono: true, cell: (c) => c.parent, hideBelowMd: true },
-    { key: 'der', header: 'Derivation commits', hint: 'col.classes.derivation_n', numeric: true, cell: (c) => counts.get(c.slug)?.derivation ?? 0 },
+    { key: 'der', header: 'Derivation commits', hint: 'col.classes.derivation_n', numeric: true, cell: (c) => counts.get(c.slug)?.derivation ?? 0, hideBelowMd: true },
     { key: 'con', header: 'Confirmation commits', hint: 'col.classes.confirmation_n', numeric: true, cell: (c) => counts.get(c.slug)?.confirmation ?? 0 },
     {
       key: 'page',
@@ -129,18 +165,9 @@ function VersionSection({ detail, meId, onPage }: { detail: ClassSetVersionDetai
   const measures: Column<ClassSetMeasure>[] = [
     { key: 'name', header: 'Measure', hint: 'col.classes.measure', cell: (m) => MEASURE_LABEL[m.name] },
     { key: 'value', header: 'Result', hint: 'col.classes.result', numeric: true, cell: (m) => value(m) },
-    { key: 'n', header: 'Read over', hint: 'col.classes.n', numeric: true, cell: (m) => m.n },
-    {
-      key: 'state',
-      header: 'State',
-      hint: 'col.classes.state',
-      cell: (m) => (
-        <Tag tone={m.state === 'pass' ? 'green' : m.state === 'fail' ? 'red' : 'grey'} hint="tag.classes.measure_state" data-testid={`measure-${m.name}`}>
-          {m.state === 'not_applicable' ? 'not applicable' : m.state}
-        </Tag>
-      ),
-    },
-    { key: 'words', header: 'What it means', hint: 'col.classes.words', cell: (m) => m.words },
+    { key: 'n', header: 'Read over', hint: 'col.classes.n', numeric: true, cell: (m) => m.n, hideBelowMd: true },
+    { key: 'state', header: 'State', hint: 'col.classes.state', cell: (m) => measureTag(m) },
+    { key: 'words', header: 'What it means', hint: 'col.classes.words', cell: (m) => typeset(m.words) },
     { key: 'threshold', header: 'Threshold', hint: 'col.classes.threshold', cell: (m) => m.threshold, hideBelowMd: true },
   ]
   const split: Column<ClassSetVersionDetail['split'][number]>[] = [
@@ -173,12 +200,25 @@ function VersionSection({ detail, meId, onPage }: { detail: ClassSetVersionDetai
       {can('approver') && detail.status === 'proposed' && (
         <div className="mt-6">
           <Refused error={sign.error} testId="class-set-sign-refused" />
-          <StartButton hint={own ? 'button.classes.sign_own' : 'button.classes.sign'} disabled={own} pending={sign.isPending} onClick={() => sign.mutate({ act: 'sign', org: detail.org, n: detail.n, digest: detail.digest })}>
+          <StartButton
+            hint={own ? 'button.classes.sign_own' : 'button.classes.sign'}
+            disabled={own}
+            pending={sign.isPending}
+            onClick={() =>
+              sign.mutate(
+                { act: 'sign', org: detail.org, n: detail.n, digest: detail.digest },
+                { onSuccess: (v) => setSignedWords(`You signed ${detail.version_id}. ${typeset((v as ClassSetVersionSummary).route.words)}`) },
+              )
+            }
+          >
             Sign this class set
           </StartButton>
           {own && <p className="mt-1 text-sm">You sponsored this class set, so a second person must sign it.</p>}
         </div>
       )}
+      <p ref={signedRef} tabIndex={-1} role="status" aria-live="polite" className="mt-3" data-testid="class-set-signed">
+        {signedWords}
+      </p>
       {can('approver') && detail.status !== 'revoked' && (
         <form className="mt-6 space-y-3" aria-label="Revoke this class set" onSubmit={(e) => e.preventDefault()}>
           <Refused error={revoke.error} testId="class-set-revoke-refused" />
@@ -200,6 +240,12 @@ function VersionSection({ detail, meId, onPage }: { detail: ClassSetVersionDetai
 }
 
 function ClassSection({ page }: { page: ClassPage }) {
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    // opened from "Read its page" far above: bring its heading into view and say where you are
+    headingRef.current?.scrollIntoView?.({ block: 'start' })
+    headingRef.current?.focus()
+  }, [page.slug])
   const sizes: Column<ClassPage['sizes'][number]>[] = [
     { key: 'repo', header: 'Repository', hint: 'col.classes.size_repo', cell: (s) => s.repo, hideBelowMd: true },
     { key: 'size', header: 'Size', hint: 'col.classes.size', cell: (s) => s.size },
@@ -210,7 +256,7 @@ function ClassSection({ page }: { page: ClassPage }) {
       hint: 'col.classes.standard',
       cell: (s) => (s.standard ? `${s.standard.arm}${s.standard.ceiling ? ' (ceiling, forward-unvalidated)' : ''}` : 'No proven standard'),
     },
-    { key: 'next', header: 'The next measurement', hint: 'col.classes.next', cell: (s) => s.next || `reading ${s.standard?.reading_id ?? ''}` },
+    { key: 'next', header: 'The next measurement', hint: 'col.classes.next', cell: (s) => typeset(s.next) || `reading ${s.standard?.reading_id ?? ''}` },
   ]
   const context: Column<ClassPage['context'][number]>[] = [
     { key: 'entry', header: 'Entry', hint: 'col.classes.entry', mono: true, cell: (c) => c.entry_id },
@@ -219,19 +265,25 @@ function ClassSection({ page }: { page: ClassPage }) {
     { key: 'effect', header: 'Measured effect', hint: 'col.classes.effect', cell: (c) => c.effect },
   ]
   return (
-    <Card title={`Class: ${page.title}`} id="class">
+    <Card id="class">
+      <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-[16px] leading-6 font-bold" data-testid="class-heading">
+        Class: {page.title}
+      </h2>
       <RouteLine route={page.route} />
       <dl className="m-0 space-y-4">
         <Hint as="div" id="row.classes.definition" className="block">
           <dt className="font-bold">What the work is</dt>
           <dd className="m-0">
-            {page.definition} <span className="text-on-surface-muted">(a kind of {page.parent} in {page.version_id})</span>
+            {page.definition}{' '}
+            <span className="text-on-surface-muted">
+              (in {page.version_id}, a kind of <span className="font-mono text-xs">{page.parent}</span>: {page.parent_definition || 'a global class'})
+            </span>
           </dd>
         </Hint>
         <Hint as="div" id="row.classes.rule" className="block">
           <dt className="font-bold">How a ticket is put in it</dt>
           <dd className="m-0" data-testid="class-rule">
-            {page.rule_words} A person can say otherwise with a crb:class={page.slug} label on the ticket, and every such override is counted.
+            {typeset(page.rule_words)} A person can say otherwise with a crb:class={page.slug} label on the ticket, and every such override is counted.
           </dd>
         </Hint>
         <Hint as="div" id="row.classes.examples" className="block">
@@ -243,7 +295,7 @@ function ClassSection({ page }: { page: ClassPage }) {
               <ul className="m-0 list-disc pl-5">
                 {page.examples.map((x) => (
                   <li key={`${x.repo}/${x.sha}`}>
-                    <Link to={`/tasks/${encodeURIComponent(x.repo)}/${encodeURIComponent(x.sha)}`} className="font-mono text-xs">
+                    <Link to={`/tasks/${encodeURIComponent(x.repo)}/${encodeURIComponent(x.sha)}`} className="font-mono text-xs underline">
                       {x.sha.slice(0, 12)}
                     </Link>{' '}
                     {x.subject} ({x.size}
@@ -257,13 +309,23 @@ function ClassSection({ page }: { page: ClassPage }) {
         <Hint as="div" id="row.classes.ticket" className="block">
           <dt className="font-bold">What a ticket in it must carry</dt>
           <dd className="m-0">
-            <ul className="m-0 list-disc pl-5">
-              {page.ticket_slots.map((s) => (
-                <li key={s.name}>
-                  <span className="font-mono text-xs">{s.name}</span> — {s.question}
-                </li>
-              ))}
-            </ul>
+            {page.ticket_slots.length === 0 ? (
+              <p className="m-0" data-testid="class-no-slots">
+                No readiness question is set for {page.parent} yet, so a ticket in this class needs only its acceptance criteria. A signed work-type entry for this class can add questions in{' '}
+                <Link to={`/library/${encodeURIComponent(page.library[0]?.repo ?? page.entry_repo)}?type=${encodeURIComponent(page.library[0]?.work_type ?? page.parent)}`} className="underline">
+                  the library
+                </Link>
+                .
+              </p>
+            ) : (
+              <ul className="m-0 list-disc pl-5">
+                {page.ticket_slots.map((s) => (
+                  <li key={s.name}>
+                    <span className="font-mono text-xs">{s.name}</span> — {s.question}
+                  </li>
+                ))}
+              </ul>
+            )}
             {page.signed_slots.length > 0 && <p className="mt-2">Signed test-standard slots: {page.signed_slots.join(', ')}.</p>}
           </dd>
         </Hint>
@@ -274,7 +336,9 @@ function ClassSection({ page }: { page: ClassPage }) {
             {page.library.map((l, i) => (
               <span key={l.repo}>
                 {i > 0 ? ', ' : ''}
-                <Link to={`/library/${encodeURIComponent(l.repo)}?type=${encodeURIComponent(l.work_type)}`}>the {l.repo} library’s {l.work_type} page</Link>
+                <Link to={`/library/${encodeURIComponent(l.repo)}?type=${encodeURIComponent(l.work_type)}`} className="underline">
+                  the {l.repo} library’s {l.work_type} page
+                </Link>
               </span>
             ))}
             . None reaches a builder until an arm has measured it.
@@ -283,6 +347,7 @@ function ClassSection({ page }: { page: ClassPage }) {
       </dl>
       <DataTable rows={page.context} columns={context} rowKey={(c) => `${c.repo}/${c.entry_id}`} caption={`Signed context for ${page.slug}`} empty="No signed entry is scoped to this class yet." dense />
       <h3 className="mt-6 text-lg font-bold">What is proven, per size</h3>
+      {!page.route.routes && <p className="text-sm">No size has a proven standard while the class set routes nothing: {typeset(page.route.words)}</p>}
       <DataTable rows={page.sizes} columns={sizes} rowKey={(s) => `${s.repo}/${s.size}`} caption={`Proven standard per size for ${page.slug}`} empty="No repository." dense />
     </Card>
   )
@@ -293,28 +358,44 @@ function LabelSection({ org, n, queue }: { org: string; n: number; queue: ClassL
   const next = queue.items.find((x) => !x.my_label)
   const [klass, setKlass] = useState('')
   const [done, setDone] = useState('')
+  const [moved, setMoved] = useState(0)
+  const nextRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    // after a label, the next commit's message is where the labeller carries on (P-687)
+    if (moved) nextRef.current?.focus()
+  }, [moved])
+  const titles = new Map(queue.classes.map((c) => [c.slug, c.title]))
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (!next || !klass || act.isPending) return
+    const said = klass === UNCLASSIFIED ? 'none of these classes' : (titles.get(klass) ?? klass)
     act.mutate(
       { act: 'label', org, n, repo: next.repo, taskId: next.task_id, klass },
       {
         onSuccess: () => {
-          setDone(`Labelled ${next.task_id.slice(0, 12)} as ${klass}.`)
+          setDone(`Saved: “${next.message}” is ${said}.`)
           setKlass('')
+          setMoved((m) => m + 1)
         },
       },
     )
   }
+  const short = Math.max(0, queue.sample_min - queue.items.length)
   return (
     <Card title="Label a sample" id="label">
-      <p>
-        You have labelled {queue.labelled_by_me} of {queue.items.length} derivation commits. The report needs at least {queue.sample_min} labelled commits and {queue.per_class_min} in each class. You see only the commit and its ticket: never the rule’s answer, another person’s label or whether a build passed.
-      </p>
-      {next ? (
+      {queue.sponsor ? (
+        <p data-testid="label-sponsor">You sponsored this class set. Its rule is your own words, so another person labels its sample: your labels would check the rule against its author.</p>
+      ) : (
+        <p>
+          You have labelled {queue.labelled_by_me} of {plural(queue.items.length, 'derivation commit', 'derivation commits')}. The report needs at least {queue.sample_min} labelled commits and {queue.per_class_min} in each class. For each commit you see its message and ticket: never the class the rule gives it, another person’s label or whether a build passed, and the report’s agreement is withheld from you until you have labelled them all. The classes’ pages show each rule in words, and their example commits are never offered here, so label before you read them if you can.
+        </p>
+      )}
+      {queue.sponsor ? null : next ? (
         <form onSubmit={submit} className="space-y-4" aria-label={`Label a commit for ${queue.version_id}`}>
           <Hint as="div" id="row.classes.label_message" className="block">
-            <p className="m-0 font-bold">The commit’s message</p>
+            <h3 ref={nextRef} tabIndex={-1} className="m-0 text-base font-bold" data-testid="label-next">
+              The commit’s message
+            </h3>
             <p className="m-0 font-mono text-sm" data-testid="label-message">
               {next.message}
             </p>
@@ -326,7 +407,7 @@ function LabelSection({ org, n, queue }: { org: string; n: number; queue: ClassL
           <Hint as="div" id="row.classes.label_diff" className="block">
             <p className="m-0 font-bold">What changed</p>
             <p className="m-0 text-sm">
-              {next.diff.source_files} source files and {next.diff.test_files} test files, {next.diff.churn} lines of source.
+              {plural(next.diff.source_files, 'source file', 'source files')} and {plural(next.diff.test_files, 'test file', 'test files')}, {plural(next.diff.churn, 'line', 'lines')} of source.
             </p>
           </Hint>
           <SelectField label="Which class is it?" value={klass} onChange={(e) => setKlass(e.target.value)} hint="field.classes.label">
@@ -338,13 +419,32 @@ function LabelSection({ org, n, queue }: { org: string; n: number; queue: ClassL
             ))}
             <option value={UNCLASSIFIED}>None of these</option>
           </SelectField>
+          <Hint as="div" id="row.classes.label_definitions" className="block">
+            <p className="m-0 font-bold">What each class means</p>
+            <dl className="m-0 space-y-1 text-sm" data-testid="label-definitions">
+              {queue.classes.map((c) => (
+                <div key={c.slug}>
+                  <dt className="inline font-bold">{c.title}</dt>
+                  <dd className="m-0 inline">
+                    {' '}
+                    ({c.slug}): {c.definition}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </Hint>
           <Refused error={act.error} testId="class-label-refused" />
           <StartButton type="submit" pending={act.isPending} hint="button.classes.label" disabled={!klass}>
             Save label
           </StartButton>
         </form>
+      ) : queue.items.length === 0 ? (
+        <p data-testid="label-empty">No derivation commit is ready to label yet. Mine more of the repositories’ history (Connect, then Measure), and the new commits appear here.</p>
       ) : (
-        <p>You have labelled every derivation commit of this version.</p>
+        <p data-testid="label-done">
+          You have labelled every derivation commit this version offers.
+          {short > 0 && ` Its sample needs ${plural(short, 'more commit', 'more commits')} than its repositories hold: mine more of their history (Connect, then Measure) and label the new ones.`}
+        </p>
       )}
       <p role="status" aria-live="polite" className="mt-3" data-testid="class-labelled">
         {done}
@@ -365,7 +465,7 @@ function parseClasses(text: string) {
     })
 }
 
-function ProposeForm({ orgs, repos }: { orgs: string[]; repos: string[] }) {
+function ProposeForm({ orgs, repos, parents }: { orgs: string[]; repos: string[]; parents: ClassSetIndex['global_classes'] }) {
   const act = useClassSetAct()
   const [org, setOrg] = useState(orgs[0] ?? '')
   const [chosen, setChosen] = useState(repos.join(', '))
@@ -396,6 +496,18 @@ function ProposeForm({ orgs, repos }: { orgs: string[]; repos: string[] }) {
           hint="field.classes.lines"
           description="slug; global parent; title; what it is; words the ticket uses, comma-separated. For example: parser-fix; bug.fix; A fix to the parser; A change to how the parser reads input; parser, parse"
         />
+        <Hint as="div" id="row.classes.global_parents" className="block">
+          <Details summary={`The ${parents.length} global classes a class can refine`}>
+            <dl className="m-0 space-y-1 text-sm" data-testid="global-parents">
+              {parents.map((p) => (
+                <div key={p.slug}>
+                  <dt className="inline font-mono text-xs">{p.slug}</dt>
+                  <dd className="m-0 inline"> — {p.definition}</dd>
+                </div>
+              ))}
+            </dl>
+          </Details>
+        </Hint>
         <StartButton type="submit" pending={act.isPending} hint="button.classes.propose">
           Propose as sponsor
         </StartButton>
@@ -432,8 +544,9 @@ export function ClassesPage() {
           {v.status}
         </Tag>
       ),
+      hideBelowMd: true,
     },
-    { key: 'sponsor', header: 'Sponsor', hint: 'col.classes.sponsor', cell: (v) => who(v.sponsor_name, v.sponsor) },
+    { key: 'sponsor', header: 'Sponsor', hint: 'col.classes.sponsor', cell: (v) => who(v.sponsor_name, v.sponsor), hideBelowMd: true },
     { key: 'approver', header: 'Signed by', hint: 'col.classes.approver', cell: (v) => who(v.approver_name, v.approver), hideBelowMd: true },
     {
       key: 'routes',
@@ -456,10 +569,12 @@ export function ClassesPage() {
       ),
     },
   ]
+  // back to the context library the page's door is on: the version's first repository's
+  const home = detail.data?.version.repos[0] ?? idx.data?.repos[0] ?? ''
   return (
     <>
-      <BackLink to="/decisions" hint="link.classes.back">
-        Back to Decisions
+      <BackLink to={home ? `/library/${encodeURIComponent(home)}` : '/home'} hint="link.classes.back">
+        Back to the context library
       </BackLink>
       <Kicker>Classes of work</Kicker>
       <PageTitle>Your organisation’s classes of work</PageTitle>
@@ -483,9 +598,11 @@ export function ClassesPage() {
       )}
       {detail.isError && <ErrorState error={detail.error} compact />}
       {detail.data && <VersionSection detail={detail.data} meId={me?.id ?? ''} onPage={(s) => pick({ org, v: String(n), class: s })} />}
+      {page.isError && <ErrorState error={page.error} compact />}
       {page.data && <ClassSection page={page.data} />}
+      {can('operator') && queue.isError && <ErrorState error={queue.error} compact />}
       {can('operator') && queue.data && <LabelSection org={org} n={n} queue={queue.data} />}
-      {can('operator') && idx.data && <ProposeForm orgs={(idx.data.orgs ?? []).map((o) => o.org)} repos={idx.data.repos} />}
+      {can('operator') && idx.data && <ProposeForm orgs={(idx.data.orgs ?? []).map((o) => o.org)} repos={idx.data.repos} parents={idx.data.global_classes ?? []} />}
     </>
   )
 }

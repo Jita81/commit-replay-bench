@@ -220,9 +220,10 @@ P-403): S (all but G-478, and G-477 carried from Wave 2 closed), P (all but G-32
 G-735 and G-737 open). Not built, and carried to the list after Wave 4: LIB's entry sets as arms
 (G-675, so `product.truth.212` stays unmet), FWD (G-679, so `product.truth.215` stays unmet) and
 CL (G-945, G-946). CLS was then built as stream CLS of Wave 4b on `feat/ns4b-cls` (DL-330 to
-DL-332, P-680): G-672 closed, `product.truth.208` partial on G-761 (the linked-ticket reader and
-the factory's own-cell licence), `product.extensibility.220` met, and the class page's own gaps
-G-762 and G-763 open. The seams the integration moved
+DL-333, P-680 to P-689): G-672 closed, `product.truth.208` partial on G-761 (the linked-ticket
+reader, a replay pool keyed by the rule's class alone, and the factory's own-cell licence),
+`product.extensibility.220` met, and the class page's own gaps G-762, G-763 and G-764 (merge,
+split and the separation test) open. The seams the integration moved
 to later work are there too: the Decisions inbox reading the entry gate's own sign-off (G-738),
 the read-then-insert ratchet (G-720), the failed-read ratchet's per-read rule and its list
 (G-732), and the controls still disabled while their request runs (G-739).
@@ -286,7 +287,7 @@ These are not wave items; each unblocks the work named beside it.
 | what Wave 2 left open: the walkthrough's sealed reading, a spend cap that is a ceiling, the approver task, economics in one scope, the migration job's owner URL, the fresh-clone job's first CI run, and C's evidence checks | G-956, G-963, G-477, G-990, G-991, G-989, G-709, G-664, G-994, G-996, G-995, G-998 |
 | what the Wave 2 review found in our own process: the gate environment, the plan's record, accepted ADRs and a stale base | G-766, G-767, G-768, G-769 |
 | what Wave 4 left open: the Decisions inbox's sign-off reader, the read-then-insert ratchet, the failed-read ratchet, controls disabled while pending, and the streams not built (LIB's arms, FWD, CL) | G-738, G-720, G-732, G-739, G-675, G-679, G-945, G-946 |
-| what stream CLS left open: the linked-ticket reader and the factory's own-cell licence for an organisation's class, class sets on Decisions, and the map's organisation cells | G-761, G-762, G-763 |
+| what stream CLS left open: the linked-ticket reader, a replay pool keyed by the rule's class alone and the factory's own-cell licence for an organisation's class, class sets on Decisions, the map's organisation cells, and the merge, split and separation-test tools | G-761, G-762, G-763, G-764 |
 | the product | F43, G-604, F21, G-600 |
 
 ## What each wave must do to its own artefacts

@@ -11,7 +11,11 @@ What it does: Pins that the split is the seeded hash ADR-0026 item 9 names, fixe
               not its sponsor through the library's one two-person rule, with the digest they
               read; that the validity report computes coverage, κ against a person's labels on
               derivation commits only, stability, ticket consistency, size agreement,
-              measurability and the override rate against ADR-0026's thresholds; that a
+              measurability and the override rate against ADR-0026's thresholds, each routing
+              clause failing the version on its own; that the per-class minimum counts
+              labelled commits; that the sponsor's labels and a class's example commits are
+              never read; that measurability counts only commits mined under the class's
+              parent; that the route verdict names only the checks that stop routing; that a
               version routes only when signed and passing; and that a reading's pool refuses a
               derivation commit, a version that does not route and a registration made before
               the signature.
@@ -276,7 +280,7 @@ def test_agreement_reads_derivation_commits_only_and_needs_the_sample_and_five_p
     ]
     agreement = cs.validity_report(v, commits, wrong, points_tier=_tier).measure("agreement")
     assert agreement.value is not None and agreement.value < cs.KAPPA_MIN
-    assert "fewer than 5 labels in cli-fix" in agreement.words
+    assert "fewer than 5 labelled commits in cli-fix" in agreement.words
 
 
 def test_ticket_consistency_size_agreement_and_the_override_rate() -> None:
@@ -400,3 +404,164 @@ def test_a_reading_pool_holds_confirmation_commits_of_a_routing_version_after_it
 
 def test_the_fixture_org_is_what_the_tests_assume() -> None:
     assert ORG == "acme" and CLI.parent == PARSER.parent == "bug.fix"
+
+
+# --- each clause of the report, alone (P-689) ---------------------------------------------
+
+
+def _wide() -> cs.ClassSetVersion:
+    chores = cs.OrgClass(
+        slug="chore", title="Chores", definition="Housekeeping.", parent="docs.update",
+        rule=cs.ClassRule(words=("chore",)),
+    )  # fmt: skip
+    return dataclasses.replace(version(), classes=(PARSER, CLI, chores))
+
+
+def _only_failing(report: cs.ValidityReport) -> list[str]:
+    return [m.name for m in report.measures if m.state == "fail" and m.name != "size_agreement"]
+
+
+def test_the_per_class_minimum_counts_labelled_commits_not_labels() -> None:
+    lexer = cs.OrgClass(
+        slug="lexer-fix", title="Lexer", definition="A fix to the lexer.", parent="bug.fix",
+        rule=cs.ClassRule(words=("lexer",)),
+    )  # fmt: skip
+    v = dataclasses.replace(_wide(), classes=(*_wide().classes, lexer))
+    ids = [f"{i:040x}" for i in range(40) if not cs.set_aside(REPO, f"{i:040x}")][:3]
+    lexers = [
+        cs.Case(REPO, t, "derivation", "S", cs.from_message(f"fix: the lexer {t[-4:]}"),
+                mined_class="bug.fix")
+        for t in ids
+    ]  # fmt: skip
+    commits = cases(200) + lexers
+    labels = _labels(v, commits)
+    # three lexer commits, each labelled by two people: six labels, three commits — under the
+    # five a class needs
+    labels += [cs.PersonLabel(c.repo, c.task_id, "lexer-fix", "d" * 32) for c in lexers]
+    report = cs.validity_report(v, commits, labels, points_tier=_tier)
+    agreement = report.measure("agreement")
+    assert agreement.value is not None and agreement.value >= cs.KAPPA_MIN
+    assert agreement.n >= cs.SAMPLE_MIN
+    assert agreement.detail["per_class"]["lexer-fix"] == 3
+    assert (
+        agreement.state == "fail"
+        and "fewer than 5 labelled commits in lexer-fix" in agreement.words
+    )
+    assert _only_failing(report) == ["agreement"]
+    verdict = cs.routes(_signed(v), report)
+    assert (verdict.code, "agreement" in verdict.words) == ("class_set_report_failed", True)
+
+
+def test_ticket_consistency_alone_stops_the_version() -> None:
+    v = _wide()
+    commits = []
+    for i, c in enumerate(cases(200)):
+        # a quarter of the parser tickets say "cli" where the message says "parser"
+        said = "fix: the cli flag is ignored" if (i % 4 == 1 and i % 7 != 6) else c.message.text
+        commits.append(
+            dataclasses.replace(c, ticket=cs.TicketFields(text=said, source="ticket@2026-08-01"))
+        )
+    report = cs.validity_report(v, commits, _labels(v, commits), points_tier=_tier)
+    consistency = report.measure("ticket_consistency")
+    assert consistency.state == "fail" and consistency.value == pytest.approx(0.785)
+    assert _only_failing(report) == ["ticket_consistency"]
+    verdict = cs.routes(_signed(v), report)
+    assert verdict.code == "class_set_report_failed" and "(ticket consistency)" in verdict.words
+
+
+def test_measurability_alone_stops_the_version_and_reads_confirmation_commits_only() -> None:
+    v = _wide()
+    sizes = ("XS", "S", "M", "L", "XL")
+    spread = [dataclasses.replace(c, size=sizes[i % 5]) for i, c in enumerate(cases(200))]
+    report = cs.validity_report(v, spread, _labels(v, spread), points_tier=_tier)
+    assert report.measure("measurability").state == "fail" and not report.routable_cells
+    assert _only_failing(report) == ["measurability"]
+    assert "(measurability)" in cs.routes(_signed(v), report).words
+    # thirty derivation commits and ten confirmation commits in one cell: only the ten count
+    few = [
+        cs.Case(REPO, f"{i:040x}", "derivation" if i < 30 else "confirmation", "S",
+                cs.from_message("fix: the parser"), mined_class="bug.fix")
+        for i in range(40)
+    ]  # fmt: skip
+    measure = cs.validity_report(v, few, [], points_tier=_tier).measure("measurability")
+    assert measure.state == "fail" and measure.detail["cells"] == [
+        {"class": "parser-fix", "size": "S", "n": 10}
+    ]
+
+
+def test_measurability_counts_only_commits_a_reading_of_the_class_can_pool() -> None:
+    v = _wide()
+    # thirty confirmation commits the rule puts in parser-fix, mined under docs.update: a
+    # reading of parser-fix sits on bug.fix's cell and can never pool them
+    elsewhere = [
+        cs.Case(REPO, f"{i:040x}", "confirmation", "S", cs.from_message("fix: the parser"),
+                mined_class="docs.update")
+        for i in range(30)
+    ]  # fmt: skip
+    measure = cs.validity_report(v, elsewhere, [], points_tier=_tier).measure("measurability")
+    assert measure.state == "fail" and measure.detail["other_parent"] == 30
+    assert "30 more qualified confirmation commits of these classes were mined under another" in (
+        measure.words
+    )
+    home = [dataclasses.replace(c, mined_class="bug.fix") for c in elsewhere]
+    assert cs.validity_report(v, home, [], points_tier=_tier).routable_cells == (
+        ("parser-fix", "S"),
+    )
+
+
+def test_points_naming_a_smaller_tier_too_often_fail_size_agreement_which_never_stops_routing() -> (
+    None
+):
+    v = _wide()
+    commits = []
+    for i, c in enumerate(cases(60)):
+        # 50 tickets pointed to the churn tier (S), 10 to a smaller one (XS): 83% agree, 17% small
+        points = 1.0 if i < 10 else 2.0
+        ticket = cs.TicketFields(text=c.message.text, points=points, source="ticket@2026-08-01")
+        commits.append(dataclasses.replace(c, ticket=ticket))
+    size = cs.validity_report(v, commits, [], points_tier=_tier).measure("size_agreement")
+    assert size.value is not None and size.value >= cs.SIZE_EQUAL_MIN
+    assert size.state == "fail" and "a smaller tier for 10" in size.words
+    # the route verdict names only the checks that stop routing, never the points check
+    many = cases(200)
+    failing = cs.validity_report(v, many, [], points_tier=_tier)
+    assert failing.measure("size_agreement").state == "fail"
+    verdict = cs.routes(_signed(v), failing)
+    assert "agreement" in verdict.words and "size agreement" not in verdict.words
+    passing = cs.validity_report(v, many, _labels(v, many), points_tier=_tier)
+    assert passing.measure("size_agreement").state == "fail" and passing.passes
+    assert cs.routes(_signed(v), passing).ok
+
+
+def test_the_sponsors_labels_and_example_commits_are_never_read() -> None:
+    v = _wide()
+    commits = cases(200)
+    by_sponsor = [dataclasses.replace(x, labeller=SPONSOR) for x in _labels(v, commits)]
+    agreement = cs.validity_report(v, commits, by_sponsor, points_tier=_tier).measure("agreement")
+    assert agreement.n == 0 and agreement.state == "fail"
+    assert agreement.detail["set_aside"]["sponsor"] == len(by_sponsor)
+    assert "of the sponsor's own labels are not read" in agreement.words
+    # the set-aside commits are derivation commits drawn per commit; the page's examples are some
+    shown = cs.example_keys(commits)
+    assert shown and all(c.split == "derivation" for c in commits if (c.repo, c.task_id) in shown)
+    examples = cs.examples_of(v, commits)
+    assert any(examples.values())
+    assert all(
+        len(examples[k.slug]) <= cs.EXAMPLES_PER_CLASS
+        and all((c.repo, c.task_id) in shown for c in examples[k.slug])
+        and all(cs.classify(v, c.fields).slug == k.slug for c in examples[k.slug])
+        for k in v.classes
+    )
+    # mining more history never moves a commit into or out of the set-aside draw
+    assert shown <= cs.example_keys(cases(400))
+    only_shown = [x for x in _labels(v, commits) if (x.repo, x.task_id) in shown]
+    agreement = cs.validity_report(v, commits, only_shown, points_tier=_tier).measure("agreement")
+    assert agreement.n == 0 and agreement.detail["set_aside"]["examples"] == len(only_shown)
+
+
+def test_a_parent_that_is_not_a_global_class_is_refused_with_the_ones_that_are() -> None:
+    with pytest.raises(ValueError) as e:
+        dataclasses.replace(PARSER, parent="bugfix")
+    assert "'bugfix' is not a global class" in str(e.value)
+    assert all(p in str(e.value) for p in ("bug.fix", "feature.add", "refactor"))
+    assert UNCLASSIFIED not in cs.global_parents()

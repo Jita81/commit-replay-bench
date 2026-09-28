@@ -539,7 +539,7 @@ export const HINTS = {
 
   // ── /classes (screens/Classes/ClassesPage.tsx) — an organisation’s classes, ADR-0026 item 9
   'link.classes.back':
-    'Back to Decisions, where everything that waits on a person is listed.',
+    'Back to the context library of the version’s repository, where this page’s door is. A class set waiting for its second person is not listed on Decisions yet: find it here.',
   'stat.classes.count':
     'How many class-set versions exist, and how many route. A version routes only when a second person has signed it and its validity report passes.',
   'col.classes.version':
@@ -575,15 +575,17 @@ export const HINTS = {
   'button.classes.page':
     'Open the page for this class below: what the work is, examples, what a ticket carries, the context and what is proven.',
   'col.classes.measure':
-    'One check of the validity report. Every check but the points check must pass before the version routes.',
+    'One check of the validity report. Every check but the points check must pass before the version routes; the points check decides only whether story points size a ticket.',
   'col.classes.result':
     'The check’s result: a share of commits, κ for agreement with a person, or the number of cells with enough confirmation commits.',
   'col.classes.n':
     'How many commits, labels or tickets the result was read over. A small number is why a check fails even when the result looks good.',
   'col.classes.state':
-    'Pass, fail, or not applicable when the check has too few linked tickets to apply.',
+    'Pass, fail, or not applicable when the check has too few linked tickets to apply. Withheld means you are part-way through labelling the sample, so its agreement is kept from you until you finish.',
   'tag.classes.measure_state':
-    'Whether this check meets the threshold the architecture decision sets. Not applicable counts as passing; a failing check stops the version routing.',
+    'Whether this check meets the threshold the architecture decision sets. Not applicable counts as passing; a failing check stops the version routing. Withheld is the agreement, kept from a person until they have labelled all their sample.',
+  'tag.classes.points':
+    'Whether story points size a ticket in this organisation. Points not used means tickets are sized by the churn tiers, reading their size and the next larger one; it never stops the version routing.',
   'col.classes.words':
     'What the result means, in words, with the counts behind it.',
   'col.classes.threshold':
@@ -611,7 +613,7 @@ export const HINTS = {
   'col.classes.standard':
     'The least context a registered reading proved for this class and size, or no proven standard. A ceiling admits calibration builds only.',
   'col.classes.next':
-    'What would prove this cell: the reading to register and how many confirmation commits it has, or the reading that proved it.',
+    'What would prove this cell: the reading to register and how many confirmation commits it has, or the reading that proved it. While the set routes nothing, the reason is said once above the table.',
   'col.classes.entry':
     'A signed library entry scoped to this class or its parent, as kind/slug.',
   'col.classes.statement':
@@ -625,9 +627,9 @@ export const HINTS = {
   'row.classes.rule':
     'The one rule that puts a ticket in this class. It reads only what a ticket carries, and the same rule reads a replayed commit’s ticket or message.',
   'row.classes.examples':
-    'Derivation commits the rule puts in this class. Confirmation commits are never shown, because they are kept for the licence.',
+    'The first derivation commits the rule puts in this class. They are never offered for labelling, so no one labels a commit they were shown as the rule’s answer; confirmation commits are never shown, because they are kept for the licence.',
   'row.classes.ticket':
-    'The questions a ticket in this class must answer before it enters manufacturing: the readiness slots of its parent, and any the signed work type adds.',
+    'The questions a ticket in this class must answer before it enters manufacturing: the readiness slots of its parent, and any the signed work type adds. Some parents set none yet; the page then says so.',
   'row.classes.context':
     'The signed project knowledge for this kind of work, from each repository’s library. It reaches a builder only once an arm has measured it.',
   'row.classes.label_message':
@@ -637,15 +639,19 @@ export const HINTS = {
   'row.classes.label_diff':
     'How many source and test files changed, and how many lines. It helps you read the commit; the rule never reads it.',
   'field.classes.label':
-    'The class you read this commit as. Choose none of these when no class fits; that is an answer too.',
+    'The class you read this commit as. What each class means is listed below. Choose none of these when no class fits; that is an answer too.',
+  'row.classes.label_definitions':
+    'Each class’s title and what it means, in the organisation’s words, so you label by meaning. The rule that puts a ticket in a class is not shown here.',
   'button.classes.label':
-    'Save your label. It is recorded under your name, and no one else’s label is shown to you.',
+    'Save your label. It is recorded under your name, no one else’s label is shown to you, and the next commit takes its place.',
   'field.classes.org':
     'The organisation whose classes these are. Its versions are numbered in order from 1.',
   'field.classes.repos':
     'The repositories whose commits the version describes, separated by commas.',
   'field.classes.lines':
-    'One class per line: its short name, its global parent, a title, what it is, and the words a ticket in it uses, separated by semicolons.',
+    'One class per line: its short name, its global parent, a title, what it is, and the words a ticket in it uses, separated by semicolons. The global classes a parent can be are listed below the field.',
+  'row.classes.global_parents':
+    'Every global class a class of yours can refine, with what it means. Your class splits its parent’s cell and never changes what is shared outside the organisation.',
   'button.classes.propose':
     'Record the version with you as its sponsor and read every commit by its rule. Nothing routes until a different approver signs it and its report passes.',
 
