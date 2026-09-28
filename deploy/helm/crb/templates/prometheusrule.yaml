@@ -3,7 +3,7 @@ DEPLOYMENT §9.2's four alert rules as a PrometheusRule (the Prometheus Operator
 off by default. Each expression is the guide's, word for word: tests/test_deploy_alert_rules.py
 reads the table and fails when the two disagree. Three of the four read the worker's own
 series, so the rules are refused while the worker's metrics port is off. CrbNoWorker reads
-the absence of crb_queue_depth, which the api's exposition never serves (P-260), so it
+the absence of crb_queue_depth, which the api's exposition never serves (P-268), so it
 fires when no worker is scraped even while the api is.
 */}}
 {{- if .Values.prometheusRule.enabled }}

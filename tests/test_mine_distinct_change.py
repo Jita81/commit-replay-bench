@@ -17,7 +17,7 @@ What it does: Pins that two cherry-picks of one change mine as one task (the old
               outside the walk is still never kept, that a change the store already holds is
               never mined again whichever of its commits the store holds (in the walk or
               outside it), that a replay of a task mined before the rule stamps the identity on
-              its 2.4 row, and that a row below 2.4 carries none (P-296, P-297).
+              its 2.4 row, and that a row below 2.4 carries none (P-304, P-305).
 How:          ``tests/fixtures/distinct_changes.py`` (pyrepo plus the two pairs, dated a day
               apart) through ``iter_candidates``, ``mine`` (no gold: RED and baseline only) and
               ``run_task`` with the gold patch.

@@ -152,7 +152,7 @@ def cmd_register(args: argparse.Namespace) -> int:
         and t.gold_clean is True
         and (not t.language or t.language == args.language)
     }
-    try:  # the pool is frozen by rule, never by a list (DL-097, P-312)
+    try:  # the pool is frozen by rule, never by a list (DL-097, P-320)
         pool, pool_rule = pool_by_rule(
             {c: str(t.authored or "") for c, t in tasks.items()}, since=args.since
         )

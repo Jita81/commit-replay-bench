@@ -526,7 +526,7 @@ def test_offline_sql_includes_tables_and_triggers(backend: Backend) -> None:
     # 0008 offline adds the reaper count to that table after it exists
     count = sql.find("ADD COLUMN unconfirmed_containers INTEGER DEFAULT '0' NOT NULL")
     assert count > workers, sql[-2000:]
-    # 0013 offline refuses an unchained row too (P-246): the CHECK after the back-fill
+    # 0013 offline refuses an unchained row too (P-254): the CHECK after the back-fill
     check = sql.find("ck_events_chain_hashes")
     assert check > sql.find("ADD COLUMN row_hash"), sql[-2000:]
     assert migrate.current(backend.url) is None  # offline mode touched nothing
@@ -1128,7 +1128,7 @@ def test_0013_frozen_rule_is_the_runtime_rule() -> None:
 def test_0013_refuses_a_row_from_the_release_before_it_and_keeps_recording(
     backend: Backend,
 ) -> None:
-    """P-246: during a rolling upgrade the release before 0013 keeps writing events, and a
+    """P-254: during a rolling upgrade the release before 0013 keeps writing events, and a
     rollback runs it against the migrated schema. Its INSERT names no chain column. The
     migrated table must refuse that row outright — if it stored ``''`` it would become a
     head no later write can chain onto, and the audit trail (sign-in included) would stop

@@ -22,7 +22,7 @@ Honesty properties (all correct-by-construction, none advisory)
   as it stood — a stable prefix of the changed files' candidates, a timeout read as a
   kill — and its stamp and operator-set hash are v1's byte for byte
   (:func:`mutation_version`, read at call time). So no score stamped 2.3 is a v2 score,
-  and a reader that keeps one apparatus keeps one rule (P-295).
+  and a reader that keeps one apparatus keeps one rule (P-303).
 * **No randomness anywhere, and every changed file is reached** (``mutation.v2``,
   ADR-0025 item 7). Every candidate of every changed file is generated, with no cap per
   file; within a file the candidates are ranked by the SHA-256 of
@@ -147,7 +147,7 @@ def mutation_version(apparatus_version: str | None = None) -> str:
     """The scoring rule of ``apparatus_version`` (the live apparatus, read at call time, by
     default): :data:`MUTATION_V2` from 2.4, :data:`MUTATION_V1` below it. The rule follows
     the apparatus stamp and never runs ahead of it, so no score stamped 2.3 is a v2 score
-    (P-295)."""
+    (P-303)."""
     apparatus = apparatus_version if apparatus_version is not None else _version.APPARATUS_VERSION
     return MUTATION_V2 if is_v2_apparatus(apparatus) else MUTATION_V1
 
@@ -644,7 +644,7 @@ class MutationProvenance:
         if not self.mutation_version:
             object.__setattr__(self, "mutation_version", rule)
         if self.mutation_version != rule:
-            # poka-yoke (P-301): a stamp cannot name a rule its apparatus does not score by
+            # poka-yoke (P-309): a stamp cannot name a rule its apparatus does not score by
             raise ValueError(
                 f"mutation_version {self.mutation_version!r} is not the rule of apparatus "
                 f"{self.apparatus_version} ({rule!r}): a score's rule follows its apparatus"

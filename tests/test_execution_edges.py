@@ -8,7 +8,7 @@
   only when the docker CLI said so on stderr, or the run printed nothing; one table of
   docker output serves all three launch paths.
 * The worker read an empty executor setting as ``local`` on its own path
-  (``… or "local"``) before ``make_executor`` could refuse it (P-300). Now the worker's
+  (``… or "local"``) before ``make_executor`` could refuse it (P-308). Now the worker's
   settings refuse any kind but ``local`` and ``docker`` at start-up, and ``Worker._executor``
   has no default of its own.
 
@@ -30,7 +30,7 @@ ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md; ADR-0025 item 13 (str
 Works with:   src/crb/core/execution.py (under test), src/crb/server/worker.py and
               src/crb/server/worker_main.py (the worker's path into ``make_executor``),
               tests/test_execution.py (the executor's own suite), docs/PREVENTION.md (P-120,
-              P-121 and P-300, the rows these tests close)
+              P-121 and P-308, the rows these tests close)
 Tested by:    tests/test_execution_edges.py
 Touch when:   never for a new repository; a docker release words its launch failures differently
               (add the captured line).
@@ -181,7 +181,7 @@ def test_make_executor_local_is_local() -> None:
     assert isinstance(make_executor(" LOCAL "), ex.LocalExecutor)
 
 
-# --- the worker's path into make_executor (P-300: the fix reached the leaf, not its callers)
+# --- the worker's path into make_executor (P-308: the fix reached the leaf, not its callers)
 def _worker_args() -> Any:
     from crb.server import worker_main
 

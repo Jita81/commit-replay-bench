@@ -177,7 +177,7 @@ describe('MeasurePage', () => {
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).max_cost_usd).toBe(9.5)
   })
 
-  it('a spend cap the browser could not read as a number is refused, never sent (P-265)', async () => {
+  it('a spend cap the browser could not read as a number is refused, never sent (P-273)', async () => {
     const { calls } = mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/cobra': REPO,

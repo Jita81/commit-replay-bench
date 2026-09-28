@@ -34,7 +34,7 @@ import { collectHints } from './Help'
 import { ConfirmationPanel, Details, NotificationBanner, SummaryList, Tag, TaskList } from './govuk'
 
 describe('govuk patterns', () => {
-  it('a task list status wraps at phone width instead of pushing the page sideways (P-307)', () => {
+  it('a task list status wraps at phone width instead of pushing the page sideways (P-315)', () => {
     render(
       <MemoryRouter>
         <TaskList completed={0} tasks={[{ num: 8, name: 'Deliver your first change', status: 'Backlog frozen — run the factory', tone: 'blue', to: '/factory' }]} />
@@ -180,7 +180,7 @@ describe('PosturePage', () => {
   })
 
 
-  it('an edited audit event is reported as the audit trail, naming the event, and sends the reader to verify the store (P-243)', async () => {
+  it('an edited audit event is reported as the audit trail, naming the event, and sends the reader to verify the store (P-251)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },

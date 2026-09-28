@@ -13,7 +13,7 @@ What it does: Pins the label ladder (needs-info beats not deliverable beats read
               zero, that the same inputs render byte-identical text (so a re-post writes
               nothing), that every gap names what closes it, and that only an entry stop
               says "not built": a ticket the entry gate admits is ready whatever its cell
-              routes, told whether a pull request opens (P-288).
+              routes, told whether a pull request opens (P-296).
 How:          Real ``Readiness`` objects from ``crb.factory.readiness.assess`` over drafts
               built by ``crb.intake.draft`` — no hand-written gap fixtures, so a change to
               the catalogue shows up here.
@@ -107,7 +107,7 @@ def test_a_missing_structural_slot_is_needs_info() -> None:
     assert f.ready_to_register is False
 
 
-#: Words that say a ticket is not built — true only of an entry-gate stop (P-280, P-288).
+#: Words that say a ticket is not built — true only of an entry-gate stop (P-288, P-296).
 NOT_BUILT_WORDS: tuple[str, ...] = (
     "not be built",
     "not built",
@@ -120,7 +120,7 @@ NOT_BUILT_WORDS: tuple[str, ...] = (
 
 
 def test_a_ticket_the_gate_admits_is_built_whatever_its_cells_route() -> None:
-    """The route gate is not the entry gate (P-280's class, in the ticket comment): a ticket
+    """The route gate is not the entry gate (P-288's class, in the ticket comment): a ticket
     the entry gate admits is built, graded and reviewed whatever its cell routes, and only
     ``deliver`` opens a pull request. For every other route — and an unmeasured cell — the
     comment says it is built with no pull request, never "not built"; the label is

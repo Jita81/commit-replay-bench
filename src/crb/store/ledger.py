@@ -274,7 +274,7 @@ def import_stamp(
     saying so. The file's ``oracle_strength`` is kept as the source recorded it; no reader
     that licenses anything reads it (the oracle comes from this deployment's scores)."""
     labels = dict(row.labels)
-    labels[LABEL_IMPORTED] = "true"  # a reading never counts it (P-313)
+    labels[LABEL_IMPORTED] = "true"  # a reading never counts it (P-321)
     labels.setdefault(LABEL_SOURCE_ROW_HASH, row.row_hash or "")
     labels.setdefault("source_actor", row.actor)
     labels.setdefault("source_provenance", row.provenance)
@@ -480,7 +480,7 @@ def _probe_write(factory: sessionmaker[Session], table: str, verb: str, stmt: An
     """Run ``stmt`` and roll it back: return when the trigger refused it in its own words, or
     when PostgreSQL refused it for want of the privilege (SQLSTATE ``42501``: an application
     role granted only ``SELECT``/``INSERT`` on the append-only tables, as DEPLOYMENT §3.3
-    advises, cannot reach the trigger at all — P-321); re-raise any other database error,
+    advises, cannot reach the trigger at all — P-329); re-raise any other database error,
     and raise :class:`LedgerIntegrityError` when the write went through (the rollback undoes
     it). Whether the triggers are there for the owner is the live-trigger check's to say."""
     with factory() as s:

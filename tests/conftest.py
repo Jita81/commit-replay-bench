@@ -23,9 +23,9 @@ How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``t
               ``claude_cli_on_path`` to ``False`` for every test, so no test passes or fails on
               whether this machine has the ``claude`` CLI (P-037); ``_no_host_endpoint_env``
               clears the ``CRB_OPENAI_*`` / ``CRB_AZURE_*`` variables, so no test builds
-              against the endpoint this machine's shell names (P-269); ``_no_crb_env_leak``
+              against the endpoint this machine's shell names (P-277); ``_no_crb_env_leak``
               puts every ``CRB_*`` variable back after each test, so no test (and no code
-              under test that writes one) hands a home or a setting to the next (P-302).
+              under test that writes one) hands a home or a setting to the next (P-310).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
@@ -129,7 +129,7 @@ def _no_crb_env_leak() -> Iterator[None]:
     """Every test starts with the ``CRB_*`` environment the one before it started with: a
     variable a test (or the code it drives) sets, changes or deletes is put back after it.
     ``worker_main.settings_from_args`` sets ``CRB_HOME``; unguarded, one test's temporary
-    home reached every later test in the session (P-302)."""
+    home reached every later test in the session (P-310)."""
     yield from crb_env_restored()
 
 
@@ -143,7 +143,7 @@ def _no_host_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(claude_code, "claude_cli_on_path", lambda: False)
 
 
-#: The deployment's endpoint variables ``EndpointConfig.from_env`` reads (P-269).
+#: The deployment's endpoint variables ``EndpointConfig.from_env`` reads (P-277).
 _HOST_ENDPOINT_ENV = (
     "CRB_OPENAI_BASE_URL",
     "CRB_OPENAI_KEY_ENV",

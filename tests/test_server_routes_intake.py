@@ -600,7 +600,7 @@ def test_a_ready_ticket_lands_as_a_draft_until_an_operator_registers_it(
     assert row["awaiting_approval"] is True and row["registered"] is False
     # unqueued, and labelled with the product's readiness word for this deployment: the
     # entry gate admits it, so it is ready — it will be built even though the test cell
-    # routes nothing to `deliver`, which only withholds the pull request (P-288) — and the
+    # routes nothing to `deliver`, which only withholds the pull request (P-296) — and the
     # label stays true once registered (queued, below)
     assert row["label"] == c.LABEL_READY
     assert env.client.get(f"{API_PREFIX}/factory/{ALPHA}/backlog").status_code == 404

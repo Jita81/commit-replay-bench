@@ -12,7 +12,7 @@ What it does: Pins that the workflow's jobs expand to the check names branch pro
               adding a job fails here until the setting is read again — or until the reading
               names the job under ``awaiting_protection`` with the administrator's step and
               an open gap in docs/dod that names the job, an entry that is itself refused once
-              stale or once no open gap holds it (DL-101, P-261); and that the scheduled
+              stale or once no open gap holds it (DL-101, P-269); and that the scheduled
               workflow runs the live comparison and fails, never passes, without its token.
 How:          Calls the module's functions on fixture text and on the real ci.yml, runs
               ``main`` against the saved reading, and reads the workflow file.
@@ -271,7 +271,7 @@ def test_a_job_awaiting_protection_is_held_to_the_setting_and_the_workflow() -> 
 
 
 def test_a_job_awaits_protection_only_under_an_open_gap_that_names_it() -> None:
-    """The entry is bounded by the record, not by review (DL-101, P-261): its step names a
+    """The entry is bounded by the record, not by review (DL-101, P-269): its step names a
     gap id, the gap is open in docs/dod (it blocks a criterion that is not met), and the
     gap's own text names the job. A job parked under the key with no gap, under a closed
     gap, or under a gap about something else — say one dropped from the required list —

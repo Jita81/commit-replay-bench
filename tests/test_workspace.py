@@ -7,7 +7,7 @@ What it is:   The trial worktree's test suite — parent checkout, overlays, ``t
 What it does: Pins that a workspace checks out the parent, overlays tests and sources, detects a
               tampered (even whitespace-only) or missing test file, counts diff stats over
               untracked and deleted files (a content line shaped like a diff header included —
-              P-286), and that ``touched_files`` reads the filesystem against
+              P-294), and that ``touched_files`` reads the filesystem against
               the parent tree — so builder-authored ``.gitignore`` rules, ``info/exclude``,
               ``core.excludesFile``, a forged index, a rename, a symlink or a self-hiding ignore
               file cannot hide a change — while pre-existing ignore rules and harness-written
@@ -179,7 +179,7 @@ def test_diff_stats_includes_untracked_new_files(pyrepo: pr.PyRepo, tmp_path: Pa
 def test_a_content_line_that_looks_like_a_header_is_still_counted(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
-    """P-286: an added line whose text is ``++ b/<path>`` reads ``+++ b/<path>`` in the
+    """P-294: an added line whose text is ``++ b/<path>`` reads ``+++ b/<path>`` in the
     diff, and a deleted ``-- x`` reads ``--- x``. Parsed by prefix, the first became a file
     header — the excluded test path, so every line after it went uncounted — and the second
     was dropped. Inside a hunk every line is content, so each is counted."""
@@ -582,7 +582,7 @@ def test_concurrent_worktrees_of_one_clone_never_share_an_excludes_file(
 def test_a_line_one_trial_left_in_the_shared_exclude_is_reported_in_every_later_trial(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
-    """P-299: the shared ``info/exclude`` is read, never rewritten, so a hiding line a
+    """P-307: the shared ``info/exclude`` is read, never rewritten, so a hiding line a
     builder appends stays in the file. It is judged against the clone's baseline, captured
     once by the harness, not against the file as it stood when each worktree was created —
     so the line is reported in every later trial it could affect, never absorbed."""

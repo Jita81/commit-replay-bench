@@ -4,7 +4,7 @@ A row's failure kind decides its denominator: ``outage`` leaves ``n``, ``harness
 against autonomy, ``builder_red`` / ``lint`` / ``api`` against the model. Before this, a row
 pinned ``harness`` was re-read as ``outage`` against ``OUTAGE_ERROR_MARKERS`` — a tuple anyone
 could edit — so an edit to it moved stored rows between denominators (external assessment
-2026-09-25, A6; P-293). Now:
+2026-09-25, A6; P-301). Now:
 
 * the rule as it stood at 2.3 and its outage markers are FROZEN
   (``derive_failure_kind_v1``, ``OUTAGE_ERROR_MARKERS_V1``) and read every row below 2.4;
@@ -20,7 +20,7 @@ What it does: Fails when the live rule or its markers change under an unchanged
               ``APPARATUS_VERSION``; fails when the frozen v1 rule or markers change at all;
               shows the frozen reading of a row below 2.4 cannot move when the live markers do;
               and pins each rule's code as well as its answers, so an edit on a branch the grid
-              never reaches fails too (P-298).
+              never reaches fails too (P-306).
 How:          Evaluates each rule over one grid of inputs that exercises every branch and every
               marker, hashes the canonical JSON of the outputs with the marker list, and compares
               with ``GOLDEN``; hashes each rule's tokens (docstring and comments dropped) with the
@@ -30,7 +30,7 @@ ADRs:         ADR-0025 item 6 (stream G; the draft stream R commits);
               docs/adr/0020-a-bug-is-closed-by-prevention.md
 Works with:   src/crb/core/ledger.py (``derive_failure_kind``, ``derive_failure_kind_v1``,
               ``OUTAGE_ERROR_MARKERS_V1``, ``GradeRow.failure_kind``), src/crb/core/version.py
-              (``APPARATUS_VERSION``, the key of the golden table), docs/PREVENTION.md (P-293,
+              (``APPARATUS_VERSION``, the key of the golden table), docs/PREVENTION.md (P-301,
               the row this test closes)
 Tested by:    tests/test_failure_rule_golden.py
 Touch when:   never for a new repository; the apparatus moves (add its lines to ``GOLDEN`` and
@@ -70,7 +70,7 @@ GOLDEN: dict[str, str] = {
 V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd544364713f"
 #: apparatus version → the hash of the live rule's SOURCE (``_source_digest``): the grid
 #: above pins what the rule answers on its inputs, this pins the rule itself, so an edit on a
-#: branch the grid never reaches still fails (P-298). Written once per version, never edited.
+#: branch the grid never reaches still fails (P-306). Written once per version, never edited.
 GOLDEN_SOURCE: dict[str, str] = {
     "2.3": "f4931817defdcb051a19397bee4a2b32bc1ea73e8b59eb2216edc3063df21e96",
     "2.4": "869ee80395a9d636283035a2ea0b50f036298ecac6b7cbd9965a55d21602f251",
@@ -282,7 +282,7 @@ def _sources(fns: Sequence[Callable[..., Any]]) -> list[str]:
 
 def test_the_live_failure_rule_source_is_pinned_to_the_apparatus() -> None:
     """The live rule's code, not only its answers on the grid: an edit on a branch the grid
-    never reaches fails here until the apparatus moves (P-298)."""
+    never reaches fails here until the apparatus moves (P-306)."""
     got = _source_digest(_sources(LIVE_RULE))
     assert APPARATUS_VERSION in GOLDEN_SOURCE, (
         f"apparatus {APPARATUS_VERSION} has no line in GOLDEN_SOURCE: add {got!r}"
@@ -298,7 +298,7 @@ def test_the_frozen_v1_rule_source_never_changes() -> None:
 
 
 def test_an_edit_the_grid_never_reaches_still_moves_the_source_pin() -> None:
-    """The class P-298 names: an edit that reads a new text as ``outage`` leaves every grid
+    """The class P-306 names: an edit that reads a new text as ``outage`` leaves every grid
     answer as it was — and the source pin fails on it."""
     src = inspect.getsource(lg.derive_failure_kind)
     edited = src.replace(

@@ -74,7 +74,7 @@ describe('LedgerPage', () => {
     expect(clean).toHaveAttribute('aria-expanded', 'true')
   })
 
-  // The failure states (G-183, P-243): each part of the verification is its own row, so a
+  // The failure states (G-183, P-251): each part of the verification is its own row, so a
   // break is reported as the part that broke — never an audit-trail break read as the grades'.
 
   it('an edited audit event closes the gate on the audit trail, naming the event, while the grade chain still verifies', async () => {

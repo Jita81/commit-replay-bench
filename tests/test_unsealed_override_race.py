@@ -8,7 +8,7 @@ What it is:   The concurrency suite for ``crb.server.unsealed_override.record_un
 What it does: Pins that the API and a worker (or two workers, or two API processes) starting
               at the same moment each write their ``posture.unsealed_override`` event on the
               one shared trace, with dense ``seq`` values and an intact chain — neither start
-              crashes on the unique ``(trace_id, seq)`` (P-241, P-150's class on a trace every
+              crashes on the unique ``(trace_id, seq)`` (P-249, P-150's class on a trace every
               process start writes).
 How:          Two threads call ``record_unsealed_override`` over one store; a barrier placed
               after the event is built (its ``seq`` read) and before the commit makes the two

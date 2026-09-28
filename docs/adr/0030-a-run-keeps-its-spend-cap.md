@@ -56,9 +56,9 @@ experiment. So a run cap must not be kept by quietly shrinking each attempt.
    the reason and a link to the run. The Factory page and the run form take a cap that is
    blank unless the operator types one. Each cap is a text field read as typed: text that
    is not an amount is refused, never read as no cap (a number input reports text it cannot
-   parse as blank, P-265). The Measure page always sends a cap, so when the model has no
+   parse as blank, P-273). The Measure page always sends a cap, so when the model has no
    known price it names the two ways forward it can reach: an admin prices the model, or
-   the full run form runs without a cap (P-266).
+   the full run form runs without a cap (P-274).
 
 ## Consequences
 

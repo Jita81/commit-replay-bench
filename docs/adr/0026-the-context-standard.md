@@ -600,7 +600,7 @@ The values marked **[operator]** above are proposals until the operator fixes th
 row here. A criterion or gap line of the definition of done that states one carries
 `ADR-0026 [operator]` and follows the operator's choice; `scripts/dod_check.py` refuses one that
 does not, refuses a marker this table does not register, and refuses the marker once this ADR
-is accepted (docs/PREVENTION.md P-229).
+is accepted (docs/PREVENTION.md P-237).
 
 | item | the proposal | the words a criterion states it in |
 |---|---|---|

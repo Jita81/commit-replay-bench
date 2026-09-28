@@ -29,7 +29,7 @@ refuses a run that asks for the local executor in its own parameters. In ``prod`
 must name who set it and why (``CRB_ALLOW_UNSEALED_PROD_BY`` / ``_REASON``, G-663):
 :func:`announce_start` checks the name is an active admin and writes the audit event, or the
 worker exits 2 without taking a run — as it does when the event cannot be written (a store
-error at start is the JSON error on stderr, never a traceback; P-241).
+error at start is the JSON error on stderr, never a traceback; P-249).
 
 **At every start the worker logs both chains' heads** (G-601): the grade ledger's and the audit
 trail's last ``row_hash``, so the log store holds a copy outside the database.
@@ -483,7 +483,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         announce_start(worker)
     except (OverrideRefused, SQLAlchemyError) as exc:
         # the override names no active admin, or its start could not be recorded (a lost
-        # connection, a lock timeout): do not start, and say so as the JSON error (P-241)
+        # connection, a lock timeout): do not start, and say so as the JSON error (P-249)
         print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}), file=sys.stderr)
         return EXIT_ERROR
 

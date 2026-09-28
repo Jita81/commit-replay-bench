@@ -37,7 +37,7 @@
  *               (ui/src/lib/builder.ts) for the builder the deployment can run,
  *               `useCreateRun` with `{kind: replay, mode: sighted, limit, retain,
  *               max_cost_usd}`, the cap's text read by `readAmount` (ui/src/lib/amount.ts,
- *               P-265); a 422 `spend_cap_unpriced` gets this page's own way forward; on
+ *               P-273); a 422 `spend_cap_unpriced` gets this page's own way forward; on
  *               success the walk resumes on the repository with
  *               the run watched. The kicker is `journeyEyebrow(pathname, 'task 5 of 8 · …')`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -148,7 +148,7 @@ export function MeasurePage() {
   // estimate, rounded up to the dollar, and follows it until the operator types another
   const [capDraft, setCapDraft] = useState<string | null>(null)
   const capText = capDraft ?? String(Math.max(1, Math.ceil(hi)))
-  // read as typed (P-265): text the browser could not parse is refused, never sent; the page
+  // read as typed (P-273): text the browser could not parse is refused, never sent; the page
   // always sends a cap, so blank is refused too
   const capRead = readAmount(capText, { min: 0, above: true })
   const cap = capRead.kind === 'ok' ? capRead.value : 0

@@ -90,7 +90,7 @@ WORKDIR /app
 
 # Dependency layer: exactly the versions and hashes uv.lock pins, the same lock every CI job
 # installs from — never pyproject.toml resolved at build time, which would ship versions no
-# gate ran (docs/PREVENTION.md P-262; tests/test_ci_lock.py fails on a fresh resolution).
+# gate ran (docs/PREVENTION.md P-270; tests/test_ci_lock.py fails on a fresh resolution).
 # It reads only pyproject.toml and uv.lock, so it caches independently of src/.
 COPY pyproject.toml uv.lock README.md LICENSE /app/
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \

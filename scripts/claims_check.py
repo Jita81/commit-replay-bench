@@ -48,7 +48,7 @@ thereby tagged the sentence around it.
   or after a determiner, a preposition or an identifier ("at stage 3"), never after a
   subject or a modal ("the worker can batch 40 jobs"). A word that is mostly a verb or a
   gerund ("pass", "finding") is not on the list, and the list is pinned by a test beside
-  the evasions every exemption must still refuse (P-232);
+  the evasions every exemption must still refuse (P-240);
 - whether the tag is the *right* one, and whether a ``[measured]`` figure is true: it checks
   that ``n``, a method and an apparatus version are *present*, never that they are sound.
   Only a person reading the ledger can do that;
@@ -78,13 +78,13 @@ page may state in the present tense only once the criterion that builds them is 
 ``docs/dod/``: a matching sentence on a ``PROMISE_PAGES`` page (the allowlist and
 EVIDENCE-AND-CLAIMS) is refused until then, and a promise whose criterion no longer exists is
 refused too. The README once said the product names which ISO/IEC 25010 characteristics its
-checks evidence while the criterion that builds that table was unmet (P-227). It holds only
+checks evidence while the criterion that builds that table was unmet (P-235). It holds only
 the promises registered here; an unregistered capability sentence still needs a reader
 (G-935).
 
 **README's measured claims name their rows.** A ``[measured]`` tag on README (``ROWS_PAGES``),
 wherever it renders — a paragraph, a list item, a heading, a table cell or a checklist item
-(P-238) — must say where its rows are — ``rows: data/<campaign>/``, written plain inside the
+(P-246) — must say where its rows are — ``rows: data/<campaign>/``, written plain inside the
 tag — and that directory must be in the repository with a ``MANIFEST.sha256`` that verifies: every
 listed file present and unchanged, and no file beside it that the manifest does not list
 (its README excepted). The gate holds that shape; ``tests/test_measured_claims.py``
@@ -100,7 +100,7 @@ in the factory's pull-request body template (the string literals of ``pr_body`` 
 ``rework_comment``, of the module's functions they call and of the module constants they
 read, each f-string or ``+`` join rendered with the constants it interpolates, imported ones
 from ``crb`` included, and a value it cannot resolve read as a standard). It reads every
-shape a page renders — headings, table cells and checklist items as well as prose (P-238). A
+shape a page renders — headings, table cells and checklist items as well as prose (P-246). A
 sentence that only names a standard passes, and so does one that denies the claim: a
 negation in front of the conformity verb ("does not conform", "is not ISO/IEC 25010
 compliant"), a negated verb whose complement carries it in the same clause ("does not mean
@@ -109,7 +109,7 @@ that says code conforms"), or a sentence in a section listing what must never be
 (EVIDENCE-AND-CLAIMS §7 quotes it to forbid it); a conformity word coordinated with a denied
 one shares its denial ("conforms to, complies with or is certified against"). Nothing else
 denies: "no doubt", "without exception", "not only conforms", or a refusal or negation in
-another clause, and ``CONFORMITY_EVASIONS`` in the tests holds the cases (P-232, P-237). It
+another clause, and ``CONFORMITY_EVASIONS`` in the tests holds the cases (P-240, P-245). It
 reads words, not meaning: "our pipeline is ISO-aligned" passes, and a reader still has to
 read.
 
@@ -128,12 +128,12 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               in a review's Actions table that has no stated record in the decision log,
               and every record whose review no longer lists the action or is no longer on
               disk; reports a registered promise stated in the present tense before its
-              criterion is met (P-227); reports a sentence that claims ISO conformity on
+              criterion is met (P-235); reports a sentence that claims ISO conformity on
               README, a guide or the factory's pull-request body template, in any shape the
-              page renders (ADR-0026 item 11, P-237, P-238); reports a README
+              page renders (ADR-0026 item 11, P-245, P-246); reports a README
               ``[measured]`` tag that names no vendored rows, or rows
               whose checksum manifest does not verify (G-660); reports README's routing bar
-              when it differs from ``RoutingPolicy.describe()`` (ADR-0025 item 10, P-303);
+              when it differs from ``RoutingPolicy.describe()`` (ADR-0025 item 10, P-311);
               --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
@@ -228,7 +228,7 @@ def expand(root: Path, allow: tuple[str, ...]) -> tuple[list[str], list[str]]:
     return pages, empty
 
 
-#: The pages the promise rule reads: the allowlist and the claims policy itself (P-227).
+#: The pages the promise rule reads: the allowlist and the claims policy itself (P-235).
 PROMISE_PAGES: tuple[str, ...] = (*ALLOWLIST, "docs/EVIDENCE-AND-CLAIMS.md")
 #: Where the definition of done's criteria live — a promise's criterion is read from there.
 DOD_DIR = "docs/dod"
@@ -243,7 +243,7 @@ class Promise:
     says: str
 
 
-#: Registered promises (P-227). A sentence on a ``PROMISE_PAGES`` page that matches
+#: Registered promises (P-235). A sentence on a ``PROMISE_PAGES`` page that matches
 #: ``pattern`` is refused while ``criterion`` is not ``met`` in docs/dod/. A future tense
 #: ("will name") is not the present one, so the page may say what is coming and cite its gap.
 _NAMING = r"(?<!will )\b(?:names?|maps?|lists?|shows?)\s+(?:which|each|the)\b"
@@ -385,7 +385,7 @@ _CARDINAL = r"(?:\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d{4,}(?:\.\d+)?|" + "|".join(NUMB
 _COUNT_RE = re.compile(rf"\b({_CARDINAL})\s+(?:([a-z][\w'-]*)\s+)?([a-z][\w'-]{{2,}}s)\b", re.I)
 _PLURAL_RE = re.compile(r"[a-z][\w'-]{2,}s", re.I)
 #: A percentage: "95%", "95 %", and written in words — "95 percent", "95 per cent",
-#: "ninety percent", "ninety-five per cent" (P-239).
+#: "ninety percent", "ninety-five per cent" (P-247).
 _NUMBER_WORD = r"(?:" + "|".join(NUMBER_WORDS) + r")(?:-(?:one|" + "|".join(NUMBER_WORDS) + r"))?"
 _PERCENT = (
     r"(?:\d[\d,]*(?:\.\d+)?\s?%"
@@ -424,7 +424,7 @@ _FORBIDDEN_SECTION_RE = re.compile(
 #: ("belt 3", "stage 3", "Wave 2", "rank 23"), not how many — when it reads as a noun
 #: (``_names_one``). A word that is mostly a verb or a gerund ("pass 45 tests", "finding 40
 #: defects", "round 12 estimates") is not on it, and the list is pinned by a test, because it
-#: exempts counts on every gated page (P-232).
+#: exempts counts on every gated page (P-240).
 NAMING_NOUNS: tuple[str, ...] = (
     "belt",
     "step",
@@ -491,7 +491,7 @@ def _names_one(before: str) -> bool:
     capitalised ("Belt 3", "Wave 2"), at the start of the sentence or after a bracket or
     a comma, after a determiner or a preposition ("at stage 3"), or after an identifier
     ("ADR-0026 item 11"). After anything else — a subject or a modal — it is a verb, and
-    the count after it is a count ("the worker can batch 40 jobs", P-232)."""
+    the count after it is a count ("the worker can batch 40 jobs", P-240)."""
     m = _NAMING_NOUN_RE.search(before)
     if not m:
         return False
@@ -511,7 +511,7 @@ _CONTENTS_REST_RE = re.compile(r"^[\s·|•,;:>*+-]*(?:[A-Za-z ]{1,20}:)?[\s·|�
 #: ``- **G-nnn** — what is missing · what closes it · owner``. Its form is a [gap] tag — it
 #: names what is absent and what would close it, which is what the tag must cite
 #: (EVIDENCE-AND-CLAIMS §1) — but only where ``dod_check`` reads it as a gap: under a
-#: ``## Gaps`` heading on a definition-of-done page or in the prevention register (P-232).
+#: ``## Gaps`` heading on a definition-of-done page or in the prevention register (P-240).
 _GAP_LINE_RE = re.compile(r"^\*\*G-\d{3}\*\*\s*—\s*\S.*·.*·")
 _GAP_PAGES_RE = re.compile(r"^(?:docs/dod/.+\.md|docs/PREVENTION\.md)$")
 _GAPS_HEADING_RE = re.compile(r"^#{2}\s+Gaps\b", re.I)
@@ -590,7 +590,7 @@ def _unrendered(text: str) -> tuple[set[int], dict[int, str]]:
     """``(hidden, tails)``: the line numbers (1-based) a reader never sees as prose — an HTML
     comment block (a file's Navigation header, even across blank lines) and a leading
     front-matter block — and, for a comment block whose closing line carries text after
-    ``-->``, that text, which GitHub renders and the gate therefore reads (P-232)."""
+    ``-->``, that text, which GitHub renders and the gate therefore reads (P-240)."""
     hidden: set[int] = set()
     tails: dict[int, str] = {}
     lines = re.sub(r"\r\n?", "\n", text).split("\n")
@@ -615,7 +615,7 @@ def _contents_prose(text: str) -> str:
     a heading on the same page, joined by separators and at most a short label
     ("Contents:") — a same-page link's text is dropped: a heading is not a claim, so its
     link is not one either. Anywhere else, and for a contents line's links to other pages, a
-    link reads as the words it shows (P-232)."""
+    link reads as the words it shows (P-240)."""
     if _ANCHOR_LINK_RE.search(text) and _CONTENTS_REST_RE.match(_LINK_RE.sub(" ", text)):
         return _ANCHOR_LINK_RE.sub(" ", text)
     return text
@@ -639,7 +639,7 @@ def blocks_of(text: str, *, rendered: bool = False) -> list[Block]:
     each cell of a table row, and a checklist item (read as a list item, so the paragraph
     that introduces it covers it). The claim-tag heuristic counts only prose; a rule about
     what a page *says* — the conformity rule, a README ``[measured]`` tag's rows and their
-    re-derivation, a registered promise — reads everything that renders (P-238).
+    re-derivation, a registered promise — reads everything that renders (P-246).
     """
     out: list[Block] = []
     paragraph: list[str] = []
@@ -730,7 +730,7 @@ def claim_numbers(sentence: str) -> list[str]:
         cardinal, between, noun = match.group(1), match.group(2), match.group(3)
         if between and noun.lower() in FUNCTION_WORDS and _PLURAL_RE.fullmatch(between):
             # "12 releases this year": the optional middle word took the plural noun and left
-            # a function word that merely ends in "s" in its place (P-232)
+            # a function word that merely ends in "s" in its place (P-240)
             between, noun = None, between
         if between and between.lower() in FUNCTION_WORDS:
             continue
@@ -855,7 +855,7 @@ def criterion_states(root: Path) -> dict[str, str]:
 
 def check_promises(root: Path, pages: tuple[str, ...]) -> list[Finding]:
     """A registered capability stated in the present tense before its criterion is met
-    (P-227): the README said the product names which ISO/IEC 25010 characteristics its checks
+    (P-235): the README said the product names which ISO/IEC 25010 characteristics its checks
     evidence while the criterion that builds that table was unmet."""
     findings: list[Finding] = []
     if not (root / DOD_DIR).is_dir():
@@ -1004,7 +1004,7 @@ _CONFORM_RE = re.compile(
     re.I,
 )
 #: An ISO standard, named: "ISO/IEC 25010", "ISO 9001", "an ISO standard", "iso/iec 25010",
-#: "ISO25010" — in any case, and with or without a space before its number (P-237).
+#: "ISO25010" — in any case, and with or without a space before its number (P-245).
 _ISO_RE = re.compile(r"\bISO(?:\b|(?=\d))", re.I)
 #: Words that negate the verb they stand in front of. "no" and "without" are absent on
 #: purpose: they govern a noun ("no doubt", "without exception"), never the conformity verb.
@@ -1012,7 +1012,7 @@ _NEGATIONS: frozenset[str] = frozenset({"never", "not", "nor", "cannot"})
 #: What may stand between a negation and the verb it negates: an auxiliary, an adverb that
 #: does not turn the negation ("does not formally conform"), an article, and the standard's
 #: own name ("is not ISO/IEC 25010 compliant"). "only", "just", "merely" and "simply" are
-#: absent on purpose: "not only conforms" asserts it (P-237).
+#: absent on purpose: "not only conforms" asserts it (P-245).
 _VERB_GROUP: frozenset[str] = frozenset(
     {
         "a",
@@ -1125,7 +1125,7 @@ def _denied(words: list[str], at: int, denied: set[int]) -> bool:
     clause ("does not mean the code complies"); in the complement of a refused saying in its
     own clause ("refuses a sentence that says code conforms"); or coordinated with a denied
     conformity word ("conforms to, complies with or is certified against"). A negation or a
-    refusal anywhere else in the sentence denies nothing (P-232, P-237)."""
+    refusal anywhere else in the sentence denies nothing (P-240, P-245)."""
     if _negated(words, at):
         return True
     clause = _clause_before(words, at)
@@ -1172,7 +1172,7 @@ def bundled_guides(root: Path) -> tuple[str, ...] | None:
 
 
 #: What an interpolated value the rule cannot resolve reads as: a standard. Beside a
-#: conformity word it is refused, because the rule cannot show it is not one (P-238).
+#: conformity word it is refused, because the rule cannot show it is not one (P-246).
 HOLE = "ISO(an interpolated value)"
 _PLACEHOLDER_RE = re.compile(r"\{[^{}]*\}|%[sdr]")
 
@@ -1279,7 +1279,7 @@ def _literals(node: ast.AST, resolver: _Resolver) -> list[tuple[int, str]]:
     ``+`` join is rendered whole, with each value it interpolates resolved or read as
     ``HOLE``, and a literal's own ``{}``/``%s`` placeholders (``.format``, ``%``) read as
     ``HOLE`` — so a sentence split by a value still reads, and a value that may name a
-    standard is not dropped (P-238)."""
+    standard is not dropped (P-246)."""
     out: list[tuple[int, str]] = []
     consumed: set[int] = set()
     for sub in ast.walk(node):
@@ -1301,7 +1301,7 @@ def _pr_body_literals(root: Path) -> list[tuple[int, str]] | None:
     """``(line, text)`` for every string the pull-request body can emit: the literals of the
     body functions, of every module-level function they call (and those call), and of every
     module-level constant any of them reads — the body is what ``pr_body`` returns, not
-    only what is written inside it (P-232) — each rendered with what it interpolates (P-238)."""
+    only what is written inside it (P-240) — each rendered with what it interpolates (P-246)."""
     path = root / PR_BODY_SOURCE
     if not path.is_file():
         return None
@@ -1526,7 +1526,7 @@ def check_routing_bar(root: Path, bar: str | None = None) -> list[Finding]:
     """README's routing bar is the code's, byte for byte once line wrapping is undone: the text
     between :data:`BAR_BEGIN` and :data:`BAR_END` must equal ``RoutingPolicy.describe()``
     (ADR-0025 item 10). The class of defect — the published bar drifting from the code's —
-    gets a gate, not a sentence (docs/PREVENTION.md P-303)."""
+    gets a gate, not a sentence (docs/PREVENTION.md P-311)."""
     path = root / BAR_PAGE
     if not path.is_file():
         return []

@@ -15,7 +15,7 @@ What it does: Pins that editing a worktree changes neither the inputs nor the ke
               followed; any other index, a wheel-less package every environment needs, a
               workspace or another lock version refused), with the groups in the bundle key;
               that a requirements lock's ``--hash`` is kept only as a whole sha256 and any
-              other hash or option after the pin refuses the lock (P-263);
+              other hash or option after the pin refuses the lock (P-271);
               that ``deps_lock`` alternatives provision a lock that moved across a history;
               that ``.npmrc``, ``pip.conf`` and ``go.env`` are never read; that a trial never
               makes the selector read outside its tree (an escaping replace or a linked
@@ -273,7 +273,7 @@ def test_a_committed_hash_is_never_dropped_or_cut(tmp_path: Path, tail: str) -> 
     """ADR-0019 fetches with pip's hashes wherever the lock carries them, and DL-101 refuses
     a hash that is not a whole sha256 before anything is fetched. A hash of another kind or
     length was once skipped (the pin written bare, ``require_hashes`` off) or cut to 64
-    characters — a lock provisioned more loosely than it was committed (P-263). Every token
+    characters — a lock provisioned more loosely than it was committed (P-271). Every token
     after the pin is a whole ``--hash=sha256:<64 hex>``, or the lock is refused."""
     repo, (sha,) = _repo(tmp_path / "r", {"requirements.txt": f"six==1.16.0 {tail}\n"})
     _refused("PROVISION_SOURCE_REFUSED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))

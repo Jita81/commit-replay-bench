@@ -115,7 +115,7 @@ def record_unsealed_override(
     active admin — the caller must not start."""
     with factory() as db:
         # the events write lock first: every start writes this one trace, and two processes
-        # starting at once must not read one ``seq`` (P-241 — the API and a worker, or two
+        # starting at once must not read one ``seq`` (P-249 — the API and a worker, or two
         # replicas, at the same moment; the second insert would break (trace_id, seq))
         lock_event_writes(db)
         user = find_acknowledging_admin(db, by)

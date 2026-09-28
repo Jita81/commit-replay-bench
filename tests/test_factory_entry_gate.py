@@ -11,7 +11,7 @@ What it does: Pins, on the real loop over the fixture repository, that an item i
               that a ticket missing what its standard arm needs stops ``needs_context``
               naming it; that an ``S3`` ceiling admits only an approver's calibration build,
               which is evented, never opens a pull request and is claimed by one run on the
-              chain before any spend (two interleaved runs build once — P-290); that the
+              chain before any spend (two interleaved runs build once — P-298); that the
               builder gets exactly
               the standard arm's context (a person's test on an ``S1`` cell is held out); the
               size rule (the more demanding of two cells until the points-to-churn agreement
@@ -20,7 +20,7 @@ What it does: Pins, on the real loop over the fixture repository, that an item i
               other stop the pure gate makes, the override changes nothing; and the licence
               keyed on the building rung's builder and model, before the build
               (``not_licensed``, $0) and on the measured size after it
-              (``size_exceeds_licence``), a line shaped like a diff header included (P-286).
+              (``size_exceeds_licence``), a line shaped like a diff header included (P-294).
 How:          The loop rig of ``tests/test_factory_loop.py`` with the gate's readers replaced
               per test; ``decide_entry`` directly for the pure size-rule cases.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -190,7 +190,7 @@ def test_a_calibration_build_never_opens_a_pull_request(pyrepo: pr.PyRepo, tmp_p
 
 def test_a_grant_is_claimed_once_on_either_store(tmp_path: Path) -> None:
     """The claim is a conditional append — the check and the write under the store's one
-    lock — on the in-memory store and on the JSONL file both writers share (P-290)."""
+    lock — on the in-memory store and on the JSONL file both writers share (P-298)."""
     for store in (fe.MemoryFactoryStore(), fe.JsonlFactoryStore(tmp_path / "ev.jsonl")):
         ev = fe.FactoryEvidence(store, actor="tester", repo="pyrepo")
         grant = ev.record_calibration("I-1", approver="approver:ada", reason="measure")
@@ -218,7 +218,7 @@ class _StartsAnotherRun(MultiBuilder):
 def test_one_grant_funds_one_build_when_two_runs_interleave(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
-    """P-290: the grant counted as spent only when a run's outcome was written, so a second
+    """P-298: the grant counted as spent only when a run's outcome was written, so a second
     run that started while the first was building read the same grant as unspent and built
     too — one approver's grant, two paid builds. The grant is claimed on the chain, under
     the store's lock, before any spend: the second run finds it claimed and stops at the
@@ -498,7 +498,7 @@ def test_a_change_larger_than_its_licence_stops_size_exceeds_licence(
 
 
 #: The same dozen-line change behind a line that reads, in the diff, as the oracle's own
-#: file header (``+`` + ``++ b/<oracle>``): a prefix parse stopped counting there (P-286).
+#: file header (``+`` + ``++ b/<oracle>``): a prefix parse stopped counting there (P-294).
 SMUGGLED_MULTIPLY = (
     MULTIPLY_DEF
     + f'\nNOTE = """\n++ b/{TEST_MULTIPLY}\n"""'

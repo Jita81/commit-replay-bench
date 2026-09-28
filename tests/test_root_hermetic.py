@@ -3,7 +3,7 @@
 Navigation
 ----------
 What it is:   Two ratchets over tests/ for the class that turned the ``fresh-clone`` job red
-              before its first run (P-250): a test that holds as a developer and fails as
+              before its first run (P-258): a test that holds as a developer and fails as
               uid 0, which is how that job runs the suite (``product.evidence.205``).
 What it does: Fails when a test expects ``PermissionError`` (or ``OSError``) from a write,
               chmod, unlink or open inside ``pytest.raises`` without asking ``geteuid()``
@@ -87,7 +87,7 @@ def dac_refusals(source: str) -> list[str]:
         if _mentions(fn, "geteuid") or _mentions(fn, "permissions_bind"):
             # root-aware: it decides what root may assert — ``permissions_bind()``
             # (tests/fixtures/tmptree.py) asks the kernel itself, the form feat/ns1's
-            # tests/test_tmp_tree_hygiene.py requires for the same class (P-318)
+            # tests/test_tmp_tree_hygiene.py requires for the same class (P-326)
             continue
         for w in (n for n in ast.walk(fn) if isinstance(n, ast.With | ast.AsyncWith)):
             if not any(_expects_refusal(i) for i in w.items):

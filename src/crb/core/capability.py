@@ -484,7 +484,7 @@ class ReadingBook:
     ) -> ReadingOutcome | None:
         """The reading that speaks for one full cell at one apparatus, class-set version,
         checks arm and posture class — every scope field the reading counted its rows on
-        (``_counts_for``), so a licence never crosses an arm or a posture (P-311)."""
+        (``_counts_for``), so a licence never crosses an arm or a posture (P-319)."""
         want = canonical_cell_key(cell)
         return latest_outcome(
             o
@@ -521,7 +521,7 @@ class ReadingBook:
         """The reading of the ONE full cell ``rows`` belong to; ``None`` when they span more
         than one repository, full cell key, checks arm or posture class (a projection that
         pools builders or models, or a view that pools posture classes, is never licensed by
-        one reading — P-311)."""
+        one reading — P-319)."""
         repos = {r.repo for r in rows}
         keys = {r.cell for r in rows}
         checks = {r.checks_arm for r in rows}

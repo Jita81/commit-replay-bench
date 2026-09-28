@@ -7,11 +7,11 @@ code, and fails when the claim does not state a figure in its role — "49 of 55
 cell's clean count of its attempts, "point 0.891" its point, "0.78 to 0.95" its interval —
 when it states any other number, anywhere the tag covers, or when it names another
 apparatus. A figure is bound to its role, never to whichever figure it happens to equal:
-"false-Q1 = 1" fails although a point rounds to 1 (P-234). Every number the tag covers is
+"false-Q1 = 1" fails although a point rounds to 1 (P-242). Every number the tag covers is
 read, in digits or in words, bare or in a ratio ("54", "ninety percent", "9-in-10"); only
 dates, apparatus versions, confidence levels and numbers that name rather than count are
-not figures (P-239). A tag in a table cell, a heading or a checklist item is re-derived like
-one in prose (P-238). A claim that stops being true fails here rather than waiting for a
+not figures (P-247). A tag in a table cell, a heading or a checklist item is re-derived like
+one in prose (P-246). A claim that stops being true fails here rather than waiting for a
 reader.
 
 Navigation
@@ -79,7 +79,7 @@ class Derived:
     """What a campaign's rows give: its apparatus, its figures, and the phrases a claim on
     them states — each a template naming the figure in its role (``"{cell_clean} of
     {cell_n}"``), so a number is held to the figure it is meant to be, never to whichever
-    figure it happens to equal (P-234)."""
+    figure it happens to equal (P-242)."""
 
     apparatus: str
     figures: dict[str, float]
@@ -188,7 +188,7 @@ def stated_numbers(text: str) -> list[str]:
     """Every figure the text states, once each, where it stands: every number in digits
     ("49", "0.891", "1,071", "54", the 9 and the 10 of "9-in-10") and every number written
     in words ("ninety", "fifty-four"). Dates, apparatus versions, confidence levels and
-    numbers that name rather than count (``_IDENTIFIER``) are not figures (P-239)."""
+    numbers that name rather than count (``_IDENTIFIER``) are not figures (P-247)."""
     text = cc._strip_markup(text)
     text = _APPARATUS_TEXT.sub(" ", text)
     text = _DATE.sub(" ", text)
@@ -308,7 +308,7 @@ def test_stated_numbers_skip_dates_versions_and_confidence_levels() -> None:
 
 def test_a_measured_tag_in_a_table_is_re_derived(tmp_path: Path) -> None:
     """A [measured] tag in a table cell names its rows (the gate) and is re-derived from
-    them like any other (P-238): a cell that does not state what the rows give fails."""
+    them like any other (P-246): a cell that does not state what the rows give fails."""
     tag = (
         "[measured — n = 55 attempts; method: the census rows re-imported and read by the "
         "product's cell statistics; rows: data/census-2026-07-08/; apparatus 1.0-census]"
@@ -320,7 +320,7 @@ def test_a_measured_tag_in_a_table_is_re_derived(tmp_path: Path) -> None:
 
 
 #: A stated figure swapped for ANOTHER figure the rows give: each is a number the rows do
-#: give, in the wrong role, so a bag-of-figures comparison accepted every one (P-234).
+#: give, in the wrong role, so a bag-of-figures comparison accepted every one (P-242).
 COINCIDENT: tuple[tuple[str, str], ...] = (
     ("false-Q1 = 0", "false-Q1 = 1"),
     ("false-Q1 = 0", "false-Q1 = 55"),
@@ -359,7 +359,7 @@ def _census_paragraph() -> str:
         "{p}\n\n- 99% of all 1,071 rows were clean.\n",
         # a sentence of the block with numbers but no count of a plural noun is read too
         "{p} Its Wilson interval is 0.10 to 0.20.\n",
-        # a bare number, a percentage in words and a k-in-n ratio are figures too (P-239)
+        # a bare number, a percentage in words and a k-in-n ratio are figures too (P-247)
         "{p} The cell's clean count was 54.\n",
         "{p} In all, ninety percent of the cell's attempts were clean.\n",
         "{p} That is 9-in-10 clean.\n",

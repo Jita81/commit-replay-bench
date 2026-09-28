@@ -12,7 +12,7 @@ What it does: Pins that appends chain from genesis and verify, that ``append_man
               tampered underneath dropped triggers, labels through the JSON column,
               ``assert_append_only`` passing with triggers and raising without — every
               append-only table seeded from its own columns, each trigger swapped for one
-              that lets its write through, one table and one verb at a time (P-245) — that import
+              that lets its write through, one table and one verb at a time (P-253) — that import
               re-chains and keeps the source row hash, that an export re-verifies standalone,
               pack store / get round trip and append-only, and that four threads appending
               concurrently form one valid chain.
@@ -251,7 +251,7 @@ def _a_value_for(col: Any) -> Any:
     if kind is bytes:
         return b"x"
     # a string as long as the column allows, so a length CHECK is met (the events chain's
-    # hash columns must hold 64 characters since revision 0013, P-246)
+    # hash columns must hold 64 characters since revision 0013, P-254)
     return "x" * int(getattr(col.type, "length", None) or 1)
 
 
@@ -445,7 +445,7 @@ def test_concurrent_appends_from_four_threads_form_one_valid_chain(
 def test_every_imported_row_is_stamped_imported_even_without_a_source_hash(
     ledger: DbLedger,
 ) -> None:
-    """P-313: the marker a reading reads to skip imported rows is stamped on EVERY imported
+    """P-321: the marker a reading reads to skip imported rows is stamped on EVERY imported
     row — a row exported with a blank hash would otherwise carry no marker at all. (The
     import stamp keeps ``source_row_hash`` on every row too, empty when the source had none —
     EI-2 — so the ``imported`` label, not the hash, is the marker.)"""

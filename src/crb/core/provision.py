@@ -415,7 +415,7 @@ def _whole_hashes(tail: str, where: str) -> tuple[str, ...]:
     """The ``--hash`` options after a pin, each a whole ``sha256:<64 hex>``. Anything else
     in the tail — a hash of another kind or length, a ``--hash`` with no value, another
     option — refuses the lock (PROVISION_SOURCE_REFUSED): a hash is never skipped, so the
-    pin written bare, nor cut to 64 characters (DL-101; docs/PREVENTION.md P-263)."""
+    pin written bare, nor cut to 64 characters (DL-101; docs/PREVENTION.md P-271)."""
     hashes: list[str] = []
     rest = tail.strip()
     while rest:

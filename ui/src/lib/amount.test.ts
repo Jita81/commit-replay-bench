@@ -3,7 +3,7 @@
  *
  * Navigation
  * ----------
- * What it is:   The tests of ui/src/lib/amount.ts and a source-level ratchet (P-265) over
+ * What it is:   The tests of ui/src/lib/amount.ts and a source-level ratchet (P-273) over
  *               `ui/src`: no screen or component renders an `<input type="number">`.
  * What it does: Pins that `readAmount` takes plain digits only (a decimal where the field
  *               allows one), refuses an exponent, a sign, a unit or a value below the field's
@@ -19,7 +19,7 @@
  * Works with:   ui/src/lib/amount.ts (under test), ui/src/screens/Runs/RunNewDialog.tsx (the
  *               run form's caps, limit and timeout), ui/src/screens/Factory/FactoryPage.tsx
  *               (the factory's spend cap), ui/src/screens/Connect/MeasurePage.tsx (the
- *               measurement's spend cap), docs/PREVENTION.md (row P-265)
+ *               measurement's spend cap), docs/PREVENTION.md (row P-273)
  * Tested by:    itself (the negative control below)
  * Touch when:   never for a new repository; a field takes a number: read it with `readAmount`,
  *               never `type="number"`.
@@ -61,7 +61,7 @@ describe('readAmount', () => {
   })
 })
 
-describe('no number input (P-265)', () => {
+describe('no number input (P-273)', () => {
   it('finds the sources', () => {
     expect(Object.keys(SOURCES).length).toBeGreaterThan(50)
   })

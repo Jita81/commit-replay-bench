@@ -649,7 +649,7 @@ class FactoryHome:
         outcomes: dict[tuple[str, int], FactoryEvent] = {}
         entries: dict[str, FactoryEvent] = {}  # the entry stop since the last readiness
         grants: dict[str, FactoryEvent] = {}  # the newest calibration grant
-        spent: set[str] = set()  # grant event ids a run claimed (P-290)
+        spent: set[str] = set()  # grant event ids a run claimed (P-298)
         for ev in self.events():
             if ev.item_id:
                 latest.setdefault(ev.item_id, {})[ev.kind] = ev  # newest wins per kind

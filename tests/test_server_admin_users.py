@@ -562,7 +562,7 @@ def test_account_events_are_on_the_hash_chained_audit_trail(client: TestClient, 
 def test_a_write_that_skips_the_chain_is_refused_and_sign_in_keeps_working(
     client: TestClient, app: Any
 ) -> None:
-    """P-246: the release before revision 0013 (still running during the upgrade, or after
+    """P-254: the release before revision 0013 (still running during the upgrade, or after
     a rollback) inserts events naming no chain column. That one write must fail on its own;
     it must not leave a head the next sign-in cannot chain onto (which answered 500 to every
     sign-in from then on)."""

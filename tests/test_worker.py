@@ -2160,7 +2160,7 @@ def test_a_prod_worker_under_the_override_stamps_every_factory_run(
 def test_a_sealed_prod_worker_under_the_override_stamps_a_run_that_asks_for_local(
     h: Harness,
 ) -> None:
-    """P-248: a worker whose defaults are sealed (docker and docker) but that starts under
+    """P-256: a worker whose defaults are sealed (docker and docker) but that starts under
     the override admits a run asking for the local executor in its own parameters. That run
     executes unsealed, so its apparatus must carry the override and the name of the admin
     who set it — the worker-wide stamp is empty because the DEFAULTS are sealed."""

@@ -399,7 +399,7 @@ LABEL_BUILDER_EXECUTOR = "builder_executor"
 BUILDER_EXECUTOR_SEALED = "docker"
 #: Stamped ``true`` on every row the ledger IMPORTED (``DbLedger.import_rows``), with or without
 #: a source hash: an imported row is history — its labels were set elsewhere, so a reading
-#: never counts it as an attempt this deployment graded (ADR-0026 item 2, P-313).
+#: never counts it as an attempt this deployment graded (ADR-0026 item 2, P-321).
 LABEL_IMPORTED = "imported"
 #: The source ledger's own hash of an imported row, kept for traceability.
 LABEL_SOURCE_ROW_HASH = "source_row_hash"
@@ -667,7 +667,7 @@ def is_sealed_class(posture_class: str) -> bool:
 
 
 #: The labels only apparatus 2.4 defines (DL-094 (2)): a row below 2.4 never carries one,
-#: whichever writer built it — refused by the row itself, at write and on read (P-301). A
+#: whichever writer built it — refused by the row itself, at write and on read (P-309). A
 #: writer that is handed one for an older apparatus writes the row as a 2.3 row always was.
 V2_ONLY_LABELS: frozenset[str] = frozenset(
     {LABEL_LINT_REASON, LABEL_CHANGE_ID, LABEL_CONTEXT_ARM, LABEL_TAXONOMY}
@@ -678,7 +678,7 @@ V2_KEPT_LABELS: frozenset[str] = V2_ONLY_LABELS | {LABEL_BUILDER_EXECUTOR}
 
 
 def labels_at_apparatus(labels: Mapping[str, str], apparatus_version: str) -> dict[str, str]:
-    """The labels a row of ``apparatus_version`` keeps (DL-094 (2), P-309): from 2.4 all of
+    """The labels a row of ``apparatus_version`` keeps (DL-094 (2), P-317): from 2.4 all of
     them; below 2.4 none of :data:`V2_KEPT_LABELS` — the row is written as a 2.3 row always
     was. THE one rule for every writer, and for every test that rewrites a row's apparatus."""
     if is_v2_apparatus(apparatus_version):
@@ -931,7 +931,7 @@ class GradeRow:
         pins its ``failure_kind`` and a ``lint_reason`` that agrees with belt 5, and a
         replay row names the change it observed and was gold-checked clean. Rows below 2.4
         are never re-interpreted, and never carry a label only 2.4 defines
-        (:data:`V2_ONLY_LABELS`, P-301)."""
+        (:data:`V2_ONLY_LABELS`, P-309)."""
         if not is_v2_apparatus(self.apparatus_version):
             leaked = [k for k in V2_ONLY_LABELS if k in self.labels]
             if leaked:

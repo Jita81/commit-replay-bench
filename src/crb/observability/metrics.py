@@ -32,7 +32,7 @@ What it does: Counts runs, graded tasks by outcome, belt failures, builder token
               GitHub installation-token mints (never the token); times grades and builds;
               gauges queue depth, ``crb_false_q1_total`` (must stay 0) and the ledger row
               count; renders the exposition for the API's ``/metrics`` less the worker-only
-              series (``render_api``, P-260) and starts the worker's, the whole registry, on
+              series (``render_api``, P-268) and starts the worker's, the whole registry, on
               its port.
 How:          Import-time try/except picks the real registry or ``_Noop``; every metric is
               a module-level object created through ``_counter``/``_gauge``/``_histogram``;
@@ -369,7 +369,7 @@ def set_ledger_health(*, rows: int, false_q1: int) -> None:
 #: shares this module's registry, so without :func:`render_api` it would serve each of them
 #: too, as an empty family or a zero: ``crb_queue_depth 0.0`` from the API kept the
 #: ``CrbNoWorker`` rule (``absent_over_time(crb_queue_depth[…])``) from ever firing while the
-#: API was scraped (docs/PREVENTION.md P-260).
+#: API was scraped (docs/PREVENTION.md P-268).
 WORKER_SERIES: frozenset[str] = frozenset(
     {
         "crb_runs_total",

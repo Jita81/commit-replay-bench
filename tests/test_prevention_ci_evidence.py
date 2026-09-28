@@ -1,7 +1,7 @@
-"""A prevention row's ``ci:`` evidence names a job that runs what the row says fails (P-240).
+"""A prevention row's ``ci:`` evidence names a job that runs what the row says fails (P-248).
 
 A row of docs/PREVENTION.md lists the artefacts that fail if its class of defect returns. A
-``ci:<job>`` citation says that job fails. P-234 cited ``ci:claims`` for the README
+``ci:<job>`` citation says that job fails. P-242 cited ``ci:claims`` for the README
 re-derivation, but the claims job runs only ``scripts/claims_check.py --check``; the
 re-derivation is ``tests/test_measured_claims.py``, which runs in the ``test`` job. Both jobs
 are required, so nothing merged unchecked, but the row named the wrong gate, and a reader
@@ -16,7 +16,7 @@ What it does: Reads each job of .github/workflows/ci.yml; a job whose ``run`` st
               exactly one ``scripts/<x>.py`` and never run pytest is a single-script job
               (claims, dod, code-map). Every docs/PREVENTION.md row that cites ``ci:<job>``
               for such a job must cite a ``test:tests/test_<x>.py::`` evidence too. A
-              synthetic row in P-234's old shape must fail, so the check cannot pass
+              synthetic row in P-242's old shape must fail, so the check cannot pass
               vacuously.
 How:          ``single_script_jobs(workflow)`` → ``{job: script}``;
               ``misattributed(rows, jobs)`` → the rows that cite a job without a test of its
@@ -25,7 +25,7 @@ Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/PREVENTION.md (the rows it reads), .github/workflows/ci.yml (the jobs),
               scripts/dod_check.py (resolves a ``ci:`` citation to a job that exists; this
-              checks the job is the right one), tests/test_measured_claims.py (P-234's real
+              checks the job is the right one), tests/test_measured_claims.py (P-242's real
               evidence)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; a CI job starts or stops running a single script; the
@@ -119,7 +119,7 @@ def test_every_prevention_row_names_a_ci_job_that_runs_its_evidence() -> None:
 
 
 def test_a_row_citing_the_claims_job_for_a_test_it_does_not_run_fails() -> None:
-    """P-234's old evidence: the re-derivation's tests and ``ci:claims``, which runs none."""
+    """P-242's old evidence: the re-derivation's tests and ``ci:claims``, which runs none."""
     row = (
         "| P-999 | a re-derivation defect | a-class | a finder | "
         "`test:tests/test_measured_claims.py::test_a_real_figure_in_the_wrong_role_fails` · "

@@ -573,7 +573,7 @@ class WorkerSettings:
             raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
         if not str(self.metrics_host).strip():
             raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
-        executor_kind(self.executor)  # P-300: an empty or unknown kind never starts a worker
+        executor_kind(self.executor)  # P-308: an empty or unknown kind never starts a worker
 
 
 # ---------------------------------------------------------------------------
@@ -798,7 +798,7 @@ Handler = Callable[[RunContext], tuple[str, dict[str, Any], str]]
 def run_executor_kind(params: Mapping[str, Any], settings: WorkerSettings) -> str:
     """The executor a run asks for: its own ``params.executor``, else the worker's setting —
     never a default of our own, so an empty kind reaches ``make_executor`` and is refused
-    there (P-300); the unsealed-override stamp reads the same answer."""
+    there (P-308); the unsealed-override stamp reads the same answer."""
     return str(params.get("executor") or settings.executor)
 
 
@@ -1628,7 +1628,7 @@ class Worker:
         run fails with ``sandbox unavailable``; there is no local fallback."""
         if ctx._executor is not None:
             return ctx._executor
-        # no default here: an empty kind reaches make_executor and is refused (P-300)
+        # no default here: an empty kind reaches make_executor and is refused (P-308)
         kind = run_executor_kind(ctx.params, self.settings)
         if kind != "docker" and self.settings.refuse_unsealed:
             raise SandboxUnavailable(
@@ -1751,7 +1751,7 @@ class Worker:
         """ADR-0023: a prod worker running unsealed under the override says so on every
         apparatus it writes (and so in every pack); nothing when sealed or in dev. A worker
         whose DEFAULTS are sealed stamps a run that asks for another executor in its own
-        parameters (only the override admits one), naming who set the override (P-248)."""
+        parameters (only the override admits one), naming who set the override (P-256)."""
         o = dict(self.settings.unsealed_override)
         if not o and self.settings.env == "prod":
             kind = self._executor_kind(ctx)
@@ -2695,7 +2695,7 @@ class Worker:
         the points-to-churn agreement has passed — read ONCE from the store, on one checks arm
         (the factory run's, GOV-3, else the repository's own) and one posture class (the run's
         measured one, else this deployment's), so a standard never crosses an arm or a posture
-        (P-311). :func:`crb.server.factory_standard.bind_readers` is the one binding."""
+        (P-319). :func:`crb.server.factory_standard.bind_readers` is the one binding."""
         return factory_standard.bind_readers(
             self.factory,
             repo,
