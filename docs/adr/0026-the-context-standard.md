@@ -1,7 +1,7 @@
 # ADR-0026 — The context standard: pre-registered context arms, a look rule with one error budget per cell, a leak guard, an entry gate, class sets held out by commit, and a library that reaches a brief only when measured
 
-**Status:** Proposed (DL-098; the values marked **[operator]** are proposals the operator fixes
-before stream R builds them; DL-099 records the library's scope)
+**Status:** Proposed (DL-086; the values marked **[operator]** are proposals the operator fixes
+before stream R builds them; DL-087 records the library's scope)
 **Date:** 2026-09-27
 **Apparatus impact:** none of its own. It rides ADR-0025's bump to **2.4**: every row of 2.4 or
 later stamps its context arm (`labels.context_arm`) and its class-set version
@@ -363,7 +363,7 @@ rule makes them prospective (item 10).
      narrowed to the global vocabulary in the same way.
 
 10. **The context library: six kinds, one nomenclature, two people, measured before it reaches a
-    brief** (scope: DL-099).
+    brief** (scope: DL-087).
     - **Kinds and ids.** Every entry is a `component`, `work-type`, `decision`, `convention`,
       `pattern` or `standard`, with the id `<kind>/<slug>`. A work type is an organisation class:
       its definition, global parent, rule, example commits and test standard (the failing test a
@@ -587,7 +587,7 @@ The values marked **[operator]** above are proposals until the operator fixes th
 row here. A criterion or gap line of the definition of done that states one carries
 `ADR-0026 [operator]` and follows the operator's choice; `scripts/dod_check.py` refuses one that
 does not, refuses a marker this table does not register, and refuses the marker once this ADR
-is accepted (docs/PREVENTION.md P-117).
+is accepted (docs/PREVENTION.md P-229).
 
 | item | the proposal | the words a criterion states it in |
 |---|---|---|
