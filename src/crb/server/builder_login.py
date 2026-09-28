@@ -61,7 +61,8 @@ Works with:   src/crb/builders/claude_code.py (``verify_login`` / ``login_resolu
               src/crb/server/routes/system.py (the ``builders`` probe),
               src/crb/server/routes/admin.py
               (the stored-token verify records here), src/crb/server/worker.py (a build that
-              meets a refused login records it; the claim check), src/crb/store/events.py (``append_event``),
+              meets a refused login records it; the claim check),
+              src/crb/store/events.py (``append_event``),
               src/crb/server/settings.py (``BuilderSettings.login_ttl_s``)
 Tested by:    tests/test_builder_login.py
 Touch when:   never for a new repository; a builder gains a verify (add it to
