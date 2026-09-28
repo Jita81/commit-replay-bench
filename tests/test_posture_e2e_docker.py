@@ -58,6 +58,7 @@ from crb.core.evidence import BuilderRef
 from crb.core.execution import DockerExecutor, DockerSettings
 from crb.core.git import GitRepo
 from crb.core.grade import GradeContext, grade
+from crb.core.mine import change_identity
 from crb.core.qualify import QUAL_ENV_UNLOADABLE, GoldWitness, qualify_task
 from crb.core.run import BuildAttempt, RunSpec, run
 from crb.core.runners import get_runner
@@ -138,6 +139,9 @@ def test_the_sealed_posture_provisions_qualifies_replays_and_never_blames_the_mo
         target_tests=runner.target_scope(cand.test_files),
         belt_scope=(),
         language="go",
+        # the change the commit carries, as the miner stamps it (a 2.4 row names it; the rows
+        # below are built straight from ``grade``, not through ``run``, which would stamp it)
+        labels={lg.LABEL_CHANGE_ID: change_identity(repo, feat)},
     )
     events: list[str] = []
 
