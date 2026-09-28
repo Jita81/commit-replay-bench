@@ -37,8 +37,9 @@ Works with:   src/crb/core/oracle/mutation.py (under test), src/crb/core/oracle/
               spans), src/crb/core/oracle/adequacy.py (the consumer of the number),
               tests/test_oracle_mutation_text.py (the text mutators for the other languages)
 Tested by:    tests/test_oracle_mutation.py
-Touch when:   a Python operator is added (the operator-set case and its hash change — an
-              apparatus consequence); the scoring rule for timeouts or errors changes (ADR).
+Touch when:   never for a new repository; a Python operator is added (the operator-set case and its
+              hash change — an apparatus consequence); the scoring rule for timeouts or errors
+              changes (ADR).
 """
 
 from __future__ import annotations

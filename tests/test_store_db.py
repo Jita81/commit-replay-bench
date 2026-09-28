@@ -273,6 +273,58 @@ def test_the_events_seq_lock_holds_a_second_writer_until_the_first_commits(
     assert _count(backend, "events") == 2
 
 
+def test_the_events_lock_is_held_even_inside_a_transaction_already_open(
+    backend: Backend,
+) -> None:
+    """P-429's rule for the events lock: ``BEGIN IMMEDIATE`` cannot run inside an open
+    transaction, and a caller's deferred ``BEGIN`` holds no write lock, so the helper takes
+    it explicitly (a zero-row write) instead of swallowing the refused ``BEGIN IMMEDIATE``.
+    After it returns, a second connection must not be able to take SQLite's write lock.
+    PostgreSQL's advisory lock has no such case (the concurrency test above covers it)."""
+    import sqlite3
+
+    from crb.store.events import lock_event_writes
+
+    if backend.dialect != "sqlite":
+        pytest.skip("SQLite's BEGIN IMMEDIATE only; PostgreSQL takes an advisory lock")
+    store_db.init_db(backend.engine)
+    database = backend.engine.url.database
+    assert database
+    with backend.factory() as s:
+        s.execute(text("BEGIN"))  # a transaction, but no write lock
+        lock_event_writes(s)
+        other = sqlite3.connect(database, timeout=0)
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                other.execute("BEGIN IMMEDIATE")
+        finally:
+            other.close()
+        s.rollback()
+
+
+def test_a_refused_begin_immediate_already_took_sqlites_write_lock(tmp_path: Path) -> None:
+    """The accident P-429's and P-430's records describe: SQLite compiles ``BEGIN IMMEDIATE``
+    to ``OP_Transaction`` (which takes the write lock) BEFORE ``OP_AutoCommit`` (which raises
+    "cannot start a transaction within a transaction"), so the old helpers that swallowed
+    that error did hold the write lock. The fail-closed helpers no longer depend on that
+    order; this test pins it, so the records are corrected if a SQLite release changes it."""
+    import sqlite3
+
+    database = tmp_path / "order.db"
+    first = sqlite3.connect(database, isolation_level=None)
+    other = sqlite3.connect(database, timeout=0, isolation_level=None)
+    try:
+        first.execute("CREATE TABLE t (x)")
+        first.execute("BEGIN")  # deferred: no write lock yet
+        with pytest.raises(sqlite3.OperationalError, match="within a transaction"):
+            first.execute("BEGIN IMMEDIATE")
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            other.execute("BEGIN IMMEDIATE")
+    finally:
+        other.close()
+        first.close()
+
+
 # ---------------------------------------------------------------------------
 # append-only triggers — one test per table, UPDATE and DELETE each
 # ---------------------------------------------------------------------------

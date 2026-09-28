@@ -58,9 +58,10 @@ Works with:   tests/conftest.py (turns it into fixtures), src/crb/core/grade.py 
               the walkthrough's "public" repository)
 Tested by:    tests/test_grade.py, tests/test_mine.py, tests/test_workspace.py, tests/test_git.py,
               tests/test_worker.py
-Touch when:   a belt or miner rule needs a shape the history cannot show — add an OPT-IN commit
-              method (never change the three base commits: ``feat_task`` and the walkthrough
-              depend on them) and an ``apply_*`` helper named for the belt it defeats.
+Touch when:   never for a new repository; a belt or miner rule needs a shape the history cannot show
+              — add an OPT-IN commit method (never change the three base commits: ``feat_task`` and
+              the walkthrough depend on them) and an ``apply_*`` helper named for the belt it
+              defeats.
 """
 
 from __future__ import annotations

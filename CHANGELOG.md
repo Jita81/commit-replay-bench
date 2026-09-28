@@ -14,12 +14,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **One governed delivery, end to end: the entry gate reads the registered readings**
   (the north-star Wave 2 integration; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
-  The seven Wave 2 streams are merged on `feat/ns2` with their ids renumbered after
-  `feat/ns1`'s. The factory's entry gate now reads a cell's standard from routing.v2's
-  registered readings, signed only by a sign-off on its arm, class-set version and reading
-  (`crb.server.factory_standard`). A new test walks sealed rows, a reading, a sign-off, an
-  authored test, a build, a required strength probe and a pull request on a fake forge, and
-  shows each gate stopping the chain before any spend (`product.truth.219`).
+  The seven Wave 2 streams are merged on `feat/ns2` on Wave 1's final form (#63 to #65), their
+  ids renumbered after Wave 1's. The factory's entry gate now reads a cell's standard from
+  routing.v2's registered readings, signed only by a sign-off on its arm, class-set version
+  and reading (`crb.server.factory_standard`). A new test walks sealed rows, a reading, a
+  sign-off, an authored test, a build, a required strength probe and a pull request on a fake
+  forge, and shows each gate stopping the chain before any spend (`product.truth.219`).
 
 - **Every public page is gated, README's measured numbers re-derive, and the quality baseline is named, never claimed**
   (north-star Wave 2, stream C; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
@@ -81,59 +81,36 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   and worker refuse an empty kind, docker's exit 125 is told from a suite's, each pack and
   worktree has its own files. The pack names the files the tests wrote.
 
-- **Find your way: every screen says what it is, and the decision records open in the product**
-  (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
-  The sign-in page, the help pages and the unknown address carry an About block; the
-  architecture decision records are bundled and open at `/help/docs/ADR-nnnn` (DL-073); an
-  approver's Home is the progress report; a failed read on Home is an error with Retry and
-  its tasks read Unavailable; `POST /repos/{name}/baseline-read` records that a person read
-  the baseline, which completes task 6 (DL-074).
+- **The security and governance review's findings closed: sign-in, evidence, store, delivery**
+  (the operator's internal review, streams A to D; [#63](https://github.com/Jita81/commit-replay-bench/pull/63)).
+  A login attempt counts before its password is checked, the identity provider never demotes
+  the last admin who can sign in, and sign-out, deactivation and every credential change are
+  events (DL-076, DL-077). Only rows this deployment measured license anything, and every chain
+  is verified on the server (DL-078, DL-079). A read-modify-write holds its table's one lock
+  from read to commit, and no statement the product can issue rewrites an append-only row
+  (DL-080, DL-081, DL-085). A route-gate override needs a second person and never delivers on
+  a false-Q1 cell; the licence is for the change delivered (DL-082 to DL-084).
 
-- **Keyboard, phone and navigation** (north-star Wave 1, stream A1; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
-  Five keyboard steps in the walkthrough (`11b-keyboard`, in the story after 08 and 10) open a
-  map cell, a reason code and a term, and reach the sign-off, revoke and freeze controls by Tab
-  alone; under 640 px the navigation folds into a Menu; `/login` is swept for WCAG 2.1 AA
-  before sign-in; a viewer reaches `/oracle` and `/learn` from the navigation (DL-072).
+- **Wave 1 finished: accounts, the Learn page's writes, keyboard and wayfinding**
+  (north-star Wave 1, streams U, L, A1 and A2; [#65](https://github.com/Jita81/commit-replay-bench/pull/65)).
+  Settings › Users shows each account's kind, state and last sign-in; an admin sets a password,
+  turns an account off and on and signs it out everywhere; sign-ins and refused local
+  sign-ins are audited, and a password set rotates the session nonce (DL-068, DL-069). An
+  operator accepts a refusal line, registers strengthening items and queues a re-measurement
+  from Learn, each audited (DL-070, DL-071, DL-075). Under 640 px the navigation folds into a Menu, and the
+  walkthrough reaches every control by Tab (DL-072). The decision records open at
+  `/help/docs/ADR-nnnn`, and a recorded baseline read completes task 6 (DL-073, DL-074).
 
-- **The learning loop acts from the Learn page, behind a named person**
-  (north-star Wave 1, stream L; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
-  An operator accepts a refusal line, registers the strengthening items and queues the
-  re-measurement plan from the page, each an audited event; a what-if plan is never queued,
-  through the same submit gate as `POST /runs` (DL-070, DL-071). A walkthrough makes a real
-  guard refusal and walks the page for every persona.
-
-- **Accounts and sign-in: every stop names its way forward, and every sign-in is on the record**
-  (Wave 1, stream U; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
-  Settings › Users shows each account's kind, active state and last sign-in; an admin sets a
-  password, turns an account off and on, signs it out everywhere and reads its History; everyone
-  changes their own password. `/login` names who sets a new password and the wait after a 429,
-  and a failed organisation sign-in returns to the form with its reason. Every sign-in joins the
-  account's trail, retried on a lost race; a name that is no account is stored nowhere
-  (DL-068). A password set rotates the session nonce (DL-069). A walkthrough times a recovery.
-
-- **Each value stream measures its own flow**
-  (north-star Wave 1, stream M; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
-  `GET /flow?repo=` derives each stream's lead time, spend and counts from stored records, and
-  each stream's screen shows its own. Money is summed by one rule in `/flow` and `/value`: an
-  unpriced row is never $0, and the per-pound figures are withheld while one is in scope
-  (DL-066). `POST /reviews` takes the reviewer's minutes (DL-067, revision 0012). A cell first
-  routing deliver, the install and the first green `/health` are recorded when they happen,
-  never back-dated (ADR-0028).
-
-- **Every cost and latency carries its n, its interval and its apparatus**
-  (north-star Wave 1, stream E, F35; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
-  Cost and latency are means over the attempts with a known value, each with n, a Student-t
-  95 % interval and the apparatus and posture class; an unknown is a dash, and a known $0 now
-  counts as $0, so a cell mixing free and paid attempts can read lower than before. A fold
-  over rows of two apparatus versions, posture classes or checks arms is refused with the
-  reason (DL-065).
-
-- **The definition of done corrects its own record** (north-star Wave 0, stream D; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
+- **The record corrects itself; costs carry their n; each stream measures its own flow**
+  (north-star Waves 0 and 1, streams D, E and M;
+  [#64](https://github.com/Jita81/commit-replay-bench/pull/64)).
   `scripts/dod_check.py` refuses a gap line no criterion cites, a plan item that is not a gap
-  and a top-ranked gap in no wave, and a retired id must have been a gap in the history
-  (DL-063, DL-064). `scripts/check_branch_protection.py` compares the required checks with the
-  CI jobs, an aggregator standing for the shards and parts it needs. The walkthrough serves only its own checkout, and every axe scan in the browser
-  suites waits for the page to settle.
+  and a ranked gap in no plan table (DL-063, DL-064); `scripts/check_branch_protection.py`
+  compares the required checks with the CI jobs. Cost and latency are means with n, an interval
+  and the apparatus; a known $0 counts, and a fold across apparatus versions, posture classes or
+  checks arms is refused (F35, DL-065). `GET /flow?repo=` derives each stream's lead time and
+  spend from stored records under one money rule (DL-066); `POST /reviews` takes minutes
+  (DL-067).
 
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile

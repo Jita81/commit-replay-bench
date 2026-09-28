@@ -28,8 +28,8 @@ Works with:   src/crb/observability/metrics.py (under test), src/crb/server/work
               (``Harness`` / ``FakeBuilder``), docs/DEPLOYMENT.md#9-observability (the table
               the ratchet reads), tests/test_server_system.py (the API-side series)
 Tested by:    tests/test_observability_metrics.py
-Touch when:   a metric is added or relabelled (add its row to docs/DEPLOYMENT.md and a case
-              here); never for a new repository.
+Touch when:   never for a new repository; a metric is added or relabelled (add its row to
+              docs/DEPLOYMENT.md and a case here).
 """
 
 from __future__ import annotations

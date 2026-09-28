@@ -138,7 +138,7 @@ export const HINTS = {
   'flow.installed_to_healthy':
     'From this deployment’s install to the first time /health read green. The install is dated only when the server was first started on an empty database; a deployment upgraded to this release shows a dash with the reason rather than a guessed date.',
   'flow.password_set_to_signed_in':
-    'From an admin setting someone else’s password to that person signing in again: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted. Only an admin sees it, as only an admin sees the accounts.',
+    'From an admin setting someone else’s password to that person’s first sign-in after it: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted. Only an admin sees it, as only an admin sees the accounts.',
   'flow.spend':
     'What this stream spent, summing only the rows whose cost is a measurement. A row that reported no price is never counted as zero, so the figure is a floor and the line underneath says how many rows are missing from it.',
   'flow.spend_total':
@@ -1550,7 +1550,7 @@ export const HINTS = {
   'field.learn.note':
     'One line saying why, written into the corpus file as a comment above the line, for whoever reads it next. It stays one line: a line break would end the comment.',
   'field.learn.command':
-    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line.',
+    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line. The field starts with the cut example as recorded: add the rest after it.',
   'field.learn.prefix':
     'Which guard family to file the refusal under. The refused corpus takes archaeology and network lines only; an attempt to tamper with the tests is judged elsewhere.',
   'button.learn.accept_refusal':
@@ -1586,7 +1586,6 @@ export const HINTS = {
   'link.learn.queued_runs':
     'The runs page for this repository, where the runs just queued report their progress.',
 
-  // ── /ledger (screens/Ledger/LedgerPage.tsx)
   // the loop's hand-offs and position (G-172, G-348, G-352)
   'col.learn_strengthen.remeasure':
     'Opens a run for this item’s task once the tests are stronger: re-qualify it, re-score its oracle, or re-run the negative controls. Only an operator sees this column.',
@@ -1616,6 +1615,8 @@ export const HINTS = {
     'The Learn page’s strengthening report for this repository: the finding on this stage is closed by stronger tests, and that report names the work and re-runs the oracle and the controls.',
   'link.factory.learn':
     'The Learn page’s strengthening report for this repository: an item stopped for a weak test is closed by stronger tests, and that report names the work.',
+
+  // ── /ledger (screens/Ledger/LedgerPage.tsx)
   'button.ledger.export_jsonl':
     'Download the rows (filtered to the repository if one is chosen) as JSON lines, the form the chain verifies.',
   'button.ledger.export_csv':

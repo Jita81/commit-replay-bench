@@ -157,6 +157,22 @@ def add_event(env: Env, **kw: Any) -> None:
         s.commit()
 
 
+def account_event(env: Env, n: int, action: str, hhmm: str, *, actor: str, target: str) -> None:
+    """One ``user.*`` event on 2026-09-01 at ``hhmm``, as ``record_user_event`` writes it."""
+    add_event(
+        env,
+        event_id=f"{n:032x}",
+        trace_id=f"{target[:8]}".ljust(32, "0"),
+        seq=n,
+        timestamp=f"2026-09-01T{hhmm}:00+00:00",
+        stage="system",
+        action=action,
+        status="ok",
+        actor=actor,
+        payload_json={"target": target},
+    )
+
+
 class TestShape:
     def test_every_stream_the_definition_of_done_names_is_served_in_order(self, env: Env) -> None:
         body = reading(env)
@@ -802,23 +818,10 @@ class TestRunThePlatform:
     def test_the_account_figures_are_an_admins_only(self, env: Env) -> None:
         # the admin-only user list (GET /users) is refused below admin; the same deployment's account
         # counts and the timing of one person's recovery are refused on /flow too
-        add_event(
-            env,
-            event_id="a" * 32,
-            trace_id="b" * 32,
-            seq=1,
-            timestamp="2026-09-01T10:00:00+00:00",
-            stage="system",
-            action="user.password_set",
-            status="ok",
-            actor=user_id("root"),
-            payload_json={"target": user_id("viewer1")},
-        )
-        with env.factory() as db:
-            user = db.get(User, user_id("viewer1"))
-            assert user is not None
-            user.last_login = "2026-09-01T10:30:00+00:00"
-            db.commit()
+        root, viewer = user_id("root"), user_id("viewer1")
+        account_event(env, 1, "user.signed_in", "09:55", actor=root, target=root)
+        account_event(env, 2, "user.password_set", "10:00", actor=root, target=viewer)
+        account_event(env, 3, "user.signed_in", "10:30", actor=viewer, target=viewer)
         # the env is signed in as the admin, who reads them (before viewer1 signs in again)
         s = stream(reading(env), "run-the-platform")
         assert s["counts"]["admins_active"] == 1 and s["counts"]["recoveries_started"] == 1
@@ -874,24 +877,10 @@ class TestRunThePlatform:
         assert s["counts"]["install_recorded"] == 1
 
     def test_a_recovery_is_timed_from_the_reset_to_the_next_sign_in(self, env: Env) -> None:
-        target = user_id("viewer1")
-        add_event(
-            env,
-            event_id="a" * 32,
-            trace_id="b" * 32,
-            seq=1,
-            timestamp="2026-09-01T10:00:00+00:00",
-            stage="system",
-            action="user.password_set",
-            status="ok",
-            actor=user_id("root"),
-            payload_json={"target": target},
-        )
-        with env.factory() as s:
-            user = s.get(User, target)
-            assert user is not None
-            user.last_login = "2026-09-01T10:30:00+00:00"
-            s.commit()
+        root, viewer = user_id("root"), user_id("viewer1")
+        account_event(env, 1, "user.signed_in", "09:55", actor=root, target=root)
+        account_event(env, 2, "user.password_set", "10:00", actor=root, target=viewer)
+        account_event(env, 3, "user.signed_in", "10:30", actor=viewer, target=viewer)
         s2 = stream(reading(env), "run-the-platform")
         lt = lead(s2, "password_set_to_signed_in")
         assert lt["n"] == 1 and lt["median_s"] == 1800.0
@@ -913,6 +902,61 @@ class TestRunThePlatform:
         )
         s = stream(reading(env), "run-the-platform")
         assert s["counts"]["recoveries_started"] == 0
+
+    def test_each_reset_is_timed_to_the_first_sign_in_after_it_never_the_latest(
+        self, env: Env
+    ) -> None:
+        """``User.last_login`` is overwritten at every sign-in, so pairing a reset with it
+        timed the reset to the LATEST sign-in: a person who signed in again an hour later
+        lengthened the recovery, and two resets of one account shared one sign-in."""
+        root, viewer = user_id("root"), user_id("viewer1")
+        account_event(env, 1, "user.signed_in", "09:55", actor=root, target=root)
+        account_event(env, 2, "user.password_set", "10:00", actor=root, target=viewer)
+        account_event(env, 3, "user.signed_in", "10:30", actor=viewer, target=viewer)
+        account_event(env, 4, "user.signed_in", "11:30", actor=viewer, target=viewer)
+        account_event(env, 5, "user.password_set", "12:00", actor=root, target=viewer)
+        account_event(env, 6, "user.signed_in", "12:10", actor=viewer, target=viewer)
+        with env.factory() as db:
+            user = db.get(User, viewer)
+            assert user is not None
+            user.last_login = "2026-09-01T12:10:00+00:00"
+            db.commit()
+        s = stream(reading(env), "run-the-platform")
+        lt = lead(s, "password_set_to_signed_in")
+        assert (lt["n"], lt["median_s"], lt["min_s"], lt["max_s"]) == (2, 1200.0, 600.0, 1800.0)
+        assert s["counts"]["recoveries_started"] == 2
+
+    def test_the_flow_reading_never_times_a_moment_from_a_column_a_later_event_overwrites(
+        self,
+    ) -> None:
+        """docs/PREVENTION.md P-402: ``User.last_login`` holds only the latest sign-in, so a
+        lead time paired with it moved whenever the person signed in again. The flow reading
+        reads recorded events; it never reads that column."""
+        import ast
+
+        import crb.server.flow as flow_mod
+
+        src = Path(flow_mod.__file__).read_text(encoding="utf-8")
+        reads = [
+            node.lineno
+            for node in ast.walk(ast.parse(src))
+            if isinstance(node, ast.Attribute) and node.attr == "last_login"
+        ]
+        assert reads == [], f"src/crb/server/flow.py reads User.last_login at lines {reads}"
+
+    def test_a_reset_before_sign_ins_were_recorded_is_counted_but_never_timed(
+        self, env: Env
+    ) -> None:
+        """A reset older than the deployment's first recorded sign-in may have been followed
+        by a sign-in nothing recorded, so the first recorded one could be a later one."""
+        root, viewer = user_id("root"), user_id("viewer1")
+        account_event(env, 1, "user.password_set", "10:00", actor=root, target=viewer)
+        account_event(env, 2, "user.signed_in", "10:30", actor=viewer, target=viewer)
+        s = stream(reading(env), "run-the-platform")
+        lt = lead(s, "password_set_to_signed_in")
+        assert lt["n"] == 0 and lt["median_s"] is None
+        assert "before this deployment recorded sign-ins" in lt["reason"]
+        assert s["counts"]["recoveries_started"] == 1
 
     def test_a_reset_nobody_has_signed_in_after_is_counted_but_not_timed(self, env: Env) -> None:
         add_event(

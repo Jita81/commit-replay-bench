@@ -320,14 +320,16 @@ def commit_audited(
     once ran out of the retries below and answered 500 (found by AUTH-1's regression
     test). On another dialect two writers can still read the same ``seq``; the loser's
     insert breaks ``uq_events_trace_seq``, which is a lost race, not a refusal, so the
-    transaction is rolled back and ``write`` runs again on fresh rows (DL-068).
+    transaction is rolled back and ``write`` runs again on fresh rows (DL-068). The break
+    can surface inside ``write`` too: a later query there (the next ``seq`` of the sign-in
+    trace, ADR-0028 §8) autoflushes the earlier insert, so both are guarded.
     """
     for attempt in range(AUDIT_ATTEMPTS):
         if before is not None:
             before()
         lock_event_writes(db)
-        write()
         try:
+            write()
             db.commit()
             return
         except IntegrityError:

@@ -29,8 +29,8 @@
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts (gate OPEN with false-Q1 = 0, rows
  *               listed, the JSONL export verifies with `crb ledger verify`),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a filter is added to `GET /grades` (docs/API.md) — add it to `FILTER_KEYS`
- *               and `GradeListParams` in ui/src/api/types.ts; never for a new repository.
+ * Touch when:   never for a new repository; a filter is added to `GET /grades` (docs/API.md) — add
+ *               it to `FILTER_KEYS` and `GradeListParams` in ui/src/api/types.ts.
  * Claims:       A verified chain proves the rows were not edited, reordered or removed — not
  *               that a clean row is mergeable
  *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).

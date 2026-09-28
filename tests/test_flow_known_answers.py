@@ -220,18 +220,17 @@ def served(tmp_path: Path) -> dict[str, Any]:
         stamp(s, n := n + 1, at("11:30"), ALPHA, "bug.fix", checks_arm="on")
         stamp(s, n := n + 1, at("11:40"), BETA, "bug.fix")
         stamp(s, n := n + 1, at("12:30"), ALPHA, "bug.fix")
-        # an admin recovers viewer1, who signs in 30 minutes later
-        event(
-            s,
-            n := n + 1,
-            "user.password_set",
-            at("10:00"),
-            {"target": user_id("viewer1")},
-            actor=user_id("root"),
-        )
-        viewer = s.get(User, user_id("viewer1"))
+        # an admin recovers viewer1, who signs in 30 minutes later and again an hour after
+        # that: the recovery ends at the FIRST sign-in after the reset, never the latest
+        # (P-402); the admin's own sign-in before it shows sign-ins were being recorded
+        root, viewer_id = user_id("root"), user_id("viewer1")
+        event(s, n := n + 1, "user.signed_in", at("09:55"), {"target": root}, actor=root)
+        event(s, n := n + 1, "user.password_set", at("10:00"), {"target": viewer_id}, actor=root)
+        for hhmm in ("10:30", "11:30"):
+            event(s, n := n + 1, "user.signed_in", at(hhmm), {"target": viewer_id}, actor=viewer_id)
+        viewer = s.get(User, viewer_id)
         assert viewer is not None
-        viewer.last_login = at("10:30")
+        viewer.last_login = at("11:30")  # the column keeps only the latest; never read
         s.commit()
 
     reviews = DbReviewLedger(factory)

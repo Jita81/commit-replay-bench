@@ -35,10 +35,11 @@ PostgreSQL behave identically.
 Navigation
 ----------
 What it is:   The job queue — the ``runs`` table driven as a durable, crash-safe work queue.
-What it does: Enqueues runs, hands each to exactly one worker, measures liveness by
-              heartbeat, re-queues (then abandons) runs whose worker died, refuses a stale
-              worker's writes, and supports cooperative cancellation. Every reclaim and
-              abandonment is recorded as a ``system`` event, never silently.
+What it does: Enqueues runs (or stages them in a caller's own transaction), hands each to
+              exactly one worker, measures liveness by heartbeat, re-queues (then abandons)
+              runs whose worker died, refuses a stale worker's writes, and supports
+              cooperative cancellation. Every reclaim and abandonment is recorded as a
+              ``system`` event, never silently.
 How:          ``claim_next`` flips ``queued → running`` in one locked transaction (``BEGIN
               IMMEDIATE`` / ``FOR UPDATE SKIP LOCKED``); ``heartbeat`` / ``progress`` refresh
               the stamp; ``reclaim_stale`` compares stamps to a threshold in Python;

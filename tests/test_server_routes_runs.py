@@ -714,9 +714,10 @@ class TestCredentialPresence:
         """P-160, the route half of P-003's class: a second route that queues runs (Learn's
         re-measurement queue) enqueued them with no credential check, so a cell whose builder
         had no key was queued to fail at $0. Every function in the server that calls
-        ``.enqueue(`` (or stages a run with ``stage_queued(``) must call ``submit_refusals`` —
-        the one gate ``POST /runs`` applies — or be named here with the reason it cannot
-        queue a build."""
+        ``.enqueue(`` (or stages a run with ``stage_queued(``, which puts a run on the queue
+        inside the caller's transaction — EI-1, P-420) must call ``submit_refusals`` — the
+        one gate ``POST /runs`` applies — or be named here with the reason it cannot queue a
+        build."""
         import ast
 
         queue_calls = {"enqueue", "stage_queued"}

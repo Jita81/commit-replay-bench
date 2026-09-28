@@ -23,8 +23,9 @@ Works with:   src/crb/intake/feedback.py (under test), src/crb/factory/readiness
               open questions it renders), src/crb/core/routing.py (the route words),
               tests/test_intake_draft.py (the drafts it renders)
 Tested by:    tests/test_intake_feedback.py
-Touch when:   the comment gains a section — say what closes the gap in the same sentence,
-              and keep the renderer deterministic or the idempotent re-post breaks.
+Touch when:   never for a new repository; the comment gains a section — say what closes the gap in
+              the same sentence, and keep the renderer deterministic or the idempotent re-post
+              breaks.
 """
 
 from __future__ import annotations

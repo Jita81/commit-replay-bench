@@ -21,16 +21,14 @@ on its own: the register acts only under an operator's switch, and each report's
 made here by an operator and recorded with their name." (`help.ts` About copy for `/learn`; the
 header purpose says the same and the eyebrow reads `Instrument · Learn`.) **[aspiration — this artefact's specification; its criteria state what is met]**
 
-the `INSTRUMENT` list in `Layout.tsx`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
-`Layout.tsx:121`), from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
-that class's details open, or from a screen that reveals a need for the strengthen report —
-a cell withheld for its oracle on the Baseline map, the controls gate on Oracle, an amber
-controls stage on the Connection walk, an item stopped for a weak test on the Factory — each
-of which opens `/learn?repo=#strengthen`. A line under the header says which of the loop's six
-steps happen here. Pick a repository and leave with the prevention register — every
-**Entry → exit.** Arrive by the Instrument nav entry `Learn` (every role, like
-the three reads behind it: `INSTRUMENT` in `Layout.tsx`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
-bug class with its lever and level, before → after with n and the bar, its status and what
+**Entry → exit.** Arrive by the Instrument nav entry `Learn` (every role, like the three reads
+behind it: `INSTRUMENT` in `Layout.tsx`), from a Decisions `prevention` row, which opens
+`/learn?repo=&class=` with that class's details open, or from a screen that reveals a need for
+the strengthen report — a cell withheld for its oracle on the Baseline map, the controls gate on
+Oracle, an amber controls stage on the Connection walk, an item stopped for a weak test on the
+Factory — each of which opens `/learn?repo=#strengthen`. A line under the header says which of
+the loop's six steps happen here. Pick a repository and leave with the prevention register —
+every bug class with its lever and level, before → after with n and the bar, its status and what
 happens next (an operator can throw the switch, revert a change or register a filed item from
 here) — and three derivations of its ledger: refusal classes with the spend they cost and a
 verdict that reads `unsure` until a named person has decided it; the cells withheld from
@@ -44,17 +42,18 @@ registered) after a registration, `Re-qualify`, `Re-score` and `Re-run controls`
 `/runs?repo=&new=<kind>&tasks=<the item's task>` from an operator's strengthening row, `Runs`
 → `/runs?repo=` from the plan and after a queue, and a class's evidence → `/ledger?repo=`. The
 plan can also be read against a named apparatus version before a bump; that what-if plan
-offers no Queue control. With no repository chosen the body is the empty state `Pick a repository` and
-the only way forward is the picker in the header **[aspiration — this artefact's specification; its criteria state what is met]**.
+offers no Queue control. With no repository chosen the body is the empty state `Pick a repository`,
+and it offers two ways forward: choose one in the picker in the header, or `Connect a repository`
+(`/connect`) from the body **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** The page never decides on its own. The three reports write only when an operator
 makes one of the three decisions they hand off to — `Decide`, `Register` or `Queue runs` — and
 each is that person's act, recorded with their name (this replaces the earlier non-goal "the
 three reports never write", which contradicted G-532; STANDARD §2: "not yet" is a gap, not a
-non-goal). The page itself judges no refusal (every served verdict is `unsure` by
-construction), composes no body (a request names an id and the server re-derives the line, the
+non-goal). The page itself judges no refusal (the product never decides a verdict: a class reads `unsure`
+until a person records `honest` or `refuse`, and that decision is served with their name), composes no body (a request names an id and the server re-derives the line, the
 item and the run from the ledger), spends nothing without confirming the estimate first, and
-offers a viewer none of the three. The register card writes only what an operator does with its
+offers a viewer none of the three [measured — n = 5 tests at this commit: `tests/test_server_routes_learn.py::test_refusals_empty_then_one` (every class reads `unsure`), `tests/test_server_routes_learn.py::test_every_learn_write_refuses_a_field_it_does_not_name` (a request names ids and nothing else), and in `ui/src/screens/Learn/LearnPage.test.tsx` "a class already decided reads its verdict and who decided it, and is not offered the form again", "queueing a re-measurement confirms the plan’s own estimate before anything is sent (G-532)" and "offers a viewer none of the three decisions (they are operator acts at the API too)"; method: those tests; apparatus n/a, a property of the product's own code, not a graded row]. The register card writes only what an operator does with its
 controls, each a record naming the person; it never writes a grader key and never computes a
 verdict in the browser. No report derives a route in the browser (the held reason and the
 threshold are the served routing policy's) or blends a rate across apparatus versions **[aspiration — this artefact's specification; its criteria state what is met]**.

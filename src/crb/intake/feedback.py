@@ -45,8 +45,9 @@ Works with:   src/crb/intake/client.py (the labels and the marker),
               src/crb/factory/standard.py (the entry gate's decision it renders),
               src/crb/server/intake.py (posts the text through the adapter)
 Tested by:    tests/test_intake_feedback.py
-Touch when:   the comment gains a section (keep it deterministic); a routing word is added
-              (gloss it in ``ROUTE_WORDS`` or the comment will show a bare code).
+Touch when:   never for a new repository; the comment gains a section (keep it deterministic); a
+              routing word is added (gloss it in ``ROUTE_WORDS`` or the comment will show a bare
+              code).
 """
 
 from __future__ import annotations

@@ -16,8 +16,8 @@ Works with:   src/crb/server/routes/oracle.py (under test), src/crb/core/oracle/
               (the bands and gates), src/crb/server/routes/runs.py (``event_to_model``),
               tests/fixtures/server_seed.py, docs/API.md (oracle adequacy)
 Tested by:    tests/test_server_routes_oracle.py
-Touch when:   the ``oracle.score`` or ``controls.report`` event shape changes in the worker (the
-              seed and these cases together).
+Touch when:   never for a new repository; the ``oracle.score`` or ``controls.report`` event shape
+              changes in the worker (the seed and these cases together).
 """
 
 from __future__ import annotations

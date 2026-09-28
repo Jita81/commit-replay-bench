@@ -20,9 +20,9 @@ Works with:   src/crb/core/routing.py (under test), src/crb/core/reading.py (``A
               src/crb/core/ledger.py (``CellStats`` / ``CellKey``), tests/test_routing_v2.py
               (the same rule driven through readings and the map)
 Tested by:    tests/test_routing.py
-Touch when:   never to make a threshold LESS strict without an ADR (docs/CONTRIBUTING.md); a
-              clause or reason code is added (a case per branch here and a reason-code coverage
-              update).
+Touch when:   never for a new repository; never to make a threshold LESS strict without an ADR
+              (docs/CONTRIBUTING.md); a clause or reason code is added (a case per branch here and a
+              reason-code coverage update).
 """
 
 from __future__ import annotations

@@ -28,9 +28,9 @@
  *               ui/src/components/VerdictPill.tsx (the route pill with its sentence)
  * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   the routing policy gains a threshold or a reason code (an ADR-0003 amendment)
- *               — add it to the policy card and to ui/src/screens/Capability/contract.ts;
- *               never for a new repository.
+ * Touch when:   never for a new repository; the routing policy gains a threshold or a reason code
+ *               (an ADR-0003 amendment) — add it to the policy card and to
+ *               ui/src/screens/Capability/contract.ts.
  * Claims:       A route is a decision under a named policy version over measured evidence;
  *               `deliver` licenses a branch + PR, never a merge
  *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
