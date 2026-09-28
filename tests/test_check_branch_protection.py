@@ -198,6 +198,41 @@ def test_a_part_of_an_aggregator_is_never_required_in_its_own_name() -> None:
     ]
 
 
+UNREAD_MATRIX_CI_TEXT = """name: ci
+jobs:
+  lint:
+    name: lint
+  test:
+    name: test (py${{ matrix.python }})
+    strategy:
+      matrix:
+        include:
+          - python: "3.12"
+"""
+
+EMPTY_LIST_CI_TEXT = """name: ci
+jobs:
+  lint:
+    name: lint
+  test:
+    strategy:
+      matrix:
+        python: []
+"""
+
+
+@pytest.mark.parametrize(
+    "ci_text", [UNREAD_MATRIX_CI_TEXT, EMPTY_LIST_CI_TEXT], ids=["include-matrix", "empty-list"]
+)
+def test_a_matrix_the_scan_cannot_read_fails_closed_never_drops_the_job(ci_text: str) -> None:
+    """A job whose ``name:`` names a matrix key the scan did not read (an ``include:`` matrix,
+    a multi-line list), or whose matrix list is empty, used to expand to no check names at
+    all: it dropped out of the comparison, and a setting that did not require it passed."""
+    mod = _load()
+    with pytest.raises(SystemExit, match="could not read"):
+        mod.gating_contexts(ci_text)
+
+
 def test_the_real_workflow_requires_its_aggregators_and_none_of_their_parts() -> None:
     """Main's CI splits the suite into shards and the walkthrough into a story and screens
     shards; the required contexts stay on the `test` and `walkthrough` aggregators."""
