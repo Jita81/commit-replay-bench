@@ -47,7 +47,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from crb.core.deps import DepsBinding, ProvisionRefused
-from crb.core.provision import LANG_PYTHON, RECIPE_PY, LockInputs, describe_inputs
+from crb.core.provision import (
+    LANG_PYTHON,
+    RECIPE_PY,
+    LockInputs,
+    describe_inputs,
+    pin_line_refusal,
+)
 from crb.provision import RECIPES, SealedProvider
 from crb.provision.config import ProvisionConfig
 from crb.provision.fetch import MIRROR_INSIDE, FetchPlan
@@ -73,9 +79,17 @@ _PIP_ENV = {
 
 
 def lock_text(inputs: LockInputs) -> bytes:
-    """The one lock pip reads, written from the parsed pins (never the repository's file)."""
+    """The one lock pip reads, written from the parsed pins (never the repository's file).
+
+    Fail closed: every pin is matched field by field before it is written
+    (``pin_line_refusal``), whatever reader produced it, so a name, version, marker or hash
+    that would carry a second line, a comment or an option into ``/in/lock.txt`` is refused
+    ``PROVISION_SOURCE_REFUSED`` rather than written."""
     lines = []
     for p in inputs.py_pins:
+        why = pin_line_refusal(p)
+        if why:
+            raise ProvisionRefused("PROVISION_SOURCE_REFUSED", f"{p.source or 'a pin'}: {why}")
         line = f"{p.name}=={p.version}"
         if p.marker:
             line += f" {p.marker}"

@@ -30,14 +30,13 @@ Touch when:   never for a new repository; a flag on the fetch's ``docker run`` c
 
 from __future__ import annotations
 
-import os
-import shutil
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+import docker_wait
 from crb.core.deps import ProvisionRefused
 from crb.core.execution import SandboxUnavailable
 from crb.provision import fetch as fetch_mod
@@ -133,10 +132,10 @@ def test_fetch_user_is_the_worker_and_never_root(tmp_path: Path) -> None:
     for root in ("0:0", "root", "0"):
         with pytest.raises(SandboxUnavailable, match="root"):
             fetch_argv(_plan(), network="none", stage=tmp_path, image="i@sha256:x", user=root)
-    argv = fetch_argv(
-        _plan(), network="none", stage=tmp_path, image="i", user=f"{os.getuid()}:{os.getgid()}"
-    )
-    assert argv[argv.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
+    # a fixed non-root uid, not the host's: the suite runs as root on a fresh clone, where
+    # the host's uid is the very one the fetch refuses
+    argv = fetch_argv(_plan(), network="none", stage=tmp_path, image="i", user="10001:10001")
+    assert argv[argv.index("--user") + 1] == "10001:10001"
     assert "HTTPS_PROXY" not in " ".join(argv)  # no proxy without the sidecar
 
 
@@ -249,17 +248,8 @@ def test_a_denied_host_is_named_in_the_refusal(scratch: Path) -> None:
         run_fetch(plan, stage, config=cfg)
     assert ei.value.code == "PROVISION_FETCH_FAILED"
     assert "the proxy denied denied.invalid:443" in ei.value.message
-    # the sidecar and its network are gone
-    docker = shutil.which("docker") or "docker"
-    import subprocess
-
-    left = subprocess.run(
-        [docker, "ps", "-a", "-q", "--filter", "name=crb-fproxy-"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    assert left == ""
+    # the sidecar is gone (a bounded wait: its --rm removal finishes in the daemon, P-119)
+    assert docker_wait.gone("crb-fproxy-")
 
 
 @pytest.mark.docker

@@ -282,6 +282,15 @@ Make such a rule preferred, or use a ReadWriteMany claim. A worker on the dedica
 the api with it (the example in §3.1), or the store moves to a ReadWriteMany claim on a file system that keeps POSIX
 permissions (the store refuses a directory that its group can read).
 The claim has no `keep` policy, so a stored credential does not outlive the release.
+The kept patches, the evidence packs and the retained transcripts live in `evidenceStore`:
+one claim that the worker, which writes them at grade time, and the API, which serves them
+at `/grades/{row_hash}/patch` and `/grades/{row_hash}/transcript`, both mount at
+`$CRB_HOME/evidence` and `$CRB_HOME/transcripts` (P-045). It follows the secrets store's
+placement rule: a ReadWriteOnce claim pins both pods to one node, and only ReadWriteMany
+claims for both stores lift the pin (`evidenceStore.existingClaim`,
+`evidenceStore.accessMode: ReadWriteMany`). Unlike the secrets store it carries
+`helm.sh/resource-policy: keep`: the kept patches are the product's retained output, so
+delete the claim explicitly.
 The chart also refuses an `api.podLabels`, `worker.podLabels`, `api.podAnnotations` or
 `worker.podAnnotations` key that it sets itself (the pin's `crb.dev/secrets-store` label,
 the selector labels, `checksum/config`): the pod would carry the key twice.
@@ -414,13 +423,18 @@ run replaces this with a measured figure]**.
 
 Every check `.github/workflows/ci.yml` reports blocks a merge to `main` only while its name is
 on the branch's required-status-checks list, which is a repository setting, not a workflow
-file. The list names every job's check but the parts an aggregator stands for (below) —
+file. The list names every job's check the workflow had when it was last read, but the parts an aggregator stands for (below) —
 `sandbox-images`, which has no `continue-on-error` and fails on any skipped smoke test exactly
 as `container` does, and `sbom` among them — and is strict (a branch must be up to date)
 **[measured 2026-09-27 — n = 16 required checks against the 16 gating check names the
-workflow renders, method: `scripts/check_branch_protection.py` against
+workflow rendered then, method: `scripts/check_branch_protection.py` against
 `GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
-apparatus 2.3; the same list was read on 2026-09-26]**.
+apparatus 2.3; the same list was read on 2026-09-26]**. The `fresh-clone` job, which runs
+every gate on a fresh clone from `uv.lock` as root with no docker daemon (G-664), came later
+and is not on the list: an administrator adds its check name with the call below. Until then
+the saved reading (`tests/fixtures/branch_protection_main.json`) names it under
+`awaiting_protection` with that step, and the daily comparison against the live setting fails
+(DL-101).
 
 `scripts/check_branch_protection.py` compares the two both ways. It fails on a required check
 that no job reports (every pull request would wait on it for ever), a job that no required
@@ -547,8 +561,11 @@ bound (2 CPU / 2 GB per sandbox by default): size the pool for the concurrency y
 
 State: the database (everything that matters, including the append-only `grades` /
 `events` / `signoffs` / `evidence` tables), the worker's work volume (`worker.workDir`;
-reproducible from the repositories, convenient to keep) and the secrets store
-(`secretsStore`: the stored Claude Code login and the tracker token, §3.2).
+reproducible from the repositories, convenient to keep), the evidence store
+(`evidenceStore`: the kept patches and the retained transcripts the API serves, §3.2; back
+it up with the database — a row whose patch is gone can no longer be re-read or reviewed)
+and the secrets store (`secretsStore`: the stored Claude Code login and the tracker token,
+§3.2).
 
 * **Secrets store**: choose one of two, and write the choice down.
   * Back the claim up with a volume snapshot (or a copy of `/srv/crb-secrets/store`) held
@@ -576,12 +593,12 @@ There is one restore order for each choice. In both, ledger verify and the healt
 come after the pods start.
 
 Restore order when the secrets store is restored: database (on an *empty* target) → work
-volume → secrets store → `migrate` (no-op at head; it re-asserts the triggers) → start the
+volume → evidence store → secrets store → `migrate` (no-op at head; it re-asserts the triggers) → start the
 api and the worker → ledger verify → the `migrations` and `append_only` probes on
 `/api/v1/health`.
 
 Restore order when the credentials are supplied again: database (on an *empty* target) →
-work volume → `migrate` (no-op at head; it re-asserts the triggers) → start the api alone
+work volume → evidence store → `migrate` (no-op at head; it re-asserts the triggers) → start the api alone
 (`worker.replicaCount: 0`) → supply the credentials again through Settings → start the
 worker (`worker.replicaCount` back to its value) → ledger verify → the `migrations` and
 `append_only` probes on `/api/v1/health`.
@@ -707,6 +724,17 @@ before the upgrade (`kubectl -n crb scale deploy --replicas=0 -l
 the schema is not downgraded: do not roll back across it — restore the pre-upgrade dump
 instead.
 
+**Upgrading to the chart with the evidence store** (`evidenceStore`, P-045): before it, the
+worker kept its kept patches, evidence packs and transcripts on its own work claim, at
+`$CRB_HOME/evidence` and `$CRB_HOME/transcripts`. The new chart mounts the evidence claim
+over those two paths, which would hide what the worker kept. So when `worker.workDir.type`
+is `pvc`, the worker pod runs an init container, `evidence-carry`, before the worker starts:
+it copies both directories from the work claim into the evidence claim once, then leaves a
+marker (`.carried-from-work`) so later starts copy nothing. Nothing is deleted from the work
+claim; once `/grades/{row_hash}/patch` serves a patch written before the upgrade, you may
+remove the old directories from it. With `workDir.type: emptyDir` the worker kept nothing
+across restarts, and no carry runs (`tests/test_deploy_evidence_store.py`).
+
 Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up -d`
 ([deploy/README.md §5](../deploy/README.md#5-upgrade)).
 
@@ -809,7 +837,10 @@ that scrapes the api alone sees `crb_false_q1_total`, `crb_ledger_rows`,
 | one process (`crb serve` + `crb worker` on a host) | `/api/v1/metrics` | `127.0.0.1:9464/metrics` — loopback by default; a Prometheus on another host needs `CRB_METRICS_HOST=<the interface it may reach>` (or `0.0.0.0` behind a host firewall) — the series name repositories, builders, per-repository cost and installation ids |
 
 The table is checked against the code by `tests/test_observability_metrics.py`: a metric
-the module defines that is not here, or is here under other labels, fails the suite.
+the module defines that is not here, or is here under other labels, fails the suite. A
+series whose process is `worker` is served by the worker only: the api's exposition leaves
+it out, so an alert on its absence (the no-worker rule below) fires when no worker is
+scraped, and that suite fails if the api serves one.
 
 | name | type | labels | process | meaning |
 |---|---|---|---|---|
@@ -836,12 +867,17 @@ read at this commit; apparatus n/a]**.
 
 ### 9.2 Alert rules
 
-These rules cover the operating posture; expressions assume both targets are scraped.
+These rules cover the operating posture; expressions assume both targets are scraped. The
+chart ships them as a `PrometheusRule` (`prometheusRule.enabled`, off by default; its
+`labels` are what your Prometheus's `ruleSelector` matches), with these expressions word for
+word — `tests/test_deploy_alert_rules.py` fails when the chart and this table disagree — so
+no deployment retypes them. The render refuses the rules while `worker.metrics.port` is 0:
+three of them read series only the worker serves.
 
 | Alert | Expression | Meaning and action |
 |---|---|---|
-| **False-Q1** | `max(crb_false_q1_total) > 0` | the honesty floor is breached — stop delivery, [OPERATOR §8](OPERATOR.md#8-stop-conditions). `/health` is also `down` |
-| **No worker** | `/health` probe `worker` is not `ok` (`crb_http_*` cannot see it; probe `/api/v1/health` with a blackbox exporter, or alert on `crb_queue_depth > 0` with no fresh worker scrape for 3 × `heartbeat_s`) | queued runs will not start: no worker has checked in, one stopped checking in (the probe names it and its age), or a running run's heartbeat is stale |
+| **False-Q1** | `max(crb_false_q1_total) > 0` | the honesty floor is breached — stop delivery, [OPERATOR §8](OPERATOR.md#8-stop-conditions). `/health` is also `down`. Critical, fires at once |
+| **No worker** | `absent_over_time(crb_queue_depth[5m])` | no worker's exposition has been scraped for 5 minutes (`prometheusRule.noWorkerFor`; keep it several scrape intervals long), so queued runs will not start. A worker that is up but stopped checking in, or a running run whose heartbeat is stale, still serves the series: the `/health` probe `worker` names those (probe `/api/v1/health` with a blackbox exporter to alert on them too) |
 | **Sandbox failing closed** | `increase(crb_sandbox_unavailable_total[15m]) > 0` | the docker daemon, image or mounts are wrong on the worker host ([OPERATOR §7](OPERATOR.md#7-when-the-sandbox-is-unavailable)); no test ran on the host as a fallback |
 | **Deliveries failing** | `increase(crb_deliveries_total{outcome="failed"}[1h]) > 0` | the push or the pull-request call errored — the GitHub App's installation, permissions or the repository's default branch |
 

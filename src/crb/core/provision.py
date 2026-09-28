@@ -11,7 +11,8 @@ before any builder has touched a tree:
 * Every refusal is a :class:`~crb.core.deps.ProvisionRefused` with its code — a URL, VCS,
   path or foreign-registry source, an unpinned version, ``go.work``, a lock format this
   version does not provision, a package that must be built, a language that is not
-  provisioned at all.
+  provisioned at all. A ``uv.lock`` is read into the same hashed pins a requirements
+  lock gives, or refused; it is never provisioned loosely (G-951, G-962).
 * :func:`bundle_key` addresses a sealed set by its recipe, the fetch image's ID and the
   lockfile blob hashes. Go has ONE key over the union of the parent's and the gold's
   blobs (one module cache holds both — the D4 finding) and a parent-only key for the
@@ -25,10 +26,16 @@ Navigation
 What it is:   The pure half of dependency provisioning: lockfile readers over git objects, the
               refusal rules, the content-addressed bundle key and the closure selector.
 What it does: Reads ``go.mod``/``go.sum`` (and a local replace target's ``go.mod``),
-              pinned ``requirements*.txt`` (following ``-r``) or ``runner_opts.deps_lock``,
-              and ``package.json`` + ``package-lock.json`` at a commit; refuses every source
-              the ADR refuses; computes the bundle keys; says which set a trial selects.
-How:          ``GitRepo.show_blob`` / ``tree_names`` → per-language parser → ``LockInputs``
+              pinned ``requirements*.txt`` (following ``-r``; a ``--hash`` that is not a
+              whole sha256 refuses the lock, never dropped), a ``uv.lock`` (the project's
+              dependencies and the ``runner_opts.deps_groups`` it names, closed, hashed and
+              marked) or ``runner_opts.deps_lock`` (whose inner lists are alternatives: a
+              commit reads the first it carries), and ``package.json`` +
+              ``package-lock.json`` at a commit; refuses every source the ADR refuses;
+              computes the bundle keys (a uv lock's groups included); says which set a trial
+              selects.
+How:          ``GitRepo.show_blob`` / ``tree_names`` → per-language parser (``parse_uv_lock``
+              walks the lock's graph, joining markers per path) → ``LockInputs``
               (files + parsed pins) → ``bundle_key`` over sorted blob hashes →
               ``ClosureSelector`` (``crb.core.deps``) → ``select_role`` on a trial tree.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -321,7 +328,27 @@ _PY_SOURCE_OPTS = (
     "--trusted-host",
     "--no-index",
 )
-_PY_ALT_LOCKS: tuple[str, ...] = ("uv.lock", "poetry.lock", "pylock.toml", "Pipfile.lock")
+_PY_ALT_LOCKS: tuple[str, ...] = ("poetry.lock", "pylock.toml", "Pipfile.lock")
+#: The uv lock, read at the root when no requirements lock is there and none is declared.
+UV_LOCK = "uv.lock"
+#: The only package index a uv lock may name: the public one it was resolved against. The
+#: fetch reads the deployment's own index (a mirror of it); the lock's hashes pin the bytes.
+UV_PUBLIC_INDEX: frozenset[str] = frozenset({"https://pypi.org/simple", "https://pypi.org/simple/"})
+#: A package reached by more marker paths than this is refused, not approximated.
+_UV_MAX_PATHS = 32
+_HASH = re.compile(r"sha256:[0-9a-fA-F]{64}\Z")
+#: A project name as PEP 508 spells it, and a version as a pin may write it: the whole
+#: string, so a newline or an option can never ride inside one (``\Z``, not ``$``).
+_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?\Z")
+_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+!_-]*\Z")
+#: What an environment marker is written with: names, quoted values, comparisons and
+#: parentheses. No newline, ``#``, ``;`` or backslash, and no word that starts with ``-``
+#: (an option) — a marker is repository text that reaches the file pip reads.
+_MARKER_CHARS = re.compile(r"[A-Za-z0-9_.'\"()<>=!~ ,*+@/:-]*\Z")
+_OPTION_WORD = re.compile(r"(?:^|\s)-")
+
+#: A node of a uv lock's graph: a package (by identity) and the extra it was reached for.
+_UvNode = tuple[int, str]
 
 
 @dataclass(frozen=True)
@@ -337,6 +364,27 @@ class PyPin:
     @property
     def norm(self) -> str:
         return re.sub(r"[-_.]+", "-", self.name).lower()
+
+
+def safe_marker(marker: str) -> bool:
+    """True when ``marker`` (an environment marker, without its ``;``) cannot write a
+    second line, a comment or an option into a requirements file."""
+    return bool(_MARKER_CHARS.match(marker)) and not _OPTION_WORD.search(marker)
+
+
+def pin_line_refusal(pin: PyPin) -> str:
+    """Why ``pin`` cannot be written as one ``name==version [; marker] --hash=…`` line,
+    or ``""``: each field is matched whole, never trusted because a reader produced it."""
+    if not _NAME.match(pin.name):
+        return f"the name {pin.name!r} is not a package name"
+    if not _VERSION.match(pin.version):
+        return f"{pin.name}: the version {pin.version!r} is not a version"
+    if pin.marker and not (pin.marker.startswith(";") and safe_marker(pin.marker[1:])):
+        return f"{pin.name}=={pin.version}: the marker {pin.marker!r} is not a marker"
+    bad = [h for h in pin.hashes if not _HASH.match(h)]
+    if bad:
+        return f"{pin.name}=={pin.version}: {bad[0]!r} is not a sha256 hash"
+    return ""
 
 
 def _logical_lines(text: str) -> Iterable[tuple[int, str]]:
@@ -360,11 +408,34 @@ def _strip_comment(line: str) -> str:
     return re.split(r"(?:^|\s)#", line, maxsplit=1)[0].strip()
 
 
+_HASH_OPTION = re.compile(r"--hash(?:=|\s+)(\S+)")
+
+
+def _whole_hashes(tail: str, where: str) -> tuple[str, ...]:
+    """The ``--hash`` options after a pin, each a whole ``sha256:<64 hex>``. Anything else
+    in the tail — a hash of another kind or length, a ``--hash`` with no value, another
+    option — refuses the lock (PROVISION_SOURCE_REFUSED): a hash is never skipped, so the
+    pin written bare, nor cut to 64 characters (DL-101; docs/PREVENTION.md P-263)."""
+    hashes: list[str] = []
+    rest = tail.strip()
+    while rest:
+        m = _HASH_OPTION.match(rest)
+        if not m or not _HASH.match(m.group(1)):
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED",
+                f"{where}: {rest.split()[0] if not m else m.group(1)!r} after the pin is not "
+                "a whole --hash=sha256:<64 hex>",
+            )
+        hashes.append(m.group(1))
+        rest = rest[m.end() :].strip()
+    return tuple(hashes)
+
+
 def parse_requirements(
     reader: _Reader, path: str, *, seen: set[str] | None = None
 ) -> tuple[list[LockFile], list[PyPin]]:
     """Read ``path`` and its ``-r`` includes through git objects. Only ``name==version``
-    (with optional ``--hash`` options and markers) is accepted."""
+    (with optional markers, and ``--hash`` options each a whole sha256) is accepted."""
     seen = set() if seen is None else seen
     norm = posixpath.normpath(path)
     if norm in seen:
@@ -400,8 +471,9 @@ def parse_requirements(
             raise ProvisionRefused(
                 "PROVISION_SOURCE_REFUSED", f"{where}: the option {opt} is not supported"
             )
-        hashes = tuple(re.findall(r"--hash[=\s]+(sha256:[0-9a-fA-F]{64})", line))
-        spec = re.split(r"\s--hash", line, maxsplit=1)[0].strip()
+        first_hash = re.search(r"\s--hash", line)
+        cut = first_hash.start() if first_hash else len(line)
+        spec, hashes = line[:cut].strip(), _whole_hashes(line[cut:], where)
         if (
             "://" in spec
             or " @ " in spec
@@ -414,9 +486,11 @@ def parse_requirements(
         m = _PIN.match(spec)
         if not m or _RANGE.search(spec.split(";")[0]):
             raise ProvisionRefused("PROVISION_UNPINNED", f"{where}: {spec!r} is not name==version")
-        pins.append(
-            PyPin(m.group("name"), m.group("version"), hashes, (m.group("marker") or ""), where)
-        )
+        pin = PyPin(m.group("name"), m.group("version"), hashes, (m.group("marker") or ""), where)
+        why = pin_line_refusal(pin)
+        if why:
+            raise ProvisionRefused("PROVISION_SOURCE_REFUSED", f"{where}: {why}")
+        pins.append(pin)
     return files, pins
 
 
@@ -436,18 +510,74 @@ def _py_declares(reader: _Reader) -> bool:
     return bool(project.get("dependencies")) or bool(project.get("optional-dependencies"))
 
 
+def _declared_locks(config: RepoConfig) -> list[str | tuple[str, ...]] | None:
+    """``runner_opts.deps_lock`` as entries: a path every commit must carry, or a tuple of
+    alternatives of which a commit reads the first it carries. ``None`` when nothing is
+    declared; a malformed declaration is refused, never guessed at."""
+    raw = config.runner_opts.get("deps_lock")
+    if raw is None:
+        return None
+    entries = [raw] if isinstance(raw, str) else raw
+    out: list[str | tuple[str, ...]] = []
+    if isinstance(entries, list) and entries:
+        for entry in entries:
+            if isinstance(entry, str) and entry.strip():
+                out.append(entry)
+            elif (
+                isinstance(entry, list)
+                and entry
+                and all(isinstance(e, str) and e.strip() for e in entry)
+            ):
+                out.append(tuple(entry))
+            else:
+                out = []
+                break
+    if not out:
+        raise ProvisionRefused(
+            "PROVISION_NO_LOCK",
+            "runner_opts.deps_lock must name a lock path, or a list whose entries are paths or "
+            f"lists of alternative paths; got {raw!r}",
+        )
+    return out
+
+
+def _choose(reader: _Reader, entry: str | tuple[str, ...]) -> str:
+    """The path one declared entry reads at this commit: the path itself, or the first of
+    its alternatives the commit carries (none carried is ``PROVISION_NO_LOCK``)."""
+    if isinstance(entry, str):
+        return entry
+    for alt in entry:
+        if reader.blob(posixpath.normpath(alt)) is not None:
+            return alt
+    raise ProvisionRefused(
+        "PROVISION_NO_LOCK",
+        f"none of the declared alternatives ({', '.join(entry)}) is committed at this commit",
+    )
+
+
+def _deps_groups(config: RepoConfig) -> tuple[str, ...]:
+    """``runner_opts.deps_groups``: the dependency groups or extras a uv lock is read for,
+    besides the project's own dependencies."""
+    raw = config.runner_opts.get("deps_groups") or ()
+    groups = (raw,) if isinstance(raw, str) else tuple(raw)
+    if not all(isinstance(g, str) and g for g in groups):
+        raise ProvisionRefused(
+            "PROVISION_NO_LOCK", f"runner_opts.deps_groups must name groups; got {raw!r}"
+        )
+    return tuple(sorted(set(groups)))
+
+
 def _read_python(
     reader: _Reader, config: RepoConfig
-) -> tuple[str, tuple[LockFile, ...], tuple[PyPin, ...]]:
-    declared = config.runner_opts.get("deps_lock")
-    if isinstance(declared, str):
-        declared = [declared]
+) -> tuple[str, tuple[LockFile, ...], tuple[PyPin, ...], tuple[str, ...]]:
+    declared = _declared_locks(config)
     names = reader.names()
-    paths = (
-        [str(p) for p in declared]
-        if declared
-        else sorted(n for n in names if re.fullmatch(r"requirements[\w.-]*\.txt", n))
-    )
+    if declared:
+        paths = [_choose(reader, entry) for entry in declared]
+    else:
+        paths = sorted(n for n in names if re.fullmatch(r"requirements[\w.-]*\.txt", n))
+        if not paths and UV_LOCK in names:
+            paths = [UV_LOCK]
     if not paths:
         alt = [n for n in _PY_ALT_LOCKS if n in names]
         if alt:
@@ -461,17 +591,212 @@ def _read_python(
                 "PROVISION_NO_LOCK",
                 "the project declares dependencies but no requirements lock is committed",
             )
-        return RECIPE_NONE, (), ()
+        return RECIPE_NONE, (), (), ()
     files: list[LockFile] = []
     pins: list[PyPin] = []
     seen: set[str] = set()
+    selection: tuple[str, ...] = ()
     for p in paths:
-        f, pn = parse_requirements(reader, p, seen=seen)
+        if posixpath.basename(p) == UV_LOCK:
+            selection = _deps_groups(config)
+            f, pn = parse_uv_lock(reader, p, selection)
+        else:
+            f, pn = parse_requirements(reader, p, seen=seen)
         files += f
         pins += pn
     if not pins:
-        return RECIPE_NONE, tuple(files), ()
-    return RECIPE_PY, tuple(files), tuple(pins)
+        return RECIPE_NONE, tuple(files), (), selection
+    return RECIPE_PY, tuple(files), tuple(pins), selection
+
+
+def parse_uv_lock(
+    reader: _Reader, path: str, groups: Sequence[str] = ()
+) -> tuple[list[LockFile], list[PyPin]]:
+    """Read a ``uv.lock`` through git objects into the pinned, hashed set a requirements
+    lock gives: the project's own dependencies and the named ``groups`` (dependency groups
+    or extras), closed over every package's dependencies and the extras an edge asks for.
+
+    Each pin carries every wheel's hash, and the marker that reaches it: the conjunction
+    of the markers on one path from the project, joined by ``or`` over the paths, and none
+    when any path is unconditional — pip evaluates it on the fetch image. Refused, never
+    loosened: a source other than the public index (``PROVISION_SOURCE_REFUSED``); a
+    package every environment needs that has no wheel (``PROVISION_BUILD_REQUIRED``); a
+    lock version, a workspace or an edge this reader cannot resolve to one package
+    (``PROVISION_LOCK_UNSUPPORTED``); a group the lock does not carry (``PROVISION_NO_LOCK``).
+    The project itself is the tree under test and is never fetched."""
+    norm = posixpath.normpath(path)
+    if norm.startswith("../") or norm.startswith("/"):
+        raise ProvisionRefused("PROVISION_SOURCE_REFUSED", f"{path}: a lock outside the repository")
+    data = reader.blob(norm)
+    if data is None:
+        raise ProvisionRefused("PROVISION_NO_LOCK", f"{norm} is not committed at this commit")
+
+    def unsupported(why: str) -> ProvisionRefused:
+        return ProvisionRefused("PROVISION_LOCK_UNSUPPORTED", f"{norm}: {why}")
+
+    try:
+        lock = tomllib.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise unsupported(f"not a TOML lock ({exc})") from exc
+    if lock.get("version") != 1:
+        raise unsupported(f"lock version {lock.get('version')!r} is not provisioned (only 1)")
+    packages = [p for p in lock.get("package", []) if isinstance(p, dict)]
+    roots = [p for p in packages if _uv_is_project(p)]
+    if len(roots) != 1:
+        raise unsupported(
+            "a uv workspace is not provisioned"
+            if roots
+            else "names no project (no package whose source is the lock's own directory)"
+        )
+    root = roots[0]
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for p in packages:
+        by_name.setdefault(_norm_name(str(p.get("name", ""))), []).append(p)
+
+    def resolve(edge: Mapping[str, Any]) -> dict[str, Any]:
+        name = _norm_name(str(edge.get("name", "")))
+        cands = by_name.get(name, [])
+        if "version" in edge:
+            cands = [c for c in cands if c.get("version") == edge["version"]]
+        if len(cands) > 1 and "source" in edge:
+            cands = [c for c in cands if c.get("source") == edge["source"]]
+        if len(cands) != 1:
+            raise unsupported(f"the dependency {name} resolves to {len(cands)} packages")
+        return cands[0]
+
+    def edges(pkg: Mapping[str, Any], extra: str) -> list[Mapping[str, Any]]:
+        table = (
+            pkg.get("dependencies", [])
+            if not extra
+            else pkg.get("optional-dependencies", {}).get(extra, [])
+        )
+        return [e for e in table if isinstance(e, dict)]
+
+    start: list[Mapping[str, Any]] = edges(root, "")
+    dev = root.get("dev-dependencies", {})
+    optional = root.get("optional-dependencies", {})
+    for g in groups:
+        if g in dev:
+            start += [e for e in dev[g] if isinstance(e, dict)]
+        elif g in optional:
+            start += edges(root, g)
+        else:
+            raise ProvisionRefused(
+                "PROVISION_NO_LOCK", f"{norm} carries no dependency group or extra named {g!r}"
+            )
+
+    # the marker paths reaching each (package, extra) node: a set of conjunctions, the empty
+    # conjunction meaning "always"; a superset of a held path adds nothing (absorption)
+    paths: dict[_UvNode, set[frozenset[str]]] = {}
+    ident: dict[int, dict[str, Any]] = {}
+    work: list[tuple[_UvNode, frozenset[str]]] = []
+
+    def reach(edge: Mapping[str, Any], via: frozenset[str]) -> None:
+        pkg = resolve(edge)
+        extras = [str(x) for x in edge.get("extra", []) or []]
+        if _uv_is_project(pkg):
+            # the tree under test is never fetched, but an extra of its own that an edge
+            # names (``{ name = "proj", extra = ["testing"] }``) is followed like any other
+            missing = [x for x in extras if x not in optional]
+            if missing:
+                raise ProvisionRefused(
+                    "PROVISION_NO_LOCK",
+                    f"{norm}: the project declares no extra named {missing[0]!r}",
+                )
+            if not extras:
+                return
+        marker = str(edge.get("marker", "")).strip()
+        if marker and not safe_marker(marker):
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED",
+                f"{norm}: the marker {marker!r} on {edge.get('name')!r} is not a marker",
+            )
+        clause = via | {marker} if marker else via
+        for extra in extras if _uv_is_project(pkg) else ("", *extras):
+            node = (id(pkg), extra)
+            ident[id(pkg)] = pkg
+            held = paths.setdefault(node, set())
+            if any(h <= clause for h in held):
+                continue
+            held -= {h for h in held if clause <= h}
+            held.add(clause)
+            if len(held) > _UV_MAX_PATHS:
+                raise unsupported(f"{pkg.get('name')} is reached by too many marker paths")
+            work.append((node, clause))
+
+    for e in start:
+        reach(e, frozenset())
+    while work:
+        (pid, extra), clause = work.pop()
+        if clause not in paths.get((pid, extra), set()):
+            continue  # absorbed by a shorter path since it was queued
+        for e in edges(ident[pid], extra):
+            reach(e, clause)
+
+    pins: list[PyPin] = []
+    for pid, pkg in ident.items():
+        if _uv_is_project(pkg):
+            continue  # reached only for its own extras
+        clauses = paths.get((pid, ""), set())
+        name = str(pkg.get("name", ""))
+        version = str(pkg.get("version", ""))
+        if not version:
+            raise ProvisionRefused("PROVISION_UNPINNED", f"{norm}: {name!r} has no version")
+        if not _NAME.match(name) or not _VERSION.match(version):
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED",
+                f"{norm}: {name!r}=={version!r} is not a package name and version",
+            )
+        _uv_check_source(norm, name, pkg.get("source"))
+        marker = _uv_marker(clauses)
+        hashes = tuple(
+            str(w.get("hash", "")) for w in pkg.get("wheels", []) or [] if isinstance(w, dict)
+        )
+        if not hashes:
+            if not marker:
+                raise ProvisionRefused(
+                    "PROVISION_BUILD_REQUIRED", f"{norm}: {name}=={version} publishes no wheel"
+                )
+            sdist = pkg.get("sdist")
+            hashes = (str(sdist.get("hash", "")),) if isinstance(sdist, dict) else ()
+        if not hashes or not all(_HASH.match(h) for h in hashes):
+            raise ProvisionRefused(
+                "PROVISION_UNPINNED", f"{norm}: {name}=={version} carries no sha256 hash"
+            )
+        pins.append(PyPin(name, version, hashes, marker, f"{norm}:{name}"))
+    pins.sort(key=lambda p: (p.norm, p.version))
+    return [LockFile(norm, data)], pins
+
+
+def _norm_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _uv_is_project(pkg: Mapping[str, Any]) -> bool:
+    src = pkg.get("source")
+    return isinstance(src, dict) and any(src.get(k) == "." for k in ("editable", "virtual"))
+
+
+def _uv_check_source(lock: str, name: str, src: object) -> None:
+    kind, where = next(iter(src.items())) if isinstance(src, dict) and src else ("", "")
+    if kind == "registry" and where in UV_PUBLIC_INDEX:
+        return
+    what = f"the index {where}" if kind == "registry" else f"a {kind or 'missing'} source"
+    raise ProvisionRefused("PROVISION_SOURCE_REFUSED", f"{lock}: {name} comes from {what}")
+
+
+def _uv_marker(clauses: set[frozenset[str]]) -> str:
+    """``""`` when any path is unconditional, else ``"; <marker>"``: one marker as written,
+    a conjunction's parts parenthesised, several paths joined by ``or``."""
+    if not clauses or frozenset() in clauses:
+        return ""
+
+    def conj(c: frozenset[str]) -> str:
+        parts = sorted(c)
+        return parts[0] if len(parts) == 1 else " and ".join(f"({m})" for m in parts)
+
+    terms = sorted(conj(c) for c in clauses)
+    return "; " + (terms[0] if len(terms) == 1 else " or ".join(f"({t})" for t in terms))
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +929,9 @@ class LockInputs:
     local_mods: Mapping[str, GoMod] = field(default_factory=dict)
     py_pins: tuple[PyPin, ...] = ()
     node_pkgs: tuple[NodePkg, ...] = ()
+    #: The groups a uv lock was read for (``runner_opts.deps_groups``): the same file read for
+    #: another selection pins another set, so the selection is part of the bundle key.
+    selection: tuple[str, ...] = ()
 
     @classmethod
     def from_git(
@@ -624,7 +952,7 @@ class LockInputs:
                 pins |= set(m.resolved_requires())
             return cls(lang, sha, recipe, files, tuple(sorted(pins)), gomod, dict(locals_))
         if lang == LANG_PYTHON:
-            recipe, files, py = _read_python(reader, config)
+            recipe, files, py, selection = _read_python(reader, config)
             return cls(
                 lang,
                 sha,
@@ -632,6 +960,7 @@ class LockInputs:
                 files,
                 tuple(sorted(f"{p.norm}=={p.version}" for p in py)),
                 py_pins=py,
+                selection=selection,
             )
         recipe, files, node = _read_node(reader, config, npm_registry_host)
         return cls(
@@ -651,7 +980,9 @@ class LockInputs:
 
     @property
     def blobs(self) -> tuple[str, ...]:
-        return tuple(sorted(f.sha256 for f in self.files))
+        """What a bundle key covers: every input file's hash, and the uv groups read."""
+        chosen = (f"groups:{','.join(self.selection)}",) if self.selection else ()
+        return tuple(sorted(f.sha256 for f in self.files)) + chosen
 
     @property
     def lock_key(self) -> str:
@@ -849,6 +1180,8 @@ __all__ = [
     "lang_of",
     "parse_go_mod",
     "parse_requirements",
+    "parse_uv_lock",
+    "pin_line_refusal",
     "select_role",
     "tree_lock_key",
 ]

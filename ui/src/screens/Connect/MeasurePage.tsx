@@ -8,31 +8,37 @@
  *               route" / "the first useful picture" / "tighter intervals, longer wait"), the
  *               two retention switches with the policy statement, a "Before you start"
  *               summary (estimated cost from the repository's own measured cost per
- *               attempt, the absence of a spend cap, retention, posture) and one red button
- *               that names the estimate — the MoJ "confirm an action" pattern. While a
+ *               attempt, the run's spend cap and how it is kept, retention, posture) and one
+ *               red button that names the estimate and the cap — the MoJ "confirm an action"
+ *               pattern. A spend cap field starts at the top of the estimate (F5b). While a
  *               replay is already queued or running for the repository the button and the
  *               estimate give way to a banner naming that run, so the page can never queue
  *               a second spend by accident (J-ONR-4).
  * What it does: Replaces the technical run dialog for the person who has never used the
  *               product: every number on the page is the deployment's (the cost estimate is
  *               the repository's measured mean per attempt when it has one, else the
- *               documented range), the button says "estimated" because the request carries
- *               no cost cap (F5b: nothing on this page promises a ceiling nothing enforces),
+ *               documented range), the button says "estimated" and names the cap the request
+ *               carries as `max_cost_usd` and the worker keeps (F5b); a last replay that
+ *               stopped itself at its cap is said in a banner with its reason and its run,
  *               the posture is the real sandbox mode, and nothing is queued until the red
  *               button. A reader without the operator role is told so under the title and
  *               sees the choices as read-only lists — nothing a role cannot act on is shown
  *               as a control. Every element a reader meets — the back link, the kicker, the
  *               in-flight banner's lead line, each radio and checkbox (or its read-only row),
+ *               the way forward when the cap is refused on an unpriced model,
  *               the gold-clean cap note, every "Before you start" row, the "Every knob" link
  *               and the red button — is a hint trigger (`link.measure.*`, `nav.measure.kicker`,
- *               `banner.measure.inflight`, `field.measure.*`, `stat.measure.*`,
+ *               `banner.measure.inflight`, `banner.measure.spend_cap_stop`, `field.measure.*`,
+ *               `stat.measure.*`, `text.measure.spend_cap_unpriced`,
  *               `summary.measure.*`, `button.measure.start`).
  * How:          `useRepo` (+ `last_run` → `useRun`, polled, for the in-flight banner),
  *               `useCapabilityMap` (its economics fold, read by `measuredCostPerAttempt`),
  *               `useHealth` (sandbox posture and the builder), `builderChoice`
  *               (ui/src/lib/builder.ts) for the builder the deployment can run,
- *               `useCreateRun` with `{kind: replay, mode:
- *               sighted, limit, retain}`; on success the walk resumes on the repository with
+ *               `useCreateRun` with `{kind: replay, mode: sighted, limit, retain,
+ *               max_cost_usd}`, the cap's text read by `readAmount` (ui/src/lib/amount.ts,
+ *               P-265); a 422 `spend_cap_unpriced` gets this page's own way forward; on
+ *               success the walk resumes on the repository with
  *               the run watched. The kicker is `journeyEyebrow(pathname, 'task 5 of 8 · …')`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
@@ -50,12 +56,14 @@
 
 import { useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
+import { ApiError } from '../../api/client'
 import { useCapabilityMap, useCreateRun, useHealth, useRepo, useRun } from '../../api/hooks'
 import { ErrorState } from '../../components/ErrorState'
 import { DocLink } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { journeyEyebrow } from '../../components/Layout'
 import { BackLink, Kicker, Lede, NotificationBanner, PageTitle, SummaryList, WarningButton, type SummaryRow } from '../../components/govuk'
+import { readAmount } from '../../lib/amount'
 import { useAuth } from '../../lib/auth'
 import { builderChoice } from '../../lib/builder'
 import { measuredCostPerAttempt, noMeasuredCostReason } from '../../lib/economics'
@@ -90,6 +98,12 @@ export function posturePhrase(sandbox: { status: string; data?: Record<string, u
   return `${sandbox.status} — a development reading, not evidence, until the sandbox is available`
 }
 
+/** "claude_code:claude-sonnet-5" — the unpriced models a `spend_cap_unpriced` refusal names. */
+function unpricedModels(detail: Record<string, unknown>): string {
+  const rungs = Array.isArray(detail.rungs) ? (detail.rungs as Array<{ builder?: unknown; model?: unknown }>) : []
+  return rungs.map((r) => `${String(r.builder ?? '')}:${String(r.model ?? '')}`).join(', ')
+}
+
 /** "14:05" — when the in-flight run started. */
 function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
@@ -104,9 +118,13 @@ export function MeasurePage() {
   // a replay already queued or running for this repository: the page must name it, not
   // offer a second spend (the API exposes it as the repository's last run)
   const lastRun = repo.data?.last_run
+  const lastReplayId = lastRun && lastRun.kind === 'replay' ? lastRun.id : ''
   const activeId = lastRun && lastRun.kind === 'replay' && (lastRun.status === 'queued' || lastRun.status === 'running') ? lastRun.id : ''
-  const active = useRun(activeId, { poll: Boolean(activeId) })
+  // the last replay, read whether or not it is still in flight: the banner names a run in
+  // flight, and a finished one that stopped itself at its spend cap is said as such (F5b)
+  const active = useRun(lastReplayId, { poll: Boolean(activeId) })
   const inFlight = activeId.length > 0 && (!active.data || active.data.status === 'queued' || active.data.status === 'running')
+  const capStop = !inFlight && active.data?.counts?.stopped_code === 'spend_cap' ? active.data : null
   const map = useCapabilityMap(name, ['capability_class', 'size'])
   const health = useHealth()
   const create = useCreateRun()
@@ -126,6 +144,19 @@ export function MeasurePage() {
   const runLimit = gold > 0 ? Math.min(limit, gold) : limit
   const lo = measuredMean !== null ? measuredMean * 0.8 * runLimit : RANGE_LOW * runLimit
   const hi = measuredMean !== null ? measuredMean * 1.2 * runLimit : RANGE_HIGH * runLimit
+  // F5b — the run's own spend cap, which the worker keeps: it starts at the top of the
+  // estimate, rounded up to the dollar, and follows it until the operator types another
+  const [capDraft, setCapDraft] = useState<string | null>(null)
+  const capText = capDraft ?? String(Math.max(1, Math.ceil(hi)))
+  // read as typed (P-265): text the browser could not parse is refused, never sent; the page
+  // always sends a cap, so blank is refused too
+  const capRead = readAmount(capText, { min: 0, above: true })
+  const cap = capRead.kind === 'ok' ? capRead.value : 0
+  const capOk = capRead.kind === 'ok'
+  // a cap cannot be kept on a model with no known price (ADR-0030 §6): the API says so as
+  // 422 spend_cap_unpriced, whose own way forward ("run without a cap") this page cannot
+  // take, so the page names the two it can reach
+  const unpriced = create.error instanceof ApiError && create.error.code === 'spend_cap_unpriced' ? unpricedModels(create.error.detail) : null
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
   const choice = builderChoice(health.data)
   const posture = posturePhrase(sandbox)
@@ -145,7 +176,7 @@ export function MeasurePage() {
   }
 
   const start = () => {
-    if (!choice || inFlight) return
+    if (!choice || inFlight || !capOk) return
     create.mutate(
       {
         repo: name,
@@ -156,6 +187,7 @@ export function MeasurePage() {
         ...(Object.keys(choice.builder_config).length > 0 ? { builder_config: choice.builder_config } : {}),
         limit: runLimit,
         retain: { worktrees, transcripts },
+        max_cost_usd: cap,
       },
       { onSuccess: () => navigate(`/connect/${encodeURIComponent(name)}`) },
     )
@@ -178,6 +210,17 @@ export function MeasurePage() {
         </p>
       )}
       {repo.isError && <ErrorState error={repo.error} onRetry={() => void repo.refetch()} />}
+      {capStop && (
+        <NotificationBanner title="Stopped at its spend cap">
+          <Hint as="p" id="banner.measure.spend_cap_stop" className="m-0 mb-2 font-bold">
+            The last measurement of {name} stopped at its spend cap of {usd(capStop.max_cost_usd ?? 0)}: {usd(capStop.cost_usd)} spent over {capStop.counts.rows} attempts. The reason below says whether it stopped before an attempt that could have passed the cap, or after one with no cost cap of its own passed it.
+          </Hint>
+          <p className="m-0 mb-2" data-testid="measure-cap-stop-reason">{capStop.counts.stopped_reason}</p>
+          <p className="m-0">
+            <Link to={`/runs/${encodeURIComponent(capStop.id)}`}>Open the run</Link> · the attempts it made are graded and kept; start another run below to reach the tasks it did not.
+          </p>
+        </NotificationBanner>
+      )}
       {inFlight && (
         <NotificationBanner title="Important">
           <Hint as="p" id="banner.measure.inflight" className="m-0 mb-2 font-bold">
@@ -221,6 +264,34 @@ export function MeasurePage() {
           </p>
         )}
       </div>
+      <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">Spend cap</h2>
+      <div className="mb-8 max-w-[44em]">
+        {operator ? (
+          <>
+            <Hint as="label" id="field.measure.spend_cap" className="flex items-center gap-4 py-2 text-[19px] leading-[1.47]">
+              <span>Stop the run at $</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="w-32 border-2 border-[var(--ink)] bg-surface px-2 py-1 text-[19px]"
+                value={capText}
+                onChange={(e) => setCapDraft(e.target.value)}
+                aria-describedby="measure-cap-note"
+              />
+            </Hint>
+            <p id="measure-cap-note" className="m-0 mt-2 text-[16px] text-on-surface-muted">
+              The run stops before an attempt that could take its spend past this amount. An attempt with no cost cap of its own is counted at the dearest attempt so far (nothing before the first), so the run can pass this amount by up to one attempt; it then stops and says so. It starts at the top of the estimate.
+            </p>
+            {!capOk && (
+              <p className="m-0 mt-2 text-[16px] font-bold text-status-red" data-testid="cap-invalid">
+                Enter an amount above $0: the run needs a cap it can keep.
+              </p>
+            )}
+          </>
+        ) : (
+          <SummaryList label="Spend cap" rows={[{ key: 'Stop the run at', value: `${usd(capOk ? cap : 0)}, the top of the estimate unless the operator sets another`, hint: 'field.measure.spend_cap' }]} />
+        )}
+      </div>
       <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">Retention</h2>
       <Lede className="mb-2">This deployment retains no raw artefacts by default. Anything you keep here is stored until you delete it and is in scope for your own retention policy.</Lede>
       <div className="mb-8 max-w-[44em]">
@@ -262,8 +333,14 @@ export function MeasurePage() {
                 </Hint>
               ),
             },
-            // honest until F5b (a per-run cap summed over attempts) lands: the request carries no cap
-            { key: 'Budget cap', hint: 'summary.measure.budget_cap', value: 'No spend cap on this run yet. Each attempt is capped on turns, tool calls and wall clock; you can cancel at any point and attempts already made are still charged.' },
+            // F5b: the cap the request carries and the worker keeps, and how it is kept
+            {
+              key: 'Budget cap',
+              hint: 'summary.measure.budget_cap',
+              value: capOk
+                ? `${usd(cap)} for the whole run. Before each attempt the run counts what it has spent plus what that attempt could cost, and stops if the sum would pass ${usd(cap)}; an attempt with no cost cap of its own is counted at the dearest attempt so far, so the run can pass the cap by up to one attempt and then stops and says so. You can also cancel at any point; attempts already made are still charged.`
+                : 'No valid cap yet: enter an amount above $0 under Spend cap.',
+            },
             { key: 'Retention', hint: 'summary.measure.retention', value: retention },
             { key: 'Posture', hint: 'summary.measure.posture', value: posture },
           ]}
@@ -274,13 +351,23 @@ export function MeasurePage() {
           <>
             <p className="mb-4 mt-6 text-[19px] leading-[1.47]">You can cancel the run at any point. Attempts already made are still charged.</p>
             {operator && (
-              <WarningButton hint="button.measure.start" onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0}>
-                Start the run — estimated {usd(lo)} to {usd(hi)}
+              <WarningButton hint="button.measure.start" onClick={start} disabled={create.isPending || !repo.data || !choice || gold === 0 || !capOk}>
+                Start the run — estimated {usd(lo)} to {usd(hi)}{capOk ? `, stops at ${usd(cap)}` : ''}
               </WarningButton>
             )}
           </>
         )}
-        {create.isError && <ErrorState compact error={create.error} />}
+        {create.isError && (
+          <ErrorState compact error={create.error}>
+            {unpriced !== null && (
+              <div data-testid="measure-unpriced" className="mt-2 text-sm">
+                <Hint as="p" id="text.measure.spend_cap_unpriced" className="m-0">
+                  This page always sends a spend cap, and a cap can only be kept on a model with a known price. An admin adds the price of {unpriced || 'the model'} to the price table (CRB_PRICING_JSON), then start again here. To measure without a cap, use the full run form: <Link to="/runs" className="underline">Every knob</Link>, and leave its spend cap blank.
+                </Hint>
+              </div>
+            )}
+          </ErrorState>
+        )}
       </div>
     </>
   )

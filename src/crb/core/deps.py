@@ -139,7 +139,8 @@ REFUSALS: Mapping[str, tuple[str, str]] = {
     PROVISION_NO_LOCK: (
         SCOPE_TASK,
         "commit a pinned lockfile at this commit (go.sum; requirements.txt with name==version "
-        "lines, or runner_opts.deps_lock; package-lock.json)",
+        "lines, or uv.lock, or name them in runner_opts.deps_lock, whose inner lists are "
+        "alternatives; the uv groups in runner_opts.deps_groups; package-lock.json)",
     ),
     PROVISION_UNPINNED: (
         SCOPE_TASK,
@@ -159,8 +160,8 @@ REFUSALS: Mapping[str, tuple[str, str]] = {
     PROVISION_LOCK_UNSUPPORTED: (
         SCOPE_TASK,
         "this lockfile format is not provisioned in this version (go.work, yarn, pnpm, "
-        "poetry, uv, pylock, npm lockfileVersion 1); commit a supported lock or use the "
-        "local posture",
+        "poetry, pylock, a uv.lock that is not version 1 or is a workspace, npm "
+        "lockfileVersion 1); commit a supported lock or use the local posture",
     ),
     PROVISION_PRIVATE_MODULE: (
         SCOPE_TASK,

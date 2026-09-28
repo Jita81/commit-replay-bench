@@ -9,12 +9,18 @@ What it is:   The suite for the pure half of dependency provisioning — lockfil
               objects, refusals, bundle keys and the closure selector.
 What it does: Pins that editing a worktree changes neither the inputs nor the key; that the Go
               key covers the parent's and the gold's blobs together; that URL, VCS, path, index,
-              foreign-host, unpinned, ``go.work``, yarn/pnpm/uv, install-script and JVM inputs
-              are each refused with their code and scope; that ``.npmrc``, ``pip.conf`` and
-              ``go.env`` are never read; that a trial never makes the selector read outside its
-              tree (an escaping replace or a linked manifest); and that a trial selects the
-              parent's or the gold's set
-              or raises ``ClosureViolation`` naming what was outside.
+              foreign-host, unpinned, ``go.work``, yarn/pnpm/poetry, install-script and JVM
+              inputs are each refused with their code and scope; that a ``uv.lock`` is read
+              into hashed, marked pins for the named groups (extras, forks and marker paths
+              followed; any other index, a wheel-less package every environment needs, a
+              workspace or another lock version refused), with the groups in the bundle key;
+              that a requirements lock's ``--hash`` is kept only as a whole sha256 and any
+              other hash or option after the pin refuses the lock (P-263);
+              that ``deps_lock`` alternatives provision a lock that moved across a history;
+              that ``.npmrc``, ``pip.conf`` and ``go.env`` are never read; that a trial never
+              makes the selector read outside its tree (an escaping replace or a linked
+              manifest); and that a trial selects the parent's or the gold's set or raises
+              ``ClosureViolation`` naming what was outside.
 How:          ``two_commit_repo`` / ``init_repo`` + ``commit_all`` → ``LockInputs.from_git`` →
               assert;
               a spy ``GitRepo`` records every path asked for.
@@ -235,10 +241,10 @@ def test_pip_includes_hashes_and_alternative_locks(tmp_path: Path) -> None:
     assert got.require_hashes is True
     assert set(got.lock_paths) == {"requirements.txt", "reqs/base.txt"}
     repo, (sha,) = _repo(
-        tmp_path / "b", {"uv.lock": "x\n", "pyproject.toml": "[project]\nname='x'\n"}
+        tmp_path / "b", {"poetry.lock": "x\n", "pyproject.toml": "[project]\nname='x'\n"}
     )
     err = _refused("PROVISION_LOCK_UNSUPPORTED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
-    assert "uv.lock" in err.message
+    assert "poetry.lock" in err.message
     repo, (sha,) = _repo(
         tmp_path / "c", {"pyproject.toml": "[project]\nname='x'\ndependencies=['left']\n"}
     )
@@ -249,6 +255,433 @@ def test_pip_includes_hashes_and_alternative_locks(tmp_path: Path) -> None:
     assert pv.LockInputs.from_git(repo, sha, _cfg("pytest", deps_lock=["locks/test.txt"])).pins == (
         "left==1.0.0",
     )
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "--hash=sha512:" + "a" * 128,
+        "--hash=sha256:" + "a" * 63,
+        "--hash=sha256:" + "a" * 65,
+        "--hash=sha256:" + "a" * 64 + " --hash=md5:" + "a" * 32,
+        "--hash",
+        "--hash=sha256:" + "a" * 64 + " --no-binary",
+    ],
+    ids=["sha512", "short", "long", "one_of_two", "empty", "trailing_option"],
+)
+def test_a_committed_hash_is_never_dropped_or_cut(tmp_path: Path, tail: str) -> None:
+    """ADR-0019 fetches with pip's hashes wherever the lock carries them, and DL-101 refuses
+    a hash that is not a whole sha256 before anything is fetched. A hash of another kind or
+    length was once skipped (the pin written bare, ``require_hashes`` off) or cut to 64
+    characters — a lock provisioned more loosely than it was committed (P-263). Every token
+    after the pin is a whole ``--hash=sha256:<64 hex>``, or the lock is refused."""
+    repo, (sha,) = _repo(tmp_path / "r", {"requirements.txt": f"six==1.16.0 {tail}\n"})
+    _refused("PROVISION_SOURCE_REFUSED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+
+
+def test_a_whole_sha256_in_either_spelling_is_kept(tmp_path: Path) -> None:
+    h, g = "sha256:" + "a" * 64, "sha256:" + "B" * 64
+    repo, (sha,) = _repo(
+        tmp_path / "r", {"requirements.txt": f"six==1.16.0 --hash {h} --hash={g}\n"}
+    )
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    assert got.require_hashes is True
+    (pin,) = got.py_pins
+    assert pin.hashes == (h, g)
+
+
+# ---------------------------------------------------------------------------
+# uv.lock, and a lock that moved across a repository's history (G-951, G-962)
+# ---------------------------------------------------------------------------
+
+_PYPI = 'source = { registry = "https://pypi.org/simple" }'
+
+
+def _h(c: str) -> str:
+    return "sha256:" + c * 64
+
+
+def _uv_pkg(
+    name: str,
+    version: str,
+    *,
+    deps: str = "",
+    wheels: tuple[str, ...] = ("1",),
+    source: str = _PYPI,
+    extra: str = "",
+) -> str:
+    """One ``[[package]]`` of a uv.lock; ``wheels`` are the hash characters of its wheels."""
+    body = f'[[package]]\nname = "{name}"\nversion = "{version}"\n{source}\n'
+    if deps:
+        body += f"dependencies = [\n{deps}]\n"
+    body += (
+        f'sdist = {{ url = "https://files.pythonhosted.org/{name}.tar.gz", hash = "{_h("f")}" }}\n'
+    )
+    if wheels:
+        body += (
+            "wheels = [\n"
+            + "".join(
+                f'    {{ url = "https://files.pythonhosted.org/{name}-{c}.whl", hash = "{_h(c)}" }},\n'
+                for c in wheels
+            )
+            + "]\n"
+        )
+    return body + extra + "\n"
+
+
+def _uv_lock(root_deps: str = "", groups: str = "", *packages: str, version: int = 1) -> str:
+    root = '[[package]]\nname = "proj"\nversion = "1.0"\nsource = { editable = "." }\n'
+    if root_deps:
+        root += f"dependencies = [\n{root_deps}]\n"
+    if groups:
+        root += f"\n[package.dev-dependencies]\n{groups}"
+    return f'version = {version}\nrevision = 3\nrequires-python = ">=3.10"\n\n' + "\n".join(
+        [root, *packages]
+    )
+
+
+#: click's shape at 05f6fd0^: no runtime dependencies, pytest in the ``tests`` group.
+_CLICK_UV = _uv_lock(
+    "",
+    'tests = [\n    { name = "pytest" },\n]\ndev = [\n    { name = "ruff" },\n]\n',
+    _uv_pkg(
+        "pytest",
+        "8.4.2",
+        deps='    { name = "colorama", marker = "sys_platform == \'win32\'" },\n'
+        '    { name = "iniconfig" },\n'
+        '    { name = "tomli", marker = "python_full_version < \'3.11\'" },\n',
+        wheels=("2",),
+    ),
+    _uv_pkg("colorama", "0.4.6", wheels=("3",)),
+    _uv_pkg("iniconfig", "2.1.0", wheels=("4",)),
+    _uv_pkg("tomli", "2.2.1", wheels=("5", "6")),
+    _uv_pkg("ruff", "0.14.0", wheels=("7",)),
+)
+
+
+def _pin_lines(got: pv.LockInputs) -> list[tuple[str, str, str, tuple[str, ...]]]:
+    return [(p.norm, p.version, p.marker, p.hashes) for p in got.py_pins]
+
+
+def test_a_uv_lock_is_provisioned_hash_pinned_for_the_named_groups(tmp_path: Path) -> None:
+    """uv.lock at the root is read like a hashed requirements lock: the project's own
+    dependencies, plus the groups ``runner_opts.deps_groups`` names, closed over their
+    dependencies, each pin carrying every wheel's hash and the marker of the path that
+    reached it. A group nobody named (``dev``) is never fetched."""
+    repo, (sha,) = _repo(
+        tmp_path / "a", {"uv.lock": _CLICK_UV, "pyproject.toml": "[project]\nname='proj'\n"}
+    )
+    bare = pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    assert bare.recipe == pv.RECIPE_NONE and bare.py_pins == ()
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest", deps_groups=["tests"]))
+    assert got.recipe == pv.RECIPE_PY
+    assert got.lock_paths == ("uv.lock",)
+    assert got.require_hashes is True
+    assert _pin_lines(got) == [
+        ("colorama", "0.4.6", "; sys_platform == 'win32'", (_h("3"),)),
+        ("iniconfig", "2.1.0", "", (_h("4"),)),
+        ("pytest", "8.4.2", "", (_h("2"),)),
+        ("tomli", "2.2.1", "; python_full_version < '3.11'", (_h("5"), _h("6"))),
+    ]
+    assert got.pins == ("colorama==0.4.6", "iniconfig==2.1.0", "pytest==8.4.2", "tomli==2.2.1")
+
+
+def test_the_groups_a_uv_lock_is_read_for_are_part_of_the_sets_key(tmp_path: Path) -> None:
+    """One uv.lock read for two different group selections is two different sets: the
+    selection is in the bundle key, so a set sealed for one never serves the other. The lock
+    identity a trial is matched on is still the file's alone."""
+    uv = _uv_lock(
+        '    { name = "iniconfig" },\n',
+        'tests = [\n    { name = "pytest" },\n]\n',
+        _uv_pkg("iniconfig", "2.1.0"),
+        _uv_pkg("pytest", "8.4.2", wheels=("2",)),
+    )
+    repo, (sha,) = _repo(tmp_path / "a", {"uv.lock": uv})
+    runtime = pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    tests = pv.LockInputs.from_git(repo, sha, _cfg("pytest", deps_groups="tests"))
+    assert runtime.pins == ("iniconfig==2.1.0",)
+    assert tests.pins == ("iniconfig==2.1.0", "pytest==8.4.2")
+    assert pv.bundle_key(pv.RECIPE_PY, IMAGE, runtime.blobs) != pv.bundle_key(
+        pv.RECIPE_PY, IMAGE, tests.blobs
+    )
+    assert runtime.lock_key == tests.lock_key
+
+
+def test_a_uv_lock_follows_extras_forks_and_joins_markers_down_the_path(tmp_path: Path) -> None:
+    """An edge's extra pulls that extra's dependencies; a forked package is pinned once per
+    version under its own marker; a package reached only under a marker keeps the
+    conjunction of every marker on its path, and one reached unconditionally by any path
+    has none; an edge back to the project is the tree itself and is never fetched."""
+    uv = _uv_lock(
+        '    { name = "srv", extra = ["std"] },\n'
+        '    { name = "np", version = "1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < \'3.11\'" },\n'
+        '    { name = "np", version = "2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= \'3.11\'" },\n',
+        "",
+        _uv_pkg(
+            "srv",
+            "0.30",
+            deps='    { name = "proj" },\n',
+            extra='[package.optional-dependencies]\nstd = [\n    { name = "watch", marker = "sys_platform != \'win32\'" },\n    { name = "h11" },\n]\n',
+        ),
+        _uv_pkg(
+            "watch",
+            "1.0",
+            deps='    { name = "deep", marker = "python_full_version < \'3.13\'" },\n',
+        ),
+        _uv_pkg("deep", "3.0"),
+        _uv_pkg("h11", "0.16", deps='    { name = "deep" },\n'),
+        _uv_pkg("np", "1.0", wheels=("8",)),
+        _uv_pkg("np", "2.0", wheels=("9",)),
+    )
+    repo, (sha,) = _repo(tmp_path / "a", {"uv.lock": uv})
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    markers = {(p.norm, p.version): p.marker for p in got.py_pins}
+    assert markers == {
+        ("deep", "3.0"): "",  # also reached unconditionally through h11
+        ("h11", "0.16"): "",
+        ("np", "1.0"): "; python_full_version < '3.11'",
+        ("np", "2.0"): "; python_full_version >= '3.11'",
+        ("srv", "0.30"): "",
+        ("watch", "1.0"): "; sys_platform != 'win32'",
+    }
+    only_watch = uv.replace('    { name = "h11" },\n', "")
+    repo, (sha,) = _repo(tmp_path / "b", {"uv.lock": only_watch})
+    deep = {p.norm: p.marker for p in pv.LockInputs.from_git(repo, sha, _cfg("pytest")).py_pins}
+    assert deep["deep"] == "; (python_full_version < '3.13') and (sys_platform != 'win32')"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'source = { git = "https://github.com/x/y?rev=1#abc" }',
+        'source = { url = "https://example.test/y-1.0.tar.gz" }',
+        'source = { path = "../y" }',
+        'source = { directory = "vendor/y" }',
+        'source = { editable = "libs/y" }',
+        'source = { registry = "https://mirror.example.test/simple" }',
+    ],
+)
+def test_a_uv_lock_source_other_than_the_public_index_is_refused(
+    tmp_path: Path, source: str
+) -> None:
+    uv = _uv_lock('    { name = "y" },\n', "", _uv_pkg("y", "1.0", source=source))
+    repo, (sha,) = _repo(tmp_path / "a", {"uv.lock": uv})
+    err = _refused("PROVISION_SOURCE_REFUSED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+    assert "y" in err.message
+
+
+def test_a_uv_lock_that_cannot_be_hash_pinned_is_refused_never_loosened(tmp_path: Path) -> None:
+    """A package with no wheel that every environment needs must be built:
+    ``PROVISION_BUILD_REQUIRED`` before any fetch. One only another platform needs keeps its
+    source hash and its marker, so pip skips it here. A lock format, a workspace or an
+    ambiguous fork this reader does not know is ``PROVISION_LOCK_UNSUPPORTED``; a group the
+    lock does not carry is ``PROVISION_NO_LOCK``."""
+    no_wheel = _uv_lock('    { name = "y" },\n', "", _uv_pkg("y", "1.0", wheels=()))
+    repo, (sha,) = _repo(tmp_path / "a", {"uv.lock": no_wheel})
+    _refused("PROVISION_BUILD_REQUIRED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+    win_only = _uv_lock(
+        '    { name = "y", marker = "sys_platform == \'win32\'" },\n',
+        "",
+        _uv_pkg("y", "1.0", wheels=()),
+    )
+    repo, (sha,) = _repo(tmp_path / "b", {"uv.lock": win_only})
+    (pin,) = pv.LockInputs.from_git(repo, sha, _cfg("pytest")).py_pins
+    assert (pin.marker, pin.hashes) == ("; sys_platform == 'win32'", (_h("f"),))
+    cases = {
+        "c": _uv_lock('    { name = "y" },\n', "", _uv_pkg("y", "1.0"), version=2),
+        "d": _uv_lock("", "", _uv_pkg("y", "1.0", source='source = { editable = "." }')),
+        "e": _uv_lock('    { name = "y" },\n', "", _uv_pkg("y", "1.0"), _uv_pkg("y", "2.0")),
+        "f": "not = [toml\n",
+    }
+    for name, text in cases.items():
+        repo, (sha,) = _repo(tmp_path / name, {"uv.lock": text})
+        err = _refused(
+            "PROVISION_LOCK_UNSUPPORTED", pv.LockInputs.from_git, repo, sha, _cfg("pytest")
+        )
+        assert "uv.lock" in err.message
+    repo, (sha,) = _repo(tmp_path / "g", {"uv.lock": _CLICK_UV})
+    err = _refused(
+        "PROVISION_NO_LOCK",
+        pv.LockInputs.from_git,
+        repo,
+        sha,
+        _cfg("pytest", deps_groups=["tests", "typing"]),
+    )
+    assert "typing" in err.message
+
+
+def test_one_declaration_provisions_a_lock_that_moved_across_the_history(tmp_path: Path) -> None:
+    """click kept ``requirements/tests.txt`` until May 2025 and ``uv.lock`` after it. A
+    ``deps_lock`` entry that is a list names alternatives: each commit reads the first it
+    carries, so one configuration provisions both eras; a commit that carries none is
+    refused naming every alternative. A plain entry must still be carried by every commit."""
+    tests_txt = (
+        "#\n# This file is autogenerated by pip-compile\n#\n"
+        "iniconfig==1.0.0          # via pytest\npytest==6.0.1             # via -r tests.in\n"
+    )
+    root = tmp_path / "click"
+    repo, (old, new) = _repo(
+        root,
+        {"requirements/tests.txt": tests_txt, "setup.py": "from setuptools import setup\n"},
+        {"uv.lock": _CLICK_UV, "pyproject.toml": "[project]\nname='proj'\n"},
+    )
+    git(root, "rm", "-q", "requirements/tests.txt", "setup.py")
+    uv_only = commit_all(root, "the requirements lock retired")
+    git(root, "rm", "-q", "uv.lock")
+    gone = commit_all(root, "neither lock")
+    cfg = _cfg("pytest", deps_lock=[["uv.lock", "requirements/tests.txt"]], deps_groups=["tests"])
+    was = pv.LockInputs.from_git(repo, old, cfg)
+    assert (was.recipe, was.lock_paths) == (pv.RECIPE_PY, ("requirements/tests.txt",))
+    assert was.pins == ("iniconfig==1.0.0", "pytest==6.0.1")
+    for sha in (new, uv_only):  # the first alternative wins while both are carried
+        now = pv.LockInputs.from_git(repo, sha, cfg)
+        assert now.lock_paths == ("uv.lock",)
+        assert "pytest==8.4.2" in now.pins
+    err = _refused("PROVISION_NO_LOCK", pv.LockInputs.from_git, repo, gone, cfg)
+    assert "uv.lock" in err.message and "requirements/tests.txt" in err.message
+    strict = _cfg("pytest", deps_lock=["requirements/tests.txt"])
+    _refused("PROVISION_NO_LOCK", pv.LockInputs.from_git, repo, uv_only, strict)
+    for bad in ({"a": 1}, [["uv.lock", 3]], [[]], ""):
+        _refused(
+            "PROVISION_NO_LOCK", pv.LockInputs.from_git, repo, new, _cfg("pytest", deps_lock=bad)
+        )
+
+
+def _raw_uv_pkg(name: str, version: str, body: str = "") -> str:
+    """A ``[[package]]`` written as given: no default wheel or sdist."""
+    return f'[[package]]\nname = "{name}"\nversion = "{version}"\n{_PYPI}\n{body}\n'
+
+
+def test_a_uv_lock_pin_without_a_sha256_hash_is_unpinned_never_fetched_loosely(
+    tmp_path: Path,
+) -> None:
+    """The guard that keeps ``--require-hashes`` on: a wheel whose hash is empty or not a
+    sha256, a sha256 with anything after its 64 digits, and a package only another platform
+    needs that publishes neither a wheel nor a source hash are each ``PROVISION_UNPINNED``.
+    Without it such a set is fetched with no hash check at all."""
+    whl = "https://files.pythonhosted.org/y-1.whl"
+    cases = {
+        "empty": f'wheels = [\n    {{ url = "{whl}", hash = "" }},\n]\n',
+        "md5": f'wheels = [\n    {{ url = "{whl}", hash = "md5:{"a" * 32}" }},\n]\n',
+        "trailing": f'wheels = [\n    {{ url = "{whl}", hash = "{_h("1")}\\n" }},\n]\n',
+        "one_of_two": (
+            f'wheels = [\n    {{ url = "{whl}", hash = "{_h("1")}" }},\n'
+            f'    {{ url = "{whl}", hash = "sha1:{"b" * 40}" }},\n]\n'
+        ),
+    }
+    for name, body in cases.items():
+        uv = _uv_lock('    { name = "y" },\n', "", _raw_uv_pkg("y", "1.0", body))
+        repo, (sha,) = _repo(tmp_path / name, {"uv.lock": uv})
+        err = _refused("PROVISION_UNPINNED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+        assert "y==1.0" in err.message and "sha256" in err.message, name
+    linux_only = _uv_lock(
+        '    { name = "y", marker = "sys_platform == \'linux\'" },\n',
+        "",
+        _raw_uv_pkg("y", "1.0"),
+    )
+    repo, (sha,) = _repo(tmp_path / "no_source", {"uv.lock": linux_only})
+    _refused("PROVISION_UNPINNED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+
+
+@pytest.mark.parametrize(
+    ("where", "edge", "pkg"),
+    [
+        (
+            "marker",
+            '    { name = "y", marker = "sys_platform == \'linux\'\\n--no-binary :all:" },\n',
+            _uv_pkg("y", "1.0"),
+        ),
+        (
+            "marker_extra_index",
+            '    { name = "y", marker = "python_version > \'3\' --extra-index-url x" },\n',
+            _uv_pkg("y", "1.0"),
+        ),
+        (
+            "marker_comment",
+            '    { name = "y", marker = "python_version > \'3\' # a" },\n',
+            _uv_pkg("y", "1.0"),
+        ),
+        (
+            "version",
+            '    { name = "y" },\n',
+            _uv_pkg("y", "1.0\\n--index-url https://evil.example/simple"),
+        ),
+        (
+            "name",
+            '    { name = "y\\n-r /etc/passwd\\nsix" },\n',
+            _uv_pkg("y\\n-r /etc/passwd\\nsix", "1.0"),
+        ),
+        ("name_space", '    { name = "y z" },\n', _uv_pkg("y z", "1.0")),
+    ],
+    ids=["marker", "marker_extra_index", "marker_comment", "version", "name", "name_space"],
+)
+def test_a_uv_lock_cannot_write_an_option_line_into_the_lock_pip_reads(
+    tmp_path: Path, where: str, edge: str, pkg: str
+) -> None:
+    """A committed uv.lock is repository text. A name, version or marker that would put a
+    line or an option into ``/in/lock.txt`` (``--no-binary``, an index, an include, a
+    comment) is refused before anything is fetched, never written for pip to read."""
+    uv = _uv_lock(edge, "", pkg)
+    repo, (sha,) = _repo(tmp_path / where, {"uv.lock": uv})
+    with pytest.raises(ProvisionRefused) as ei:
+        pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    assert ei.value.code in {"PROVISION_UNPINNED", "PROVISION_SOURCE_REFUSED"}, ei.value
+
+
+@pytest.mark.parametrize(
+    "pin",
+    [
+        pv.PyPin("six\n-r /etc/passwd", "1.0"),
+        pv.PyPin("six", "1.0\n--index-url https://evil.example/simple"),
+        pv.PyPin("six", "1.0", marker="; sys_platform == 'linux'\n--no-binary :all:"),
+        pv.PyPin("six", "1.0", marker="; python_version > '3' --no-binary :all:"),
+        pv.PyPin("six", "1.0", (_h("1") + "\n--pre",)),
+        pv.PyPin("--no-binary", ":all:"),
+    ],
+    ids=["name", "version", "marker_line", "marker_option", "hash", "option_pin"],
+)
+def test_the_lock_pip_reads_is_refused_rather_than_written_with_an_option(pin: pv.PyPin) -> None:
+    """The second line: whatever reader produced the pins, ``lock_text`` writes only
+    ``name==version [; marker] --hash=sha256:…`` lines, and refuses a pin that would
+    write anything else."""
+    from crb.provision.python import lock_text
+
+    inputs = pv.LockInputs(lang=pv.LANG_PYTHON, sha="0" * 40, recipe=pv.RECIPE_PY, py_pins=(pin,))
+    with pytest.raises(ProvisionRefused) as ei:
+        lock_text(inputs)
+    assert ei.value.code == "PROVISION_SOURCE_REFUSED"
+
+
+def test_a_uv_group_that_names_the_projects_own_extra_follows_that_extra(
+    tmp_path: Path,
+) -> None:
+    """``tests = [{ name = "proj", extra = ["testing"] }]`` is uv's spelling of a group that
+    reuses the project's own extra: the project is never fetched, but the extra's
+    dependencies are, with the edge's marker. An extra the project does not declare is
+    ``PROVISION_NO_LOCK``, never an empty set."""
+    root_extra = (
+        '[package.optional-dependencies]\ntesting = [\n    { name = "six" },\n'
+        '    { name = "proj", extra = ["testing"] },\n]\n'
+    )
+    uv = _uv_lock(
+        "",
+        'tests = [\n    { name = "proj", extra = ["testing"], marker = "python_version >= \'3\'" },\n]\n',
+        _uv_pkg("six", "1.16.0", wheels=("2",)),
+    ).replace("\n[package.dev-dependencies]", "\n" + root_extra + "\n[package.dev-dependencies]")
+    repo, (sha,) = _repo(tmp_path / "a", {"uv.lock": uv})
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest", deps_groups=["tests"]))
+    assert got.recipe == pv.RECIPE_PY
+    assert _pin_lines(got) == [("six", "1.16.0", "; python_version >= '3'", (_h("2"),))]
+    missing = uv.replace('extra = ["testing"], marker', 'extra = ["typing"], marker')
+    repo, (sha,) = _repo(tmp_path / "b", {"uv.lock": missing})
+    err = _refused(
+        "PROVISION_NO_LOCK",
+        pv.LockInputs.from_git,
+        repo,
+        sha,
+        _cfg("pytest", deps_groups=["tests"]),
+    )
+    assert "typing" in err.message
 
 
 def test_go_work_is_unsupported(tmp_path: Path) -> None:

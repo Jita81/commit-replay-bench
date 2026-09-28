@@ -17,7 +17,9 @@ differently); a setting that is not strict (a branch may merge while behind ``ma
 job name of 100 characters or more (GitHub cuts a check name at 100, so no run can satisfy
 it). An aggregator is a job that ``needs`` others and runs ``if: always()`` — the ``test``
 job over the suite's shards and ``walkthrough`` over the story and the screens shards: it is
-required, and the parts it stands for are not.
+required, and the parts it stands for are not. A saved reading may list a job added before
+the administrator could require it, under ``awaiting_protection`` with the step that remains
+and the open gap in docs/dod that names the job; the live setting never does (DL-101, P-261).
 
 Navigation
 ----------
@@ -25,18 +27,21 @@ What it is:   The comparator between branch protection's required checks and ci.
               (stdlib only; ``gh`` reads the setting).
 What it does: Expands ci.yml's jobs into the check names GitHub reports (a matrix job once per
               combination), sets aside the parts an aggregator stands for, reads
-              ``required_status_checks`` through ``gh api`` (or from a saved JSON reading),
-              and prints every difference; exits non-zero on any.
+              ``required_status_checks`` through ``gh api`` (or from a saved JSON reading,
+              which may name jobs awaiting the administrator, each under an open gap in
+              docs/dod that names it), and prints every difference; exits non-zero on any.
 How:          Line-scan the workflow's ``jobs:`` block (job key, ``name:``, list matrices,
               ``needs:``, the job-level ``if:``) → expand ``${{ matrix.<key> }}`` → the
-              aggregators' parts → set comparison with the reading.
+              aggregators' parts → set comparison with the reading; the open gaps come from
+              scripts/dod_check.py's own parser.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   .github/workflows/ci.yml (the jobs it expands), .github/workflows/
               branch-protection.yml (the scheduled run with a token that may read the
               setting), tests/fixtures/branch_protection_main.json (the last saved reading),
               docs/DEPLOYMENT.md §3.4 (the administrator's guide to the setting),
-              docs/dod/product.md (product.evidence.6 and gap G-930)
+              docs/dod/product.md (product.evidence.6 and gap G-930), scripts/dod_check.py
+              (``open_gaps`` reads the record through its parser)
 Tested by:    tests/test_check_branch_protection.py
 Touch when:   never for a new repository (it compares this repository's own workflow with its
               own branch setting); ci.yml gains a job shape this scan does not read (an
@@ -47,11 +52,13 @@ Touch when:   never for a new repository (it compares this repository's own work
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import itertools
 import json
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,6 +67,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 #: GitHub cuts a check-run name at this length (docs/DEPLOYMENT.md §3.4).
 NAME_LIMIT = 100
+
+#: A saved reading's record of jobs that await the administrator: ``{check name: the step}``.
+AWAITING_KEY = "awaiting_protection"
 
 _JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 _NAME = re.compile(r"^    name:\s*(.+?)\s*$")
@@ -236,6 +246,78 @@ def compare(
     return errors
 
 
+_GAP_ID = re.compile(r"\bG-\d{3}\b")
+
+
+def open_gaps() -> dict[str, str]:
+    """``{gap id: its text}`` for every gap in docs/dod that blocks a criterion not yet met,
+    read through scripts/dod_check.py's own parser (one reading of the record, never two)."""
+    name = "_check_branch_protection_dod"
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / "dod_check.py")
+    assert spec and spec.loader
+    dod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = dod  # its dataclasses look their module up while it executes
+    spec.loader.exec_module(dod)
+    out: dict[str, str] = {}
+    for path in dod.artefact_files():
+        art, _errors = dod.parse_artefact(path)
+        blocking = {c.gap for c in art.criteria if c.state in ("partial", "unmet")}
+        out.update({g: text for g, text in art.gaps.items() if g in blocking})
+    return out
+
+
+def compare_reading(
+    jobs: list[str],
+    reading: dict[str, Any],
+    gaps: Mapping[str, str] | None = None,
+    parts: dict[str, str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """``(errors, notes)`` for one reading. A SAVED reading may name, under
+    :data:`AWAITING_KEY`, a job added to ci.yml before an administrator could require it, with
+    the step that remains: it is not an error while the setting lacks it, and it is listed as a
+    note. The entry is an error once the setting requires the job (read it again and drop the
+    entry), when no job reports it, when it names no step, and unless its step names a gap
+    that is open in docs/dod (``gaps``: :func:`open_gaps`, read only when an entry needs it)
+    and whose text names the job; ``parts`` are the aggregators' parts, as :func:`compare`
+    takes them — so a job cannot be parked there by review alone (P-261).
+    The live setting never carries the key, so the scheduled comparison stays red until the
+    administrator acts (DL-101)."""
+    required = [str(c) for c in reading.get("contexts", [])]
+    awaiting = {str(k): str(v) for k, v in dict(reading.get(AWAITING_KEY) or {}).items()}
+    errors = compare(
+        jobs, required + [c for c in awaiting if c in jobs], bool(reading.get("strict")), parts
+    )
+    notes: list[str] = []
+    for ctx, step in awaiting.items():
+        if ctx in required:
+            errors.append(
+                f"branch protection now requires {ctx!r}: save the reading again without it "
+                f"under {AWAITING_KEY}"
+            )
+        elif ctx not in jobs:
+            errors.append(f"{ctx!r} awaits branch protection, but no job in ci.yml reports it")
+        elif not step.strip():
+            errors.append(f"{ctx!r} awaits branch protection with no step named")
+        else:
+            named = _GAP_ID.findall(step)
+            if not named:
+                errors.append(
+                    f"{ctx!r} awaits branch protection under no gap: name the open gap "
+                    "(G-nnn) whose text names the job"
+                )
+                continue
+            if gaps is None:
+                gaps = open_gaps()
+            if not any(ctx in gaps.get(g, "") for g in named):
+                errors.append(
+                    f"{ctx!r} awaits branch protection under {', '.join(named)}, which is not "
+                    "an open gap in docs/dod that names the job"
+                )
+                continue
+            notes.append(f"job {ctx!r} awaits the administrator: {step}")
+    return errors, notes
+
+
 def read_live(repo: str, branch: str) -> dict[str, Any]:
     """``required_status_checks`` for ``repo``'s ``branch``, read with ``gh`` (its token must
     be allowed to read the setting: Administration: read)."""
@@ -271,14 +353,17 @@ def main(argv: list[str] | None = None) -> int:
     else:
         reading = read_live(args.repo, args.branch)
     required = [str(c) for c in reading.get("contexts", [])]
-    strict = bool(reading.get("strict"))
     ci_text = args.ci.read_text(encoding="utf-8")
-    errors = compare(gating_contexts(ci_text), required, strict, aggregated_parts(ci_text))
+    errors, notes = compare_reading(
+        gating_contexts(ci_text), reading, parts=aggregated_parts(ci_text)
+    )
     for e in errors:
         print(e)
     if errors:
         print(f"{len(errors)} difference(s)")
         return 1
+    for n in notes:
+        print(n)
     print(f"branch protection: {len(required)} required checks match the jobs in {args.ci.name}")
     return 0
 

@@ -15,9 +15,9 @@
  *               refusal's own reason from the chain — J-FAC-4), and what the route gate
  *               withheld. Before the run it says what will be spent, with which builder,
  *               how many items can be worked and delivered, and where a pull request would
- *               go — or why delivery is not possible for this repository (J-FAC-2/3); the
- *               button names the estimate, never a cap (F5b: nothing on this page promises
- *               a ceiling nothing enforces). While
+ *               go — or why delivery is not possible for this repository (J-FAC-2/3); an
+ *               operator may set a spend cap the run keeps, item by item (F5b), and the
+ *               button names the estimate and that cap. While
  *               a factory run is active the chain polls and a banner names the run and the
  *               item in hand (J-FAC-5 / J-TEL-9), inside a polite live region that is on the
  *               page before the run starts, so its arrival is announced (G-905). A built
@@ -52,7 +52,8 @@
  *               `useRegisterBacklog`, `useCreateRun`, `useCancelRun`, `useRuns`, `useHealth`,
  *               `useCapabilityMap`, `useAllRepos`), ui/src/api/types.ts (`FactoryTask`,
  *               `FactoryBacklog`), ui/src/lib/builder.ts (`builderChoice`, shared with
- *               Measure), ui/src/components/RepoPicker.tsx (`defaultToLatest`, as the
+ *               Measure), ui/src/lib/amount.ts (the spend cap's text, read as typed),
+ *               ui/src/components/RepoPicker.tsx (`defaultToLatest`, as the
  *               Baseline), ui/src/screens/Runs/EvidenceDrawer.tsx (the pack view an item
  *               row opens), src/crb/server/routes/factory.py (the shapes — `way_forward`
  *               included — documented under "Factory" in the API doc),
@@ -86,6 +87,7 @@ import { ShortId } from '../../components/ShortId'
 import { Details, NotificationBanner, SummaryList, WarningButton } from '../../components/govuk'
 import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
+import { readAmount } from '../../lib/amount'
 import { builderChoice } from '../../lib/builder'
 import { measuredCostPerAttempt, noMeasuredCostReason, type MeasuredCost } from '../../lib/economics'
 import { fmtDate, fmtInt, kOfN, shortId } from '../../lib/format'
@@ -664,6 +666,14 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   const [deliver, setDeliver] = useState(false)
   const [ownBuilder, setOwnBuilder] = useState('')
   const [ownModel, setOwnModel] = useState('')
+  // F5b — the run's own spend cap (blank = none): the worker stops the run before an item
+  // that could take its spend past it — a guard, not a guarantee (ADR-0030 §3)
+  const [capText, setCapText] = useState('')
+  // read as typed (P-265): text the browser could not parse is refused, never "no cap"
+  const capRead = readAmount(capText, { min: 0, above: true })
+  const cap = capRead.kind === 'ok' ? capRead.value : 0
+  const capSet = capRead.kind === 'ok'
+  const capOk = capRead.kind !== 'bad'
   const choice = builderChoice(health.data)
   const measured = useMemo(() => estimateFromMap(map.data), [map.data])
   // an API older than J-FAC-3 serves no pre-flight: say so rather than guess (never a white screen)
@@ -691,7 +701,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
       ? choice.label
       : 'No builder is configured on this deployment — an admin adds a provider key (Settings), or name one below'
   const target = canDeliver ? `pushes a branch to ${delivery.full_name} and opens a pull request against ${delivery.default_branch}; nothing is written to ${delivery.default_branch}` : ''
-  const startable = (own.length > 0 || choice !== null) && !run.isPending && worked > 0
+  const startable = (own.length > 0 || choice !== null) && !run.isPending && worked > 0 && capOk
 
   const startRun = () => {
     const body = own
@@ -709,6 +719,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
       kind: 'factory',
       deliver: deliver && canDeliver,
       ...body,
+      ...(capSet && capOk ? { max_cost_usd: cap } : {}),
     })
   }
 
@@ -749,7 +760,10 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           {
             key: 'Budget cap',
             hint: 'summary.factory.budget_cap',
-            value: 'no spend cap yet — the builder’s ladder caps turns, tool calls and wall clock per attempt',
+            value:
+              capSet && capOk
+                ? `${usd(cap)} for the whole run: before each item the run counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass ${usd(cap)}. An attempt with no cost cap of its own, and a test author’s call, are counted at the dearest so far (nothing before the first), so a run can pass its cap by up to one item; it then stops and says so`
+                : 'none on the whole run — set one under Stop the run at; the builder’s ladder caps turns, tool calls and wall clock per attempt',
           },
         ]}
         label="Before you run"
@@ -771,6 +785,18 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             An override of the route gate is a second approver’s act: once this run is queued, another approver grants it on the run’s page, under their name. It never lifts a cell with a false-Q1 row.
           </Hint>
         )}
+        <div className="max-w-[20em]" data-testid="factory-spend-cap">
+          <TextField
+            label="Stop the run at (USD)"
+            inputMode="decimal"
+            value={capText}
+            onChange={(e) => setCapText(e.target.value)}
+            placeholder="no cap"
+            description="blank = no cap on the whole run"
+            error={capOk ? undefined : 'Enter an amount above $0, or leave it blank.'}
+            hint="field.factory.spend_cap"
+          />
+        </div>
         <Hint as="div" id="details.factory.own_builder">
           <Details summary="Use a different builder" className="mb-0 mt-2 text-sm">
             <p className="m-0 mb-2 text-xs text-on-surface-muted">
@@ -786,8 +812,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
       <p className="mb-3 mt-3 text-sm">You can cancel the run at any point. Items already built are still charged.</p>
       <div className="flex flex-wrap items-center gap-3" data-testid="factory-run-controls">
         <WarningButton onClick={startRun} disabled={!startable} hint="button.factory.run">
-          {/* an estimate, never a promised cap: the request carries no spend cap (F5b), as the Budget cap row above says */}
-          {worked > 0 && (measured || own || choice) ? `Run the factory — estimated ${usd(lo)} to ${usd(hi)}` : 'Run the factory'}
+          {/* the estimate, and the cap when one is set: the request carries it and the worker keeps it (F5b) */}
+          {worked > 0 && (measured || own || choice) ? `Run the factory — estimated ${usd(lo)} to ${usd(hi)}${capSet && capOk ? `, stops at ${usd(cap)}` : ''}` : 'Run the factory'}
         </WarningButton>
         {run.data && (
           <LinkButton size="sm" to={`/runs/${run.data.id}`} hint="button.factory.started_run">

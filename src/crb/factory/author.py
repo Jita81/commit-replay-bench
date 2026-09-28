@@ -45,11 +45,11 @@ What it is:   The configurable test-author rung — a ``TestAuthor`` that writes
               ``builder:model[:provider]`` spelling as a build rung.
 What it does: Turns a rung label into a test author whose identity the loop's existing
               refusal compares against every build rung (the author and a build rung are
-              never the same rung, nor the same model — C3); asks one OpenAI-compatible model for a
-              single test
-              file in the repository's own conventions, re-asking on a reply it cannot parse
-              or a path the repository does not call a test, and refuses to return anything
-              else.
+              never the same rung, nor the same model — C3); asks one OpenAI-compatible
+              model for a single test file in the repository's own conventions, re-asking on
+              a reply it cannot parse or a path the repository does not call a test, and
+              refuses to return anything else. Meters every call (``calls``, and the cost on
+              each ``author.attempt`` event), so a run's spend cap counts it (F5b).
 How:          ``author_for_rung`` (validates the builder name against the registry) →
               ``RungTestAuthor.author`` = read the repo's test examples → ``build_messages``
               → one chat call → ``parse_authored`` → path check → ``AuthoredTest``; the
@@ -79,12 +79,14 @@ Claims:       An authored test is never trusted on the author's say-so; it is pr
 from __future__ import annotations
 
 import re
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
 from crb.builders import builder_names
 from crb.builders.adapter import parse_rung_label
 from crb.builders.base import Rung, emit
+from crb.builders.budget import Pricing, load_pricing, price_for
 from crb.builders.openai_client import (
     ChatFn,
     ChatReply,
@@ -243,6 +245,7 @@ class RungTestAuthor:
         attempts: int = DEFAULT_ATTEMPTS,
         max_examples: int = 2,
         max_example_chars: int = DEFAULT_EXAMPLE_CHARS,
+        pricing: Mapping[str, Pricing] | None = None,
     ) -> None:
         if not name.strip() or not model.strip():
             raise ValueError("a test author needs a builder name and a model id")
@@ -256,6 +259,11 @@ class RungTestAuthor:
         self.attempts = attempts
         self.max_examples = max_examples
         self.max_example_chars = max_example_chars
+        self._pricing = pricing
+        #: One entry per model call this author made — ``cost_usd`` and ``cost_known``, as
+        #: its ``author.attempt`` event carries them. A run's spend cap counts these: the
+        #: author writes no ledger row of its own (F5b).
+        self.calls: list[dict[str, Any]] = []
 
     def describe(self) -> dict[str, Any]:
         """The apparatus stamp. ``process`` says what this actually runs — the one-shot
@@ -313,6 +321,10 @@ class RungTestAuthor:
             )
             reply = chat(messages)
             text = reply.text if isinstance(reply, ChatReply) else str(reply)
+            cost_usd, cost_known = self._cost(reply)
+            self.calls.append(
+                {"action": "author.attempt", "cost_usd": cost_usd, "cost_known": cost_known}
+            )
             path, content = parse_authored(text)
             reason = self._unusable(path, content, config)
             emit(
@@ -322,6 +334,8 @@ class RungTestAuthor:
                 attempt=attempt,
                 path=path,
                 reason=reason,
+                cost_usd=cost_usd,
+                cost_known=cost_known,
             )
             if not reason:
                 return AuthoredTest(path, content, f"{self.name}:{self.model}")
@@ -329,6 +343,27 @@ class RungTestAuthor:
             f"{self.name}:{self.model} produced no usable test for {item.id} in "
             f"{self.attempts} attempt(s): {reason}"
         )
+
+    def _cost(self, reply: object) -> tuple[float, bool]:
+        """``(cost_usd, cost_known)`` of one call: the provider's reported cost, else the
+        price table's for the reply's tokens; a reply with no usage, or a model with no
+        known price, is a cost nobody can see (``0.0, False``)."""
+        if not isinstance(reply, ChatReply):
+            return 0.0, False
+        if reply.cost_usd is not None:
+            return float(reply.cost_usd), True
+        table = self._pricing
+        if table is None:
+            try:
+                table = load_pricing()
+            except (OSError, ValueError):  # a malformed deployment table: nothing is known
+                return 0.0, False
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            price = price_for(self.model, table)
+        if not price.known:
+            return 0.0, False
+        return price.cost(reply.tokens_in, reply.tokens_out, cached_in=reply.cached_in), True
 
     @staticmethod
     def _unusable(path: str, content: str, config: RepoConfig) -> str:

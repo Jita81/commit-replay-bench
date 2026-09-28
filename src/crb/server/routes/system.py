@@ -894,7 +894,7 @@ def prometheus_metrics(factory: SessionFactoryDep, settings: SettingsDep) -> Res
     if not metrics.available():
         raise ApiError(503, "metrics_unavailable", "prometheus_client is not installed")
     refresh_ledger_gauges(factory)
-    return Response(content=metrics.render(), media_type=CONTENT_TYPE_LATEST)
+    return Response(content=metrics.render_api(), media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/version", summary="Package, apparatus and routing-policy versions")

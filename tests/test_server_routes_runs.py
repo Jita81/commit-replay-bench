@@ -221,6 +221,7 @@ class TestList:
             "rows": 5,
             "duration_s": 210.5,
             "stopped_reason": "",
+            "stopped_code": "",
             "detail": {},
         }
         assert run["progress"] == {"done": 4, "total": 4, "current_task_id": None}

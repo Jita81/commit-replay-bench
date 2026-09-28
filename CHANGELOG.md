@@ -31,6 +31,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   worker for that upgrade and never roll back across it (DEPLOYMENT §6); between full walks,
   at most five minutes apart, `/ledger/verify` re-hashes only new events (P-246 to P-249).
 
+- **Gates from a lock, a run that keeps its spend cap, and click provisioned sealed**
+  (north-star Wave 2, stream H; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
+  CI and the image install every library, the audit tools and uv at pinned versions; a
+  `fresh-clone` job runs every gate as root with no docker daemon, though not yet (DL-101). A
+  build run may declare `max_cost_usd`, a guard that counts the test author's calls and says when
+  the run passed it (ADR-0030, DL-102). The sealed posture reads a `uv.lock`, refusing text
+  that would reach pip as an option, and provisions click across its lock move. The chart
+  ships the alert rules and one evidence store, carrying an older worker's evidence into it.
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

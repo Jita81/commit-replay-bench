@@ -83,6 +83,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
+from crb.builders.budget import PRICING_ENV, load_pricing
 from crb.builders.claude_code import credential_missing as claude_code_credential_missing
 from crb.builders.claude_code import default_auth as claude_code_default_auth
 from crb.builders.claude_code import default_model as claude_code_default_model
@@ -114,6 +115,7 @@ from crb.server.schemas import (
 )
 from crb.server.secrets import secrets_dir_for
 from crb.store.events import lock_event_writes
+from crb.server.spend_cap import unpriced_rungs
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 
@@ -395,6 +397,9 @@ def _counts(session: Session, run: Run) -> RunCounts:
     # a factory run keeps its own counters (items, done, accepted, by_status, outcomes) next
     # to the RunSummary derived from its graded attempts
     derived.detail = {k: v for k, v in cj.items() if k != "current_task_id"}
+    # and why it stopped itself (the spend cap, F5b), which no graded row can say
+    derived.stopped_reason = str(cj.get("stopped_reason") or derived.stopped_reason)
+    derived.stopped_code = str(cj.get("stopped_code") or "")
     return derived
 
 
@@ -478,6 +483,7 @@ def run_out(session: Session, run: Run) -> RunOut:
         provider=run.provider,
         ladder=list(run.ladder_json or []),
         budget=dict(params.get("budget") or {}),
+        max_cost_usd=float(params["max_cost_usd"]) if params.get("max_cost_usd") else None,
         executor=str(params.get("executor", "") or ""),
         timeout=int(params.get("timeout", 0) or 0),
         pool=str(params.get("pool", "") or ""),
@@ -624,6 +630,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["builder_config"] = dict(body.builder_config)
     if body.budget is not None and body.budget.overrides():
         params["budget"] = body.budget.overrides()
+    if body.max_cost_usd is not None:
+        params["max_cost_usd"] = float(body.max_cost_usd)
     if body.retain.worktrees or body.retain.transcripts:
         params["retain"] = body.retain.model_dump()
     if body.outage_stop is not None:
@@ -715,6 +723,67 @@ def credential_refusal(run: Run, settings: Any) -> None:
             )
 
 
+def run_rungs(run: Run) -> list[tuple[str, str]]:
+    """Every ``(builder, model)`` the run can call: its own and each rung's (``rN`` labels
+    are the run's own; a ``builder:model[:provider]`` or ``builder:model@provider`` label
+    and an object rung name theirs)."""
+    own = (run.builder, run.model)
+    out: list[tuple[str, str]] = [own] if run.builder else []
+    for entry in run.ladder_json or []:
+        if isinstance(entry, Mapping):
+            out.append((str(entry.get("builder", "")), str(entry.get("model", ""))))
+        elif isinstance(entry, str) and ":" in entry:
+            builder, rest = entry.split(":", 1)
+            out.append((builder.strip(), rest.split("@", 1)[0].split(":", 1)[0].strip()))
+        elif run.builder:
+            out.append(own)
+    return list(dict.fromkeys(pair for pair in out if pair[0]))
+
+
+def author_rung(run: Run, body_author: str | None, deployment_author: str) -> tuple[str, str]:
+    """``(builder, model)`` of the test author a factory run will call — the run's
+    ``test_author`` over the deployment's ``CRB_FACTORY__TEST_AUTHOR``, as the worker
+    resolves it — or ``("", "")`` when it has none (``none`` declines one). A label that is
+    not a rung is returned whole as the builder, so the price check names it."""
+    if run.kind != KIND_FACTORY:
+        return "", ""
+    label = (body_author if body_author is not None else deployment_author or "").strip()
+    if not label or label.lower() == "none":
+        return "", ""
+    builder, _, rest = label.partition(":")
+    model = rest.split("@", 1)[0].split(":", 1)[0].strip()
+    return (builder.strip(), model) if model else (label, "")
+
+
+def spend_cap_refusal(run: Run, author: tuple[str, str] = ("", "")) -> None:
+    """422 ``spend_cap_unpriced`` when a capped run could call a model with no known price:
+    its attempts — or its test author's calls (``author``, from :func:`author_rung`) —
+    would report no cost, so the cap (F5b) could never stop the run. The table is the
+    API's own (``CRB_PRICING_JSON`` over the defaults) — the compose and Helm give the API
+    and the worker the same; one that cannot be read refuses the cap too."""
+    if not (run.params_json or {}).get("max_cost_usd"):
+        return
+    try:
+        table = load_pricing()
+    except (OSError, ValueError) as exc:
+        raise ApiError(
+            422,
+            "spend_cap_unpriced",
+            f"the price table could not be read ({exc}), so no spend cap can be kept — "
+            "nothing was queued",
+        ) from exc
+    unpriced = unpriced_rungs([*run_rungs(run), *([author] if author[0] else [])], table)
+    if unpriced:
+        named = ", ".join(f"{b}:{m}" for b, m in unpriced)
+        raise ApiError(
+            422,
+            "spend_cap_unpriced",
+            f"a spend cap needs the price of every model the run can call, and {named} has "
+            f"none: price it in {PRICING_ENV} or run without a cap — nothing was queued",
+            detail={"rungs": [{"builder": b, "model": m} for b, m in unpriced]},
+        )
+
+
 def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
     """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
     route that enqueues a run cannot skip one (docs/PREVENTION.md P-160: the Learn queue
@@ -725,9 +794,16 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
     * 422 ``builder_credential_missing`` — a builder this run would call has no credential
       (P-003; presence only);
     * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
-      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker.
+      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker;
+    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
+      run's test author included (F5b).
     """
     credential_refusal(run, settings)
+    factory_settings = getattr(settings, "factory", None)
+    spend_cap_refusal(
+        run,
+        author_rung(run, body.test_author, str(getattr(factory_settings, "test_author", ""))),
+    )
     if body.qualify_first is False:
         repo_row = db.get(Repo, body.repo)
         if repo_row is None:

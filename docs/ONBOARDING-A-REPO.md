@@ -114,6 +114,11 @@ formatter is applied before grading (4 of the 6 NHS misses were formatting **[hy
 as the NHS measurement of 2026-09-14 reported them; its rows are the operator's and not in
 this repository]**), and
 `outage_stop` at its default so a usage-limit outage stops the run rather than burning it.
+Name a spend cap for the whole run (`max_cost_usd`; the Measure page starts it at the top of
+the estimate): before each attempt the run adds what it has spent to what that attempt could
+cost — the attempt's own cost cap, or the dearest attempt so far when it has none — and stops
+itself, `stopped_code: spend_cap`, when the sum would pass the cap. A cap over a model with no
+known price is refused before anything is queued.
 
 **What to look at on the Run page:** the failure split. `builder_red` is the model's;
 `lint` is the maintainers' gate; `budget`, `protocol`, `harness`, `outage` are the

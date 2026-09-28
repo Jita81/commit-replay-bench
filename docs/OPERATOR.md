@@ -263,8 +263,9 @@ the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
 `$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
 at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
 `--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
-pin Python as `name==version` in `requirements*.txt` (or name the files in
-`runner_opts.deps_lock`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+pin Python as `name==version` in `requirements*.txt` or commit a `uv.lock` (or name the
+files in `runner_opts.deps_lock`, where a list of alternatives lets one repository's history
+move from one lock to another, and the uv groups to read in `runner_opts.deps_groups`); commit a `package-lock.json` (lockfileVersion 2+) and name any
 package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
 version does not provision is refused with its `PROVISION_*` code and the fix
 ([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With
@@ -916,6 +917,12 @@ Stop delivery and investigate before any further sign-off if you observe any of:
   the same scope in the same posture, so the posture moved under its qualification (a run
   stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
   before the next replay — §7a).
+
+A run that stops itself at its spend cap (`counts.stopped_code: spend_cap`,
+`run.spend_cap`) is not a stop condition: it did what it was told. Its attempts are graded
+and kept, the reason names what was spent and the attempt or item it did not start, and the
+next run reaches the tasks it did not. If a capped run stopped because an attempt's cost was
+not known, price the model in `CRB_PRICING_JSON` before the next one.
 
 **Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
 shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in

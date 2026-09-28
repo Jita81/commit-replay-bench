@@ -57,6 +57,41 @@ spec:
       # Long enough for an in-flight task to finish its belts; the worker resumes orphaned
       # runs from the queue after a restart in any case.
       terminationGracePeriodSeconds: 120
+      {{- if eq .Values.worker.workDir.type "pvc" }}
+      # Upgrade carry (docs/DEPLOYMENT.md §6): a worker from a chart before the evidence
+      # store kept its patches and transcripts on this work claim, at the paths the store is
+      # now mounted over. Copy them into the store once, before
+      # the worker starts, so no row loses its patch or transcript; the marker makes every
+      # later start a no-op. A pod work directory (emptyDir) kept nothing to carry.
+      initContainers:
+        - name: evidence-carry
+          image: {{ include "crb.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              from="${CRB_CARRY_FROM:-/work}"; to="${CRB_CARRY_TO:-/store}"
+              if [ -e "$to/.carried-from-work" ]; then exit 0; fi
+              for d in evidence transcripts; do
+                if [ -d "$from/$d" ]; then
+                  mkdir -p "$to/$d"
+                  cp -R -p "$from/$d/." "$to/$d/"
+                fi
+              done
+              : > "$to/.carried-from-work"
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+              readOnly: true
+            - name: evidence-store
+              mountPath: /store
+      {{- end }}
       containers:
         - name: worker
           image: {{ include "crb.image" . }}
@@ -104,6 +139,7 @@ spec:
             - name: work
               mountPath: /srv/crb
             {{- include "crb.secretsStore.mount" . | nindent 12 }}
+            {{- include "crb.evidenceStore.mount" . | nindent 12 }}
             {{- if eq $mode "dind" }}
             - name: docker-sock
               mountPath: /var/run/docker
@@ -155,6 +191,7 @@ spec:
       volumes:
         {{- include "crb.scratchVolumes" . | nindent 8 }}
         {{- include "crb.secretsStore.volume" . | nindent 8 }}
+        {{- include "crb.evidenceStore.volume" . | nindent 8 }}
         - name: work
           {{- if eq .Values.worker.workDir.type "pvc" }}
           persistentVolumeClaim:
