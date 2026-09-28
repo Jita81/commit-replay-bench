@@ -17,7 +17,7 @@ Works with:   src/crb/core/reading.py (``register`` — the readings built here)
               src/crb/core/ledger.py (the sealed 2.4 rows the ledger admits),
               tests/fixtures/posture.py (``posture_row`` — the labels a 2.4 row carries)
 Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_signoff_v5.py
-Touch when:   the sealed posture's labels or the reading's shape change.
+Touch when:   never for a new repository; the sealed posture's labels or the reading's shape change.
 """
 
 from __future__ import annotations

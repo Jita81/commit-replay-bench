@@ -22,7 +22,8 @@ Works with:   tests/fixtures/env_guard.py (under test), tests/conftest.py (``_no
               the autouse fixture), src/crb/server/worker_main.py (``settings_from_args``, the
               writer that leaked)
 Tested by:    tests/test_env_guard.py
-Touch when:   the product starts reading configuration from a variable outside ``CRB_*``.
+Touch when:   never for a new repository; the product starts reading configuration from a variable
+              outside ``CRB_*``.
 """
 
 from __future__ import annotations

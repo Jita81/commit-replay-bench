@@ -28,8 +28,8 @@ Works with:   docs/PREVENTION.md (the rows it reads), .github/workflows/ci.yml (
               checks the job is the right one), tests/test_measured_claims.py (P-234's real
               evidence)
 Tested by:    (this is a test file)
-Touch when:   a CI job starts or stops running a single script; the prevention register's
-              row format changes.
+Touch when:   never for a new repository; a CI job starts or stops running a single script; the
+              prevention register's row format changes.
 """
 
 from __future__ import annotations
@@ -44,7 +44,9 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 PREVENTION = ROOT / "docs" / "PREVENTION.md"
 
-_SCRIPT_RE = re.compile(r"\bscripts/([A-Za-z0-9_]+)\.py\b")
+#: A repository script a job's steps run: Python, or a shell driver (``walkthrough.sh`` runs
+#: the job's specs, so a job that runs it is not a one-script job).
+_SCRIPT_RE = re.compile(r"\bscripts/([A-Za-z0-9_]+)\.(?:py|sh)\b")
 _ROW_RE = re.compile(r"^\|\s*(P-\d{3})\s*\|")
 _CI_RE = re.compile(r"`ci:([A-Za-z0-9_-]+)`")
 
@@ -88,6 +90,27 @@ def test_the_single_script_jobs_are_found() -> None:
     assert jobs.get("claims") == "claims_check"
     assert jobs.get("dod") == "dod_check"
     assert "test" not in jobs
+
+
+def test_a_job_that_drives_specs_through_a_shell_script_is_not_a_one_script_job() -> None:
+    """The Wave 2 integration found the rule reading ``walkthrough-screens`` (which runs
+    ``scripts/walkthrough.sh`` over its spec, then ``scripts/ci_job_budget.py``) as a job that
+    runs one Python script and no test, and so demanding a ``test:`` evidence for a row whose
+    evidence is the spec the job runs. A shell driver is a script the job runs."""
+    jobs = _jobs()
+    assert "walkthrough-screens" not in jobs
+    workflow = {
+        "jobs": {
+            "spec": {
+                "steps": [
+                    {"run": "scripts/walkthrough.sh e2e/x.spec.ts"},
+                    {"run": "python3 scripts/ci_job_budget.py"},
+                ]
+            },
+            "one": {"steps": [{"run": "python scripts/claims_check.py --check"}]},
+        }
+    }
+    assert single_script_jobs(workflow) == {"one": "claims_check"}
 
 
 def test_every_prevention_row_names_a_ci_job_that_runs_its_evidence() -> None:

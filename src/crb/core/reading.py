@@ -63,10 +63,10 @@ Works with:   src/crb/core/context_arm.py (the arms a hierarchy names),
               src/crb/server/routes/readings.py (the events store and ``POST /readings``),
               src/crb/cli/commands/reading.py (``crb reading register``)
 Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_server_readings.py
-Touch when:   a rule is added (a row in ``RULES`` with its exact P(deliver | 0.80) — an ADR
-              amending ADR-0026 item 5 first); the counting rule changes (an apparatus bump);
-              the operator fixes another budget (``CRB_READING__CELL_ERROR_BUDGET``); never for
-              a new repository.
+Touch when:   never for a new repository; a rule is added (a row in ``RULES`` with its exact
+              P(deliver | 0.80) — an ADR amending ADR-0026 item 5 first); the counting rule changes
+              (an apparatus bump); the operator fixes another budget
+              (``CRB_READING__CELL_ERROR_BUDGET``); never for a new repository.
 Claims:       A reading bounds the chance of certifying a cell whose true first-attempt rate is
               0.80 by its rule's P(deliver | 0.80); it says nothing about correctness or
               working software (docs/EVIDENCE-AND-CLAIMS.md).

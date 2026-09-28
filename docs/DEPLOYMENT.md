@@ -36,7 +36,7 @@ come from, and two flows that are off by default: the tracker the intake watches
 (`CRB_INTAKE__TRACKER`) and, with dependency provisioning on (`CRB_PROVISION__ENABLED=true`,
 §3.4), the fetch sidecar to your package mirror or registry —
 which receives only the package names and versions the task's lockfiles pin
-([SECURITY.md](SECURITY.md) has the complete table, with what each flow sends).
+([SECURITY.md](SECURITY.md) has the complete table, with what each flow sends) **[hypothesis — the design SECURITY.md's egress table and the chart's network policies record; a packet capture of a running deployment against that table would confirm it]**.
 
 ### 1.1 Single host without containers (evaluation)
 
@@ -486,7 +486,7 @@ aggregators — each a job that `needs` its parts and runs `if: always()`: the w
 parallel parts (`test shard (py3.12, 1 of 6)` …, the walkthrough story and its screens
 shards) and the aggregator passes only when every part passed (a failed, cancelled or skipped
 part fails it), the suite's parts together ran every test exactly once, and the union's
-coverage is at least 70 % (P-051, P-053). Never add a part to the list — its name changes
+coverage is at least 70 % (P-051, P-053) **[measured — n = 3 aggregators; method: `scripts/check_branch_protection.py`'s `aggregated_parts` over ci.yml, pinned by `tests/test_ci_job_budget.py`; apparatus n/a, a property of the product's own code, not a graded row]**. Never add a part to the list — its name changes
 whenever the job is split differently, and the aggregator's does not;
 `scripts/check_branch_protection.py` refuses a part on the list.
 
@@ -712,7 +712,7 @@ account's sessions on every device.
 
 **Upgrading to revision `0013`** (the audit trail's hash chain, ADR-0029): the revision
 chains every event already stored, then makes the database refuse any event that does not
-carry the chain — the two chain columns have no default and must each hold a SHA-256. The
+carry the chain — the two chain columns have no default and must each hold a SHA-256 **[measured — n = 1 revision; method: `tests/test_store_migrate.py::test_0013_refuses_a_row_from_the_release_before_it_and_keeps_recording` on SQLite and PostgreSQL; apparatus n/a, a property of the product's own code, not a graded row]**. The
 release before it does not write the chain, so while its API and worker pods still run
 (the `pre-upgrade` hook migrates before any pod is replaced; compose's `run --rm migrate`
 runs before `up -d`) every event they try to write is refused, one at a time: a sign-in
@@ -728,7 +728,7 @@ instead.
 **Upgrading to the chart with the evidence store** (`evidenceStore`, P-045): before it, the
 worker kept its kept patches, evidence packs and transcripts on its own work claim, at
 `$CRB_HOME/evidence` and `$CRB_HOME/transcripts`. The new chart mounts the evidence claim
-over those two paths, which would hide what the worker kept. So when `worker.workDir.type`
+over those two paths, which would hide what the worker kept **[measured — n = 2 paths; method: the chart's worker template, pinned by `tests/test_deploy_evidence_store.py`; apparatus n/a, a property of the product's own code, not a graded row]**. So when `worker.workDir.type`
 is `pvc`, the worker pod runs an init container, `evidence-carry`, before the worker starts:
 it copies both directories from the work claim into the evidence claim once, then leaves a
 marker (`.carried-from-work`) so later starts copy nothing. Nothing is deleted from the work
@@ -907,7 +907,7 @@ The `worker` probe reads the `workers` table: every worker upserts its row every
 `heartbeat_s` (default 10 s) whether or not it holds a run, with the interval it promised,
 so the probe judges a worker alive when it checked in within 3 × its own `heartbeat_s`. The
 UI reads the same probe: the Deployment page lists the workers with their last check-in. Two
-probes raise a banner. The shell raises the red "Delivery halted" banner above every screen,
+probes raise a banner **[measured — n = 2 probes; method: every UI reader of a probe classified in `tests/test_health_probe_docs.py`'s `BANNERS`; apparatus n/a, a property of the product's own code, not a graded row]**. The shell raises the red "Delivery halted" banner above every screen,
 Home included, while the `ledger` probe reports a false-Q1 row; Home adds its own banner when
 the `sandbox` probe says the sandbox cannot run. Any other probe that is not `ok` shows only as
 the one-word pill in the header, so read `/health` itself when that pill is not `ok`.

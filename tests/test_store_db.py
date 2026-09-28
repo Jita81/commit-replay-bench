@@ -672,3 +672,16 @@ def test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_prot
         with backend.engine.begin() as c:
             c.execute(text(f"DROP OWNED BY {role}"))
             c.execute(text(f"DROP ROLE {role}"))
+
+
+def test_the_pg_function_raises_the_one_append_only_text() -> None:
+    """The Wave 2 integration's merge spliced stream I's f-string body into feat/ns1's plain
+    string, so PostgreSQL's ``crb_append_only()`` would have raised the literal
+    ``{APPEND_ONLY_SUFFIX}`` and the probe, which takes only the trigger's own words as proof,
+    would have read every refusal as another error. The function raises exactly the text the
+    probe matches, on both dialects."""
+    assert "{" not in store_db._PG_FUNCTION_SRC
+    assert f"'%{store_db.APPEND_ONLY_SUFFIX}'" in store_db._PG_FUNCTION_SRC
+    assert store_db.append_only_error_text("grades") in store_db._sqlite_trigger_sql(
+        "grades", "grades_no_update"
+    )

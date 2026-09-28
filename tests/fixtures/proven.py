@@ -19,7 +19,8 @@ ADRs:         docs/adr/0025-routing-v2.md, docs/adr/0026-the-context-standard.md
 Works with:   tests/fixtures/server_seed.py (the store it adds to), tests/fixtures/readings.py
               (the sealed rows), src/crb/server/routes/readings.py (``POST /readings``)
 Tested by:    tests/test_server_readings.py
-Touch when:   the sealed posture's labels, the score payload or the report payload change.
+Touch when:   never for a new repository; the sealed posture's labels, the score payload or the
+              report payload change.
 """
 
 from __future__ import annotations

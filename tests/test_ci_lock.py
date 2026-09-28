@@ -33,8 +33,9 @@ Works with:   .github/workflows/ci.yml (the install steps and the ``fresh-clone`
               uv.lock (the lock), pyproject.toml (the extras it locks), docs/CONTRIBUTING.md
               (the same install for a person), docs/dod/product.md (product.evidence.205)
 Tested by:    (this is a test file)
-Touch when:   a job installs Python packages a new way; a gate is added to CONTRIBUTING's
-              list (add it to ``GATES`` and to the fresh-clone job in the same change).
+Touch when:   never for a new repository; a job installs Python packages a new way; a gate is added
+              to CONTRIBUTING's list (add it to ``GATES`` and to the fresh-clone job in the same
+              change).
 """
 
 from __future__ import annotations

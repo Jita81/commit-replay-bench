@@ -21,7 +21,8 @@ ADRs:         docs/adr/0019-qualification-is-posture-relative.md; ADR-0025 item 
 Works with:   src/crb/core/grade.py (``touched_post_run``), src/crb/core/workspace.py
               (``touched_files``), tests/fixtures/pyrepo.py (the gold trial the grade runs on)
 Tested by:    tests/test_grade_post_run.py
-Touch when:   a belt starts reading the post-run tree (it must not: ADR-0019 §7).
+Touch when:   never for a new repository; a belt starts reading the post-run tree (it must not:
+              ADR-0019 §7).
 """
 
 from __future__ import annotations

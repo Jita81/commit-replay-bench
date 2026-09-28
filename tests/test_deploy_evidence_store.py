@@ -31,8 +31,9 @@ Works with:   deploy/helm/crb/templates/_helpers.tpl (the ``crb.evidenceStore*``
               this suite resolves), tests/test_deploy_secrets_store.py (the helpers and the
               secrets store's twin suite), docs/PREVENTION.md (P-045)
 Tested by:    tests/test_deploy_evidence_store.py
-Touch when:   the API or the worker reads or writes another directory under ``$CRB_HOME``
-              that the other pod must see; never give the two pods separate evidence stores.
+Touch when:   never for a new repository; the API or the worker reads or writes another directory
+              under ``$CRB_HOME`` that the other pod must see; never give the two pods separate
+              evidence stores.
 """
 
 from __future__ import annotations

@@ -23,8 +23,8 @@ Works with:   src/crb/server/settings.py (``unsealed_override_ack_refusal``, the
               variables' own rows), deploy/helm/crb/README.md (the chart's ``config.*`` keys
               an operator sets)
 Tested by:    tests/test_override_docs_name_who_sets_it.py
-Touch when:   another variable becomes required beside an existing one (add it to
-              ``REQUIRES``), or an operator document is added.
+Touch when:   never for a new repository; another variable becomes required beside an existing one
+              (add it to ``REQUIRES``), or an operator document is added.
 """
 
 from __future__ import annotations

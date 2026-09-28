@@ -20,7 +20,8 @@ Works with:   src/crb/core/reading.py (the code under test),
               src/crb/core/ledger.py (the rows a reading counts),
               tests/fixtures/readings.py (sealed rows and registered readings)
 Tested by:    this file
-Touch when:   a rule, the counting or the budget changes (an ADR amending ADR-0026 first).
+Touch when:   never for a new repository; a rule, the counting or the budget changes (an ADR
+              amending ADR-0026 first).
 """
 
 from __future__ import annotations

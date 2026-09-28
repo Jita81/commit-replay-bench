@@ -22,7 +22,8 @@ Works with:   src/crb/factory/review.py (the probe and the waiver), src/crb/fact
               (the stop), src/crb/factory/evidence.py (``review.probe_waived``),
               src/crb/factory/delivery.py (the pull request's waiver section)
 Tested by:    tests/test_factory_strength_probe.py
-Touch when:   the probe's required-ness changes (an ADR); the waiver's binding changes.
+Touch when:   never for a new repository; the probe's required-ness changes (an ADR); the waiver's
+              binding changes.
 """
 
 from __future__ import annotations

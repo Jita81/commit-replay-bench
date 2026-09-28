@@ -46,9 +46,9 @@ Works with:   src/crb/core/ledger.py (the label, ``GradeRow.context_arm``, the r
               reads one arm), src/crb/factory/build.py (a factory row's arm),
               src/crb/core/prevention.py (the ``learn`` label ``+L`` reads)
 Tested by:    tests/test_context_arm.py, tests/test_routing_v2.py
-Touch when:   an arm base or modifier is added — an ADR amending ADR-0026 item 1 first; a new
-              provenance stamp (add it to ``PROVENANCE_LABELS``, never to the arm); never for a
-              new repository.
+Touch when:   never for a new repository; an arm base or modifier is added — an ADR amending
+              ADR-0026 item 1 first; a new provenance stamp (add it to ``PROVENANCE_LABELS``, never
+              to the arm); never for a new repository.
 Claims:       An arm names what the brief carried, not what the builder read; ``S3`` never
               certifies and ``A0`` never licenses (docs/EVIDENCE-AND-CLAIMS.md).
 """

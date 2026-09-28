@@ -24,8 +24,8 @@ ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md,
 Works with:   src/crb/server/worker_main.py (under test), src/crb/server/unsealed_override.py
               (the event), src/crb/store/events.py (``events_head``)
 Tested by:    tests/test_worker_start.py
-Touch when:   the start-up line or the override event changes shape (docs/DEPLOYMENT.md §8
-              and §9.4 name them).
+Touch when:   never for a new repository; the start-up line or the override event changes shape
+              (docs/DEPLOYMENT.md §8 and §9.4 name them).
 """
 
 from __future__ import annotations

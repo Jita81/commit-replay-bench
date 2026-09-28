@@ -19,8 +19,9 @@ Works with:   src/crb/server/schemas.py (the models), ui/src/api/types.ts (the i
               ui/src/screens/Ledger/LedgerPage.tsx and ui/src/screens/Posture/PosturePage.tsx
               (the screens that read ``LedgerVerify``)
 Tested by:    tests/test_ui_type_mirrors.py
-Touch when:   a screen starts to read a response whole (register it), or a registered model
-              gains or loses a field (change the interface and the screens with it).
+Touch when:   never for a new repository; a screen starts to read a response whole (register it), or
+              a registered model gains or loses a field (change the interface and the screens with
+              it).
 """
 
 from __future__ import annotations

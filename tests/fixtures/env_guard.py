@@ -16,7 +16,8 @@ Works with:   tests/conftest.py (the autouse fixture), src/crb/server/worker_mai
               of ``CRB_HOME`` into the process environment), tests/test_lint.py (asserts the
               suite never runs against a real home — the test the leak failed)
 Tested by:    tests/test_env_guard.py
-Touch when:   the product reads configuration from a variable outside ``CRB_*``.
+Touch when:   never for a new repository; the product reads configuration from a variable outside
+              ``CRB_*``.
 """
 
 from __future__ import annotations

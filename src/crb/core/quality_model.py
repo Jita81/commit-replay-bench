@@ -38,8 +38,9 @@ Works with:   src/crb/core/grade.py (the belts named here), src/crb/core/checks.
               docs/EVIDENCE-AND-CLAIMS.md §9 (the guide's copy of the table),
               scripts/claims_check.py (refuses a conformity claim)
 Tested by:    tests/test_quality_model.py
-Touch when:   a check starts or stops evidencing a characteristic — change this table, the
-              guide (§9, regenerated from ``render_table``) and ADR-0026's table together.
+Touch when:   never for a new repository; a check starts or stops evidencing a characteristic —
+              change this table, the guide (§9, regenerated from ``render_table``) and ADR-0026's
+              table together.
 """
 
 from __future__ import annotations

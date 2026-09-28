@@ -26,8 +26,9 @@ Works with:   tests/test_server_reaper.py and tests/test_worker.py (the budget t
               fake or in-process daemons), tests/test_execution.py (the kill-bound tests
               given room), docs/PREVENTION.md (P-014, the row this closes)
 Tested by:    tests/test_wall_clock_bounds.py
-Touch when:   a test needs a wall-clock bound: make it at least the floor and wide enough to
-              tell bounded from unbounded, or move the arithmetic onto a fake clock.
+Touch when:   never for a new repository; a test needs a wall-clock bound: make it at least the
+              floor and wide enough to tell bounded from unbounded, or move the arithmetic onto a
+              fake clock.
 """
 
 from __future__ import annotations

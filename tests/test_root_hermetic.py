@@ -20,8 +20,8 @@ Works with:   tests/test_provision_store.py (the seal's write probe it found),
               tests/test_builders_container.py (the sibling ratchet for builder settings on
               the host's uid), .github/workflows/ci.yml (job ``fresh-clone``)
 Tested by:    itself (the planted samples)
-Touch when:   a new filesystem call can be refused by mode bits, or a new keyword carries a
-              uid into code that refuses root.
+Touch when:   never for a new repository; a new filesystem call can be refused by mode bits, or a
+              new keyword carries a uid into code that refuses root.
 """
 
 from __future__ import annotations

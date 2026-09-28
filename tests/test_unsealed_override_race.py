@@ -20,7 +20,8 @@ ADRs:         docs/adr/0023-production-refuses-the-unsealed-posture.md,
 Works with:   src/crb/server/unsealed_override.py (under test), src/crb/store/events.py
               (``lock_event_writes``, ``verify_events``), tests/conftest_store.py (the backends)
 Tested by:    tests/test_unsealed_override_race.py
-Touch when:   the override's event moves to another writer, or the events write lock changes.
+Touch when:   never for a new repository; the override's event moves to another writer, or the
+              events write lock changes.
 """
 
 from __future__ import annotations

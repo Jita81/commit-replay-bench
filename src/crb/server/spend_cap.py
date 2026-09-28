@@ -45,8 +45,8 @@ Works with:   src/crb/server/worker.py (asks before each attempt or item),
               src/crb/factory/author.py (``RungTestAuthor.calls``, the author's metered
               calls)
 Tested by:    tests/test_worker_spend_cap.py, tests/test_server_spend_cap.py
-Touch when:   a new kind of spend is recorded outside the run's ledger rows (count it in
-              ``Spend``), or a new unit of work needs a reserve.
+Touch when:   never for a new repository; a new kind of spend is recorded outside the run's ledger
+              rows (count it in ``Spend``), or a new unit of work needs a reserve.
 """
 
 from __future__ import annotations

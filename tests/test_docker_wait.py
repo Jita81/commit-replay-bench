@@ -24,8 +24,8 @@ Works with:   tests/docker_wait.py (under test), tests/test_sandbox_docker.py (t
               probe against a daemon), docs/PREVENTION.md (P-119, the row this ratchet
               closes)
 Tested by:    tests/test_docker_wait.py
-Touch when:   a test needs another docker listing: add it to tests/docker_wait.py and teach
-              the ratchet its argv shape.
+Touch when:   never for a new repository; a test needs another docker listing: add it to
+              tests/docker_wait.py and teach the ratchet its argv shape.
 """
 
 from __future__ import annotations

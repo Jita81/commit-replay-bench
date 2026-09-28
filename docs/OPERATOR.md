@@ -704,7 +704,7 @@ export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
 - **Reply length.** `CRB_OPENAI_MAX_TOKENS` is the reply cap of the builders, the test author
   and the intent labeller. While it is unset the labeller keeps its own shorter cap of 400
   tokens (a label is one short JSON object); set it for a reasoning model that needs longer,
-  or set `max_tokens` in a label run's `builder_config`, which wins.
+  or set `max_tokens` in a label run's `builder_config`, which wins **[measured — n = 1 default, 400 tokens; method: `DEFAULT_MAX_TOKENS` in `src/crb/builders/labeller.py` read at this commit; apparatus n/a, a property of the product's own code, not a graded row]**.
 - **Timeouts.** A model that generates slowly needs a timeout longer than one reply takes:
   at 15 tokens a second a 4,000-token reply takes about 270 s **[hypothesis — arithmetic from
   a stated rate, not measured on a model]**. Keep retries low — a timed-out call is retried
@@ -1153,7 +1153,7 @@ What authoring returns and each `author.attempt` it records carry that endpoint'
 the run's provider: that belongs to the build ladder, so a Claude ladder with an author on
 Cerebras (`CRB_FACTORY__TEST_AUTHOR=editblock:gpt-oss-120b`) runs.
 The provider is recorded, never compared as identity: the same model behind two providers is
-still one model, and the refusal above still stops it.
+still one model, and the refusal above still stops it **[measured — n = 1 rule; method: `tests/test_builders_endpoint.py::test_a_provider_never_lets_the_authors_model_pass_as_another`; apparatus n/a, a property of the product's own code, not a graded row]**.
 
 Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
 the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at

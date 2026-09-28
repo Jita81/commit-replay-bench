@@ -24,7 +24,8 @@ Works with:   src/crb/core/lint.py (``LINT_STATUSES``, ``lint_status``), src/crb
               (stamps it), src/crb/core/ledger.py (``lint_reason`` on a 2.4 row),
               tests/test_lint.py (the belt's own suite)
 Tested by:    tests/test_lint_status.py
-Touch when:   a status joins ``LINT_STATUSES`` or the grade reaches belt 5 by another path.
+Touch when:   never for a new repository; a status joins ``LINT_STATUSES`` or the grade reaches belt
+              5 by another path.
 """
 
 from __future__ import annotations

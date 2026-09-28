@@ -18,8 +18,8 @@ Works with:   src/crb/core/quality_model.py (the code under test),
               docs/EVIDENCE-AND-CLAIMS.md §9 (the guide's copy of the table),
               scripts/claims_check.py (refuses a conformity claim; tests/test_claims_check.py)
 Tested by:    (this is a test file)
-Touch when:   a check starts or stops evidencing a characteristic — change the data, the
-              guide and ADR-0026's table together.
+Touch when:   never for a new repository; a check starts or stops evidencing a characteristic —
+              change the data, the guide and ADR-0026's table together.
 """
 
 from __future__ import annotations

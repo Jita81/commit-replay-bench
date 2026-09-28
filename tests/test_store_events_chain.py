@@ -29,8 +29,8 @@ ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md,
 Works with:   src/crb/store/events.py (the flush hook, ``verify_events``, ``events_head``),
               src/crb/core/event_chain.py (the hash rule), tests/conftest_store.py (backends)
 Tested by:    tests/test_store_events_chain.py
-Touch when:   a new writer of ``events`` is added (it must pass through a session flush), or
-              the chain rule changes.
+Touch when:   never for a new repository; a new writer of ``events`` is added (it must pass through
+              a session flush), or the chain rule changes.
 """
 
 from __future__ import annotations

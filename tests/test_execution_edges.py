@@ -32,7 +32,8 @@ Works with:   src/crb/core/execution.py (under test), src/crb/server/worker.py a
               tests/test_execution.py (the executor's own suite), docs/PREVENTION.md (P-120,
               P-121 and P-300, the rows these tests close)
 Tested by:    tests/test_execution_edges.py
-Touch when:   a docker release words its launch failures differently (add the captured line).
+Touch when:   never for a new repository; a docker release words its launch failures differently
+              (add the captured line).
 """
 
 from __future__ import annotations

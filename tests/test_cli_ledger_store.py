@@ -16,7 +16,8 @@ ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/cli/commands/ledger.py (under test), src/crb/store/events.py
               (``verify_events`` / ``events_head``), src/crb/store/ledger.py (``DbLedger``)
 Tested by:    tests/test_cli_ledger_store.py
-Touch when:   the verb's flags or its JSON shape change (docs/OPERATOR.md names them).
+Touch when:   never for a new repository; the verb's flags or its JSON shape change
+              (docs/OPERATOR.md names them).
 """
 
 from __future__ import annotations

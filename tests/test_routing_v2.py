@@ -22,7 +22,8 @@ Works with:   src/crb/core/routing.py (the rule under test),
               src/crb/core/capability.py (``build_capability_map`` — the product's path),
               tests/fixtures/readings.py (sealed rows and registered readings)
 Tested by:    this file
-Touch when:   a clause, its order or a reason code changes (an ADR first).
+Touch when:   never for a new repository; a clause, its order or a reason code changes (an ADR
+              first).
 """
 
 from __future__ import annotations

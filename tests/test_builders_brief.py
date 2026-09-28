@@ -22,7 +22,7 @@ Works with:   src/crb/builders/brief.py (under test), src/crb/builders/adapter.p
               brief), src/crb/factory/build.py (the factory brief), src/crb/core/playbook.py
               (the time-order rule), src/crb/factory/loop.py (the +L rule)
 Tested by:    tests/test_builders_brief.py
-Touch when:   the composer gains an input; a provenance label is added.
+Touch when:   never for a new repository; the composer gains an input; a provenance label is added.
 """
 
 from __future__ import annotations

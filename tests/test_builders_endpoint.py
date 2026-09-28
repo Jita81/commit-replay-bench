@@ -35,8 +35,9 @@ Works with:   src/crb/builders/openai_client.py (``resolve_endpoint``, ``from_en
               refused), src/crb/factory/author.py (the test author's provider stamp),
               tests/fixtures/builders_repo.py and tests/fixtures/pyrepo.py (the workspaces)
 Tested by:    tests/test_builders_endpoint.py
-Touch when:   a new ``CRB_OPENAI_*`` variable is read (a default case and a refusal case);
-              a new OpenAI-compatible builder is registered (a "lands on the fake" case).
+Touch when:   never for a new repository; a new ``CRB_OPENAI_*`` variable is read (a default case
+              and a refusal case); a new OpenAI-compatible builder is registered (a "lands on the
+              fake" case).
 """
 
 from __future__ import annotations

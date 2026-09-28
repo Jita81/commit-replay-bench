@@ -27,8 +27,8 @@ Works with:   deploy/helm/crb/templates/prometheusrule.yaml (under test),
               table it reads), src/crb/observability/metrics.py (``render_api``),
               docs/dod/product.md (go-live.20)
 Tested by:    tests/test_deploy_alert_rules.py
-Touch when:   an alert rule is added or changed — change the table in DEPLOYMENT §9.2 and the
-              template together; this suite fails until they agree.
+Touch when:   never for a new repository; an alert rule is added or changed — change the table in
+              DEPLOYMENT §9.2 and the template together; this suite fails until they agree.
 """
 
 from __future__ import annotations

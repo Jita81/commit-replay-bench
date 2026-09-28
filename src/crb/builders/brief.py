@@ -57,9 +57,9 @@ Works with:   src/crb/builders/adapter.py (the replay brief, the ``S1`` arm),
               (``BuildBrief``, ``DEFAULT_RULES``), src/crb/core/playbook.py (the learned lines'
               held-out and time-order rules), src/crb/factory/loop.py (the factory's arm)
 Tested by:    tests/test_builders_brief.py, tests/test_replay_s1_arm.py
-Touch when:   a context modifier joins ADR-0026 item 1's grammar (``context_arm_for`` and a
-              provenance label); stream R's context-arm module lands (replace
-              ``context_arm_for``'s body with R's).
+Touch when:   never for a new repository; a context modifier joins ADR-0026 item 1's grammar
+              (``context_arm_for`` and a provenance label); stream R's context-arm module lands
+              (replace ``context_arm_for``'s body with R's).
 Claims:       an arm names what the brief carried, never how good it was; only a registered
               reading of the arm says that (docs/EVIDENCE-AND-CLAIMS.md).
 """

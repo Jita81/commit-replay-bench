@@ -17,7 +17,7 @@ Works with:   src/crb/cli/commands/route.py (the command under test),
               src/crb/core/routing.py (``describe`` — the bar ``--help`` quotes),
               tests/fixtures/readings.py (the sealed rows and the reading)
 Tested by:    this file
-Touch when:   ``crb route``'s flags or output change.
+Touch when:   never for a new repository; ``crb route``'s flags or output change.
 """
 
 from __future__ import annotations

@@ -18,7 +18,8 @@ Works with:   src/crb/core/context_arm.py (the grammar and ``context_arm_for``),
               src/crb/core/ledger.py (the hashed stamp and ``ContextArmsPooled``),
               tests/fixtures/posture.py (the 2.4 rows the tests build)
 Tested by:    this file
-Touch when:   an arm base or modifier is added (an ADR amending ADR-0026 item 1 first).
+Touch when:   never for a new repository; an arm base or modifier is added (an ADR amending ADR-0026
+              item 1 first).
 """
 
 from __future__ import annotations

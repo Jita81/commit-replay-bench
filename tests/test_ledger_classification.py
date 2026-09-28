@@ -28,7 +28,8 @@ Works with:   src/crb/core/ledger.py (under test), src/crb/factory/build.py (``f
               src/crb/core/lint.py (``LINT_STATUSES``), tests/fixtures/posture.py (the posture
               labels and hand-built results the rows reduce)
 Tested by:    tests/test_ledger_classification.py
-Touch when:   a label joins what a 2.4 row must carry, or a refusal changes.
+Touch when:   never for a new repository; a label joins what a 2.4 row must carry, or a refusal
+              changes.
 """
 
 from __future__ import annotations

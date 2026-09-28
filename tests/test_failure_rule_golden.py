@@ -33,9 +33,9 @@ Works with:   src/crb/core/ledger.py (``derive_failure_kind``, ``derive_failure_
               (``APPARATUS_VERSION``, the key of the golden table), docs/PREVENTION.md (P-293,
               the row this test closes)
 Tested by:    tests/test_failure_rule_golden.py
-Touch when:   the apparatus moves (add its lines to ``GOLDEN`` and ``GOLDEN_SOURCE``: the hashes
-              the tests print) — or the rule changes, which is an apparatus bump
-              (src/crb/core/version.py) first.
+Touch when:   never for a new repository; the apparatus moves (add its lines to ``GOLDEN`` and
+              ``GOLDEN_SOURCE``: the hashes the tests print) — or the rule changes, which is an
+              apparatus bump (src/crb/core/version.py) first.
 """
 
 from __future__ import annotations

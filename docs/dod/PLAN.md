@@ -60,8 +60,11 @@ their files; the shared registries (`hints.ts`, `help.ts`, `types.ts`, `API.md`,
 from the integration tree, with every stream's ids renumbered to follow the base in merge
 order. It awaits the operator's merge. The gaps the streams opened are placed in Wave 2, Wave 4
 or the list after Wave 4 below, and the checker now refuses a ranked gap in no table (P-189).
-The next wave runs on `feat/ns2-*` branches cut from `feat/ns1`, stream T first; no later
-wave has started.
+Wave 2's streams (T, then C, I, H, X, F, and R on G) are integrated on
+`feat/ns2`, cut from `feat/ns1`'s head, their ids renumbered after `feat/ns1`'s in merge
+order and their seams wired (the entry gate reads the registered readings through one
+binding, `crb.server.factory_standard`); it awaits the operator's merge after `feat/ns1`. No
+later wave has started.
 
 Some ids the base carried are retired on this branch because they were **merged or narrowed,
 not closed**: the criteria that cited them are still open under the id that replaced them.
@@ -118,7 +121,7 @@ the tier-1 walkthrough passes with specs in which an admin resets a colleague's 
 the colleague signs in again, and an operator accepts a refusal line on `/learn` and reads what
 it did.
 
-## Wave 2 — trustworthy when, and the context standard (autonomous)
+## Wave 2 — trustworthy when, and the context standard (autonomous; integrated on `feat/ns2`)
 
 The external assessment's conditions for trust, all but the measured README section, which is
 Wave 3's; spend under control; and the operator's thesis of 26 September 2026 made buildable
@@ -131,7 +134,7 @@ branches from T's head. R builds on G's branch, because it owns the one apparatu
 brief composer for the wave.
 
 On this branch the order of work puts G-477 (Home's task 7 reads Completed with only the
-bootstrap admin) first among the gaps nobody but us can close, so it moves here from Wave 4
+bootstrap admin) first among the gaps nobody but us can close **[measured — n = 1 gap; method: `GAP-ANALYSIS.md`'s order of work as `scripts/dod_check.py` generated it on `feat/ns1`; apparatus n/a, a property of the product's own code, not a graded row]**, so it moves here from Wave 4
 (STANDARD §6); it restarts from the parked `feat/w2-s`, whose readiness rule it is, and the rest
 of that stream stays in Wave 4.
 
@@ -243,6 +246,7 @@ These are not wave items; each unblocks the work named beside it.
 | doors and wayfinding | G-907, G-977, G-236, G-444, G-253, G-260, G-293, G-366, G-228, G-396, G-979 |
 | proof through each journey's own doors | G-428, G-300, G-380, G-399, G-446, G-109, G-119, G-125, G-133, G-238, G-256, G-268, G-183 |
 | time, cost and non-goals in words | G-302, G-401, G-430, G-447, G-978, G-908, G-382, G-402, G-429, G-140, G-185, G-207, G-262, G-263, G-269 |
+| what Wave 2 left open: the walkthrough's sealed reading, and a spend cap that is a ceiling | G-956, G-963 |
 | the product | F43, G-604, F21, G-600 |
 
 ## What each wave must do to its own artefacts

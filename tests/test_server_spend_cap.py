@@ -23,7 +23,7 @@ Works with:   src/crb/server/routes/runs.py (under test), src/crb/server/schemas
               ``RunCounts.stopped_code``), src/crb/server/spend_cap.py (``unpriced_rungs``),
               docs/API.md (the field and the error)
 Tested by:    tests/test_server_spend_cap.py
-Touch when:   the cap's request field, its bounds or its refusal change.
+Touch when:   never for a new repository; the cap's request field, its bounds or its refusal change.
 """
 
 from __future__ import annotations

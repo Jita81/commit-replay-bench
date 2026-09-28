@@ -24,7 +24,8 @@ ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5)
 Works with:   src/crb/core/reading.py (the rules), src/crb/cli/commands/route.py (reads the
               file), src/crb/server/routes/readings.py (the same act over the database)
 Tested by:    tests/test_cli_reading.py
-Touch when:   the reading's shape changes (the core first); never for a new repository.
+Touch when:   never for a new repository; the reading's shape changes (the core first); never for a
+              new repository.
 """
 
 from __future__ import annotations

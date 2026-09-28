@@ -26,7 +26,7 @@ Works with:   src/crb/builders/adapter.py (the S1 step), src/crb/builders/brief.
               src/crb/server/worker.py (``_s1_arm``), src/crb/server/routes/runs.py (``arm`` on
               ``POST /runs``)
 Tested by:    tests/test_replay_s1_arm.py
-Touch when:   the S1 arm's steps change (an ADR-0026 amendment).
+Touch when:   never for a new repository; the S1 arm's steps change (an ADR-0026 amendment).
 """
 
 from __future__ import annotations

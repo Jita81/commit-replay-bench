@@ -37,7 +37,8 @@ Works with:   src/crb/server/settings.py (``unsealed_override_ack_refusal`` — 
               docs/DEPLOYMENT.md#21-environment-reference (the two variables, for operators)
 Tested by:    tests/test_settings_posture.py, tests/test_worker_start.py,
               tests/test_unsealed_override_race.py
-Touch when:   the override's variables change name, or another process starts under it.
+Touch when:   never for a new repository; the override's variables change name, or another process
+              starts under it.
 """
 
 from __future__ import annotations

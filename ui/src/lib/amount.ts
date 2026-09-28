@@ -21,7 +21,7 @@
  *               ui/src/screens/Connect/MeasurePage.tsx (the measurement's spend cap)
  * Tested by:    ui/src/lib/amount.test.ts (with the ratchet that no source renders a number
  *               input)
- * Touch when:   a field needs another shape of number (a sign, a unit).
+ * Touch when:   never for a new repository; a field needs another shape of number (a sign, a unit).
  */
 
 /** What a field accepts: its floor, whether the floor itself is refused, whole numbers only. */

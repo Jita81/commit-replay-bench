@@ -25,7 +25,7 @@ Works with:   src/crb/server/routes/readings.py (``POST`` and ``GET /readings``,
               src/crb/server/routes/ledger.py (the CSV export's arm and class-set columns),
               tests/fixtures/proven.py (a proven cell in the seeded store)
 Tested by:    this file
-Touch when:   a served field of the readings or the map changes.
+Touch when:   never for a new repository; a served field of the readings or the map changes.
 """
 
 from __future__ import annotations

@@ -33,8 +33,9 @@ Works with:   src/crb/store/models.py (``Event.prev_hash`` / ``Event.row_hash`` 
               helper), src/crb/core/event_chain.py (the runtime rule this file copies),
               src/crb/store/events.py (chains every row written after this revision)
 Tested by:    tests/test_store_migrate.py
-Touch when:   never — a released revision is immutable (stream I of the north-star Wave 2
-              held a temporary id; the Wave 2 integration numbered it 0013 on 0012).
+Touch when:   never for a new repository; never — a released revision is immutable (stream I of the
+              north-star Wave 2 held a temporary id; the Wave 2 integration numbered it 0013 on
+              0012).
 """
 
 from __future__ import annotations

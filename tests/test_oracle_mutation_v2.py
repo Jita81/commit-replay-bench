@@ -32,8 +32,8 @@ Works with:   src/crb/core/oracle/mutation.py (under test), tests/test_oracle_mu
               scorer's own suite on a real repository), docs/dod/journeys/prove-the-instrument.md
               (prove-the-instrument.truth.19, the criterion this closes)
 Tested by:    tests/test_oracle_mutation_v2.py
-Touch when:   the sampler or the exclusion rule changes (a new ``mutation_version``, with the
-              apparatus bump it rides).
+Touch when:   never for a new repository; the sampler or the exclusion rule changes (a new
+              ``mutation_version``, with the apparatus bump it rides).
 """
 
 from __future__ import annotations

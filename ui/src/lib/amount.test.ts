@@ -21,7 +21,8 @@
  *               (the factory's spend cap), ui/src/screens/Connect/MeasurePage.tsx (the
  *               measurement's spend cap), docs/PREVENTION.md (row P-265)
  * Tested by:    itself (the negative control below)
- * Touch when:   a field takes a number: read it with `readAmount`, never `type="number"`.
+ * Touch when:   never for a new repository; a field takes a number: read it with `readAmount`,
+ *               never `type="number"`.
  */
 import { describe, expect, it } from 'vitest'
 import { readAmount } from './amount'

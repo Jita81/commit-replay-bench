@@ -23,7 +23,8 @@ ADRs:         docs/adr/0019-qualification-is-posture-relative.md (the miner it f
 Works with:   tests/fixtures/pyrepo.py (the base history), src/crb/core/mine.py (the walk it
               exercises), tests/test_mine_distinct_change.py (its consumer)
 Tested by:    tests/test_mine_distinct_change.py
-Touch when:   the census finds another shape of one change in two commits.
+Touch when:   never for a new repository; the census finds another shape of one change in two
+              commits.
 """
 
 from __future__ import annotations

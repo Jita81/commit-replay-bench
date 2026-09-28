@@ -18,7 +18,7 @@ Works with:   src/crb/core/signoff.py (the policy and the v5 record under test),
               src/crb/core/capability.py (the cells a sign-off is written against),
               tests/fixtures/readings.py (the proven reading the cells are read on)
 Tested by:    this file
-Touch when:   the sign-off policy or record version moves.
+Touch when:   never for a new repository; the sign-off policy or record version moves.
 """
 
 from __future__ import annotations

@@ -16,7 +16,7 @@ Works with:   src/crb/cli/commands/reading.py (the command under test),
               src/crb/core/reading.py (the rules it applies unchanged),
               tests/fixtures/readings.py (the cell, the sealed rows and the shas)
 Tested by:    this file
-Touch when:   ``crb reading``'s flags change.
+Touch when:   never for a new repository; ``crb reading``'s flags change.
 """
 
 from __future__ import annotations

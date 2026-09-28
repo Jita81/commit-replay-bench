@@ -28,7 +28,8 @@ Works with:   src/crb/core/mine.py (``ChangeIndex``, ``change_identity``, ``iter
               (``LABEL_CHANGE_ID``), tests/fixtures/distinct_changes.py (the two same-change
               pairs)
 Tested by:    tests/test_mine_distinct_change.py
-Touch when:   the rule for which commit of a change is kept changes (DL-093 first).
+Touch when:   never for a new repository; the rule for which commit of a change is kept changes
+              (DL-093 first).
 """
 
 from __future__ import annotations

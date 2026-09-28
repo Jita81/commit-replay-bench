@@ -28,8 +28,9 @@ Works with:   tests/test_sandbox_docker.py (the kill and leak probes that wait t
               kill), tests/test_docker_wait.py (its tests and the ratchet), docs/PREVENTION.md
               (P-119, the class it closes)
 Tested by:    tests/test_docker_wait.py
-Touch when:   a test needs to know whether docker still lists a container or a network:
-              call :func:`gone` or :func:`network_gone`, never ``docker ps`` directly.
+Touch when:   never for a new repository; a test needs to know whether docker still lists a
+              container or a network: call :func:`gone` or :func:`network_gone`, never ``docker ps``
+              directly.
 """
 
 from __future__ import annotations

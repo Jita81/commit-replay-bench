@@ -224,7 +224,7 @@ POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", m
   so no line nobody saw refused can sit under the provenance of real rows. It is
   idempotent: a line already present is reported, not written twice, and two operators
   deciding one class at once are serialised by a lock on the corpus directory, so the same
-  command never lands in both corpora. The note is one line —
+  command never lands in both corpora **[measured — n = 2 deciders at once; method: `tests/test_learn.py::TestApply::test_two_deciders_at_once_never_leave_a_line_in_both_corpora`; apparatus n/a, a property of the product's own code, not a graded row]**. The note is one line —
   it is written as the provenance comment, so a note with a line break is refused rather than
   allowed to write a corpus line nobody decided. The corpus directory is
   `CRB_LEARN_CORPUS_DIR`, else `<CRB_HOME>/learn/corpus` — this deployment's own record of

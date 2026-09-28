@@ -19,7 +19,8 @@ Works with:   src/crb/core/event_chain.py (under test), src/crb/core/evidence.py
               (the same rule against SQLite and PostgreSQL), tests/test_store_migrate.py (the
               revision's frozen copy of the rule, held to this one)
 Tested by:    tests/test_event_chain.py
-Touch when:   the hashed field set or its normalisation changes (a new chain schema).
+Touch when:   never for a new repository; the hashed field set or its normalisation changes (a new
+              chain schema).
 """
 
 from __future__ import annotations

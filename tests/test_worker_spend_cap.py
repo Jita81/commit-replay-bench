@@ -30,7 +30,8 @@ Works with:   src/crb/server/spend_cap.py (the rules), src/crb/server/worker.py 
               run asks), src/crb/core/run.py (``RunSpec.admit``),
               tests/test_server_spend_cap.py (the API's half)
 Tested by:    tests/test_worker_spend_cap.py
-Touch when:   what counts as spend changes, or the factory's reserve for an item changes.
+Touch when:   never for a new repository; what counts as spend changes, or the factory's reserve for
+              an item changes.
 """
 
 from __future__ import annotations

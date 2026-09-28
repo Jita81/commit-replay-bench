@@ -39,9 +39,9 @@ Works with:   README.md (the claims), data/census-2026-07-08/ and
               tests/test_census_gate.py (the census's own invariants), docs/dod/product.md
               (product.claims.201, G-660)
 Tested by:    (this is a test file)
-Touch when:   README gains a [measured] claim on a new campaign — vendor its rows with a
-              manifest under data/ and add its derivation, with the phrases the claim
-              states, to ``DERIVATIONS`` in the same change.
+Touch when:   never for a new repository; README gains a [measured] claim on a new campaign — vendor
+              its rows with a manifest under data/ and add its derivation, with the phrases the
+              claim states, to ``DERIVATIONS`` in the same change.
 """
 
 from __future__ import annotations

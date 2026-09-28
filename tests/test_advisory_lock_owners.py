@@ -6,7 +6,7 @@ What it is:   The ratchet that keeps every table's write lock in one helper, so 
               changes cannot each add their own copy of the same lock (P-224).
 What it does: Walks every module under src/crb, finds each ``pg_advisory_xact_lock(<id>)``
               literal and the function that holds it, and fails when an id is taken in more
-              than one function, or when the events lock is taken anywhere but
+              than one function, when an id is computed where the walker cannot read it, or when the events lock is taken anywhere but
               ``crb.store.events.lock_event_writes``; a synthetic tree with two helpers for one
               id must fail, so the walker cannot pass by finding nothing.
 How:          ``ast`` over the source files: a string constant carrying the lock call is
@@ -33,6 +33,9 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "crb"
 _LOCK = re.compile(r"pg_advisory_xact_lock\((\d+)\)")
+#: The owner id of a lock whose id the source computes (an f-string, a constant): the walker
+#: cannot read it, so it cannot tell whether that id is already some other helper's.
+COMPUTED = "<computed>"
 
 
 def _owners(src: Path = SRC) -> dict[str, set[str]]:
@@ -46,6 +49,15 @@ def _owners(src: Path = SRC) -> dict[str, set[str]]:
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     visit(child, f"{scope}.{child.name}" if scope else child.name)
+                    continue
+                if isinstance(child, ast.JoinedStr):
+                    text = "".join(
+                        v.value if isinstance(v, ast.Constant) else "{}" for v in child.values
+                    )
+                    for lock_id in _LOCK.findall(text):
+                        owners[lock_id].add(f"{module}:{scope or '<module>'}")
+                    if "pg_advisory_xact_lock({})" in text:
+                        owners[COMPUTED].add(f"{module}:{scope or '<module>'}")
                     continue
                 if isinstance(child, ast.Constant) and isinstance(child.value, str):
                     for lock_id in _LOCK.findall(child.value):
@@ -91,3 +103,22 @@ def test_two_helpers_for_one_lock_are_caught(tmp_path: Path) -> None:
     assert _shared(_owners(pkg)) == {
         "7332": ["crb.store.events:lock_event_seq", "crb.store.events:lock_event_writes"]
     }
+
+
+def test_every_advisory_lock_id_is_written_where_the_walker_can_read_it() -> None:
+    """P-224's class came back at the Wave 2 integration behind a constant: stream I took the
+    events lock as ``f"SELECT pg_advisory_xact_lock({EVENTS_LOCK_KEY})"`` in two functions of
+    its own, which the walker — reading only literal ids — never saw. An id the source
+    computes is refused, so every lock is one the ratchet can attribute."""
+    assert COMPUTED not in _owners(), _owners()[COMPUTED]
+
+
+def test_a_lock_taken_by_a_computed_id_is_caught(tmp_path: Path) -> None:
+    pkg = tmp_path / "crb"
+    (pkg / "store").mkdir(parents=True)
+    (pkg / "store" / "events.py").write_text(
+        "KEY = 7332\n\n\ndef lock_events(s):\n"
+        '    s.execute(text(f"SELECT pg_advisory_xact_lock({KEY})"))\n',
+        encoding="utf-8",
+    )
+    assert _owners(pkg)[COMPUTED] == {"crb.store.events:lock_events"}

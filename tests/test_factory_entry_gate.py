@@ -28,7 +28,8 @@ ADRs:         docs/adr/0026-the-context-standard.md
 Works with:   src/crb/factory/standard.py (the gate), src/crb/factory/loop.py (where it runs),
               src/crb/intake/draft.py (``unsized``)
 Tested by:    tests/test_factory_entry_gate.py
-Touch when:   a stop is added to the gate; the operator fixes ADR-0026 item 8's size value.
+Touch when:   never for a new repository; a stop is added to the gate; the operator fixes ADR-0026
+              item 8's size value.
 """
 
 from __future__ import annotations

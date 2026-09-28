@@ -21,8 +21,8 @@ Works with:   tests/conftest.py (``_no_host_endpoint_env`` — the fixture under
               variables would change), tests/test_factory_author.py and
               tests/test_worker_test_author.py (the modules that read the default endpoint)
 Tested by:    tests/test_endpoint_env_isolation.py
-Touch when:   a new ``CRB_OPENAI_*`` or ``CRB_AZURE_*`` variable is read (add it to the
-              hostile set here and to the fixture); a new module builds a default
+Touch when:   never for a new repository; a new ``CRB_OPENAI_*`` or ``CRB_AZURE_*`` variable is read
+              (add it to the hostile set here and to the fixture); a new module builds a default
               OpenAI-compatible builder or author (add it to ``_MODULES``).
 """
 

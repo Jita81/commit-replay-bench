@@ -16,7 +16,8 @@ Works with:   src/crb/core/taxonomy.py (the grammar, ``ClassSetsPooled``, the la
               src/crb/core/ledger.py (the stamp on every 2.4 row, the refusal in ``cell_stats``),
               docs/adr/0026-the-context-standard.md (item 9's *Touch when*, quoted verbatim)
 Tested by:    this file
-Touch when:   the class-set grammar or the label table changes (an ADR first).
+Touch when:   never for a new repository; the class-set grammar or the label table changes (an ADR
+              first).
 """
 
 from __future__ import annotations

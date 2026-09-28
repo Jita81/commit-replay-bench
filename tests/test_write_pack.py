@@ -17,7 +17,7 @@ ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md; ADR-0025 i
 Works with:   src/crb/core/run.py (``write_pack``), src/crb/core/evidence.py (the pack),
               docs/PREVENTION.md (P-122, the row this test closes)
 Tested by:    tests/test_write_pack.py
-Touch when:   the pack store changes how it writes.
+Touch when:   never for a new repository; the pack store changes how it writes.
 """
 
 from __future__ import annotations

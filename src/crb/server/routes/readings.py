@@ -38,8 +38,8 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/server/posture_view.py (the deployment's posture class),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
 Tested by:    tests/test_server_readings.py
-Touch when:   the reading's shape or the registration's refusals change (an ADR amending
-              ADR-0026 first); never for a new repository.
+Touch when:   never for a new repository; the reading's shape or the registration's refusals change
+              (an ADR amending ADR-0026 first); never for a new repository.
 """
 
 from __future__ import annotations
