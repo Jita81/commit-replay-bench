@@ -319,6 +319,40 @@ def test_a_store_at_head_whose_schema_drifted_names_the_drift(backend: Backend) 
     assert any("ix_runs_status" in d for d in st.drift), st.drift
 
 
+def test_a_dropped_server_default_is_drift_on_postgresql(backend: Backend) -> None:
+    """Q1's review: the probe compared with alembic's defaults, so a server default dropped
+    outside the migrations on PostgreSQL read ``matches_models: True``. PostgreSQL reflects
+    defaults faithfully, so the comparison includes them there (on SQLite the reflection
+    reads a false difference at head, and the DDL parity test guards migrations instead)."""
+    if backend.dialect != "postgresql":
+        pytest.skip(
+            "server defaults are compared on PostgreSQL only (SQLite reflects them loosely)"
+        )
+    migrate.upgrade(backend.url)
+    assert migrate.head_status(backend.url).matches_models is True  # no false positive at head
+    with backend.engine.begin() as c:
+        c.execute(text("ALTER TABLE users ALTER COLUMN session_nonce DROP DEFAULT"))
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True and st.matches_models is False
+    assert any("session_nonce" in d for d in st.drift), st.drift
+
+
+def test_a_constraint_difference_names_its_table_and_columns() -> None:
+    """An unnamed constraint (a column's ``unique=True``) has no name to print: the drift line
+    names the table and the columns instead of a bare ``add_constraint``."""
+    from sqlalchemy import Column, Integer, MetaData, String, Table, UniqueConstraint
+
+    table = Table("users", MetaData(), Column("id", Integer), Column("email", String))
+    unnamed = UniqueConstraint(table.c.email)
+    assert migrate._describe_difference(("add_constraint", unnamed)) == (
+        "add_constraint users unique(email)"
+    )
+    named = UniqueConstraint(table.c.email, name="uq_users_email")
+    assert migrate._describe_difference(("remove_constraint", named)) == (
+        "remove_constraint users uq_users_email unique(email)"
+    )
+
+
 def test_head_status_of_an_older_release_create_all_schema(backend: Backend) -> None:
     init_db(backend.engine)
     _drop_column(backend, "grades", "repo_lint_clean")  # a pre-belt-5 release's create_all

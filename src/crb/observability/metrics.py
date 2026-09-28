@@ -445,9 +445,13 @@ def start_worker_exposition(
     ask = 0 if requested == METRICS_PORT_AUTO else int(requested)
     try:
         started = start_http_server(ask, addr=addr, registry=registry)
-    except OSError as exc:  # the port is taken, or the address is not this host's
+    except (OSError, UnicodeError, ValueError) as exc:
+        # the port is taken, the address is not this host's, or the host cannot even be
+        # encoded (a label over 63 characters is a UnicodeError; a NUL a ValueError) — none
+        # may end the worker (Q1's review)
+        why = getattr(exc, "strerror", None) or exc
         reason = (
-            f"could not bind {addr}:{requested}: {exc.strerror or exc} — set "
+            f"could not bind {addr[:80]}:{requested}: {why} — set "
             "CRB_METRICS_PORT=auto (a free port) or another free port; 0 switches it off"
         )
         _LOG.error("worker metrics exposition %s", reason)

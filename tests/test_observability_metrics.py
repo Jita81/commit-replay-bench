@@ -325,6 +325,19 @@ def test_a_port_another_stack_holds_leaves_the_listener_degraded_and_named(
     assert "could not bind" in caplog.text
 
 
+@pytest.mark.parametrize("addr", ["a" * 300, "bad\x00host"])
+def test_a_host_the_resolver_cannot_encode_leaves_the_listener_degraded(
+    registry: Any, addr: str
+) -> None:
+    """Q1's review: the "never raises into the worker" rule held for ``OSError`` only; a
+    ``CRB_METRICS_HOST`` label longer than 63 characters raised ``UnicodeError`` (IDNA) out of
+    ``start_http_server`` and ended the worker. Any address that cannot be bound is
+    ``degraded``, named, and the worker keeps running."""
+    got = metrics.start_worker_exposition(metrics.METRICS_PORT_AUTO, addr=addr)
+    assert got.state == metrics.EXPOSITION_DEGRADED and not got.listening
+    assert got.reason.startswith("could not bind"), got.reason
+
+
 def test_auto_binds_a_free_port_and_reports_the_one_it_chose(
     registry: Any, caplog: pytest.LogCaptureFixture
 ) -> None:

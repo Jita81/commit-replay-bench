@@ -84,7 +84,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, Engine, inspect
+from sqlalchemy import Connection, Constraint, Engine, UniqueConstraint, inspect
 
 from crb.store.db import database_url, install_append_only_triggers, make_engine
 from crb.store.models import APPEND_ONLY_TABLES, Base
@@ -357,6 +357,15 @@ def _describe_difference(diff: object) -> str:
         return str(type(entry).__name__)
     words = [str(entry[0])]
     for part in entry[1:]:
+        if isinstance(part, Constraint):
+            # a constraint may have no name (a column's ``unique=True``): name its table and
+            # columns, so the line says WHICH constraint differs (Q1's review)
+            table = getattr(getattr(part, "table", None), "name", "")
+            cols = ", ".join(str(getattr(c, "name", c)) for c in getattr(part, "columns", ()))
+            kind = "unique" if isinstance(part, UniqueConstraint) else type(part).__name__
+            words += [w for w in (table, part.name if isinstance(part.name, str) else "") if w]
+            words.append(f"{kind}({cols})")
+            continue
         name = getattr(part, "name", None)
         if isinstance(name, str) and name:
             words.append(name)
@@ -369,7 +378,11 @@ def schema_drift(connection: Connection) -> tuple[str, ...]:
     """How the connection's schema differs from ``Base.metadata`` (``()`` when it matches),
     by the same ``compare_metadata`` call adoption refuses a foreign schema with; at most
     :data:`DRIFT_SHOWN` entries, the last naming how many more there are."""
-    diffs = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+    # PostgreSQL reflects server defaults faithfully, so a default dropped out of band is
+    # drift there (Q1's review); SQLite's reflection reads a false difference at head, and
+    # the DDL parity test (``test_upgrade_head_equals_init_db``) guards migrations instead
+    opts = {"compare_server_default": connection.dialect.name == "postgresql"}
+    diffs = compare_metadata(MigrationContext.configure(connection, opts=opts), Base.metadata)
     shown = [_describe_difference(d) for d in diffs[:DRIFT_SHOWN]]
     if len(diffs) > DRIFT_SHOWN:
         shown.append(f"and {len(diffs) - DRIFT_SHOWN} more")
