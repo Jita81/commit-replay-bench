@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Truth on the instrument screens: failed reads are said, exports are recorded, catches are witnessed**
+  (north-star Wave 4, stream T; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-t4)).
+  A failed read on a Connect row or the Measure estimate is an error with Retry, never a stage
+  or a price; Repos and the run dialog read every page; the Ledger shows linked filters as
+  removable chips; every ledger export records a `ledger.exported` event first (DL-128); each
+  caught negative control carries a gold witness graded in the same posture, and a red one is a
+  violation (`controls.v3`, DL-127); the About copy names no threshold the policy serves.
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the
