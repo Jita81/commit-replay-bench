@@ -18,7 +18,9 @@
  *               repository's stages (`stagesFor`), the server's record that a person read the
  *               baseline (`baseline_read`) or a sign-off the API flags `active` and not
  *               `stale` (task 6 — a stale one lifts nothing, so completes nothing; DL-074),
- *               the two-person readiness (task 7) and the active factory run (task 8: "Backlog
+ *               the two-person readiness (task 7, whose note names the next step for the
+ *               server's reason and whose admin link lands on the invite card) and the active
+ *               factory run (task 8: "Backlog
  *               frozen — run the factory" until a run exists, then "In progress — item k of n")
  *               decide them. A read that fails is never read as absence (G-164): one error envelope
  *               names every read that failed, with Retry, and each task that stands on one
@@ -76,7 +78,7 @@ import { ErrorState } from '../../components/ErrorState'
 import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, type TagTone, TaskList, type TaskItem } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
-import { kOfN } from '../../lib/format'
+import { kOfN, sentence } from '../../lib/format'
 import { type StageStatus, stageComplete, stagesFor } from '../Connect/connection'
 import { ValueTile } from './ValueTile'
 
@@ -166,6 +168,32 @@ export function factoryStatusFor(input: { measured: boolean; deliverCells: boole
   return input.deliverCells ? 'ready' : 'no_deliver_cell'
 }
 
+/**
+ * Task 7's next step for the reason the deployment is not two-person ready — the step that
+ * helps, for the reader's role: an invited person who has not arrived needs their link used,
+ * not another invitation; only an admin can invite.
+ */
+export function task7NextStep(reasonCode: string, admin: boolean): string {
+  switch (reasonCode) {
+    case 'approver_never_signed_in':
+      return admin
+        ? 'The approver you invited has not signed in: ask them to open their one-time link. If it has expired, invite them again on the Settings screen.'
+        : 'The approver who was invited has not signed in: ask them to open their one-time link. If it has expired, an admin invites them again.'
+    case 'single_person':
+      return admin
+        ? 'Invite a second person on the Settings screen, somebody who did not run the measurements: the account is created inactive and you pass on a one-time link.'
+        : 'Only an admin can invite somebody. Ask your admin to invite a second person who did not run the measurements.'
+    case 'runner_is_the_only_signer':
+      return admin
+        ? 'Invite an approver who did not run them on the Settings screen: the account is created inactive and you pass on a one-time link.'
+        : 'Only an admin can invite somebody. Ask your admin to invite an approver who did not run them.'
+    default:
+      return admin
+        ? 'Invite an approver on the Settings screen: the account is created inactive and you pass on a one-time link.'
+        : 'Only an admin can invite somebody. Ask your admin to invite an approver.'
+  }
+}
+
 export function HomePage() {
   const { me, can } = useAuth()
   const [params] = useSearchParams()
@@ -236,6 +264,7 @@ export function HomePage() {
   const approverKnown = ready ? ready.ready : undefined
   // a link that was sent and not used is progress a nag would hide
   const inviteWaiting = (ready?.invitations_pending ?? 0) > 0
+  const admin = can('admin')
 
   const q = chosen ? `?repo=${encodeURIComponent(chosen)}` : ''
   const walk = chosen ? `/connect/${encodeURIComponent(chosen)}` : '/connect'
@@ -282,7 +311,7 @@ export function HomePage() {
     { num: 6, name: 'Read the baseline', ...(baselineActed ? { status: 'Completed', tone: 'pale' as TagTone } : mapUnread || signoffs.isError ? UNAVAILABLE : { status: anyRows ? 'Incomplete' : 'Cannot start yet', tone: anyRows ? 'blue' : 'grey' }), to: `/results${q}`, hint: 'task.home.read_baseline' },
     // only an admin can invite; everyone else reads a state (not an instruction), is not sent
     // to a page that refuses them, and gets the note under the list
-    { num: 7, name: 'Invite an approver', ...(twoPerson.isError ? UNAVAILABLE : { status: approverKnown === true ? 'Completed' : approverKnown === false ? (inviteWaiting ? 'In progress' : 'Incomplete') : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey' }), to: can('admin') ? '/settings' : '/posture', hint: 'task.home.invite_approver' },
+    { num: 7, name: 'Invite an approver', ...(twoPerson.isError ? UNAVAILABLE : { status: approverKnown === true ? 'Completed' : approverKnown === false ? (inviteWaiting ? 'In progress' : 'Incomplete') : 'Not known yet', tone: approverKnown === true ? 'pale' : approverKnown === false ? 'blue' : 'grey' }), ...(admin ? { to: '/settings#invite' } : {}), hint: 'task.home.invite_approver' },
     // the destination (DL-044): the factory delivers a change under the baseline the walk earned;
     // the runs read decides only "frozen" against "running", so it leaves only a frozen backlog unknown
     { num: 8, name: 'Deliver your first change', ...(factoryStatus !== 'delivered' && (reposUnread || map.isError || failedRead(backlog) || factoryTasks.isError || (factoryRun.isError && factoryStatus === 'frozen')) ? UNAVAILABLE : { status: FACTORY_LABEL[factoryStatus], label: factoryDetail, tone: FACTORY_TONE[factoryStatus] }), to: chosen ? `/factory?repo=${encodeURIComponent(chosen)}` : '/factory', hint: 'task.home.deliver' },
@@ -333,7 +362,7 @@ export function HomePage() {
         <TaskList tasks={listed} completed={completed} summary={<Hint id="stat.home.completed">{operator ? `You have completed ${completed} of ${tasks.length} tasks.` : `The operators have completed ${completed} of ${tasks.length} tasks.`}</Hint>} />
         {approverKnown !== true && ready && (
           <p className="m-0 mt-2 text-[16px] text-on-surface-muted" data-testid="home-task-7-note">
-            <strong>Task 7.</strong> {ready.reason}. {can('admin') ? 'Invite them on the Settings screen: the account is created inactive and you pass on a one-time link.' : 'Only an admin can invite somebody. Ask your admin to invite an approver in Settings.'}
+            <strong>Task 7.</strong> {sentence(ready.reason)}. {task7NextStep(ready.reason_code, admin)}
           </p>
         )}
       </div>

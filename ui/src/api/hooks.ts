@@ -547,8 +547,8 @@ export function useCancelRun(): UseMutationResult<Run, ApiError, string> {
 }
 
 /**
- * `POST /runs/{id}/deliver-override` — a SECOND approver overrides a factory run's route gate
- * (ADR-0003 amendment 2026-09-27): refused 409 `same_actor` for the run's own actor; the grant
+ * `POST /runs/{id}/deliver-override` — a SECOND approver lifts a factory run's sign-off clause
+ * for that run, never its route gate (ADR-0003 amendment 2026-09-27, ADR-0026 item 8): refused 409 `same_actor` for the run's own actor; the grant
  * is an event on the run's trace and never lifts a false-Q1 cell.
  */
 export function useGrantDeliverOverride(): UseMutationResult<Run, ApiError, string> {

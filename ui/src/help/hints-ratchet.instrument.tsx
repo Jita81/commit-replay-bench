@@ -28,7 +28,7 @@
  *               reason as their hint, and an identity-provider account, whose Set-password button
  *               is disabled — so both states are walked, not only unit-tested.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import type { EventSourceLike } from '../api/sse'
@@ -512,6 +512,44 @@ const FLOW = {
 
 // ─── the table ───────────────────────────────────────────────────────────────────────────
 
+/** The two-person readiness and the invitations the Settings screen's invite card reads (G-518): a
+ * pending link and an accepted one, so the table's headers, state pills and Withdraw are held to
+ * the hint contract too. */
+const INVITATION = {
+  id: 'i1',
+  user_id: 'u9',
+  username: 'walk-approver',
+  display_name: 'Walk Approver',
+  email: '',
+  role: 'approver',
+  state: 'pending',
+  created: '2026-09-23T09:00:00Z',
+  expires: '2026-09-26T09:00:00Z',
+  accepted: '',
+  revoked: '',
+  created_by: 'u1',
+  revoked_reason: '',
+  last_login: '',
+}
+const INVITE_API = {
+  'GET /two-person-readiness': {
+    ready: false,
+    reason_code: 'approver_never_signed_in',
+    reason: 'the only account that can sign has never signed in, so it can sign nothing yet — the invitation has not been used',
+    approvers_active: 1,
+    approvers_signed_in: 0,
+    other_active_accounts: 1,
+    accounts_signed_in: 1,
+    invitations_pending: 1,
+  },
+  'GET /invitations': {
+    items: [INVITATION, { ...INVITATION, id: 'i2', user_id: 'u8', username: 'second-approver', state: 'accepted', accepted: '2026-09-23T10:00:00Z' }],
+    total: 2,
+    limit: 50,
+    offset: 0,
+  },
+}
+
 export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
   '/factory': {
     route: '/factory?repo=alpha',
@@ -616,7 +654,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/settings',
     path: '/settings',
     element: <SettingsPage />,
-    api: { 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'ok', detail: 'worker-1 alive', data: {} }] }, 'GET /version': VERSION, 'GET /settings': SETTINGS, 'GET /users': USERS, 'GET /settings/secrets': SECRETS, 'GET /github/app': GITHUB_APP, 'GET /golive': GOLIVE },
+    api: { 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'ok', detail: 'worker-1 alive', data: {} }] }, 'GET /version': VERSION, 'GET /settings': SETTINGS, 'GET /users': USERS, 'GET /settings/secrets': SECRETS, 'GET /github/app': GITHUB_APP, 'GET /golive': GOLIVE, ...INVITE_API },
     roles: ['viewer', 'operator', 'admin'],
   },
   '/library/:repo': {
@@ -676,8 +714,9 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
     open: async () => {
       await screen.findByTestId('settings-sandbox-mode')
     },
-    // the configuration, the Users card and the go-live attestations card (ADR-0031)
-    minHints: 67,
+    // the configuration, the Users card, the go-live attestations card (ADR-0031) and the invite
+    // card with its readiness and its table of invitations (G-518)
+    minHints: 83,
   },
   {
     // ADR-0031: the go-live attestations card, with Withdraw's question open — its two buttons are a state of their own
@@ -691,7 +730,27 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
       await userEvent.click(await screen.findByTestId('withdraw-egress-denied'))
       await screen.findByTestId('withdraw-confirm-egress-denied')
     },
-    minHints: 68,
+    minHints: 84,
+  },
+  {
+    // G-518: the one-time link block and its Copy exist only after an invitation is made — a state
+    // of its own the one-entry table cannot reach
+    name: '/settings as admin + an invitation made (the one-time link)',
+    route: '/settings',
+    path: '/settings',
+    element: <SettingsPage />,
+    api: {
+      ...INSTRUMENT_SCREENS['/settings']!.api,
+      'POST /invitations': { invitation: { ...INVITATION, id: 'i3', username: 'third-approver' }, accept_url: 'https://crb.invalid/invite?token=t', token: 't', public_url_missing: false },
+    },
+    roles: ['admin'],
+    open: async () => {
+      const form = await screen.findByRole('form', { name: 'Invite an approver' })
+      await userEvent.type(within(form).getByLabelText(/^Username/), 'third-approver')
+      await userEvent.click(within(form).getByRole('button', { name: 'Invite' }))
+      await screen.findByTestId('invitation-link')
+    },
+    minHints: 85,
   },
   {
     // G-922: Remove token asks before it deletes — the question's two buttons are a state of their own

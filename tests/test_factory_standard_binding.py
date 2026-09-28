@@ -127,6 +127,11 @@ def test_a_sign_off_signs_only_its_arm_version_reading_and_apparatus() -> None:
     assert not signed_by([_record(apparatus_version="2.3")], XS, apparatus="2.4", **kw)
     assert not signed_by([_record(checks_arm="fmt")], XS, apparatus="2.4", **kw)
     assert not signed_by([_record(size="S")], XS, apparatus="2.4", **kw)
+    # a sign-off made in one posture class never licenses the same reading read in another
+    # (ADR-0019 §8): the record is keyed by cell, so only this clause keeps them apart
+    other = {**kw, "posture_class": "local/copy/net"}
+    assert not signed_by([_record()], XS, apparatus="2.4", **other)
+    assert signed_by([_record(posture_class="local/copy/net")], XS, apparatus="2.4", **other)
     revoked = [_record(), replace(_record(), revoked=True)]
     assert not signed_by(revoked, XS, apparatus="2.4", **kw)
     assert AUTHOR in S1

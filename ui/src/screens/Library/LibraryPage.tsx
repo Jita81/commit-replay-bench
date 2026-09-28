@@ -16,8 +16,11 @@
  *               miner's or a model's proposal, and a DIFFERENT approver sign it; revocation and
  *               retirement are appended with a reason. The sponsor's own Sign button is disabled
  *               and says why (the API refuses it too, 409 `same_person`). Every refusal is shown
- *               in the API's words. The page says, in the lede and on its tag, that nothing here
- *               reaches a builder's brief until an arm measures it.
+ *               in the API's words BESIDE the form or table that made it, focused, and marks
+ *               the field it names (P-397); a revocation or retirement says what it did and
+ *               clears its form, and an empty press asks at the fields. The page says, in the
+ *               lede and on its tag, that nothing here reaches a builder's brief until an arm
+ *               measures it.
  * How:          `useLibrary` + `useWorkTypePage` + `useLibraryAct` + `useLibraryMine`; tables
  *               through `DataTable` with a hint on every column; forms through `Field`; every
  *               element a reader meets is a hint trigger (`*.library.*`).
@@ -34,7 +37,7 @@
  * Touch when:   never for a new repository; a field of the page changes in docs/API.md#library
  *               first.
  */
-import { type FormEvent, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
 import type { LibraryEntry, LibraryKind, LibraryMineRun, LibraryStatus, WorkTypePage } from '../../api/types'
@@ -76,6 +79,30 @@ function refusal(err: unknown): string {
   if (!err) return ''
   if (isApiError(err)) return err.message
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * A refused act, said beside the form or table that made it — never at the top of the page,
+ * out of sight of the person who pressed — and focused when it appears, so a keyboard user
+ * and a screen reader land on it (P-397).
+ */
+function Refused({ error, testId }: { error: unknown; testId: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (error) ref.current?.focus()
+  }, [error])
+  if (!error) return null
+  return (
+    <div ref={ref} role="alert" tabIndex={-1} className="my-3 border-l-4 border-status-red p-3" data-testid={testId}>
+      {refusal(error)}
+    </div>
+  )
+}
+
+/** The refusal's words when they name ``field`` — shown at the field too (``aria-invalid``). */
+function fieldRefusal(error: unknown, field: RegExp): string | undefined {
+  const words = refusal(error)
+  return words && field.test(words) ? words : undefined
 }
 
 function WorkTypeSection({ page }: { page: WorkTypePage }) {
@@ -192,7 +219,9 @@ function WorkTypeSection({ page }: { page: WorkTypePage }) {
   )
 }
 
-function ProposeForm({ repo, kinds, characteristics, statementMax, onAct }: { repo: string; kinds: LibraryKind[]; characteristics: string[]; statementMax: number; onAct: ReturnType<typeof useLibraryAct> }) {
+function ProposeForm({ repo, kinds, characteristics, statementMax }: { repo: string; kinds: LibraryKind[]; characteristics: string[]; statementMax: number }) {
+  // its own act: a refusal of this form is said in this form (P-397)
+  const onAct = useLibraryAct(repo)
   const [kind, setKind] = useState<LibraryKind>('convention')
   const [slug, setSlug] = useState('')
   const [title, setTitle] = useState('')
@@ -204,6 +233,7 @@ function ProposeForm({ repo, kinds, characteristics, statementMax, onAct }: { re
   const [done, setDone] = useState('')
   const submit = (e: FormEvent) => {
     e.preventDefault()
+    if (onAct.isPending) return
     setDone('')
     const scope = workTypes
       .split(',')
@@ -230,6 +260,7 @@ function ProposeForm({ repo, kinds, characteristics, statementMax, onAct }: { re
     <Card title="Propose an entry" id="propose">
       <p>You become the entry’s sponsor. A different person must sign it before it counts as signed.</p>
       <form onSubmit={submit} className="space-y-4" aria-label={`Propose an entry for ${repo}`}>
+        <Refused error={onAct.error} testId="library-propose-refused" />
         <SelectField label="Kind" value={kind} onChange={(e) => setKind(e.target.value as LibraryKind)} hint="field.library.kind">
           {kinds.map((k) => (
             <option key={k} value={k}>
@@ -237,8 +268,8 @@ function ProposeForm({ repo, kinds, characteristics, statementMax, onAct }: { re
             </option>
           ))}
         </SelectField>
-        <TextField label="Short name (slug)" value={slug} onChange={(e) => setSlug(e.target.value)} required hint="field.library.slug" description="Lower case, digits, dots, dashes; it becomes the id kind/slug." />
-        <TextField label="Title" value={title} onChange={(e) => setTitle(e.target.value)} required hint="field.library.title" />
+        <TextField label="Short name (slug)" value={slug} onChange={(e) => setSlug(e.target.value)} required hint="field.library.slug" description="Lower case, digits, dots, dashes; it becomes the id kind/slug." error={fieldRefusal(onAct.error, /\bslug\b/i)} />
+        <TextField label="Title" value={title} onChange={(e) => setTitle(e.target.value)} required hint="field.library.title" error={fieldRefusal(onAct.error, /\btitle\b/i)} />
         <TextArea
           label="Statement"
           value={statement}
@@ -247,6 +278,7 @@ function ProposeForm({ repo, kinds, characteristics, statementMax, onAct }: { re
           maxLength={statementMax}
           hint="field.library.statement"
           description={`${statement.length} of ${statementMax} characters. No code and no secrets.`}
+          error={fieldRefusal(onAct.error, /\bstatement\b/i)}
         />
         {kind === 'work-type' ? (
           <TextField label="Global parent class" value={parent} onChange={(e) => setParent(e.target.value)} hint="field.library.parent" description="For example bug.fix or feature.add." />
@@ -266,7 +298,7 @@ function ProposeForm({ repo, kinds, characteristics, statementMax, onAct }: { re
             <TextField label="Check that evidences it" value={check} onChange={(e) => setCheck(e.target.value)} hint="field.library.check" description="The check's name as the repository runs it. Without one the entry is advisory." />
           </>
         )}
-        <StartButton type="submit" disabled={onAct.isPending} hint="button.library.propose">
+        <StartButton type="submit" pending={onAct.isPending} hint="button.library.propose">
           Propose as sponsor
         </StartButton>
       </form>
@@ -291,6 +323,7 @@ function MineCard({ repo }: { repo: string }) {
   const mine = useLibraryMine(repo)
   const submit = (e: FormEvent) => {
     e.preventDefault()
+    if (mine.isPending) return
     mine.mutate({ commit })
   }
   return (
@@ -300,27 +333,31 @@ function MineCard({ repo }: { repo: string }) {
       </p>
       <form onSubmit={submit} className="space-y-4" aria-label={`Propose entries from ${repo}’s files`}>
         <TextField label="Commit (optional)" value={commit} onChange={(e) => setCommit(e.target.value)} hint="field.library.commit" description="A sha, branch or tag of the clone. Empty reads its head." />
-        <SecondaryButton type="submit" disabled={mine.isPending} hint="button.library.mine">
+        <SecondaryButton type="submit" pending={mine.isPending} hint="button.library.mine">
           {mine.isPending ? 'Reading the files…' : 'Propose from the files'}
         </SecondaryButton>
       </form>
       <div role="status" aria-live="polite" className="mt-3" data-testid="library-mined">
         {mine.data ? mineSummary(mine.data) : ''}
       </div>
-      {mine.isError && (
-        <div role="alert" className="mt-3 border-l-4 border-status-red p-3" data-testid="library-mine-refused">
-          {refusal(mine.error)}
-        </div>
-      )}
+      <Refused error={mine.error} testId="library-mine-refused" />
     </Card>
   )
 }
 
-function IndexSection({ repo, entries, meId, onAct }: { repo: string; entries: LibraryEntry[]; meId: string; onAct: ReturnType<typeof useLibraryAct> }) {
+function IndexSection({ repo, entries, meId }: { repo: string; entries: LibraryEntry[]; meId: string }) {
   const { can } = useAuth()
+  // the table's acts (sponsor, sign) and the withdraw form's acts are said each beside their
+  // own controls (P-397), so each has its own act
+  const onAct = useLibraryAct(repo)
+  const withdraw = useLibraryAct(repo)
   const [reason, setReason] = useState('')
   const [target, setTarget] = useState('')
-  const act = (a: LibraryAct) => onAct.mutate(a)
+  const [asked, setAsked] = useState(false)
+  const [withdrawn, setWithdrawn] = useState('')
+  const act = (a: LibraryAct) => {
+    if (!onAct.isPending) onAct.mutate(a)
+  }
   const signable = (e: LibraryEntry) => (e.status === 'proposed' || e.status === 'stale') && Boolean(e.sponsor)
   const columns: Column<LibraryEntry>[] = [
     { key: 'id', header: 'Id', hint: 'col.library.entry', mono: true, cell: (e) => e.entry_id, sortValue: (e) => e.entry_id },
@@ -345,7 +382,7 @@ function IndexSection({ repo, entries, meId, onAct }: { repo: string; entries: L
       cell: (e) => {
         if (!e.sponsor && e.status === 'proposed' && can('operator')) {
           return (
-            <SecondaryButton hint="button.library.sponsor" onClick={() => act({ act: 'sponsor', entryId: e.entry_id, version: e.version })}>
+            <SecondaryButton hint="button.library.sponsor" pending={onAct.isPending} onClick={() => act({ act: 'sponsor', entryId: e.entry_id, version: e.version })}>
               Sponsor
             </SecondaryButton>
           )
@@ -354,7 +391,7 @@ function IndexSection({ repo, entries, meId, onAct }: { repo: string; entries: L
           const own = e.sponsor === meId
           return (
             <span className="block">
-              <SecondaryButton hint={own ? 'button.library.sign_own' : 'button.library.sign'} disabled={own} onClick={() => act({ act: 'sign', entryId: e.entry_id, version: e.version })}>
+              <SecondaryButton hint={own ? 'button.library.sign_own' : 'button.library.sign'} disabled={own} pending={onAct.isPending} onClick={() => act({ act: 'sign', entryId: e.entry_id, version: e.version })}>
                 {e.status === 'stale' ? 'Sign again' : 'Sign'}
               </SecondaryButton>
               {own && <span className="mt-1 block text-xs">You sponsored this entry, so a second person must sign it.</span>}
@@ -366,15 +403,40 @@ function IndexSection({ repo, entries, meId, onAct }: { repo: string; entries: L
     },
   ]
   const withdrawable = entries.filter((e) => e.status !== 'retired' && e.status !== 'revoked')
+  // the chosen entry only while it can still be withdrawn: a retired one leaves the list, and
+  // a press then acts on nothing the person can see
+  const chosen = withdrawable.some((e) => e.entry_id === target) ? target : ''
+  const entryError = asked && !chosen ? 'Choose the entry to revoke or retire.' : undefined
+  const reasonError = asked && !reason.trim() ? 'Give the reason; it is kept on the record.' : undefined
+  const withdrawAct = (a: 'revoke' | 'retire') => {
+    setAsked(true)
+    setWithdrawn('')
+    if (!chosen || !reason.trim() || withdraw.isPending) return
+    const why = reason.trim()
+    withdraw.mutate(
+      { act: a, entryId: chosen, reason: why },
+      {
+        onSuccess: () => {
+          setWithdrawn(`${a === 'retire' ? 'Retired' : 'Revoked'} ${chosen}: ${why}. It is on the record.`)
+          setTarget('')
+          setReason('')
+          setAsked(false)
+        },
+      },
+    )
+  }
   return (
     <Card title="Nomenclature index" id="index">
+      <div data-testid="library-index">
       <p>Every entry of every kind, in one vocabulary. The id is kind/slug everywhere the product names it.</p>
       <DataTable rows={entries} columns={columns} rowKey={(e) => e.entry_id} caption={`Library entries for ${repo}`} empty="No entry yet. Propose the first one below." dense />
-      {can('approver') && withdrawable.length > 0 && (
+      <Refused error={onAct.error} testId="library-refused" />
+      {can('approver') && (withdrawable.length > 0 || withdrawn) && (
         <form className="mt-6 space-y-3" aria-label="Revoke or retire an entry" onSubmit={(e) => e.preventDefault()}>
           <h3 className="text-lg font-bold">Revoke or retire an entry</h3>
           <p className="text-sm">Both are appended to the record; neither edits it. Revoke when it was wrong; retire when it no longer holds.</p>
-          <SelectField label="Entry" value={target} onChange={(e) => setTarget(e.target.value)} hint="field.library.entry">
+          <Refused error={withdraw.error} testId="library-withdraw-refused" />
+          <SelectField label="Entry" value={chosen} onChange={(e) => setTarget(e.target.value)} hint="field.library.entry" error={entryError}>
             <option value="">Choose an entry</option>
             {withdrawable.map((e) => (
               <option key={e.entry_id} value={e.entry_id}>
@@ -382,17 +444,21 @@ function IndexSection({ repo, entries, meId, onAct }: { repo: string; entries: L
               </option>
             ))}
           </SelectField>
-          <TextField label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} hint="field.library.reason" />
+          <TextField label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} hint="field.library.reason" error={reasonError} />
           <div className="flex flex-wrap gap-3">
-            <WarningButton hint="button.library.revoke" disabled={!target || !reason.trim()} onClick={() => act({ act: 'revoke', entryId: target, reason })}>
+            <WarningButton hint="button.library.revoke" pending={withdraw.isPending} onClick={() => withdrawAct('revoke')}>
               Revoke
             </WarningButton>
-            <SecondaryButton hint="button.library.retire" disabled={!target || !reason.trim()} onClick={() => act({ act: 'retire', entryId: target, reason })}>
+            <SecondaryButton hint="button.library.retire" pending={withdraw.isPending} onClick={() => withdrawAct('retire')}>
               Retire
             </SecondaryButton>
           </div>
+          <p role="status" className="m-0 text-sm" data-testid="library-withdrawn">
+            {withdrawn}
+          </p>
         </form>
       )}
+      </div>
     </Card>
   )
 }
@@ -402,7 +468,6 @@ export function LibraryPage() {
   const [params, setParams] = useSearchParams()
   const { can, me } = useAuth()
   const lib = useLibrary(repo)
-  const onAct = useLibraryAct(repo)
   const types = lib.data?.work_types ?? []
   const chosen = params.get('type') ?? types[0]?.slug ?? ''
   const pageable = types.find((t) => t.slug === chosen && (t.status === 'global' || t.status === 'signed'))
@@ -428,11 +493,6 @@ export function LibraryPage() {
         </Pill>
       </div>
       {lib.isError && <ErrorState error={lib.error} onRetry={() => void lib.refetch()} />}
-      {onAct.isError && (
-        <div role="alert" className="mb-4 border-l-4 border-status-red p-3" data-testid="library-refused">
-          {refusal(onAct.error)}
-        </div>
-      )}
       {lib.data && (
         <>
           <Card title="Work types" id="work-types">
@@ -460,9 +520,9 @@ export function LibraryPage() {
           {page.isError && <ErrorState error={page.error} compact />}
           {page.data && <WorkTypeSection page={page.data} />}
           {chosen && !pageable && types.some((t) => t.slug === chosen) && <p>This work type has no page until it is signed.</p>}
-          <IndexSection repo={repo} entries={lib.data.entries} meId={me?.id ?? ''} onAct={onAct} />
+          <IndexSection repo={repo} entries={lib.data.entries} meId={me?.id ?? ''} />
           {can('operator') && <MineCard repo={repo} />}
-          {can('operator') && <ProposeForm repo={repo} kinds={lib.data.kinds} characteristics={lib.data.characteristics} statementMax={lib.data.statement_max} onAct={onAct} />}
+          {can('operator') && <ProposeForm repo={repo} kinds={lib.data.kinds} characteristics={lib.data.characteristics} statementMax={lib.data.statement_max} />}
         </>
       )}
     </>

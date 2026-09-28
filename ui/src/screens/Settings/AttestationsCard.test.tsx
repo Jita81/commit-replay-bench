@@ -68,6 +68,24 @@ describe('AttestationsCard', () => {
     expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual(['/settings/attestations/egress-denied'])
   })
 
+  it('focus never falls to the page: the question takes it, Keep it gives it back, and the outcome takes it after a withdrawal (P-396)', async () => {
+    mockApi({ ...ADMIN, 'DELETE /settings/attestations/egress-denied': GOLIVE })
+    renderApp(<AttestationsCard />, { route: '/settings' })
+    const trigger = await screen.findByTestId('withdraw-egress-denied')
+    trigger.focus()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('withdraw-confirm-egress-denied')))
+    await userEvent.tab()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Keep it' }))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('withdraw-egress-denied')))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('withdraw-confirm-egress-denied')))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('attest-done')))
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
   it('shows the server’s refusal in its own words', async () => {
     mockApi({ ...ADMIN, 'PUT /settings/attestations/egress-denied': () => envelope(422, 'invalid_attestation', 'the act cannot be dated in the future') })
     renderApp(<AttestationsCard />, { route: '/settings' })

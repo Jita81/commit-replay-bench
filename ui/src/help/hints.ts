@@ -1202,7 +1202,7 @@ export const HINTS = {
   'link.run.repo':
     'The repository this run worked; opens its overview, tasks and configuration.',
   'button.run.deliver_override':
-    'Let this factory run open pull requests for items whose cell does not route deliver. A second approver’s act: the person who queued the run cannot grant it. Recorded under your name on the run’s trace; it never overrides the honesty floor: a cell with a wrong clean verdict stays withheld.',
+    'Let this factory run build and deliver items whose cell’s proven standard nobody has signed yet. It lifts the sign-off clause and nothing else: a cell that does not route deliver still opens no pull request, and a cell with a wrong clean verdict (the honesty floor) is never lifted. A second approver’s act: the person who queued the run cannot grant it. Recorded under your name on the run’s trace.',
   'button.run.cancel':
     'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
   'chart.run.progress':

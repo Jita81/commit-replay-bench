@@ -516,7 +516,7 @@ export function ladderEntryLabel(entry: LadderEntry): string {
 
 /**
  * A factory run's delivery switch as the worker read it (`RunOut.factory`): whether
- * delivery was on, who overrode the route gate (id and display name) and the frozen
+ * delivery was on, who lifted its sign-off clause (id and display name) and the frozen
  * backlog's hash. `null` for every other kind; absent on an older server.
  */
 export interface RunFactory {
@@ -1267,8 +1267,8 @@ export interface Signoff {
   active: boolean
   /** Made on an earlier apparatus than the one the deployment reads at now, or carrying no apparatus stamp (ADR-0015): kept, verifying, lifting nothing until re-signed or revoked. */
   stale: boolean
-  /** Why `stale` (first match): `no_apparatus_stamp` — signed before the stamp existed, so it covers no rows (GOV-6); `apparatus_moved`; `checks_arm_moved`; `posture_moved`; `""` when not stale. */
-  stale_reason?: '' | 'no_apparatus_stamp' | 'apparatus_moved' | 'checks_arm_moved' | 'posture_moved'
+  /** Why `stale` (first match): `verifier_deactivated` — the approver's account was deactivated since, and a leaver's sign-off lifts nothing (DL-120); `no_apparatus_stamp` — signed before the stamp existed, so it covers no rows (GOV-6); `apparatus_moved`; `checks_arm_moved`; `posture_moved`; `""` when not stale. */
+  stale_reason?: '' | 'verifier_deactivated' | 'no_apparatus_stamp' | 'apparatus_moved' | 'checks_arm_moved' | 'posture_moved'
   /** The deployment's current apparatus, for comparison with `evidence.apparatus_versions`. */
   apparatus_current: string
   /** This stored row no longer hashes to its own `row_hash` — altered under the append-only triggers (EI-6). */
@@ -1327,6 +1327,7 @@ export function signoffStaleWhy(
   current = '',
 ): string {
   const now = s.apparatus_current || current || '?'
+  if (s.stale_reason === 'verifier_deactivated') return 'signed by an account that has since been deactivated, and a leaver’s sign-off licenses nothing'
   if (s.stale_reason === 'no_apparatus_stamp') return `signed before the apparatus stamp, now reading at ${now}`
   if (s.checks_arm && s.checks_arm_current && s.checks_arm !== s.checks_arm_current) {
     return `signed on the ${s.checks_arm} checks arm, now reading the ${s.checks_arm_current} arm`

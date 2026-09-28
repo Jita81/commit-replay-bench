@@ -86,7 +86,7 @@ const SRC = {
   separation: 'Source: the sign-off policy in the code (src/crb/core/signoff.py), refused at write',
   secrets: 'Source: the settings and secrets code (src/crb/server/settings.py, src/crb/server/secrets.py)',
   delivery: 'Source: the delivery code (src/crb/server/worker.py and docs/GITHUB-APP.md §5)',
-  override: 'Source: the route gate in the code (src/crb/factory/loop.py), each override an event',
+  override: 'Source: the sign-off clause in the code (src/crb/factory/loop.py and src/crb/factory/standard.py), each lift an event',
   retention: 'Source: the retention settings (docs/DATA-RETENTION.md §2, ADR-0006)',
   export: 'Source: the ledger routes (src/crb/server/routes/ledger.py)',
 } as const
@@ -158,6 +158,9 @@ export function PosturePage() {
   // when this reader is not an admin (the settings query is not even issued for them)
   const signedCellRequired = s?.raw?.factory?.require_signed_cell
   const adminOnly = (v: unknown): ReactNode => (admin ? String(v ?? '—') : 'shown to admins')
+  // a row fed by the admin's settings, before they answer: why there is no value — "…" while
+  // loading, the failure when the read failed (P-398), never a bare dash for ever
+  const settingsUnread = (): ReactNode => (admin ? (settings.isError ? 'the settings could not be read' : '…') : 'shown to admins')
 
   // the executor as the deployment reports it: the admin's settings when they answer,
   // else the health probe's own `executor` (never a guess)
@@ -241,7 +244,11 @@ export function PosturePage() {
           hint: 'summary.posture.executor',
           note: s ? SRC.settings : SRC.health,
           value: !executorKnown ? (
-            '…'
+            health.isError && !s ? (
+              'the health check could not be read'
+            ) : (
+              '…'
+            )
           ) : executor === 'docker' ? (
             'docker (sealed)'
           ) : executor === '' ? (
@@ -273,9 +280,9 @@ export function PosturePage() {
                   ? 'on — each task’s dependencies are fetched outside the test container and mounted read-only'
                   : 'off — a repository whose tests need a third-party module cannot be qualified in the sealed sandbox, and the Posture panel says so instead of blaming the model',
               )
-            : adminOnly(undefined),
+            : settingsUnread(),
         },
-        { key: 'Builder posture', hint: 'summary.posture.builder', note: SRC.settings, value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : adminOnly(undefined) },
+        { key: 'Builder posture', hint: 'summary.posture.builder', note: SRC.settings, value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : settingsUnread() },
         { key: 'Toolchains', hint: 'summary.posture.toolchains', value: probeText('toolchains'), note: SRC.health },
         {
           key: 'Worker',
@@ -309,7 +316,11 @@ export function PosturePage() {
           hint: 'summary.posture.permissions',
           note: SRC.github,
           value: !gh.data ? (
-            '…'
+            gh.isError ? (
+              'GitHub App status unavailable'
+            ) : (
+              '…'
+            )
           ) : !gh.data.configured ? (
             <>
               the GitHub App installation must hold Contents: write and Pull requests: write; installations without them measure only. No app is configured, so no repository can deliver.{' '}
@@ -342,7 +353,7 @@ export function PosturePage() {
           // no bare environment-variable token in a viewer's row: an unbreakable name this
           // long sets the summary list's min-content width and the page scrolls sideways at
           // 375 px (J-FAC-14). The admin's row prints it with break-all, as the sandbox row does.
-          value: signedCellRequired === undefined ? (admin ? '…' : 'a signed cell as well as a deliver route, unless this deployment has turned that off — the setting itself is shown to admins') : signedCellRequired ? 'a signed cell as well as a deliver route: the factory does not build an item until a person has signed off its cell’s proven standard, on the current apparatus (a sign-off expires with the apparatus)' : (
+          value: signedCellRequired === undefined ? (admin ? (s ? 'not reported by this deployment' : settingsUnread()) : 'a signed cell as well as a deliver route, unless this deployment has turned that off — the setting itself is shown to admins') : signedCellRequired ? 'a signed cell as well as a deliver route: the factory does not build an item until a person has signed off its cell’s proven standard, on the current apparatus (a sign-off expires with the apparatus)' : (
             <>
               the route alone — this deployment has turned the sign-off clause off (<code className="break-all">CRB_FACTORY__REQUIRE_SIGNED_CELL=false</code>), so a measured cell licenses a pull request with no human attestation.{' '}
               <NextStep admin={admin} doc={<DocLink to="ONBOARDING-A-REPO#step-7--sign-off-approver">Sign off (ONBOARDING)</DocLink>}>

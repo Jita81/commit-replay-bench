@@ -162,11 +162,16 @@ describe('HomePage', () => {
     expect(rows[5]).toHaveTextContent('Incomplete')
     // G-518 — task 7 reads the deployment's real readiness, not the presence of an admin: an
     // invitation that was sent and not used is "In progress", and the note is the server's
-    // own reason plus who can act. A non-admin is not sent to a page that refuses them.
+    // own reason plus the next step for THAT reason. A non-admin is not sent to a page that
+    // refuses them, nor to one that says nothing about it: the task keeps its state, no link.
     expect(rows[6]).toHaveTextContent('In progress')
-    expect(within(rows[6]!).getByRole('link')).toHaveAttribute('href', '/posture')
-    expect(screen.getByTestId('home-task-7-note')).toHaveTextContent('has never signed in')
-    expect(screen.getByText(/Only an admin can invite somebody/)).toBeInTheDocument()
+    expect(within(rows[6]!).queryByRole('link')).toBeNull()
+    const note = screen.getByTestId('home-task-7-note')
+    // the server's reason starts the sentence, so it starts with a capital (GOV.UK style)
+    expect(note).toHaveTextContent('Task 7. The only account that can sign has never signed in')
+    // invited and not arrived: the step is the invited person's link, not another invitation
+    expect(note).toHaveTextContent('ask them to open their one-time link')
+    expect(note).not.toHaveTextContent('Ask your admin to invite an approver')
     // a frozen backlog with no factory run behind it is ready to run, not "in progress"
     expect(rows[7]).toHaveTextContent('Backlog frozen — run the factory')
     // the viewer's Continue keeps its rule — the baseline once any row exists — and names
@@ -235,7 +240,9 @@ describe('HomePage', () => {
     rows = within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')
     expect(rows[6]).toHaveTextContent('Incomplete')
     expect(screen.getByTestId('home-task-7-note')).toHaveTextContent('queued every run of this repository')
-    expect(screen.getByTestId('home-task-7-note')).toHaveTextContent('Invite them on the Settings screen')
+    expect(screen.getByTestId('home-task-7-note')).toHaveTextContent('Invite an approver who did not run them on the Settings screen')
+    // an admin's task 7 lands on the invite card itself, not the top of Settings (P-399)
+    expect(within(rows[6]!).getByRole('link')).toHaveAttribute('href', '/settings#invite')
   })
 
   it('a stale sign-off (the apparatus moved on) completes nothing: task 6 stays Incomplete and Continue lands on it', async () => {

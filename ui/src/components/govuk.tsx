@@ -43,7 +43,7 @@
  *               is added (name it after the GOV.UK/NHS component it is).
  */
 
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { Link } from 'react-router'
 import type { HintId } from '../help/hints'
 import { Hint } from './Hint'
@@ -244,7 +244,7 @@ export function ConfirmationPanel({ title, reference, referenceLabel = 'Your ref
   )
 }
 
-const BTN = 'inline-block rounded-[4px] border-0 px-4 py-3 text-[19px] leading-[1.2] text-on-primary no-underline cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 mb-1'
+const BTN = 'inline-block rounded-[4px] border-0 px-4 py-3 text-[19px] leading-[1.2] text-on-primary no-underline cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 aria-disabled:cursor-not-allowed aria-disabled:opacity-45 mb-1'
 
 interface GovButtonProps {
   children: ReactNode
@@ -254,11 +254,15 @@ interface GovButtonProps {
   type?: 'button' | 'submit'
   /** What pressing it does — a registry id; the ratchet requires one on a Start or Warning button. */
   hint?: HintId
+  /** The act is in flight: reads as unavailable and ignores presses, but keeps focus (P-396) —
+   * use it, never `disabled`, for "while pending". */
+  pending?: boolean
 }
 
 /** A link or a button in the GOV.UK button classes, through `<Hint as>` when it carries an id. */
-function GovButton({ children, onClick, to, disabled, type = 'button', hint, cls, primary }: GovButtonProps & { cls: string; primary?: boolean }) {
+function GovButton({ children, onClick, to, disabled, type = 'button', hint, cls, primary, pending = false }: GovButtonProps & { cls: string; primary?: boolean }) {
   const mark = primary ? '' : undefined
+  const busy = pending ? { 'aria-disabled': true as const, 'aria-busy': true as const, onClick: (e: MouseEvent) => e.preventDefault() } : { onClick }
   if (to) {
     if (hint) {
       return (
@@ -275,13 +279,13 @@ function GovButton({ children, onClick, to, disabled, type = 'button', hint, cls
   }
   if (hint) {
     return (
-      <Hint as="button" id={hint} type={type} onClick={onClick} disabled={disabled} className={cls} data-primary={mark}>
+      <Hint as="button" id={hint} type={type} disabled={disabled} className={cls} data-primary={mark} {...busy}>
         {children}
       </Hint>
     )
   }
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={cls} data-primary={mark}>
+    <button type={type} disabled={disabled} className={cls} data-primary={mark} {...busy}>
       {children}
     </button>
   )

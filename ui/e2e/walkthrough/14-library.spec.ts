@@ -77,6 +77,19 @@ test('a sponsor proposes an entry and cannot sign it; a second person signs it a
   await first.click()
   await expect(page.getByRole('heading', { name: `Work type: ${workType}` })).toBeVisible()
 
+  // a refused proposal is said at its own form, in view and focused, even at phone width (P-397)
+  await page.setViewportSize({ width: 375, height: 812 })
+  await field(page, 'Short name (slug)').fill('Bad Slug!')
+  await field(page, 'Title').fill('Wrap errors with the operation')
+  await field(page, 'Statement').fill('Every returned error names the operation that failed.')
+  await page.getByRole('button', { name: 'Propose as sponsor' }).click()
+  const refusal = page.getByTestId('library-propose-refused')
+  await expect(refusal).toContainText('slug')
+  await expect(refusal).toBeFocused()
+  await expect(refusal).toBeInViewport()
+  await expect(field(page, 'Short name (slug)')).toHaveAttribute('aria-invalid', 'true')
+  await page.setViewportSize({ width: 1280, height: 720 })
+
   // propose, as the sponsor
   await field(page, 'Short name (slug)').fill(SLUG)
   await field(page, 'Title').fill('Wrap errors with the operation')

@@ -159,6 +159,50 @@ describe('LibraryPage', () => {
     vi.unstubAllGlobals()
   })
 
+  it('a refused proposal is said at its own form, marks the field it names, and takes focus (P-397)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      ...LIBRARY_API,
+      'POST /library/alpha/entries': () => envelope(422, 'invalid_entry', 'a slug is lower case letters, digits, ‘.’, ‘_’ or ‘-’, at most 64 characters'),
+    })
+    renderApp(<LibraryPage />, AT)
+    const card = (await screen.findByRole('heading', { name: 'Propose an entry' })).closest('section, div')!.parentElement!
+    const form = screen.getByRole('form', { name: 'Propose an entry for alpha' })
+    await userEvent.type(screen.getByLabelText(/Short name \(slug\)/), 'Bad Slug!')
+    await userEvent.type(screen.getByLabelText(/^Title/), 'No package globals')
+    await userEvent.type(screen.getByLabelText(/^Statement/), 'State lives on the command.')
+    await userEvent.click(screen.getByRole('button', { name: 'Propose as sponsor' }))
+    const refused = await within(form).findByTestId('library-propose-refused')
+    expect(refused).toHaveTextContent('a slug is lower case letters')
+    await waitFor(() => expect(document.activeElement).toBe(refused))
+    expect(screen.getByLabelText(/Short name \(slug\)/)).toHaveAttribute('aria-invalid', 'true')
+    expect(within(card).queryByTestId('library-refused')).toBeNull()
+    expect(screen.queryByTestId('library-refused')).toBeNull() // never at the top of the page
+  })
+
+  it('a retirement says what it did beside its form and clears it; an empty press asks at the fields instead of a silent disabled button (P-397)', async () => {
+    const retired = { ...LIBRARY.entries[1]!, status: 'retired' as const }
+    const { calls } = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      ...LIBRARY_API,
+      [`POST /library/alpha/entries/${LIBRARY.entries[1]!.entry_id}/retire`]: () => json(retired),
+    })
+    renderApp(<LibraryPage />, AT)
+    const form = await screen.findByRole('form', { name: 'Revoke or retire an entry' })
+    const retire = within(form).getByRole('button', { name: 'Retire' })
+    expect(retire).toBeEnabled()
+    await userEvent.click(retire)
+    expect(within(form).getByLabelText('Entry')).toHaveAttribute('aria-invalid', 'true')
+    expect(within(form).getByLabelText('Reason')).toHaveAttribute('aria-invalid', 'true')
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    await userEvent.selectOptions(within(form).getByLabelText('Entry'), LIBRARY.entries[1]!.entry_id)
+    await userEvent.type(within(form).getByLabelText('Reason'), 'no longer how we work')
+    await userEvent.click(retire)
+    await waitFor(() => expect(within(form).getByTestId('library-withdrawn')).toHaveTextContent(`Retired ${LIBRARY.entries[1]!.entry_id}: no longer how we work`))
+    expect((within(form).getByLabelText('Entry') as HTMLSelectElement).value).toBe('')
+    expect((within(form).getByLabelText('Reason') as HTMLInputElement).value).toBe('')
+  })
+
   it('a second approver signs, and a refusal is shown in the API’s words', async () => {
     const { calls } = mockApi({
       'GET /auth/me': PRINCIPAL, // u1: not the sponsor
@@ -170,6 +214,9 @@ describe('LibraryPage', () => {
     const row = screen.getAllByText('convention/context-first').find((el) => el.closest('tr'))!.closest('tr')!
     await userEvent.click(within(row).getByRole('button', { name: 'Sign' }))
     await waitFor(() => expect(screen.getByTestId('library-refused')).toHaveTextContent('a second person must sign it'))
+    // said beside the table the act was pressed in, and focused (P-397)
+    const index = screen.getByRole('table', { name: 'Library entries for alpha' }).closest('[data-testid="library-index"]')!
+    expect(within(index as HTMLElement).getByTestId('library-refused')).toBe(document.activeElement)
     const post = calls.find((c) => c.method === 'POST')!
     expect(JSON.parse(String(post.init?.body))).toEqual({ version: 'e'.repeat(64) })
     const stale = screen.getAllByText('convention/lint').find((el) => el.closest('tr'))!.closest('tr')!

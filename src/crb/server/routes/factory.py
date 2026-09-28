@@ -1363,7 +1363,7 @@ def waive_probe(  # noqa: PLR0917 — FastAPI dependencies + path/body
     """ADR-0025 item 12 as ADR-0016's two-person rule applies it (P-339): the waiver lifts a
     REQUIRED gate, so the approver who queued a factory run on this repository that is
     still queued or running may not waive its probe — 409 ``same_actor`` — as they may not
-    override its route gate; the loop refuses a waiver naming the run's actor too, for a
+    lift its sign-off clause; the loop refuses a waiver naming the run's actor too, for a
     waiver granted before the run was queued. 409 ``probe_waiver_stale`` when the bytes are
     not the latest RED proof's."""
     get_repo_or_404(db, repo)

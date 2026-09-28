@@ -3122,7 +3122,8 @@ class Worker:
         return STATUS_SUCCEEDED, counts, ""
 
     def _deliver_override(self, run_id: str) -> str:
-        """Who overrides this factory run's route gate, read from the run's row NOW: the
+        """Who lifts this factory run's SIGN-OFF clause (never its route gate — ADR-0026
+        item 8), read from the run's row NOW: the
         ``params.deliver_override_by`` a second approver granted (``POST
         /runs/{id}/deliver-override``), honoured only when it names an ACTIVE account that
         holds the approver role at the moment of the gate — ``""`` otherwise (GOV-4): a

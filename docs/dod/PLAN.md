@@ -65,8 +65,12 @@ Wave 2's streams (T, then C, I, H, X, F, and R on G) are integrated on
 PR #63 review fixes), by a merge on 28 September; Wave 2's own prevention rows moved up by
 eight, after `feat/ns1`'s `P-227` to `P-234` (P-334), their other ids renumbered after
 `feat/ns1`'s in merge order and their seams wired (the entry gate reads the registered readings through one
-binding, `crb.server.factory_standard`); it awaits the operator's merge after `feat/ns1`. No
-later wave has started.
+binding, `crb.server.factory_standard`); it awaits the operator's merge after `feat/ns1`. Wave
+4's streams (T4, P, S, then L with M) are integrated on `feat/ns4`, cut from `feat/ns2` and
+brought to its later head, `8ba71fda`, by a merge on 28 September, with their ids renumbered after
+Wave 2's (DL-106 to DL-120, P-350 to P-403, ADR-0031, Alembic revisions 0014 to 0016) and their
+seams wired; what it closed and what it left are under Wave 4 below. It awaits the operator's
+merge after `feat/ns2`. Wave 3 and Wave 5 need the operator and have not started.
 
 Some ids the base carried are retired on this branch because they were **merged or narrowed,
 not closed**: the criteria that cited them are still open under the id that replaced them.
@@ -198,7 +202,7 @@ interval beside the minimum detectable effect, and each cell's standard or "no p
 (value.109 met); README's measured section cites vendored rows whose checksum manifest and
 re-derivation test pass in CI (claims.201 met); posture.23 and go-live.18 read met.
 
-## Wave 4 — the second person and the go-live truth (autonomous)
+## Wave 4 — the second person and the go-live truth (autonomous; integrated on `feat/ns4`)
 
 | stream · base | gaps | what ships |
 |---|---|---|
@@ -210,11 +214,23 @@ re-derivation test pass in CI (claims.201 met); posture.23 and go-live.18 read m
 | FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `acceptance: held_out` stamp on its `S2` row; the registered `S2` reading that alone promotes an `S3` ceiling |
 | CL · claims on the decision records · new | G-945, G-946 | `docs/adr/*.md` and `CHANGELOG.md` read by the claims gate, each page tagged or corrected in its own change, so every public page the repository carries is gated; each count of a list in the code on a gated page bound to a test that re-derives it, or removed (claims.218) |
 
+**Status on `feat/ns4`.** Built and verified, then attacked and fixed (DL-119, DL-120, P-391 to
+P-403): S (all but G-478, and G-477 carried from Wave 2 closed), P (all but G-321), V as stream T4
+(all but G-143, G-992 and G-993) and LIB as streams L and M (G-673, G-676, G-677 and G-736 closed;
+G-735 and G-737 open). Not built, and carried to the list after Wave 4: LIB's entry sets as arms
+(G-675, so `product.truth.212` stays unmet), CLS (G-672, so `product.truth.208` stays unmet), FWD
+(G-679, so `product.truth.215` stays unmet) and CL (G-945, G-946). The seams the integration moved
+to later work are there too: the Decisions inbox reading the entry gate's own sign-off (G-738),
+the read-then-insert ratchet (G-720), the failed-read ratchet's per-read rule and its list
+(G-732), and the controls still disabled while their request runs (G-739).
+
 **Done when:** an invited approver can accept, sign in and sign a cell on the walkthrough stack;
 the factory refuses an unsigned cell by default; `/posture` shows each go-live line's state;
 roles.209, extensibility.213, truth.212, explanation.211, truth.208 and truth.215 read met; the
 only open product criteria are go-live.16 (F43), release.22 (G-604), extensibility.25 (F21) and
-identity.11 (G-600).
+identity.11 (G-600). **Not met on `feat/ns4`:** truth.208, truth.212 and truth.215 are unmet
+(CLS, LIB's arms and FWD were not built), and the walkthrough stack cannot show a person signing a
+cell (G-956); roles.209, extensibility.213 and explanation.211 read met.
 
 ## Wave 5 — the library and the organisation's classes, measured (needs the operator)
 
@@ -265,6 +281,7 @@ These are not wave items; each unblocks the work named beside it.
 | time, cost and non-goals in words | G-302, G-401, G-430, G-447, G-978, G-908, G-382, G-402, G-429, G-140, G-185, G-207, G-262, G-263, G-269 |
 | what Wave 2 left open: the walkthrough's sealed reading, a spend cap that is a ceiling, the approver task, economics in one scope, the migration job's owner URL, the fresh-clone job's first CI run, and C's evidence checks | G-956, G-963, G-477, G-990, G-991, G-989, G-709, G-664, G-994, G-996, G-995, G-998 |
 | what the Wave 2 review found in our own process: the gate environment, the plan's record, accepted ADRs and a stale base | G-766, G-767, G-768, G-769 |
+| what Wave 4 left open: the Decisions inbox's sign-off reader, the read-then-insert ratchet, the failed-read ratchet, controls disabled while pending, and the streams not built (LIB's arms, CLS, FWD, CL) | G-738, G-720, G-732, G-739, G-675, G-672, G-679, G-945, G-946 |
 | the product | F43, G-604, F21, G-600 |
 
 ## What each wave must do to its own artefacts

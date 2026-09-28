@@ -70,8 +70,10 @@ What it does: ``POST`` runs the five steps of the module docstring: the false-Q1
               clause, recorded as an event) → the whole decision, ``verifier_kind``
               included, stamped into the row and chained. ``preview`` runs steps 1–4
               without writing; a revocation is a new row; at read every attestation says
-              whether it is still ``active`` (latest, not revoked, false-Q1 still 0) and
-              what kind of account signed it.
+              whether it is still ``active`` (latest, not revoked, false-Q1 still 0, its
+              approver's account still active — a leaver's sign-off is ``stale`` with
+              ``verifier_deactivated`` and ``load_signoff_records`` leaves it out, ADR-0016's
+              amendment, DL-120) and what kind of account signed it.
 How:          ``_floor`` → ``cell_rows`` (sighted, current apparatus, the repo's own checks
               arm — ``checks_arm_in``) → ``measured_cell`` +
               ``cell_oracle_strength`` → ``resolve_attestation`` + ``cell_actors`` (``Grade.actor``,
@@ -93,7 +95,8 @@ Works with:   src/crb/core/signoff.py (the policy, ``SignoffRecord``, ``evaluate
               src/crb/server/schemas_signoff.py (the v3 shapes), src/crb/store/models.py
               (``Signoff``, ``Grade.actor``, ``Run.actor``), ui/src/screens/Signoff,
               docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity (§6a)
-Tested by:    tests/test_server_routes_signoffs.py, tests/test_server_routes_capability.py
+Tested by:    tests/test_server_routes_signoffs.py, tests/test_server_routes_capability.py,
+              tests/test_governed_delivery_e2e.py (a leaver's sign-off licenses nothing)
 Touch when:   never for a new repository; relaxing a threshold is deployment configuration
               (``CRB_SIGNOFF__*``, docs/API.md), not code; adding a policy clause means
               src/crb/core/signoff.py + a snapshot key here + the schema + the UI + the
@@ -219,6 +222,9 @@ STALE_NO_APPARATUS_STAMP = "no_apparatus_stamp"
 STALE_APPARATUS_MOVED = "apparatus_moved"
 STALE_CHECKS_ARM_MOVED = "checks_arm_moved"
 STALE_POSTURE_MOVED = "posture_moved"
+#: The attestation's verifier has since been deactivated: a leaver's sign-off lifts nothing
+#: (ADR-0016 amendment of 2026-09-28, DL-120) — the inbox asks another approver to re-sign.
+STALE_VERIFIER_DEACTIVATED = "verifier_deactivated"
 # signoff-policy.v1+ snapshot keys (absent on rows written before the policy).
 _EV_ORACLE = "evidence_oracle_strength"
 _POLICY_VERSION = "policy_version"
@@ -617,11 +623,23 @@ def load_signoff_records(session: Session, repo: str | None = None) -> list[Sign
     edited row's scope, repository and kind are the editor's choice, so no reading of it can
     be trusted to withdraw what it withdrew (EI-6, 2026-09-27). ``/signoffs/verify`` and the
     ``/health`` ``ledger`` probe name the break. So does a row the audit trail names that the
-    chain no longer holds — its last row deleted leaves a chain that still links (P-337)."""
+    chain no longer holds — its last row deleted leaves a chain that still links (P-337).
+
+    A leaver's attestation lifts nothing (ADR-0016 amendment of 2026-09-28, DL-120): a
+    sign-off is a standing licence, so P-229's rule holds for it — deactivation ends
+    everything the account holds. An attestation whose verifier's account is deactivated
+    NOW is left out of what this returns (every reader of the licence reads it the same
+    way); its row stays on the chain, and re-activating the account brings it back. A
+    revocation is never left out: withdrawing is not a power the leaver still exercises."""
     rows = load_signoff_rows(session)
     if not signoff_chain_intact(rows) or signoff_rows_missing(session, rows):
         return []
-    return [to_record(r) for r in rows if not repo or r.repo in (repo, WILDCARD)]
+    inactive = set(session.execute(select(User.id).where(User.active.is_(False))).scalars())
+    return [
+        to_record(r)
+        for r in rows
+        if (not repo or r.repo in (repo, WILDCARD)) and (r.revoke or r.verifier not in inactive)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1109,7 +1127,9 @@ def signoff_out(
     # … or signed on evidence graded in another posture class than the one the deployment
     # grades the repository in now (ADR-0019 §8)
     signed_posture = str(cj.get(_EV_POSTURE, "") or "")
+    verifier = session.get(User, row.verifier)
     reasons = (
+        (STALE_VERIFIER_DEACTIVATED, verifier is not None and not verifier.active),
         (STALE_NO_APPARATUS_STAMP, not stamped),
         (STALE_APPARATUS_MOVED, bool(stamped) and APPARATUS_VERSION not in stamped),
         (STALE_CHECKS_ARM_MOVED, bool(arm_now) and signed_arm != arm_now),

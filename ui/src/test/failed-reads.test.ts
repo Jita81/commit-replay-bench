@@ -14,8 +14,13 @@
  *               range, each while the read behind it was down. The sources that did this before
  *               the ratchet are listed in `NOT_YET_READ`, and a match that is not a query at all
  *               in `NOT_A_QUERY` with why — lists that only shrink: an entry that no longer
- *               offends must be removed, and a new offender fails. The matcher is
- *               pinned on its own strings, so the ratchet cannot pass by matching nothing.
+ *               offends must be removed, and a new offender fails. A read bound to a local
+ *               (`const s = settings.data`) and then read through a fallback is the query's
+ *               read too; and a placeholder shown straight off a missing read
+ *               (`!q.data ? '…'`) must be guarded by that query's own failure IN THE SAME
+ *               EXPRESSION — a sibling row's `isError` elsewhere in the file does not answer it
+ *               (P-398). The matcher is pinned on its own strings, so the ratchet cannot pass
+ *               by matching nothing.
  * How:          `import.meta.glob` over the sources as `?raw` text; comments stripped; one regex
  *               for the reads and one per way of reading the failure.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -71,12 +76,28 @@ const NOT_A_QUERY: ReadonlyMap<string, string> = new Map([
 export function unansweredReads(source: string): string[] {
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
   const names = new Set([...code.matchAll(/\b([A-Za-z_$][\w$]*)\.data\s*(?:\?\?|\?\.)/g)].map((m) => m[1]!))
+  // a read bound to a local and read through a fallback there is the query's read (P-398)
+  for (const m of code.matchAll(/\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\.data\s*(?:;|\n)/g)) {
+    if (new RegExp(`\\b${m[1]!.replace(/\$/g, '\\$')}\\s*(?:\\?\\?|\\?\\.)`).test(code)) names.add(m[2]!)
+  }
   const passedToFailedRead = new Set(
     [...code.matchAll(/\bfailedRead\s*\(([^)]*)\)/g)].flatMap((m) => m[1]!.split(',').map((a) => a.trim())),
   )
   const answered = (n: string) =>
     new RegExp(`\\b${n}\\.(?:isError|error)\\b`).test(code) || new RegExp(`query=\\{\\s*${n}\\s*\\}`).test(code) || passedToFailedRead.has(n)
-  return [...names].filter((n) => !answered(n)).sort()
+  const unguarded = new Set([...ellipsisForever(code)])
+  return [...names].filter((n) => !answered(n) || unguarded.has(n)).concat([...unguarded].filter((n) => !names.has(n))).sort()
+}
+
+/**
+ * The queries whose missing read is shown as a placeholder straight away — `!q.data ? '…'`,
+ * `!q.data ? ('…')` — with no `q.isError` in that same branch: the placeholder then stands for
+ * ever when the read fails, whatever a sibling row elsewhere in the file says (P-398).
+ */
+export function ellipsisForever(code: string): string[] {
+  const out = new Set<string>()
+  for (const m of code.matchAll(/!\s*([A-Za-z_$][\w$]*)\.data\s*\?\s*\(?\s*(['"`])…\2/g)) out.add(m[1]!)
+  return [...out]
 }
 
 const key = (path: string, name: string) => `${path.replace(/^\.\.\//, '')}::${name}`
@@ -91,6 +112,13 @@ describe('failed reads (P-369, G-730)', () => {
     expect(unansweredReads('const n = map.data?.n; const f = failedRead(oracle, controls, map)')).toEqual([])
     expect(unansweredReads('// map.data ?? 0 in a comment')).toEqual([])
     expect(unansweredReads('const v = q.data; if (!v) return null')).toEqual([])
+    // P-398: a read bound to a local and read through a fallback is the query's read
+    expect(unansweredReads('const s = settings.data\nconst x = s?.raw?.factory')).toEqual(['settings'])
+    expect(unansweredReads('const s = settings.data\nconst x = s?.raw; if (settings.isError) return')).toEqual([])
+    // P-398: a placeholder straight off a missing read needs its own failure branch, even when
+    // a sibling row in the file reads that query's isError
+    expect(unansweredReads("value: !gh.data ? ('…') : gh.data.x; other: gh.isError ? 'down' : 'up'")).toEqual(['gh'])
+    expect(unansweredReads("value: !gh.data ? (gh.isError ? 'GitHub App status unavailable' : '…') : gh.data.x")).toEqual([])
   })
 
   it('reads the screens and components it guards', () => {

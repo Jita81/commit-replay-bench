@@ -20,7 +20,9 @@
  *               is not OK stays on the closed Menu button as the probe's glyph and in its name. The
  *               instrument row offers every role the pages its API lets that role read
  *               (G-914). `AboutThisScreen` is mounted once after the outlet so every screen
- *               carries its help with no wiring. The footer carries crb / apparatus /
+ *               carries its help with no wiring. A deep link lands on its target: the shell
+ *               scrolls to `location.hash` once the page renders it (`useScrollToHash`,
+ *               P-399). The footer carries crb / apparatus /
  *               policy versions — the one place internals appear, because an auditor needs
  *               the provenance of what they are reading — and links to Help and the glossary.
  *               `journeyEyebrow(pathname, sub?)` derives `Journey · 2 of 4 · Baseline` from
@@ -57,6 +59,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, matchPath, useLocation, useNavigate } from 'react-router'
 import { useHealth, useLogout, useVersion } from '../api/hooks'
 import { useAuth } from '../lib/auth'
+import { useScrollToHash } from '../lib/scrollToHash'
 import { useTheme } from '../lib/theme'
 import type { HintId } from '../help/hints'
 import { Button } from './Button'
@@ -200,6 +203,8 @@ function useShellMenu(): { open: boolean; toggle: () => void } {
  */
 export function Layout() {
   const { me, can } = useAuth()
+  // a deep link (`/settings#invite`) lands on its target once the page has rendered it (P-399)
+  useScrollToHash()
   const instrument = INSTRUMENT.filter((n) => can(n.role))
   const [theme, , cycle] = useTheme()
   const logout = useLogout()

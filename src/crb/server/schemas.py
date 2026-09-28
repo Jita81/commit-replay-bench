@@ -441,7 +441,7 @@ class RunCounts(BaseModel):
 
 class RunFactoryOut(BaseModel):
     """What a factory run was allowed to do (J-FAC-6), from its ``params``: delivery on or
-    off, the approver who overrode the route gate (id, and the display name resolved at
+    off, the approver who lifted its sign-off clause (id, and the display name resolved at
     read time as sign-offs do — the row keeps the id), and the backlog hash it worked."""
 
     deliver: bool
@@ -1313,9 +1313,11 @@ class SignoffOut(BaseModel):
     #: (``""`` for evidence from before apparatus 2.3) and ``posture_class_current`` the
     #: deployment's class for the repository now (``""`` for a record not tied to one). A
     #: record with no apparatus stamp is stale on every apparatus (GOV-6): it cannot show it
-    #: covers the rows read now. ``stale_reason`` names the first reason that applies —
-    #: ``no_apparatus_stamp``, ``apparatus_moved``, ``checks_arm_moved``, ``posture_moved``
-    #: — and is ``""`` when the record is not stale.
+    #: covers the rows read now. A record whose approver's account has since been
+    #: deactivated is stale too: a leaver's sign-off lifts nothing (ADR-0016 amendment,
+    #: DL-120). ``stale_reason`` names the first reason that applies —
+    #: ``verifier_deactivated``, ``no_apparatus_stamp``, ``apparatus_moved``,
+    #: ``checks_arm_moved``, ``posture_moved`` — and is ``""`` when the record is not stale.
     stale: bool = False
     stale_reason: str = ""
     apparatus_current: str = ""

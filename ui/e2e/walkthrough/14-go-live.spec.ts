@@ -152,10 +152,16 @@ test.describe('14 go live', () => {
     await expect(section.getByRole('heading', { name: 'Acts the operator attests' })).toBeVisible()
     for (const act of ['penetration test', 'egress test', 'restore has been rehearsed', 'alert fires', 'released digest']) await expect(section).toContainText(new RegExp(act, 'i'))
 
+    // the deep link from a line lands ON the card, not at the top of Settings (P-399)
+    await section.getByRole('link', { name: 'Record or withdraw on Settings' }).first().click()
+    await expect(page).toHaveURL(/\/settings#golive-attestations$/)
+    const card = page.locator('#golive-attestations')
+    await expect(card.getByTestId('attest-form')).toBeVisible()
+    await expect(card).toBeInViewport()
+
     // a rerun against a stack the last run left attested: withdraw first, so the walk starts unproven
     const egress = section.getByTestId('golive-egress-denied')
     await page.goto('/settings#golive-attestations')
-    const card = page.locator('#golive-attestations')
     await expect(card.getByTestId('attest-form')).toBeVisible()
     if (await card.getByTestId('withdraw-egress-denied').count()) {
       await card.getByTestId('withdraw-egress-denied').click()

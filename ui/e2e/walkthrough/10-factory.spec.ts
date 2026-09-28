@@ -26,7 +26,7 @@
  *               forward (J-FAC-4 / J-FAC-15); that the Runs list names the factory kind; that
  *               the approver (a second persona, signed in as themselves) signs I-2's
  *               structural gap and the evidence chain records it under their id, with no
- *               route-gate override offered while delivery is not linked (G-143); and that
+ *               lift of the sign-off clause offered while delivery is not linked (G-143); and that
  *               /factory does not scroll sideways at 375 px (J-FAC-14).
  * How:          `signIn` (the fixture), the freeze dialog's JSON mode (the only way to attach
  *               an authored test in the UI), `waitForRun` on the status pill, then the item
@@ -227,7 +227,7 @@ test.describe('10 factory (fixture_gold)', () => {
   })
 
   // G-143 — the approver's own acts, walked live as the approver: signing the structural gap
-  // (the chain records it under their id), and the route-gate override, which is offered only
+  // (the chain records it under their id), and lifting the sign-off clause, which is offered only
   // where delivery is linked — never on this stack, so it must not be offered here
   test('the approver signs I-2’s structural gap; the chain records it under their id; no override is offered while delivery is not linked', async ({ page }) => {
     await ensureApprover(page)
@@ -263,7 +263,7 @@ test.describe('10 factory (fixture_gold)', () => {
     const box = page.getByTestId('before-you-start')
     await expect(box).toBeVisible()
     await expect(box.getByRole('checkbox', { name: /Open pull requests/ })).toBeDisabled()
-    await expect(box.getByText('Override the route gate (approver)')).toHaveCount(0)
+    await expect(box.getByText(/Lift the sign-off clause|Override the route gate/)).toHaveCount(0)
   })
 
   test('the Runs list names the factory kind', async ({ page }) => {

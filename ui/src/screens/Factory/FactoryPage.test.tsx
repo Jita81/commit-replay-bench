@@ -610,7 +610,7 @@ describe('FactoryPage — the shipped contract', () => {
     expect(box).toHaveTextContent('on — a clean build in a deliver cell pushes a branch to acme/cobra and opens a pull request against main; nothing is written to main.')
     // GOV-4 + ADR-0026 item 8: the override is a SECOND approver's act on the run's page —
     // never asked for at enqueue — and it lifts a missing sign-off, and only that
-    expect(within(box).queryByRole('checkbox', { name: /Lift a missing sign-off|Override the route gate/ })).toBeNull()
+    expect(within(box).queryByRole('checkbox', { name: /Lift a missing sign-off|Lift the sign-off clause|route gate/ })).toBeNull()
     expect(within(box).getByTestId('factory-override-note')).toHaveTextContent('A missing sign-off is lifted for one run by a second approver: once this run is queued, another approver grants it on the run’s page, under their name. It lifts only the sign-off — never a missing standard, missing context, a calibration build or a cell with a false-Q1 row.')
     await userEvent.click(screen.getByRole('button', { name: /^Run the factory/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))

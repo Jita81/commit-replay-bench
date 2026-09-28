@@ -84,6 +84,8 @@ describe('InviteApproverCard', () => {
     const pill = await screen.findByTestId('two-person-readiness')
     expect(pill).toHaveTextContent('not two-person ready')
     expect(screen.getByTestId('two-person-reason')).toHaveTextContent('has never signed in')
+    // the server's reason starts the line, so it starts with a capital (GOV.UK style)
+    expect(screen.getByTestId('two-person-reason').textContent).toMatch(/^The only account that can sign/)
     expect(screen.getByTestId('two-person-reason')).toHaveTextContent('0 of 1 account that can sign have signed in; 1 invitation waiting')
   })
 
@@ -120,6 +122,34 @@ describe('InviteApproverCard', () => {
     expect(within(panel).getByTestId('invitation-url')).toHaveTextContent('https://crb.example.nhs.uk/invite?token=the-one-time-token')
     expect(panel).toHaveTextContent('This link is shown once and cannot be recovered')
     expect(within(panel).getByRole('button', { name: 'Copy the link' })).toBeInTheDocument()
+    // the link is said to a screen reader and a keyboard user: focus moves to its words (P-396)
+    await waitFor(() => expect(document.activeElement).toBe(within(panel).getByTestId('invitation-said')))
+  })
+
+  it('a copy the browser refuses says so and says what to do instead', async () => {
+    const created = {
+      invitation: inv({ id: 'i2', username: 'second-person' }),
+      accept_url: 'https://crb.example.nhs.uk/invite?token=t',
+      token: 't',
+      public_url_missing: false,
+    }
+    mockApi(base({ 'POST /invitations': created }))
+    renderApp(<InviteApproverCard />, { route: '/settings' })
+    await userEvent.type(await screen.findByLabelText(/^Username/), 'second-person')
+    await userEvent.click(screen.getByRole('button', { name: 'Invite' }))
+    const panel = await screen.findByTestId('invitation-link')
+    // no clipboard at all (plain http on a non-local address)
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Copy the link' }))
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('Could not copy: select the link above and copy it.')
+    // a clipboard that refuses (no permission)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) }, configurable: true })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Copy the link' }))
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('Could not copy')
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.resolve() }, configurable: true })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Copy the link' }))
+    expect(await within(panel).findByRole('button', { name: 'Copied' })).toBeInTheDocument()
+    expect(within(panel).queryByRole('alert')).toBeNull()
   })
 
   it('a pending link is withdrawn with a reason, and a refused invitation renders the envelope', async () => {
@@ -138,5 +168,7 @@ describe('InviteApproverCard', () => {
     await userEvent.type(screen.getByLabelText(/^Username/), 'walk-approver')
     await userEvent.click(screen.getByRole('button', { name: 'Invite' }))
     expect(await screen.findByText(/already exists/)).toBeInTheDocument()
+    // the refusal takes focus, so nobody is left on the page's body (P-396)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('invite-refused')))
   })
 })

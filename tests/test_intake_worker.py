@@ -356,6 +356,29 @@ def test_the_served_worker_leaves_a_ready_ticket_waiting_for_an_operator(tmp_pat
     assert row.awaiting_approval and not row.registered
 
 
+def test_the_served_worker_labels_an_unsigned_proven_cell_with_the_sign_off_it_needs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-392 (the Wave 4 attack): the worker binds the deployment's sign-off clause into the
+    ticket feedback, so the ticket names the stop the run will make. Under the served default
+    (``CRB_FACTORY__REQUIRE_SIGNED_CELL`` unset — on), a ticket in a cell whose proven
+    standard nobody signed is labelled not deliverable with the sign-off as its way forward;
+    a worker that dropped the setting would label it queued while the run stops
+    ``unsigned_cell``."""
+    every_cell_proven(monkeypatch, "S1@claude-sonnet-5", signed=False)
+    stack = Stack(tmp_path, _intake())
+    assert stack.worker.settings.factory.require_signed_cell is True  # the served default
+    stack.add_repo("alpha", {"enabled": True})
+    stack.worker.poll_intake()
+    (row,) = IntakeStore(stack.home, "alpha").rows()
+    assert row.label == c.LABEL_NOT_DELIVERABLE and row.entry_stop == "unsigned_cell"
+    board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
+    ticket = board["tickets"]["4711"]
+    assert c.LABEL_NOT_DELIVERABLE in ticket["tags"]
+    text = "\n".join(ticket["comments"].values())
+    assert "no active sign-off" in text and "lifts only the sign-off" in text
+
+
 def test_the_worker_honours_the_deployments_author_allowlist(tmp_path: Path) -> None:
     board = json.loads(json.dumps(BOARD))
     board["tickets"]["4711"]["author"] = "ada@example.invalid"

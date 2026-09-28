@@ -7,7 +7,8 @@
  *               who has no account yet ever sees apart from /login.
  * What it does: Turns a one-time link into an account the person controls. It reads the token
  *               from `?token=`, asks for a password twice (at least 12 characters; the two
- *               fields are compared in the browser so a mismatch is not a round trip), posts
+ *               fields are compared in the browser so a mismatch is not a round trip, and the
+ *               problem is said at the field it is about, which takes focus — P-397), posts
  *               `POST /invitations/accept`, and on success says which account is now live, in
  *               what role, and that the next step is to sign in with the password just chosen
  *               — no session is issued here, so the first thing the account does is prove it.
@@ -30,7 +31,7 @@
  * Touch when:   never for a new repository; the accept body or the minimum password length
  *               changes (they are the server's, `MIN_PASSWORD_LENGTH`).
  */
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useAcceptInvitation } from '../../api/hooks'
 import { Button } from '../../components/Button'
@@ -57,12 +58,32 @@ export function AcceptInvitePage() {
   const [password, setPassword] = useState('')
   const [again, setAgain] = useState('')
   const [touched, setTouched] = useState(false)
+  const [asked, setAsked] = useState(0)
   const problem = passwordProblem(password, again)
+  // the problem is said AT the field it is about (aria-invalid, described by it), and that
+  // field takes focus on each refused submit; a server refusal takes focus too (P-397)
+  const tooShort = touched && password.length < MIN_PASSWORD ? problem : undefined
+  const mismatch = touched && !tooShort && problem ? problem : undefined
+  const refused = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!asked) return
+    const name = password.length < MIN_PASSWORD ? 'new-password' : 'new-password-again'
+    document.querySelector<HTMLInputElement>(`input[name="${name}"]`)?.focus()
+    // only on a submit: typing must never move the cursor
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asked])
+  useEffect(() => {
+    if (accept.isError) refused.current?.focus()
+  }, [accept.isError, accept.error])
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
+    if (accept.isPending) return
     setTouched(true)
-    if (problem) return
+    if (problem) {
+      setAsked((n) => n + 1)
+      return
+    }
     accept.mutate({ token, password })
   }
 
@@ -100,6 +121,7 @@ export function AcceptInvitePage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                error={tooShort}
               />
               <TextField
                 label="New password again"
@@ -110,14 +132,14 @@ export function AcceptInvitePage() {
                 required
                 value={again}
                 onChange={(e) => setAgain(e.target.value)}
+                error={mismatch}
               />
-              {touched && problem && (
-                <p className="m-0 text-[16px] text-status-red" role="alert" data-testid="invite-problem">
-                  {problem}
-                </p>
+              {accept.isError && (
+                <div ref={refused} tabIndex={-1} data-testid="invite-refused">
+                  <ErrorState compact error={accept.error} title={accept.error.status === 401 ? 'This invitation link cannot be used' : undefined} />
+                </div>
               )}
-              {accept.isError && <ErrorState compact error={accept.error} title={accept.error.status === 401 ? 'This invitation link cannot be used' : undefined} />}
-              <Button type="submit" variant="filled" hint="button.invite.accept" className="w-full" disabled={accept.isPending}>
+              <Button type="submit" variant="filled" hint="button.invite.accept" className="w-full" pending={accept.isPending}>
                 {accept.isPending ? 'Setting your password…' : 'Set my password'}
               </Button>
             </form>

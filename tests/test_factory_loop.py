@@ -824,6 +824,150 @@ def test_a_change_smaller_than_its_estimate_is_licensed_by_its_own_measured_cell
     assert len(rig2.prs) == 1
 
 
+def _signed_only(*sizes: str) -> Readers:
+    """The person's test (``S2``) proven in every cell, signed only in ``sizes``."""
+    return Readers(standard_for=lambda cell: Standard(ARM_S2, signed=cell.size in sizes))
+
+
+def test_a_change_larger_than_its_estimate_is_delivered_only_into_a_signed_cell(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-391 (the Wave 4 attack): the entry gate checks the signatures of the cells the size
+    rule reads from the ESTIMATE (XS and S for an XS ticket); a change that measures larger
+    lands in a cell nobody may have signed. With the clause on, the delivered change's own
+    cell must carry an active sign-off too — or the item stops ``unsigned_cell`` at delivery,
+    with both sizes on the chain — and the pull request's licence line is the DELIVERED
+    cell's, never the estimate's."""
+    edit, oracle = _padded(40)
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S"),
+        require_signed_cell=True,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+    )
+    out = rig.loop().run_item(multiply_item(), authored=oracle)
+    measured = [r for r in rig.ledger.rows() if r.clean][-1].size
+    assert measured not in ("XS", "S", "")  # the change lands beyond the cells signed
+    assert out.status == fl.STATUS_UNSIGNED_CELL and out.delivery is None
+    assert not rig.pushes and not rig.prs
+    (refused,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    ev = refused.payload
+    assert ev["reason_code"] == "unsigned_cell"
+    assert ev["estimate"] == "XS" and ev["measured"] == measured
+    assert f"bug.fix {measured}" in ev["reason"] and "no active sign-off" in ev["reason"]
+    # a second approver's override lifts that clause at delivery too — and the pull request
+    # says so, naming the delivered cell's licence, never "signed cell"
+    rig2 = _rig(
+        pyrepo,
+        tmp_path / "b",
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S"),
+        require_signed_cell=True,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+        deliver_override_by="approver:ada",
+    )
+    out2 = rig2.loop().run_item(multiply_item(), authored=oracle)
+    assert out2.status == fl.STATUS_ACCEPTED and out2.delivery is not None
+    body = rig2.prs[0]["body"]
+    assert "**signed cell**" not in body
+    assert (
+        "- licence: **unsigned cell** — opened under a per-run override of the sign-off "
+        "clause by approver `approver:ada`" in body
+    )
+    (delivered,) = rig2.evidence.events_for("I-1", fe.EV_DELIVERY)
+    assert delivered.payload["licence"]["override_by"] == "approver:ada"
+    # the override is still refused for the run's own actor at delivery
+    rig3 = _rig(
+        pyrepo,
+        tmp_path / "c",
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S"),
+        require_signed_cell=True,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+        deliver_override_by="tester",
+    )
+    out3 = rig3.loop().run_item(multiply_item(), authored=oracle)
+    assert out3.status == fl.STATUS_UNSIGNED_CELL and not rig3.prs
+    (ev3,) = rig3.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    assert ev3.payload["override_refused"] == "same_actor"
+    # a delivered cell that IS signed says so, quoting its own standard
+    rig4 = _rig(
+        pyrepo,
+        tmp_path / "d",
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S", measured),
+        require_signed_cell=True,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+    )
+    out4 = rig4.loop().run_item(multiply_item(), authored=oracle)
+    assert out4.status == fl.STATUS_ACCEPTED and len(rig4.prs) == 1
+    assert "- licence: **signed cell**" in rig4.prs[0]["body"]
+
+
+def test_the_licence_line_is_the_delivered_cells_not_the_estimates(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-391: with the clause off, a change delivered into an unsigned larger cell is never
+    described as a signed cell because its ESTIMATE cell happened to be signed."""
+    edit, oracle = _padded(40)
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S"),
+        require_signed_cell=False,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+    )
+    out = rig.loop().run_item(multiply_item(), authored=oracle)
+    assert out.status == fl.STATUS_ACCEPTED and len(rig.prs) == 1
+    body = rig.prs[0]["body"]
+    assert "**signed cell**" not in body
+    assert "- licence: **unsigned cell** — this deployment does not require a signed cell" in body
+
+
+def test_the_override_is_refused_when_any_cell_the_size_rule_reads_carries_false_q1(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """GOV-1 over every cell the size rule reads (Wave 4 attack): the override lifts the
+    sign-off clause on the estimate cell AND the next larger one, so the honesty floor is
+    read on both — a false-Q1 row in the next larger cell refuses it, on the chain, and the
+    item stops unsigned before any spend."""
+    reads: list[str] = []
+
+    def route_for(item: BacklogItem) -> dict[str, Any]:
+        reads.append(item.size_estimate)
+        return DELIVER_ROUTE if item.size_estimate == "XS" else FALSE_Q1_ROUTE
+
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        readers=UNSIGNED,
+        require_signed_cell=True,
+        route_decision_for=route_for,
+        deliver_override_by="approver:ada",
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert "S" in reads  # the next larger cell's route was read
+    assert out.status == fl.STATUS_UNSIGNED_CELL and not out.builds and not rig.prs
+    (refused,) = _override_refusals(rig)
+    assert refused["override_refused"] == "false_q1" and refused["override_by"] == "approver:ada"
+    assert not _lifted(rig)
+
+
 def test_a_larger_change_is_delivered_when_its_measured_cell_routes_deliver(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:

@@ -478,6 +478,28 @@ def test_the_prediction_follows_the_deployments_delivery_licence_posture(
         assert route["deliverable"] is True
 
 
+def test_a_pending_item_in_an_unsigned_proven_cell_is_told_the_sign_off_stop_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-392 (the Wave 4 attack): ``GET /factory/{repo}/tasks`` previews the entry gate for an
+    item no run has reached with the SERVED sign-off clause — on by default — so the task
+    names ``unsigned_cell`` exactly as the next run's pre-build check will stop it; with
+    ``CRB_FACTORY__REQUIRE_SIGNED_CELL=false`` the same item enters."""
+    every_cell_proven(monkeypatch, "S1@m", signed=False)
+    with make_env(tmp_path / "on") as env:
+        assert env.settings.factory.require_signed_cell is True
+        login(env.client, "operator")
+        assert _register(env, [ITEM]).status_code == 201
+        (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+        assert t["status"] == "pending" and t["entry"]["code"] == "unsigned_cell"
+    monkeypatch.setenv("CRB_FACTORY__REQUIRE_SIGNED_CELL", "false")
+    with make_env(tmp_path / "off") as env:
+        login(env.client, "operator")
+        assert _register(env, [ITEM]).status_code == 201
+        (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+        assert t["entry"] is None
+
+
 def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:
     r = _register(env, [{**ITEM, "kind": "wish"}])
     assert r.status_code == 422 and "kind must be one of" in envelope(r)["message"]

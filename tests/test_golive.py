@@ -236,8 +236,12 @@ def test_a_degraded_probe_leaves_the_health_line_unproven_and_names_it(
     r = read(backend, settings(tmp_path), health=health)
     assert states(r)["health-green"] == golive.UNPROVEN
     assert "worker is degraded" in detail(r, "health-green")
-    r = read(backend, settings(tmp_path), health={})
-    assert detail(r, "health-green") == "the health check could not be read"
+    # a health reading with no probes — none served, or none readable — proves nothing
+    # (deploy-and-go-live.truth.4: a line the product can read is proven only by its check)
+    for unreadable in ({}, {"probes": []}, {"probes": ["not a probe"]}):
+        r = read(backend, settings(tmp_path), health=unreadable)
+        assert states(r)["health-green"] == golive.UNPROVEN, unreadable
+        assert detail(r, "health-green") == "the health check could not be read"
 
 
 def test_a_broken_chain_or_an_unread_ledger_is_unproven(backend: Backend, tmp_path: Path) -> None:

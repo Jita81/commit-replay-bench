@@ -32,7 +32,9 @@
     deliver — ONLY an `accept` verdict reaches it (ADR-0021); OPT-IN, default OFF; fails
       │   closed on missing creds; gated on the route read at readiness (DL-038, DL-045),
       │   re-read on the measured cell when the change measures larger (GOV-2), which no
-      │   override lifts (ADR-0026 item 8)
+      │   override lifts (ADR-0026 item 8); with the sign-off clause on, the delivered
+      │   cell must be signed too, or a second approver's override lift it (P-391)
+      │   ──▶ unsigned_cell
       ▼   ──▶ delivery_failed
     accepted
 
@@ -54,9 +56,10 @@ What it is:   The governed loop — one backlog item end to end, every step evid
 What it does: Sequences readiness and the entry gate (ADR-0026 item 8: an item is built only
               on its cell's proven context standard and with what that arm needs; an
               approver's calibration build never delivers; the override lifts only the
-              sign-off clause, honoured only from a second approver and never on a false-Q1
-              cell — GOV-1, GOV-4) — where the capability map's route for the item's cell is
-              read once, before any build — → RED proof on the standard arm's oracle
+              sign-off clause, honoured only from a second approver and never when any cell
+              the size rule reads carries false-Q1 — GOV-1, GOV-4, P-394) — where the
+              capability map's route for the item's cell is read once, before any build —
+              → RED proof on the standard arm's oracle
               (authored or test-first rung) → build ladder, graded on the run's checks arm
               (GOV-3) → independent review (an unscoreable oracle with no approver's waiver
               for its bytes stops ``oracle_not_scoreable`` before any push) → rework (edit
@@ -64,7 +67,9 @@ What it does: Sequences readiness and the entry gate (ADR-0026 item 8: an item i
               ``weak_oracle`` verdict never rebuilds against an unchanged oracle — DL-045
               rule 3) → optional delivery (default OFF, fails closed, gated on the delivered
               change's own licence and on that route — re-read on the measured cell when
-              the change measures larger than its estimate, GOV-2 — and reached ONLY by an
+              the change measures larger than its estimate, GOV-2; with the sign-off clause
+              on, the delivered cell's own standard signed or lifted by the override, and the
+              pull request's licence line read from that cell, P-391 — and reached ONLY by an
               ``accept`` verdict — ADR-0021), turning every governed refusal into an
               ``ItemOutcome`` status rather than an exception; an open pull request an
               earlier run opened is updated on ``accept`` and closed, naming the verdict, on
@@ -195,10 +200,13 @@ from crb.factory.standard import (
     STOP_UNSIZED,
     Calibration,
     Entry,
+    Licence,
     Readers,
+    Standard,
     gate_for,
     licensing_rungs,
     own_cell_licence,
+    sizes_to_read,
 )
 from crb.factory.testfirst import (
     AuthoredTest,
@@ -517,20 +525,22 @@ def _override_refusal(route: Mapping[str, Any] | None, override_by: str, *, acto
     return ""
 
 
-def _licence_line(entry: Entry) -> str:
-    """What licensed this item at the entry gate, for the pull request's reader (ADR-0018):
-    a signed cell, an approver's per-run override of the sign-off clause — one person, one
-    run, never a human attestation of the cell — or a deployment that does not require a
-    signed cell. Never "signed" unless the standard itself carries an active sign-off."""
-    if entry.override_by:
+def _licence_line(standard: Standard | None, override_by: str) -> str:
+    """What licensed this delivery, for the pull request's reader (ADR-0018 decision 4): read
+    from the DELIVERED change's own cell (``standard`` is its :class:`Licence`'s), never from
+    the estimate cell the entry gate read (P-391) — a signed cell, an approver's per-run
+    override of the sign-off clause (one person, one run, never a human attestation of the
+    cell) or a deployment that does not require a signed cell. Never "signed" unless the
+    delivered cell's standard itself carries an active sign-off."""
+    if standard is not None and standard.signed:
+        return (
+            f"**signed cell** — the cell's proven standard (`{standard.arm}`) carries an "
+            "active sign-off"
+        )
+    if override_by:
         return (
             f"**unsigned cell** — opened under a per-run override of the sign-off clause by "
-            f"approver `{entry.override_by}`, not a human attestation of the cell"
-        )
-    if entry.standard is not None and entry.standard.signed:
-        return (
-            f"**signed cell** — the cell's proven standard (`{entry.standard.arm}`) carries an "
-            "active sign-off"
+            f"approver `{override_by}`, not a human attestation of the cell"
         )
     return (
         "**unsigned cell** — this deployment does not require a signed cell "
@@ -600,6 +610,27 @@ class FactoryLoop:
         value. ``""`` = nobody."""
         f = self.spec.deliver_override_for
         return str((f() if f is not None else self.spec.deliver_override_by) or "").strip()
+
+    def _override_refusal_over_read_cells(self, item: BacklogItem, override_by: str) -> str:
+        """:func:`_override_refusal` over the route of EVERY cell the size rule reads for the
+        item's estimate — the override lifts the sign-off clause on each of them, so the
+        honesty floor is read on each (GOV-1). The estimate cell's route is read first; a
+        refusal of any cell refuses the override. ``""`` = it may lift."""
+        if not override_by:
+            return ""
+        routes: list[Mapping[str, Any] | None] = [self._map_route(item)]
+        if item.size_estimate in SIZE_TIER_NAMES:
+            for size in sizes_to_read(
+                item.size_estimate, agreement_passed=self.spec.gate.agreement_passed
+            ):
+                if size != item.size_estimate:
+                    routes.append(self._map_route(dc_replace(item, size_estimate=size)))
+        refusals = [_override_refusal(r, override_by, actor=self.spec.actor) for r in routes]
+        # the honesty floor is named first when any cell trips it
+        for why in (OVERRIDE_REFUSED_FALSE_Q1, OVERRIDE_REFUSED_SAME_ACTOR):
+            if why in refusals:
+                return why
+        return ""
 
     def _calibration(self, item: BacklogItem) -> Calibration | None:
         """The item's unspent calibration grant: the newest ``calibration.funded`` that no
@@ -679,9 +710,7 @@ class FactoryLoop:
         # the override names a second approver, and never lifts anything on a false-Q1 cell:
         # a refused one is recorded, and the gate decides as if nobody had named it
         override_by = self._override_by()
-        refused = _override_refusal(
-            self._map_route(item) if override_by else None, override_by, actor=s.actor
-        )
+        refused = self._override_refusal_over_read_cells(item, override_by)
         if refused:
             ev.record_route(
                 item.id,
@@ -954,6 +983,69 @@ class FactoryLoop:
             )
         return results
 
+    def _delivered_cell_sign_off(
+        self,
+        item: BacklogItem,
+        final: BuildResult,
+        lic: Licence,
+        route: Mapping[str, Any] | None,
+        entry_override: str,
+    ) -> str:
+        """ADR-0018's sign-off clause read at the DELIVERED change's own cell (P-391). Returns
+        the approver whose override lifts it there (``""`` when the cell is signed or the
+        clause is off); stops the item ``unsigned_cell`` — recorded, nothing pushed — when
+        the clause is on, the cell's standard carries no active sign-off and no override
+        may lift it. ``route`` is the delivered cell's route (the honesty floor's reading)."""
+        s = self.spec
+        std = lic.standard
+        if not s.require_signed_cell or (std is not None and std.signed):
+            return ""
+        override = entry_override or self._override_by()
+        refused = _override_refusal(route, override, actor=s.actor) if override else ""
+        if override and not refused:
+            if not entry_override:
+                self._emit(
+                    "delivery.override", item.id, override_by=override, cell=lic.cell.to_dict()
+                )
+            return override
+        where = f"{item.capability_class} {lic.measured}"
+        reason = (
+            f"the delivered change's own cell ({where}) has a proven standard "
+            f"({std.arm if std is not None else 'none'}) but no active sign-off"
+            + (
+                f"; the item was estimated {lic.estimate}, and only the cells its estimate "
+                "reads were checked at entry"
+                if lic.measured != lic.estimate
+                else ""
+            )
+            + ": no pull request. A second person signs the cell, or a second approver's "
+            "named override licenses this one run (it lifts only the sign-off)"
+        )
+        if refused:
+            reason += f" — override refused: {_OVERRIDE_REFUSED_WHY[refused].format(by=override)}"
+        s.evidence.record_delivery_refused(
+            item.id,
+            reason,
+            pack_hash=final.pack_hash,
+            reason_code=STOP_UNSIGNED_CELL,
+            estimate=lic.estimate,
+            measured=lic.measured,
+            estimated_cell=f"{item.capability_class}|{item.size_estimate}",
+            licence=lic.to_dict(),
+            override_refused=refused,
+            override_by=override,
+        )
+        self._emit(
+            "delivery.unsigned",
+            item.id,
+            status=StepStatus.SKIPPED,
+            reason=reason,
+            code=STOP_UNSIGNED_CELL,
+            estimate=lic.estimate,
+            measured=lic.measured,
+        )
+        raise _Stop(STATUS_UNSIGNED_CELL, error=reason)
+
     def _deliver(
         self,
         item: BacklogItem,
@@ -965,7 +1057,7 @@ class FactoryLoop:
         rework_n: int = 0,
         after_verdict: str = "",
         arm: str = "",
-        licence_line: str = "",
+        entry_override: str = "",
     ) -> tuple[DeliveryResult | None, str]:
         """The LAST step: delivery of a build the review ACCEPTED (ADR-0021) — skipped and
         RECORDED when opt-in is off; a failure stops the item (``delivery_failed``).
@@ -977,6 +1069,8 @@ class FactoryLoop:
         has moved the branch) is recorded on the ``delivery.updated`` event as
         ``comment_error`` and emitted as a ``delivery.comment_failed`` warning. ``arm`` is
         the context arm the build carried: the change's own cell must license THAT arm.
+        ``entry_override`` is the approver whose override lifted the sign-off clause at the
+        entry gate (``""`` = none); the delivered cell's clause is read again here (P-391).
         Returns ``(result, pr_ref)``."""
         s = self.spec
         if not verdict.accepted or verdict.pack_hash != final.pack_hash:
@@ -1036,13 +1130,6 @@ class FactoryLoop:
                 else STATUS_CELL_NOT_LICENSED,
                 error=lic.reason,
             )
-        # both sizes and both cells ride on the delivery event itself
-        licence = {
-            "estimate": lic.estimate,
-            "measured": lic.measured,
-            "estimated_cell": f"{item.capability_class}|{item.size_estimate}",
-            "licence": lic.to_dict(),
-        }
         # THE ROUTE GATE (external review 2026-09-16, point 36 → DL-038): the capability
         # map decides what the factory may deliver. A clean build in a cell that does not
         # route `deliver` — or in a cell nobody has measured — opens no pull request; the
@@ -1091,6 +1178,26 @@ class FactoryLoop:
                 measured_route=measured,
             )
             return None, ""
+        # THE SIGN-OFF CLAUSE AT THE DELIVERED CELL (P-391): the entry gate checked the
+        # signatures of the cells the size rule read from the ESTIMATE; a change that
+        # measures larger lands in a cell nobody may have signed. With the clause on, the
+        # delivered cell's own standard must carry an active sign-off too, or a second
+        # approver's named override lifts it (the same bounds as at entry: never the run's
+        # own actor, never a false-Q1 cell) — otherwise the item stops ``unsigned_cell``.
+        override = self._delivered_cell_sign_off(item, final, lic, route, entry_override)
+        # both sizes and both cells ride on the delivery event itself, with the licence
+        # the pull request's reader is told — the delivered cell's, never the estimate's
+        licence = {
+            "estimate": lic.estimate,
+            "measured": lic.measured,
+            "estimated_cell": f"{item.capability_class}|{item.size_estimate}",
+            "licence": {
+                **lic.to_dict(),
+                "signed": bool(lic.standard is not None and lic.standard.signed),
+                "override_by": override,
+            },
+        }
+        licence_line = _licence_line(lic.standard, override)
         try:
             d = deliver(
                 self.repo,
@@ -1535,7 +1642,7 @@ class FactoryLoop:
                     rework_n=reworks,
                     after_verdict=verdicts[-2].verdict if len(verdicts) > 1 else "",
                     arm=arm,
-                    licence_line=_licence_line(entry),
+                    entry_override=entry.override_by,
                 )
                 status = STATUS_ACCEPTED
             else:

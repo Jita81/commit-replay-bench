@@ -13,7 +13,9 @@
  *               `hint` (a registry id) the button is the hover / focus / tap trigger for what
  *               pressing it does; the click always goes through. A filled or submit button
  *               carries `data-primary` so the ratchet can require a hint on every primary
- *               action.
+ *               action. With `pending` the button says it is busy (`aria-disabled`) and
+ *               ignores presses but KEEPS focus: a `disabled` button that had focus drops it
+ *               to <body>, and a keyboard user loses their place after every submit (P-396).
  * How:          `buttonClasses(variant, size)` composes the Tailwind classes; each wrapper
  *               spreads the rest of its props onto the native element, through `<Hint as>`
  *               when it carries an id.
@@ -24,11 +26,14 @@
  *               (close button), ui/src/components/ErrorState.tsx (retry),
  *               ui/src/screens/Ledger/LedgerPage.tsx (`AnchorButton` for the export URLs)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract), ui/src/components/Hint.test.tsx
- *               (the click goes through), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe on every screen), and
+ *               (the click goes through), ui/src/components/Button.test.tsx (a pending button
+ *               keeps focus and ignores presses),
+ *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe on every screen), and
  *               every screen test that clicks a button by role
- * Touch when:   a variant or size is added; never for a new repository.
+ * Touch when:   never for a new repository; a variant or size is added, or the pending contract
+ *               changes (pin it in Button.test.tsx first).
  */
-import type { ButtonHTMLAttributes, AnchorHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, AnchorHTMLAttributes, MouseEvent } from 'react'
 import { Link, type LinkProps } from 'react-router'
 import type { HintId } from '../help/hints'
 import { Hint } from './Hint'
@@ -40,7 +45,7 @@ export type ButtonSize = 'sm' | 'md'
 export function buttonClasses(variant: ButtonVariant = 'outlined', size: ButtonSize = 'md'): string {
   const base =
     'inline-flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] font-semibold whitespace-nowrap ' +
-    'transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer select-none'
+    'transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 cursor-pointer select-none'
   const sizes: Record<ButtonSize, string> = {
     sm: 'h-8 px-3 text-xs',
     md: 'h-10 px-4 text-sm',
@@ -62,6 +67,12 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize
   /** What pressing it does — a registry id; required by the ratchet on every primary (filled / submit) button. */
   hint?: HintId
+  /**
+   * The act is in flight: the button reads as unavailable (`aria-disabled`) and a press does
+   * nothing — not even a form submit — but it stays focusable, so focus is never lost to
+   * <body> while the request runs (P-396). Use it, never `disabled`, for "while pending".
+   */
+  pending?: boolean
 }
 
 /** `data-primary` marks the buttons the ratchet requires a hint on: filled, or a form's submit. */
@@ -70,10 +81,17 @@ function primary(variant: ButtonVariant, type?: string): '' | undefined {
 }
 
 /** A `<button>`; `type="button"` unless told otherwise, so a button inside a form does not submit it. */
-export function Button({ variant = 'outlined', size = 'md', className = '', type = 'button', hint, id, ...rest }: ButtonProps) {
+export function Button({ variant = 'outlined', size = 'md', className = '', type = 'button', hint, id, pending = false, onClick, ...rest }: ButtonProps) {
   const cls = `${buttonClasses(variant, size)} ${className}`
-  if (hint) return <Hint as="button" id={hint} elementId={id} type={type} className={cls} data-primary={primary(variant, type)} {...rest} />
-  return <button id={id} type={type} className={cls} data-primary={primary(variant, type)} {...rest} />
+  const busy = pending
+    ? {
+        'aria-disabled': true as const,
+        'aria-busy': true as const,
+        onClick: (e: MouseEvent<HTMLButtonElement>) => e.preventDefault(),
+      }
+    : { onClick }
+  if (hint) return <Hint as="button" id={hint} elementId={id} type={type} className={cls} data-primary={primary(variant, type)} {...rest} {...busy} />
+  return <button id={id} type={type} className={cls} data-primary={primary(variant, type)} {...rest} {...busy} />
 }
 
 interface LinkButtonProps extends LinkProps {

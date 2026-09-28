@@ -14,7 +14,9 @@
  *               recovered, and the person redeems it themselves at /invite. Each row says
  *               where its invitation stands (pending, accepted, expired, withdrawn) and, once
  *               accepted, whether that account has ever signed in — the thing an admin's
- *               presence could never tell you.
+ *               presence could never tell you. Focus is never left on the page (P-396): the
+ *               Invite button stays focusable while it works, and the link's words or the
+ *               refusal take focus; a copy the browser refuses says so and what to do instead.
  * How:          `useTwoPersonReadiness`, `useInvitations(admin)`, `useInvite`,
  *               `useRevokeInvitation`; the created link lives in component state only (never a
  *               cache, never storage) and is cleared when another invitation is made.
@@ -29,7 +31,7 @@
  * Touch when:   never for a new repository; an invitation state is added (a pill tone here
  *               and the server's own word).
  */
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useInvitations, useInvite, useRevokeInvitation, useTwoPersonReadiness } from '../../api/hooks'
 import type { Invitation, InvitationCreated, InvitationState, Role } from '../../api/types'
 import { Button } from '../../components/Button'
@@ -43,7 +45,7 @@ import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { readAmount } from '../../lib/amount'
-import { fmtDate } from '../../lib/format'
+import { fmtDate, sentence } from '../../lib/format'
 
 /** The roles worth an invitation — the server refuses any other (`INVITABLE_ROLES`). */
 const INVITABLE: Role[] = ['approver', 'admin']
@@ -91,6 +93,17 @@ export function InviteApproverCard() {
   const [hours, setHours] = useState('72')
   const [made, setMade] = useState<InvitationCreated | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
+  // focus goes to the outcome of an invite — the one-time link's words, or the refusal — so a
+  // keyboard or screen-reader user is never left on <body> (P-396)
+  const said = useRef<HTMLDivElement>(null)
+  const refused = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (made) said.current?.focus()
+  }, [made])
+  useEffect(() => {
+    if (invite.isError) refused.current?.focus()
+  }, [invite.isError, invite.error])
 
   // P-273: the expiry is typed text read by one rule — a blank, a fraction or an hour outside
   // the server's range is said at the field and never sent as a silent default
@@ -99,9 +112,10 @@ export function InviteApproverCard() {
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (expiryHours === null) return
+    if (expiryHours === null || invite.isPending) return
     setMade(null)
     setCopied(false)
+    setCopyFailed(false)
     invite.mutate(
       { username, role, display_name: display, email, expires_hours: expiryHours },
       {
@@ -115,12 +129,23 @@ export function InviteApproverCard() {
     )
   }
 
+  // a copy the browser refuses (no permission) or cannot make (no clipboard on plain http)
+  // says so and says what to do instead — never a button that silently keeps its label
   const copy = () => {
     if (!made) return
-    void navigator.clipboard?.writeText(made.accept_url).then(
-      () => setCopied(true),
-      () => setCopied(false),
-    )
+    const failed = () => {
+      setCopied(false)
+      setCopyFailed(true)
+    }
+    const clip = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+    if (!clip?.writeText) {
+      failed()
+      return
+    }
+    clip.writeText(made.accept_url).then(() => {
+      setCopied(true)
+      setCopyFailed(false)
+    }, failed)
   }
 
   const columns: Column<Invitation>[] = useMemo(
@@ -150,7 +175,7 @@ export function InviteApproverCard() {
               size="sm"
               hint="button.invitations.revoke"
               data-testid={`revoke-${i.username}`}
-              disabled={revoke.isPending}
+              pending={revoke.isPending}
               onClick={() => revoke.mutate({ id: i.id, reason: 'withdrawn by an admin on the Settings screen' })}
             >
               Withdraw
@@ -164,7 +189,7 @@ export function InviteApproverCard() {
   )
 
   return (
-    <Card title="Invite an approver" eyebrow="admin · the second person">
+    <Card id="invite" title="Invite an approver" eyebrow="admin · the second person">
       <div className="space-y-4">
         <QueryBoundary query={readiness} loading="Reading this deployment…">
           {(r) => (
@@ -173,7 +198,7 @@ export function InviteApproverCard() {
                 {r.ready ? 'two-person ready' : 'not two-person ready'}
               </Pill>
               <Hint id="stat.invitations.two_person" className="block text-sm text-on-surface-muted" data-testid="two-person-reason">
-                {r.reason}. {r.approvers_signed_in} of {r.approvers_active} account{r.approvers_active === 1 ? '' : 's'} that can sign have signed in; {r.invitations_pending} invitation{r.invitations_pending === 1 ? '' : 's'} waiting.
+                {sentence(r.reason)}. {r.approvers_signed_in} of {r.approvers_active} account{r.approvers_active === 1 ? '' : 's'} that can sign have signed in; {r.invitations_pending} invitation{r.invitations_pending === 1 ? '' : 's'} waiting.
               </Hint>
             </div>
           )}
@@ -184,9 +209,11 @@ export function InviteApproverCard() {
         </p>
         {made && (
           <div className="rounded-[var(--radius-control)] border border-border p-4" data-testid="invitation-link">
-            <Hint as="p" id="stat.invitations.link" className="m-0 mb-2 text-[16px]">
-              <strong>{made.invitation.username}</strong> is invited as <strong>{made.invitation.role}</strong>. This link is shown once and cannot be recovered — pass it on now. It stops working on {fmtDate(made.invitation.expires)}.
-            </Hint>
+            <div ref={said} tabIndex={-1} data-testid="invitation-said">
+              <Hint as="p" id="stat.invitations.link" className="m-0 mb-2 text-[16px]">
+                <strong>{made.invitation.username}</strong> is invited as <strong>{made.invitation.role}</strong>. This link is shown once and cannot be recovered — pass it on now. It stops working on {fmtDate(made.invitation.expires)}.
+              </Hint>
+            </div>
             <code className="block break-all rounded-[4px] bg-surface p-2 text-xs" data-testid="invitation-url">
               {made.accept_url}
             </code>
@@ -194,6 +221,11 @@ export function InviteApproverCard() {
               <Button variant="outlined" size="sm" hint="button.invitations.copy" onClick={copy} data-testid="copy-invitation">
                 {copied ? 'Copied' : 'Copy the link'}
               </Button>
+              {copyFailed && (
+                <span role="alert" className="text-xs text-status-red">
+                  Could not copy: select the link above and copy it.
+                </span>
+              )}
               {made.public_url_missing && <span className="text-xs text-status-amber">This deployment has no public address configured, so the link above is a path: put this deployment's address in front of it.</span>}
             </div>
           </div>
@@ -232,12 +264,12 @@ export function InviteApproverCard() {
             error={expiryHours === null ? `Enter a whole number of hours from 1 to ${MAX_EXPIRY_HOURS}.` : undefined}
           />
           <div className="flex items-end">
-            <Button type="submit" variant="filled" disabled={invite.isPending || expiryHours === null} hint="button.invitations.invite">
+            <Button type="submit" variant="filled" pending={invite.isPending} disabled={expiryHours === null} hint="button.invitations.invite">
               {invite.isPending ? 'Inviting…' : 'Invite'}
             </Button>
           </div>
           {invite.isError && (
-            <div className="sm:col-span-3">
+            <div ref={refused} tabIndex={-1} className="sm:col-span-3" data-testid="invite-refused">
               <ErrorState compact error={invite.error} />
             </div>
           )}

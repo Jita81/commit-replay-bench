@@ -11,7 +11,9 @@
  *               {line}`, and says what it recorded, naming the line and the day; withdraws the
  *               attestation in force through `DELETE`, after asking, and says so. The server
  *               names who recorded it; the card never invents a record and offers no way to
- *               attest a line the product proves by its own check.
+ *               attest a line the product proves by its own check. Focus never falls to the
+ *               page (P-396): opening the question focuses its Withdraw, Keep it returns focus
+ *               to the row's Withdraw…, and a withdrawal focuses the sentence that says so.
  * How:          `useGoLive` for the lines, `useAttest` and `useWithdrawAttestation` for the
  *               writes; a native date input capped at today; `ErrorState` shows the server's
  *               refusal in its own words.
@@ -27,7 +29,7 @@
  * Touch when:   never for a new repository; the attestation body changes in
  *               src/crb/server/routes/golive.py.
  */
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useAttest, useGoLive, useWithdrawAttestation } from '../../api/hooks'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -55,6 +57,17 @@ export function AttestationsCard() {
   const [day, setDay] = useState(today())
   const [said, setSaid] = useState('')
   const [asking, setAsking] = useState('')
+  // where focus goes after the render that follows an act (P-396): a control that unmounted
+  // must never leave focus on <body>
+  const [focusTo, setFocusTo] = useState('')
+  useEffect(() => {
+    if (!focusTo) return
+    const el = document.querySelector<HTMLElement>(`[data-testid="${focusTo}"]`)
+    if (el) {
+      el.focus()
+      setFocusTo('')
+    }
+  }, [focusTo, asking, said])
 
   return (
     <Card id="golive-attestations" title={<Hint id="tile.settings.attestations">Go-live attestations</Hint>} eyebrow="admin · DEPLOYMENT §8">
@@ -101,7 +114,7 @@ export function AttestationsCard() {
                               size="sm"
                               variant="filled"
                               hint="button.settings.withdraw_confirm"
-                              disabled={withdraw.isPending}
+                              pending={withdraw.isPending}
                               data-testid={`withdraw-confirm-${l.id}`}
                               onClick={() =>
                                 withdraw.mutate(
@@ -110,6 +123,7 @@ export function AttestationsCard() {
                                     onSuccess: () => {
                                       setAsking('')
                                       setSaid(`Withdrawn: “${l.title}” reads unproven again. The withdrawal is on record.`)
+                                      setFocusTo('attest-done')
                                     },
                                   },
                                 )
@@ -117,12 +131,27 @@ export function AttestationsCard() {
                             >
                               Withdraw
                             </Button>
-                            <Button size="sm" hint="button.settings.withdraw_keep" onClick={() => setAsking('')}>
+                            <Button
+                              size="sm"
+                              hint="button.settings.withdraw_keep"
+                              onClick={() => {
+                                setAsking('')
+                                setFocusTo(`withdraw-${l.id}`)
+                              }}
+                            >
                               Keep it
                             </Button>
                           </span>
                         ) : (
-                          <Button size="sm" hint="button.settings.withdraw" data-testid={`withdraw-${l.id}`} onClick={() => setAsking(l.id)}>
+                          <Button
+                            size="sm"
+                            hint="button.settings.withdraw"
+                            data-testid={`withdraw-${l.id}`}
+                            onClick={() => {
+                              setAsking(l.id)
+                              setFocusTo(`withdraw-confirm-${l.id}`)
+                            }}
+                          >
                             Withdraw…
                           </Button>
                         ))}
@@ -154,11 +183,11 @@ export function AttestationsCard() {
                 {attest.isError && <ErrorState compact error={attest.error} />}
                 {withdraw.isError && <ErrorState compact error={withdraw.error} />}
                 {said && (
-                  <p role="status" className="m-0 text-sm" data-testid="attest-done">
+                  <p role="status" tabIndex={-1} className="m-0 text-sm" data-testid="attest-done">
                     {said}
                   </p>
                 )}
-                <Button type="submit" variant="filled" hint="button.settings.attest" disabled={attest.isPending || !chosen} data-testid="attest-submit">
+                <Button type="submit" variant="filled" hint="button.settings.attest" pending={attest.isPending} disabled={!chosen} data-testid="attest-submit">
                   {attest.isPending ? 'Recording…' : 'Record attestation'}
                 </Button>
               </form>

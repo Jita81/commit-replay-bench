@@ -182,6 +182,24 @@ def test_only_an_admin_may_invite_and_only_a_signing_role_may_be_invited(
     login(client, "op1", "a-long-enough-password")
     r = client.post(f"{API_PREFIX}/invitations", json={"username": "someone"})
     assert r.status_code == 403 and err(r)["code"] == "forbidden"
+    # nor may an approver (the Wave 4 attack): an approver who could invite could mint a
+    # second signing account and hold its one-time link — one person, two signatures
+    login(client)
+    pending = invite(client, "pending-one")
+    made_ap = client.post(
+        f"{API_PREFIX}/users",
+        json={"username": "ap1", "password": "a-long-enough-password", "role": "approver"},
+    )
+    assert made_ap.status_code == 201
+    login(client, "ap1", "a-long-enough-password")
+    for role in ("approver", "admin"):
+        r = client.post(f"{API_PREFIX}/invitations", json={"username": "someone", "role": role})
+        assert r.status_code == 403 and err(r)["code"] == "forbidden"
+    r = client.post(
+        f"{API_PREFIX}/invitations/{pending['invitation']['id']}/revoke",
+        json={"reason": "not mine to end"},
+    )
+    assert r.status_code == 403 and err(r)["code"] == "forbidden"
 
 
 # --- accepting it ---------------------------------------------------------------------

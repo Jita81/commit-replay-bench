@@ -77,6 +77,31 @@ describe('PosturePage — sources, go-live and print', () => {
     await waitFor(() => expect(screen.getAllByText('the version could not be read').length).toBeGreaterThan(2))
   })
 
+  it('a row fed by a read that failed says so, never an ellipsis or a bare dash for ever (P-398)', async () => {
+    const row = (hint: string) => document.querySelector(`[data-hint="${hint}"]`) as HTMLElement
+    // GET /github/app down: Permissions says so, as Source control does
+    mockApi(base('viewer', { 'GET /github/app': () => envelope(503, 'unavailable', 'down') }))
+    renderApp(<PosturePage />, { route: '/posture' })
+    await waitFor(() => expect(row('summary.posture.permissions')).toHaveTextContent('GitHub App status unavailable'))
+    expect(row('summary.posture.permissions')).not.toHaveTextContent('…')
+    // GET /settings down for an admin: the delivery licence, provisioning and the builder say so
+    cleanup()
+    vi.unstubAllGlobals()
+    mockApi(base('admin', { 'GET /settings': () => envelope(503, 'unavailable', 'down') }))
+    renderApp(<PosturePage />, { route: '/posture' })
+    await waitFor(() => expect(row('summary.posture.delivery_licence')).toHaveTextContent('the settings could not be read'))
+    for (const hint of ['summary.posture.provisioning', 'summary.posture.builder']) {
+      expect(row(hint), hint).toHaveTextContent('the settings could not be read')
+    }
+    // GET /health down for a viewer: the test executor says so, as the other health rows do
+    cleanup()
+    vi.unstubAllGlobals()
+    mockApi(base('viewer', { 'GET /health': () => envelope(503, 'unavailable', 'down') }))
+    renderApp(<PosturePage />, { route: '/posture' })
+    await waitFor(() => expect(row('summary.posture.executor')).toHaveTextContent('the health check could not be read'))
+    expect(row('summary.posture.executor')).not.toHaveTextContent('…')
+  })
+
   it('reads the belt set, the sign-off policy and the licence from /version, never from a literal (P-358)', async () => {
     // values no literal in the page could match: a row that prints its own words fails here
     mockApi(base('viewer', { 'GET /version': { ...VERSION, belt_set: 'v9-test', signoff_policy: 'signoff-policy.test', licence: 'TEST-1.0' } }))

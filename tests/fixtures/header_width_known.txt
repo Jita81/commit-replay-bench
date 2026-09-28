@@ -30,7 +30,6 @@ tests/test_server_system.py#147756e98a9b
 tests/test_server_system.py#b83dcdaa0e47
 tests/test_version_consistency.py#147dbffc9265
 ui/src/components/Button.tsx#085435ca3016
-ui/src/components/Button.tsx#b58bd24bc387
 ui/src/components/Button.tsx#b5cb995e4ac3
 ui/src/components/CiBar.tsx#af8df9bd0116
 ui/src/components/GateBanner.tsx#a6feb8110606

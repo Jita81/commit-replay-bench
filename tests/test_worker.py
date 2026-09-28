@@ -1994,6 +1994,20 @@ def test_the_worker_never_honours_an_override_from_a_deactivated_approver(
         params_json={"deliver": True, "deliver_override_by": leaver},
     )
     assert h.worker._deliver_override(run.id) == leaver  # active: the grant is read
+    # demoted while still active (the Wave 4 attack): the approver role is read at the
+    # moment of the gate, so an operator's grant names nobody either
+    with h.factory() as s:
+        account = s.get(User, leaver)
+        assert account is not None
+        account.role = "operator"
+        s.commit()
+    assert h.worker._deliver_override(run.id) == ""
+    with h.factory() as s:
+        account = s.get(User, leaver)
+        assert account is not None
+        account.role = "approver"
+        s.commit()
+    assert h.worker._deliver_override(run.id) == leaver  # restored: read again
     with h.factory() as s:
         account = s.get(User, leaver)
         assert account is not None

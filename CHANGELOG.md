@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
+  ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
+  A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull
+  request's licence line is that cell's. A leaver's sign-off licenses nothing. The run page's
+  override button says what it does: it lifts the sign-off clause, never the route gate.
+  Wave 4's forms keep focus while they work, say a refusal beside the form that made it, and
+  deep links land on their target. ADR-0018 now states what the code does (DL-119, DL-120,
+  P-391 to P-403).
+
 - **The library's miners: proposals from a repository's own files, never signed**
   (north-star Wave 4, stream M; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   *Propose from the files* and `POST /library/{repo}/mine` run five miners over the clone at a
