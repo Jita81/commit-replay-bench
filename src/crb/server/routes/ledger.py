@@ -4,8 +4,11 @@
 recomputes every ``row_hash`` from the STORED columns (the same canonical body
 :class:`~crb.core.ledger.GradeRow` hashes, without constructing one — a tampered
 or false-Q1 row must be REPORTED, not hidden behind an exception), checks each
-``prev_hash`` link, and counts false-Q1 over the stored belts. ``ok`` is
-``chain_ok and false_q1_total == 0 and clean_without_pack == 0``.
+``prev_hash`` link, and counts false-Q1 over the stored belts; it also counts the clean
+rows measured here whose evidence pack is absent or does not re-hash to its name, and
+walks the sign-off and review chains (``signoffs`` / ``reviews``). ``ok`` is
+``chain_ok and false_q1_total == 0 and clean_without_pack == 0`` and both of those
+chains intact.
 
 ``/ledger/export`` streams the stored rows verbatim (chain fields included), so an
 UNFILTERED JSONL export verifies standalone with
@@ -54,6 +57,7 @@ from __future__ import annotations
 
 import csv
 import datetime as _dt
+import hashlib
 import io
 import json
 from collections.abc import Iterable, Iterator, Mapping
@@ -69,19 +73,24 @@ from crb.core.federated import export_abstract
 from crb.core.grade import BELT_NAMES, OPTIONAL_BELT_NAMES, FalseQ1Violation
 from crb.core.ledger import (
     GENESIS_HASH,
+    PROVENANCE_MEASURED,
     RECORDED_BELTS,
     GradeRow,
     LedgerIntegrityError,
     verify_chain,
 )
 from crb.core.redact import redact
+from crb.observability.events import StepStatus
 from crb.server.auth import AdminDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
-from crb.server.routes.grades import ROW_FIELDS, grade_to_dict
-from crb.server.routes.signoffs import FALSE_Q1_PREDICATE
-from crb.server.schemas import LedgerImportOut, LedgerVerifyOut
+from crb.server.routes.grades import ROW_FIELDS, grade_to_dict, pack_verified
+from crb.server.routes.reviews import verify_reviews
+from crb.server.routes.runs import append_system_event, system_trace_id
+from crb.server.routes.signoffs import FALSE_Q1_PREDICATE, verify_signoffs
+from crb.server.schemas import ChainVerifyOut, LedgerImportOut, LedgerVerifyOut
+from crb.server.schemas_review import ReviewVerifyOut
 from crb.store.ledger import DbLedger
-from crb.store.models import Grade
+from crb.store.models import EvidencePackRow, Grade
 
 router = APIRouter(tags=["ledger"])
 _ERR = {"model": ErrorEnvelope}
@@ -135,7 +144,8 @@ def _iter_grades(session: Session, batch: int = EXPORT_BATCH) -> Iterator[Grade]
 
 
 def verify_ledger(session: Session) -> LedgerVerifyOut:
-    """The chain walk + the two SQL counts (false-Q1, clean-without-pack); never raises —
+    """The chain walk + false-Q1 in SQL + the clean rows with no evidence to show
+    (:func:`clean_without_pack`) + the sign-off and review chains (EI-6); never raises —
     the first break is reported by ``seq`` and the walk continues to count rows."""
     rows = 0
     prev = GENESIS_HASH
@@ -154,28 +164,68 @@ def verify_ledger(session: Session) -> LedgerVerifyOut:
             select(func.count(Grade.seq)).where(Grade.clean.is_(True), FALSE_Q1_PREDICATE)
         ).scalar_one()
     )
-    no_pack = int(
+    no_pack = clean_without_pack(session)
+    signoffs = verify_signoffs(session)
+    reviews = verify_reviews(session)
+    others = [
+        (name, chain)
+        for name, chain in (("sign-off", signoffs), ("review", reviews))
+        if not chain.chain_ok
+    ]
+    chain_ok = broken_at is None
+    if chain_ok and fq1 == 0 and no_pack == 0:
+        detail = f"{rows} rows, chain intact, false_q1=0"
+    elif chain_ok:
+        detail = f"chain intact but false_q1={fq1}, clean_without_pack={no_pack}"
+    if others:
+        detail += "; " + "; ".join(f"{n} chain broken at {c.detail}" for n, c in others)
+    return LedgerVerifyOut(
+        rows=rows,
+        ok=chain_ok and fq1 == 0 and no_pack == 0 and not others,
+        false_q1_total=fq1,
+        chain_ok=chain_ok,
+        broken_at=broken_at,
+        detail=detail,
+        clean_without_pack=no_pack,
+        signoffs=_chain(signoffs),
+        reviews=_chain(reviews),
+        verified_at=_now(),
+    )
+
+
+def _chain(v: ChainVerifyOut | ReviewVerifyOut) -> ChainVerifyOut:
+    """The chain part of a table's verify answer (rows, chain_ok, broken_at, detail)."""
+    return ChainVerifyOut(rows=v.rows, chain_ok=v.chain_ok, broken_at=v.broken_at, detail=v.detail)
+
+
+def clean_without_pack(session: Session) -> int:
+    """Clean rows MEASURED HERE with no evidence to show for their Q1: an empty
+    ``evidence_pack_hash``, a pack the ``evidence`` table does not hold, or a stored pack
+    that does not re-hash to its name (:func:`pack_verified`). An imported row cites a pack
+    of its source's; it licenses nothing here, and only its empty hash is counted (the
+    write gate refuses that at construction anyway) — EI-3, 2026-09-27."""
+    empty = int(
         session.execute(
             select(func.count(Grade.seq)).where(
                 Grade.clean.is_(True), Grade.evidence_pack_hash == ""
             )
         ).scalar_one()
     )
-    chain_ok = broken_at is None
-    if chain_ok and fq1 == 0 and no_pack == 0:
-        detail = f"{rows} rows, chain intact, false_q1=0"
-    elif chain_ok:
-        detail = f"chain intact but false_q1={fq1}, clean_without_pack={no_pack}"
-    return LedgerVerifyOut(
-        rows=rows,
-        ok=chain_ok and fq1 == 0 and no_pack == 0,
-        false_q1_total=fq1,
-        chain_ok=chain_ok,
-        broken_at=broken_at,
-        detail=detail,
-        clean_without_pack=no_pack,
-        verified_at=_now(),
+    measured_clean = (
+        select(Grade.seq, Grade.evidence_pack_hash, EvidencePackRow.body_json)
+        .outerjoin(EvidencePackRow, EvidencePackRow.pack_hash == Grade.evidence_pack_hash)
+        .where(
+            Grade.clean.is_(True),
+            Grade.provenance == PROVENANCE_MEASURED,
+            Grade.evidence_pack_hash != "",
+        )
+        .order_by(Grade.seq)
     )
+    unproven = 0
+    for _seq, pack_hash, body in session.execute(measured_clean):
+        if body is None or not pack_verified(str(pack_hash), dict(body)):
+            unproven += 1
+    return empty + unproven
 
 
 @router.get(
@@ -370,7 +420,12 @@ def parse_import(text: str) -> tuple[list[GradeRow], int]:
 def ledger_import(
     file: UploadFile, admin: AdminDep, db: DbDep, factory: SessionFactoryDep
 ) -> LedgerImportOut:
-    del admin
+    """Import crb JSONL rows. Every row is stamped as imported inside its hashed body
+    (:func:`crb.store.ledger.import_stamp`) and the import is one ``ledger.imported``
+    event naming the admin, the file's SHA-256, the counts and whether the file's own
+    chain verified. A file whose own chain is broken is still imported (re-chained) and
+    says so on the response and the event. An imported row never licenses anything: the
+    sign-off and the route the delivery gate reads count rows measured here only."""
     raw = file.file.read(MAX_IMPORT_BYTES + 1)  # read one byte past the cap to detect overflow
     if len(raw) > MAX_IMPORT_BYTES:
         raise ApiError(413, "payload_too_large", f"import exceeds {MAX_IMPORT_BYTES} bytes")
@@ -400,14 +455,54 @@ def ledger_import(
         and not (r.evidence_pack_hash and r.evidence_pack_hash in existing_packs)
     ]
     ledger = DbLedger(factory)
-    imported = ledger.import_rows(fresh) if fresh else 0
-    return LedgerImportOut(
-        imported=imported,
+    file_sha256 = hashlib.sha256(raw).hexdigest()
+    chained = (
+        ledger.import_rows(
+            fresh, imported_by=admin.id, imported_at=_now(), import_sha256=file_sha256
+        )
+        if fresh
+        else []
+    )
+    out = LedgerImportOut(
+        imported=len(chained),
         skipped=len(rows) - len(fresh),
         read=read,
         rows=ledger.count(),
         source_chain_ok=source_chain_ok,
     )
+    _record_import(db, admin_id=admin.id, file_sha256=file_sha256, out=out, rows=chained)
+    return out
+
+
+def _record_import(
+    db: Session, *, admin_id: str, file_sha256: str, out: LedgerImportOut, rows: list[GradeRow]
+) -> None:
+    """The import's one audit event (``system/ledger.imported``), committed: who, which
+    file, the counts, whether the source chain verified — and, when it did not, that the
+    rows were accepted anyway, re-chained and stamped, and license nothing."""
+    note = "rows re-chained onto this ledger and stamped imported; they license nothing"
+    if out.source_chain_ok is False:
+        note = "the file's own chain is broken; " + note
+    append_system_event(
+        db,
+        trace_id=system_trace_id("ledger", "import"),
+        action="ledger.imported",
+        actor=admin_id,
+        status=StepStatus.OK,
+        payload={
+            "file_sha256": file_sha256,
+            "read": out.read,
+            "imported": out.imported,
+            "skipped": out.skipped,
+            "source_chain_ok": out.source_chain_ok,
+            "provenance": sorted({r.provenance for r in rows}) or [],
+            "repos": sorted({r.repo for r in rows}),
+            "first_row_hash": rows[0].row_hash if rows else "",
+            "last_row_hash": rows[-1].row_hash if rows else "",
+            "note": note,
+        },
+    )
+    db.commit()
 
 
 #: ``IN (...)`` lists are chunked to this many values: SQLite caps bound parameters
@@ -431,6 +526,7 @@ __all__ = [
     "EXPORT_BATCH",
     "FORMATS",
     "MAX_IMPORT_BYTES",
+    "clean_without_pack",
     "parse_import",
     "router",
     "row_hash_from_stored",

@@ -398,6 +398,8 @@ def test_policy_defaults_are_the_published_ones() -> None:
         "false_q1",
         "oracle_unmeasured",
         "attestation_missing",
+        "attested_row_not_measured",
+        "attested_row_without_pack",
         "same_actor",
     ]
     assert d["bounds"]["n_min"] == [1, 10_000]
@@ -927,6 +929,8 @@ def test_refusal_code_vocabulary_is_closed() -> None:
         "false_q1",
         "oracle_unmeasured",
         "attestation_missing",
+        "attested_row_not_measured",  # EI-2: an imported row is never attested
+        "attested_row_without_pack",  # EI-2: nor one whose pack is not stored and verified
         "same_actor",
     )
     assert so.REFUSAL_CODES[-1] == "same_actor"  # the last clause evaluated

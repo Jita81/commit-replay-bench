@@ -215,7 +215,14 @@ from crb.core.git import (
     redact_url,
 )
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED
-from crb.core.ledger import GradeRow, false_q1_total, is_outage_error, rows_for_checks
+from crb.core.ledger import (
+    FAILURE_HARNESS,
+    LABEL_FAILURE_KIND,
+    GradeRow,
+    false_q1_total,
+    is_outage_error,
+    rows_for_checks,
+)
 from crb.core.mine import MineOutcome, mine
 from crb.core.oracle.controls import (
     CONTROLS,
@@ -288,6 +295,7 @@ from crb.server.routes.capability import (
     rows_for_posture,
     signed_map,
 )
+from crb.server.routes.grades import pack_verified
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
 from crb.server.settings import (
@@ -612,7 +620,11 @@ class _RunLedger:
 
     The core writes ``<evidence_dir>/<pack_hash>.json`` before it appends the
     row; this wrapper stores that pack in the DB **before** the row so the DB
-    can never hold a clean row whose pack it lacks.
+    can never hold a clean row whose pack it lacks: a clean row whose pack file is
+    missing, does not re-hash to its name, or could not be stored is appended DEMOTED —
+    not clean, ``harness``, the reason in ``error`` — never clean (EI-3, 2026-09-27: it
+    used to emit the event and append the clean row anyway). A forged body is never
+    stored: the table is content-addressed and first write wins.
     """
 
     def __init__(
@@ -665,7 +677,9 @@ class _RunLedger:
             )
         return body
 
-    def _store_pack(self, row: GradeRow, body: Mapping[str, Any]) -> None:
+    def _store_pack(self, row: GradeRow, body: Mapping[str, Any]) -> bool:
+        """Store ``body`` under the row's pack hash; ``False`` (and a
+        ``ledger.pack_store_error`` event) when the store refused it."""
         try:
             with self._factory() as s:
                 if s.get(EvidencePackRow, row.evidence_pack_hash) is None:
@@ -679,7 +693,7 @@ class _RunLedger:
                         )
                     )
                     s.commit()
-        except Exception as exc:  # the file on disk remains the evidence; record it
+        except Exception as exc:  # the served surface reads the DB: the row cannot be clean
             self._ctx.emit(
                 "ledger",
                 "ledger.pack_store_error",
@@ -687,12 +701,48 @@ class _RunLedger:
                 error=f"{type(exc).__name__}: {exc}",
                 pack=row.evidence_pack_hash,
             )
+            return False
+        return True
+
+    def _kept_pack(self, row: GradeRow) -> tuple[dict[str, Any] | None, str]:
+        """The row's pack body once it is stored and verified, else ``None`` and why."""
+        if not row.evidence_pack_hash:
+            return None, "no evidence pack named"
+        body = self._pack_body(row.evidence_pack_hash)
+        if body is None:
+            return None, "evidence pack file not found"
+        if not pack_verified(row.evidence_pack_hash, dict(body)):
+            self._ctx.emit(
+                "ledger",
+                "ledger.pack_forged",
+                status=StepStatus.ERROR,
+                error="the pack's bytes do not hash to its name; it was not stored",
+                pack=row.evidence_pack_hash,
+            )
+            return None, "evidence pack does not hash to its name"
+        if not self._store_pack(row, body):
+            return None, "evidence pack could not be stored"
+        return body, ""
+
+    @staticmethod
+    def _demoted(row: GradeRow, why: str) -> GradeRow:
+        """``row`` as an instrument failure: not clean, ``harness``, the reason in
+        ``error`` (the same kind the one failure rule derives from a non-empty error)."""
+        labels = {**row.labels, LABEL_FAILURE_KIND: FAILURE_HARNESS}
+        return GradeRow(
+            **{
+                **row.fields(),
+                "clean": False,
+                "error": f"{why} — a clean row needs its evidence (no pack ⇒ no Q1)",
+                "labels": labels,
+            }
+        )
 
     def append(self, row: GradeRow) -> GradeRow:
         row = self._stamp(row)
-        body = self._pack_body(row.evidence_pack_hash) if row.evidence_pack_hash else None
-        if body is not None:
-            self._store_pack(row, body)
+        body, why = self._kept_pack(row) if row.evidence_pack_hash else (None, "")
+        if row.clean and body is None:
+            row = self._demoted(row, why)
         chained = self._ledger.append(row)
         grade = dict(body.get("grade") or {}) if body else {}
         metrics.record_grade(

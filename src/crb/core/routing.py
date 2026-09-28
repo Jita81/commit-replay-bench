@@ -408,6 +408,7 @@ def route(
     oracle_strength: float | None = None,
     controls: ControlsVerdict | None = None,
     policy: RoutingPolicy = DEFAULT_POLICY,
+    rows_oracle: bool = True,
 ) -> RouteDecision:
     """Evaluate the rule in the order ADR-0003 publishes it; first match wins.
 
@@ -415,9 +416,18 @@ def route(
     do not apply and the decision says so (``controls_policy=""``). Pass
     :meth:`ControlsVerdict.unmeasured` to say "we looked and there is none" — the
     fail-closed reading the server's capability map uses.
+
+    ``rows_oracle=False`` says the caller measured the oracle from its own ledger of
+    scores: ``oracle_strength`` is then the only strength, ``None`` = unmeasured, and the
+    rows' own ``oracle_strength`` is never read (EI-2, 2026-09-27: an imported row carried
+    a number nobody here measured).
     """
     # an explicit strength (the adequacy gate's) outranks the mean the rows carry
-    strength = oracle_strength if oracle_strength is not None else stats.oracle_strength_mean
+    strength = (
+        oracle_strength
+        if oracle_strength is not None or not rows_oracle
+        else stats.oracle_strength_mean
+    )
     base: dict[str, Any] = {
         "cell": stats.cell.to_dict(),
         "n": stats.n,

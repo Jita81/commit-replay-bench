@@ -217,6 +217,10 @@ class RouteDecisionWithControlsOut(RouteDecisionOut):
     model_ci_low: float | None = None
     model_ci_high: float | None = None
     failure_split: FailureSplitOut
+    #: Rows behind the decision that were imported, not measured here (EI-2 residual): 0 on
+    #: the default ``apparatus=current`` reading; above 0 the route is a reader's view of
+    #: someone else's evidence and licenses nothing.
+    rows_imported: int = 0
 
 
 class RoutesWithControlsResponse(RoutesResponse):

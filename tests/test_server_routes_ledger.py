@@ -77,9 +77,13 @@ class TestVerify:
             "broken_at",
             "detail",
             "clean_without_pack",
+            "signoffs",
+            "reviews",
             "verified_at",
         }
         assert d["rows"] == 50 and d["ok"] is True and d["false_q1_total"] == 0
+        # EI-6: the sign-off and review chains are walked with the grades chain
+        assert d["signoffs"]["chain_ok"] is True and d["reviews"]["chain_ok"] is True
         assert d["chain_ok"] is True and d["broken_at"] is None and d["clean_without_pack"] == 0
         assert d["detail"] == "50 rows, chain intact, false_q1=0"
 

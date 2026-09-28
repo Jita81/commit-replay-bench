@@ -66,6 +66,8 @@ export type RefusalCode =
   | 'oracle_weak'
   | `route_not_deliver:${ReasonCode | 'unrouted' | 'unknown'}`
   | 'attestation_missing'
+  | 'attested_row_not_measured'
+  | 'attested_row_without_pack'
   | 'same_actor'
 
 /** The policy this reading was written against; the server's `policy_version` is what is displayed. */
@@ -298,6 +300,8 @@ export const REFUSAL_DISPLAY: Record<string, string> = {
   oracle_weak: 'oracle too weak to license auto-delivery',
   route_not_deliver: 'the routing rule does not say deliver',
   attestation_missing: 'name the accepted row you read and affirm it — no policy can waive this',
+  attested_row_not_measured: 'the row you named was imported, not measured here — attest to a row this deployment graded; no policy can waive this',
+  attested_row_without_pack: 'the row you named has no stored, verified evidence pack, so there is no diff to have read; no policy can waive this',
   same_actor: 'you produced this evidence — you queued the run that graded the attested row, or every accepted row in the cell is yours; a second approver must sign; no policy can waive this',
 }
 
