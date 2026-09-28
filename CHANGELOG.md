@@ -19,17 +19,17 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   tests, and the change profile. Each proposal cites its file and commit and waits for a
   person to sponsor it. Guidance files are read as data. An entry is proposed again only when
   its source or the miner's reading of it changes. A convention names belt 5's check only where
-  belt 5's own detectors find the tool. Teams add miners through a registry (DL-132, DL-133,
+  belt 5's own detectors find the tool. Teams add miners through a registry (DL-116, DL-117,
   G-677).
 
 - **The context library: two people sign what a repository's people know, and each work type has a page**
   (north-star Wave 4, stream L; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-l)).
   Entries of six kinds, with an id `<kind>/<slug>` and their provenance, are proposed by a
   sponsor and signed by a different approver (`same_person` refused); a miner or a model is
-  never a person. Every act is appended to a hash-chained table (revision 0043) and is an
+  never a person. Every act is appended to a hash-chained table (revision 0016) and is an
   event. An entry read from a file goes stale when a mine finds the file changed or gone.
   `/library/:repo` shows one page per work type, and Decisions lists entries to sign, gone
-  stale or retired by measurement. No entry reaches a builder's brief (DL-129 to DL-131).
+  stale or retired by measurement. No entry reaches a builder's brief (DL-113 to DL-115).
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

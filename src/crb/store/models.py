@@ -19,7 +19,7 @@ task_qualifications — APPEND-ONLY: each task's qualification per posture (ADR-
              latest row for (repo, task, posture) is in force, a revocation is a new row
              (revision 0011)
 library_acts — APPEND-ONLY, hash-chained: every act on a repository's context library —
-             propose, sponsor, sign, stale, revoke, retire (ADR-0026 item 10; revision 0043)
+             propose, sponsor, sign, stale, revoke, retire (ADR-0026 item 10; revision 0016)
 
 Navigation
 ----------
@@ -440,7 +440,7 @@ class LibraryActRow(Base):
     """APPEND-ONLY. One act on a repository's context library (ADR-0026 item 10) — the
     :class:`crb.core.library.LibraryAct` column for column, chained on its own
     ``prev_hash`` / ``row_hash``. A new version, a signature, a staleness notice, a
-    revocation and a retirement are each a new row; nothing is edited (revision 0043)."""
+    revocation and a retirement are each a new row; nothing is edited (revision 0016)."""
 
     __tablename__ = "library_acts"
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

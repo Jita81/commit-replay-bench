@@ -2005,7 +2005,7 @@ class Worker:
         return STATUS_SUCCEEDED, counts, ""
 
     def _library_freshness(self, ctx: RunContext, ref: str) -> None:
-        """G-736, DL-130: after a mine, read the repository's head and mark stale every
+        """G-736, DL-114: after a mine, read the repository's head and mark stale every
         library entry whose source file's bytes there differ from the ones it was signed
         against — the same rule as ``POST /library/{repo}/freshness``, without a person
         asking. Only the files entries cite are read (``git cat-file``, no checkout); a file

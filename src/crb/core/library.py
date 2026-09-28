@@ -221,7 +221,7 @@ def carries_credential(value: Any) -> bool:
     credential shape :func:`~crb.core.redact.redact` would replace. The library's acts are
     append-only and hash-chained, so a credential written once could never be removed:
     every field of an entry and every body of an act is held to this, not only the
-    statement (P-282)."""
+    statement (P-355)."""
     if isinstance(value, str):
         return redact(value) != value
     if isinstance(value, Mapping):
@@ -657,7 +657,7 @@ class EntryState:
 def _signed_against(state: EntryState) -> frozenset[str]:
     """The file digests an entry read from a file vouches for: the one it was proposed
     against and, once re-signed while stale, the one the approver acknowledged. Never the
-    empty digest — that is a file gone at head, which is always a change (P-281)."""
+    empty digest — that is a file gone at head, which is always a change (P-354)."""
     return frozenset(d for d in (state.entry.provenance.digest, state.acknowledged_digest) if d)
 
 

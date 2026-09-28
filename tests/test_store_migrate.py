@@ -361,7 +361,7 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
 
     migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0043"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0016"
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -453,7 +453,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     # the refusal rolls the whole downgrade back — 0008's column, 0007's and 0005's tables, 0006's
     # column, 0004's index swap and 0003's drop of the (empty) reviews table included — so the database stays
     # exactly where it was
-    assert migrate.current(backend.url) == "0043"
+    assert migrate.current(backend.url) == "0016"
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -468,7 +468,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0043" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0016" and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -609,7 +609,7 @@ def test_0004_refuses_a_database_holding_duplicate_trace_seq_pairs(backend: Back
     fresh = _reset(backend)
     migrate.upgrade(backend.url, revision="0003")
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0043" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0016" and _autogen_diff(fresh) == []
     assert "uq_events_trace_seq" in {ix["name"] for ix in inspect(fresh).get_indexes("events")}
 
 
@@ -632,7 +632,7 @@ def test_0006_backfills_the_github_identity_and_refuses_duplicate_legacy_links(
         c.execute(text(row), {"name": "calc", "cfg": linked})
         c.execute(text(row), {"name": "by-url", "cfg": '{"language": "go"}'})
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0043"
+    assert migrate.current(backend.url) == "0016"
     with backend.engine.connect() as c:
         got = dict(c.execute(text("SELECT name, github_full_name FROM repos")).all())
     assert got == {"calc": "acme/calc", "by-url": None}
@@ -685,7 +685,7 @@ def test_0007_adds_the_workers_table_and_adoption_tolerates_its_absence(backend:
         c.execute(text("DROP TABLE workers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0043" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0016" and _autogen_diff(fresh) == []
     assert "workers" in set(inspect(fresh).get_table_names())
 
 
@@ -707,7 +707,7 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
             )
         )
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0043"
+    assert migrate.current(backend.url) == "0016"
     cols = {c["name"] for c in inspect(backend.engine).get_columns("workers")}
     assert "unconfirmed_containers" in cols
     with backend.engine.connect() as c:
@@ -731,7 +731,7 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
         c.execute(text("ALTER TABLE workers DROP COLUMN unconfirmed_containers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0043" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0016" and _autogen_diff(fresh) == []
 
 
 def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
@@ -754,7 +754,7 @@ def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
             {"active": True},
         )
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0043"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0016"
     with backend.engine.connect() as c:
         got = c.execute(text("SELECT session_nonce FROM users")).scalar_one()
     assert got == ""
@@ -772,7 +772,7 @@ def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
         c.execute(text("ALTER TABLE users DROP COLUMN session_nonce"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0043" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0016" and _autogen_diff(fresh) == []
 
 
 def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
@@ -809,7 +809,7 @@ def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
             s.add(Task(repo="calc", task_id=t.task_id, spec_json=t.to_dict(), authored=t.authored))
         s.commit()
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0043"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0016"
     with backend.engine.connect() as c:
         n = c.execute(text("SELECT COUNT(*) FROM task_qualifications")).scalar_one()
         states = {r[0] for r in c.execute(text("SELECT state FROM task_qualifications"))}
@@ -834,7 +834,7 @@ def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
     assert migrate.current(backend.url) == "0008"
     assert "task_qualifications" not in set(inspect(backend.engine).get_table_names())
     migrate.upgrade(backend.url)  # and back up at head, equal to init_db
-    assert migrate.current(backend.url) == "0043" and _autogen_diff(backend.engine) == []
+    assert migrate.current(backend.url) == "0016" and _autogen_diff(backend.engine) == []
 
 
 def test_0011_downgrade_refuses_while_a_measured_qualification_exists(backend: Backend) -> None:
@@ -868,7 +868,7 @@ def test_0011_downgrade_refuses_while_a_measured_qualification_exists(backend: B
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0008")
     assert "task_qualifications" in set(inspect(backend.engine).get_table_names())
-    assert migrate.current(backend.url) == "0043"
+    assert migrate.current(backend.url) == "0016"
 
 
 def test_no_released_revision_imports_the_application_runtime() -> None:
@@ -952,7 +952,7 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     with backend.engine.begin() as c:
         _insert_review(c, n=1)
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0043"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0016"
     with backend.engine.connect() as c:
         assert c.execute(text("SELECT minutes FROM reviews")).scalar_one() is None
     assert {"reviews_no_update", "reviews_no_delete"} <= backend.trigger_names()
@@ -967,7 +967,7 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0011")
-    assert migrate.current(backend.url) == "0043"
+    assert migrate.current(backend.url) == "0016"
     # with no minutes stated the column is empty and may go
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -987,11 +987,11 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
         c.execute(text("ALTER TABLE reviews DROP COLUMN minutes"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0043" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0016" and _autogen_diff(fresh) == []
 
 
 def _insert_library_act(conn: Any, n: int) -> None:
-    """One stored library act with every column revision 0043 requires."""
+    """One stored library act with every column revision 0016 requires."""
     conn.execute(
         text(
             "INSERT INTO library_acts (act_id, schema, repo, entry_id, version, act, actor, "
@@ -1002,16 +1002,16 @@ def _insert_library_act(conn: Any, n: int) -> None:
     )
 
 
-def test_0043_adds_the_library_acts_append_only_and_never_drops_a_signature(
+def test_0016_adds_the_library_acts_append_only_and_never_drops_a_signature(
     backend: Backend,
 ) -> None:
-    """Revision 0043 (ADR-0026 item 10) adds ``library_acts`` — the context library's
+    """Revision 0016 (ADR-0026 item 10) adds ``library_acts`` — the context library's
     hash-chained acts — with the append-only triggers; a downgrade is refused while any act
     exists (a signature is never dropped) and otherwise drops the table."""
     migrate.upgrade(backend.url, revision="0012")
     assert "library_acts" not in inspect(backend.engine).get_table_names()
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0043"
+    assert migrate.current(backend.url) == migrate.head_revision() == "0016"
     assert {"library_acts_no_update", "library_acts_no_delete"} <= backend.trigger_names()
     with backend.engine.begin() as c:
         _insert_library_act(c, 1)
@@ -1019,12 +1019,12 @@ def test_0043_adds_the_library_acts_append_only_and_never_drops_a_signature(
         c.execute(text("UPDATE library_acts SET actor = 'x'"))
     cfg = migrate.alembic_config(backend.url)
     with (
-        pytest.raises(RuntimeError, match="refusing to downgrade 0043"),
+        pytest.raises(RuntimeError, match="refusing to downgrade 0016"),
         backend.engine.begin() as connection,
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0012")
-    assert migrate.current(backend.url) == "0043"
+    assert migrate.current(backend.url) == "0016"
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
     cfg = migrate.alembic_config(backend.url)
@@ -1033,10 +1033,10 @@ def test_0043_adds_the_library_acts_append_only_and_never_drops_a_signature(
         command.downgrade(cfg, "0012")
     assert migrate.current(backend.url) == "0012"
     assert "library_acts" not in inspect(fresh).get_table_names()
-    # a create_all schema from before the library adopts at 0012 and 0043 adds the table
+    # a create_all schema from before the library adopts at 0012 and 0016 adds the table
     fresh = _reset(backend)
     init_db(fresh)
     with fresh.begin() as c:
         c.execute(text("DROP TABLE library_acts"))
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0043" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == "0016" and _autogen_diff(fresh) == []

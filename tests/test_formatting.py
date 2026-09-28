@@ -215,7 +215,7 @@ def test_no_changed_source_file_is_its_own_skip(tmp_path: Path) -> None:
 def test_the_format_step_reads_a_configuration_by_belt_5s_own_detectors(
     tmp_path: Path, files: dict[str, str]
 ) -> None:
-    """One detector per tool: the format step asks crb.core.lint, never a copy (P-191)."""
+    """One detector per tool: the format step asks crb.core.lint, never a copy (P-348)."""
     for rel, text in files.items():
         (tmp_path / rel).write_text(text, encoding="utf-8")
     assert fm.black_configured(tmp_path) == lint.black_evidence(tmp_path)

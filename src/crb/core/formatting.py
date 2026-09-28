@@ -134,13 +134,13 @@ class FormatRun:
 def black_configured(root: Path) -> bool:
     """Does the repository configure black? Belt 5's own detector answers
     (:func:`crb.core.lint.black_evidence`: ``[tool.black]`` or a ``black`` pre-commit hook),
-    so the format step and the lint belt never disagree (P-191)."""
+    so the format step and the lint belt never disagree (P-348)."""
     return black_evidence(root)
 
 
 def prettier_configured(root: Path) -> bool:
     """A prettier configuration file, or a ``prettier`` key in ``package.json`` — belt 5's
-    own detector answers (:func:`crb.core.lint.prettier_evidence`, P-191)."""
+    own detector answers (:func:`crb.core.lint.prettier_evidence`, P-348)."""
     return bool(prettier_evidence(root))
 
 

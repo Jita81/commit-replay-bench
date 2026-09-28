@@ -888,7 +888,7 @@ def _signed_file_entry(h: Harness, slug: str, path: str) -> str:
 
 
 def test_a_mine_reads_the_head_and_an_entry_whose_file_changed_goes_stale(h: Harness) -> None:
-    # G-736, DL-130: nobody posts digests — the mine itself reads the files entries cite
+    # G-736, DL-114: nobody posts digests — the mine itself reads the files entries cite
     changed = _signed_file_entry(h, "readme", pr.README)
     kept = _signed_file_entry(h, "pytest-ini", "pytest.ini")
     ledger = DbLibraryLedger(h.factory)

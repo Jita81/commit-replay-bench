@@ -22,7 +22,7 @@ ADRs:         docs/adr/0026-the-context-standard.md (item 10),
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/core/library.py (the act, the rule and the fold),
               src/crb/store/models.py (``LibraryActRow``),
-              src/crb/store/migrations/versions/v0043_library_acts.py (the table),
+              src/crb/store/migrations/versions/v0016_library_acts.py (the table),
               src/crb/server/routes/library.py (the only writer over HTTP),
               src/crb/server/worker.py (``mark_stale`` after every mine, G-736)
 Tested by:    tests/test_store_library.py, tests/test_server_routes_library.py
@@ -163,7 +163,7 @@ class DbLibraryLedger:
         (:func:`~crb.core.library.stale_candidates`; a digest of ``None`` or ``""`` is a file
         gone at head; a path not in ``digests_at_head`` is not judged). The one staleness
         path for ``POST /library/{repo}/freshness`` and the worker's read after a mine
-        (DL-130, G-736). An entry another reader marked between the fold and the write is
+        (DL-114, G-736). An entry another reader marked between the fold and the write is
         skipped, never marked twice."""
         out: list[tuple[LibraryAct, EntryState]] = []
         for state, digest in stale_candidates(self.states(repo).values(), digests_at_head):

@@ -2,7 +2,7 @@
 
 Navigation
 ----------
-What it is:   Revision 0043: the append-only ``library_acts`` table — every act on a
+What it is:   Revision 0016: the append-only ``library_acts`` table — every act on a
               repository's context library (propose, sponsor, sign, stale, revoke, retire).
 What it does: Creates the table (unless ``init_db`` already did) with its lookup index, and
               installs the grades table's UPDATE/DELETE-refusing triggers on it (SQLite and
@@ -17,7 +17,7 @@ ADRs:         docs/adr/0026-the-context-standard.md (item 10),
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/models.py (``LibraryActRow``; ``APPEND_ONLY_TABLES``),
               src/crb/store/migrate.py (``REVISION_TABLES`` carries
-              ``("0043", "library_acts")``; the trigger helper),
+              ``("0016", "library_acts")``; the trigger helper),
               src/crb/store/library.py (appends and reads the acts),
               src/crb/core/library.py (the act a row holds)
 Tested by:    tests/test_store_migrate.py, tests/test_store_library.py
@@ -35,14 +35,14 @@ from alembic import context, op
 
 from crb.store.migrate import install_append_only_triggers_on
 
-revision: str = "0043"
-down_revision: str | None = "0012"
+revision: str = "0016"
+down_revision: str | None = "0015"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 TABLE = "library_acts"
 #: The append-only tables that exist once this revision is applied (pinned; see 0001).
-APPEND_ONLY_AT_0043: tuple[str, ...] = (
+APPEND_ONLY_AT_0016: tuple[str, ...] = (
     "grades",
     "events",
     "signoffs",
@@ -83,7 +83,7 @@ def upgrade() -> None:
         op.create_index(
             "ix_library_acts_repo_entry", TABLE, ["repo", "entry_id", "seq"], unique=False
         )
-    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0043)
+    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0016)
 
 
 def downgrade() -> None:
@@ -95,7 +95,7 @@ def downgrade() -> None:
         n: int = op.get_bind().execute(sa.text("SELECT COUNT(*) FROM library_acts")).scalar_one()
         if n:
             raise RuntimeError(
-                f"refusing to downgrade 0043: {n} library act(s) exist — signatures and "
+                f"refusing to downgrade 0016: {n} library act(s) exist — signatures and "
                 "revocations are never dropped"
             )
     if _table_exists() or context.is_offline_mode():

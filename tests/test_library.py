@@ -363,7 +363,7 @@ def test_an_entry_read_from_a_file_goes_stale_when_the_file_changes_until_signed
 
 
 def test_a_file_gone_at_head_is_a_change_before_any_re_signature() -> None:
-    # P-281: the empty digest (a file gone at head) once matched the empty acknowledged
+    # P-354: the empty digest (a file gone at head) once matched the empty acknowledged
     # digest of an entry never re-signed, so a deleted file left its entry signed
     e = _from_file()
     for before in (
@@ -415,7 +415,7 @@ CREDENTIAL_CARRIERS: dict[str, dict[str, object]] = {
 
 @pytest.mark.parametrize("field_name", sorted(CREDENTIAL_CARRIERS))
 def test_no_field_of_an_entry_carries_a_credential(field_name: str) -> None:
-    # P-282: the credential check read the statement and the title alone, so a token in the
+    # P-355: the credential check read the statement and the title alone, so a token in the
     # path, the check or a scope entered the append-only chain, where nothing can remove it
     with pytest.raises(ValueError, match="credential"):
         entry(**CREDENTIAL_CARRIERS[field_name])
@@ -579,7 +579,7 @@ LIBRARY_TABLE_OWNERS = {
     "src/crb/store/library.py",
     "src/crb/store/models.py",
     "src/crb/store/migrate.py",
-    "src/crb/store/migrations/versions/v0043_library_acts.py",
+    "src/crb/store/migrations/versions/v0016_library_acts.py",
 }
 
 

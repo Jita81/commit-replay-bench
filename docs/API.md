@@ -196,7 +196,7 @@ bytes there, the graded rows it was learned from, or the person who wrote it). E
 needs **two different people**: the sponsor who proposes it (or adopts a miner's or a
 model's proposal) and an approver who signs it; the approver is never the sponsor, and a
 miner or a model is never a person. The acts are append-only and hash-chained in the
-`library_acts` table (`crb.core.library`, `crb.store.library`, revision 0043); every act is a
+`library_acts` table (`crb.core.library`, `crb.store.library`, revision 0016); every act is a
 `system/library.*` event naming the actor and the entry. **No entry reaches a builder's
 brief**: `reaches_briefs` is `false` on the index and the page, because an entry reaches a
 brief only inside a measured context arm (ADR-0026 items 1 and 10), which no build of this
@@ -396,7 +396,7 @@ that is not here fails the suite.
 | mine | `mine.candidate` / `mine.red` / `mine.skip` / `mine.gold` / `mine.done` | ok / skipped | `sha`, `pool`, `worktree` (candidate only), `reason`, `code` (the qualification's refusal code — ADR-0019), `clean`, `note`, `lint`, `found`, `examined` | core/mine.py | LOG |
 | mine | `mine.task` | ok | `size`, `capability_class`, `gold_clean`, `duration_ms` | worker | LOG |
 | mine | `mine.cancelled` | ok | `counts` | worker | LOG |
-| mine | `library.stale` / `library.freshness` | ok / error | stale: `entry_id`, `path`, `head_commit`, `act_id`, `actor` (`system:library-freshness`); freshness: `head_commit`, `files` (the paths entries cite, read at head), `stale` (entry ids); error: the git or ledger failure — the mine still succeeds (G-736, DL-130) | worker (after a mine that was not cancelled) | AUDIT; the entry's own `stale` act is the record (`GET /library/{repo}`) |
+| mine | `library.stale` / `library.freshness` | ok / error | stale: `entry_id`, `path`, `head_commit`, `act_id`, `actor` (`system:library-freshness`); freshness: `head_commit`, `files` (the paths entries cite, read at head), `stale` (entry ids); error: the git or ledger failure — the mine still succeeds (G-736, DL-114) | worker (after a mine that was not cancelled) | AUDIT; the entry's own `stale` act is the record (`GET /library/{repo}`) |
 | mine | `label.task` | ok / error | `path_class`, `intent_class`, `confidence`, `rationale`, `labeller`, `evidence_hash`, `class_source`, `previous_class`, `changed`, `cost_usd`, `latency_ms` | worker | LOG |
 | build | `build.start` / `build.done` | ok | `trial`, `rung`, `mode` / `builder`, `model`, `turns`, `tokens_in`, `tokens_out`, `cost_usd` (→ the envelope), `latency_s`, `error` | core/run.py; factory/build.py (`item`) | LOG (cost column) |
 | build | `build.oracle_staged` | ok | `item`, `sha`, `branch` | factory/build.py | LOG |

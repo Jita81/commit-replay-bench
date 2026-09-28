@@ -16,7 +16,7 @@ updated: 2026-09-27
 **Purpose.** What people know about one repository that a test cannot say, in one vocabulary,
 with one page per kind of change; each entry needs a sponsor and a different approver, and
 nothing here reaches a builder until an arm has measured it (`help.ts` About copy; ADR-0026
-item 10, DL-099).
+item 10, DL-087).
 
 **Entry → exit.** Arrives from the repository's page (*Context library*) or from a library row
 on Decisions (an entry to sign, an entry gone stale, an entry retired by measurement). The

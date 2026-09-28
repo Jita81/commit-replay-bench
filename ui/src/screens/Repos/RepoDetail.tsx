@@ -261,7 +261,7 @@ function TasksTab({ name }: { name: string }) {
               // G-431 — a task that is not gold-clean after a configuration change is walked
               // again (`mine` + its sha) without re-mining the history; the dialog arrives
               // pre-filled and queueing it is still the operator's act. It re-checks the
-              // gold; "Re-qualify" is posture qualification (ADR-0019), a different act (P-096)
+              // gold; "Re-qualify" is posture qualification (ADR-0019), a different act (P-163)
               key: 'recheck_gold',
               header: 'Re-check gold',
               hint: 'col.tasks.recheck_gold' as const,

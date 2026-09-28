@@ -1254,7 +1254,7 @@ what people know about it that a test cannot say, in one vocabulary: its **compo
 **work types** (kinds of change), the **decisions** in force, its **conventions**, the
 **patterns** that recur and its **standards**. Each entry has the id `<kind>/<slug>`, a
 statement of at most 400 characters and where it came from — a file at a commit, the graded
-rows it was learned from, or the person who wrote it (ADR-0026 item 10, DL-099). Graded rows
+rows it was learned from, or the person who wrote it (ADR-0026 item 10, DL-087). Graded rows
 must be rows of this repository's ledger. A file's path, commit and digest are read from the
 clone when a miner proposes the entry, and are as the person gave them when a person does; the
 product then reads the file at the repository's head after each mine, and marks the entry stale

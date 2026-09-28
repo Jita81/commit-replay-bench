@@ -154,7 +154,7 @@ imports (`sqlalchemy`, `openai`, …) are visible to the forbidden contract.
 ## How to add a library miner
 
 A miner proposes context-library entries from files a repository already holds
-([ADR-0026](adr/0026-the-context-standard.md) item 10, DL-132, DL-133). The contract is written in
+([ADR-0026](adr/0026-the-context-standard.md) item 10, DL-116, DL-117). The contract is written in
 `src/crb/core/miners.py`; in short:
 
 1. Write a class with `name` (a lower-case slug), `version` (a whole number — bump it whenever
@@ -169,7 +169,7 @@ A miner proposes context-library entries from files a repository already holds
 3. Never stamp a provenance or a proposer: the runner reads the cited file's bytes and records
    `mined:<name>@<version>`. Never copy a guidance file's prose (`CLAUDE.md`, `AGENTS.md`,
    `CONTRIBUTING`) into a statement. Never decide on your own which check backs an entry: read
-   what the check itself reads (the lint miner asks `crb.core.lint.belt5_evidence`, P-191).
+   what the check itself reads (the lint miner asks `crb.core.lint.belt5_evidence`, P-348).
 4. Register it with `register_miner(...)` and add a test like
    `tests/test_miners.py::test_a_using_team_adds_a_miner_through_the_registry_and_the_contract_holds_it`
    over a fixture repository. A draft that breaks the record's rules is refused and named in
