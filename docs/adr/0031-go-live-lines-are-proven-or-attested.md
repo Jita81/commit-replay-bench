@@ -20,7 +20,8 @@ of the fifteen lines are facts the product already reads: the health check, the 
 verification, how people sign in, whether each repository qualifies in the sealed posture,
 and whether tests and the builder run sealed. The other ten are acts only the operator can
 do on their own infrastructure, such as an egress test from a worker pod, a rehearsed restore,
-a PostgreSQL role that does not own the ledger tables (§3.3) or a penetration test. The product cannot see them.
+a PostgreSQL role that does not own the ledger tables (§3.3) or a penetration test. The
+product cannot see them.
 
 Three operating gaps kept the sealed posture from going live without a person's hand:
 

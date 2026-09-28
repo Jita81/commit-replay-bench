@@ -260,7 +260,7 @@ def test_first_due_is_stamped_once_and_survives_a_row_coming_back(env: Env) -> N
         db.commit()
         rec = _due(db)[("signoff_due", "bug.fix|S")]
         assert rec.first_due == rec.last_seen == "2026-09-01T09:00:00+00:00"
-        assert rec.resolved == "" and rec.role == "approver"
+        assert rec.resolved == "" and rec.act_role == "approver"
         # still due a day later: first_due holds, last_seen moves
         dec.record_due(db, ALPHA, rows, now="2026-09-02T09:00:00+00:00")
         db.commit()

@@ -439,8 +439,10 @@ class DecisionDue(Base):
     key: Mapped[str] = mapped_column(String(256), nullable=False)
     #: The row's own words when it was last seen — what a reader of the age is reading about.
     title: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    #: The role the act belongs to (``approver`` / ``operator`` / ``viewer``).
-    role: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    #: The role the act belongs to (``approver`` / ``operator`` / ``viewer``). Stored in the
+    #: column ``role``; the attribute is named apart from an account's ``User.role``, which the
+    #: last-admin guard owns (``tests/test_server_auth.py``).
+    act_role: Mapped[str] = mapped_column("role", String(16), nullable=False, default="")
     first_due: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
     last_seen: Mapped[str] = mapped_column(String(40), nullable=False, default=_now)
     #: When the row stopped being due (``""`` while it still is).

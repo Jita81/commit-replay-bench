@@ -296,7 +296,7 @@ def record_due(
         if rec is None:
             rec = _first_stamp(db, repo, row, stamp)
         rec.title = row.title
-        rec.role = row.role
+        rec.act_role = row.role
         rec.last_seen = stamp
         rec.resolved = ""
         live[ident] = rec
@@ -323,7 +323,7 @@ def _first_stamp(db: Session, repo: str, row: DecisionRow, stamp: str) -> Decisi
         "kind": row.kind,
         "key": row.key,
         "title": row.title,
-        "role": row.role,
+        "act_role": row.role,
         "first_due": stamp,
         "last_seen": stamp,
         "resolved": "",

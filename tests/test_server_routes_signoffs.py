@@ -1580,9 +1580,9 @@ class TestPostureClass:
         """G-480: before anyone signs, the gate says which posture class the evidence was
         graded in and whether that is the sealed posture ONBOARDING Step 6 asks for (the
         docker executor, sealed dependencies). Advisory: no clause refuses on it, so the
-        preview's refusals are the same either way. The seeded deployment grades on the
-        host, so its evidence is a development reading and the preview says so."""
-        clear_policy(env)
+        preview's refusals are the same either way. The seeded deployment as shipped grades
+        on the host (``clear_policy`` would move it to the sealed posture routing.v2 reads),
+        so its evidence is a development reading and the preview says so."""
         ev = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()["evidence"]
         assert ev["posture_class"].startswith("local/") and ev["sealed_posture"] is False
 

@@ -106,7 +106,7 @@ class DbLibraryLedger:
         if dialect == "sqlite":
             s.execute(text("BEGIN IMMEDIATE"))
         elif dialect == "postgresql":
-            s.execute(text(f"SELECT pg_advisory_xact_lock({LOCK_KEY})"))  # library
+            s.execute(text("SELECT pg_advisory_xact_lock(7343)"))  # library (LOCK_KEY)
 
     @staticmethod
     def _head(s: Session) -> str:

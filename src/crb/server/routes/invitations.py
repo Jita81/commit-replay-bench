@@ -367,8 +367,8 @@ def create_invitation(
         role=role,
         display_name=body.display_name,
         email=body.email,
+        active=False,
     )
-    user.active = False
     token = secrets.token_urlsafe(TOKEN_BYTES)
     now = _now()
     inv = Invitation(

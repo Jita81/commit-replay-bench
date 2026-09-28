@@ -51,8 +51,8 @@ Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this mus
               src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
               src/crb/server/routes/runs.py (``append_system_event`` — the export's audit
               event, DATA-RETENTION §4),
-              src/crb/cli/commands/ledger.py (the CLI twin, incl. ``import-census``),
-              docs/REPRODUCING-THE-CENSUS.md (the verify procedure end to end)
+              src/crb/cli/commands/ledger.py (the CLI twin, incl. ``import-census``, whose
+              verify procedure REPRODUCING-THE-CENSUS walks end to end)
 Tested by:    tests/test_server_routes_ledger.py
 Touch when:   never for a new repository; when ``GradeRow.body`` changes what it hashes
               (``row_hash_from_stored`` must change identically, and the ADR); when a
