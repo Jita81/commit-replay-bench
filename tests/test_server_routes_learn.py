@@ -2,9 +2,9 @@
 
 The seed (``fixtures/server_seed``) has no protocol rows, four ``oracle.score`` events
 (strengths 0.9 / 0.5 / 0.33 / unscoreable) stamped apparatus ``2.0``, and a controls
-report with one ESCAPE — so the 40-row deliver-on-numbers cell routes ``human``
-(``controls_escapes``) and IS oracle-held. Rows are stamped with the live apparatus,
-so nothing is stale until the query asks about a newer one.
+report with one ESCAPE — so the 40-row deliver-on-numbers cell routes ``human``: its
+scores average 0.58, so the map and Learn both hold it ``oracle_weak`` (P-426). Rows are
+stamped with the live apparatus, so nothing is stale until the query asks about a newer one.
 
 Navigation
 ----------
@@ -23,7 +23,9 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               factory run are refused with nothing written; that queueing enqueues the PLAN's
               own run bodies, never the caller's, through the submit gate ``POST /runs`` applies
               (a cell whose builder has no credential is refused whole — P-160), refuses a
-              what-if plan (P-165) and a cell whose queued runs are unfinished (P-182); that a
+              what-if plan (P-165) and a cell whose queued runs are unfinished (P-182), even for
+              two requests at once, a lost ``seq`` race or a failed insert (P-420); that Learn
+              and the map agree on why a cell is held (P-426); that a
               ``command`` only completes a cut example (P-183); that a note with a line break is
               refused (P-161); that each write refuses a field it does not name; that the reads
               and writes follow the repository's checks arm (ADR-0024); that a viewer, a
@@ -62,10 +64,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import event as sa_event
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND
 from crb.core.version import APPARATUS_VERSION
+from crb.server.app import API_PREFIX
+from crb.server.routes import learn as learn_routes
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures.concurrency import at_once, pause_after
@@ -224,7 +232,9 @@ def test_strengthen_uses_the_controls_verdict_and_the_oracle_scores(env: Env) ->
     items = [i for i in d["items"] if i["labels"]["cell"] == "bug.fix|S"]
     assert items, d
     assert all(i["capability_class"] == "test.add" for i in items)
-    assert all(i["labels"]["reason_code"] == "controls_escapes" for i in items)
+    # the seed's scores average 0.58, below the bar: the cell is held for its oracle before
+    # its controls escape, as the map holds it (P-426)
+    assert all(i["labels"]["reason_code"] == "oracle_weak" for i in items)
     weak = [
         i for i in items if i["labels"].get("oracle_strength") in ("0.50", "0.33", "unscoreable")
     ]
@@ -234,6 +244,25 @@ def test_strengthen_uses_the_controls_verdict_and_the_oracle_scores(env: Env) ->
     assert "bug.fix|S" in d2["cells_without_scores"]
     r = env.get(f"/learn/strengthen?repo={ALPHA}&by=nope")
     assert r.status_code == 422
+
+
+def test_learn_and_the_map_agree_on_why_every_cell_is_held(env: Env) -> None:
+    """P-426: the strengthen report is routed under the same oracle strength the map routes
+    under — each task's latest ``oracle.score`` — so the two never disagree about why a cell
+    is held. On the seed the rows' own strength is strong but the scores average 0.58: the
+    map holds the cell ``oracle_weak``, and a report routed under the rows' strength called
+    it a controls escape and sent a person to the wrong work."""
+    cmap = env.get(f"/capability-map?repo={ALPHA}&by=class,size").json()
+    held = {
+        c["label"]: c["reason_code"]
+        for c in cmap["cells"]
+        if c["reason_code"] in ("oracle_weak", "controls_escapes", "controls_thin")
+    }
+    d = env.get(f"/learn/strengthen?repo={ALPHA}").json()
+    assert sorted(d["cells_flagged"]) == sorted(held)
+    assert d["items"]
+    for item in d["items"]:
+        assert item["labels"]["reason_code"] == held[item["labels"]["cell"]], item["labels"]
 
 
 def test_strengthen_reads_per_task_scores_from_the_store_events(env: Env) -> None:
@@ -252,7 +281,7 @@ def test_strengthen_reads_per_task_scores_from_the_store_events(env: Env) -> Non
         }
     assert items and {i["labels"]["task_id"] for i in items} <= set(scored)
     assert all(i["labels"]["repo"] == ALPHA for i in items)
-    assert all(i["labels"]["reason_code"] == "controls_escapes" for i in items)
+    assert all(i["labels"]["reason_code"] == "oracle_weak" for i in items)
     for i in items:
         payload = scored[i["labels"]["task_id"]]
         assert i["labels"]["mutants"] == str(payload["total"])
@@ -267,11 +296,12 @@ def test_strengthen_reads_per_task_scores_from_the_store_events(env: Env) -> Non
 def test_cli_over_the_exports_derives_the_route_items(
     env: Env, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A ledger export is the rows alone: over it the CLI honestly flags nothing, even
-    with the scores — the cell is held by the controls verdict. Given the two exports
-    the route reads from the store (``GET /oracle/{repo}`` and
-    ``GET /oracle/{repo}/controls``) the CLI derives the SAME items with the SAME ids;
-    the oracle run's ``events/log`` page is an equivalent source of the scores."""
+    """A ledger export is the rows alone: over it the CLI honestly flags nothing — the
+    rows' own strength is strong and no controls verdict is given. Given the scores the
+    route reads from the store (``GET /oracle/{repo}``) the CLI routes each cell under
+    them as the map does (P-426) and derives the SAME items with the SAME ids, with or
+    without ``GET /oracle/{repo}/controls``; the oracle run's ``events/log`` page is an
+    equivalent source of the scores."""
     from crb.cli.main import main
 
     route = env.get(f"/learn/strengthen?repo={ALPHA}").json()
@@ -298,16 +328,19 @@ def test_cli_over_the_exports_derives_the_route_items(
         assert code == 0, out.err
         return dict(json.loads(out.out))
 
+    rows_only = cli()
     bare = cli("--oracle", str(oracle))
     with_controls = cli("--oracle", str(oracle), "--controls", str(controls))
     from_events = cli("--oracle", str(events), "--controls", str(controls))
-    assert bare["cells_flagged"] == [] and bare["items"] == [] and bare["controls"] is None
-    for d in (with_controls, from_events):
+    assert rows_only["cells_flagged"] == [] and rows_only["items"] == []
+    assert bare["controls"] is None
+    for d in (bare, with_controls, from_events):
         got = sorted(
             (i["id"], i["labels"]["task_id"], i["labels"]["oracle_strength"]) for i in d["items"]
         )
         assert got == want
         assert d["cells_flagged"] == route["cells_flagged"]
+    for d in (with_controls, from_events):
         assert d["controls"]["escapes"] == 1 and d["controls"]["measured"] is True
 
 
@@ -754,6 +787,148 @@ def test_a_cell_whose_runs_are_in_flight_is_not_queued_again(env: Env, builder_k
             run.status = "failed"
         s.commit()
     assert _queue(env, cell=STALE_CELL).status_code == 201
+
+
+def test_two_concurrent_queues_of_one_cell_spend_the_estimate_once(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-420: the guard and the write are one serialised step. A second request that arrives
+    while the first is between its check and its write must not pass the check too: it
+    waits for the first to finish and is then refused 409 naming the first's runs. Driven
+    deterministically: once the first request has checked, a second operator's request runs
+    in another thread and the first waits (up to 3 s) for it to check as well — which it can
+    only do if the check is not held by the first request's lock."""
+    del builder_keys
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    second = TestClient(env.client.app)
+    login(second, "admin")
+    real = learn_routes.in_flight_runs
+    second_checked = threading.Event()
+    results: dict[str, Any] = {}
+    first_call = [True]
+
+    def run_second() -> None:
+        results["second"] = second.post(
+            f"{API_PREFIX}/learn/remeasure/queue?repo={ALPHA}", json={"cell": STALE_CELL}
+        )
+
+    thread = threading.Thread(target=run_second)
+
+    def checked(*args: Any, **kwargs: Any) -> list[str]:
+        out = real(*args, **kwargs)
+        if first_call[0]:
+            first_call[0] = False
+            thread.start()
+            second_checked.wait(timeout=3)
+        else:
+            second_checked.set()
+        return out
+
+    monkeypatch.setattr(learn_routes, "in_flight_runs", checked)
+    first = _queue(env, cell=STALE_CELL)
+    thread.join(timeout=90)
+    assert not thread.is_alive()
+    codes = sorted([first.status_code, results["second"].status_code])
+    assert codes == [201, 409], (first.text, results["second"].text)
+    queued = first if first.status_code == 201 else results["second"]
+    refused = results["second"] if queued is first else first
+    assert envelope(refused)["code"] == "remeasure_already_queued"
+    assert sorted(envelope(refused)["detail"]["run_ids"]) == sorted(queued.json()["run_ids"])
+    assert env.get("/runs").json()["total"] == before + len(queued.json()["run_ids"])
+    assert len(_queued_events(env)) == 1
+
+
+def test_a_lost_seq_race_on_the_learn_trace_is_retried_with_nothing_queued_twice(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-420: every Learn write appends on one ``learn:<repo>`` trace, so the queue's event
+    can lose a ``seq`` race to another write (on PostgreSQL the commit raises the unique
+    violation). The runs and the event that names them are one transaction: the lost race
+    rolls both back and the queue is written again — never runs on the queue with no event
+    behind them, which the page would offer to queue (and pay for) a second time."""
+    del builder_keys
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    real_commit = Session.commit
+    lost = [False]
+
+    def commit(self: Session) -> None:
+        pending = [o for o in self.new if isinstance(o, Event)]
+        if not lost[0] and any(o.action == "learn.remeasure.queued" for o in pending):
+            lost[0] = True
+            self.rollback()
+            raise IntegrityError(
+                "INSERT INTO events", {}, Exception("duplicate key: uq_events_trace_seq")
+            )
+        real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+    r = _queue(env, cell=STALE_CELL)
+    assert lost[0]
+    assert r.status_code == 201, r.text
+    run_ids = r.json()["run_ids"]
+    assert env.get("/runs").json()["total"] == before + len(run_ids)
+    (event,) = _queued_events(env)
+    assert event.payload_json["run_ids"] == run_ids
+
+
+def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-420: the retry is bounded. When other Learn writes take the trace's ``seq`` on every
+    one of the ``_QUEUE_ATTEMPTS`` tries, the route answers the documented 409
+    ``remeasure_concurrent_write`` — no run on the queue and no event naming one."""
+    del builder_keys
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    real_commit = Session.commit
+    lost = [0]
+
+    def commit(self: Session) -> None:
+        pending = [o for o in self.new if isinstance(o, Event)]
+        if any(o.action == "learn.remeasure.queued" for o in pending):
+            lost[0] += 1
+            self.rollback()
+            raise IntegrityError(
+                "INSERT INTO events", {}, Exception("duplicate key: uq_events_trace_seq")
+            )
+        real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+    r = _queue(env, cell=STALE_CELL)
+    assert lost[0] == learn_routes._QUEUE_ATTEMPTS
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "remeasure_concurrent_write"
+    assert env.get("/runs").json()["total"] == before
+    assert _queued_events(env) == []
+
+
+def test_a_queue_that_fails_part_way_queues_nothing(env: Env, builder_keys: None) -> None:
+    """P-420: a cell is queued whole or not at all. When the second run of a cell cannot be
+    written, the first is not left on the queue with no event naming it."""
+    del builder_keys
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    inserts = [0]
+
+    def refuse_the_second(_mapper: Any, _connection: Any, _target: Any) -> None:
+        inserts[0] += 1
+        if inserts[0] == 2:
+            raise RuntimeError("the queue refused the second run")
+
+    sa_event.listen(Run, "before_insert", refuse_the_second)
+    try:
+        try:
+            r = _queue(env, cell=STALE_CELL)
+        except RuntimeError:
+            r = None
+    finally:
+        sa_event.remove(Run, "before_insert", refuse_the_second)
+    assert inserts[0] == 2
+    assert r is None or r.status_code == 500
+    assert env.get("/runs").json()["total"] == before
+    assert _queued_events(env) == []
 
 
 def test_queueing_refuses_a_cell_the_plan_does_not_hold(env: Env) -> None:

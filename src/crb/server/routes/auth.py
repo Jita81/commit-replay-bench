@@ -35,9 +35,10 @@ How:          Thin handlers over src/crb/server/auth.py — ``LoginRateLimiter.a
               event, all through ``commit_audited``) → cookies → redirect, or
               ``_back_to_login`` (a race lost on every retry: ``oidc_failed``).
 Layer:        server — docs/ARCHITECTURE.md#71-security
-ADRs:         none
+ADRs:         docs/adr/0028-the-moments-flow-needs-are-recorded.md (§8, every sign-in)
 Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/routes/admin.py
-              (``record_user_event`` — the account trail), src/crb/server/routes/runs.py
+              (``record_user_event`` — the account trail; ``record_sign_in`` — every
+              sign-in, ADR-0028 §8), src/crb/server/routes/runs.py
               (``append_system_event`` for a refusal with no account; ``commit_audited``, the
               one locked, retrying commit of an event with its change), src/crb/server/app.py
               (``/auth/login`` is CSRF-exempt; the limiter lives on ``app.state``),
@@ -93,7 +94,7 @@ from crb.server.auth import (
     upsert_oidc_user,
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep, client_ip
-from crb.server.routes.admin import record_user_event
+from crb.server.routes.admin import record_sign_in, record_user_event
 from crb.server.routes.runs import append_system_event, commit_audited, system_trace_id
 from crb.server.settings import Settings
 from crb.store.models import User
@@ -137,8 +138,10 @@ def _record_failed_login(db: Session, username: str) -> None:
 
     On the account's own trail when the name is a local account (its History shows who
     tried); otherwise one event with NO name on a shared trace — a person who typed their
-    password into the username box must not have it stored, and writing on both paths keeps
-    the response time from saying whether the account exists."""
+    password into the username box must not have it stored. An event is written on both
+    paths, and the password check costs the same either way (``_DUMMY_HASH``), but the audit
+    writes differ by path and the whole response has not been timed: that it does not say
+    whether the account exists is a hypothesis, not a guarantee (DL-068, CWE-208)."""
     known = find_local_user(db, username) if username else None
     if known is not None:
         record_user_event(
@@ -217,6 +220,8 @@ def login(
             raise ApiError(401, "invalid_credentials", "username or password is incorrect")
         account.last_login = _now()
         record_user_event(db, action="user.login", actor=uid, target=account, method="local")
+        # every sign-in, not just the latest: a recovery is timed to the FIRST after a reset
+        record_sign_in(db, user=account, by="local")
 
     commit_audited(db, _signed_in)
     user = db.get(User, uid) or user
@@ -497,6 +502,7 @@ def _complete_oidc(
             )
         user.last_login = _now()
         record_user_event(db, action="user.login", actor=user.id, target=user, method="oidc")
+        record_sign_in(db, user=user, by="oidc")
         signed_in.append(user)
 
     def _users_first() -> None:

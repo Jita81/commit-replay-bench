@@ -895,6 +895,44 @@ class TestStrengthen:
         again = learn.strengthening_backlog(cmap, [score], generated_at="y").items[0]
         assert again.id == item.id
 
+    def test_an_oracle_weak_cell_whose_scores_are_now_strong_is_not_called_a_control_escape(
+        self,
+    ) -> None:
+        """P-426: the map routed the cell ``oracle_weak`` under the rows' own (older) strength,
+        but every task's latest score now kills its mutants. The one cell-level item is chosen
+        by the reason the cell is held: this cell is held for its oracle, not for a control,
+        so its item is the re-measurement that lets the scores reach the route — never the
+        negative-control item, which would send a person hunting an escape that never
+        happened."""
+        cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
+        assert cmap.cells[0].reason_code == REASON_ORACLE_WEAK
+        scores = []
+        for task in (TASK_A, TASK_B):
+            strong = _score(task, oracle_strength=0.95, killed=3, escaped=[], total=3)
+            strong["escaped"] = 0
+            scores.append(strong)
+        bl = learn.strengthening_backlog(cmap, scores, generated_at="x")
+        (item,) = bl.items
+        assert item.labels["reason_code"] == REASON_ORACLE_WEAK
+        assert "negative control" not in item.description
+        assert "controls run" not in " ".join(item.acceptance_criteria)
+        assert "re-measure" in item.title
+        assert assess(BacklogItem.from_dict(item.to_dict())).route_hint == ROUTE_BUILD
+        # the controls item keeps its own id space: the two can never collide on one cell
+        controls = ControlsVerdict(passed=True, constructible=6, total=7, escapes=1)
+        held = build_capability_map(
+            [
+                _clean(
+                    task_id=TASK_A, oracle_strength=0.95, repo="click", language="python", size="S"
+                )
+            ]
+            * 10,
+            projection=PROJECTION_CLASS_SIZE,
+            controls=controls,
+        )
+        other = learn.strengthening_backlog(held, scores[:1], generated_at="x").items[0]
+        assert other.id != item.id and "negative control" in other.description
+
     def test_strong_scored_task_in_a_held_cell_is_not_work(self) -> None:
         cmap = build_capability_map(_weak_cell_rows(), projection=PROJECTION_CLASS_SIZE)
         strong = _score(TASK_A, oracle_strength=0.95, killed=3, escaped=[], total=3)
@@ -1024,6 +1062,21 @@ def _stale_ledger(tmp_path: Path) -> list[GradeRow]:
         _clean(task_id="e" * 40, repo="cobra", size="M", apparatus_version="2.1"),
     ]
     return _chained(rows, tmp_path)
+
+
+def test_the_api_docs_describe_up_to_date_as_the_served_label_and_mode(tmp_path: Path) -> None:
+    """P-428: each ``up_to_date`` entry is ``<cell label>|<mode>``, not a bare cell label,
+    so a client that compares it with ``cells[].label`` never finds a match. Every
+    ``docs/API.md`` description of the field must name the shape the plan serves."""
+    plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
+    (entry,) = plan.up_to_date
+    label, _, mode = entry.rpartition("|")
+    assert mode in ("sighted", "blind") and label.count("|") == 6
+    api = (Path(__file__).resolve().parents[1] / "docs" / "API.md").read_text()
+    described = [line for line in api.splitlines() if "up_to_date[]" in line]
+    assert len(described) == 2
+    for line in described:
+        assert "up_to_date[] (one `<cell label>|<mode>` string" in line, line
 
 
 class TestRemeasure:

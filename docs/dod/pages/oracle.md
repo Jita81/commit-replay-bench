@@ -18,13 +18,12 @@ must catch, and the mutation strength of the tests on the changed lines. A weak 
 cell to a human whatever its pass rate (`help.ts` About copy for `/oracle`; eyebrow
 `Instrument · Oracle`, `OraclePage.tsx:218`).
 
-the `INSTRUMENT` list in `Layout.tsx`), the Baseline door `Oracle and controls` (`ResultsPage.tsx`), the
-repository's Next steps `Oracle adequacy` (`RepoDetail.tsx`) or the Learn strengthen
-report (`LearnPage.tsx`), always with `?repo=`. Leave with: per task and per cell the
-**Entry → exit.** Arrive by the Instrument nav entry `Oracle` (every role, like the
-API: `INSTRUMENT` in `Layout.tsx`), the Baseline door `Oracle and controls` (`ResultsPage.tsx:249`), the
-strength, band and the gate a green licenses; the negative-controls gate with the server's
-verdict and the seven control rows. Exits as coded: a task id opens `/tasks/:repo/:taskId`
+**Entry → exit.** Arrive by the Instrument nav entry `Oracle` (every role, like the API:
+`INSTRUMENT` in `Layout.tsx`), the Baseline door `Oracle and controls` (`ResultsPage.tsx`), the
+repository's Next steps `Oracle adequacy` (`RepoDetail.tsx`) or the Learn strengthen report
+(`LearnPage.tsx`), always with `?repo=`. Leave with: per task and per cell the strength, band
+and the gate a green licenses; the negative-controls gate with the server's verdict and the
+seven control rows. Exits as coded: a task id opens `/tasks/:repo/:taskId`
 (`OraclePage.tsx:98,187`); no repo → `Choose a repo` with one link to `/connect` (`:223`); an
 operator with nothing scored or no controls report gets `Run oracle` → `/runs?repo=&new=oracle`
 (`:242`) and `Run controls` → `/runs?repo=&new=controls` (`:134`).
