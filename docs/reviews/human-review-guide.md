@@ -14,7 +14,7 @@ against `reboot/v2 @ 655e732` (2026-09-13/14) and **re-baselined after the indep
 (`signoffs/2026-09-14-fable-ai-pass.md`, 9 findings on `842875b`) closed its findings: every line
 number below is from the re-baselined tree, every "Observed" line names the commit it was observed on,
 and every exercise whose expected outcome CHANGED says what it used to be. If yours differs, that is a
-finding.
+finding **[hypothesis — recorded at the time; not re-checked since]**.
 
 ---
 
@@ -110,7 +110,7 @@ appended** exactly that on `842875b`; it must now raise `LedgerIntegrityError: �
 is not what apparatus '2.2' (provenance 'measured') records — expected v5`. The legacy set is reachable
 only with `provenance="imported:…"` and `apparatus_version="1.0-census"`, and then the first three belts
 are still checked and `source_changed` must be `None`. Also try a `v5` row stamped `2.1` and a `v4` row
-stamped `2.2` (both refused), and confirm the census import in exercise 7 still loads.
+stamped `2.2` (both refused), and confirm the census import in exercise 7 still loads **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### Exercise 2 — edit a ledger row in SQLite (trigger must abort)
 
@@ -137,7 +137,7 @@ sqlite3 "$CRB_HOME/crb.db" "select seq, clean, tests_unmodified, disqualified, s
 **Expected:** **ten** triggers (`{grades,events,signoffs,evidence,reviews}_no_{update,delete}` — the
 guide said eight before the `reviews` table existed); both statements fail with `Error: stepping,
 grades is append-only (19)`, exit 19; the row is unchanged. Observed 2026-09-13 (eight) and 2026-09-14
-on `842875b` (ten): exactly that.
+on `842875b` (ten): exactly that **[hypothesis — recorded at the time; not re-checked since]**.
 
 Then try harder: `DROP TRIGGER grades_no_update;` succeeds for anyone with DDL rights on the file —
 this is a property of SQLite, not a bug, but it means **the triggers protect against mistakes, not
@@ -188,7 +188,7 @@ exit=1
 
 Variants worth five minutes each: tamper only whitespace / a trailing newline (belt 1 is byte-level —
 must still DQ); `--mode blind` with the test rewritten before grading (belt 0 DQ: "builder modified
-test files pre-overlay").
+test files pre-overlay") **[hypothesis — an estimate, not a measurement]**.
 
 **Exercise 3b — regress a neighbour and silence its test (sighted).** Belt 1 protects the *target*
 tests only; belt 3 compares failing sets. So break `add()`, then rewrite the neighbouring
@@ -325,7 +325,7 @@ perl/node equivalents); script files (`bash ./x.sh`, `make`, `python x.py`); and
 bypass here cannot mint a false pass (finding 1's fixes hold whatever the builder ran), but it lets a
 builder recover the real patch *unrecorded*, which contaminates the measurement (a copied gold patch
 grades clean). The sealed container (`CRB_BUILDER__EXECUTOR=docker`, file 9) is the belt for that: the
-answer is not in the container. Record any new spelling as a finding for the corpus, with the line.
+answer is not in the container. Record any new spelling as a finding for the corpus, with the line **[hypothesis — an estimate, not a measurement]**.
 
 ### Exercise 6 — verify the hash chain with `crb ledger verify`, then break it
 
@@ -361,14 +361,14 @@ DB ledger refuses `pack_hash_mismatch` (the pack is resolved through row A); the
 pack whose `pack_hash` does not recompute is refused as not the row's
 (`tests/test_store_reviews.py::test_append_anchors_to_the_reviewed_rows_pack_never_the_records`,
 `tests/test_review.py::test_jsonl_ledger_requires_the_reviewed_rows_pack_for_a_verdict`). The API
-(`POST /reviews`) always resolved the pack from the row; the store-level contract now matches it.
+(`POST /reviews`) always resolved the pack from the row; the store-level contract now matches it **[hypothesis — recorded at the time; not re-checked since]**.
 
 **Exercise 6c — sign off a cell whose oracle was never measured (must be refused).** Twenty clean
 rows with `oracle_strength=None`, controls passed 7/7: on `842875b` the router said `deliver` and
 `evaluate_signoff` refused nothing (finding 3). **Expected now:** refusal `oracle_unmeasured` (policy
 v2, `core/signoff.py`), in the same family as `controls_unmeasured` and **not relaxable** by
 `CRB_SIGNOFF__*`; `false_q1` and `attestation` remain non-overridable. `tests/test_signoff.py` pins
-the decider's rule.
+the decider's rule **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### Exercise 7 — re-derive false-Q1 = 0 from the census JSONL
 
@@ -376,7 +376,7 @@ The census (1,071 rows, 24 public repos) is vendored under `data/census-2026-07-
 `tests/test_census_gate.py` re-derives it on every PR. Do it yourself with `sqlite3` alone. The review's
 Appendix A SQL is written for a live server DB whose `grades` rows all carry four belts; **706 census rows
 predate belt 4** (`belt_set = v3-legacy`, no `source_changed` key), so the belt-4 clause must be applied
-only where the belt was recorded — the naive appendix SQL counts 682 phantom "violations".
+only where the belt was recorded — the naive appendix SQL counts 682 phantom "violations" **[measured — n = 1,071 rows; method: the vendored census, re-derived by tests/test_census_gate.py on every pull request; apparatus 1.0-census]**.
 
 ```bash
 (cd data/census-2026-07-08 && shasum -a 256 -c MANIFEST.sha256 | grep -vc ': OK$')   # 0 = every file intact

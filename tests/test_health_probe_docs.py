@@ -8,9 +8,11 @@ What it does: Collects the probes the readiness route actually serves (every pro
               fail, so the test needs no database, no docker daemon and no network) and
               refuses a guide that omits one by name or states the wrong count — DEPLOYMENT
               §9.3 said seven probes while ``/health`` served eleven, and API.md said ten and
-              left out ``provision`` (G-403; docs/PREVENTION.md P-126). And refuses a §9.3
-              that names other probes as raising a banner than the UI raises one for: every
-              UI reader of a probe is classified in ``BANNERS`` (P-188). And refuses a guide
+              left out ``provision`` (G-403; docs/PREVENTION.md P-126) — and refuses any
+              "N probes" on DEPLOYMENT, API, ARCHITECTURE or OPERATOR that is not the served
+              count (§9's opening line kept "seven"; P-238). And refuses a §9.3 that names other
+              probes as raising a banner than the UI raises one for: every UI reader of a probe
+              is classified in ``BANNERS`` (P-188). And refuses a guide
               sentence that says the ``append_only`` probe refused an UPDATE without saying it
               is tried only once ``grades`` has a row (P-233).
 How:          ``collect_health`` over a session factory that raises and probe functions that
@@ -164,6 +166,27 @@ def test_the_guide_names_the_probes_that_raise_a_banner(
     assert named == banner, (
         f"DEPLOYMENT §9.3 says {sorted(named)} raise a banner; the UI raises one for {sorted(banner)}"
     )
+
+
+_COUNT = re.compile(r"\b(\d+|" + "|".join(WORDS.values()) + r")\s+probes\b", re.I)
+
+
+def test_no_guide_states_another_count_of_health_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-126's first test read only DEPLOYMENT §9.3 and API.md's row, so §9's own opening
+    line kept "seven probes" while ``/health`` served eleven (found when the claims gate
+    widened to DEPLOYMENT, G-929; docs/PREVENTION.md P-238). Every "N probes" on the pages
+    an operator reads the endpoint from must now state the served count."""
+    served = len(_served(tmp_path, monkeypatch))
+    wrong = []
+    for rel in ("docs/DEPLOYMENT.md", "docs/API.md", "docs/ARCHITECTURE.md", "docs/OPERATOR.md"):
+        for m in _COUNT.finditer((ROOT / rel).read_text(encoding="utf-8")):
+            word = m.group(1).lower()
+            n = int(word) if word.isdigit() else {v: k for k, v in WORDS.items()}.get(word)
+            if n != served:
+                wrong.append(f"{rel}: {m.group(0)!r}")
+    assert not wrong, f"/health serves {served} probes; these say otherwise: {wrong}"
 
 
 #: The guides an operator reads the probes from; the records (the register, the decision

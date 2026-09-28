@@ -3,7 +3,7 @@
 **Question asked:** can the factory take a real backlog item on a real repository from a frozen
 backlog to a branch and a pull request, under the same governance as measurement — a RED proof
 before any build, the four belts and the lint belt, the route gate on the signed map, an
-independent review — with every step on the evidence chain? And what does it cost?
+independent review — with every step on the evidence chain? And what does it cost? **[hypothesis — recorded at the time; not re-checked since]**
 
 **Claims in this record.** Everything quoted from the run — the belts, the costs, the turns,
 the token counts, the durations, the route line, the ledger count — is **[measured — run
@@ -19,7 +19,7 @@ hashes name — they are kept byte-for-byte and carry no claim tags because they
 opened on the fork [Jita81/cobra](https://github.com/Jita81/cobra) (`main` = `adbc881`,
 byte-identical to `spf13/cobra` that day) — nothing was pushed to `main`, nothing to
 `spf13/cobra`. The run also found two product defects, a third rule the rework exposed, and one thing the reviewer was right
-about; they are the second half of this record.
+about; they are the second half of this record **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 
 ## Method
 
@@ -34,7 +34,7 @@ The chain, as the product recorded it (`GET /factory/cobra/evidence`, `run e9acd
    to the GitHub App installation `#163031176` (`Contents: write`, `Pull requests: write`)
    through *Connection → Connect from GitHub → Link to an existing repository* (PR #34): the
    row kept its name and its evidence; its URL became `https://github.com/Jita81/cobra.git`;
-   the events table carries `repo.github_linked` with both URLs.
+   the events table carries `repo.github_linked` with both URLs **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 2. **Freeze.** A two-item backlog, hash `d10c527f366f1dea…`, registered through the Factory
    page's *paste JSON* route with the operator-authored oracles (the file is
    [2026-09-19-b1b/backlog.json](2026-09-19-b1b/backlog.json); the tests are beside it). Both
@@ -67,7 +67,7 @@ constraints (for `cobra-1918`: "by identity of the cobra-built command objects, 
 | Ledger rows | `3416f2fa…`, and the rework's | `b79c22ec…` |
 
 Totals: 3 builds, 3 clean, 0 disqualified, 0 harness errors, **$0.69**, 11 min wall clock
-**[measured — `/runs/e9acd89c…`, apparatus 2.2, local executor: a development reading]**.
+**[hypothesis, recorded as measured — n = 3 builds; method: the run's own record on the operator's stack, `/runs/e9acd89c…`, not in this repository; apparatus 2.2, local executor: a development reading]**.
 
 The fixes themselves, for a reader who knows cobra: PR #1 passes `cmd.Flags().Args()` to the
 help function in the `flag.ErrHelp` branch and `Find`'s remaining args from the `help` command;
@@ -115,7 +115,7 @@ the name-match the adversarial pass had shown would slip through a weaker test.
 5. **The deployment lived in `/private/tmp`**, where macOS deletes untouched files after
    about three days: it removed the stored Claude Code token, the restart script and the
    `HEAD` and `config` of every clone before the run. The stack now lives in `~/crb-stack`;
-   docs/DEPLOYMENT.md should say so for any operator running a trial on a Mac.
+   docs/DEPLOYMENT.md should say so for any operator running a trial on a Mac **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 
 ## What is honest about the dev ledger after this
 
@@ -124,8 +124,8 @@ the name-match the adversarial pass had shown would slip through a weaker test.
   `main` is the deployment-side guard and was not yet enabled when this ran.
 - Three factory rows joined the cobra ledger under the `process: factory` label. They were
   built against operator-authored oracles, not mined commits; a reader pooling the cell should
-  know the map now mixes the two (finding 2 is the sharper version of this).
-- 602 → 605 rows, chain intact, false-Q1 0 **[measured — `/ledger/verify` after the run]**.
+  know the map now mixes the two (finding 2 is the sharper version of this) **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
+- 602 → 605 rows, chain intact, false-Q1 0 **[hypothesis, recorded as measured — n = 605 rows; method: the stack's ledger verification read after the run, not in this repository; apparatus 2.2]**.
 
 ## How to repeat it
 

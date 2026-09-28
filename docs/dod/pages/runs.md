@@ -17,7 +17,7 @@ updated: 2026-09-26
 
 **Entry → exit.** Arrive from the instrument nav "Runs" (operator and above — `INSTRUMENT` in `Layout.tsx`), from the Measure page's "Every knob", from a repository's next steps, or from an empty state carrying `?new=replay|mine|oracle|controls` (Capability, Routing, Oracle, Repo detail). Filter by repository, kind and status (in the URL); a row or its id opens `/runs/:id`. An operator presses "Start run", fills the dialog (kind, mode, builder, model, builder config, per-run budget caps, ladder rungs, retention, task limit) and lands on the new run's page (`RunsPage.tsx:187`).
 
-**Non-goals.** Does not start a probe, a label or a factory run (the repository page, the CLI and the Factory page do); does not show a run's rows or log (the run page does); does not page beyond the newest 200 runs; does not set a deployment or repository budget — budget is per run, in the dialog.
+**Non-goals.** Does not start a probe, a label or a factory run (the repository page, the CLI and the Factory page do); does not show a run's rows or log (the run page does); does not page beyond the newest 200 runs; does not set a deployment or repository budget — budget is per run, in the dialog **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 ## Definition of done
 

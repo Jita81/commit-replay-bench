@@ -37,7 +37,7 @@ end-to-end measurement. Every number quoted from the *prototype* (its rates, cos
 is the prototype's own illustration and is **[aspiration]** — it was never trusted and was
 not carried into the product. Counts of screens or tasks ("seven tasks", "twelve screens")
 are counts of UI elements, not measurements, and carry no `n`. No claim here is
-**[measured]**.
+`[measured]`.
 
 ## Verdict
 
