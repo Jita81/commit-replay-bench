@@ -75,6 +75,7 @@ from crb.core.value import (
     REVIEWS_FROM_EXPORT,
     ReviewVerdict,
     ValueRow,
+    select_rows,
     value_report,
     value_row_from_grade,
 )
@@ -263,7 +264,10 @@ def render_markdown(
         usd_per_gbp=usd_per_gbp,
         reviews_source=REVIEWS_FROM_EXPORT,
     ).to_dict()
-    scoped = [r for r in rows if apparatus == "all" or r.apparatus_version == rep["apparatus"]]
+    # The report's own scope, never a re-derivation: its apparatus rule (`select_rows`) and the
+    # one checks arm its headline reads (ADR-0024 - never two), so every figure below counts
+    # the rows the served figures beside it count (P-407).
+    scoped = [r for r in select_rows(rows, apparatus=apparatus) if r.checks_arm == rep["checks"]]
     app = f"apparatus {', '.join(rep['apparatus_versions']) or '—'}" + (
         " (pooled)" if rep["pooled"] else ""
     )
