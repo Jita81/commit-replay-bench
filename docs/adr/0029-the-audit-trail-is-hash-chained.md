@@ -51,11 +51,11 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
    Every column of `events` is hashed: `EVENT_CHAIN_FIELDS` plus `EVENT_CHAIN_UNHASHED`
    (empty) must equal the table's columns, and a test fails until a new column is hashed
    under a new chain schema or named unhashed with its reason here (P-247).
-3. **Existing rows are chained by the migration** (revision 0013): in id order from genesis, with a frozen copy of the rule that a
-   test holds to the runtime one, so the same rows give the same hashes on every run and
-   either dialect. The `events` update trigger is dropped for the back-fill and every
-   trigger is re-installed in the same revision. After the back-fill the revision drops the
-   columns' server default and adds the CHECK (item 2).
+3. **Existing rows are chained by the migration** (revision 0013): in id order from genesis, with a
+   frozen copy of the rule that a test holds to the runtime one, so the same rows give the same
+   hashes on every run and either dialect. The `events` update trigger is dropped for the back-fill
+   and every trigger is re-installed in the same revision. After the back-fill the revision drops
+   the columns' server default and adds the CHECK (item 2).
 4. **The walk is served.** `GET /ledger/verify` walks the audit trail after the grade
    ledger and serves `events: {rows, chain_ok, broken_at, detail, head_row_hash, walk,
    full_walk_at}`; `ok` now also needs the audit trail intact. Between full walks the route

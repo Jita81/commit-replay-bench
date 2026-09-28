@@ -15,6 +15,8 @@ How:          Pure: the readings, rows and sign-off records are built in memory 
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (items 2, 6 and 8)
 Works with:   src/crb/server/factory_standard.py (under test), tests/fixtures/readings.py
+              (sealed rows and registered readings), src/crb/core/signoff.py (the records a
+              standard is signed by)
 Tested by:    this file
 Touch when:   never for a new repository; the binding's scope or the sign-off's binding changes.
 """

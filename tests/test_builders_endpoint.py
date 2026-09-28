@@ -313,15 +313,17 @@ def _one_call(model: str = "qwen-local") -> oc.ModelTurn:
 def test_the_configured_timeout_is_honoured_both_ways(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    slow = FakeModel(delay_s=2.5)  # a model still generating when the configured 1 s runs out
+    # a model still generating when the configured 1 s runs out, long after the bound below
+    # (the bound is at least 5 s: a shorter one times the machine, not the code — P-014)
+    slow = FakeModel(delay_s=8.0)
     try:
         _point_at(monkeypatch, slow, CRB_OPENAI_TIMEOUT_S="1", CRB_OPENAI_MAX_RETRIES="0")
         started = time.monotonic()
         with pytest.raises(oc.ModelCallError, match="Timeout"):
             _one_call()
-        assert time.monotonic() - started < 2.4  # gave up at the configured second
+        assert time.monotonic() - started < 6.0  # gave up at the configured second
         assert len(slow.requests) == 1  # CRB_OPENAI_MAX_RETRIES=0: no regeneration
-        monkeypatch.setenv("CRB_OPENAI_TIMEOUT_S", "10")
+        monkeypatch.setenv("CRB_OPENAI_TIMEOUT_S", "30")
         turn = _one_call()
         assert turn.content == "done" and len(slow.requests) == 2
     finally:

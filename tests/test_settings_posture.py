@@ -335,7 +335,7 @@ class TestTheOverrideNamesWhoSetIt:
             create_local_user(db, username="vic", password="p" * 16, role="viewer")
             gone = create_local_user(db, username="gone", password="p" * 16, role="admin")
             db.commit()
-            set_user_active(db, gone, False)
+            set_user_active(db, gone, False, sign_in=None)
             db.commit()
         with (
             pytest.raises(unsealed_override.OverrideRefused, match=why),

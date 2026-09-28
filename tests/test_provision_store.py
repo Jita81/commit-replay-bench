@@ -70,7 +70,7 @@ def test_seal_is_atomic_and_read_only(tmp_path: Path) -> None:
     # the mode bits above are the seal; the kernel refusing the write is their effect for
     # every uid but root with CAP_DAC_OVERRIDE, which DAC does not stop (product.evidence.205:
     # the suite runs as root on a fresh clone) — there, a changed byte is caught by the digest
-    if permissions_bind():
+    if os.geteuid() != 0 and permissions_bind():
         with pytest.raises(PermissionError):
             (sealed.path / "gomod" / "c.txt").write_bytes(b"tampered")
     # the store hands out a read-only mount that validates at use

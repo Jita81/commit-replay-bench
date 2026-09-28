@@ -11,9 +11,9 @@ What it does: ``every_cell_proven(monkeypatch, arm)`` patches ``bind_readers`` (
 How:          ``monkeypatch.setattr`` on the module both callers reach it through.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 8)
-Works with:   src/crb/server/factory_standard.py (the seam), tests/test_worker.py,
-              tests/test_worker_fetch.py, tests/test_intake_worker.py,
-              tests/test_server_routes_factory.py, tests/test_server_routes_intake.py
+Works with:   src/crb/server/factory_standard.py (the seam it patches), tests/test_worker.py
+              (factory runs that build), tests/test_intake_worker.py (the timed poll's
+              feedback), tests/test_server_routes_intake.py (the on-demand poll)
 Tested by:    the tests above (a factory run builds only when a cell is proven)
 Touch when:   never for a new repository; the binding's signature changes.
 """

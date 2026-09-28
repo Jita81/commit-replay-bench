@@ -32,9 +32,10 @@ ADRs:         docs/adr/0026-the-context-standard.md (items 1, 2, 6 and 8),
               docs/adr/0025-routing-v2.md, docs/adr/0021-factory-review-before-delivery.md,
               docs/adr/0029-the-audit-trail-is-hash-chained.md,
               docs/adr/0030-a-run-keeps-its-spend-cap.md
-Works with:   src/crb/factory/loop.py, src/crb/factory/standard.py,
-              src/crb/server/factory_standard.py, src/crb/server/spend_cap.py,
-              tests/fixtures/proven.py, tests/test_factory_loop.py (the fakes)
+Works with:   src/crb/factory/loop.py (the chain under test), src/crb/server/factory_standard.py
+              (the gate's store-bound readers), src/crb/server/spend_cap.py (the cap asked
+              before the item), tests/fixtures/proven.py (tasks, rows, oracle, controls),
+              tests/test_factory_loop.py (the fake builder, test author and credentials)
 Tested by:    this file
 Touch when:   never for a new repository; a gate is added to the delivery chain (add its step
               and its refusal here); the look rule's first look changes.

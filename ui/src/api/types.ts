@@ -1302,6 +1302,14 @@ export interface EventsVerify {
  * audit trail's chain, false-Q1 = 0 and every clean row's pack all hold; `chain_ok` and
  * `broken_at` are the grade chain's alone, so a reader is told WHICH part failed.
  */
+/** One hash-chained table walked from its stored columns (``ChainVerifyOut``). */
+export interface ChainVerify {
+  rows: number
+  chain_ok: boolean
+  broken_at: number | null
+  detail: string
+}
+
 export interface LedgerVerify {
   rows: number
   ok: boolean
@@ -1310,6 +1318,9 @@ export interface LedgerVerify {
   broken_at: number | null
   detail: string
   clean_without_pack: number
+  /** The sign-off and review chains, walked the same way (EI-6). */
+  signoffs: ChainVerify
+  reviews: ChainVerify
   verified_at: string
   /** The grade ledger's last `row_hash` (`""` when empty), to record outside the store. */
   head_row_hash: string

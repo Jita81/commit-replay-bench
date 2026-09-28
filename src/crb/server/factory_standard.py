@@ -33,8 +33,8 @@ Works with:   src/crb/factory/standard.py (the gate, ``Readers``, ``CellRef``),
               src/crb/server/routes/readings.py (``load_readings``, ``standard_for``),
               src/crb/server/prevention_state.py (``current_checks_arm``),
               src/crb/server/posture_view.py (``deployment_posture_class``),
-              src/crb/server/worker.py, src/crb/server/intake.py and
-              src/crb/server/routes/factory.py (the three callers)
+              src/crb/server/worker.py (binds it once per run and per intake pass),
+              src/crb/server/routes/factory.py (the task preview, calibration and polls)
 Tested by:    tests/test_factory_standard_binding.py,
               tests/test_governed_delivery_e2e.py
 Touch when:   never for a new repository; a new scope a reading counts on (bind it here,
