@@ -146,15 +146,14 @@ of that stream stays in Wave 4.
 | E2 · economics in one scope | G-990, G-991, G-989 | a cell's flat cost and latency means, the Pareto frontier, the best config and the forecast's price read one apparatus version and one posture class or are withheld; `GET /value` filters by posture class and refuses to pool two; a help-copy ratchet ties "not yet served" sentences to the API's fields (opened by Wave 1's stream E) |
 | S0 · the approver task · from `feat/w2-s` | G-477 | Home task 7 reads the real two-person readiness: Completed only when an approver other than the operator who would queue exists, never on the bootstrap admin alone |
 | A · the security review's auth findings · `fix/audit-a` | G-750, G-751, G-752, G-753, G-754 | the operator's internal security and governance review (2026-09-27): the login limiter reserves an attempt before it checks the password, so a burst cannot outrun it (AUTH-1); the identity provider's claims never demote the last active admin (AUTH-2); deactivation ends an account's sessions for good (AUTH-3); every credential change and every sign-out is an event naming who made it (EI-8); the re-check's two residuals — the last-admin count takes only admins who can sign in, and a finished Claude sign-in is recorded with its own time though nobody reads it back (G-754) |
-
-The builder-endpoint work parked on `feat/w3-x` (stream X) joins this wave when its criteria
-reach the record; until then it is not a wave item.
+| X · a configured builder endpoint | G-611 | every OpenAI-compatible builder and the labeller call the endpoint `CRB_OPENAI_BASE_URL` names, stamp its provider and use its timeout, reply length and retry count (`product.truth.26`, brought in from the parked `feat/w3-x`); the factory's test author stamps the provider of the endpoint it calls and refuses a rung naming another (`product.truth.27`) |
 
 **Done when:** truth.202, truth.203, posture.204, roles.7, evidence.205, go-live.15, go-live.20,
 claims.21, value.111, truth.206, truth.207, truth.214, truth.216 and claims.210 read `met`, as
 do the learn stream's automation.25 and measure.27, intake's recovery.23 and manufacture's
-non-goals.12, and so do `home.truth.13` and `sign-off-a-cell.truth.3` (G-477);
-`APPARATUS_VERSION` reads 2.4; tests show a cell of many attempts on too few commits routing `calibrate`, rows of more than one context arm or class-set version refused a
+non-goals.12, and so do `home.truth.13` and `sign-off-a-cell.truth.3` (G-477), and product
+truth.26 and truth.27; `APPARATUS_VERSION` reads 2.4; tests show a cell of many attempts on too
+few commits routing `calibrate`, rows of more than one context arm or class-set version refused a
 pooled reading, a planted leaking context line refused, a ticket in a cell with no proven
 standard stopped before any spend with delivery off, a calibration build that never opens a pull
 request, the code's look rule reproducing ADR-0026's operating characteristics, a build that

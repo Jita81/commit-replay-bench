@@ -49,7 +49,9 @@ What it does: Turns a rung label into a test author whose identity the loop's ex
               model for a single test file in the repository's own conventions, re-asking on
               a reply it cannot parse or a path the repository does not call a test, and
               refuses to return anything else. Meters every call (``calls``, and the cost on
-              each ``author.attempt`` event), so a run's spend cap counts it (F5b).
+              each ``author.attempt`` event), so a run's spend cap counts it (F5b). It calls
+              the endpoint the deployment configures and stamps that endpoint's provider
+              (``resolve_endpoint``), refusing a rung naming another.
 How:          ``author_for_rung`` (validates the builder name against the registry) →
               ``RungTestAuthor.author`` = read the repo's test examples → ``build_messages``
               → one chat call → ``parse_authored`` → path check → ``AuthoredTest``; the
@@ -67,7 +69,9 @@ Works with:   src/crb/factory/testfirst.py (the ``TestAuthor`` protocol, ``autho
               ladder rung uses), src/crb/builders/__init__.py (``builder_names`` — the closed
               label space), src/crb/server/worker.py (the served deployment's setting and
               per-run override)
-Tested by:    tests/test_factory_author.py, tests/test_worker_test_author.py
+Tested by:    tests/test_factory_author.py, tests/test_worker_test_author.py,
+              tests/test_builders_endpoint.py (the configured endpoint is the one called; its
+              provider is stamped, never identity — product.truth.27)
 Touch when:   never for a new repository — the test layout comes from the repo config; another
               authoring process is added (a second ``TestAuthor`` and a way to name it); the reply
               format changes (``parse_authored`` and its test move together).
@@ -92,7 +96,7 @@ from crb.builders.openai_client import (
     ChatReply,
     EndpointConfig,
     make_chat,
-    resolved_endpoint,
+    resolve_endpoint,
 )
 from crb.core.spec import RepoConfig
 from crb.core.workspace import Workspace
@@ -253,8 +257,11 @@ class RungTestAuthor:
             raise ValueError("a test author needs at least one attempt")
         self.name = name.strip()
         self.model = model.strip()
-        self.endpoint = endpoint
-        self.provider = provider or resolved_endpoint(endpoint).provider
+        # the configured endpoint (CRB_OPENAI_BASE_URL …) when none is passed, and the
+        # provider it IS: a rung naming another provider is refused here, before any call
+        # (ProviderMismatch). The provider is stamped, never identity — the refusal that
+        # keeps the author off the ladder compares builder:model only (ADR-0021)
+        self.endpoint, self.provider = resolve_endpoint(endpoint, provider, seam=chat_fn)
         self._chat_fn = chat_fn
         self.attempts = attempts
         self.max_examples = max_examples
@@ -273,6 +280,7 @@ class RungTestAuthor:
             "model": self.model,
             "provider": self.provider,
             "process": "one-shot test-first authoring, re-asked on an unusable reply",
+            "endpoint": self.endpoint.to_dict(),
             "attempts": self.attempts,
         }
 
@@ -332,6 +340,7 @@ class RungTestAuthor:
                 "author.attempt",
                 item=item.id,
                 attempt=attempt,
+                provider=self.provider,
                 path=path,
                 reason=reason,
                 cost_usd=cost_usd,

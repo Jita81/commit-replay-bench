@@ -664,6 +664,62 @@ schedule — the token is long-lived):
    evaluation is over — `auth: cli` is a developer/evaluation mode; production runs use
    `ANTHROPIC_API_KEY` on the worker and never read the file.
 
+#### 3.0.2 Pointing the OpenAI-compatible builders at your own endpoint
+
+`editblock`, `openai_agent`, the intent labeller and the factory's test author all call one
+endpoint: the one the **worker's** environment names. With nothing set it is Cerebras (`CEREBRAS_API_KEY`). To use
+a self-hosted model (vLLM, llama-server) or another OpenAI-compatible provider:
+
+```bash
+export CRB_OPENAI_BASE_URL=http://gpu-box.internal:8080/v1
+export CRB_OPENAI_KEY_ENV=GPU_BOX_KEY            # the NAME of the variable holding the key
+export CRB_OPENAI_TIMEOUT_S=900                  # default 120; 1–3600
+export CRB_OPENAI_MAX_RETRIES=1                  # default 4; 0–10 — each retry regenerates
+export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
+```
+
+- **What a row says.** The provider on every row, cell and label is the endpoint's own —
+  `cerebras` for a host in the `cerebras.ai` domain, `azure` for an Azure endpoint in an Azure
+  domain (`azure.com`, `azure-api.net`, `azure.us`, `azure.cn`), or otherwise the URL's host
+  and port (`gpu-box.internal:8080`) — so a self-hosted model is its own cell, never pooled
+  with Cerebras, even when its host name contains `cerebras` (a mirror). A host with no dot
+  and no port (a compose or Kubernetes service called `cerebras`) is stamped `host:cerebras`:
+  a provider's name is never taken from a host outside that provider's domain. Write rungs as
+  `openai_agent:qwen3@gpu-box.internal:8080` (the `@` form: a host carries a `:`) or leave the
+  provider empty and it is filled in.
+- **Never put the key in the URL.** The URL is stamped on every row and the ledger is
+  append-only, so a `CRB_OPENAI_BASE_URL` (or `CRB_AZURE_ENDPOINT`) with a user name or key
+  before the host (`https://user:key@host/v1`), a query string (`?api-key=…`) or a fragment is
+  refused by name, and the value is not repeated in the message. The key goes in the variable
+  `CRB_OPENAI_KEY_ENV` names.
+- **What it refuses.** A rung that names a provider the endpoint is not
+  (`openai_agent:qwen3@cerebras` while the URL is your server) is refused when you submit the
+  run — 422 `builder_provider_mismatch`, with the fix in the sentence and nothing queued — and
+  a run already queued stops the attempt as `builder unavailable: ProviderMismatch: …` before
+  any call is made. The factory's test author (the run's `test_author`, or
+  `CRB_FACTORY__TEST_AUTHOR`) is checked the same way. A tuning value that is out of range or not a number stops it the same way and names
+  the variable. A run's `builder_config` cannot get round this: the keys that name a
+  builder's own seams (`model_fn`, `chat_fn`, `spawn`, `runner_factory`, `endpoint`,
+  `executor`) are refused by `POST /runs` with a 422.
+- **Reply length.** `CRB_OPENAI_MAX_TOKENS` is the reply cap of the builders, the test author
+  and the intent labeller. While it is unset the labeller keeps its own shorter cap of 400
+  tokens (a label is one short JSON object); set it for a reasoning model that needs longer,
+  or set `max_tokens` in a label run's `builder_config`, which wins.
+- **Timeouts.** A model that generates slowly needs a timeout longer than one reply takes:
+  at 15 tokens a second a 4,000-token reply takes about 270 s **[hypothesis — arithmetic from
+  a stated rate, not measured on a model]**. Keep retries low — a timed-out call is retried
+  from the start, so four retries can cost five full generations.
+- **Proof.** The request lands on the configured URL, the row carries its host, a mismatched
+  rung is refused and the timeout, reply length and retry count are the ones set **[measured —
+  n = 64 test cases in `tests/test_builders_endpoint.py`: 10 point a builder, the labeller or
+  the test author at a fake OpenAI-compatible server on 127.0.0.1 and check where the request
+  landed, what it carried and the provider stamped; the other 54 check the settings'
+  defaults and refusals, the provider rule, the seams a run request cannot set and a source
+  ratchet, and the module's own count; no model called; each fix reverted in turn made them
+  fail; apparatus 2.3]**.
+  The factory's test author (§10) follows the same rule: it calls this endpoint, stamps its
+  provider, and a test-author rung naming another provider is refused before any call.
+
 What you will see (the run's live log on `/runs/<id>`, and `crb` on the terminal):
 `mine.candidate` → `mine.red` / `mine.skip` → `mine.gold` → `build.*` → `grade.belt` (five
 per task with belt 5, `repo_lint_clean`; four on a repository without a lint plan) →
@@ -1085,6 +1141,19 @@ to the longest model in the pricing table (`CRB_PRICING_JSON` extends it), so
 `haiku` count as every model of that family. If the run fails this way, the message names
 the rung by its place on the ladder (`build rung 2`) and the model — change that rung's
 model, or give the test author a different one.
+
+**The author calls the endpoint the builders call.** Whatever builder name its rung spells,
+the test author asks the OpenAI-compatible endpoint the worker's environment names (§3.0.2):
+`CRB_OPENAI_BASE_URL`, or Azure when `CRB_AZURE_ENDPOINT` is set, or Cerebras when neither is.
+What authoring returns and each `author.attempt` it records carry that endpoint's provider —
+`cerebras`, `azure` or the URL's host. An author rung that names a different provider
+(`editblock:qwen3:cerebras` while the URL is your own server) is refused with
+`ProviderMismatch` before anything is built or paid for; name the host the endpoint is
+(`editblock:qwen3@gpu-box.internal:8080`) or leave the provider empty. The author never takes
+the run's provider: that belongs to the build ladder, so a Claude ladder with an author on
+Cerebras (`CRB_FACTORY__TEST_AUTHOR=editblock:gpt-oss-120b`) runs.
+The provider is recorded, never compared as identity: the same model behind two providers is
+still one model, and the refusal above still stops it.
 
 Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
 the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at

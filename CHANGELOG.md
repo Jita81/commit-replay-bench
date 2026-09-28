@@ -40,6 +40,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   that would reach pip as an option, and provisions click across its lock move. The chart
   ships the alert rules and one evidence store, carrying an older worker's evidence into it.
 
+- **A configured builder endpoint is the one called** (north-star Wave 2, stream X; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
+  `editblock`, `openai_agent`, the intent labeller and the factory's test author call the
+  endpoint `CRB_OPENAI_BASE_URL` (or Azure) names and stamp its provider: `azure`, `cerebras`
+  for the `cerebras.ai` domain, otherwise the URL's host and port. A URL carrying a key is
+  refused by name. A rung naming another provider is refused before any call, and a run's
+  `builder_config` cannot set a builder seam to skip that. The timeout, reply length and
+  retries are validated variables with stated defaults. The test author no longer takes the
+  run's provider, so a Claude ladder with a Cerebras author runs (ADR-0021).
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the
