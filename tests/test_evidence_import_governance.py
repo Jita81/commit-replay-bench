@@ -38,8 +38,8 @@ What it does: Replays the skeptic's end-to-end (fabricated rows imported → sig
 How:          ``make_env`` over the seed (``tests/fixtures/server_seed.py``) with the sign-off
               helpers (``tests/fixtures/signoff_seed.py``); rows cloned from the seed's
               accepted rows; the worker's ``_RunLedger`` with a stub run context; tampering
-              through raw SQL after dropping the table's append-only trigger, or with an
-              ``INSERT OR REPLACE`` that fires none.
+              through raw SQL after dropping the table's append-only trigger, as only the
+              tables' owner can (an ``INSERT OR REPLACE`` is refused since EI-5, DL-081).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md,
@@ -66,6 +66,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.ledger import CELL_FIELDS, GradeRow
@@ -434,13 +435,21 @@ def _tier(env: Env) -> str:
     return str(next(d for d in decisions if d["label"] == _DELIVER_LABEL)["verification_tier"])
 
 
-#: Moves the revocation row to another scope in place: ``INSERT OR REPLACE`` on its own
-#: ``seq`` fires no UPDATE or DELETE trigger, so the append-only triggers stay in force.
-_MOVE_REVOCATION = text(
+#: The skeptic's first route for moving the revocation row to another scope in place:
+#: ``INSERT OR REPLACE`` on its own ``seq``. Stream C's EI-5 fix (recursive triggers on every
+#: SQLite connection, DL-081) makes its implicit delete meet the append-only trigger, so it is
+#: refused; the test pins that and then moves the row as the tables' owner could.
+_REPLACE_REVOCATION = text(
     "INSERT OR REPLACE INTO signoffs (seq, signoff_id, repo, cell_json, tier, verifier, note,"
     " revoke, evidence_rows, created, prev_hash, row_hash)"
     " SELECT seq, signoff_id, repo, json_set(cell_json, '$.size', 'XL'), tier, verifier, note,"
     " revoke, evidence_rows, created, prev_hash, row_hash FROM signoffs WHERE revoke = 1"
+)
+
+#: The same move with the ``UPDATE`` trigger dropped first: the row's ``row_hash`` is left as
+#: it was, so only a chain walk can see it.
+_MOVE_REVOCATION = text(
+    "UPDATE signoffs SET cell_json = json_set(cell_json, '$.size', 'XL') WHERE revoke = 1"
 )
 
 
@@ -503,6 +512,9 @@ class TestSignoffAndReviewChainsAreVerified:
         r = env.post(f"/signoffs/{created['id']}/revoke", json={"note": "withdrawn"})
         assert r.status_code == 200, r.text
         assert _tier(env) == "automated-pass"
+        with env.factory() as s, pytest.raises(IntegrityError, match="append-only"):
+            s.execute(_REPLACE_REVOCATION)
+        _drop_trigger(env.factory, "signoffs")
         with env.factory() as s:
             s.execute(_MOVE_REVOCATION)
             s.commit()
