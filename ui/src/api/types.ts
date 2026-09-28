@@ -1960,6 +1960,45 @@ export interface IntakePoll {
 }
 
 /** `GET /factory/{repo}/intake` — the listener, the connection, the last poll, the column. */
+/** A held-out acceptance-test record as a page may show it: never the tests themselves. */
+export interface HeldOutRecord {
+  record_id: string
+  item_id: string
+  grant: string
+  author: string
+  written_at: string
+  sha256: string
+  paths: string[]
+}
+
+/** One ticket whose calibration build needs, or has, a second person's held-out acceptance
+ *  tests (`GET /factory/{repo}/acceptance`, ADR-0026 item 8). Never the ticket's own failing
+ *  test and never a build. */
+export interface AcceptanceAssignment {
+  item_id: string
+  title: string
+  description: string
+  acceptance_criteria: string[]
+  capability_class: string
+  size: string
+  grant: string
+  funded_by: string
+  funded_at: string
+  /** `open` (tests needed), `written`, `building` (the grant is claimed), `graded`. */
+  status: 'open' | 'written' | 'building' | 'graded'
+  can_write: boolean
+  /** Why the signed-in person may not write them; empty when they may. */
+  why_not: string
+  record: HeldOutRecord | null
+  /** `pass`, `fail` or `error` once the first attempt is graded; else empty. */
+  result: string
+}
+
+export interface AcceptanceAssignments {
+  repo: string
+  assignments: AcceptanceAssignment[]
+}
+
 export interface Intake {
   repo: string
   listener: IntakeListener
@@ -2370,13 +2409,34 @@ export interface LibraryStandard {
   state: string
   ceiling: boolean
   reading_id: string
+  /** For a ceiling: the forward (`S2`) reading registered to promote it, or null when none is
+   *  (ADR-0026 items 4 and 8). Absent on a server from before stream FWD. */
+  forward?: ForwardReadingState | null
+}
+
+/** A ceiling's forward reading, as the work type's page serves it. */
+export interface ForwardReadingState {
+  reading_id: string
+  rule: string
+  registered_at: string
+  /** The `S2` arm's look state: `look_pending`, `deliver`, `insufficient`. */
+  state: string
+  /** Tickets whose first attempt was graded on held-out tests and read, and the clean ones. */
+  counted: number
+  clean: number
+  /** Tickets enrolled: their held-out tests were written after the reading was registered. */
+  enrolled: number
+  next_look: number | null
+  /** Tickets still needed before that look can be read. */
+  needed: number
 }
 
 export interface LibrarySizeRow {
   size: string
   tasks: number
   standard: LibraryStandard | null
-  /** What would prove the cell, when nothing does. */
+  /** What would prove the cell, when nothing does — or, for a ceiling, what a calibration
+   *  build needs; empty for a proven standard. */
   next: string
 }
 

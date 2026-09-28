@@ -176,6 +176,7 @@ def store_standard_reader(db: Session, settings: Any, repo: str) -> StandardRead
         checks_arm=checks_arm_in(db, repo),
         posture_class=deployment_posture_class(settings, db.get(Repo, repo)),
     )
+    forwards = factory_standard.forward_states(db, repo)
 
     def read(_repo: str, capability_class: str, size: str) -> ProvenStandard | None:
         cell = CellRef(capability_class, size)
@@ -193,6 +194,7 @@ def store_standard_reader(db: Session, settings: Any, repo: str) -> StandardRead
             state=arm.state if arm is not None else "deliver",
             ceiling=std.ceiling,
             reading_id=std.reading_id,
+            forward=forwards.get(std.reading_id) if std.ceiling else None,
         )
 
     return read

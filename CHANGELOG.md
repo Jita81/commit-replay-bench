@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The forward reading: a second person's held-out tests are the only way past a ceiling**
+  (north-star Wave 4, stream FWD; [the branch](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4b-fwd)).
+  A second person writes held-out acceptance tests on `/factory/acceptance`, from the ticket
+  alone and before the build. The calibration build's first attempt is graded on them after
+  the builder finishes and stamped `S2` inside its row; it never opens a pull request.
+  `POST /readings/forward` registers the forward reading of a ceiling, spending that cell's
+  budget. Only its delivery promotes the ceiling, and the work type's page shows its state and
+  n. One label now means "graded on held-out tests" for writer and readers (DL-334, DL-335,
+  P-690, P-691).
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

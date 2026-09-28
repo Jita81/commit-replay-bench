@@ -40,7 +40,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
-import type { LibraryEntry, LibraryKind, LibraryMineRun, LibraryStatus, WorkTypePage } from '../../api/types'
+import type { LibraryEntry, LibraryKind, LibraryMineRun, LibraryStandard, LibraryStatus, WorkTypePage } from '../../api/types'
 import { Card } from '../../components/Card'
 import { type Column, DataTable } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
@@ -105,6 +105,26 @@ function fieldRefusal(error: unknown, field: RegExp): string | undefined {
   return words && field.test(words) ? words : undefined
 }
 
+const FORWARD_STATE: Record<string, string> = {
+  look_pending: 'reading',
+  deliver: 'delivered',
+  insufficient: 'insufficient — the ceiling stands',
+}
+
+/** A ceiling's forward reading (ADR-0026 items 4 and 8): its state with its n, or that none
+ *  is registered yet. */
+function Forward({ std, size }: { std: LibraryStandard; size: string }) {
+  const f = std.forward
+  return (
+    <Hint as="p" id="item.library.forward" className="m-0 mt-1 text-xs" data-testid={`forward-${size}`}>
+      {f
+        ? `Forward reading: ${FORWARD_STATE[f.state] ?? f.state} · n = ${f.counted} (${f.clean} passed the held-out tests)` +
+          (f.state === 'look_pending' && f.next_look ? ` · ${f.needed} more to its look at ${f.next_look}` : '')
+        : 'No forward reading is registered yet: an operator registers one before the first calibration build.'}
+    </Hint>
+  )
+}
+
 function WorkTypeSection({ page }: { page: WorkTypePage }) {
   const context: Column<WorkTypePage['context'][number]>[] = [
     { key: 'entry', header: 'Entry', hint: 'col.library.entry', cell: (c) => <span className="font-mono text-xs">{c.entry_id}</span> },
@@ -121,11 +141,26 @@ function WorkTypeSection({ page }: { page: WorkTypePage }) {
       key: 'standard',
       header: 'Proven standard',
       hint: 'col.library.standard',
-      cell: (s) => (s.standard ? `${s.standard.arm}${s.standard.ceiling ? ' (ceiling, forward-unvalidated)' : ''}` : <span>No proven standard</span>),
+      cell: (s) => (s.standard ? `${s.standard.arm}${s.standard.ceiling ? ' (ceiling only — forward-unvalidated)' : ''}` : <span>No proven standard</span>),
     },
     { key: 'commits', header: 'Distinct commits', hint: 'col.library.commits', numeric: true, cell: (s) => (s.standard ? `${s.standard.clean} of ${s.standard.n}` : `${s.tasks} mined`) },
     { key: 'interval', header: 'Interval', hint: 'col.library.interval', cell: (s) => (s.standard ? `${pct(s.standard.ci_low)} to ${pct(s.standard.ci_high)}` : '—') },
-    { key: 'next', header: 'Apparatus, or the next measurement', hint: 'col.library.next', cell: (s) => (s.standard ? `apparatus ${s.standard.apparatus}` : s.next) },
+    {
+      key: 'next',
+      header: 'Apparatus, or the next measurement',
+      hint: 'col.library.next',
+      cell: (s) =>
+        s.standard?.ceiling ? (
+          <div data-testid={`ceiling-${s.size}`}>
+            <p className="m-0">{s.next}</p>
+            <Forward std={s.standard} size={s.size} />
+          </div>
+        ) : s.standard ? (
+          `apparatus ${s.standard.apparatus}`
+        ) : (
+          s.next
+        ),
+    },
   ]
   const quality: Column<WorkTypePage['quality']['rows'][number]>[] = [
     { key: 'char', header: 'ISO/IEC 25010 characteristic', hint: 'col.library.characteristic', cell: (q) => q.characteristic },

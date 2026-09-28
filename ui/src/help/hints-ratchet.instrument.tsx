@@ -34,6 +34,8 @@ import type { ReactElement } from 'react'
 import type { EventSourceLike } from '../api/sse'
 import type { Role } from '../api/types'
 import { CapabilityPage } from '../screens/Capability/CapabilityPage'
+import { AcceptancePage } from '../screens/Factory/AcceptancePage'
+import { ACCEPTANCE } from '../screens/Factory/acceptance.fixture'
 import { FactoryPage } from '../screens/Factory/FactoryPage'
 import { IntakePage } from '../screens/Factory/IntakePage'
 import { LearnPage } from '../screens/Learn/LearnPage'
@@ -576,6 +578,17 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
       'GET /repos': REPOS,
       'GET /factory/alpha/intake': INTAKE,
     },
+    roles: ['viewer', 'operator'],
+  },
+  '/factory/acceptance': {
+    route: '/factory/acceptance?repo=alpha',
+    path: '/factory/acceptance',
+    element: <AcceptancePage />,
+    api: {
+      'GET /repos': REPOS,
+      'GET /factory/alpha/acceptance': ACCEPTANCE,
+    },
+    // an operator who may write sees the form; a viewer reads why they may not
     roles: ['viewer', 'operator'],
   },
   '/posture': {

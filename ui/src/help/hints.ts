@@ -478,7 +478,9 @@ export const HINTS = {
   'col.library.interval':
     'The 95 % Wilson interval of the proven standard’s first-attempt clean rate.',
   'col.library.next':
-    'The apparatus the standard was proven under, or what would prove the cell: a registered reading and how far its pool of commits has to go.',
+    'The apparatus the standard was proven under, or what would prove the cell: a registered reading and how far its pool of commits has to go. For a ceiling, what a calibration build needs and where its forward reading stands.',
+  'item.library.forward':
+    'The forward reading of this ceiling: calibration builds graded on held-out acceptance tests a second person wrote, counted in the order their tests were written. n is how many first attempts it has read; it delivers only under the look rule, and only then does the ceiling become a standard.',
   'col.library.characteristic':
     'One of the nine product quality characteristics of ISO/IEC 25010:2023. Named, never claimed: the product does not certify conformity.',
   'col.library.checks':
@@ -809,6 +811,32 @@ export const HINTS = {
     'What happens to a ticket when the pull request this product opened is merged or closed. With nothing configured, the product never changes anybody’s ticket state.',
   'stat.intake.last_poll':
     'What the last read did: how many tickets were in the column, how many were read this time, how many were already handled at that revision, and how many became items.',
+  'banner.acceptance.second_person':
+    'The two-person rule for held-out tests (ADR-0026 item 8): the person who writes them is never the ticket’s author, never the approver who funded the calibration build and never the person whose run builds it.',
+  'tag.acceptance.status':
+    'Tests needed: nobody has written them yet. Tests written: stored, waiting for the build. Being built: a run has claimed the build, so tests written now could not be held out. Graded: the first attempt has been run against them.',
+  'stat.acceptance.cell':
+    'The kind of change and its estimated size — the cell whose ceiling this calibration build helps to test forward.',
+  'stat.acceptance.description':
+    'The ticket’s description exactly as it was written. Write your tests from this and the criteria below, not from any code.',
+  'stat.acceptance.criteria':
+    'The ticket’s acceptance criteria as written. The ticket’s own failing test is deliberately not shown: your tests must be independent of it.',
+  'stat.acceptance.funded':
+    'The approver who funded this calibration build, and when. They may not write its held-out tests.',
+  'stat.acceptance.record':
+    'Who wrote the held-out tests, when, the SHA-256 digest of the files and their paths. The tests themselves are stored whole and never shown again.',
+  'stat.acceptance.result':
+    'Whether the build’s first attempt passed your tests. Only a first attempt is ever graded on them; a later attempt never counts.',
+  'item.acceptance.why_not':
+    'Why you cannot write held-out tests for this build: you wrote the ticket or funded the build, your role cannot write tests, they are already written, or the build has started.',
+  'field.acceptance.path':
+    'Where the test file goes in the repository. It must be a file the repository’s test runner treats as a test, and not the ticket’s own test file.',
+  'field.acceptance.content':
+    'The held-out tests: what a correct change must do, written from the ticket alone. They are run against the build only after the builder has finished, and the builder never sees them.',
+  'button.acceptance.save':
+    'Store your held-out tests under your name, with the time and their digest. One set per calibration build; it cannot be changed afterwards.',
+  'link.factory.acceptance':
+    'Open the held-out acceptance tests for this calibration build: a second person writes them from the ticket alone, before it is built.',
   'button.intake.switch_on':
     'Start reading the watched column on this repository. This is the consent to read that board and to comment and label on its tickets; it is recorded under your name.',
   'button.intake.switch_off':
@@ -2072,6 +2100,9 @@ export const MIN_HINTS: Record<string, number> = {
   '/signoff': 30,
   '/factory': 28,
   '/factory/intake': 16,
+  // one open assignment with its form and one written one: the status tag, six summary rows,
+  // the two fields, the Save button and the two-person banner
+  '/factory/acceptance': 12,
   // the five groups plus the go-live checklist (both its lists) and the print control
   '/posture': 39,
   '/repos': 8,

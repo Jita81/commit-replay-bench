@@ -966,6 +966,15 @@ function ItemRow({
           Calibration build funded by {t.calibration.approver}: the next factory run builds it, and it never opens a pull request.
         </Hint>
       )}
+      {t.calibration && (
+        // ADR-0026 item 8 — before the run, a second person writes the held-out tests its
+        // first attempt is graded on (the door to /factory/acceptance)
+        <p className="m-0 mt-2">
+          <LinkButton size="sm" to={`/factory/acceptance?repo=${encodeURIComponent(repo)}`} hint="link.factory.acceptance" data-testid={`acceptance-link-${t.id}`}>
+            Held-out acceptance tests
+          </LinkButton>
+        </p>
+      )}
       {t.way_forward?.action === 'fund_calibration' && canSign && <CalibrationForm repo={repo} task={t} />}
       {t.status === 'oracle_not_scoreable' && canSign && t.test_sha256 && <WaiverForm repo={repo} task={t} />}
       {t.dor_gaps.length > 0 && canSign && <GapForm repo={repo} task={t} />}

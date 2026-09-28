@@ -113,6 +113,7 @@ from pathlib import Path
 from typing import Any
 
 from crb.core import version as _version
+from crb.core.acceptance import held_out_graded, held_out_passes
 from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, arm_from_label
 from crb.core.context_arm import (
     BASE_S1,
@@ -1760,12 +1761,6 @@ class CellStats:
         }
 
 
-#: The hashed label a factory row carries when its first attempt was graded on held-out
-#: acceptance tests the builder never saw (ADR-0026 item 8) — the only factory row that routes,
-#: and only for arm ``S2`` (ADR-0026 item 6, amending ADR-0025 item 2).
-LABEL_HELD_OUT = "held_out_acceptance"
-
-
 @dataclass(frozen=True)
 class FirstAttempt:
     """One distinct change of a cell, read by its first observed attempt (ADR-0025 item 2)."""
@@ -1782,19 +1777,18 @@ class FirstAttempt:
 
     @property
     def clean(self) -> bool:
-        return self.observed and self.row.clean
+        """Observed and clean — and, for an attempt graded on held-out acceptance tests,
+        passing them too (ADR-0026 item 8: an ``S2`` row is graded on those tests)."""
+        return self.observed and self.row.clean and held_out_passes(self.row.labels)
 
     @property
     def gold_checked(self) -> bool:
         """A replay row whose gold was checked clean, or a factory ``S2`` row graded on
-        held-out acceptance tests. Every other factory row is graded on a test a model
-        wrote: the factory never licenses itself."""
+        held-out acceptance tests (:func:`crb.core.acceptance.held_out_graded`, THE rule the
+        factory's writer stamps — P-690). Every other factory row is graded on a test a model
+        or the ticket's author wrote: the factory never licenses itself."""
         if self.row.process_step == PROCESS_FACTORY:
-            return (
-                is_arm(self.row.context_arm)
-                and parse_arm(self.row.context_arm).base == BASE_S2
-                and self.row.labels.get(LABEL_HELD_OUT) == "true"
-            )
+            return held_out_graded(self.row.labels)
         return self.row.gold_clean is True
 
     @property

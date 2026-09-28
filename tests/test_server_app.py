@@ -202,6 +202,7 @@ class TestFactory:
             assert c.get(f"{API_PREFIX}/version").status_code == 404
         mounted = register_routers(app)
         assert mounted == [  # core (W2-A) + domain (W2-B), sorted — the seam mounts every module
+            "acceptance",
             "admin",
             "auth",
             "capability",

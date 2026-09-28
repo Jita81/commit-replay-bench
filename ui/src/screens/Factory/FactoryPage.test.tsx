@@ -401,6 +401,17 @@ describe('FactoryPage — the shipped contract', () => {
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))).toEqual({ reason: 'measure the cell once' })
   })
 
+  it('a funded calibration build links to where a second person writes its held-out tests (ADR-0026 item 8)', async () => {
+    const funded: FactoryTask = { ...TASKS[0]!, calibration: { approver: 'u-1', reason: 'forward reading', event: 'e1', created: '2026-09-28T10:00:00+00:00' } }
+    mockApi(base({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /factory/alpha/tasks': [funded] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    const link = within(row).getByTestId('acceptance-link-I-1')
+    expect(link).toHaveAttribute('href', '/factory/acceptance?repo=alpha')
+    expect(link).toHaveTextContent('Held-out acceptance tests')
+    expect(link.closest('[data-hint]')).toHaveAttribute('data-hint', 'link.factory.acceptance')
+  })
+
   it('a stopped item shows what to change and the replacement item already drafted (G-904)', async () => {
     const reason = 'the reviewer found the oracle weak (the test asserts only that the call returns) and this deployment has no test author: strengthen the test and register a superseding item'
     const stopped: FactoryTask = {

@@ -72,6 +72,19 @@ describe('LibraryPage', () => {
     expect(unhinted(container)).toEqual([])
   })
 
+  it('a ceiling says "ceiling only — forward-unvalidated", what a calibration build needs, and its forward reading with its n', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, ...LIBRARY_API })
+    const { container } = renderApp(<LibraryPage />, AT)
+    await screen.findByRole('heading', { name: 'Work type: bug.fix' })
+    const sizes = screen.getByRole('table', { name: 'Proven standard per size for bug.fix' })
+    const l = within(sizes).getByText('L').closest('tr')!
+    expect(l).toHaveTextContent('S3 (ceiling only — forward-unvalidated)')
+    expect(within(l).getByTestId('ceiling-L')).toHaveTextContent('built only as a calibration build, which never opens a pull request')
+    expect(within(l).getByTestId('forward-L')).toHaveTextContent('Forward reading: reading · n = 1 (1 passed the held-out tests) · 19 more to its look at 20')
+    expect(within(l).getByTestId('forward-L')).toHaveAttribute('data-hint', 'item.library.forward')
+    expect(unhinted(container)).toEqual([])
+  })
+
   it('without the quality table on the build the page names no characteristic as evidenced', async () => {
     const page = { ...WORK_TYPE, quality: { ...WORK_TYPE.quality, served: false, rows: [] } }
     mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /library/alpha': LIBRARY, 'GET /library/alpha/work-types/bug.fix': page })

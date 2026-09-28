@@ -187,6 +187,18 @@ export const HELP: ScreenHelp[] = [
     ],
   },
   {
+    route: '/factory/acceptance',
+    purpose: 'A cell whose standard is only a ceiling is tested forward: each ticket is built as a calibration build, and a second person writes the held-out acceptance tests its first attempt is graded on — from the ticket alone, before the build, never seeing the ticket’s own failing test. A registered forward reading counts those results; only it can turn the ceiling into a standard.',
+    next: {
+      viewer: 'Read each ticket’s state: tests needed, written, being built, or graded with the first attempt’s result.',
+      operator: 'If you did not write the ticket, did not fund its build and will not run it, write the tests a correct change must pass and save them. They are stored under your name and never shown to the builder.',
+      approver: 'Fund a calibration build on the Factory page; someone else writes its held-out tests here.',
+    },
+    numbers: 'A digest is the SHA-256 of the test files as written. A result is the first attempt’s run against them: pass, fail (a miss for the forward reading) or error (the tests could not be run, so the ticket leaves the reading — never a miss).',
+    terms: ['cell', 'deliver', 'signoff', 'apparatus'],
+    readMore: [{ to: 'ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted', label: 'Forward mode' }],
+  },
+  {
     route: '/posture',
     purpose: 'A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source.',
     next: {

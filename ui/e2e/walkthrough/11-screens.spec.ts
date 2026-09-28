@@ -177,6 +177,7 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     ['/signoff', 'signoff'],
     ['/factory', 'factory'],
     ['/factory/intake', 'factory-intake'],
+    ['/factory/acceptance', 'factory-acceptance'],
     ['/posture', 'posture'],
     ['/runs', 'runs'],
     [c.runId ? `/runs/${c.runId}` : '/runs/none', 'runs-detail'],

@@ -959,6 +959,10 @@ class ProvenStandard:
     state: str = "deliver"
     ceiling: bool = False
     reading_id: str = ""
+    #: For a ceiling: the forward (``S2``) reading registered to promote it — its id, rule,
+    #: look state, the tickets counted and clean, the next look and the tickets still
+    #: needed — or ``None`` when none is registered (ADR-0026 items 4 and 8).
+    forward: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -971,6 +975,7 @@ class ProvenStandard:
             "state": self.state,
             "ceiling": self.ceiling,
             "reading_id": self.reading_id,
+            "forward": dict(self.forward) if self.forward is not None else None,
         }
 
 
@@ -986,6 +991,20 @@ def standard_for(repo: str, capability_class: str, size: str) -> ProvenStandard 
     through the same store-bound readers as the factory's entry gate)."""
     del repo, capability_class, size
     return None
+
+
+#: What a cell whose standard is only a ceiling needs before anything in it delivers
+#: (ADR-0026 items 4 and 8): calibration builds graded on a second person's held-out tests,
+#: counted by a registered forward reading.
+CALIBRATION_NEEDS = (
+    "Ceiling only — forward-unvalidated: only the commit's own tests delivered, so a ticket "
+    "here is built only as a calibration build, which never opens a pull request. Each "
+    "calibration build needs a failing test a person attached to the ticket, an approver who "
+    "funds it, and held-out acceptance tests a second person writes from the ticket alone "
+    "before it is built. A forward reading registered on this cell counts the first attempts "
+    "graded on those tests; when it delivers under the look rule, the ceiling becomes a "
+    "standard."
+)
 
 
 def next_measurement(tasks_in_cell: int) -> str:
@@ -1116,7 +1135,11 @@ def work_type_page(
                 "size": size,
                 "tasks": n_tasks,
                 "standard": std.to_dict() if std is not None else None,
-                "next": "" if std is not None else next_measurement(n_tasks),
+                "next": (
+                    next_measurement(n_tasks)
+                    if std is None
+                    else (CALIBRATION_NEEDS if std.ceiling else "")
+                ),
             }
         )
     counted = evidence_pairs(quality)
@@ -1179,6 +1202,7 @@ __all__ = [
     "ACTOR_FRESHNESS",
     "ACTOR_MEASUREMENT",
     "ACTS",
+    "CALIBRATION_NEEDS",
     "EVIDENCE_ADVISORY",
     "EVIDENCE_CHECK",
     "FINAL_STATUSES",

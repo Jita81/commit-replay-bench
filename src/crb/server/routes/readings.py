@@ -12,7 +12,10 @@ under an arm of the hierarchy at this apparatus, ``422 pool_not_blind`` when the
 pool the rule does not give, ``409 budget_spent`` when the budget cannot cover the rule, and
 ``422 invalid_reading`` for a shape the ADR forbids. ``GET /readings`` serves every reading of a
 repository evaluated over its rows — each arm's look state — and each cell's budget spent.
-``standard_for`` is the seam the factory's entry gate reads (ADR-0026 item 8).
+``standard_for`` is the seam the factory's entry gate reads (ADR-0026 item 8). ``POST
+/readings/forward`` (operator) registers the forward reading of a ceiling (DL-334): ``S2`` on the
+factory's cell, counted on calibration builds graded on a second person's held-out tests, the
+one reading that can promote the ceiling; ``load_readings`` enrols its pool.
 
 Navigation
 ----------
@@ -37,7 +40,7 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/server/routes/signoffs.py (the sign-off write path reads the same book),
               src/crb/server/posture_view.py (the deployment's posture class),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
-Tested by:    tests/test_server_readings.py
+Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py
 Touch when:   never for a new repository; the reading's shape or the registration's refusals change
               (an ADR amending ADR-0026 first); never for a new repository.
 """
@@ -52,6 +55,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.core.acceptance import HeldOutTests
 from crb.core.capability import ReadingBook
 from crb.core.context_arm import parse_arm
 from crb.core.ledger import (
@@ -63,6 +67,7 @@ from crb.core.ledger import (
 from crb.core.reading import (
     READING_EVENT_ACTION,
     REFUSAL_INVALID,
+    REFUSAL_NOT_A_CEILING,
     REFUSAL_POOL_NOT_BLIND,
     RULE_LOOK_V1,
     Reading,
@@ -70,13 +75,17 @@ from crb.core.reading import (
     Standard,
     budget_spent,
     cell_error_budget,
+    evaluate,
     pool_by_rule,
     refuse_unless_blind,
     register,
+    register_forward,
     standard_of,
+    with_enrolment,
 )
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
+from crb.server.acceptance import load_held_out
 from crb.server.auth import OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
@@ -99,8 +108,12 @@ def _trace(repo: str) -> str:
 
 def load_readings(session: Session, repo: str) -> list[Reading]:
     """The repository's registered readings, in registration order. A record whose id or pool
-    hash does not re-hash licenses nothing and is left out (the verified set is what counts)."""
+    hash does not re-hash licenses nothing and is left out (the verified set is what counts).
+    A forward reading's pool is filled here, once, from the held-out records written after it
+    (``crb.core.reading.with_enrolment``, DL-334) — so every reader of readings, the factory's
+    gate included, reads the same enrolled pool."""
     out: list[Reading] = []
+    records: list[HeldOutTests] | None = None
     for ev in session.execute(
         select(Event)
         .where(Event.repo == repo, Event.action == READING_EVENT_ACTION)
@@ -108,6 +121,10 @@ def load_readings(session: Session, repo: str) -> list[Reading]:
     ).scalars():
         reading = Reading.from_dict(dict(ev.payload_json or {}))
         if reading.verify() and reading.repo == repo:
+            if reading.prospective:
+                if records is None:
+                    records = load_held_out(session, repo)
+                reading = with_enrolment(reading, records)
             out.append(reading)
     return out
 
@@ -234,6 +251,8 @@ def _change_of(task: Task) -> str:
 
 def _refuse(exc: ReadingRefused) -> ApiError:
     code = 422 if exc.code in (REFUSAL_INVALID, REFUSAL_POOL_NOT_BLIND) else 409
+    if exc.code == REFUSAL_NOT_A_CEILING:
+        code = 409
     return ApiError(code, exc.code, str(exc), detail=dict(exc.detail))
 
 
@@ -318,6 +337,74 @@ def register_reading(
         )
     except ReadingRefused as exc:
         raise _refuse(exc) from exc
+    return dict(ev.payload)
+
+
+class ForwardIn(BaseModel):
+    """A forward reading (ADR-0026 items 4, 5 and 8; DL-334): the reading whose ``S3``
+    ceiling it may promote, and the factory builder, model and provider its calibration
+    builds run on. The pool is not named: it is every calibration build of the cell whose
+    held-out tests are written after this registration."""
+
+    repo: str = Field(min_length=1, max_length=64)
+    promotes: str = Field(min_length=1, max_length=64)
+    builder: str = Field(min_length=1, max_length=64)
+    model: str = Field(min_length=1, max_length=128)
+    provider: str = Field(default="", max_length=64)
+    rule: str = RULE_LOOK_V1
+
+
+@router.post(
+    "/readings/forward",
+    status_code=status.HTTP_201_CREATED,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
+    summary="Register the forward (S2) reading of a ceiling before its first calibration build (operator)",
+)
+def register_forward_reading(
+    body: ForwardIn,
+    operator: OperatorDep,
+    db: DbDep,
+    factory: SessionFactoryDep,
+) -> dict[str, Any]:
+    """The one reading that can promote an ``S3`` ceiling to a standard: ``S2`` on the
+    factory's cell, counted only on calibration builds graded on a second person's held-out
+    acceptance tests. Refused **409** ``not_a_ceiling`` when the named reading does not read
+    ``ceiling`` now, **409** ``budget_spent`` when the ceiling's cell budget cannot cover the
+    rule, **404** for a reading the repository does not have."""
+    get_repo_or_404(db, body.repo)
+    rows = list(DbLedger(factory).rows(repo=body.repo))
+
+    def build(s: Session) -> dict[str, Any]:
+        readings = load_readings(s, body.repo)
+        named = next((r for r in readings if r.reading_id == body.promotes), None)
+        if named is None:
+            raise ApiError(404, "not_found", f"no reading {body.promotes!r} on {body.repo!r}")
+        reading = register_forward(
+            ceiling=evaluate(named, rows),
+            builder=body.builder,
+            model=body.model,
+            provider=body.provider,
+            actor=operator.id,
+            existing=readings,
+            rule=body.rule,
+            budget=cell_error_budget(),
+        )
+        return reading.to_dict()
+
+    try:
+        ev = append_event_checked(
+            factory,
+            trace_id=_trace(body.repo),
+            stage="system",
+            action=READING_EVENT_ACTION,
+            build=build,
+            actor=operator.id,
+            repo=body.repo,
+        )
+    except ReadingRefused as exc:
+        raise _refuse(exc) from exc
+    except ValueError as exc:
+        raise ApiError(422, REFUSAL_INVALID, str(exc)) from exc
     return dict(ev.payload)
 
 

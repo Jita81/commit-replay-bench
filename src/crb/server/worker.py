@@ -296,6 +296,7 @@ from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
 from crb.server import factory_standard
+from crb.server.acceptance import held_out_reader
 from crb.server.decisions import record_due
 from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
@@ -3020,6 +3021,9 @@ class Worker:
             readers=self._standard_readers(
                 run.repo, checks_arm=checks.arm, posture_class=gate.posture.posture_class
             ),
+            # ADR-0026 item 8 — a second person's held-out acceptance tests, read from the
+            # store after the run claims a calibration grant and graded on its first attempt
+            held_out=held_out_reader(self.factory, run.repo),
             # the loop's overlay and lines reach an item's brief only when its standard arm
             # carries +L (ADR-0026 item 8); the loop decides per item
             learning=self._learning_snapshot(ctx),
