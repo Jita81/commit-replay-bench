@@ -1064,6 +1064,21 @@ def _stale_ledger(tmp_path: Path) -> list[GradeRow]:
     return _chained(rows, tmp_path)
 
 
+def test_the_api_docs_describe_up_to_date_as_the_served_label_and_mode(tmp_path: Path) -> None:
+    """P-428: each ``up_to_date`` entry is ``<cell label>|<mode>``, not a bare cell label,
+    so a client that compares it with ``cells[].label`` never finds a match. Every
+    ``docs/API.md`` description of the field must name the shape the plan serves."""
+    plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
+    (entry,) = plan.up_to_date
+    label, _, mode = entry.rpartition("|")
+    assert mode in ("sighted", "blind") and label.count("|") == 6
+    api = (Path(__file__).resolve().parents[1] / "docs" / "API.md").read_text()
+    described = [line for line in api.splitlines() if "up_to_date[]" in line]
+    assert len(described) == 2
+    for line in described:
+        assert "up_to_date[] (one `<cell label>|<mode>` string" in line, line
+
+
 class TestRemeasure:
     """``remeasure_plan``: stale cells, rows needed, cost, and valid ``POST /runs`` bodies — nothing
     queued.
