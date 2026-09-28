@@ -15,7 +15,7 @@ An invitation instead:
 * ``POST /invitations/accept`` needs no session — it is the link's own page. The person
   sets their own password, and the account is activated at that moment. The token is
   spent; a second attempt is refused.
-* A link never outlives another way into the same account (P-325): when the admin
+* A link never outlives another way into the same account (P-353): when the admin
   activates the account or sets its password from the Users card, the link is withdrawn in
   that transaction (``supersede_invitations``, reason ``superseded: …``), and an account
   found already active or already signed in to refuses the link here and withdraws it.
@@ -67,7 +67,7 @@ Works with:   src/crb/store/models.py (``Invitation``, ``User``),
 Tested by:    tests/test_server_invitations.py
 Touch when:   never for a new repository; the role ladder changes (the readiness rule names
               the signing roles); a new way into an account is added (it withdraws the pending
-              link through ``supersede_invitations``, P-325).
+              link through ``supersede_invitations``, P-353).
 """
 
 from __future__ import annotations
@@ -483,7 +483,7 @@ def accept_invitation(
     if user.active or user.last_login:
         # the account was opened another way while the link sat unused — the break-glass
         # CLI, a restore, a direct write; the admin's own routes withdraw it themselves. A
-        # link never outlives another way into the same account (P-325): withdraw it on the
+        # link never outlives another way into the same account (P-353): withdraw it on the
         # record, and answer exactly as for any other dead link
         supersede_invitations(
             db, user, actor="system", how="the account was opened before the link was used"

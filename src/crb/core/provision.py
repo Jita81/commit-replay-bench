@@ -29,7 +29,7 @@ What it does: Reads ``go.mod``/``go.sum`` (and a local replace target's ``go.mod
               pinned ``requirements*.txt`` (following ``-r``; a ``--hash`` that is not a
               whole sha256 refuses the lock, never dropped), a ``uv.lock`` (the project's
               dependencies and the ``runner_opts.deps_groups`` it names, closed, hashed and
-              marked), a ``poetry.lock`` or PEP 751 ``pylock.toml`` (DL-109), or
+              marked), a ``poetry.lock`` or PEP 751 ``pylock.toml`` (DL-110), or
               ``runner_opts.deps_lock`` (whose inner lists are alternatives: a commit reads
               the first it carries), and ``package.json`` + ``package-lock.json`` at a
               commit; refuses every source the ADR refuses; computes the bundle keys (a uv
@@ -329,7 +329,7 @@ _PY_SOURCE_OPTS = (
     "--trusted-host",
     "--no-index",
 )
-#: Python locks this version still refuses (poetry and pylock are read since DL-109, uv since
+#: Python locks this version still refuses (poetry and pylock are read since DL-110, uv since
 #: DL-101).
 _PY_ALT_LOCKS: tuple[str, ...] = ("Pipfile.lock",)
 #: The uv lock, read at the root when no requirements lock is there and none is declared.
@@ -418,7 +418,7 @@ def _whole_hashes(tail: str, where: str) -> tuple[str, ...]:
     """The ``--hash`` options after a pin, each a whole ``sha256:<64 hex>``. Anything else
     in the tail — a hash of another kind or length, a ``--hash`` with no value, another
     option — refuses the lock (PROVISION_SOURCE_REFUSED): a hash is never skipped, so the
-    pin written bare, nor cut to 64 characters (DL-101; docs/PREVENTION.md P-263)."""
+    pin written bare, nor cut to 64 characters (DL-101; docs/PREVENTION.md P-271)."""
     hashes: list[str] = []
     rest = tail.strip()
     while rest:
@@ -572,7 +572,7 @@ def _deps_groups(config: RepoConfig) -> tuple[str, ...]:
 
 # ---------------------------------------------------------------------------
 # Python — poetry and PEP 751 pylock locks: read into the same pinned, hashed ``PyPin`` set a
-# requirements lock gives, so one recipe fetches them (DL-109). A ``uv.lock`` is read by
+# requirements lock gives, so one recipe fetches them (DL-110). A ``uv.lock`` is read by
 # :func:`parse_uv_lock`, which walks its graph for the named groups (DL-101).
 # ---------------------------------------------------------------------------
 

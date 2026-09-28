@@ -258,7 +258,7 @@ def derive_strengthen(
     # the repository's own checks arm: a cell never pools two arms (ADR-0024)
     every = list(DbLedger(factory).rows(repo=repo))
     rows = rows_for_arm(factory, repo, every, CHECKS_CURRENT)
-    # the deployment's posture class: a reading licenses only the rows it counted on (P-311)
+    # the deployment's posture class: a reading licenses only the rows it counted on (P-319)
     rows = filter_posture(db, repo, rows, POSTURE_DEPLOYMENT, settings).rows
     # one reading: the current apparatus and global class set, each cell on its standard arm
     # (ADR-0025 item 1, ADR-0026) — never two pooled

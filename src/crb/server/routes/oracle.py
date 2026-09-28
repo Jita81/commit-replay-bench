@@ -21,7 +21,7 @@ the latest finished ``controls`` run's ``counts_json``; when neither exists it
 returns :meth:`ControlsVerdict.unmeasured` (an honest absence, never a pass). Every report
 is reduced through :func:`crb.core.oracle.controls.controls_verdict_of`, so a passed report
 with no gold witness (written before ``controls.v3``) reads as unmeasured too — on the
-controls screen's verdict and for routing alike (P-344).
+controls screen's verdict and for routing alike (P-372).
 
 Navigation
 ----------

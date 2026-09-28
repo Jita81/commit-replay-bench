@@ -491,7 +491,7 @@ def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:
 def test_an_item_registered_without_a_size_is_unsized_and_stops_before_any_spend(
     env: Env,
 ) -> None:
-    """P-289: the operator API froze an item with no estimate as ``S``, a cell it never
+    """P-297: the operator API froze an item with no estimate as ``S``, a cell it never
     claimed, and refused ``unsized`` outright (seven characters, four allowed). An item
     with no size is ``unsized``: registered as such, and told now that the next run's
     pre-build check stops it ``unsized`` — to a person, before any spend."""

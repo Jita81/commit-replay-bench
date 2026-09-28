@@ -1,4 +1,4 @@
-"""The suite-wide ``CRB_*`` environment guard: no test hands its settings to the next (P-302).
+"""The suite-wide ``CRB_*`` environment guard: no test hands its settings to the next (P-310).
 
 Navigation
 ----------

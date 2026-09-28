@@ -328,7 +328,7 @@ def split_on(row: GradeRow, axis: str) -> GradeRow:
     if axis in labelled:
         out = dataclasses.replace(row, labels={**row.labels, **labelled[axis]})
     elif axis == "apparatus_version":
-        # a row moved to another apparatus keeps only that apparatus's labels (P-309)
+        # a row moved to another apparatus keeps only that apparatus's labels (P-317)
         out = at_apparatus(row, fields[axis])
     else:
         out = dataclasses.replace(row, **{axis: fields[axis]})

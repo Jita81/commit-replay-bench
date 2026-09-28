@@ -4,7 +4,7 @@
 virtual environment whose editable install points at another checkout sees ``crb`` in BOTH
 places, and ``lint-imports`` then read the other checkout's copy of a module both trees carry:
 a forbidden import planted in this worktree's ``crb/factory/review.py`` passed as KEPT
-(P-353). This suite runs the contracts itself, in a subprocess whose ``sys.path`` holds this
+(P-381). This suite runs the contracts itself, in a subprocess whose ``sys.path`` holds this
 checkout's ``src`` as the only source of ``crb``, so the full suite fails when a contract
 breaks here, whatever the environment's editable install points at.
 
@@ -20,7 +20,7 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md,
               docs/adr/0026-the-context-standard.md (item 10)
 Works with:   pyproject.toml (``[tool.importlinter]`` — the contracts it runs),
-              docs/PREVENTION.md (P-353, the class it stops), scripts/walkthrough.sh (the same
+              docs/PREVENTION.md (P-381, the class it stops), scripts/walkthrough.sh (the same
               refusal of a foreign ``crb`` for the served stack)
 Tested by:    this file
 Touch when:   never for a new repository; a contract is added or renamed in pyproject.toml.

@@ -11,7 +11,7 @@
  *               the About block opens the go-live checklist (DEPLOYMENT §8) and OPERATOR
  *               §9; and that every form on the page is named once, so the Users card and
  *               the invitation card — which both ask for a Username — are told apart by a
- *               screen reader and a test (P-323).
+ *               screen reader and a test (P-351).
  * How:          `mockApi` + `renderApp` at `/settings`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -52,7 +52,7 @@ describe('SettingsPage', () => {
     expect(within(about).getByRole('link', { name: 'Record what only you can prove' })).toHaveAttribute('href', '/help/docs/DEPLOYMENT#81-record-what-only-you-can-prove')
     expect(within(about).getByRole('link', { name: 'Users, and what to do when nobody can sign in' })).toHaveAttribute('href', '/help/docs/OPERATOR#9-users')
   })
-  it('two cards that both ask for a Username are told apart: every form is named, once, and a repeated label never sits outside one (P-323)', async () => {
+  it('two cards that both ask for a Username are told apart: every form is named, once, and a repeated label never sits outside one (P-351)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'admin' },
       'GET /health': { status: 'ok', probes: [] },

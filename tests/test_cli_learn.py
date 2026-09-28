@@ -535,7 +535,7 @@ def test_load_controls_export_reads_the_report_or_a_run_body() -> None:
     }
     v2 = load_controls_export(run_body)
     assert v2.measured and v2.escapes == 0 and v2.total == 10 and v2.run_id == "ctl-2"
-    # a passed report written before the gold witness licenses nothing here either (P-344)
+    # a passed report written before the gold witness licenses nothing here either (P-372)
     for old in (
         {**report, "apparatus": {"controls_version": "controls.v2"}},
         {**report, "apparatus": {}},

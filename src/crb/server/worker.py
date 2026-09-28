@@ -379,7 +379,7 @@ DEFAULT_OUTAGE_STOP = 3
 DECISIONS_REFRESH_S = 300.0
 #: The idle loop's own steps, in the order it takes them when no run is queued. Each runs
 #: under the loop's guard (:meth:`Worker._run_idle_steps`), so one that raises is logged and
-#: the worker goes on (P-326). A new idle step is a method name here, never a bare call in
+#: the worker goes on (P-354). A new idle step is a method name here, never a bare call in
 #: ``run_forever`` — tests/test_worker.py refuses a call there outside the guard.
 IDLE_STEPS: tuple[str, ...] = ("poll_intake", "refresh_decisions")
 
@@ -596,7 +596,7 @@ class WorkerSettings:
             raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
         if not str(self.metrics_host).strip():
             raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
-        executor_kind(self.executor)  # P-300: an empty or unknown kind never starts a worker
+        executor_kind(self.executor)  # P-308: an empty or unknown kind never starts a worker
 
 
 # ---------------------------------------------------------------------------
@@ -821,7 +821,7 @@ Handler = Callable[[RunContext], tuple[str, dict[str, Any], str]]
 def run_executor_kind(params: Mapping[str, Any], settings: WorkerSettings) -> str:
     """The executor a run asks for: its own ``params.executor``, else the worker's setting —
     never a default of our own, so an empty kind reaches ``make_executor`` and is refused
-    there (P-300); the unsealed-override stamp reads the same answer."""
+    there (P-308); the unsealed-override stamp reads the same answer."""
     return str(params.get("executor") or settings.executor)
 
 
@@ -916,7 +916,7 @@ class Worker:
         is logged and the next one still runs, and so does the next iteration. A step's own
         "never raises" is a promise; this guard is what keeps the loop alive when a promise
         is broken — a unique-key race or a ``database is locked`` in the decisions pass
-        ended the worker before it (P-326). Never raises."""
+        ended the worker before it (P-354). Never raises."""
         for name in IDLE_STEPS:
             try:
                 getattr(self, name)()
@@ -937,7 +937,7 @@ class Worker:
         Called from the idle loop only, and never raises: a repository whose map cannot be
         read is logged and the next pass retries. Each repository is its own transaction, so
         one that fails — and leaves its session needing a rollback — neither spoils the next
-        nor makes a final commit raise (P-326); a first stamp ``GET /decisions`` committed
+        nor makes a final commit raise (P-354); a first stamp ``GET /decisions`` committed
         meanwhile is joined, not collided with (:func:`crb.server.decisions.record_due`). It
         writes nothing but ``decisions_due`` — no evidence, no ledger row, no event —
         because it is a clock, not an act.
@@ -1713,7 +1713,7 @@ class Worker:
         run fails with ``sandbox unavailable``; there is no local fallback."""
         if ctx._executor is not None:
             return ctx._executor
-        # no default here: an empty kind reaches make_executor and is refused (P-300)
+        # no default here: an empty kind reaches make_executor and is refused (P-308)
         kind = run_executor_kind(ctx.params, self.settings)
         if kind != "docker" and self.settings.refuse_unsealed:
             raise SandboxUnavailable(
@@ -1836,7 +1836,7 @@ class Worker:
         """ADR-0023: a prod worker running unsealed under the override says so on every
         apparatus it writes (and so in every pack); nothing when sealed or in dev. A worker
         whose DEFAULTS are sealed stamps a run that asks for another executor in its own
-        parameters (only the override admits one), naming who set the override (P-248)."""
+        parameters (only the override admits one), naming who set the override (P-256)."""
         o = dict(self.settings.unsealed_override)
         if not o and self.settings.env == "prod":
             kind = self._executor_kind(ctx)
@@ -2197,7 +2197,7 @@ class Worker:
         return STATUS_SUCCEEDED, counts, ""
 
     def _library_freshness(self, ctx: RunContext, ref: str) -> None:
-        """G-736, DL-114: after a mine, read the repository's head and mark stale every
+        """G-736, DL-115: after a mine, read the repository's head and mark stale every
         library entry whose source file's bytes there differ from the ones it was signed
         against — the same rule as ``POST /library/{repo}/freshness``, without a person
         asking. Only the files entries cite are read (``git cat-file``, no checkout); a file
@@ -2841,7 +2841,7 @@ class Worker:
         the points-to-churn agreement has passed — read ONCE from the store, on one checks arm
         (the factory run's, GOV-3, else the repository's own) and one posture class (the run's
         measured one, else this deployment's), so a standard never crosses an arm or a posture
-        (P-311). :func:`crb.server.factory_standard.bind_readers` is the one binding."""
+        (P-319). :func:`crb.server.factory_standard.bind_readers` is the one binding."""
         return factory_standard.bind_readers(
             self.factory,
             repo,

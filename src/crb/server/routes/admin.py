@@ -23,7 +23,7 @@ rotates the same nonce, so its sessions end for good: re-activating it brings no
 An invited account (``/invitations``) that the admin opens here instead — activates it, on
 its own or with a role change, or sets its password — has its unused link withdrawn in the
 same transaction (:func:`supersede_invitations`, reason ``superseded: …``): a one-time link
-must never outlive another way into the same account (P-325).
+must never outlive another way into the same account (P-353).
 
 Secrets (``/settings/secrets/*``) go through :mod:`crb.server.secrets`: a value is
 accepted on ``PUT`` and written owner-only to disk; every response — including the
@@ -247,7 +247,7 @@ def record_user_event(
 
 
 #: The first word of the reason a link is withdrawn with when the account it would open was
-#: opened another way (P-325).
+#: opened another way (P-353).
 SUPERSEDED = "superseded"
 
 
@@ -258,7 +258,7 @@ def supersede_invitations(db: Session, user: User, *, actor: str, how: str) -> i
     the admin activates it or sets its password, or the accept route finds it already
     active — the link must stop working at that moment, not when it expires: otherwise
     whoever holds it could still set a new password, end the person's sessions and take a
-    signing account (the independent verifiers' attack on stream S, P-325). Each link is
+    signing account (the independent verifiers' attack on stream S, P-353). Each link is
     marked revoked with the reason ``superseded: <how>`` and a ``user.invite_revoked``
     event on the account's trace — never the token. Returns how many were withdrawn."""
     now = _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()

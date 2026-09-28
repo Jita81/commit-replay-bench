@@ -154,7 +154,7 @@ class TestVerify:
     def test_a_page_read_walks_only_new_events_and_an_operator_can_walk_them_all(
         self, env: Env
     ) -> None:
-        """P-249: a page read between full walks re-hashes only the events appended since
+        """P-257: a page read between full walks re-hashes only the events appended since
         the last walk and says so (``walk: tail``, with when the last full walk ran); an
         operator's ``?full=true`` re-hashes the whole trail and finds an edit a tail walk
         cannot see; a viewer may not ask for one (each is a walk of every event)."""

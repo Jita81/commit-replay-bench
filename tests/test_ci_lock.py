@@ -13,7 +13,7 @@ What it is:   The gate on how CI installs Python dependencies and on the fresh-c
 What it does: Fails when a job in any workflow, or the product image's Dockerfile, installs
               the project or a library other than from ``uv.lock`` (``uv sync --locked``,
               or ``uv export --locked`` with ``--require-hashes``, then the project's own
-              build with ``--no-deps``) — the image is what ships (P-262); when
+              build with ``--no-deps``) — the image is what ships (P-270); when
               ``uv.lock`` no longer matches the extras
               and dependency groups ``pyproject.toml`` declares (a dependency added or
               re-pinned without relocking) or pins a gate or reporting tool at another
@@ -165,7 +165,7 @@ def dockerfile_runs(text: str) -> list[tuple[str, str]]:
 def image_findings(text: str, name: str = "deploy/Dockerfile") -> list[str]:
     """Each Python install in the product image's Dockerfile that does not come from
     ``uv.lock`` — the image is what ships, so a pin that holds only in CI pins nothing a
-    customer runs (P-262)."""
+    customer runs (P-270)."""
     return [f for line, run in dockerfile_runs(text) for f in run_findings(f"{name}:{line}", run)]
 
 
@@ -312,7 +312,7 @@ def test_every_workflow_install_comes_from_the_lock() -> None:
 def test_the_product_image_installs_from_the_lock() -> None:
     """The image CI's ``container`` job builds and the release pushes is what a customer
     runs; its libraries come from uv.lock by version and hash, never from pyproject.toml
-    resolved at build time (the SQLAlchemy 2.1.0 class, in production — P-262)."""
+    resolved at build time (the SQLAlchemy 2.1.0 class, in production — P-270)."""
     text = DOCKERFILE.read_text(encoding="utf-8")
     assert image_findings(text) == []
     runs = " ".join(run for _line, run in dockerfile_runs(text))

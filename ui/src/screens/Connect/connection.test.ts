@@ -8,7 +8,7 @@
  *               marks its stage in progress; that mined counts, an oracle report, a controls
  *               report and measured rows each complete their stage; that a failed controls
  *               report is `failed`, not done; that a passed report the server reads as
- *               unmeasured (no gold witness, P-344) is `warn` and asks for the controls
+ *               unmeasured (no gold witness, P-372) is `warn` and asks for the controls
  *               again; that stages after a not-done stage are
  *               `blocked` (so the walk never offers step 4 before step 3); that the first
  *               measurement is the only stage that spends; that a failed or cancelled
@@ -103,7 +103,7 @@ describe('stagesFor', () => {
     expect(stageSummary(measured)).toEqual({ label: 'measured', status: 'warn' })
   })
 
-  it('a passed report the server reads as unmeasured (no gold witness, before controls.v3) is warn and asks for the controls again, never done (P-344)', () => {
+  it('a passed report the server reads as unmeasured (no gold witness, before controls.v3) is warn and asks for the controls again, never done (P-372)', () => {
     const old = { passed: true, n_rows: 7, violations: 0, escapes: 0, not_constructible: 0, apparatus: { controls_version: 'controls.v2' }, verdict: { state: 'unmeasured', measured: false, passed: false, constructible: 0, total: 0, escapes: 0 } } as unknown as ControlsReport
     expect(controlsFinding(old)).toBe('no gold witness beside its catches (a report from before controls.v3) — run the controls again; deliver is withheld until then')
     const s = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: old, measuredRows: 0 })

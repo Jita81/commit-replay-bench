@@ -21,7 +21,7 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               issue table DDL, and that a system event holds its trace's ``seq`` until it
               commits (EI-1) and the events write lock holds a second writer until the first
               commits (P-196), and that the decisions clock joins a concurrent first stamp in
-              both dialects (P-329).
+              both dialects (P-357).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -705,7 +705,7 @@ def test_the_pg_function_raises_the_one_append_only_text() -> None:
 
 
 # ---------------------------------------------------------------------------
-# the decisions clock's first stamp, on both dialects (P-329)
+# the decisions clock's first stamp, on both dialects (P-357)
 # ---------------------------------------------------------------------------
 
 
@@ -716,7 +716,7 @@ def test_a_concurrent_first_decision_stamp_is_joined_on_both_dialects(
     NOTHING`` in the dialect's own words, then reads the row back. Here the other stamper
     commits the same ``(repo, kind, key)`` between this pass's read and its write: the pass
     joins the earlier row — its ``first_due`` kept, ``last_seen`` moved — on SQLite and on
-    PostgreSQL alike, where a plain insert raised ``IntegrityError`` (P-329)."""
+    PostgreSQL alike, where a plain insert raised ``IntegrityError`` (P-357)."""
     from crb.server import decisions as dec
 
     store_db.init_db(backend.engine)

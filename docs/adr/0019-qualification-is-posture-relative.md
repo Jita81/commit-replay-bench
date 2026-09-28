@@ -279,11 +279,11 @@ workspace or another lock version, and when an edge resolves to more than one pa
 lock is repository text, so it is never trusted to be well formed: a name, version or marker
 that is not plain package text — a newline, a comment, an option — and a hash that is not a
 whole sha256 are refused before anything is fetched, and the file pip reads is written line
-by line from pins that are each matched again, so no option can reach pip from a lock (P-251).
+by line from pins that are each matched again, so no option can reach pip from a lock (P-259).
 
 `runner_opts.deps_lock` may also name alternatives, as a list inside the list: a commit
 reads the first one it carries, and a commit that carries none is refused `PROVISION_NO_LOCK`
 naming them all. A repository whose history moved from a requirements lock to `uv.lock`
 (click, in May 2025) is provisioned from one declaration. A plain entry is still one that
-every commit must carry. `poetry.lock` and `pylock.toml` are read since ADR-0031 (DL-109);
+every commit must carry. `poetry.lock` and `pylock.toml` are read since ADR-0031 (DL-110);
 `Pipfile.lock` stays refused.

@@ -167,7 +167,7 @@ def verify_ledger(
     (:func:`clean_without_pack`) + the sign-off and review chains (EI-6) + the audit trail's
     chain; never raises — the first break is reported by ``seq`` and the walk continues to
     count rows. The audit trail is walked by ``events_verifier`` (the app's, which re-hashes
-    only new events between full walks — P-249) or, without one, in full."""
+    only new events between full walks — P-257) or, without one, in full."""
     rows = 0
     prev = GENESIS_HASH
     broken_at: int | None = None

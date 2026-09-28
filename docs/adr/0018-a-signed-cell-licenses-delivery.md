@@ -1,10 +1,10 @@
 # ADR-0018 — A signed cell licenses delivery: the gate reads the sign-off as well as the route
 
-**Status:** Accepted (DL-105; wave 4, stream S; closes G-517). Decisions 1, 3 and 5
+**Status:** Accepted (DL-106; wave 4, stream S; closes G-517). Decisions 1, 3 and 5
 **as drafted** on 2026-09-23 are superseded in part by [ADR-0026](0026-the-context-standard.md)
 item 8 before this ADR merged; the decisions below are the amended text, and each superseded
 draft is quoted under [What ADR-0026 supersedes](#what-adr-0026-supersedes).
-**Date:** 2026-09-23 (amended 2026-09-27, DL-105)
+**Date:** 2026-09-23 (amended 2026-09-27, DL-106)
 **Apparatus impact:** none. This changes *which tickets the factory may build and deliver*, not
 what a grade means: no belt, no grader, no routing threshold, no ledger column and no sign-off
 clause moves, so `crb.core.version.APPARATUS_VERSION` stays where it is and `signoff-policy.v3`
@@ -61,7 +61,7 @@ what default and what override?**
      also scoped to the standard's **context arm, class-set version and reading**; that
      reader is stream R's, and ADR-0026's entry gate reads `Standard.signed` from it.
    - *A proven standard that is not a ceiling* is ADR-0026's `standard_for(repo, cell)`.
-     Since the Wave 4 integration (DL-105) the clause is the entry gate's own `unsigned_cell`
+     Since the Wave 4 integration (DL-106) the clause is the entry gate's own `unsigned_cell`
      stop (`crb.factory.standard.decide_entry`) over the store-bound readers
      (`crb.server.factory_standard`), so *signed* is `Standard.signed`: a sign-off made on the
      standard's arm, class-set version and reading. A cell with no proven standard, or only

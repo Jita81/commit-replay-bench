@@ -170,7 +170,7 @@ def first_controls_pass(session: Session, repo: str) -> str:
     "Passed" is the same word the map routes under — :meth:`ControlsVerdict.state` against
     ``DEFAULT_POLICY`` — so a report with an escape or too few constructible controls does not
     count here either, nor does a passed one with no gold witness (before ``controls.v3``):
-    each report is reduced by the same ``controls_verdict_of`` the map reads (P-344). Source
+    each report is reduced by the same ``controls_verdict_of`` the map reads (P-372). Source
     order matches ``latest_controls_verdict``, read oldest first:
     the ``controls.report`` events, then the finished ``controls`` runs' counts.
     """

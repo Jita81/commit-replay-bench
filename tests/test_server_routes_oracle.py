@@ -10,7 +10,7 @@ What it does: Pins the report's shape, bands and gates over the seed's ``oracle.
               report, 404s when not measured, and admins read too; and that a passed report
               or run with no gold witness (before ``controls.v3``, or unstamped) is served as
               written but reads as unmeasured for routing and on its own verdict, while a
-              witnessed one reads as written (P-344).
+              witnessed one reads as written (P-372).
 How:          ``make_env`` over the seed; extra ``oracle.score`` events appended through the ORM
               in the worker's shape.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -172,7 +172,7 @@ class TestControls:
     def test_a_passed_report_with_no_gold_witness_licenses_nothing(
         self, env: Env, stamp: str | None
     ) -> None:
-        """P-344: a report written before ``controls.v3`` has no gold witness beside any catch,
+        """P-372: a report written before ``controls.v3`` has no gold witness beside any catch,
         so its "caught" rows may be an environment that could not build. It is served as it
         was written, but routing reads it as unmeasured — re-run the controls — never as
         passed, whatever its counts say."""

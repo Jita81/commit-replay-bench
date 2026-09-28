@@ -86,7 +86,7 @@ def _row(
         provenance=provenance,
         # a sighted replay row of 2.4 on the global vocabulary: the one kind the export sends
         # (an unstamped row — ``arm``/``taxonomy`` empty — carries neither key: below 2.4 a
-        # row never holds a 2.4 label, even an empty one, P-309)
+        # row never holds a 2.4 label, even an empty one, P-317)
         labels={
             "story": "STORY-1234",
             **({"context_arm": arm} if arm else {}),

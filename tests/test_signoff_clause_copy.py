@@ -1,4 +1,4 @@
-"""The words about the sign-off clause say no more than the clause does (P-328).
+"""The words about the sign-off clause say no more than the clause does (P-356).
 
 ADR-0018's sign-off clause, as ADR-0026 item 8 amends it, stops an item before any spend only
 when its cell has a PROVEN context standard that nobody has signed off: the entry gate
@@ -26,7 +26,7 @@ ADRs:         docs/adr/0018-a-signed-cell-licenses-delivery.md,
 Works with:   src/crb/factory/standard.py (``decide_entry`` — the rule the words describe),
               ui/src/screens/Posture/PosturePage.tsx and ui/src/screens/Factory/FactoryPage.tsx
               (the rows and sentences that said too much), ui/src/help/hints.ts and
-              ui/src/help/help.ts (the hints), docs/PREVENTION.md (P-328)
+              ui/src/help/help.ts (the hints), docs/PREVENTION.md (P-356)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; the sign-off clause changes scope (change the
               anchor with the rule, and the words with both).

@@ -92,7 +92,7 @@ export function InviteApproverCard() {
   const [made, setMade] = useState<InvitationCreated | null>(null)
   const [copied, setCopied] = useState(false)
 
-  // P-265: the expiry is typed text read by one rule — a blank, a fraction or an hour outside
+  // P-273: the expiry is typed text read by one rule — a blank, a fraction or an hour outside
   // the server's range is said at the field and never sent as a silent default
   const expiry = readAmount(hours, { min: 1, whole: true })
   const expiryHours = expiry.kind === 'ok' && expiry.value <= MAX_EXPIRY_HOURS ? expiry.value : null

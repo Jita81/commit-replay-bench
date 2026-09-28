@@ -12,7 +12,7 @@ What it does: Pins #60's semantics — a failed query fails the check, every que
               shell string, held in a variable or not — and any ``docker inspect`` of a
               container after a ``kill``, ``rm`` or ``stop`` in the same function, either
               one reached directly or through a same-module helper, proving on planted
-              source that it catches each shape (docs/PREVENTION.md P-119, P-255, P-264).
+              source that it catches each shape (docs/PREVENTION.md P-119, P-263, P-272).
 How:          ``monkeypatch.setattr(subprocess, "run", …)`` for the helper; an ``ast`` walk
               for the ratchet: a call whose argv is ``[<docker>, "ps", …]``,
               ``[<docker>, "network", "ls", …]`` or ``_docker("ps", …)``, a name read as the
@@ -204,7 +204,7 @@ _Fn = ast.FunctionDef | ast.AsyncFunctionDef
 
 def _bound(nodes: list[ast.AST]) -> _Bindings:
     """Names bound to a list, tuple or string literal among ``nodes``, with the line of each
-    binding — so ``argv = ["docker", "ps"]; run(argv)`` reads as the literal (P-264)."""
+    binding — so ``argv = ["docker", "ps"]; run(argv)`` reads as the literal (P-272)."""
     out: _Bindings = {}
     for n in nodes:
         if isinstance(n, ast.Assign):
@@ -351,7 +351,7 @@ def test_i(name):
 def test_ratchet_sees_an_argv_held_in_a_variable() -> None:
     """``argv = ["docker", "ps", …]; subprocess.run(argv)`` is the same listing: a name
     bound to a list or tuple literal earlier in the function (or the module) is read as
-    that literal (P-264)."""
+    that literal (P-272)."""
     planted = """
 import subprocess
 ARGV = ("docker", "network", "ls", "-q")
@@ -380,7 +380,7 @@ def test_d():
 def test_ratchet_sees_an_inspect_after_a_kill_in_a_helper() -> None:
     """A ``docker inspect`` (or a kill) moved into a same-module helper is the same race:
     a call to a function whose body inspects, after a call that changes a container's state
-    — directly or through another helper — is flagged at the call (P-264)."""
+    — directly or through another helper — is flagged at the call (P-272)."""
     planted = """
 import subprocess
 def _state(name):

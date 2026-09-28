@@ -1,4 +1,4 @@
-"""The UI type-check keeps its incremental state inside the checkout it checks (P-322).
+"""The UI type-check keeps its incremental state inside the checkout it checks (P-350).
 
 ``npm run typecheck`` is ``tsc -b``: a build-mode check that skips work its ``.tsbuildinfo``
 says is up to date. That file lived under ``ui/node_modules/.tmp/``. A worktree set up the way
@@ -21,7 +21,7 @@ ADRs:         none
 Works with:   ui/tsconfig.app.json and ui/tsconfig.node.json (where ``tsBuildInfoFile`` is
               set), ui/.gitignore (which ignores the build-info directory the tsconfigs
               name — cited in words, not as a path: a fresh clone has no such directory, so
-              the code map could not resolve it, P-327), docs/PREVENTION.md (P-322)
+              the code map could not resolve it, P-355), docs/PREVENTION.md (P-350)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (the UI's own build settings); a new tsconfig with
               build info is added, or the type-check stops being ``tsc -b``.
@@ -51,7 +51,7 @@ def test_every_build_info_file_lives_in_this_checkout_and_never_under_node_modul
         p = PurePosixPath(raw)
         assert "node_modules" not in p.parts, (
             f"{name}: {raw} sits under node_modules, which a worktree may share by symlink — "
-            "the type-check would then skip a tree it never checked (P-322)"
+            "the type-check would then skip a tree it never checked (P-350)"
         )
         assert ".." not in p.parts and not p.is_absolute(), f"{name}: {raw} leaves ui/"
 

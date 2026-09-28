@@ -78,7 +78,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-#: The CHECK on ``events`` (revision 0013, P-246): both chain columns hold a SHA-256 in hex.
+#: The CHECK on ``events`` (revision 0013, P-254): both chain columns hold a SHA-256 in hex.
 #: ``length`` is the one spelling SQLite and PostgreSQL share.
 EVENTS_CHAIN_CHECK_NAME = "ck_events_chain_hashes"
 EVENTS_CHAIN_CHECK = "length(prev_hash) = 64 AND length(row_hash) = 64"
@@ -281,7 +281,7 @@ class Event(Base):
     # revision 0013 (ADR-0029, F51): the audit trail's hash chain, in id order. Set by the
     # flush hook in src/crb/store/events.py whatever the writer put there; declared LAST so
     # the column order matches a migrated database. No server default and a CHECK on both
-    # (P-246): a writer that skips the hook — the release before 0013 during an upgrade or
+    # (P-254): a writer that skips the hook — the release before 0013 during an upgrade or
     # after a rollback, a Core insert — is refused for that one row instead of storing a
     # head of '' that no later write could chain onto.
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)

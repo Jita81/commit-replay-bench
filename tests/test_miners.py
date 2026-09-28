@@ -221,7 +221,7 @@ def test_lint_configurations_become_conventions_with_the_check_that_runs_them(
 
 #: Configurations whose belt-5 reading the miner once decided on its own: each maps to the
 #: tools crb's own plans (``python_plan``, ``js_plan``, ``go_plan``, ``jvm_plan``,
-#: ``rust_plan``) run on it when every binary is installed. P-348.
+#: ``rust_plan``) run on it when every binary is installed. P-376.
 BELT5_CASES: dict[str, tuple[dict[str, str], set[str]]] = {
     "ruff.toml with a [format] table": (
         {"ruff.toml": "line-length = 100\n[format]\nquote-style = 'double'\n", "a.py": ""},

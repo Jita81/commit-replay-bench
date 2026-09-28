@@ -514,7 +514,7 @@ describe('FactoryPage — the shipped contract', () => {
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).max_cost_usd).toBe(2.5)
   })
 
-  it('a spend cap the browser could not read as a number is refused, never sent as no cap (P-265)', async () => {
+  it('a spend cap the browser could not read as a number is refused, never sent as no cap (P-273)', async () => {
     const { calls } = mockApi(base({ 'POST /runs': () => json({ id: 'e'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued' }, 201) }))
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
     const box = await screen.findByTestId('before-you-start')

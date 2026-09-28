@@ -21,7 +21,7 @@ What it does: Parses a ``class:size:count`` mix (422 on a malformed item), resol
               defaults the mix to the repo's cached change profile (409 when neither).
 How:          ``parse_mix`` → ``DbLedger.rows(repo)`` in the repository's own checks arm and
               the deployment's posture class (the map's default view, so a reading licenses
-              only the rows it counted on, P-311) → ``forecast_build`` /
+              only the rows it counted on, P-319) → ``forecast_build`` /
               ``assess_readiness`` from the core → the ``to_dict`` re-typed into the schema.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
@@ -134,7 +134,7 @@ def served_rows(
 ) -> list[GradeRow]:
     """The rows a forecast prices: the repository's own checks arm and the deployment's
     posture class — the capability map's default view (ADR-0019 §8, ADR-0024). A view that
-    pooled posture classes would be read by no reading at all (P-311)."""
+    pooled posture classes would be read by no reading at all (P-319)."""
     rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
     return filter_posture(db, repo, rows, POSTURE_DEPLOYMENT, settings).rows
 
@@ -170,7 +170,7 @@ def forecast_build_route(
     parsed = parse_mix(mix)
     # All rows, every mode and apparatus: the core forecast applies its own filters and
     # reports ``unmeasured`` for what it cannot price — in the repository's own checks arm
-    # and the deployment's posture class, because a cell never pools two (ADR-0024, P-311).
+    # and the deployment's posture class, because a cell never pools two (ADR-0024, P-319).
     rows = served_rows(db, factory, repo, settings)
     f = forecast_build(
         parsed,

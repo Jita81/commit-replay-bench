@@ -275,7 +275,7 @@ def test_a_rerun_of_a_missed_commit_never_replaces_its_first_attempt() -> None:
 
 
 def test_an_imported_row_never_counts_toward_a_reading() -> None:
-    """P-313: a row imported from another ledger is history, whatever its labels say."""
+    """P-321: a row imported from another ledger is history, whatever its labels say."""
     reading = register_reading(commits(40))
     imported = rows_for([True] * 20, reading.pool, labels={"imported": "true"})
     assert arm_reading(reading, "S3", imported).look.counted == 0

@@ -33,7 +33,7 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               production worker stamps the unsealed-production override into every run's
               apparatus and every pack, and refuses a run that asks for the local executor
               without it. And that the idle loop calls every idle step under its guard and
-              survives each one raising (P-326), and that the production path stops an
+              survives each one raising (P-354), and that the production path stops an
               unsigned deliver cell before any spend unless the setting turns the clause off
               (ADR-0018).
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
@@ -916,7 +916,7 @@ def _signed_file_entry(h: Harness, slug: str, path: str) -> str:
 
 
 def test_a_mine_reads_the_head_and_an_entry_whose_file_changed_goes_stale(h: Harness) -> None:
-    # G-736, DL-114: nobody posts digests — the mine itself reads the files entries cite
+    # G-736, DL-115: nobody posts digests — the mine itself reads the files entries cite
     changed = _signed_file_entry(h, "readme", pr.README)
     kept = _signed_file_entry(h, "pytest-ini", "pytest.ini")
     ledger = DbLibraryLedger(h.factory)
@@ -1330,7 +1330,7 @@ def test_controls_run_records_report(h: Harness) -> None:
     assert [r["control"] for r in report.payload["rows"]] == list(nc.CONTROLS)
     assert report.payload["apparatus"]["worker"] == "w-test"
     # both the report and the run's counts say they were witnessed, so routing reads either as
-    # passed; a pre-witness report reads as unmeasured (P-344)
+    # passed; a pre-witness report reads as unmeasured (P-372)
     assert c["controls_version"] == report.payload["apparatus"]["controls_version"]
     assert nc.report_is_witnessed(c) and nc.report_is_witnessed(report.payload)
     assert nc.controls_verdict_of(c).passed and nc.controls_verdict_of(report.payload).passed
@@ -2299,7 +2299,7 @@ def test_a_prod_worker_under_the_override_stamps_every_factory_run(
 def test_a_sealed_prod_worker_under_the_override_stamps_a_run_that_asks_for_local(
     h: Harness,
 ) -> None:
-    """P-248: a worker whose defaults are sealed (docker and docker) but that starts under
+    """P-256: a worker whose defaults are sealed (docker and docker) but that starts under
     the override admits a run asking for the local executor in its own parameters. That run
     executes unsealed, so its apparatus must carry the override and the name of the admin
     who set it — the worker-wide stamp is empty because the DEFAULTS are sealed."""
@@ -2784,7 +2784,7 @@ def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: 
     assert again.first_due == rec.first_due and again.last_seen >= rec.last_seen
 
 
-# --- the idle loop's own steps (P-326) --------------------------------------------------
+# --- the idle loop's own steps (P-354) --------------------------------------------------
 
 
 def test_the_idle_loop_runs_the_decisions_clock_and_survives_each_idle_step_raising(
@@ -2794,7 +2794,7 @@ def test_the_idle_loop_runs_the_decisions_clock_and_survives_each_idle_step_rais
     the real ``run_forever`` over an empty queue. And every idle step is under the loop's
     guard — the decisions pass and the intake poll each raise on their first call (a
     ``database is locked``, a unique-key race) and the loop goes round again and calls them
-    both a second time, where before one raise ended the worker (P-326)."""
+    both a second time, where before one raise ended the worker (P-354)."""
     from sqlalchemy.exc import OperationalError
 
     calls: dict[str, int] = {"poll_intake": 0, "refresh_decisions": 0}
@@ -2825,7 +2825,7 @@ def test_the_idle_loop_runs_the_decisions_clock_and_survives_each_idle_step_rais
 
 
 def test_run_forever_makes_no_call_outside_the_guard() -> None:
-    """The class, not the instance (P-326): a step added to the idle loop as a bare call
+    """The class, not the instance (P-354): a step added to the idle loop as a bare call
     would take the worker down the first time it raised. ``run_forever`` may call only
     methods that guard themselves (the check-in and the reaper say "never raises" and
     catch), ``run_once`` inside its ``try``, and the idle steps through the guarded runner
@@ -2864,7 +2864,7 @@ def test_the_decisions_pass_never_raises_and_one_repository_cannot_spoil_the_nex
     ``GET /decisions`` committing the same first stamp between the pass's read and its
     commit raised ``IntegrityError`` out of the pass, and a repository whose failure left
     the session needing a rollback made the final commit raise too. Now each repository is
-    its own transaction and the clock joins a concurrent first stamp (P-326, P-329)."""
+    its own transaction and the clock joins a concurrent first stamp (P-354, P-357)."""
     from types import SimpleNamespace
 
     from crb.server import decisions as dec

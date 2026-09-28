@@ -163,7 +163,7 @@ class DbLibraryLedger:
         (:func:`~crb.core.library.stale_candidates`; a digest of ``None`` or ``""`` is a file
         gone at head; a path not in ``digests_at_head`` is not judged). The one staleness
         path for ``POST /library/{repo}/freshness`` and the worker's read after a mine
-        (DL-114, G-736). An entry another reader marked between the fold and the write is
+        (DL-115, G-736). An entry another reader marked between the fold and the write is
         skipped, never marked twice."""
         out: list[tuple[LibraryAct, EntryState]] = []
         for state, digest in stale_candidates(self.states(repo).values(), digests_at_head):

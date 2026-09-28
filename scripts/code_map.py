@@ -16,7 +16,7 @@ with every path rendered as a link.
 in ``Layer``/``ADRs``/``Works with``/``Tested by``/``Touch when``/``Claims`` that does not exist
 in the repository (anchors are stripped before the check) — "in the repository" meaning what a
 fresh clone would hold: tracked, or new and not ignored, never a git-ignored build output that
-happens to be on this disk (P-327); a ``Tested by`` that is blank;
+happens to be on this disk (P-355); a ``Tested by`` that is blank;
 a ``Touch when`` whose first clause does not address onboarding a client repository (files
 older than that rule are listed in ``scripts/code_map_onboarding_baseline.txt``, which only
 shrinks — with ``--changed-since REF``, as CI runs it on a pull request, a listed file the
@@ -278,7 +278,7 @@ def _clone_paths(root: Path) -> frozenset[str] | None:
 
     A header that cites a git-ignored path (``ui/.tsbuild/``, the type-check's build info)
     resolved in the checkout that had built it and not in CI's fresh clone, so the gate
-    passed on a dirty tree and failed in the required job (P-327). Resolving against this
+    passed on a dirty tree and failed in the required job (P-355). Resolving against this
     set instead of the disk makes the answer the same in every checkout."""
     try:
         top = subprocess.run(

@@ -19,7 +19,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   tests, and the change profile. Each proposal cites its file and commit and waits for a
   person to sponsor it. Guidance files are read as data. An entry is proposed again only when
   its source or the miner's reading of it changes. A convention names belt 5's check only where
-  belt 5's own detectors find the tool. Teams add miners through a registry (DL-116, DL-117,
+  belt 5's own detectors find the tool. Teams add miners through a registry (DL-117, DL-118,
   G-677).
 
 - **The context library: two people sign what a repository's people know, and each work type has a page**
@@ -29,7 +29,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   never a person. Every act is appended to a hash-chained table (revision 0016) and is an
   event. An entry read from a file goes stale when a mine finds the file changed or gone.
   `/library/:repo` shows one page per work type, and Decisions lists entries to sign, gone
-  stale or retired by measurement. No entry reaches a builder's brief (DL-113 to DL-115).
+  stale or retired by measurement. No entry reaches a builder's brief (DL-114 to DL-116).
 
 - **The second person is real** (north-star Wave 4, stream S; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   An admin invites an approver from Settings with a one-time link that expires and is
@@ -44,18 +44,18 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   (north-star Wave 4, stream P; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   `GET /golive` reads the fifteen lines of DEPLOYMENT §8: five proven by the product's own
   checks, ten the operator's acts that an admin records on Settings as dated
-  `golive.attested` events (ADR-0031, DL-108). `/posture` lists both, names every row's
+  `golive.attested` events (ADR-0031, DL-109). `/posture` lists both, names every row's
   source, prints for a review board and carries the go-live journey's eyebrow. A private
   mirror's credential reaches the fetch alone; uv, poetry and pylock locks are provisioned;
-  a damaged sealed set is quarantined and what cites it revoked (DL-109, DL-110).
+  a damaged sealed set is quarantined and what cites it revoked (DL-110, DL-111).
 
 - **Truth on the instrument screens: failed reads are said, exports are recorded, catches are witnessed**
   (north-star Wave 4, stream T; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A failed read on Connect or the Measure estimate is an error with Retry, and a ratchet stops
   the next screen showing a fallback instead; Repos reads every page and re-reads a list that
   moved; the Ledger shows linked filters as chips; every ledger export is recorded first, or
-  not served (DL-112); each caught negative control carries a gold witness from the same
-  posture (`controls.v3`, DL-111). **Upgrading:** a passed controls report from before
+  not served (DL-113); each caught negative control carries a gold witness from the same
+  posture (`controls.v3`, DL-112). **Upgrading:** a passed controls report from before
   `controls.v3` licenses nothing — run the controls again on every repository.
 
 - **One governed delivery, end to end: the entry gate reads the registered readings**

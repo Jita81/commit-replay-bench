@@ -9,7 +9,7 @@ What it does: Adds ``prev_hash`` and ``row_hash`` (``VARCHAR(64) NOT NULL``, ser
               order from the genesis hash — deterministically: the same rows give the same
               hashes on any run, on either dialect — then drops the server default and adds
               a CHECK that each column holds 64 characters (so a writer that names no chain
-              column, the release before this one included, is refused row by row — P-246),
+              column, the release before this one included, is refused row by row — P-254),
               and adds the unique indexes on both columns (one successor per row, so the
               chain cannot fork). ``events`` is append-only, so its UPDATE trigger is dropped
               for the back-fill and the triggers are re-installed at the end, in the same
@@ -66,7 +66,7 @@ APPEND_ONLY_AT_0013: tuple[str, ...] = (
     "task_qualifications",
 )
 PREV_INDEX = "uq_events_prev_hash"
-#: P-246: after the back-fill both chain columns lose the server default and must hold a
+#: P-254: after the back-fill both chain columns lose the server default and must hold a
 #: SHA-256, so a writer that names no chain column (the release before this revision, still
 #: running during the upgrade or after a rollback) is refused for that row instead of
 #: storing a head of '' that no later write can chain onto. Pinned text, not imported.

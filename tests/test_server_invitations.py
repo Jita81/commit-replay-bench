@@ -14,7 +14,7 @@ What it does: Pins that an invitation creates an INACTIVE account nobody can sig
               write lands as one ``user.*`` event with actor and target and never a token or
               a password, that a link never outlives another way into the same account — the
               admin's activate and password routes withdraw it, and the accept route refuses
-              and withdraws it for an account found already open (P-325) — and that
+              and withdraws it for an account found already open (P-353) — and that
               two-person readiness answers Home's task 7 honestly: an
               admin alone is not ready, an approver who has never signed in is not ready, and
               an approver who has signed in with somebody else on the deployment is — but a
@@ -296,7 +296,7 @@ def test_revoking_an_accepted_invitation_is_refused_and_says_what_to_do_instead(
     assert r.status_code == 404
 
 
-# --- a link never outlives another way into the same account (P-325) ------------------
+# --- a link never outlives another way into the same account (P-353) ------------------
 
 
 def _accept(app: Any, token: str, password: str) -> Any:
@@ -308,7 +308,7 @@ def _accept(app: Any, token: str, password: str) -> Any:
 def test_a_leaked_link_cannot_reset_an_account_the_admin_already_activated(
     client: TestClient, app: Any
 ) -> None:
-    """The independent verifiers' attack on stream S, kept as its regression (P-325). The
+    """The independent verifiers' attack on stream S, kept as its regression (P-353). The
     admin invites Bob, then lets him in from the Users card instead — activates the account
     and sets its password. Bob signs in and works. Whoever holds the unused link must not be
     able to spend it: a 200 here would set a new password, end Bob's sessions and hand a

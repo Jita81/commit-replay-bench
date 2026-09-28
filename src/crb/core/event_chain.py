@@ -94,7 +94,7 @@ EVENT_CHAIN_FIELDS: tuple[str, ...] = (
 )
 #: ``events`` columns deliberately left OUT of the hash (besides the id and the chain). Empty:
 #: every column is hashed. A test holds ``EVENT_CHAIN_FIELDS`` plus this tuple to the table's
-#: columns (P-247), so a new column is a reviewed decision — hashed under a new schema, or
+#: columns (P-255), so a new column is a reviewed decision — hashed under a new schema, or
 #: named here with the reason in ADR-0029 — never an edit the walk cannot see.
 EVENT_CHAIN_UNHASHED: tuple[str, ...] = ()
 _INT_FIELDS = frozenset({"seq", "duration_ms"})

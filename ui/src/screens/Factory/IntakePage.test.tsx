@@ -261,7 +261,7 @@ describe('IntakePage', () => {
     expect(within(row2).getByTestId('intake-entry-4716')).toHaveTextContent('Attach to the ticket: a failing test.')
   })
 
-  it('the intake pills tell the two gates apart: only a stop says not built, and ready promises no pull request its cell does not route (P-288)', () => {
+  it('the intake pills tell the two gates apart: only a stop says not built, and ready promises no pull request its cell does not route (P-296)', () => {
     const notBuilt = /not (be )?built|nothing is built/i
     // the two stops before any build say so; the two labels of an admitted ticket never do
     expect(HINTS['pill.intake.not_deliverable']).toMatch(notBuilt)

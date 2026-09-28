@@ -209,7 +209,7 @@ def served(tmp_path: Path) -> dict[str, Any]:
         v3 = {"controls_version": "controls.v3"}
         escaped = {"n_rows": 14, "escapes": 1, "not_constructible": 2, "passed": True, **v3}
         event(s, n := n + 1, "controls.report", at("08:30"), escaped, repo=ALPHA)
-        # a clean report from before the gold witness (P-344) is not a pass either
+        # a clean report from before the gold witness (P-372) is not a pass either
         unwitnessed = {**escaped, "escapes": 0, "controls_version": "controls.v2"}
         event(s, n := n + 1, "controls.report", at("08:45"), unwitnessed, repo=ALPHA)
         passed = {"n_rows": 14, "escapes": 0, "not_constructible": 2, "passed": True, **v3}

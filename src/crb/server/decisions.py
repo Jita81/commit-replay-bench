@@ -39,7 +39,7 @@ What it does: Derives the eight inbox kinds from the capability cells, the facto
 How:          Pure ``decision_rows`` over ``CapabilityCell`` and ``TaskView``; ``record_due``
               upserts under the caller's session (the caller commits), stamping ``first_due``
               on arrival (``INSERT … ON CONFLICT DO NOTHING``, so a concurrent first stamp is
-              joined — P-329), ``last_seen`` every pass and ``resolved`` when a row goes.
+              joined — P-357), ``last_seen`` every pass and ``resolved`` when a row goes.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md (the routes the cell rows quote),
               docs/adr/0015-signoffs-expire-with-the-apparatus.md (why a stale sign-off puts a
@@ -313,7 +313,7 @@ def _first_stamp(db: Session, repo: str, row: DecisionRow, stamp: str) -> Decisi
     Two stampers run: the worker's idle pass and every ``GET /decisions``. Both read the
     clock, then write it, under the unique ``(repo, kind, key)``; when the other commits the
     same first stamp in between, a plain insert raised ``IntegrityError`` — out of the
-    worker's pass, ending the loop, and out of the route as a 500 (P-329). So the insert is
+    worker's pass, ending the loop, and out of the route as a 500 (P-357). So the insert is
     ``ON CONFLICT DO NOTHING`` on that identity, in the dialect's own words (SQLite and
     PostgreSQL both say it), and the row is then read back: ours, or the earlier one with its
     earlier ``first_due`` — the wait is the decision's, whoever stamped it first."""

@@ -30,7 +30,7 @@ Invariants
   refused by the database: the chain columns have no default and a CHECK requires a
   SHA-256 in each, and the unique index on ``prev_hash`` refuses a second row on one
   predecessor. Genesis is the predecessor of the first row of an empty table only; a head
-  that is not a hash raises :class:`EventChainHeadError` (P-246).
+  that is not a hash raises :class:`EventChainHeadError` (P-254).
 
 Navigation
 ----------
@@ -232,7 +232,7 @@ _HEX = frozenset("0123456789abcdef")
 
 def _predecessor(head: str | None) -> str:
     """The ``prev_hash`` of the next row: genesis for an EMPTY table only (``head`` is
-    ``None``); otherwise the head, which must be a SHA-256 in hex (P-246 — a head of ``''``
+    ``None``); otherwise the head, which must be a SHA-256 in hex (P-254 — a head of ``''``
     read as genesis once made every later write collide with the first row)."""
     if head is None:
         return GENESIS_HASH
@@ -512,7 +512,7 @@ def verify_events(factory: sessionmaker[Session]) -> EventChainReport:
 
 
 #: The longest a tail walk may lean on an earlier full walk: every ``/ledger/verify`` after
-#: this re-hashes the whole chain again (P-249).
+#: this re-hashes the whole chain again (P-257).
 FULL_WALK_EVERY_S = 300.0
 
 
@@ -532,7 +532,7 @@ class _Walked:
 
 
 class EventChainVerifier:
-    """The audit trail's walk for a page that is read often (P-249).
+    """The audit trail's walk for a page that is read often (P-257).
 
     A full walk re-hashes every row — the audit trail holds every step of every run, so it
     grows without bound. Between full walks (at most ``full_every_s`` apart, measured on

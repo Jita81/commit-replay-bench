@@ -102,13 +102,13 @@ Rules for the table:
   of at least six words that its old words held and its new words do not may not survive in
   any other criterion, unless that criterion waits on the same gap — the record saying the two
   change together — and the gap line names it. The checker reads each criterion's words at the
-  merge-base with the base branch (`docs/PREVENTION.md` P-228); a twin that paraphrases the
+  merge-base with the base branch (`docs/PREVENTION.md` P-236); a twin that paraphrases the
   old clause still needs a reader.
 - **A provisional value says so.** A Proposed ADR that leaves a value to the operator marks it
   **[operator]** and registers it in a `## Operator values` table, with the words a criterion
   states it in. A criterion or gap line that states one carries `ADR-nnnn [operator]` and
   follows the operator's choice. The checker refuses one that does not, an `[operator]` marker
-  the table does not register, and the marker once the ADR is accepted (P-229).
+  the table does not register, and the marker once the ADR is accepted (P-237).
 - **Tags in the record's own prose.** A criterion's `criterion` cell is a specification and
   carries no claims tag. Prose outside the table — a purpose paragraph, a gap line, a wave row
   — carries a tag on every statement that quantifies something (`docs/EVIDENCE-AND-CLAIMS.md`

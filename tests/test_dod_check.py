@@ -28,10 +28,10 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               order of work ranks, not only the first rows, sits in some table of the plan;
               that no plan heading quotes a rank (P-189); that a clause a reworded criterion
               dropped since the merge-base may not survive in a twin that does not wait on the
-              same gap (P-228); and that a value a Proposed ADR leaves to the operator is
+              same gap (P-236); and that a value a Proposed ADR leaves to the operator is
               marked provisional on every row that states it, the ADR registers each such
               value, and the marker goes when the ADR is accepted — on a fixture and on the
-              live record (P-229).
+              live record (P-237).
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
@@ -1089,7 +1089,7 @@ def _art(mod: ModuleType, rel: str, *crits: object) -> object:
 
 
 def test_a_reworded_criterion_leaves_no_twin_in_its_old_words() -> None:
-    """docs/PREVENTION.md P-228: stream T reworded manufacture.non-goals.12 from "items outside
+    """docs/PREVENTION.md P-236: stream T reworded manufacture.non-goals.12 from "items outside
     a deliver cell are built and withheld" to "is not built" and dropped it to unmet on G-933,
     while its twin on the page, factory.non-goals.19, kept the old clause and stayed met — two
     end states that cannot both hold, and nothing told G-933's builder to change the page.
@@ -1189,7 +1189,7 @@ ADR_OPERATOR = """# ADR-0099 — a proposal
 ## Operator values
 
 A criterion or gap line that states one of these carries `ADR-0099 [operator]` until the
-operator fixes it (P-229).
+operator fixes it (P-237).
 
 | item | the proposal | the words a criterion states it in |
 |---|---|---|
@@ -1201,7 +1201,7 @@ operator fixes it (P-229).
 def test_a_value_a_proposed_adr_leaves_to_the_operator_is_marked_provisional(
     tmp_path: Path,
 ) -> None:
-    """docs/PREVENTION.md P-229: product.truth.202, truth.207 and truth.208 fixed values
+    """docs/PREVENTION.md P-237: product.truth.202, truth.207 and truth.208 fixed values
     ADR-0026 still marks [operator] — the first look at 20, the size rule, twenty confirmation
     commits — with nothing on the row saying so, and the definition of done wins over the
     ADR, so a builder would have built a proposal as settled. A Proposed ADR registers each
@@ -1254,7 +1254,7 @@ def test_a_value_a_proposed_adr_leaves_to_the_operator_is_marked_provisional(
 
 def test_the_record_marks_every_operator_value_it_states() -> None:
     """The live record: every criterion and gap line that states a value a Proposed ADR leaves
-    to the operator says so (P-229)."""
+    to the operator says so (P-237)."""
     mod = _load()
     arts = [mod.parse_artefact(p)[0] for p in mod.artefact_files()]
     assert mod.validate_operator_values(arts, mod.ADR_DIR) == []
@@ -1263,7 +1263,7 @@ def test_the_record_marks_every_operator_value_it_states() -> None:
 def test_the_check_refuses_an_operator_value_stated_as_settled(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``main`` runs the provisional-value rule over the tree's own ADRs (P-229)."""
+    """``main`` runs the provisional-value rule over the tree's own ADRs (P-237)."""
     mod, root = tree
     _write_all(root)
     assert mod.main([]) == 0

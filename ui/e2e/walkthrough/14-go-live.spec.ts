@@ -99,7 +99,7 @@ test.describe('14 go live', () => {
     const users = page.getByRole('table', { name: 'Users' })
     await expect(users).toBeVisible()
     if ((await users.getByRole('cell', { name: APPROVER, exact: true }).count()) === 0) {
-      // the Users card's own form: the invitation card asks for a Username too (P-323)
+      // the Users card's own form: the invitation card asks for a Username too (P-351)
       const create = page.getByRole('form', { name: 'Create a local user' })
       await field(create, 'Username').fill(APPROVER)
       await field(create, 'Display name').fill('Walk go-live approver')

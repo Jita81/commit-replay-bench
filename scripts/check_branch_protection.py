@@ -19,7 +19,7 @@ it). An aggregator is a job that ``needs`` others and runs ``if: always()`` — 
 job over the suite's shards and ``walkthrough`` over the story and the screens shards: it is
 required, and the parts it stands for are not. A saved reading may list a job added before
 the administrator could require it, under ``awaiting_protection`` with the step that remains
-and the open gap in docs/dod that names the job; the live setting never does (DL-101, P-261).
+and the open gap in docs/dod that names the job; the live setting never does (DL-101, P-269).
 
 Navigation
 ----------
@@ -279,7 +279,7 @@ def compare_reading(
     entry), when no job reports it, when it names no step, and unless its step names a gap
     that is open in docs/dod (``gaps``: :func:`open_gaps`, read only when an entry needs it)
     and whose text names the job; ``parts`` are the aggregators' parts, as :func:`compare`
-    takes them — so a job cannot be parked there by review alone (P-261).
+    takes them — so a job cannot be parked there by review alone (P-269).
     The live setting never carries the key, so the scheduled comparison stays red until the
     administrator acts (DL-101)."""
     required = [str(c) for c in reading.get("contexts", [])]

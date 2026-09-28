@@ -15,7 +15,7 @@
  *               Strong and Adequate tiles name the served policy's floors, and the About
  *               block repeats no floor that could drift from them (G-204); each caught control
  *               shows its gold witness, a red one as an instrument failure (G-952); a passed
- *               report the server reads as unmeasured says it licenses nothing (P-344).
+ *               report the server reads as unmeasured says it licenses nothing (P-372).
  * How:          `mockApi` + `renderApp` at `/oracle?repo=…` per role.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0010-polyglot-negative-controls.md
@@ -153,7 +153,7 @@ describe('OraclePage', () => {
     expect(screen.getByRole('columnheader', { name: /Gold witness/ })).toBeInTheDocument()
   })
 
-  it('a passed report from before the gold witness says it licenses nothing and asks for the controls again (P-344)', async () => {
+  it('a passed report from before the gold witness says it licenses nothing and asks for the controls again (P-372)', async () => {
     mockApi({
       'GET /auth/me': VIEWER,
       'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },

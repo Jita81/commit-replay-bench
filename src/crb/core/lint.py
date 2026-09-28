@@ -1261,7 +1261,7 @@ def js_lint_evidence(root: Path | ConfigFiles) -> dict[str, str]:
 def prettier_evidence(root: Path | ConfigFiles) -> str:
     """The file that configures prettier — a config file, or ``package.json`` when its
     ``prettier`` key is set (an object, or a shared config's name) — or ``""``. The format
-    step asks this too (``crb.core.formatting``), so the two never disagree (P-348)."""
+    step asks this too (``crb.core.formatting``), so the two never disagree (P-376)."""
     files = config_files(root)
     hit = next((c for c in _PRETTIER_CONFIGS if files.is_file(c)), "")
     if hit:
@@ -1521,7 +1521,7 @@ def belt5_evidence(root: Path | ConfigFiles) -> dict[str, str]:
     :func:`rust_plan`) include on ``root`` when every binary is installed — each under its
     language's runner (:data:`BELT5_RUNNERS`). The plans read the same functions, so what
     this names is what belt 5 runs; the library's lint miner names ``repo_lint_clean`` for
-    these tools alone (P-348)."""
+    these tools alone (P-376)."""
     files = config_files(root)
     found: dict[str, str] = {}
     if files.is_file("go.mod"):

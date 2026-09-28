@@ -697,7 +697,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   // F5b — the run's own spend cap (blank = none): the worker stops the run before an item
   // that could take its spend past it — a guard, not a guarantee (ADR-0030 §3)
   const [capText, setCapText] = useState('')
-  // read as typed (P-265): text the browser could not parse is refused, never "no cap"
+  // read as typed (P-273): text the browser could not parse is refused, never "no cap"
   const capRead = readAmount(capText, { min: 0, above: true })
   const cap = capRead.kind === 'ok' ? capRead.value : 0
   const capSet = capRead.kind === 'ok'

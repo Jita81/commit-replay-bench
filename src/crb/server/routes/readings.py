@@ -133,7 +133,7 @@ def standard_for(
     proven standard. The factory's entry gate reads this (ADR-0026 item 8), naming the
     repository's own checks arm (``current_checks_arm``) and the deployment's posture class
     (``deployment_posture_class``): both are required, so a licence never crosses an arm or a
-    posture (P-311)."""
+    posture (P-319)."""
     with factory() as s:
         readings = load_readings(s, repo)
     rows = list(DbLedger(factory).rows(repo=repo))

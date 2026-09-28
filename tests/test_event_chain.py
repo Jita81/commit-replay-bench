@@ -90,7 +90,7 @@ def test_the_body_holds_the_named_fields_and_normalises_to_what_a_database_retur
 
 
 def test_every_events_column_is_hashed_or_named_unhashed() -> None:
-    """P-247: the hashed field set is held to the TABLE, not to itself. A column added to
+    """P-255: the hashed field set is held to the TABLE, not to itself. A column added to
     ``events`` and left out of ``EVENT_CHAIN_FIELDS`` would be editable without a trace; it
     must be hashed (a new chain schema) or named in ``EVENT_CHAIN_UNHASHED``, reviewed."""
     from crb.store.models import Event

@@ -11,7 +11,7 @@
  *               value below the floor. Fields are `type="text"` with `inputMode`, never
  *               `type="number"`: a number input whose text the browser cannot parse (`1e`,
  *               `1e400`) reports '' while the text stays on screen, so a typed spend cap read
- *               as "no cap" (the verifiers of `feat/ns2-h`, docs/PREVENTION.md P-265). This
+ *               as "no cap" (the verifiers of `feat/ns2-h`, docs/PREVENTION.md P-273). This
  *               is also the GOV.UK Design System's advice for numbers.
  * How:          One regular expression per rule, then `Number` on text it has accepted.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers

@@ -17,7 +17,7 @@
  *               ladder or an incomplete rung blocks submit; and that a submit the server
  *               refuses for a builder with no credential (`builder_credential_missing`,
  *               docs/PREVENTION.md P-003) or for a rung naming a provider the endpoint is not
- *               (`builder_provider_mismatch`, P-276) shows the refusal with its fix and
+ *               (`builder_provider_mismatch`, P-284) shows the refusal with its fix and
  *               creates nothing.
  * How:          `mockApi` records the POST body; `userEvent` drives the form; assertions on
  *               the body and the field errors.
@@ -125,7 +125,7 @@ describe('RunNewDialog', () => {
   })
 
   it('a submit refused for a rung naming another provider shows the refusal and its fix, and nothing is created', async () => {
-    // P-276 (docs/PREVENTION.md): a rung naming a provider the configured endpoint is not
+    // P-284 (docs/PREVENTION.md): a rung naming a provider the configured endpoint is not
     // could only fail on the worker; POST /runs now refuses it at submit
     const user = userEvent.setup()
     const onCreated = vi.fn()
@@ -290,7 +290,7 @@ describe('RunNewDialog', () => {
     expect(screen.getByRole('button', { name: 'Queue run' })).toBeEnabled()
   })
 
-  it('a number the browser could not read is refused, never read as blank: the cap, a budget cap, the limit (P-265)', async () => {
+  it('a number the browser could not read is refused, never read as blank: the cap, a budget cap, the limit (P-273)', async () => {
     const user = userEvent.setup()
     const { calls } = setup()
     await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')

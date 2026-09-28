@@ -26,7 +26,7 @@ What it does: Pins, per control on the fixture's ``fix`` task: gold goes green w
               beside it in the same posture, while a posture that stops building turns
               each catch into a VIOLATION (G-952), each witness graded with the very runner,
               executor, config and grade context of the control beside it; and that only a
-              report stating ``controls.v3`` or later is witnessed (P-344).
+              report stating ``controls.v3`` or later is witnessed (P-372).
 How:          ``fixtures.oracle_repo`` (module-scoped) → ``make_task`` through the real miner →
               ``controls_for_task`` with a real ``PytestRunner`` + ``LocalExecutor``; no docker,
               no network, no model.
@@ -299,7 +299,7 @@ def test_the_gold_witness_grades_with_the_very_posture_the_control_graded_with(
     ],
 )
 def test_only_a_report_from_controls_v3_on_is_witnessed(report, witnessed):
-    """P-344: a report is read as witnessed only when it states controls.v3 or later; an
+    """P-372: a report is read as witnessed only when it states controls.v3 or later; an
     earlier or missing stamp licenses nothing, and a failed report stays failed."""
     assert nc.report_is_witnessed(report) is witnessed
     passed = nc.controls_verdict_of({**report, "passed": True, "n_rows": 7})

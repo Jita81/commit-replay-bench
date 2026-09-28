@@ -51,9 +51,9 @@ never reach a brief" names this module).
 
 **Belt 5 is read, not copied.** A convention names ``repo_lint_clean`` only for a tool
 :func:`crb.core.lint.belt5_evidence` finds — the detectors belt 5's own plans call — so the
-check a signed convention names is the check that runs (P-348). A run's outcomes, notes and
+check a signed convention names is the check that runs (P-376). A run's outcomes, notes and
 files read are redacted when they are made: a refused draft never echoes the credential that
-refused it (P-349).
+refused it (P-377).
 
 **Drafting is recorded.** A model may reword a statement (the ``Drafter`` seam, off by default:
 no model is called unless an operator passes one). The proposal is then recorded as
@@ -965,7 +965,7 @@ def guidance_commands(text: str, *, tree: Iterable[str] = ()) -> list[tuple[str,
     or a fenced line — in the order found, first per tool. After the tool's leading words,
     every argument is a flag or a path whose first part is a file or directory of ``tree``
     (the repository's files) — or the command is dropped whole. Prose, instructions, URLs and
-    any command carrying a shell operator never leave this function (P-350)."""
+    any command carrying a shell operator never leave this function (P-378)."""
     top = frozenset(p.split("/", 1)[0] for p in tree)
     candidates: list[str] = [m.group(1) for m in _CODE_SPAN_RE.finditer(text)]
     fenced = False
@@ -1277,7 +1277,7 @@ class Outcome:
 
     def __post_init__(self) -> None:
         # redacted when made: a refused draft's subject may carry the credential that
-        # refused it, and a run's report reaches the API, the CLI and the page (P-349)
+        # refused it, and a run's report reaches the API, the CLI and the page (P-377)
         object.__setattr__(self, "subject", redact(str(self.subject)))
         object.__setattr__(self, "reason", redact(str(self.reason)))
         object.__setattr__(self, "counts", {redact(str(k)): v for k, v in self.counts.items()})
@@ -1316,7 +1316,7 @@ class MineRun:
     files_read: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        # a file's name may carry a credential too (P-349)
+        # a file's name may carry a credential too (P-377)
         object.__setattr__(self, "files_read", tuple(redact(p) for p in self.files_read))
 
     def counts(self) -> dict[str, int]:

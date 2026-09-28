@@ -22,18 +22,18 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               without one (the critical friend's #8 and #9 did); that the fence reader
               agrees with a CommonMark parser line for line; and that a registered promise
               is refused in the present tense until its criterion is met, on a fixture and
-              on the live pages (P-227); that a sentence claiming ISO conformity is refused
+              on the live pages (P-235); that a sentence claiming ISO conformity is refused
               on README, a guide and the factory's pull-request body template while one that
               only names a standard passes (ADR-0026 item 11), whatever incidental negation,
               refusal in another clause or "never" heading surrounds it
-              (``CONFORMITY_EVASIONS``, P-237), in every shape a page renders and on a
+              (``CONFORMITY_EVASIONS``, P-245), in every shape a page renders and on a
               guide the UI does not bundle, and in the constants, helpers and interpolated
-              values the pull-request body uses (P-238); that a percentage written in words
-              is a claim (P-239); that a number after ``§``, ``#`` or an id prefix is an
+              values the pull-request body uses (P-246); that a percentage written in words
+              is a claim (P-247); that a number after ``§``, ``#`` or an id prefix is an
               identifier, not a count; that every exemption still refuses the evasions in
-              ``EVASIONS`` and the naming nouns are pinned (P-232); and that a ``[measured]``
-              tag whose rows are not in this repository is refused (DL-088, P-233), and a
-              README one names its rows in any rendered shape (P-238).
+              ``EVASIONS`` and the naming nouns are pinned (P-240); and that a ``[measured]``
+              tag whose rows are not in this repository is refused (DL-088, P-241), and a
+              README one names its rows in any rendered shape (P-246).
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -205,7 +205,7 @@ def test_prose_that_makes_no_claim_is_not_flagged(tree: Path, body: str) -> None
         # exemption used to swallow it because the "interval|level" half was optional
         "There is 65% confidence that the builder can deliver.\n",
         "The reviewer had 80% confidence in the verdict.\n",
-        # a percentage written in words is a percentage (P-239)
+        # a percentage written in words is a percentage (P-247)
         "Ninety percent of delivered patches are mergeable.\n",
         "95 percent of delivered patches are mergeable.\n",
         "95 per cent of delivered patches are mergeable.\n",
@@ -664,7 +664,7 @@ PROMISE_ROW = "| product.claims.210 | CLAIMS | the quality table | `absent` | {S
 def test_a_capability_is_refused_on_a_page_until_the_criterion_that_builds_it_is_met(
     tree: Path,
 ) -> None:
-    """docs/PREVENTION.md P-227: README said the product and EVIDENCE-AND-CLAIMS name which
+    """docs/PREVENTION.md P-235: README said the product and EVIDENCE-AND-CLAIMS name which
     ISO/IEC 25010 characteristics its checks evidence, while product.claims.210 — the table
     that would name them — was unmet and G-674 said the product names no quality model. A
     registered promise is refused on every page the gate reads until its criterion is met."""
@@ -862,7 +862,7 @@ def test_a_readme_measured_tag_must_name_rows_the_repository_carries(tree: Path)
 @pytest.mark.parametrize("shape", ["heading", "table row", "checklist item"])
 def test_a_readme_measured_tag_in_any_rendered_shape_needs_rows(tree: Path, shape: str) -> None:
     """A results table is the natural place for a measured number, so a [measured] tag in
-    a table cell, a heading or a checklist item names its rows like any other (P-238)."""
+    a table cell, a heading or a checklist item names its rows like any other (P-246)."""
     claim = f"bug.fix XS was 99% clean {MEASURED}"
     _write(tree, "README.md", "# t\n\n" + RENDERED_SHAPES[shape].format(s=claim))
     assert ["names no rows" in f.reason for f in cc.check_rows(tree)] == [True], shape
@@ -913,7 +913,7 @@ def test_a_gap_register_line_is_its_own_gap_tag(tree: Path) -> None:
     """A definition-of-done gap line — ``- **G-nnn** — what is missing · what closes it`` under
     ``## Gaps`` — is a [gap] by its form: it names what is absent and what would close it,
     which is exactly what the tag must cite. A sentence that only mentions a gap id is not
-    one, and the same line anywhere else is prose (P-232)."""
+    one, and the same line anywhere else is prose (P-240)."""
     (tree / "docs" / "dod").mkdir()
     page = "docs/dod/x.md"
     _write(
@@ -966,7 +966,7 @@ def test_a_sentence_listed_as_what_must_never_be_said_is_not_a_claim(tree: Path)
     assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
 
 
-# ─── every exemption stays as narrow as the case it was written for (P-232) ───────────────
+# ─── every exemption stays as narrow as the case it was written for (P-240) ───────────────
 
 #: Sentences the gate must refuse on README, however the exemptions grow. Each one got
 #: through an exemption that was wider than its case (the stream C verifiers, 2026-09-27).
@@ -1034,7 +1034,7 @@ def test_a_gap_line_is_its_own_tag_only_where_dod_check_reads_gaps(tree: Path) -
     assert cc.check_tree(tree, ("docs/dod/x.md", "docs/PREVENTION.md")) == []
 
 
-# ─── a [measured] tag is what its rows re-derive (DL-088, P-233) ──────────────────────────
+# ─── a [measured] tag is what its rows re-derive (DL-088, P-241) ──────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -1061,11 +1061,11 @@ def test_a_measured_tag_whose_rows_are_not_in_the_repository_is_refused(
     assert cc.check_tree(tree, ("README.md",)) == []
 
 
-# ─── the conformity rule refuses the claim whatever else the sentence says (P-232) ─────────
+# ─── the conformity rule refuses the claim whatever else the sentence says (P-240) ─────────
 
 
 #: Sentences that claim conformity and that the rule must refuse, however its denials grow.
-#: Each got past a denial wider than its case (P-232, P-237). The list only grows: a new
+#: Each got past a denial wider than its case (P-240, P-245). The list only grows: a new
 #: denial is written with its refused cases here first. The ones with a clause break pin the
 #: break: remove it and the negation or refusal before it would deny the claim after it.
 CONFORMITY_EVASIONS: tuple[str, ...] = (
@@ -1120,7 +1120,7 @@ def test_a_denial_reaches_the_conformity_words_it_governs(tree: Path, sentence: 
 
 
 #: Every shape a page renders that a reader reads: the conformity rule reads each, not only
-#: the paragraphs and list items the claim-tag heuristic counts (P-238).
+#: the paragraphs and list items the claim-tag heuristic counts (P-246).
 RENDERED_SHAPES: dict[str, str] = {
     "paragraph": "{s}\n",
     "list item": "- {s}\n",
@@ -1235,7 +1235,7 @@ def test_the_pr_body_rule_reads_the_constants_and_helpers_the_body_uses(tree: Pa
 
 def test_readme_carries_the_routing_bar_the_code_describes() -> None:
     """README's bar is ``RoutingPolicy.describe()``: the repository passes, and a copy whose
-    bar says anything else — one number moved — fails (docs/PREVENTION.md P-303)."""
+    bar says anything else — one number moved — fails (docs/PREVENTION.md P-311)."""
     assert cc.check_routing_bar(ROOT) == []
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     assert cc.BAR_BEGIN in text and cc.BAR_END in text

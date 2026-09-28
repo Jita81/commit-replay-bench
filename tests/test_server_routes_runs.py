@@ -429,7 +429,7 @@ class TestCreate:
             "model": "gpt-oss-120b",
             "provider": "cerebras",
             # a Claude rung: `editblock:…:anthropic` on the Cerebras endpoint could only fail
-            # and is refused at submit (P-276, TestProviderAtSubmit)
+            # and is refused at submit (P-284, TestProviderAtSubmit)
             "ladder": ["r1", "r2", "claude_code:claude-sonnet-5:anthropic"],
             "task_ids": [task_id(1), task_id(2)],
             "limit": 2,
@@ -834,7 +834,7 @@ class TestCredentialPresence:
         assert r.status_code == 201, r.text
 
 
-# --- a rung naming a provider the endpoint is not is refused at submit (P-276) -------------
+# --- a rung naming a provider the endpoint is not is refused at submit (P-284) -------------
 
 
 _CLAUDE = {"builder": "claude_code", "model": "claude-sonnet-5"}

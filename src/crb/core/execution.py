@@ -1302,7 +1302,7 @@ EXECUTOR_KINDS: tuple[str, ...] = ("local", "docker")
 def executor_kind(kind: str) -> str:
     """``kind`` normalised to one of :data:`EXECUTOR_KINDS`, or ``ValueError`` naming the
     setting — the one check :func:`make_executor` and every caller that holds an executor
-    setting (the worker's own settings, P-300) apply, so an empty value is refused where
+    setting (the worker's own settings, P-308) apply, so an empty value is refused where
     it is read and never reaches a caller's default."""
     k = (kind or "").strip().lower()
     if k not in EXECUTOR_KINDS:

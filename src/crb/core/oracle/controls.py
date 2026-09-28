@@ -92,7 +92,7 @@ What it does: Proves the instrument rejects what it must (gold clean, noop red, 
               whose witness is not clean is a VIOLATION (G-952); ``controls_verdict_of`` is
               the one reduction of a stored report for routing, and a passed report with no
               witness (before ``controls.v3``) reads as unmeasured there, licensing nothing
-              (P-344).
+              (P-372).
 How:          Per task: RED check at the parent (else ``skip``) → per control: fresh
               ``Workspace`` + tests overlaid → ``TamperGuard.snapshot`` → the control's edit
               (dispatched on ``RepoConfig.language``; Go/JS compile- or syntax-checked) →
@@ -170,7 +170,7 @@ def report_is_witnessed(report: Mapping[str, Any]) -> bool:
 
     A report from before the witness, or one that states no version, cannot show that its
     "caught" rows were not an environment that could not build, so it licenses nothing
-    (P-344): routing reads it as unmeasured and asks for the controls to be run again.
+    (P-372): routing reads it as unmeasured and asks for the controls to be run again.
     """
     version = report.get("controls_version")
     apparatus = report.get("apparatus")
@@ -188,7 +188,7 @@ def controls_verdict_of(
     the sign-off, the Oracle screen's verdict, the flow's first pass, ``crb learn``). A
     PASSED report that is not :func:`report_is_witnessed` licenses nothing: it reads as
     :meth:`~crb.core.routing.ControlsVerdict.unmeasured` until the controls are run again
-    (P-344), with :data:`UNWITNESSED_DETAIL` as its reason. It keeps the apparatus it was
+    (P-372), with :data:`UNWITNESSED_DETAIL` as its reason. It keeps the apparatus it was
     written at, so a reader that looks for the latest report of an apparatus stops at it
     rather than reading an older one in its place. A failed report stays failed, witnessed
     or not."""

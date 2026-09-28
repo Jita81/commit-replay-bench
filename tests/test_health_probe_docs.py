@@ -10,7 +10,7 @@ What it does: Collects the probes the readiness route actually serves (every pro
               §9.3 said seven probes while ``/health`` served eleven, and API.md said ten and
               left out ``provision`` (G-403; docs/PREVENTION.md P-126) — and refuses any
               "N probes" on DEPLOYMENT, API, ARCHITECTURE or OPERATOR that is not the served
-              count (§9's opening line kept "seven"; P-230). And refuses a §9.3 that names other
+              count (§9's opening line kept "seven"; P-238). And refuses a §9.3 that names other
               probes as raising a banner than the UI raises one for: every UI reader of a probe
               is classified in ``BANNERS`` (P-188).
 How:          ``collect_health`` over a session factory that raises and probe functions that
@@ -174,7 +174,7 @@ def test_no_guide_states_another_count_of_health_probes(
 ) -> None:
     """P-126's first test read only DEPLOYMENT §9.3 and API.md's row, so §9's own opening
     line kept "seven probes" while ``/health`` served eleven (found when the claims gate
-    widened to DEPLOYMENT, G-929; docs/PREVENTION.md P-230). Every "N probes" on the pages
+    widened to DEPLOYMENT, G-929; docs/PREVENTION.md P-238). Every "N probes" on the pages
     an operator reads the endpoint from must now state the served count."""
     served = len(_served(tmp_path, monkeypatch))
     wrong = []

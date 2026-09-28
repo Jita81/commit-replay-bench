@@ -40,7 +40,7 @@ What it does: Appends ``FactoryEvent`` rows (freeze, evolution, sign-off, readin
               for a build with no verdict, refuses a verdict that claims to precede an
               edit already on the record, and records a pull request's outcome at most
               once; claims a calibration grant for one run only (``claim_calibration``, a
-              conditional append — P-290); ``verify`` proves the chain.
+              conditional append — P-298); ``verify`` proves the chain.
 How:          ``FactoryEvidence.record_*`` → ``FactoryStore.append`` (``JsonlFactoryStore``
               fsyncs a line per event; ``MemoryFactoryStore`` for tests) → ``chained`` with
               the previous ``row_hash``; ``append_if`` reads the chain and writes under the
@@ -118,7 +118,7 @@ EV_CALIBRATION_FUNDED = "calibration.funded"
 #: A factory run claimed a calibration grant, before any spend: the grant's event id and the
 #: run. A claimed grant is spent — the store appends the claim only while no other claim or
 #: outcome has spent it, under the lock every append takes, so one grant funds one run
-#: however many runs start at once (docs/PREVENTION.md P-290).
+#: however many runs start at once (docs/PREVENTION.md P-298).
 EV_CALIBRATION_CLAIMED = "calibration.claimed"
 #: Intake (ADR-0017): what the listener did with a ticket. These sit on the SAME chain as
 #: the manufacture steps on purpose — "who read this ticket, when, at which revision, and
@@ -329,7 +329,7 @@ class JsonlFactoryStore:
     def append_if(self, event: FactoryEvent, admit: Admit) -> FactoryEvent | None:
         """:meth:`append` only when ``admit`` holds over the file as it stands, read under
         the same thread and OS file lock as the write — two processes cannot both pass the
-        check (P-290)."""
+        check (P-298)."""
         with self._lock, jsonl_append_lock(self.path):
             return self._append(event) if admit(list(self.events())) else None
 
@@ -630,7 +630,7 @@ class FactoryEvidence:
     def claim_calibration(self, item_id: str, grant: str, *, run_id: str) -> FactoryEvent | None:
         """Claim the grant ``grant`` for this run before any spend, or ``None`` when another
         run (or an outcome) spent it first. The check and the append are one step under the
-        store's lock (P-290)."""
+        store's lock (P-298)."""
         event = FactoryEvent(
             kind=EV_CALIBRATION_CLAIMED,
             item_id=item_id,

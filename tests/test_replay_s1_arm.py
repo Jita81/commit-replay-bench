@@ -14,8 +14,8 @@ What it does: Pins that the author works in a checkout holding one commit and no
               authoring failure — a test green at the parent, an author that raises — is an
               ``authoring`` row that counts against the arm and never against the builder or
               the harness, unless the author's provider refused the call on the production
-              path (an ``outage``, outside n — P-285); that every row of one run carries the
-              run's arm, ``+L`` included (P-287); and that ``POST /runs`` takes ``arm: S1`` on
+              path (an ``outage``, outside n — P-293); that every row of one run carries the
+              run's arm, ``+L`` included (P-295); and that ``POST /runs`` takes ``arm: S1`` on
               a blind run only.
 How:          ``pyrepo``'s feat commit replayed blind through ``crb.core.run.run`` with a
               recording builder that applies the commit's own patch and a scripted author.
@@ -222,7 +222,7 @@ def _provider_refusal(status: int) -> Any:
 def test_an_author_outage_is_an_outage_never_an_authoring_failure(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
-    """P-285: the S1 test author's provider refused the call (a rate limit, a quota, an
+    """P-293: the S1 test author's provider refused the call (a rate limit, a quota, an
     overloaded server, a refused key): nothing was observed, so the row is an ``outage`` —
     outside n — not an ``authoring`` failure counted against the arm. A call the provider
     answered as a bad request, and an author that ran and produced no RED test, stay

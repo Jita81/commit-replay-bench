@@ -12,9 +12,9 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               arms on the map and on ``/value`` with the playbook digests as provenance; refuses
               every pooled view with 422; carries the arm, builder and model in the CSV export;
               answers ``standard_for`` for the factory's gate; shows a reading licensing only
-              the checks arm and posture class it counted on (P-311), a pool picked on
-              outcomes refused ``pool_not_blind`` and a date cut accepted (P-312), imported
-              rows never counted (P-313), and an S3-only standard read as a ceiling.
+              the checks arm and posture class it counted on (P-319), a pool picked on
+              outcomes refused ``pool_not_blind`` and a date cut accepted (P-320), imported
+              rows never counted (P-321), and an S3-only standard read as a ceiling.
 How:          ``make_env`` with ``tests.fixtures.proven`` adding tasks, sealed rows, scores and a
               controls report; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -226,7 +226,7 @@ def test_the_delivery_gate_reads_one_class_set_version(env: Env) -> None:
     ]
 
 
-# --- a reading licenses only the checks arm and posture class it counted on (P-311) ----------
+# --- a reading licenses only the checks arm and posture class it counted on (P-319) ----------
 
 
 def test_a_reading_on_the_off_checks_arm_never_licenses_the_fmt_arm(env: Env) -> None:
@@ -274,7 +274,7 @@ def test_a_reading_of_one_sealed_class_never_licenses_another(env: Env) -> None:
     assert standard_for(env.factory, ALPHA, CELL, checks_arm="off", posture_class=other) is None
 
 
-# --- the pool is frozen by rule, never picked on outcomes (P-312) ------------------------------
+# --- the pool is frozen by rule, never picked on outcomes (P-320) ------------------------------
 
 
 def test_a_pool_chosen_on_outcomes_is_refused(env: Env) -> None:
@@ -307,7 +307,7 @@ def test_a_pool_may_start_at_a_date_the_operator_names(env: Env) -> None:
     assert bad.status_code == 422 and bad.json()["error"]["code"] == "invalid_reading"
 
 
-# --- imported rows are history: a reading counts only what this deployment graded (P-313) -----
+# --- imported rows are history: a reading counts only what this deployment graded (P-321) -----
 
 
 def test_rows_imported_through_the_ledger_never_count_toward_a_reading(env: Env) -> None:
@@ -337,7 +337,7 @@ def test_rows_imported_through_the_ledger_never_count_toward_a_reading(env: Env)
     # of imported rows is not measured here at all, so it cannot route deliver
     assert _cells(env) == []
     # read as history, under its named version, the cell is shown — and the reading counts
-    # none of the imported rows either (P-313)
+    # none of the imported rows either (P-321)
     (cell,) = _cells(env, "&apparatus=2.4")
     assert cell["route"] != "deliver", cell
     assert cell["reason_code"] == "look_pending"

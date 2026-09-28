@@ -24,7 +24,7 @@
  * Tested by:    ui/src/screens/Login/LoginPage.test.tsx
  * Touch when:   never for a new repository; the strapline or the recovery sentence changes,
  *               a field or button is added to the form, the callback gains a failure code, or
- *               what the page shows while the session check is in flight changes (P-324).
+ *               what the page shows while the session check is in flight changes (P-352).
  */
 
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
@@ -145,7 +145,7 @@ describe('LoginPage — every stop names its way forward', () => {
     await waitFor(() => expect(screen.getByRole('link', { name: 'Sign in with organisation account' }).getAttribute('href')).toContain(encodeURIComponent('/runs')))
   })
 
-  it('while the session check is in flight no form is offered, so a signed-in visitor types nothing the redirect throws away (P-324)', async () => {
+  it('while the session check is in flight no form is offered, so a signed-in visitor types nothing the redirect throws away (P-352)', async () => {
     let answer: (r: Response) => void = () => {}
     mockApi({ 'GET /auth/me': () => new Promise<Response>((resolve) => (answer = resolve)), 'GET /version': VERSION })
     renderApp(<LoginPage />, { route: '/login' })

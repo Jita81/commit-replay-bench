@@ -397,7 +397,7 @@ def load_controls_export(raw: Any) -> ControlsVerdict:
     ``controls.report`` payload: ``passed``, ``escapes``, ``n_rows``…, plus ``run_id`` /
     ``reported_at``) or from a ``controls`` run body (``GET /runs/{id}`` → ``counts``).
     Reduced by the same :func:`~crb.core.oracle.controls.controls_verdict_of` the server
-    routes on, so a passed report written before the gold witness licenses nothing (P-344)."""
+    routes on, so a passed report written before the gold witness licenses nothing (P-372)."""
     if isinstance(raw, Mapping) and isinstance(raw.get("counts"), Mapping):
         counts: Mapping[str, Any] = raw["counts"]
         if "passed" in counts:

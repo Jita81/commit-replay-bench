@@ -4,7 +4,7 @@ Navigation
 ----------
 What it is:   A mutation gate over the evidence of stream P's met criteria and closed
               prevention rows (the go-live reading, its attestation record, the quarantine of
-              a damaged sealed set). It is the P-331 artefact: its independent verifiers
+              a damaged sealed set). It is the P-359 artefact: its independent verifiers
               found five criteria whose cited tests still passed with the behaviour switched
               off (P-178's class, recurring), and this file makes that class fail here.
 What it does: For each behaviour, copies ``src/crb`` to a temporary directory, switches the
@@ -27,7 +27,7 @@ Works with:   src/crb/server/golive.py (the go-live checks it switches off),
               tests/test_golive.py (the evidence it runs),
               tests/test_server_routes_golive.py (the evidence it runs),
               tests/test_provision_quarantine.py (the evidence it runs),
-              docs/PREVENTION.md (P-331, the row this gate closes)
+              docs/PREVENTION.md (P-359, the row this gate closes)
 Tested by:    tests/test_golive_evidence_mutations.py
 Touch when:   never for a new repository; a criterion of the go-live journey, the posture or
               settings page, or the run-the-platform stream is flipped to met on a behaviour

@@ -27,10 +27,10 @@ the plan names, and a plan heading that quotes a rank; a retired id that neither
 artefacts' git history nor the base branch's committed gap analysis shows was a gap (the
 generated file never vouches for itself); a twin left in old words — a clause of at least
 ``TWIN_MIN_WORDS`` words that a criterion reworded since the merge-base with the base branch
-dropped, still said by another criterion that does not wait on the same gap (P-228); a
+dropped, still said by another criterion that does not wait on the same gap (P-236); a
 criterion or gap line that states a value a Proposed ADR leaves to the operator without
 ``ADR-nnnn [operator]`` on it, an ``[operator]`` marker the ADR's ``## Operator values`` table
-does not register, or the marker left on after the ADR is accepted (P-229); an evidence
+does not register, or the marker left on after the ADR is accepted (P-237); an evidence
 reference that does not resolve; and a ``GAP-ANALYSIS.md`` or a ``status:`` line that differs
 from what the artefacts generate. It never edits a criterion.
 
@@ -50,8 +50,8 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               line nothing cites, a PLAN.md wave item that is not a gap, a ranked gap in no
               table of the plan, a plan heading that quotes a rank, a retired id that git
               history does not vouch for, a twin criterion left in the words another
-              criterion dropped since the base (P-228), and a value a Proposed ADR leaves to
-              the operator stated as settled (P-229); --check exits
+              criterion dropped since the base (P-236), and a value a Proposed ADR leaves to
+              the operator stated as settled (P-237); --check exits
               non-zero on any defect or drift.
 How:          Walk docs/dod/{pages,journeys,streams}/*.md + product.md → parse front matter
               and the criteria table → resolve evidence (one resolver per prefix) → demote
@@ -1315,7 +1315,7 @@ def status_drift(arts: list[Artefact]) -> list[str]:
     return out
 
 
-# ------------------------------------------------------------------ twins (P-228)
+# ------------------------------------------------------------------ twins (P-236)
 
 #: A clause shorter than this is common prose ("delivery is switched on"), not a twin.
 TWIN_MIN_WORDS = 6
@@ -1339,7 +1339,7 @@ def _clauses(text: str) -> set[str]:
 
 
 def validate_twins(arts: list[Artefact], base: dict[str, str]) -> list[str]:
-    """A clause that a reworded criterion drops must leave every other criterion too (P-228).
+    """A clause that a reworded criterion drops must leave every other criterion too (P-236).
 
     ``base`` maps each criterion id to its words at the base. For every criterion whose words
     changed, each clause of its old words that its new words no longer hold is looked for in
@@ -1399,7 +1399,7 @@ def base_criteria(root: Path, base: str) -> dict[str, str]:
     return out
 
 
-# ------------------------------------------------------------------ provisional values (P-229)
+# ------------------------------------------------------------------ provisional values (P-237)
 
 _OPERATOR_RE = re.compile(r"\[operator\b")
 _STATUS_RE = re.compile(r"^\*\*Status:\*\*\s*([A-Za-z]+)", re.M)
@@ -1454,7 +1454,7 @@ def operator_values(adr_dir: Path) -> tuple[dict[str, tuple[bool, list[str]]], l
 
 def validate_operator_values(arts: list[Artefact], adr_dir: Path) -> list[str]:
     """A criterion or gap line that states a value a Proposed ADR leaves to the operator
-    carries ``ADR-nnnn [operator]``; once the ADR is accepted the marker must go (P-229)."""
+    carries ``ADR-nnnn [operator]``; once the ADR is accepted the marker must go (P-237)."""
     values, errors = operator_values(adr_dir)
     for a in arts:
         texts = [(f"{a.rel}:{c.line}: {c.id}", c.text) for c in a.criteria]

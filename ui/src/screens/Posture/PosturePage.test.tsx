@@ -77,7 +77,7 @@ describe('PosturePage — sources, go-live and print', () => {
     await waitFor(() => expect(screen.getAllByText('the version could not be read').length).toBeGreaterThan(2))
   })
 
-  it('reads the belt set, the sign-off policy and the licence from /version, never from a literal (P-330)', async () => {
+  it('reads the belt set, the sign-off policy and the licence from /version, never from a literal (P-358)', async () => {
     // values no literal in the page could match: a row that prints its own words fails here
     mockApi(base('viewer', { 'GET /version': { ...VERSION, belt_set: 'v9-test', signoff_policy: 'signoff-policy.test', licence: 'TEST-1.0' } }))
     renderApp(<PosturePage />, { route: '/posture' })

@@ -59,8 +59,8 @@ What it does: Per attempt: resolves the rung, refuses the attempt before any bui
               time-ordered, and any line naming a token the commit introduced refused), on arm
               ``S1`` first has the test author write a test in a sealed checkout of the parent and
               proves it RED (removing it before the grade; an author whose provider refused the
-              call is recorded ``model_error:`` so the ledger reads an outage — P-285), stamps
-              every attempt with the run's one arm (P-287), runs one ``builder.build`` — on the host
+              call is recorded ``model_error:`` so the ledger reads an outage — P-293), stamps
+              every attempt with the run's one arm (P-295), runs one ``builder.build`` — on the host
               or against a sealed checkout in a container — writes the redacted transcript to a
               file, maps the outcome to a ``BuildAttempt`` and discards the source edits of any
               errored attempt so it can never grade clean-with-error. A sealed attempt whose
@@ -230,7 +230,7 @@ def author_error(exc: BaseException) -> str:
     in the chain) is written ``model_error: …``, the head every builder writes for the same
     failure, so :func:`crb.core.ledger.authoring_outage` classifies the author's rate limit,
     quota, overloaded server or refused key as an ``outage`` exactly as it would the
-    builder's (docs/PREVENTION.md P-005, P-285). Any other exception — the author ran and
+    builder's (docs/PREVENTION.md P-005, P-293). Any other exception — the author ran and
     could not produce a test — stays as it is, an ``authoring`` failure."""
     seen: set[int] = set()
     cur: BaseException | None = exc
@@ -367,7 +367,7 @@ def rungs_from_entries(
 ) -> list[Rung]:
     """The rungs a run's ladder entries name — the ONE reading, used by the worker that
     builds them and by ``POST /runs`` that refuses at submit what the worker would refuse
-    (P-276), so the two never disagree on which rung carries which provider.
+    (P-284), so the two never disagree on which rung carries which provider.
 
     An entry is an object rung (:func:`rung_from_object`), a ``builder:model[:provider]``
     label, or a bare label (``r1``, no ``:``) meaning the run's own
@@ -882,7 +882,7 @@ def build_fn_for(
         """The arm EVERY attempt of this run is stamped with — ``S1@<author>`` (with ``+L``
         when the loop is on) on the ``S1`` arm, else :func:`arm_of` — worked out once, so an
         authoring failure or a harness refusal lands in the same arm as a success
-        (docs/PREVENTION.md P-287)."""
+        (docs/PREVENTION.md P-295)."""
         if s1 is not None:
             return context_arm_for(base=ARM_S1, author=s1.author_model, plus_l=loop_on(learning))
         return arm_of(mode)
@@ -1030,7 +1030,7 @@ def build_fn_for(
         stamps: dict[str, str] = {}
         if LABEL_CONTEXT_ARM not in attempt.labels:
             # a refusal before compose is still this run's attempt: the arm's row, never
-            # an unstamped one a per-arm reading drops (P-287)
+            # an unstamped one a per-arm reading drops (P-295)
             stamps[LABEL_CONTEXT_ARM] = run_arm(mode)
         if checks is not None and LABEL_CHECKS not in attempt.labels:
             stamps[LABEL_CHECKS] = checks.label()

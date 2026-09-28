@@ -229,7 +229,7 @@ def _previous_release_insert(b: Backend, n: int) -> None:
 
 
 def test_a_row_without_the_chain_is_refused_and_the_trail_keeps_recording(db: Backend) -> None:
-    """P-246: the database refuses an unchained row outright, so one write from a writer
+    """P-254: the database refuses an unchained row outright, so one write from a writer
     that skipped the hook fails alone — it never becomes a head of ``''`` that turns every
     later write into a unique-index collision on genesis."""
     _write_through_every_writer(db)
@@ -270,7 +270,7 @@ def _force_unchained_head(b: Backend) -> None:
 
 
 def test_a_head_that_is_not_a_hash_is_a_named_break_never_a_new_genesis(db: Backend) -> None:
-    """P-246: genesis is the predecessor of the first row of an EMPTY table only. A head
+    """P-254: genesis is the predecessor of the first row of an EMPTY table only. A head
     that is not a SHA-256 is refused by name, so the writer never chains onto genesis a
     second time and the failure says what is wrong."""
     from crb.store.events import EventChainHeadError
@@ -295,7 +295,7 @@ class _Clock:
 
 
 def test_the_verifier_walks_only_new_rows_between_full_walks(db: Backend) -> None:
-    """P-249: ``/ledger/verify`` is read on every Ledger and Posture page view, and the audit
+    """P-257: ``/ledger/verify`` is read on every Ledger and Posture page view, and the audit
     trail holds every step of every run. Between full walks (at most ``full_every_s`` apart)
     the verifier re-hashes only the rows appended since its last walk, starting from that
     walk's head — after checking the head row and the row count are still what it walked."""

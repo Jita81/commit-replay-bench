@@ -26,8 +26,8 @@ What it does: Builds a client for Cerebras / Azure OpenAI / any base URL from an
               unless a caller passes one; ``resolve_endpoint`` gives every builder that
               endpoint and ITS provider (a provider's name only for a host in its domain —
               ``cerebras.ai``, ``AZURE_DOMAINS`` — else ``host_provider``: ``host:port``, and
-              ``host:<name>`` for a bare host, P-275), refusing a rung that names another
-              and, through ``url_refusal``, a URL that carries a key (P-268); refuses to
+              ``host:<name>`` for a bare host, P-283), refusing a rung that names another
+              and, through ``url_refusal``, a URL that carries a key (P-276); refuses to
               start without the named credential, retries transient failures with jittered
               backoff, decodes tool calls tolerantly (bad JSON → ``parse_error``, not a
               crash) and meters every attempt.
@@ -101,7 +101,7 @@ def url_refusal(url: str, *, https_only: bool = False) -> str:
     """Why ``url`` cannot be an endpoint — ``""`` when it can. The endpoint is stamped on
     every row (the provider column, the apparatus stamp) and the ledger is append-only, so
     a URL that carries a credential — ``user:key@`` userinfo, a ``?api-key=`` query or a
-    fragment — is refused, never stored (P-268). The reason never repeats the URL: a
+    fragment — is refused, never stored (P-276). The reason never repeats the URL: a
     refusal's text reaches logs and run errors."""
     schemes = ("https",) if https_only else ("http", "https")
     try:
@@ -130,7 +130,7 @@ def host_provider(url: str) -> str:
     lower-cased, never the userinfo. Every provider the product names without a host
     (``cerebras``, ``azure``, ``anthropic`` …) is a bare name, so a stamp taken from a host
     is never one: a host with no dot and no port — a compose or Kubernetes service called
-    ``cerebras`` — is stamped ``host:<name>`` (P-275). ``host:`` cannot be a real host's
+    ``cerebras`` — is stamped ``host:<name>`` (P-283). ``host:`` cannot be a real host's
     stamp, because a port that is not a number is refused at construction."""
     stamp = urlsplit(url).netloc.rpartition("@")[2].lower()
     if not any(mark in stamp for mark in ".:["):
@@ -532,7 +532,7 @@ class EndpointConfig:
         (:func:`host_provider`). A provider's name is stamped only for a host in that
         provider's domain (``cerebras.ai``; for an Azure endpoint, ``AZURE_DOMAINS``): a
         mirror, a look-alike or a service that merely shares the name is its own provider,
-        never pooled into that provider's cell (P-271, P-275)."""
+        never pooled into that provider's cell (P-279, P-283)."""
         if self.azure is not None:
             url, domains, name = self.azure.endpoint, AZURE_DOMAINS, "azure"
         else:
