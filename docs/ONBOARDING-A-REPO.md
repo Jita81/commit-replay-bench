@@ -73,6 +73,11 @@ You are describing the repository's **shape**, not its code:
 Presets exist for the common shapes. **Tests the developer runs now:** `crb repo setup` then
 `crb repo probe` — green means the toolchain, the dependencies and your layout are right.
 
+The 30 minutes in this step's heading is the guide's estimate [hypothesis — no developer's
+time has been measured against it]. The product measures the real figure for each repository:
+the walk's *How this flows* panel shows the time from registration to the first green probe,
+read from the repository's own records, with its n.
+
 ## Step 2 — Make the oracle reproducible (developer, the real work)
 
 The bench grades against the repository's **own tests at each historical commit**. Real
@@ -134,6 +139,10 @@ known price is refused before anything is queued.
 instrument's or the operator's — each is named per row, none is hidden in a rate.
 
 ## Step 5 — Read the map (everyone)
+
+**Time and cost.** £0: reading the map calls no model and starts no run, so nothing is spent.
+A first reading of one repository's Baseline takes about ten minutes [hypothesis — no reader's
+time measured]: the three gates, the route tiles, and one cell opened for its evidence.
 
 Capability → the grid of *change class × size*. A cell shows `n` attempts **and**
 `n_tasks` distinct commits (many attempts on a few commits is a statement about those few
@@ -298,6 +307,16 @@ is an apparatus bump with an ADR, and every row measured before it expires
 | step 4 | a small sighted replay | rows have failure kinds you can explain; `false_q1` stays 0 |
 | before sign-off | the same on the sealed posture; a human review | the review is recorded as a review row |
 | always | `GET /health`, `crb ledger verify` | every probe `ok`; the chain verifies |
+
+How long the step 3 runs take: a mine run 5 s, an oracle run 2 s and a controls run 7 s
+[measured — n = 1 each; the tier-1 walkthrough's fixture repository, the oracle and controls
+runs limited to one task; method: each
+run's `finished − started` from `GET /runs/{id}`, the stamps `GET /flow` also folds; apparatus
+2.4; a local run of `scripts/walkthrough.sh` on 2026-09-28, branch `feat/ns6-lrn` on base
+`847f25dd` — not yet a CI run]. A real repository takes longer: the oracle mutates every
+task it scores and the controls grade seven cheats per task, so the time grows with the tasks
+and the length of the test suite. The walk's *How this flows* panel shows
+this repository's own median for each run, with its n.
 
 ## What you may claim afterwards (and what you may not)
 

@@ -111,7 +111,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/results',
-    purpose: 'What the evidence says about one repository, in the order it matters: is the instrument trustworthy here, what may the builder be trusted to do, and what is waiting on a person. This is the baseline the factory runs on.',
+    purpose: 'What the evidence says about one repository, in the order it matters: is the instrument trustworthy here, what may the builder be trusted to do, and what is waiting on a person. This is the baseline the factory runs on. Reading it costs £0, because it calls no model and starts no run, and a first reading takes about ten minutes, an estimate nobody has timed yet.',
     next: {
       viewer: 'Read the three gates first. If any is amber the numbers below are provisional. Then read the route tiles and the map; open a cell for its full evidence.',
       operator: 'If a gate is amber, go back to the walk and run what is missing. If a cell reads calibrate, more attempts move it; if it reads human, more attempts will not.',
@@ -280,7 +280,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Read the register: each class names its lever, its before and after with n, and what happens next. The three reports carry the rows and spend behind them. The decisions are an operator’s.',
       operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: decide a refusal class, register a strengthening item on this repository’s backlog, or queue a cell’s re-measurement runs. Each says what it wrote; queueing spends the budget, so it shows the estimate first. Once the tests are stronger, an item’s row opens Runs with its task filled in to re-qualify, re-score or re-run the controls.',
     },
-    numbers: 'A class closes when a kept change is followed by max(20, n) exposed first attempts with no recurrence; n is ceil(ln 0.025 ÷ ln(1 − p0)) from the frozen before window. Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement spend multiplies each cell’s own mean row cost by the rows still needed; a dash means no cost is known.',
+    numbers: 'A class closes when a kept change is followed by max(20, n) exposed first attempts with no recurrence; n is ceil(ln 0.025 ÷ ln(1 − p0)) from the frozen before window. Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement and top-up spend multiplies each cell’s own mean row cost by the attempts its runs ask for; a dash means no cost is known.',
     terms: ['apparatus', 'stale', 'oracle_strength', 'wilson', 'cell'],
     readMore: [
       { to: 'LEARNING-LOOP#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring', label: 'Prevention: a bug is closed by a change that stops it recurring' },

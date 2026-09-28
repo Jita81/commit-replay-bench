@@ -20,7 +20,10 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               on the chain with the account as actor and is idempotent; that the API refuses
               exactly what the CLI refuses; that registering freezes the first item, evolves the
               rest and supersedes a re-registered one; that an unknown id and an in-flight
-              factory run are refused with nothing written; that queueing enqueues the PLAN's
+              factory run are refused with nothing written; that the refusal report serves the
+              guard's false-positive rate from the decisions (G-536); that a thin cell's top-up
+              is queued through the submit gate and a cell with no commit left queues nothing
+              (G-565); that queueing enqueues the PLAN's
               own run bodies, never the caller's, through the submit gate ``POST /runs`` applies
               (a cell whose builder has no credential is refused whole — P-160), refuses a
               what-if plan (P-165) and a cell whose queued runs are unfinished (P-182); that a
@@ -67,7 +70,7 @@ from sqlalchemy import select
 from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND
 from crb.core.version import APPARATUS_VERSION
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, Grade, Run
+from crb.store.models import Event, Grade, Run, Task
 from fixtures.concurrency import at_once, pause_after
 from fixtures.posture import dict_at_apparatus
 from fixtures.server_seed import (
@@ -153,12 +156,46 @@ def _add_protocol_row(env: Env, error: str = ERR_NHS, task: str = "f" * 40) -> N
 STALE_CELL = "replay|backend.route.add|M|python|editblock|gpt-oss-120b|cerebras"
 
 
+#: The commit :func:`_add_stale_rows` mines into :data:`STALE_CELL`: gold-clean, labelled
+#: backend.route.add|M, and graded by nobody — the one commit the plan may queue (G-565: a
+#: request never names a commit the cell already graded, and the seed's two are graded).
+FRESH_TASK = task_id(90)
+
+
+def _add_fresh_task(env: Env) -> None:
+    """A second backend.route.add|M commit of the repository, as a mine run would write it:
+    a copy of seed task 5's row under :data:`FRESH_TASK`, gold-clean and never graded."""
+    with env.factory() as s:
+        if s.get(Task, (ALPHA, FRESH_TASK)) is not None:
+            return
+        src = s.get(Task, (ALPHA, task_id(5)))
+        assert src is not None and src.capability_class == "backend.route.add"
+        s.add(
+            Task(
+                repo=ALPHA,
+                task_id=FRESH_TASK,
+                pool=src.pool,
+                size=src.size,
+                capability_class=src.capability_class,
+                language=src.language,
+                authored="2026-08-29T12:00:00+00:00",
+                subject="fix: task 90",
+                red_checked=src.red_checked,
+                gold_clean=True,
+                spec_json={**dict(src.spec_json or {}), "task_id": FRESH_TASK},
+            )
+        )
+        s.commit()
+
+
 def _add_stale_rows(env: Env, n: int = 2, *, labels: dict[str, str] | None = None) -> None:
     """Append ``n`` rows of seed task 5 graded under apparatus 2.0 through the write path, so
     the plan AT THE RUNNING APPARATUS holds :data:`STALE_CELL` (an editblock cell, so its
-    runs need a builder credential). ``labels`` are merged into the rows' own."""
+    runs need a builder credential), and mine :data:`FRESH_TASK` so the plan has a commit it
+    may queue. ``labels`` are merged into the rows' own."""
     from crb.core.ledger import GradeRow
 
+    _add_fresh_task(env)
     ledger = DbLedger(env.factory)
     template = next(r for r in ledger.rows(repo=ALPHA) if r.clean and r.builder == "editblock")
     for i in range(n):
@@ -320,8 +357,12 @@ def test_cli_over_the_exports_derives_the_route_items(
 def test_remeasure_nothing_stale_until_the_apparatus_moves(env: Env) -> None:
     d = env.get(f"/learn/remeasure?repo={ALPHA}").json()
     assert d["current_apparatus"] == APPARATUS_VERSION
-    # only the legacy cell (apparatus 1.0-census) is older than the live instrument
-    assert [c["stale_versions"] for c in d["cells"]] == [["1.0-census"]]
+    # only the legacy cell (apparatus 1.0-census) is older than the live instrument; every
+    # other cell in the plan is there because it is short of the first look (G-565)
+    stale = [c for c in d["cells"] if c["reason"] == "stale"]
+    assert [c["stale_versions"] for c in stale] == [["1.0-census"]]
+    assert all(c["stale_versions"] == [] for c in d["cells"] if c["reason"] == "thin")
+    assert d["summary"]["cells_stale"] == 1
     d2 = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()
     assert d2["rows_stale"] == d2["rows_total"] and len(d2["cells"]) >= 3
     for c in d2["cells"]:
@@ -516,6 +557,36 @@ def test_accepting_a_refusal_writes_the_line_under_the_operators_name(env: Env) 
     assert corpus.read_text(encoding="utf-8") == text
 
 
+def test_the_refusal_report_serves_the_guard_false_positive_rate_from_the_decisions(
+    env: Env,
+) -> None:
+    """G-536: ``GET /learn/refusals`` serves the guard's false-positive rate per apparatus and
+    month, derived from the ``learn.refusal.accepted`` events. The seed's row carries two
+    classes: while one is undecided the row is undecided (the rate is the bound [0, 1]); once
+    one is decided refuse, the guard was right to stop the row."""
+    _add_protocol_row(env)
+
+    def fp() -> dict[str, Any]:
+        out: dict[str, Any] = env.get(f"/learn/refusals?repo={ALPHA}").json()["false_positives"]
+        return out
+
+    (period,) = fp()["periods"]
+    assert period["apparatus_version"] == APPARATUS_VERSION
+    assert (period["rows_protocol"], period["honest"], period["refuse"], period["undecided"]) == (
+        1,
+        0,
+        0,
+        1,
+    )
+    assert (period["rate_low"], period["rate_high"]) == (0.0, 1.0)
+    assert _accept(env, _group(env, "archaeology")["group_id"], "honest").status_code == 201
+    assert (fp()["undecided"], fp()["decided_groups"], fp()["undecided_groups"]) == (1, 1, 1)
+    assert _accept(env, _group(env, "network")["group_id"], "refuse").status_code == 201
+    (period,) = fp()["periods"]
+    assert (period["honest"], period["refuse"], period["undecided"]) == (0, 1, 0)
+    assert (period["rate_low"], period["rate_high"]) == (0.0, 0.0)
+
+
 def test_accepting_refuses_exactly_what_the_cli_refuses(env: Env) -> None:
     """The API and ``crb learn refusals --apply`` share ``apply_triage``, so they refuse the
     same things: an unknown class, a verdict the report may not carry, and a line that would
@@ -668,7 +739,10 @@ def test_queueing_a_remeasurement_enqueues_the_plans_own_bodies(
     r = _queue(env, cell=cell["label"])
     assert r.status_code == 201, r.text
     d = r.json()
-    assert len(d["run_ids"]) == len(cell["requests"]) == 2
+    # one run: the stale commit is graded on this apparatus already, so the plan names only
+    # the commit nobody graded (G-565) — never a limit-only body that repeats commits
+    assert len(d["run_ids"]) == len(cell["requests"]) == 1
+    assert cell["requests"][0]["task_ids"] == [FRESH_TASK]
     assert d["n_needed"] == cell["n_needed"] and d["cost_known"] is True
     assert env.get("/runs").json()["total"] == before + len(d["run_ids"])
     queued = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
@@ -762,6 +836,117 @@ def test_a_cell_whose_runs_are_in_flight_is_not_queued_again(env: Env, builder_k
     assert _queue(env, cell=STALE_CELL).status_code == 201
 
 
+#: The thin cell :func:`_add_thin_cell` makes: the fixture builder on backend.route.add|M,
+#: at the RUNNING apparatus, so nothing about it is stale — it is only short of the bar.
+THIN_CELL = "replay|backend.route.add|M|python|fixture_gold|gold|fixture"
+
+
+def _add_thin_cell(env: Env, n: int = 3) -> None:
+    """``n`` current-apparatus rows of the fixture builder on seed task 5 (one commit), so the
+    plan holds :data:`THIN_CELL` as ``thin`` with the cell's other commits to top up on. The
+    fixture builder needs no credential, so the submit gate passes on its own merits."""
+    from crb.core.ledger import GradeRow
+
+    _add_fresh_task(env)
+    ledger = DbLedger(env.factory)
+    template = next(r for r in ledger.rows(repo=ALPHA) if r.clean and r.builder == "editblock")
+    for i in range(n):
+        d = template.to_dict()
+        d.update(
+            {
+                "task_id": task_id(5),
+                "capability_class": "backend.route.add",
+                "size": "M",
+                "builder": "fixture_gold",
+                "model": "gold",
+                "provider": "fixture",
+                "cost_usd": 0.0,
+                "trial": f"thin{i}",
+                "row_id": "",
+                "prev_hash": "",
+                "row_hash": "",
+            }
+        )
+        d.pop("failure_kind", None)
+        d.pop("cost_known", None)
+        ledger.append(GradeRow.from_dict(d))
+
+
+def test_queueing_a_thin_cells_top_up_enqueues_the_plans_own_bodies_through_the_submit_gate(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-565: a cell short of the bar with no stale row is offered its top-up, and queued from
+    one act: the plan's own bodies, naming only the commits the cell has not graded, each put
+    to the submit gate ``POST /runs`` applies before any is enqueued, and recorded with the
+    operator's identity. A second queue while those runs are unfinished spends nothing."""
+    from crb.server.routes import learn as learn_routes
+
+    _add_thin_cell(env)
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
+    cell = next(c for c in plan["cells"] if c["label"] == THIN_CELL)
+    assert cell["reason"] == "thin" and cell["n_stale"] == 0 and cell["n_current"] == 3
+    assert cell["n_needed"] == 17 and plan["summary"]["cells_thin"] >= 1
+    # the commits of backend.route.add|M this cell never graded: seed task 1 and the fresh one
+    (request,) = cell["requests"]
+    assert task_id(5) not in request["task_ids"]
+    assert set(request["task_ids"]) == {
+        FRESH_TASK,
+        *(t for t in _cell_tasks(env, "backend.route.add", "M") if t != task_id(5)),
+    }
+    assert cell["n_requested"] == len(request["task_ids"]) == request["limit"]
+    assert cell["short_by"] == 17 - cell["n_requested"] and "mine more history" in cell["note"]
+    # a known $0 is priced at $0, never unknown
+    assert cell["cost_known"] is True and cell["est_cost_usd"] == 0.0
+    gated: list[str] = []
+    real_gate = learn_routes.submit_refusals
+
+    def gate(db: Any, settings: Any, validated: Any, run: Any) -> None:
+        gated.append(run.id)
+        real_gate(db, settings, validated, run)
+
+    monkeypatch.setattr(learn_routes, "submit_refusals", gate)
+    before = env.get("/runs").json()["total"]
+    r = _queue(env, cell=THIN_CELL)
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["run_ids"] == gated and len(gated) == 1
+    assert d["n_needed"] == 17 and d["cost_known"] is True
+    (run,) = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
+    assert run["status"] == "queued" and run["builder"] == "fixture_gold"
+    assert run["task_ids"] == request["task_ids"]
+    assert env.get("/runs").json()["total"] == before + 1
+    (event,) = _queued_events(env)
+    assert event.payload_json["cell"] == THIN_CELL and event.payload_json["run_ids"] == d["run_ids"]
+    again = _queue(env, cell=THIN_CELL)
+    assert again.status_code == 409 and envelope(again)["code"] == "remeasure_already_queued"
+    assert env.get("/runs").json()["total"] == before + 1
+
+
+def test_a_thin_cell_with_no_commit_left_to_grade_queues_nothing(env: Env) -> None:
+    """G-565: a thin cell whose commits are all graded has no request (a limit-only body would
+    repeat them); queueing it is refused 422 with the plan's own words — mine more history —
+    and nothing is queued or recorded."""
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
+    empty = next(c for c in plan["cells"] if c["reason"] == "thin" and not c["requests"])
+    assert empty["short_by"] == empty["n_needed"] > 0 and "mine more history" in empty["note"]
+    before = env.get("/runs").json()["total"]
+    r = _queue(env, cell=empty["label"], mode=empty["mode"])
+    assert r.status_code == 422 and "mine more history" in envelope(r)["message"]
+    assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
+
+
+def _cell_tasks(env: Env, cls: str, size: str) -> list[str]:
+    with env.factory() as s:
+        return [
+            str(t.task_id)
+            for t in s.execute(
+                select(Task).where(
+                    Task.repo == ALPHA, Task.capability_class == cls, Task.size == size
+                )
+            ).scalars()
+        ]
+
+
 def test_queueing_refuses_a_cell_the_plan_does_not_hold(env: Env) -> None:
     """A cell that is not in the plan — or is not planned in the mode asked for, since
     sighted and blind are never pooled — is refused with the plan's own cells named."""
@@ -830,14 +1015,18 @@ def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
     legacy = _legacy_cell(env)
     item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
 
-    def planned() -> list[str]:
+    def cells() -> dict[str, str]:
         r = env.get(f"/learn/remeasure?repo={ALPHA}")
         assert r.status_code == 200, r.text
-        return [c["label"] for c in r.json()["cells"]]
+        return {c["label"]: c["reason"] for c in r.json()["cells"]}
+
+    def planned() -> list[str]:
+        return [label for label, reason in cells().items() if reason == "stale"]
 
     # every switch off: the belt-6 rows are another arm's, and neither read nor write sees them
+    # — the cell reads thin on this arm's own rows (G-565), never stale on the other arm's
     assert planned() == [legacy]
-    assert _queue(env, cell=STALE_CELL).status_code == 422
+    assert cells()[STALE_CELL] == "thin"
     # the repository switches belt 6 on: only the belt-6 arm is read, by the reads AND writes
     assert env.put(f"/repos/{ALPHA}", json={"checks": {"api_stable": True}}).status_code == 200
     assert planned() == [STALE_CELL]

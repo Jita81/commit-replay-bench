@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The learn loop's own numbers, and a top-up for every cell short of the bar**
+  (north-star Wave 6, stream Learn loop; [the branch](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-lrn)).
+  The Learn page shows the guard's false-positive rate by apparatus and month, from the
+  verdicts people recorded, as a range while rows are undecided, and how long a finding takes
+  to be re-measured. A cell short of the bar is offered its top-up, priced, on commits it has
+  not graded, never a repeat. The connect stream times registration to the first green probe,
+  step 2 and each proving run. Reading the Baseline says it costs £0 (DL-300 to DL-302, P-600,
+  P-601).
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

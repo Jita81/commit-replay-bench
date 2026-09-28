@@ -44,6 +44,11 @@ import { StatTile } from './StatTile'
 /** The hint for each milestone pair the server can name, keyed by its own `key`. */
 const FLOW_HINTS: Record<string, HintId> = {
   registered_to_controls: 'flow.registered_to_controls',
+  registered_to_probe_green: 'flow.registered_to_probe_green',
+  step_2_span: 'flow.step_2_span',
+  mine_run: 'flow.mine_run',
+  oracle_run: 'flow.oracle_run',
+  controls_run: 'flow.controls_run',
   queued_to_graded: 'flow.queued_to_graded',
   first_row_to_bar: 'flow.first_row_to_bar',
   accepted_to_signed: 'flow.accepted_to_signed',
@@ -53,6 +58,7 @@ const FLOW_HINTS: Record<string, HintId> = {
   pr_to_merged: 'flow.pr_to_merged',
   registered_to_merged: 'flow.registered_to_merged',
   refusal_to_strengthening: 'flow.refusal_to_strengthening',
+  finding_to_remeasurement: 'flow.finding_to_remeasurement',
   password_set_to_signed_in: 'flow.password_set_to_signed_in',
   installed_to_healthy: 'flow.installed_to_healthy',
 }

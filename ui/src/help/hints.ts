@@ -135,6 +135,18 @@ export const HINTS = {
     'From the pull request opening to a person merging it, taking the merge time the host itself reported. A pull request nobody has merged is not counted, so this is the wait of the ones that landed.',
   'flow.registered_to_merged':
     'The whole of manufacture: from the item being registered to its pull request being merged. This is the number a delivery team feels, and it includes every wait on a person inside it.',
+  'flow.registered_to_probe_green':
+    'From registering the repository to the first probe that finished green: how long it took to prove the toolchain, dependencies and layout right. A failed probe does not count, and a later green one does not move it.',
+  'flow.step_2_span':
+    'From the first probe or qualify after registration that said the repository was not ready to the first qualify that qualified a task. It stands in for the developer’s hours on making the oracle reproducible, which happen outside the product; it is elapsed time, not effort.',
+  'flow.mine_run':
+    'How long one mine run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. A failed run is not counted, because it did not do the work.',
+  'flow.oracle_run':
+    'How long one oracle run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. It grows with the number of tasks and the size of the test suite.',
+  'flow.controls_run':
+    'How long one negative-controls run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. A failed run is not counted.',
+  'flow.finding_to_remeasurement':
+    'From a bug class first appearing in the ledger to the first time the loop measured a change aimed at it and recorded what the change did. A class with no change, or one not yet read at its first look, is counted below and not timed.',
   'flow.refusal_to_strengthening':
     'From a refusal being raised to a strengthening item being registered that supersedes what was refused. It says how quickly a stop becomes work, and a refusal nobody has answered is not counted.',
   'flow.installed_to_healthy':
@@ -1600,15 +1612,15 @@ export const HINTS = {
   'stat.learn.stale_rows':
     'Rows older than the current apparatus out of every row for this repository. Stale evidence is kept as history and licenses nothing.',
   'stat.learn.needed':
-    'Commits still needed on the current apparatus to bring every stale cell to the look rule’s first look (routing.v2), over the cells that are stale. A reading is read only at its looks.',
+    'Commits still needed on the current apparatus to bring every stale or thin cell to the look rule’s first look (routing.v2), over the cells in the plan. A reading is read only at its looks.',
   'stat.learn.remeasure_cost':
-    'Each stale cell’s own mean row cost times the rows it still needs, summed over the cells with a known cost. A dash means no cost is known.',
+    'Each cell’s own mean row cost times the attempts its runs ask for, summed over the cells with a known cost. A dash means no cost is known.',
   'col.learn_remeasure.cell':
-    'The class and size whose rows predate the current apparatus.',
+    'The cell short of the bar: its process step, class, size, language, builder, model and provider.',
   'col.learn_remeasure.counts':
-    'Rows on older apparatus versions (named), rows on the current one, and how many more the rule needs.',
+    'Rows on older apparatus versions (named), rows on the current one, and how many more the rule needs, with how many can be queued on commits the cell has not graded.',
   'col.learn_remeasure.cost':
-    'The cell’s mean row cost times the rows needed; a question mark when no cost is known.',
+    'The cell’s mean row cost times the attempts its runs ask for. It says not known when no row of the cell recorded a cost, and a dash when nothing can be queued.',
   'col.learn_remeasure.runs':
     'How many run requests the plan lists to close the gap.',
   'link.learn.oracle':
@@ -1663,6 +1675,22 @@ export const HINTS = {
   // the three decisions beside the reports (G-532), each one a named operator's decision
   'pill.learn.decided':
     'The verdict a named person recorded for this class, and the corpus the line was written into: honest allows the command, refused keeps the guard refusing it.',
+  'col.learn_refusals.fp_apparatus':
+    'The apparatus version the refused rows were graded under. Rates of two versions are never blended, because a change to the guard changes what it refuses.',
+  'col.learn_refusals.fp_month':
+    'The calendar month the refused rows were graded in, so a change in the rate over time can be seen.',
+  'col.learn_refusals.fp_rows':
+    'How many rows the guard refused in this version and month: the n the rate is taken over.',
+  'col.learn_refusals.fp_honest':
+    'Refused rows in a class a person decided honest: the guard stopped a command it should have allowed. These are its false positives.',
+  'col.learn_refusals.fp_refuse':
+    'Refused rows with a class a person decided refused: the guard was right to stop them.',
+  'col.learn_refusals.fp_undecided':
+    'Refused rows nobody has judged yet. They are counted as neither verdict, so the rate beside them is a range until someone decides their class.',
+  'col.learn_refusals.fp_rate':
+    'False positives divided by the rows refused. While rows are undecided it shows the range: the low end counts every undecided row as a right refusal, the high end as a false positive.',
+  'text.learn.fp_undecided':
+    'How many refused rows no person has judged yet, and in how many classes. Deciding a class above narrows the range of the rate in the table.',
   'col.learn_refusals.decide':
     'Records your verdict on this class. Only an operator sees this column, and the decision is stored with the name of whoever made it.',
   'button.learn.decide_refusal':
@@ -1691,6 +1719,14 @@ export const HINTS = {
     'What the registration did: the item id, the backlog it is on now, and the item it replaced if any.',
   'link.learn.factory':
     'The factory for this repository, where the backlog is read and a run that builds the item is queued.',
+  'col.learn_remeasure.reason':
+    'Why the cell is in the plan: stale when its rows predate the current apparatus, thin when its rows are current but too few for the routing rule’s first look.',
+  'pill.learn.remeasure_reason':
+    'Stale means the cell’s evidence expired when the apparatus changed; thin means it is current but has not reached the number of commits the rule reads at.',
+  'text.learn.remeasure_short':
+    'This cell has no commit left that it has not graded on the running apparatus, so a run would only repeat commits. Mining more of the repository’s history gives it new ones.',
+  'text.learn.remeasure_cannot_clear':
+    'Cells left out of the plan because their misses already exceed what the routing rule’s last look allows. No number of further attempts can bring them to deliver.',
   'col.learn_remeasure.queue':
     'Queues this cell’s re-measurement runs. Only an operator sees this column, and the estimate is shown before anything is sent.',
   'button.learn.queue_remeasure':
@@ -2045,6 +2081,12 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.pr_to_merged',
   'flow.registered_to_merged',
   'flow.refusal_to_strengthening',
+  'flow.registered_to_probe_green',
+  'flow.step_2_span',
+  'flow.mine_run',
+  'flow.oracle_run',
+  'flow.controls_run',
+  'flow.finding_to_remeasurement',
   'flow.password_set_to_signed_in',
   'flow.installed_to_healthy',
   'flow.spend',

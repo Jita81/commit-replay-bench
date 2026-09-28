@@ -7,7 +7,8 @@ matching :mod:`crb.core.learn` derivation and returns its ``to_dict()``:
 
 * ``/learn/refusals`` — protocol rows → candidate guard-corpus lines, every verdict
   ``unsure``; the decisions a named person has already made are served beside them
-  (``decisions``, folded from the ``learn.refusal.accepted`` events);
+  (``decisions``, folded from the ``learn.refusal.accepted`` events), and the guard's
+  false-positive rate those decisions give, per apparatus and month (``false_positives``);
 * ``/learn/strengthen`` — oracle-held cells of the class × size map (routed under the
   repo's latest controls verdict, as ``/capability-map`` does) joined to the latest
   ``oracle.score`` events → ``test.add`` items in the frozen-backlog shape. The
@@ -17,8 +18,9 @@ matching :mod:`crb.core.learn` derivation and returns its ``to_dict()``:
   two screens can never disagree about a task's strength. Every score carries the
   repo, so the item ids equal what ``crb learn strengthen --oracle <GET /oracle/{repo}>
   --controls <GET /oracle/{repo}/controls>`` derives from the exports;
-* ``/learn/remeasure`` — cells stamped with an older apparatus → ``n`` needed, cost and
-  the ``POST /runs`` bodies an operator can queue.
+* ``/learn/remeasure`` — cells short of the rule's first look, stale or thin → ``n``
+  needed, the ``POST /runs`` bodies an operator can queue (only commits the cell has not
+  graded, only gold-clean ones) and what they cost.
 
 The three reads are viewer-readable and pure. The three writes (G-532) are
 operator-gated and each one carries the **same named-person decision the CLI already
@@ -51,7 +53,9 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               and writes what a named operator accepts — a corpus line, the strengthening
               items, the re-measurement runs — re-deriving each body here so the caller
               can choose but never compose; a cell whose queued runs are unfinished is
-              refused and served with those runs, so money is never spent twice (P-182).
+              refused and served with those runs, so money is never spent twice (P-182); a
+              cell with no request (no commit left it has not graded) is refused with the
+              plan's own reason, so nothing is queued that would repeat a commit.
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
               the writes go through ``apply_triage`` / ``FactoryHome.register_*`` (under
@@ -78,8 +82,9 @@ Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` 
               twin), docs/LEARNING-LOOP.md (what loops mechanically, what a human decides),
               ui/src/screens/Learn (the screen that offers the three actions)
 Tested by:    tests/test_server_routes_learn.py, tests/test_cli_learn.py
-Touch when:   never for a new repository; adding a derivation means a function in
-              src/crb/core/learn.py, a route here, a CLI verb, and a section in
+Touch when:   never for a new repository — its rows and tasks are read as they are; adding a
+              derivation means a function in src/crb/core/learn.py, a route here, a CLI verb,
+              and a section in
               docs/LEARNING-LOOP.md; a new event action needs its row in
               docs/API.md#event-vocabulary first.
 """
@@ -104,6 +109,7 @@ from crb.core.learn import (
     StrengthenBacklog,
     StrengthenItem,
     apply_triage,
+    guard_false_positives,
     has_line_break,
     load_oracle_scores,
     remeasure_plan,
@@ -297,12 +303,17 @@ def derive_remeasure(
     rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
     # each task's CURRENT label: a stale task that was relabelled since would put its new
     # rows in another cell, so the plan leaves it out and names it (decider pass 2, §3)
-    labels = {
-        str(t.task_id): (str(t.capability_class or ""), str(t.size or ""))
-        for t in db.execute(select(Task).where(Task.repo == repo)).scalars()
-    }
+    tasks = list(db.execute(select(Task).where(Task.repo == repo)).scalars())
+    labels = {str(t.task_id): (str(t.capability_class or ""), str(t.size or "")) for t in tasks}
+    # a top-up names only commits the worker will build: it skips a task that is not
+    # gold-clean, so the plan never counts one towards what a cell needs (G-565)
+    gold = [str(t.task_id) for t in tasks if t.gold_clean]
     return remeasure_plan(
-        rows, current_apparatus=apparatus, policy=DEFAULT_POLICY, task_labels=labels
+        rows,
+        current_apparatus=apparatus,
+        policy=DEFAULT_POLICY,
+        task_labels=labels,
+        gold_clean_tasks=gold,
     )
 
 
@@ -344,10 +355,15 @@ def learn_refusals(
     get_repo_or_404(db, repo)
     # Every verdict comes back "unsure" by design: the API proposes, a human decides. What
     # a person HAS decided is served beside the groups, with their name and the line.
+    report = derive_refusals(factory, repo)
+    decisions = accepted_decisions(db, repo)
     return {
         "repo": repo,
-        **derive_refusals(factory, repo).to_dict(),
-        "decisions": accepted_decisions(db, repo),
+        **report.to_dict(),
+        "decisions": decisions,
+        # the guard's false-positive rate per apparatus and month, from those decisions: a
+        # bound while any row is undecided, never a verdict nobody gave (G-536)
+        "false_positives": guard_false_positives(report, decisions).to_dict(),
     }
 
 
@@ -375,7 +391,7 @@ def learn_strengthen(
 @router.get(
     "/learn/remeasure",
     responses={401: _ERR, 404: _ERR, 409: _ERR},
-    summary="Cells stamped with an older apparatus → n needed, cost, POST /runs bodies (nothing queued)",
+    summary="Cells short of the first look, stale or thin → n needed, cost, POST /runs bodies (nothing queued)",
 )
 def learn_remeasure(
     viewer: ViewerDep,
@@ -832,6 +848,15 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             detail={"modes": sorted(c.mode for c in matches)},
         )
     cell = matches[0]
+    if not cell.requests:
+        # a cell short of the bar with no commit it has not graded: queueing would buy the
+        # same commits again, so there is nothing to queue until more history is mined
+        raise ApiError(
+            422,
+            "validation_error",
+            f"cell {body.cell!r} ({cell.mode}) has no run to queue: {cell.note}",
+            detail={"n_needed": cell.n_needed, "short_by": cell.short_by},
+        )
     require_jobs()  # 503 before anything is read under the lock
     # The guard, the runs and their event are ONE transaction under the events write lock
     # (EI-1, DL-080): a second request for the same cell waits here and then reads the

@@ -15,8 +15,9 @@
  *               and lands on its page; that the worker clones a URL-only repo on its first
  *               run (`repo.clone.done` on the probe's live log), prepares the environment
  *               when it must (`setup.auto` → `setup.done`) and the probe goes green
- *               (`probe.done`); and that the probe pill then reads OK with the runner's own
- *               summary ("N passed").
+ *               (`probe.done`); that the probe run's duration, read from the API's own
+ *               `started` / `finished` stamps, is attached to the test (G-430); and that the
+ *               probe pill then reads OK with the runner's own summary ("N passed").
  * How:          `addRepo` fills the dialog through `field()`; "Probe now" queues the run;
  *               `waitForRun` + `expectLogAction` on the live log; the `repo-probe` /
  *               `repo-probe-detail` test ids.
@@ -27,12 +28,33 @@
  *               (the screens under test), ui/src/lib/repoPresets.ts (the preset ids the
  *               targets name), src/crb/server/worker.py (the clone-on-first-run and probe)
  * Tested by:    ui/e2e/walkthrough/02-repo-onboard.spec.ts
- * Touch when:   the dialog's fields or the clone / probe event names change; a new tier-2
- *               repository needs its target in ui/e2e/walkthrough/support.ts.
+ * Touch when:   a new client repository is onboarded as a tier-2 target (add its target in
+ *               ui/e2e/walkthrough/support.ts); the dialog's fields or the clone / probe event
+ *               names change; the run API's `started` / `finished` stamps change (the probe's
+ *               timing, G-430).
  */
-import { expect, expectLogAction, field, liveLog, targets, test, waitForRun, type RepoTarget } from './support'
+import { env, expect, expectLogAction, field, liveLog, runIdFromUrl, targets, test, waitForRun, type RepoTarget } from './support'
 
 test.describe.configure({ mode: 'serial' })
+
+/**
+ * G-430 — how long this run took, from the API's own `started` and `finished` stamps, attached
+ * to the test as an annotation (and printed, so the walkthrough's output carries it). The same
+ * stamps are what `GET /flow` folds into the connect stream's per-run median.
+ */
+async function timeRun(page: import('@playwright/test').Page, kind: string, timeoutMs: number): Promise<number> {
+  const id = runIdFromUrl(page)
+  const res = await page.request.get(`${env.baseUrl}/api/v1/runs/${id}`)
+  expect(res.ok(), `GET /runs/${id} → ${res.status()}`).toBeTruthy()
+  const run = (await res.json()) as { started: string | null; finished: string | null; apparatus_version: string }
+  const seconds = (Date.parse(run.finished ?? '') - Date.parse(run.started ?? '')) / 1000
+  expect(Number.isFinite(seconds) && seconds >= 0, `run ${id} has a readable started and finished stamp`).toBe(true)
+  const description = `${seconds.toFixed(1)} s · run ${id} · apparatus ${run.apparatus_version} · method: finished − started from GET /runs/{id}`
+  test.info().annotations.push({ type: `${kind}-run-duration`, description })
+  console.log(`[G-430] ${kind} run: ${description}`)
+  expect(seconds * 1000, `the ${kind} run stayed within the tier's timeout`).toBeLessThanOrEqual(timeoutMs)
+  return seconds
+}
 
 async function addRepo(page: import('@playwright/test').Page, t: RepoTarget): Promise<void> {
   await page.goto('/repos')
@@ -83,6 +105,7 @@ for (const t of targets()) {
       await expect(page.locator('h1')).toHaveCount(1)
 
       await waitForRun(page, 'succeeded', t.probeTimeoutMs)
+      await timeRun(page, 'probe', t.probeTimeoutMs)
 
       const log = liveLog(page)
       await expect(log.getByText('run.claimed', { exact: true })).toBeVisible()

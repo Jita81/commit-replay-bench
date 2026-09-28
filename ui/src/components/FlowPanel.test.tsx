@@ -241,6 +241,36 @@ describe('FlowPanel', () => {
     expect(unhinted(container)).toEqual([])
   })
 
+  it('the connect stream shows registration to the first green probe and each proving run, each with its own hint (G-302, G-430)', async () => {
+    const lt = (key: string, label: string, n: number, median_s: number | null, reason = '') => ({ key, label, n, median_s, min_s: median_s, max_s: median_s, dropped: 0, reason })
+    const connect: Flow['streams'][number] = {
+      ...MANUFACTURE,
+      stream: 'connect-and-prove',
+      name: 'Connect & prove',
+      lead_times: [
+        lt('registered_to_probe_green', 'Registered → first green probe', 1, 1800),
+        lt('step_2_span', 'Step 2: first red probe or qualify → first qualified task (stands in for the developer’s hours [hypothesis])', 0, null, 'no probe or qualify of this repository has failed since it was registered, so step 2 has not been needed or has not started'),
+        lt('mine_run', 'One mine run, started → finished', 2, 750),
+        lt('oracle_run', 'One oracle run, started → finished', 1, 1800),
+        lt('controls_run', 'One controls run, started → finished', 0, null, 'no controls run of this repository has succeeded yet'),
+      ],
+      per_unit_label: '',
+      counts: { probe_green: 1 },
+      not_captured: [],
+    }
+    const { container } = mount('connect-and-prove', { ...FLOW, streams: [connect] })
+    const probe = await screen.findByTestId('flow-registered_to_probe_green')
+    expect(probe.textContent).toContain('30 min')
+    expect(nOf(probe)).toBe('1')
+    expect(probe.getAttribute('data-hint')).toBe('flow.registered_to_probe_green')
+    for (const key of ['step_2_span', 'mine_run', 'oracle_run', 'controls_run']) {
+      expect(screen.getByTestId(`flow-${key}`).getAttribute('data-hint')).toBe(`flow.${key}`)
+    }
+    expect(screen.getByTestId('flow-step_2_span').textContent).toContain('stands in for the developer’s hours')
+    expect(screen.getByTestId('flow-controls_run').textContent).toContain('no controls run of this repository has succeeded yet')
+    expect(unhinted(container)).toEqual([])
+  })
+
   it('every element a reader meets carries a registry hint', async () => {
     const { container } = mount()
     await screen.findByTestId('flow-registered_to_pr')

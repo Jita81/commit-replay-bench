@@ -70,9 +70,6 @@ tests/test_server_github_app.py
 tests/test_server_routes_grades.py
 tests/test_server_secrets.py
 tests/test_settings_home_guard.py
-ui/e2e/walkthrough/02-repo-onboard.spec.ts
-ui/e2e/walkthrough/03-mine.spec.ts
-ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
 ui/e2e/walkthrough/06-cancel.spec.ts
 ui/e2e/walkthrough/09-budget-sweep.spec.ts
 ui/e2e/walkthrough/09-review.spec.ts

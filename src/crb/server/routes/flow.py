@@ -24,7 +24,8 @@ What it does: Resolves the repository (404 when unknown), loads its rows, sign-o
               ``GET /admin/users`` is); nothing here writes.
 How:          ``get_repo_or_404`` → ``DbLedger(factory).rows(repo=…)`` →
               ``load_signoff_records`` → ``FactoryHome(settings.home, repo).events()`` →
-              ``build_flow`` → ``FlowOut.model_validate(reading.to_dict())``.
+              ``register_for`` (the prevention register the learn stream times findings
+              from) → ``build_flow`` → ``FlowOut.model_validate(reading.to_dict())``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/server/flow.py (``build_flow`` — every rule lives there),
@@ -46,10 +47,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query, Request
 
+from crb.core.ledger import LedgerIntegrityError
 from crb.server.auth import ViewerDep
 from crb.server.deps import DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.flow import build_flow
+from crb.server.prevention_state import register_for
 from crb.server.routes.golive import golive_counts
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.signoffs import load_signoff_records
@@ -78,6 +81,15 @@ def flow(
 ) -> FlowOut:
     get_repo_or_404(db, repo)
     rows = list(DbLedger(factory).rows(repo=repo))
+    # the learn stream times a class's finding to its first re-measurement from the prevention
+    # register (G-536); a chain that does not verify is named, never folded
+    try:
+        register, register_reason = (
+            register_for(db, factory, settings.home, repo, settings=settings),
+            "",
+        )
+    except LedgerIntegrityError as exc:
+        register, register_reason = None, f"the prevention chain does not verify: {exc}"
     reading = build_flow(
         db,
         repo=repo,
@@ -88,5 +100,7 @@ def flow(
         # the platform stream counts the go-live lines as /golive reads them (G-584), from a
         # reading at most a minute old: /flow never runs the deep probes on every read
         golive=golive_counts(request, db, factory, settings),
+        register=register,
+        register_reason=register_reason,
     )
     return FlowOut.model_validate(reading.to_dict())

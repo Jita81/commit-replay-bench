@@ -21,8 +21,11 @@
  *               of offering the form again; that registering an item reports the backlog it
  *               landed on and what it superseded; and that queueing runs confirms the plan's
  *               own estimate first, so nothing is sent by one click, and then names what was
- *               queued — an unknown estimate as unknown, never $0.00; and that the note is a
- *               one-line field (P-161).
+ *               queued — an unknown estimate as unknown, never $0.00; that the note is a
+ *               one-line field (P-161); that the guard's false-positive rate reads per
+ *               apparatus and month with the undecided rows apart (G-536); and that a cell
+ *               short of the bar says how many more attempts it needs, how many can be queued
+ *               and what they cost, or that nothing can be queued and why (G-565).
  * How:          `mockApi` with three reports (empty, or one row each where a row is needed),
  *               the populated register fixture (ui/src/screens/Learn/register.fixture.ts) and
  *               the POSTs; `renderApp` at `/learn?repo=…` as the role under test.
@@ -41,13 +44,15 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
-import { LearnPage, type RefusalGroup, type RefusalReport, type RemeasureCell, type RemeasurePlan, type StrengthenItem, type StrengthenReport } from './LearnPage'
+import { LearnPage, type FalsePositives, type RefusalGroup, type RefusalReport, type RemeasureCell, type RemeasurePlan, type StrengthenItem, type StrengthenReport } from './LearnPage'
 import { REGISTER } from './register.fixture'
 
-const REFUSALS: RefusalReport = { repo: 'alpha', rows_total: 0, rows_protocol: 0, protocol_share: 0, share: { rows_total: 0, rows_protocol: 0, share: 0, ci_low: 0, ci_high: 0 }, by_apparatus: [], cost_usd: 0, minutes: 0, unparsed: 0, apparatus_versions: [], groups: [], decisions: [], note: 'no rows' }
+const NO_FALSE_POSITIVES: FalsePositives = { periods: [], rows_protocol: 0, honest: 0, refuse: 0, undecided: 0, decided_groups: 0, undecided_groups: 0, note: 'a row is a false positive when a person decided its class honest' }
+const REFUSALS: RefusalReport = { repo: 'alpha', rows_total: 0, rows_protocol: 0, protocol_share: 0, share: { rows_total: 0, rows_protocol: 0, share: 0, ci_low: 0, ci_high: 0 }, by_apparatus: [], cost_usd: 0, minutes: 0, unparsed: 0, apparatus_versions: [], groups: [], decisions: [], false_positives: NO_FALSE_POSITIVES, note: 'no rows' }
 const STRENGTHEN: StrengthenReport = { repo: 'alpha', threshold: 0.8, cells_flagged: [], cells_without_scores: [], items: [], note: 'nothing held' }
-const REMEASURE: RemeasurePlan = { repo: 'alpha', current_apparatus: '2.2', min_n: 10, rows_total: 0, rows_stale: 0, cells: [], up_to_date: [], summary: { cells_stale: 0, n_needed_total: 0, est_cost_usd_total: 0, est_minutes_total: 0, cost_known_cells: 0 }, note: 'nothing stale' }
+const REMEASURE: RemeasurePlan = { repo: 'alpha', current_apparatus: '2.2', min_n: 10, rows_total: 0, rows_stale: 0, cells: [], up_to_date: [], cannot_clear: [], summary: { cells_stale: 0, cells_thin: 0, n_needed_total: 0, n_requested_total: 0, short_by_total: 0, est_cost_usd_total: 0, est_minutes_total: 0, cost_known_cells: 0 }, note: 'nothing stale' }
 
 describe('the register fixture', () => {
   it('gives every entry its own counts, never those of another entry (CodeRabbit, PR #57)', () => {
@@ -70,7 +75,7 @@ describe('the register fixture', () => {
 /** One refusal class, one strengthening item and one stale cell — the rows the three decisions act on. */
 const GROUP: RefusalGroup = { group_id: 'g1', prefix: 'network', reason: 'egress refused', shape: 'curl <url>', n: 3, cost_usd: 1.2, minutes: 4, repos: ['alpha'], tasks: ['t1'], examples: ['curl https://x'], truncated: false, candidate_honest: 'curl https://x', candidate_refused: 'curl https://x\tnetwork:', verdict: 'unsure' }
 const ITEM: StrengthenItem = { id: 'strengthen-1', title: 'Strengthen the divide tests', description: 'kill the surviving mutants', capability_class: 'test.add', labels: { cell: 'bug.fix|S', reason_code: 'oracle_weak', oracle_strength: '0.40', threshold: '0.80', escaped: '1' } }
-const CELL: RemeasureCell = { label: 'replay|bug.fix|S|python|editblock|m|cerebras', mode: 'sighted', stale_versions: ['2.1'], n_stale: 12, n_current: 4, n_needed: 6, est_cost_usd: 2.4, est_minutes: 30, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay' }, { kind: 'replay' }], in_flight_run_ids: [] }
+const CELL: RemeasureCell = { label: 'replay|bug.fix|S|python|editblock|m|cerebras', reason: 'stale', mode: 'sighted', stale_versions: ['2.1'], n_stale: 12, n_current: 4, n_needed: 6, n_requested: 6, short_by: 0, est_cost_usd: 2.4, est_minutes: 30, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay' }, { kind: 'replay' }], note: '', in_flight_run_ids: [] }
 
 /** The signed-in operator's view of one repository with one row in each report. */
 function operatorApi(extra: Record<string, unknown> = {}) {
@@ -96,10 +101,10 @@ describe('LearnPage', () => {
       'GET /learn/remeasure': REMEASURE,
     })
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
-    await waitFor(() => expect(screen.getByText('Nothing stale')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Nothing to re-measure or top up')).toBeInTheDocument())
     // the header says the product decides nothing, and whose each decision is
     expect(screen.getByText(/The product decides nothing: the register acts only under an operator’s switch, and each report’s decision is an operator’s, recorded with their name\./)).toBeInTheDocument()
-    for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale evidence']) expect(screen.getByText(eyebrow)).toBeInTheDocument()
+    for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale or thin evidence']) expect(screen.getByText(eyebrow)).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/play 0\d/)
     expect(document.body.textContent).not.toContain('evidence expires')
     // each report says what a person does with it, and its words are terms
@@ -113,7 +118,7 @@ describe('LearnPage', () => {
     expect(screen.getAllByRole('button', { name: /^apparatus/ }).length).toBeGreaterThanOrEqual(1)
     // with nothing to decide, the three reports offer an operator no form and no control:
     // each decision is a control on the row it acts on, never a free-standing write
-    for (const eyebrow of ['Refusals', 'Weak oracles', 'Stale evidence']) {
+    for (const eyebrow of ['Refusals', 'Weak oracles', 'Stale or thin evidence']) {
       const card = screen.getByText(eyebrow).closest('section')!
       expect(card.querySelector('form')).toBeNull()
       expect(within(card).queryByRole('button', { name: /register|revert|switch|run the loop/i })).toBeNull()
@@ -384,6 +389,69 @@ describe('LearnPage', () => {
     expect(remeasure.queryByRole('button', { name: 'Queue runs' })).toBeNull()
   })
 
+  it('a cell short of the bar says how many more attempts it needs and what they cost, or that the cost is not known', async () => {
+    // G-565: a thin cell (current rows, too few for the first look) is offered its top-up; the
+    // plan says how many more it needs, how many can be queued on commits it has not graded,
+    // and what those cost — or that the cost is not known, never $0.00
+    const thin: RemeasureCell = { ...CELL, label: 'replay|bug.fix|M|go|editblock|m|cerebras', reason: 'thin', stale_versions: [], n_stale: 0, n_current: 5, n_needed: 15, n_requested: 9, short_by: 6, est_cost_usd: 4.5, requests: [{ kind: 'replay' }], note: 'mine more history: this cell has 9 commit(s) it has not graded on apparatus 2.2 and needs 15, so 6 cannot be asked for without repeating a commit' }
+    const unpriced: RemeasureCell = { ...thin, label: 'replay|docs.update|S|go|editblock|m|cerebras', n_needed: 12, n_requested: 12, short_by: 0, cost_known: false, est_cost_usd: 0, note: '' }
+    const empty: RemeasureCell = { ...thin, label: 'replay|test.add|XS|go|editblock|m|cerebras', n_needed: 8, n_requested: 0, short_by: 8, requests: [], note: 'mine more history: this cell has 0 commit(s) it has not graded on apparatus 2.2 and needs 8, so 8 cannot be asked for without repeating a commit' }
+    mockApi(operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [thin, unpriced, empty], summary: { ...REMEASURE.summary, cells_thin: 3, n_needed_total: 35, cost_known_cells: 2 } } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const table = await screen.findByRole('table', { name: /Cells to re-measure or top up/ })
+    const row = (label: string) => within(table).getByText(label).closest('tr')!
+    // the reason, the need and what can be queued of it, and the price of what is queued
+    expect(within(row(thin.label)).getByText('thin')).toBeInTheDocument()
+    expect(screen.getByTestId(`learn-needed-${thin.label}|sighted`)).toHaveTextContent('15')
+    expect(screen.getByTestId(`learn-needed-${thin.label}|sighted`)).toHaveTextContent('9 can be queued; 6 short')
+    expect(row(thin.label).textContent).toContain('$4.50')
+    // an unknown cost says so, never $0.00
+    expect(row(unpriced.label).textContent).toContain('not known')
+    expect(row(unpriced.label).textContent).not.toContain('$0.00')
+    // a cell with no commit left offers no button: it says to mine more history
+    expect(within(row(empty.label)).queryByRole('button', { name: 'Queue runs' })).toBeNull()
+    expect(row(empty.label).textContent).toContain('Nothing to queue: mine more history')
+    expect(screen.getByTestId(`learn-needed-${empty.label}|sighted`)).toHaveTextContent('none can be queued')
+    // the dialog for the thin cell repeats what the runs ask for and how many are short
+    await userEvent.click(within(row(thin.label)).getByRole('button', { name: 'Queue runs' }))
+    const summary = within(await screen.findByTestId('learn-queue-summary'))
+    expect(summary.getByText(/^9 — 6 short: mine more history/)).toBeInTheDocument()
+    expect(summary.getByText('$4.50')).toBeInTheDocument()
+  })
+
+  it("shows the guard's false-positive rate by apparatus with the undecided rows apart", async () => {
+    // G-536: one row per apparatus version and month, never blended; the undecided rows are
+    // their own column and widen the rate into a range until someone decides their class
+    const fp: FalsePositives = {
+      periods: [
+        { apparatus_version: '2.1', month: '2026-09', rows_protocol: 4, honest: 2, refuse: 1, undecided: 1, rate_low: 0.5, rate_high: 0.75 },
+        { apparatus_version: '2.2', month: '2026-10', rows_protocol: 2, honest: 1, refuse: 1, undecided: 0, rate_low: 0.5, rate_high: 0.5 },
+      ],
+      rows_protocol: 6,
+      honest: 3,
+      refuse: 2,
+      undecided: 1,
+      decided_groups: 3,
+      undecided_groups: 1,
+      note: 'a row is a false positive when a person decided its class honest',
+    }
+    mockApi(operatorApi({ 'GET /learn/refusals': { ...REFUSALS, groups: [GROUP], false_positives: fp } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const table = await screen.findByRole('table', { name: /The guard's false positives, by apparatus/ })
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.textContent).toContain('2.1')
+    expect(rows[0]!.textContent).toContain('2026-09')
+    expect(rows[0]!.textContent).toContain('50.0% to 75.0%')
+    // a version with nothing undecided reads one exact rate
+    expect(rows[1]!.textContent).toContain('2.2')
+    expect(rows[1]!.textContent).not.toContain(' to ')
+    const undecided = within(table).getByRole('columnheader', { name: /Undecided/ })
+    expect(undecided).toBeInTheDocument()
+    expect(screen.getByTestId('learn-false-positives')).toHaveTextContent('1 of 6 refused rows are undecided (1 class(es) nobody has judged)')
+    expect(unhinted(screen.getByTestId('learn-false-positives'))).toEqual([])
+  })
+
   it('a cell whose cost nothing recorded says so instead of showing zero', async () => {
     mockApi(operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [{ ...CELL, cost_known: false, est_cost_usd: 0 }] } }))
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
@@ -528,7 +596,7 @@ describe('LearnPage', () => {
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
     const card = await waitFor(() => {
       const c = document.getElementById('remeasure')
-      if (!c || !within(c).queryByText('Nothing stale')) throw new Error('not yet')
+      if (!c || !within(c).queryByText('Nothing to re-measure or top up')) throw new Error('not yet')
       return c
     })
     await userEvent.type(within(card).getByLabelText(/^Plan against apparatus/), '9.9')
@@ -541,6 +609,6 @@ describe('LearnPage', () => {
     expect(calls.filter((c) => c.method === 'POST')).toEqual([])
     // back to the running version: the plan, and the Queue control, return
     await userEvent.click(within(card).getByRole('button', { name: 'Plan for the running version' }))
-    expect(await within(card).findByText('Nothing stale')).toBeInTheDocument()
+    expect(await within(card).findByText('Nothing to re-measure or top up')).toBeInTheDocument()
   })
 })

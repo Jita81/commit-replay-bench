@@ -159,10 +159,10 @@ const SIGNED = {
 }
 
 // ── the flow reading every screen shows its own stream's numbers from (G-925)
-const flowStream = (stream: string, name: string, key: string) => ({
+const flowStream = (stream: string, name: string, keys: string[]) => ({
   stream,
   name,
-  lead_times: [{ key, label: `${name} lead time`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' }],
+  lead_times: keys.map((key) => ({ key, label: `${name} lead time ${key}`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' })),
   spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
   spend_label: 'the replay and blind attempts graded for this repository',
   per_unit: null,
@@ -171,7 +171,7 @@ const flowStream = (stream: string, name: string, key: string) => ({
   per_unit_units: 0,
   per_unit_reason: 'no merged pull request yet to divide by',
   counts: { graded_rows: 44 },
-  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of the guide’s “real work”', why: 'nothing here times the work a person does outside this product', gap: 'G-556' }] : [],
+  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of step 2 (the guide’s “real work”), as the developer spent them', why: 'the work happens outside this product; the span from the first red probe or qualify to the first qualified task is timed above and stands in for it', gap: 'G-556' }] : [],
 })
 const FLOW = {
   repo: 'alpha',
@@ -180,12 +180,12 @@ const FLOW = {
   method: 'derived from the stored runs, graded rows, events, sign-offs and factory chain',
   spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
   streams: [
-    flowStream('connect-and-prove', 'Connect & prove', 'registered_to_controls'),
-    flowStream('measure', 'Measure', 'queued_to_graded'),
-    flowStream('decide-and-license', 'Decide & license', 'accepted_to_signed'),
-    flowStream('manufacture-and-deliver', 'Manufacture & deliver', 'registered_to_pr'),
-    flowStream('learn', 'Learn', 'refusal_to_strengthening'),
-    flowStream('run-the-platform', 'Run the platform', 'password_set_to_signed_in'),
+    flowStream('connect-and-prove', 'Connect & prove', ['registered_to_controls', 'registered_to_probe_green', 'step_2_span', 'mine_run', 'oracle_run', 'controls_run']),
+    flowStream('measure', 'Measure', ['queued_to_graded']),
+    flowStream('decide-and-license', 'Decide & license', ['accepted_to_signed']),
+    flowStream('manufacture-and-deliver', 'Manufacture & deliver', ['registered_to_pr']),
+    flowStream('learn', 'Learn', ['refusal_to_strengthening', 'finding_to_remeasurement']),
+    flowStream('run-the-platform', 'Run the platform', ['password_set_to_signed_in']),
   ],
 }
 

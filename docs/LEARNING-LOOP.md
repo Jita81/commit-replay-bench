@@ -127,11 +127,14 @@ keeps only cells and scores stamped at or after that version. `--out backlog.jso
 
 ### 2.3 Apparatus change → re-measurement plan — `remeasure_plan(rows, current)` → `crb learn remeasure`
 
-Per full cell (the unit a run targets): the rows stamped with an apparatus older than the
-current one, how many eligible current-apparatus rows exist, `n_needed = min_n − n_current`
-(from `routing.DEFAULT_POLICY`), the estimated cost (that cell's own mean row cost × n
-needed, with `cost_known` false when no row recorded one) and minutes, and the exact
-`POST /runs` bodies (`crb.server.schemas.RunCreateRequest`) an operator can queue:
+Per full cell (the unit a run targets) and mode: every cell short of the routing rule's
+first look. A cell is `stale` when it has rows stamped with an apparatus older than the
+current one, and `thin` when all its rows are current but too few — a cell short of the bar
+is offered its top-up, not only one an apparatus bump made stale (G-565). For each: how many
+eligible current-apparatus rows exist, `n_needed = min_n − n_current` (from
+`routing.DEFAULT_POLICY`), the estimated cost (that cell's own mean row cost × the attempts
+its requests ask for, with `cost_known` false when no row recorded one) and minutes, and the
+exact `POST /runs` bodies (`crb.server.schemas.RunCreateRequest`) an operator can queue:
 
 ```json
 {"repo": "cobra", "kind": "replay", "mode": "sighted", "builder": "claude_code",
@@ -139,9 +142,15 @@ needed, with `cost_known` false when no row recorded one) and minutes, and the e
  "task_ids": ["1995054b00…", "…"], "limit": 7}
 ```
 
-`task_ids` re-measures the *same* tasks the stale rows were graded on; when they are fewer
-than the rule needs, a second request asks for the remainder by `limit` and says so. The
-derivation queues nothing — `crb learn remeasure` prints JSON for the operator to post, and
+`task_ids` names only commits the cell has no eligible row on at the current apparatus: the
+stale rows' own commits first (a re-measurement renews what was measured), then — on the
+Learn page, which knows each task's current label — every other gold-clean commit labelled
+this cell. When they run out before the need does, `short_by` says how many the plan could
+not ask for and the note says **mine more history**: no request ever asks for the remainder
+by `limit` alone, because the worker would fill it with the repository's oldest commits —
+ones the cell already graded, or another cell's. A cell whose misses already exceed what the
+rule's last look allows is not offered a top-up at all and is named in `cannot_clear`: no
+number of further attempts can bring it to `deliver`. The derivation queues nothing — `crb learn remeasure` prints JSON for the operator to post, and
 `POST /learn/remeasure/queue` sends one cell's bodies on an operator's own instruction (§4).
 
 ### 2.4 What strengthening costs a person
@@ -278,6 +287,12 @@ summary.
   `BacklogItem.from_dict` and `readiness.assess` as `ready` / `build` with no value gaps, and
   the `--out` file loads and freezes as a `Backlog` whose hash verifies.
 * **The run requests are valid**: every body validates as `RunCreateRequest`.
+* **A top-up never repeats a commit**: a request names only commits the (cell, mode) has not
+  graded on the current apparatus, never a limit-only body; a thin cell is offered its top-up
+  with `n_needed` and its cost, and a cell that cannot reach the bar is offered nothing.
+* **The guard's false-positive rate is a bound, not a guess**: a row counts as a false
+  positive only when a person decided every class it fell into honest; an undecided row is
+  counted apart, never as either verdict.
 
 ## 6. What this is not (yet)
 
@@ -287,8 +302,9 @@ summary.
   the accepted line into the repository is still a person's job — the decision and its
   provenance are recorded and served, but nothing opens a pull request for it. [gap]
 * It does not label refusals *instrument* vs *builder* on its own — that is what the human
-  verdict is. Once decisions accumulate, the share of `honest` decisions per reason is the
-  guard's measured false-positive rate; reporting it over time is a follow-up.
+  verdict is. The decisions people record are what the guard's false-positive rate is
+  derived from (§7.5), per apparatus version and month; until every class is decided, that
+  rate is a range, not a number.
 * Strengthening items are proposals for the **target tests of an existing task**; they do
   not propose new oracle coverage for classes that have no tasks.
 * The re-measurement plan estimates cost from the cell's own history; a cell whose rows
@@ -387,6 +403,23 @@ register:
   non-clean rate is no more than 5 points above the before window; otherwise the class reads
   `displaced` and names what it now fails as **[measured — n = 1 margin of 0.05; method:
   the constants of the prevention rule (`crb.prevention.rule.v1`) in the prevention module, read at this commit; apparatus n/a]**. Any later recurrence reopens it.
+
+**The loop's own numbers.** Three figures say how the learning stream itself is doing, and
+the Learn page shows them (its *How this flows* panel and the refusal card):
+
+* **The guard's false-positive rate** (`crb.core.learn.guard_false_positives`, served as
+  `false_positives` by `GET /learn/refusals`) — per apparatus version and calendar month, the
+  refused rows in classes a person decided honest (the guard was wrong) over all refused rows.
+  A row with any class decided refused was a right refusal; a row nobody has judged is
+  undecided and widens the rate into a range — honest ÷ n at least, (honest + undecided) ÷ n
+  at most — because the product never supplies a verdict nobody gave.
+* **How often a class recurs after a prevention** — the register's measurement above, and
+  `GET /value`'s learning curve.
+* **The time from a finding to its re-measurement** (`crb.core.prevention.finding_to_remeasure`,
+  the learn stream's `finding_to_remeasurement` lead time in `GET /flow`) — from a class's first
+  sighting to the first `decided` record of a change that targets it: how long the loop took
+  to act on a finding and read what its change did. A class no change targets is counted and
+  never timed.
 
 Only first attempts count: a retry exists only after a failure, and stream K's escalation rule
 decides how many there are. Harness and disqualified rows stay in n, so moving a failure into

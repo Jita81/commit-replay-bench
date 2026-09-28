@@ -21,7 +21,11 @@ What it does: Pins the parser on the exact ``builder_error`` shapes the live row
               cells become ``test.add`` items that pass the factory's DoR gate, that only oracle
               reasons are flagged, that the re-measurement plan queues nothing, determinism
               (same rows → byte-identical output), and the ``rows_to_clear_bar`` Wilson minimum
-              (three 10/10 cells read ``ci_low_below_bar`` on 2.2, 2026-09-15).
+              (three 10/10 cells read ``ci_low_below_bar`` on 2.2, 2026-09-15); that the guard's
+              false-positive rate counts only decided classes and bounds the undecided rows
+              (G-536); and that a thin cell is offered its top-up with its need and cost, a
+              top-up never names a commit the cell already graded, and a cell that cannot clear
+              the bar is offered nothing (G-565).
 How:          Rows as a ledger returns them (hashed, chained) → ``triage_refusals`` /
               ``strengthening_backlog`` / ``remeasure_plan``; a temp corpus directory for apply.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -385,6 +389,85 @@ class TestTriage:
         assert a == b == c
         rep = learn.triage_refusals(rows)
         assert [g.n for g in rep.groups] == sorted((g.n for g in rep.groups), reverse=True)
+        # the false-positive rate is derived from the same rows and the same decisions in any
+        # order of the rows: byte-identical too (G-536)
+        decided = [{"group_id": rep.groups[0].group_id, "verdict": "honest"}]
+        fp = [
+            learn.dumps(learn.guard_false_positives(learn.triage_refusals(r), decided).to_dict())
+            for r in (rows, list(reversed(rows)))
+        ]
+        assert fp[0] == fp[1]
+
+    def test_guard_false_positives_count_only_decided_groups_and_bound_the_undecided(
+        self, tmp_path: Path
+    ) -> None:
+        """G-536: the guard's false-positive rate per apparatus version and calendar month,
+        from the verdicts people recorded. A row in a class decided honest is a false
+        positive; a row with any class decided refuse was rightly refused; a row nobody has
+        judged (or whose text named no class) is undecided and is never counted as either —
+        the rate is the bound [honest ÷ n, (honest + undecided) ÷ n]."""
+
+        def on(day: str) -> str:
+            return f"{day}T10:00:00+00:00"
+
+        rows = _chained(
+            [
+                _protocol(ERR_GIT_STASH, task_id="1" * 40, created=on("2026-09-14")),
+                _protocol(ERR_UV_RUN, task_id="2" * 40, created=on("2026-09-20")),
+                # two classes in one row: the first decided honest, the second refuse
+                _protocol(ERR_NHS_TWO, task_id="3" * 40, created=on("2026-09-21")),
+                # a protocol row whose text names no class: undecided whatever anyone decides
+                _row(
+                    task_id="4" * 40,
+                    error="protocol violation:",
+                    labels={LABEL_FAILURE_KIND: FAILURE_PROTOCOL},
+                    created=on("2026-09-22"),
+                ),
+                _protocol(ERR_NPX_JEST, task_id="5" * 40, created=on("2026-10-02")),
+                _protocol(
+                    ERR_UV_RUN, task_id="6" * 40, apparatus_version="2.2", created=on("2026-10-03")
+                ),
+                _clean(task_id="7" * 40, created=on("2026-09-15")),  # not a refusal at all
+            ],
+            tmp_path,
+        )
+        rep = learn.triage_refusals(rows)
+
+        def gid(prefix: str, head: str) -> str:
+            return next(
+                g.group_id for g in rep.groups if g.prefix == prefix and g.shape.startswith(head)
+            )
+
+        decisions = [
+            {"group_id": gid("archaeology", "git stash"), "verdict": "honest"},
+            # a later verdict on the same class replaces the earlier one
+            {"group_id": gid("network", "uv run"), "verdict": "refuse"},
+            {"group_id": gid("network", "uv run"), "verdict": "honest"},
+            {"group_id": gid("archaeology", "find"), "verdict": "honest"},
+            {"group_id": gid("network", "curl"), "verdict": "refuse"},
+            # "unsure" is not a verdict: the class stays undecided
+            {"group_id": gid("network", "npx jest"), "verdict": "unsure"},
+        ]
+        fp = learn.guard_false_positives(rep, decisions)
+        got = [
+            (p.apparatus_version, p.month, p.rows_protocol, p.honest, p.refuse, p.undecided)
+            for p in fp.periods
+        ]
+        assert got == [
+            ("2.1", "2026-09", 4, 2, 1, 1),
+            ("2.1", "2026-10", 1, 0, 0, 1),
+            ("2.2", "2026-10", 1, 1, 0, 0),
+        ]
+        sept = fp.periods[0]
+        assert (sept.rate_low, sept.rate_high) == (0.5, 0.75)
+        assert (fp.periods[1].rate_low, fp.periods[1].rate_high) == (0.0, 1.0)
+        assert (fp.rows_protocol, fp.honest, fp.refuse, fp.undecided) == (6, 3, 1, 2)
+        assert (fp.decided_groups, fp.undecided_groups) == (4, 1)
+        d = fp.to_dict()
+        assert d["periods"][0]["rate_low"] == 0.5 and d["periods"][0]["rate_high"] == 0.75
+        # with no decision at all, every row is undecided: nothing is inferred
+        none = learn.guard_false_positives(rep, [])
+        assert (none.honest, none.refuse, none.undecided) == (0, 0, 6)
 
     def test_empty_and_no_protocol_rows(self, tmp_path: Path) -> None:
         rep = learn.triage_refusals([])
@@ -1078,27 +1161,33 @@ class TestRemeasure:
         by = {(c.cell.label, c.mode): c for c in plan.cells}
         go = "replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic"
         py = "replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic"
-        assert set(by) == {(go, "sighted"), (go, "blind"), (py, "sighted")}
+        thin = "replay|bug.fix|M|go|claude_code|claude-sonnet-5|anthropic"
+        assert set(by) == {(go, "sighted"), (go, "blind"), (py, "sighted"), (thin, "sighted")}
         assert plan.up_to_date == (
             "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic|sighted",
         )
         a = by[(go, "sighted")]
+        assert a.reason == "stale"
         assert (a.n_stale, a.n_current, a.n_needed) == (7, 0, 20)  # the first look
         assert a.stale_versions == ("2.0",) and a.repos == ("cobra",)
         assert (a.tasks_stale, a.tasks_current, a.relabelled) == (7, 0, ())
         assert a.cost_usd_mean == pytest.approx(0.24) and a.cost_known
-        assert a.est_cost_usd == pytest.approx(0.24 * 20)  # sighted: one attempt per row
-        assert a.est_minutes == pytest.approx(62 * 20 / 60)
-        (req, rest) = a.requests
+        # the estimate prices what the requests ask for — seven commits, one attempt each
+        assert a.est_cost_usd == pytest.approx(0.24 * 7)
+        assert a.est_minutes == pytest.approx(62 * 7 / 60)
+        # one request on the seven stale commits; the other 13 cannot be asked for without
+        # repeating a commit, so no limit-only body is emitted and the plan says so
+        (req,) = a.requests
         assert req.kind == "replay" and req.mode == "sighted" and len(req.task_ids) == 7
-        assert req.limit == 7 and rest.limit == 13 and rest.task_ids == ()  # 20 − 7 named
+        assert req.limit == 7 and (a.n_requested, a.short_by) == (7, 13)
+        assert learn.MINE_MORE in a.note
         bl = by[(go, "blind")]
         assert (bl.n_stale, bl.n_needed, bl.tasks_stale) == (1, 20, 1)
         assert bl.cost_usd_mean == pytest.approx(0.39)
-        assert bl.est_cost_usd == pytest.approx(0.39 * 20 * 3)  # blind: up to 3 rungs per row
-        (breq, brest) = bl.requests
+        assert bl.est_cost_usd == pytest.approx(0.39 * 1 * 3)  # blind: up to 3 rungs per row
+        (breq,) = bl.requests
         assert breq.kind == "blind" and breq.task_ids == ("9" * 40,) and breq.limit == 1
-        assert brest.limit == 19 and "remainder" in brest.note
+        assert bl.short_by == 19
         for c in (a, bl):
             for r in c.requests:
                 assert r.repo == "cobra" and r.builder == "claude_code"
@@ -1106,9 +1195,16 @@ class TestRemeasure:
         b = by[(py, "sighted")]
         assert (b.n_stale, b.n_current, b.n_needed) == (5, 8, 12)  # 8 current: 12 to the look
         assert (b.tasks_stale, b.tasks_current) == (5, 8)
-        req, rest = b.requests  # 5 named stale tasks + a limit-only remainder of 7
+        (req,) = b.requests  # the 5 stale commits; 7 more need more history
         assert req.limit == 5 and len(req.task_ids) == 5 and req.kind == "replay"
-        assert rest.limit == 7 and rest.task_ids == ()
+        assert b.short_by == 7
+        # cell D has no stale row: it is thin, and without task labels the plan cannot name
+        # a commit it has not graded, so it offers none and says why
+        d = by[(thin, "sighted")]
+        assert (d.reason, d.n_stale, d.n_current, d.n_needed) == ("thin", 0, 1, 19)
+        assert d.requests == () and d.short_by == 19 and "task labels" in d.note
+        summary = plan.to_dict()["summary"]
+        assert (summary["cells_stale"], summary["cells_thin"]) == (3, 1)
 
     def test_relabelled_stale_tasks_are_left_out_and_named(self, tmp_path: Path) -> None:
         """A stale task whose CURRENT label moved (an intent relabel) would put its new
@@ -1120,10 +1216,132 @@ class TestRemeasure:
             current_apparatus="2.1",
             task_labels={moved: ("feature.add", "XS")},
         )
-        go = next(c for c in plan.cells if c.cell.language == "go" and c.mode == "sighted")
+        go = next(
+            c
+            for c in plan.cells
+            if c.cell.language == "go" and c.cell.size == "XS" and c.mode == "sighted"
+        )
         assert go.relabelled == (moved,)
-        req = go.requests[0]
-        assert moved not in req.task_ids and len(req.task_ids) == 6 and go.requests[1].limit == 14
+        (req,) = go.requests
+        assert moved not in req.task_ids and len(req.task_ids) == 6 and go.short_by == 14
+
+    def test_a_thin_cell_is_offered_its_top_up_with_n_needed_and_its_cost(
+        self, tmp_path: Path
+    ) -> None:
+        """G-565: a cell short of the rule's first look with no stale row is in the plan as
+        ``thin`` — how many more attempts it needs, the commits it can have them on and what
+        they cost at the cell's own rate — where it used to be left out altogether."""
+        graded = [f"{i:040x}" for i in range(1, 6)]
+        rows = _chained(
+            [_clean(task_id=t, apparatus_version="2.1", cost_usd=0.5) for t in graded], tmp_path
+        )
+        fresh = [f"{i:040x}" for i in range(100, 130)]
+        labels = dict.fromkeys(graded + fresh, ("bug.fix", "XS"))
+        labels["f" * 40] = ("feature.add", "XS")  # another cell's commit is never asked for
+        plan = learn.remeasure_plan(rows, current_apparatus="2.1", task_labels=labels)
+        (c,) = plan.cells
+        assert (c.reason, c.n_current, c.n_needed, c.n_stale) == ("thin", 5, 15, 0)
+        (req,) = c.requests
+        assert req.task_ids == tuple(fresh[:15]) and req.limit == 15
+        assert (c.n_requested, c.short_by, c.note) == (15, 0, "")
+        assert c.cost_known and c.est_cost_usd == pytest.approx(0.5 * 15)
+        d = plan.to_dict()
+        assert d["summary"]["cells_thin"] == 1 and d["summary"]["cells_stale"] == 0
+        assert d["cells"][0]["reason"] == "thin" and d["cells"][0]["short_by"] == 0
+        # a cell whose rows recorded no cost is still offered, and says the cost is unknown
+        unpriced = _chained(
+            [
+                _clean(
+                    task_id=t,
+                    apparatus_version="2.1",
+                    cost_usd=0.0,
+                    latency_s=0.0,
+                    provenance="imported:census",
+                )
+                for t in graded
+            ],
+            tmp_path / "unpriced",
+        )
+        (u,) = learn.remeasure_plan(unpriced, current_apparatus="2.1", task_labels=labels).cells
+        assert u.reason == "thin" and not u.cost_known and u.est_cost_usd == 0.0
+        # only gold-clean commits are asked for when the caller names them: the worker skips
+        # the rest, so counting them would plan rows that are never graded
+        gold = learn.remeasure_plan(
+            rows, current_apparatus="2.1", task_labels=labels, gold_clean_tasks=fresh[:4]
+        ).cells[0]
+        assert gold.requests[0].task_ids == tuple(fresh[:4]) and gold.short_by == 11
+
+    def test_a_top_up_never_requests_a_commit_the_cell_already_graded(self, tmp_path: Path) -> None:
+        """G-565: a top-up asks only for commits this (cell, mode) has no eligible row on at
+        the current apparatus. When they run out it says how many it is short and to mine
+        more history — and never emits a limit-only body, which the worker fills with the
+        repository's oldest commits: ones already graded, or another cell's."""
+        graded = [f"{i:040x}" for i in range(1, 11)]
+        rows = _chained(
+            [_clean(task_id=t, apparatus_version="2.1") for t in graded]
+            # the same commits blind: a blind row does not make a commit graded sighted
+            + [_clean(task_id=t, apparatus_version="2.1", mode="blind") for t in graded[:2]],
+            tmp_path,
+        )
+        fresh = [f"{i:040x}" for i in range(100, 104)]
+        labels = dict.fromkeys(graded + fresh, ("bug.fix", "XS"))
+        plan = learn.remeasure_plan(rows, current_apparatus="2.1", task_labels=labels)
+        by = {c.mode: c for c in plan.cells}
+        sighted = by["sighted"]
+        (req,) = sighted.requests
+        assert set(req.task_ids) == set(fresh) and not set(req.task_ids) & set(graded)
+        assert (sighted.n_needed, sighted.n_requested, sighted.short_by) == (10, 4, 6)
+        assert learn.MINE_MORE in sighted.note
+        for c in plan.cells:
+            for r in c.requests:
+                assert r.task_ids and r.limit == len(r.task_ids)  # no limit-only body
+        blind = by["blind"]
+        (breq,) = blind.requests
+        assert set(breq.task_ids) == set(graded[2:] + fresh)  # everything but its own two
+        # a stale commit the cell has since graded on the current apparatus is not asked again
+        mixed = _chained(
+            [
+                _clean(task_id=graded[0], apparatus_version="2.0"),
+                _clean(task_id=graded[0], apparatus_version="2.1"),
+                _clean(task_id=graded[1], apparatus_version="2.0"),
+            ],
+            tmp_path / "mixed",
+        )
+        (m,) = learn.remeasure_plan(mixed, current_apparatus="2.1").cells
+        assert m.reason == "stale" and m.requests[0].task_ids == (graded[1],)
+        # and a stale commit that is no longer gold-clean is not asked for: the worker skips it
+        (g,) = learn.remeasure_plan(mixed, current_apparatus="2.1", gold_clean_tasks=()).cells
+        assert g.requests == () and g.short_by == g.n_needed
+
+    def test_a_cell_that_cannot_clear_the_point_bar_is_not_offered_rows_that_cannot_help(
+        self, tmp_path: Path
+    ) -> None:
+        """G-565: under look.v1 the last look allows two misses. A cell with three misses on
+        the current apparatus can never read deliver, however many attempts are added, so the
+        plan offers it no top-up and names it in ``cannot_clear``; a cell with two is offered
+        one."""
+        fresh = [f"{i:040x}" for i in range(100, 140)]
+
+        def plan_for(misses: int, path: Path) -> learn.RemeasurePlan:
+            rows = [_clean(task_id=f"{i:040x}", apparatus_version="2.1") for i in range(1, 6)]
+            rows += [
+                _row(task_id=f"{i:040x}", apparatus_version="2.1") for i in range(6, 6 + misses)
+            ]
+            labels = dict.fromkeys(fresh, ("bug.fix", "XS"))
+            return learn.remeasure_plan(
+                _chained(rows, path), current_apparatus="2.1", task_labels=labels
+            )
+
+        hopeless = plan_for(3, tmp_path / "three")
+        assert hopeless.cells == ()
+        assert hopeless.cannot_clear == (
+            "replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic|sighted",
+        )
+        assert hopeless.to_dict()["cannot_clear"] == list(hopeless.cannot_clear)
+        assert learn.cannot_clear_bar(5, 8, learn.DEFAULT_POLICY)
+        still = plan_for(2, tmp_path / "two")
+        (c,) = still.cells
+        assert c.reason == "thin" and c.n_needed == 13 and c.requests and not still.cannot_clear
 
     def test_requests_are_valid_post_runs_bodies(self, tmp_path: Path) -> None:
         pydantic = pytest.importorskip("pydantic")
@@ -1163,7 +1381,9 @@ class TestRemeasure:
     def test_nothing_stale(self, tmp_path: Path) -> None:
         rows = _chained([_clean(task_id="1" * 40, apparatus_version="2.1")], tmp_path)
         plan = learn.remeasure_plan(rows, current_apparatus="2.1")
-        assert plan.cells == () and plan.up_to_date == () and plan.rows_stale == 0
+        assert plan.up_to_date == () and plan.rows_stale == 0
+        # nothing is stale; the one cell is short of the first look, so it is thin (G-565)
+        assert [c.reason for c in plan.cells] == ["thin"]
         assert learn.remeasure_plan([]).cells == ()
 
     def test_legacy_belt_set_rows_are_stale(self, tmp_path: Path) -> None:
@@ -1205,6 +1425,7 @@ class TestRemeasure:
         assert (
             "apparatus 2.1" in text and "cells to renew: 3" in text and "nothing was sent" in text
         )
+        assert "cells to top up: 1" in text and "| thin |" in text
 
 
 def test_version_key_orders_versions_and_tolerates_legacy() -> None:

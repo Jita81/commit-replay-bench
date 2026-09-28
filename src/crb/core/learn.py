@@ -20,10 +20,13 @@ byte-identical for the same input, and which **never act**:
   recorded them, else the count. Items are ``test.add`` with both STRUCTURAL slots
   filled from facts the ledger holds — never a value from the answer (the review's
   play-01 finding) — so the DoR gate accepts them as ``build``.
-* :func:`remeasure_plan` — every cell whose evidence is stamped with an OLDER
-  apparatus than the current one, with the ``n`` the routing rule needs, the cost
-  that implies (that cell's own mean row cost × n) and the exact ``POST /runs``
-  bodies an operator can queue. It queues nothing.
+  :func:`guard_false_positives` folds the verdicts people recorded into the guard's
+  false-positive rate per apparatus version and month — a bound while any row is undecided.
+* :func:`remeasure_plan` — every cell short of the routing rule's first look: ``stale``
+  (evidence stamped with an OLDER apparatus) or ``thin`` (current, but too few), with the
+  ``n`` the rule needs, the ``POST /runs`` bodies an operator can queue — naming only commits
+  the cell has not graded, never a limit-only body — and the cost of what they ask for (that
+  cell's own mean row cost × the attempts requested). It queues nothing.
 
 Why the three human steps are deliberate, not missing: a loop that appended its own
 refusals to its own guard corpus would launder a false positive into policy the
@@ -43,19 +46,24 @@ What it is:   The learning loop's three derivations — refusal triage, the orac
               backlog and the apparatus re-measurement plan — pure functions from the ledger
               and the capability map to proposals a human acts on.
 What it does: Groups every ``protocol`` row's guard refusals by (reason, command shape),
-              costs them and proposes corpus lines whose verdict is always ``unsure``;
-              turns every oracle-held cell into ``test.add`` backlog items with structural
-              facts from the ledger; lists every cell with stale-apparatus evidence, the
-              rows it needs to clear the rule's bars and the ``POST /runs`` bodies that
-              would renew it. Writes only what a named human decided (``apply_triage``,
-              under a lock on the corpus directory; a supplied command only completes a
-              cut example) and queues nothing.
+              costs them and proposes corpus lines whose verdict is always ``unsure``; folds
+              the recorded verdicts into the guard's false-positive rate per apparatus and
+              month (undecided rows kept apart); turns every oracle-held cell into ``test.add``
+              backlog items with structural facts from the ledger; lists every cell short of
+              the rule's first look — stale or thin — with the rows it needs, the ``POST /runs``
+              bodies that would top it up on commits it has not graded, and what they cost.
+              Writes only what a named human decided (``apply_triage``, under a lock on the
+              corpus directory; a supplied command only completes a cut example) and queues
+              nothing.
 How:          ``triage_refusals`` (``parse_violations`` → ``normalise_reason`` /
               ``normalise_command`` → ``RefusalGroup``) → a decisions file → ``apply_triage``
-              (validate all, then append with provenance); ``strengthening_backlog`` (cells
-              with an oracle reason code × ``OracleTaskScore``) → ``StrengthenItem``;
+              (validate all, then append with provenance); ``guard_false_positives`` (the
+              report's row stamps × the latest verdict per group → ``FalsePositivePeriod``);
+              ``strengthening_backlog`` (cells with an oracle reason code ×
+              ``OracleTaskScore``) → ``StrengthenItem``;
               ``remeasure_plan`` (rows per full cell by apparatus version →
-              ``rows_to_clear_bar`` → ``RunRequest``).
+              ``rows_to_clear_bar`` / ``cannot_clear_bar`` → the cell's ungraded commits →
+              ``RunRequest``).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules (the loop itself:
               docs/LEARNING-LOOP.md#2-what-crbcorelearn-adds)
 ADRs:         docs/adr/0003-one-routing-rule.md
@@ -68,7 +76,8 @@ Works with:   src/crb/core/ledger.py (the rows, failure kinds and cell grouping)
               tests/test_builders_guard_corpus.py consume what ``apply_triage`` writes),
               src/crb/factory/backlog.py (the BacklogItem shape strengthening items mirror)
 Tested by:    tests/test_learn.py, tests/test_cli_learn.py, tests/test_server_routes_learn.py
-Touch when:   never for a new repository; a new guard prefix, a new routing reason code or a
+Touch when:   never for a new repository — a repository's rows, tasks and labels are read as
+              they are; a new guard prefix, a new routing reason code or a
               change to ``BacklogItem`` must be mirrored here (the core cannot import the
               builders or the factory — tests/test_learn.py pins the mirrors); the human
               steps are deliberate (docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate)
@@ -86,7 +95,7 @@ import json
 import os
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -399,6 +408,9 @@ class RefusalReport:
     #: ``(apparatus_version, rows_total, rows_protocol)`` per apparatus — the share is
     #: never blended across versions in what is served (CodeRabbit on PR #6, 2026-09-16).
     by_apparatus: tuple[tuple[str, int, int], ...] = ()
+    #: ``(row key, apparatus_version, created)`` of every protocol row, sorted — what
+    #: :func:`guard_false_positives` dates each row by. Not served: the groups name the rows.
+    row_stamps: tuple[tuple[str, str, str], ...] = field(default=(), repr=False, compare=False)
 
     @property
     def instrument_share(self) -> float:
@@ -511,7 +523,7 @@ def triage_refusals(rows: Iterable[GradeRow]) -> RefusalReport:
                 minutes=sum(r.latency_s for r, _ in members) / 60.0,
                 repos=tuple(sorted({r.repo for r, _ in members})),
                 tasks=tuple(sorted({f"{r.repo}/{r.task_id[:10]}" for r, _ in members})),
-                rows=tuple(sorted({r.row_hash or r.row_id for r, _ in members})),
+                rows=tuple(sorted({_row_key(r) for r, _ in members})),
                 examples=examples,
                 truncated=truncated,
                 candidate_honest=cand,
@@ -534,6 +546,161 @@ def triage_refusals(rows: Iterable[GradeRow]) -> RefusalReport:
         unparsed=unparsed,
         apparatus_versions=tuple(sorted({r.apparatus_version for r in protocol})),
         by_apparatus=tuple((v, totals[v], protos.get(v, 0)) for v in sorted(totals)),
+        row_stamps=tuple(sorted((_row_key(r), r.apparatus_version, r.created) for r in protocol)),
+    )
+
+
+def _row_key(row: GradeRow) -> str:
+    """How a refusal group names a row: its chain hash, else its id (an unchained row)."""
+    return row.row_hash or row.row_id
+
+
+# --- the guard's false-positive rate, from the verdicts people recorded (G-536) ---------------
+
+
+@dataclass(frozen=True)
+class FalsePositivePeriod:
+    """One apparatus version in one calendar month: its protocol rows split by what a person
+    decided about the class each row fell into. ``honest`` rows are the guard's false
+    positives; ``refuse`` rows it was right to refuse; ``undecided`` rows nobody has judged
+    yet, and they are never counted as either verdict — the rate is a bound, not a point."""
+
+    apparatus_version: str
+    month: str
+    rows_protocol: int
+    honest: int
+    refuse: int
+    undecided: int
+
+    @property
+    def rate_low(self) -> float:
+        """The false-positive rate if every undecided row turns out to be a right refusal."""
+        return self.honest / self.rows_protocol if self.rows_protocol else 0.0
+
+    @property
+    def rate_high(self) -> float:
+        """The false-positive rate if every undecided row turns out to be a false positive."""
+        return (self.honest + self.undecided) / self.rows_protocol if self.rows_protocol else 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "apparatus_version": self.apparatus_version,
+            "month": self.month,
+            "rows_protocol": self.rows_protocol,
+            "honest": self.honest,
+            "refuse": self.refuse,
+            "undecided": self.undecided,
+            "rate_low": round(self.rate_low, 4),
+            "rate_high": round(self.rate_high, 4),
+        }
+
+
+@dataclass(frozen=True)
+class FalsePositives:
+    """The guard's false-positive rate over time: one :class:`FalsePositivePeriod` per
+    (apparatus version, calendar month) of the protocol rows, versions in order and never
+    blended, plus the totals across every period of the report."""
+
+    periods: tuple[FalsePositivePeriod, ...]
+    decided_groups: int
+    undecided_groups: int
+
+    @property
+    def rows_protocol(self) -> int:
+        return sum(p.rows_protocol for p in self.periods)
+
+    @property
+    def honest(self) -> int:
+        return sum(p.honest for p in self.periods)
+
+    @property
+    def refuse(self) -> int:
+        return sum(p.refuse for p in self.periods)
+
+    @property
+    def undecided(self) -> int:
+        return sum(p.undecided for p in self.periods)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "periods": [p.to_dict() for p in self.periods],
+            "rows_protocol": self.rows_protocol,
+            "honest": self.honest,
+            "refuse": self.refuse,
+            "undecided": self.undecided,
+            "decided_groups": self.decided_groups,
+            "undecided_groups": self.undecided_groups,
+            "note": (
+                "a row is a false positive when a person decided its class honest (the guard "
+                "was wrong), and a right refusal when they decided refuse; a row with several "
+                "classes is a right refusal if any of them was decided refuse, and undecided "
+                "while any is undecided. Undecided rows are never counted as either verdict, so "
+                "the rate is served as a bound: honest ÷ protocol rows at least, (honest + "
+                "undecided) ÷ protocol rows at most. Months are the month each row was graded."
+            ),
+        }
+
+
+_MONTH_RE = re.compile(r"^\d{4}-\d{2}")
+
+
+def _month_of(created: str) -> str:
+    """``2026-09-14T…`` → ``2026-09``; a stamp that does not start with a date → ``unknown``."""
+    m = _MONTH_RE.match(created or "")
+    return m.group(0) if m else "unknown"
+
+
+def guard_false_positives(
+    report: RefusalReport, decisions: Iterable[Mapping[str, Any]]
+) -> FalsePositives:
+    """The guard's false-positive rate per apparatus version and calendar month, from the
+    verdicts named people recorded (``learn.refusal.accepted``, oldest first; a later verdict
+    on the same class replaces an earlier one).
+
+    Pure and deterministic. A row's verdict is its classes' verdicts combined: ``refuse`` if
+    any class was decided refuse (the guard was right to stop the row), else ``undecided`` if
+    any class is undecided (or the row's text named no class), else ``honest`` — every class
+    it fell into was decided a false positive. Nothing is inferred: an undecided row stays
+    undecided and widens the bound instead of counting as either verdict."""
+    verdict_of: dict[str, str] = {}
+    for d in decisions:
+        gid = str(d.get("group_id", "") or "")
+        verdict = str(d.get("verdict", "") or "")
+        if gid and verdict in (VERDICT_HONEST, VERDICT_REFUSE):
+            verdict_of[gid] = verdict
+    row_groups: dict[str, list[str]] = {}
+    for g in report.groups:
+        for key in g.rows:
+            row_groups.setdefault(key, []).append(g.group_id)
+    buckets: dict[tuple[str, str], list[int]] = {}
+    for key, version, created in report.row_stamps:
+        verdicts = {verdict_of.get(gid, VERDICT_UNSURE) for gid in row_groups.get(key, ())}
+        if VERDICT_REFUSE in verdicts:
+            slot = 1
+        elif not verdicts or VERDICT_UNSURE in verdicts:
+            slot = 2
+        else:
+            slot = 0
+        counts = buckets.setdefault((version, _month_of(created)), [0, 0, 0])
+        counts[slot] += 1
+    periods = tuple(
+        FalsePositivePeriod(
+            apparatus_version=version,
+            month=month,
+            rows_protocol=sum(c),
+            honest=c[0],
+            refuse=c[1],
+            undecided=c[2],
+        )
+        for (version, month), c in sorted(
+            buckets.items(), key=lambda kv: (_version_key(kv[0][0]), kv[0][0], kv[0][1])
+        )
+    )
+    decided = sum(1 for g in report.groups if g.group_id in verdict_of)
+    return FalsePositives(
+        periods=periods,
+        decided_groups=decided,
+        undecided_groups=len(report.groups) - decided,
     )
 
 
@@ -1350,10 +1517,19 @@ class RunRequest:
         return body
 
 
+#: Why a cell is in the plan: its evidence predates the apparatus (``stale``), or it has
+#: none that does and is simply short of the rule's first look (``thin``, G-565).
+REASON_STALE = "stale"
+REASON_THIN = "thin"
+#: What an operator reads when a cell's fresh commits run out before its need does.
+MINE_MORE = "mine more history"
+
+
 @dataclass(frozen=True)
 class RemeasureCell:
-    """One full cell with stale evidence: how many rows are stale / current, how many
-    more the rule needs, what that costs at the cell's own rate, and the requests."""
+    """One (cell, mode) short of the rule's first look: why (``reason``), how many rows are
+    stale / current, how many more the rule needs, how many of those the plan can ask for on
+    commits the cell has not graded, what those cost at the cell's own rate, and the requests."""
 
     cell: CellKey
     stale_versions: tuple[str, ...]
@@ -1378,15 +1554,27 @@ class RemeasureCell:
     cost_known: bool
     repos: tuple[str, ...]
     requests: tuple[RunRequest, ...]
+    #: ``stale`` (evidence predates the apparatus) or ``thin`` (current, but short of the bar)
+    reason: str = REASON_STALE
+    #: the attempts the requests ask for (the sum of their limits) — what the estimate prices
+    n_requested: int = 0
+    #: how many of ``n_needed`` no request can ask for, because the cell has run out of
+    #: commits it has not graded; ``note`` then says to mine more history
+    short_by: int = 0
+    #: why the requests ask for fewer than ``n_needed`` (or for nothing), in words
+    note: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "cell": self.cell.to_dict(),
             "label": self.cell.label,
+            "reason": self.reason,
             "stale_versions": list(self.stale_versions),
             "n_stale": self.n_stale,
             "n_current": self.n_current,
             "n_needed": self.n_needed,
+            "n_requested": self.n_requested,
+            "short_by": self.short_by,
             "mode": self.mode,
             "tasks_stale": self.tasks_stale,
             "tasks_current": self.tasks_current,
@@ -1398,13 +1586,15 @@ class RemeasureCell:
             "cost_known": self.cost_known,
             "repos": list(self.repos),
             "requests": [r.to_dict() for r in self.requests],
+            "note": self.note,
         }
 
 
 @dataclass(frozen=True)
 class RemeasurePlan:
-    """The re-measurement an apparatus bump implies: the cells to renew (with their
-    requests), the cells whose fresh evidence already suffices, and the totals."""
+    """The re-measurement and top-up the ledger implies: the cells to renew or top up (with
+    their requests), the stale cells whose fresh evidence already suffices, the cells no
+    number of further attempts can bring to the bar, and the totals."""
 
     current_apparatus: str
     min_n: int
@@ -1413,10 +1603,13 @@ class RemeasurePlan:
     up_to_date: tuple[str, ...]
     rows_total: int
     rows_stale: int
+    #: ``label|mode`` of every cell whose current misses already exceed what the rule's last
+    #: look allows: no top-up can bring it to the bar, so none is offered (G-565)
+    cannot_clear: tuple[str, ...] = ()
 
     @property
     def n_needed_total(self) -> int:
-        """Rows to grade across every stale cell."""
+        """Rows to grade across every cell in the plan."""
         return sum(c.n_needed for c in self.cells)
 
     @property
@@ -1439,9 +1632,13 @@ class RemeasurePlan:
             "rows_stale": self.rows_stale,
             "cells": [c.to_dict() for c in self.cells],
             "up_to_date": list(self.up_to_date),
+            "cannot_clear": list(self.cannot_clear),
             "summary": {
-                "cells_stale": len(self.cells),
+                "cells_stale": sum(1 for c in self.cells if c.reason == REASON_STALE),
+                "cells_thin": sum(1 for c in self.cells if c.reason == REASON_THIN),
                 "n_needed_total": self.n_needed_total,
+                "n_requested_total": sum(c.n_requested for c in self.cells),
+                "short_by_total": sum(c.short_by for c in self.cells),
                 "est_cost_usd_total": round(self.est_cost_usd_total, 4),
                 "est_minutes_total": round(self.est_minutes_total, 2),
                 "cost_known_cells": sum(1 for c in self.cells if c.cost_known),
@@ -1449,11 +1646,15 @@ class RemeasurePlan:
             "note": (
                 "requests are POST /runs bodies for an operator to queue; nothing here "
                 "was sent (POST /learn/remeasure/queue sends one cell's, on an operator's "
-                "instruction and with their identity on the runs). One entry per (cell, mode) — sighted and blind are never pooled. "
-                "Costs are that cell's own mean row cost x rows needed x attempts per row "
-                "(1 sighted; the ladder's rungs blind) — an estimate, unknown where no row "
-                "recorded a cost. tasks_stale / tasks_current say how many DISTINCT commits "
-                "stand behind the rows: more rows on the same commits is not more evidence."
+                "instruction and with their identity on the runs). One entry per (cell, mode) — "
+                "sighted and blind are never pooled. A cell is here because its evidence "
+                "predates the apparatus (stale) or because it is short of the rule's first look "
+                "(thin). Every request names commits the cell has not graded on the current "
+                "apparatus, so no attempt repeats a commit; when those run out, short_by says "
+                "how many the plan could not ask for — mine more history. Costs are that "
+                "cell's own mean row cost x the attempts requested x attempts per row (1 "
+                "sighted; the ladder's rungs blind) — an estimate, unknown where no row "
+                "recorded a cost."
             ),
         }
 
@@ -1469,38 +1670,52 @@ def rows_to_clear_bar(clean: int, n: int, policy: RoutingPolicy, *, cap: int = 2
     return min(*rule_looks(policy.rule), cap)
 
 
+def cannot_clear_bar(clean: int, n: int, policy: RoutingPolicy) -> bool:
+    """True when ``n - clean`` misses already exceed what the rule's LAST look allows: no
+    number of further attempts can then bring the reading to ``deliver``, so a top-up would
+    buy rows that cannot help (G-565)."""
+    looks = rule_looks(policy.rule)
+    return (n - clean) > looks[max(looks)]
+
+
 def remeasure_plan(
     rows: Iterable[GradeRow],
     *,
     current_apparatus: str = APPARATUS_VERSION,
     policy: RoutingPolicy = DEFAULT_POLICY,
     task_labels: Mapping[str, tuple[str, str]] | None = None,
+    gold_clean_tasks: Iterable[str] | None = None,
     blind_rungs: int = 3,
 ) -> RemeasurePlan:
-    """Cells whose evidence predates ``current_apparatus``, and what it takes to renew it.
+    """Every (cell, mode) short of the rule's first look, and what it takes to bring it there.
 
-    Per full cell (the unit a run request targets): ``n_current`` counts eligible
-    rows stamped with the current apparatus; a cell is in the plan when it has
-    stale rows and ``n_current`` is below the rows needed to clear the rule's bars at the
-    observed rate (:func:`rows_to_clear_bar`); ``n_needed`` is the difference.
-    Cost is the cell's own mean over rows that recorded one (``cost_known``
-    says whether any did). Requests are one per (repo, mode) naming the stale
-    rows' task ids (oldest-first ordering is the worker's), capped by ``limit``;
-    when the known tasks are fewer than needed a second request asks for the
-    remainder by ``limit`` alone. Pure; deterministic; queues nothing.
+    Per full cell (the unit a run request targets): ``n_current`` counts eligible rows stamped
+    with the current apparatus; a cell is in the plan when ``n_current`` is below the rows the
+    rule needs (:func:`rows_to_clear_bar`) — ``reason`` ``stale`` when it has rows of an older
+    apparatus, ``thin`` when it has none (G-565: a cell short of the bar is offered its top-up,
+    not only one an apparatus bump made stale). ``n_needed`` is the difference. A cell whose
+    current misses already exceed the last look's allowance is left out and named in
+    ``cannot_clear``: no top-up can help it (:func:`cannot_clear_bar`).
 
-    Three defects the second decider pass found (2026-09-15) are closed here: the plan
-    groups by **(cell, mode)** like the map (a blended sighted+blind rate hid koa's
-    sighted cell under ``up_to_date``); a blind request is priced at **``blind_rungs``
-    attempts** per task (a blind ladder climbs 25 → 50 → 100 tool calls; the old estimate
-    of $26.53 was $50–76 in the ledger); and with ``task_labels`` — each task's CURRENT
-    ``(capability_class, size)`` — a stale task whose label moved is left out of the
-    request (its new rows would land in another cell) and named in ``relabelled``.
+    **Requests name only commits the cell has not graded** on the current apparatus: a stale
+    row's task still labelled this cell, then (with ``task_labels``, each task's CURRENT
+    ``(capability_class, size)``) every other task labelled this cell — and, with
+    ``gold_clean_tasks``, only a gold-clean one, which is all the worker builds. ``limit`` is
+    ``min(n_needed, those tasks)``. When they run out, ``short_by`` says how many the plan
+    could not ask for and ``note`` says to mine more history; no limit-only body is ever
+    emitted, because the worker would fill it with the repository's oldest tasks — commits
+    already graded, or of another cell. Without ``task_labels`` a thin cell has no request and
+    says why. Cost is the cell's own mean over rows that recorded one (``cost_known`` says
+    whether any did) × the attempts requested × ``blind_rungs`` for a blind request. A stale
+    task whose label moved is left out and named in ``relabelled``. Pure; deterministic;
+    queues nothing.
     """
     rs = list(rows)
     cur = _version_key(current_apparatus)
+    gold = frozenset(gold_clean_tasks) if gold_clean_tasks is not None else None
     plan: list[RemeasureCell] = []
     fresh: list[str] = []
+    beyond: list[str] = []
     stale_rows = 0
     by_mode: dict[str, list[GradeRow]] = {}
     for r in rs:
@@ -1516,13 +1731,16 @@ def remeasure_plan(
         stale = [r for r in group if _version_key(r.apparatus_version) < cur]
         current = [r for r in group if _version_key(r.apparatus_version) >= cur]
         stale_rows += len(stale)
-        n_current = sum(1 for r in current if r.eligible)
-        if not stale:
-            continue
-        clean_current = sum(1 for r in current if r.eligible and r.clean)
+        eligible = [r for r in current if r.eligible]
+        n_current = len(eligible)
+        clean_current = sum(1 for r in eligible if r.clean)
         target = rows_to_clear_bar(clean_current, n_current, policy)
         if n_current >= target:
-            fresh.append(f"{cell.label}|{mode_name}")
+            if stale:
+                fresh.append(f"{cell.label}|{mode_name}")
+            continue
+        if cannot_clear_bar(clean_current, n_current, policy):
+            beyond.append(f"{cell.label}|{mode_name}")
             continue
         n_needed = target - n_current
         # a known $0 is a $0 price, never "?" (P-131); an unknown cost is left out
@@ -1533,8 +1751,9 @@ def remeasure_plan(
         # a blind request climbs the ladder: every needed row may cost up to `blind_rungs`
         # attempts (each an attempt row of its own) — price what will actually be written
         attempts_per_row = blind_rungs if mode_name == "blind" else 1
+        graded = {r.task_id for r in eligible if r.task_id}
+        stale_tasks = {r.task_id for r in stale if r.task_id}
         relabelled: list[str] = []
-        requests: list[RunRequest] = []
         by_repo: dict[str, list[str]] = {}
         for r in stale:
             if task_labels is not None and r.task_id in task_labels:
@@ -1542,41 +1761,64 @@ def remeasure_plan(
                 if (now_cls, now_size) != (cell.capability_class, cell.size):
                     relabelled.append(r.task_id)
                     continue
-            by_repo.setdefault(r.repo, []).append(r.task_id)
-        mode = mode_name
+            # the worker builds only a gold-clean commit, so one that is not is not counted
+            if r.task_id and r.task_id not in graded and (gold is None or r.task_id in gold):
+                by_repo.setdefault(r.repo, []).append(r.task_id)
+        for ids in by_repo.values():
+            ids.sort()
+        repos = sorted({r.repo for r in group})
+        note = ""
+        if task_labels is not None and len(repos) == 1:
+            # every other commit labelled this cell that it has not graded on this apparatus
+            others = sorted(
+                t
+                for t, (cls, size) in task_labels.items()
+                if (cls, size) == (cell.capability_class, cell.size)
+                and t not in graded
+                and (gold is None or t in gold)
+            )
+            by_repo.setdefault(repos[0], []).extend(others)
+        elif not stale:
+            note = (
+                "the plan was given no task labels, so it cannot name a commit this cell has "
+                "not graded; read it on the Learn page (GET /learn/remeasure), which knows them"
+                if task_labels is None
+                else "this cell's rows span several repositories, so its top-up is planned "
+                "per repository"
+            )
+        requests: list[RunRequest] = []
+        left = n_needed
+        kind = RUN_KIND_BY_MODE.get(mode_name, "replay")
         for repo, ids in sorted(by_repo.items()):
-            task_ids = tuple(sorted(set(ids)))[:n_needed]
-            kind = RUN_KIND_BY_MODE.get(mode, "replay")
+            # the stale rows' own commits first (a re-measurement renews what was measured),
+            # then the cell's other ungraded commits; each once
+            stale_ids = sorted({t for t in ids if t in stale_tasks})
+            task_ids = tuple(dict.fromkeys([*stale_ids, *ids]))[:left]
+            if not task_ids:
+                continue
             requests.append(
                 RunRequest(
                     repo=repo,
                     kind=kind,
-                    mode=mode,
+                    mode=mode_name,
                     builder=cell.builder,
                     model=cell.model,
                     provider=cell.provider,
                     task_ids=task_ids,
-                    limit=min(n_needed, len(task_ids)),
+                    limit=len(task_ids),
                 )
             )
-            if len(task_ids) < n_needed:
-                requests.append(
-                    RunRequest(
-                        repo=repo,
-                        kind=kind,
-                        mode=mode,
-                        builder=cell.builder,
-                        model=cell.model,
-                        provider=cell.provider,
-                        task_ids=(),
-                        limit=n_needed - len(task_ids),
-                        note=(
-                            "the stale rows name fewer tasks than the rule needs; this asks "
-                            "the worker for the remainder by limit (oldest gold-clean tasks "
-                            "first — may overlap the task_ids request)"
-                        ),
-                    )
-                )
+            left -= len(task_ids)
+            if left <= 0:
+                break
+        n_requested = sum(r.limit for r in requests)
+        short_by = n_needed - n_requested
+        if short_by and not note:
+            note = (
+                f"{MINE_MORE}: this cell has {n_requested} commit(s) it has not graded on "
+                f"apparatus {current_apparatus} and needs {n_needed}, so {short_by} cannot be "
+                "asked for without repeating a commit"
+            )
         plan.append(
             RemeasureCell(
                 cell=cell,
@@ -1585,16 +1827,20 @@ def remeasure_plan(
                 n_current=n_current,
                 n_needed=n_needed,
                 mode=mode_name,
-                tasks_stale=len({r.task_id for r in stale if r.task_id}),
-                tasks_current=len({r.task_id for r in current if r.eligible and r.task_id}),
+                tasks_stale=len(stale_tasks),
+                tasks_current=len(graded),
                 relabelled=tuple(sorted(set(relabelled))),
                 cost_usd_mean=cost_mean,
                 latency_s_mean=lat_mean,
-                est_cost_usd=cost_mean * n_needed * attempts_per_row,
-                est_minutes=lat_mean * n_needed * attempts_per_row / 60.0,
+                est_cost_usd=cost_mean * n_requested * attempts_per_row,
+                est_minutes=lat_mean * n_requested * attempts_per_row / 60.0,
                 cost_known=bool(costs),
-                repos=tuple(sorted({r.repo for r in stale})),
+                repos=tuple(sorted({r.repo for r in stale} or set(repos))),
                 requests=tuple(requests),
+                reason=REASON_STALE if stale else REASON_THIN,
+                n_requested=n_requested,
+                short_by=short_by,
+                note=note,
             )
         )
     return RemeasurePlan(
@@ -1605,6 +1851,7 @@ def remeasure_plan(
         up_to_date=tuple(fresh),
         rows_total=len(rs),
         rows_stale=stale_rows,
+        cannot_clear=tuple(beyond),
     )
 
 
@@ -1667,29 +1914,36 @@ def render_strengthen(backlog: StrengthenBacklog) -> str:
 
 def render_remeasure(plan: RemeasurePlan) -> str:
     """The plan as a markdown table, ``?`` where a cell's cost was never recorded."""
+    stale = sum(1 for c in plan.cells if c.reason == REASON_STALE)
+    thin = len(plan.cells) - stale
     lines = [
-        f"# Re-measurement plan — apparatus {plan.current_apparatus}",
+        f"# Re-measurement and top-up plan — apparatus {plan.current_apparatus}",
         "",
-        f"stale rows: {plan.rows_stale}/{plan.rows_total} · cells to renew: {len(plan.cells)} · "
-        f"n needed: {plan.n_needed_total} · est ${plan.est_cost_usd_total:.2f} · "
-        f"est {plan.est_minutes_total:.0f} min · rule n≥{plan.min_n} ({plan.policy_version})",
+        f"stale rows: {plan.rows_stale}/{plan.rows_total} · cells to renew: {stale} · "
+        f"cells to top up: {thin} · n needed: {plan.n_needed_total} · "
+        f"est ${plan.est_cost_usd_total:.2f} · est {plan.est_minutes_total:.0f} min · "
+        f"rule n≥{plan.min_n} ({plan.policy_version})",
         "",
-        "| cell | mode | stale (tasks) | current (tasks) | needed | $/row | est $ | requests |",
-        "|---|---|---|---|---|---|---|---|",
+        "| cell | mode | reason | stale (tasks) | current (tasks) | needed | short by | $/row "
+        "| est $ | requests |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for c in plan.cells:
         per = f"{c.cost_usd_mean:.2f}" if c.cost_known else "?"
         est = f"{c.est_cost_usd:.2f}" if c.cost_known else "?"
         moved = f", {len(c.relabelled)} relabelled" if c.relabelled else ""
         lines.append(
-            f"| {c.cell.label} | {c.mode} | {c.n_stale} ({','.join(c.stale_versions)}; "
-            f"{c.tasks_stale} tasks{moved}) | {c.n_current} ({c.tasks_current} tasks) | "
-            f"{c.n_needed} | {per} | {est} | {len(c.requests)} |"
+            f"| {c.cell.label} | {c.mode} | {c.reason} | {c.n_stale} "
+            f"({','.join(c.stale_versions) or '—'}; {c.tasks_stale} tasks{moved}) | "
+            f"{c.n_current} ({c.tasks_current} tasks) | {c.n_needed} | {c.short_by} | {per} | "
+            f"{est} | {len(c.requests)} |"
         )
     if not plan.cells:
-        lines.append("| _(nothing stale)_ | | | | | | | |")
+        lines.append("| _(nothing stale or short of the bar)_ | | | | | | | | | |")
     if plan.up_to_date:
         lines += ["", "already renewed: " + ", ".join(plan.up_to_date)]
+    if plan.cannot_clear:
+        lines += ["", "no top-up can bring these to the bar: " + ", ".join(plan.cannot_clear)]
     lines += ["", "requests are POST /runs bodies for an operator to queue; nothing was sent"]
     return "\n".join(lines)
 
@@ -1707,6 +1961,9 @@ __all__ = [
     "DECISIONS_SCHEMA",
     "GUARD_PREFIXES",
     "LINE_BREAKS",
+    "MINE_MORE",
+    "REASON_STALE",
+    "REASON_THIN",
     "REFUSALS_SCHEMA",
     "REMEASURE_SCHEMA",
     "STRENGTHEN_REASONS",
@@ -1716,6 +1973,8 @@ __all__ = [
     "VERDICT_REFUSE",
     "VERDICT_UNSURE",
     "EscapedMutant",
+    "FalsePositivePeriod",
+    "FalsePositives",
     "LearnError",
     "OracleTaskScore",
     "RefusalDecision",
@@ -1729,8 +1988,10 @@ __all__ = [
     "TriageApplied",
     "Violation",
     "apply_triage",
+    "cannot_clear_bar",
     "dumps",
     "encode_corpus_line",
+    "guard_false_positives",
     "has_line_break",
     "load_decisions",
     "load_oracle_scores",
@@ -1743,6 +2004,7 @@ __all__ = [
     "render_remeasure",
     "render_strengthen",
     "row_violation_text",
+    "rows_to_clear_bar",
     "strengthening_backlog",
     "triage_refusals",
 ]

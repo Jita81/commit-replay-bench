@@ -13,10 +13,14 @@
  *               and status; its switch, revert and register controls are operator-only —
  *               ui/src/screens/Learn/PreventionSection.tsx), then `GET /learn/refusals`
  *               (protocol rows grouped by guard, reason and command shape, every verdict
- *               "unsure", with the decisions a person has already made), `/learn/strengthen`
- *               (cells withheld from deliver for a weak oracle, as frozen-backlog-shaped items)
- *               and `/learn/remeasure` (cells whose rows predate the current apparatus, with the
- *               rows and spend still needed). An operator decides from the report that computed
+ *               "unsure", with the decisions a person has already made, and the guard's
+ *               false-positive rate by apparatus and month that those decisions give, a range
+ *               while rows are undecided — G-536), `/learn/strengthen` (cells withheld from
+ *               deliver for a weak oracle, as frozen-backlog-shaped items) and
+ *               `/learn/remeasure` (cells short of the rule's first look — stale, or thin —
+ *               with the rows still needed, how many can be queued on commits the cell has not
+ *               graded and what they cost — G-565); then the learn stream's own flow figures
+ *               (`FlowPanel`). An operator decides from the report that computed
  *               the thing: accept a refusal class into the guard corpus, register a
  *               strengthening item onto the backlog, queue a cell's re-measurement runs — and a
  *               cell whose queued runs are unfinished shows them in place of Queue (the server
@@ -43,13 +47,15 @@
  *               ui/src/components/Dialog.tsx and ui/src/components/govuk.tsx
  *               (`NotificationBanner`, `WarningButton` — the money action), ui/src/lib/auth.tsx
  *               (`can('operator')` — the actions are role-gated in the UI as at the API),
- *               ui/src/screens/Oracle/OraclePage.tsx (where the strengthen report sends you)
+ *               ui/src/screens/Oracle/OraclePage.tsx (where the strengthen report sends you),
+ *               ui/src/components/FlowPanel.tsx (the learn stream's lead times and counts)
  * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx (plain eyebrows, the intro sentences,
  *               the terms, the register card and its operator controls, each action's
  *               success state, the viewer who is offered none); the derivations are pinned in
  *               tests/test_learn.py and the routes in tests/test_server_routes_learn.py
- * Touch when:   never for a new repository; a report gains a field (src/crb/core/learn.py — mirror
- *               the interface here) or a fourth play is added to docs/LEARNING-LOOP.md.
+ * Touch when:   never for a new repository — every report reads the chosen repository's own
+ *               rows; a report gains a field (src/crb/core/learn.py — mirror the interface
+ *               here) or a fourth play is added to docs/LEARNING-LOOP.md.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
@@ -60,6 +66,7 @@ import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
+import { FlowPanel } from '../../components/FlowPanel'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextField } from '../../components/Field'
 import { NotificationBanner, WarningButton } from '../../components/govuk'
@@ -112,6 +119,37 @@ export interface RefusalReport {
   groups: RefusalGroup[]
   /** What a named person HAS decided, folded from the `learn.refusal.accepted` events. */
   decisions: RefusalDecisionRecord[]
+  /** The guard's false-positive rate per apparatus and month, from those decisions (G-536). */
+  false_positives: FalsePositives
+  note: string
+}
+
+/** One apparatus version in one calendar month: its protocol rows by what a person decided. */
+export interface FalsePositivePeriod {
+  apparatus_version: string
+  month: string
+  rows_protocol: number
+  /** Rows in a class a person decided honest: the guard was wrong. */
+  honest: number
+  /** Rows with a class a person decided refuse: the guard was right. */
+  refuse: number
+  /** Rows nobody has judged: never counted as either verdict. */
+  undecided: number
+  /** honest ÷ rows — the rate if every undecided row was a right refusal. */
+  rate_low: number
+  /** (honest + undecided) ÷ rows — the rate if every undecided row was a false positive. */
+  rate_high: number
+}
+
+/** `false_positives` of `GET /learn/refusals` — mirrors `crb.core.learn.FalsePositives.to_dict()`. */
+export interface FalsePositives {
+  periods: FalsePositivePeriod[]
+  rows_protocol: number
+  honest: number
+  refuse: number
+  undecided: number
+  decided_groups: number
+  undecided_groups: number
   note: string
 }
 
@@ -189,20 +227,28 @@ export interface StrengthenReport {
   note: string
 }
 
-/** One cell with rows older than the current apparatus: how many are stale, how many current, how many still needed to reach the look rule’s first look (routing.v2), and the estimated spend. */
+/** One cell short of the look rule’s first look (routing.v2): stale (rows older than the current apparatus) or thin (current, but too few), how many rows it has, how many more it needs, how many of those can be asked for on commits it has not graded, and what they cost. */
 export interface RemeasureCell {
   label: string
+  /** Why it is in the plan: its evidence predates the apparatus (`stale`), or it is short of the bar (`thin`, G-565). */
+  reason: 'stale' | 'thin'
   /** The mode this cell is planned for: the map never pools sighted and blind, so nor does the plan. */
   mode: string
   stale_versions: string[]
   n_stale: number
   n_current: number
   n_needed: number
+  /** The attempts the requests ask for — what the estimate prices. */
+  n_requested: number
+  /** How many of `n_needed` no request can ask for without repeating a commit. */
+  short_by: number
   est_cost_usd: number
   est_minutes: number
   cost_known: boolean
   repos: string[]
   requests: Array<Record<string, unknown>>
+  /** Why the requests ask for fewer than `n_needed`, or for nothing, in words. */
+  note: string
   /** Runs an earlier queue of this cell put on the queue that have not finished: shown in place of Queue. */
   in_flight_run_ids: string[]
 }
@@ -216,7 +262,18 @@ export interface RemeasurePlan {
   rows_stale: number
   cells: RemeasureCell[]
   up_to_date: string[]
-  summary: { cells_stale: number; n_needed_total: number; est_cost_usd_total: number; est_minutes_total: number; cost_known_cells: number }
+  /** Cells whose misses already exceed what the rule’s last look allows: no top-up can help. */
+  cannot_clear: string[]
+  summary: {
+    cells_stale: number
+    cells_thin: number
+    n_needed_total: number
+    n_requested_total: number
+    short_by_total: number
+    est_cost_usd_total: number
+    est_minutes_total: number
+    cost_known_cells: number
+  }
   note: string
 }
 
@@ -569,8 +626,52 @@ function RefusalsSection({ repo }: { repo: string }) {
         empty={<EmptyState compact title="No protocol rows" reason="Nothing was refused by a guard in this repo's ledger." />}
       />
       <p className="text-xs text-on-surface-muted">{r.note}</p>
+      <FalsePositivesTable fp={r.false_positives} />
       {deciding && r.groups.some((g) => g.group_id === deciding) && (
         <DecideDialog repo={repo} group={r.groups.find((g) => g.group_id === deciding)!} onClose={() => setDeciding('')} />
+      )}
+    </div>
+  )
+}
+
+/** A rate as a bound: one figure once nothing is undecided, else the low and the high end. */
+function rateBound(p: FalsePositivePeriod): string {
+  return p.undecided === 0 ? fmtPct(p.rate_low) : `${fmtPct(p.rate_low)} to ${fmtPct(p.rate_high)}`
+}
+
+const FP_COLUMNS: Column<FalsePositivePeriod>[] = [
+  { key: 'apparatus', header: 'Apparatus', hint: 'col.learn_refusals.fp_apparatus', mono: true, sortValue: (p) => p.apparatus_version, cell: (p) => p.apparatus_version },
+  { key: 'month', header: 'Month', hint: 'col.learn_refusals.fp_month', sortValue: (p) => p.month, cell: (p) => p.month },
+  { key: 'rows', header: 'Rows refused', hint: 'col.learn_refusals.fp_rows', numeric: true, sortValue: (p) => p.rows_protocol, cell: (p) => fmtInt(p.rows_protocol) },
+  { key: 'honest', header: 'False positives', hint: 'col.learn_refusals.fp_honest', numeric: true, sortValue: (p) => p.honest, cell: (p) => fmtInt(p.honest) },
+  { key: 'refuse', header: 'Right refusals', hint: 'col.learn_refusals.fp_refuse', numeric: true, sortValue: (p) => p.refuse, cell: (p) => fmtInt(p.refuse) },
+  { key: 'undecided', header: 'Undecided', hint: 'col.learn_refusals.fp_undecided', numeric: true, sortValue: (p) => p.undecided, cell: (p) => fmtInt(p.undecided) },
+  { key: 'rate', header: 'False-positive rate', hint: 'col.learn_refusals.fp_rate', numeric: true, sortValue: (p) => p.rate_low, cell: (p) => rateBound(p) },
+]
+
+/**
+ * G-536 — the guard's false-positive rate over time: per apparatus version (never blended)
+ * and calendar month, from the verdicts people recorded. A row nobody has judged is counted
+ * apart and never as either verdict, so the rate is shown as a bound until every row is decided.
+ */
+function FalsePositivesTable({ fp }: { fp: FalsePositives }) {
+  return (
+    <div className="space-y-2" data-testid="learn-false-positives">
+      <DataTable
+        rows={fp.periods}
+        columns={FP_COLUMNS}
+        rowKey={(p) => `${p.apparatus_version}|${p.month}`}
+        caption="The guard's false positives, by apparatus"
+        dense
+        initialSort={{ key: 'apparatus', dir: 'asc' }}
+        empty={<EmptyState compact title="No refused rows" reason="The guard has refused nothing in this repo's ledger, so it has had nothing to get wrong." />}
+      />
+      {fp.rows_protocol > 0 && (
+        <Hint as="p" id="text.learn.fp_undecided" className="m-0 text-xs text-on-surface-muted">
+          {fp.undecided === 0
+            ? `Every one of the ${fmtInt(fp.rows_protocol)} refused rows is in a class a person has decided, so each rate above is exact.`
+            : `${fmtInt(fp.undecided)} of ${fmtInt(fp.rows_protocol)} refused rows are undecided (${fmtInt(fp.undecided_groups)} class(es) nobody has judged). They are counted as neither verdict, so each rate is shown as the range it could still take.`}
+        </Hint>
       )}
     </div>
   )
@@ -775,7 +876,7 @@ function QueueDialog({ repo, cell, onClose }: { repo: string; cell: RemeasureCel
         ) : (
           <>
             <p className="m-0 text-sm text-on-surface-muted">
-              This spends the deployment’s budget. The bodies are the plan’s own, on the same commits the stale rows were graded on; nothing is sent until you press the button below.
+              This spends the deployment’s budget. The bodies are the plan’s own, on commits this cell has not graded on the running apparatus, so no attempt repeats a commit; nothing is sent until you press the button below.
             </p>
             <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm" data-testid="learn-queue-summary">
               <dt className="font-semibold">Cell</dt>
@@ -786,6 +887,12 @@ function QueueDialog({ repo, cell, onClose }: { repo: string; cell: RemeasureCel
               <dd className="m-0">{fmtInt(cell.requests.length)}</dd>
               <dt className="font-semibold">Rows still needed</dt>
               <dd className="m-0">{fmtInt(cell.n_needed)}</dd>
+              {cell.short_by > 0 && (
+                <>
+                  <dt className="font-semibold">Attempts these runs ask for</dt>
+                  <dd className="m-0">{`${fmtInt(cell.n_requested)} — ${fmtInt(cell.short_by)} short: ${cell.note}`}</dd>
+                </>
+              )}
               <dt className="font-semibold">Estimated spend</dt>
               <dd className="m-0">{cell.cost_known ? fmtUsd(cell.est_cost_usd) : 'not known — no row of this cell recorded a cost'}</dd>
             </dl>
@@ -815,10 +922,40 @@ function RemeasureSection({ repo }: { repo: string }) {
   const columns = useMemo<Column<RemeasureCell>[]>(
     () => [
       { key: 'cell', header: 'Cell', hint: 'col.learn_remeasure.cell', mono: true, sortValue: (c) => c.label, cell: (c) => <span className="text-xs">{c.label}</span> },
-      { key: 'stale', header: 'Stale', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_stale, cell: (c) => `${fmtInt(c.n_stale)} (${c.stale_versions.join(', ')})` },
+      {
+        key: 'reason',
+        header: 'Reason',
+        hint: 'col.learn_remeasure.reason',
+        sortValue: (c) => c.reason,
+        cell: (c) => (
+          <Pill tone={c.reason === 'stale' ? 'amber' : 'blue'} size="xs" label={c.reason === 'stale' ? 'Stale: its rows predate the current apparatus' : 'Thin: its rows are current, but too few for the rule’s first look'} hint="pill.learn.remeasure_reason" tabStop={false}>
+            {c.reason}
+          </Pill>
+        ),
+      },
+      { key: 'stale', header: 'Stale', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_stale, cell: (c) => (c.n_stale ? `${fmtInt(c.n_stale)} (${c.stale_versions.join(', ')})` : '0') },
       { key: 'current', header: 'Current', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_current, cell: (c) => fmtInt(c.n_current) },
-      { key: 'needed', header: 'Needed', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_needed, cell: (c) => fmtInt(c.n_needed) },
-      { key: 'cost', header: 'Est. $', hint: 'col.learn_remeasure.cost', numeric: true, sortValue: (c) => (c.cost_known ? c.est_cost_usd : -1), cell: (c) => (c.cost_known ? fmtUsd(c.est_cost_usd) : '?') },
+      {
+        key: 'needed',
+        header: 'Needed',
+        hint: 'col.learn_remeasure.counts',
+        numeric: true,
+        sortValue: (c) => c.n_needed,
+        cell: (c) => (
+          <span data-testid={`learn-needed-${c.label}|${c.mode}`}>
+            {fmtInt(c.n_needed)}
+            {c.short_by > 0 && <span className="block text-xs text-on-surface-muted">{c.requests.length ? `${fmtInt(c.n_requested)} can be queued; ${fmtInt(c.short_by)} short` : 'none can be queued'}</span>}
+          </span>
+        ),
+      },
+      {
+        key: 'cost',
+        header: 'Est. $',
+        hint: 'col.learn_remeasure.cost',
+        numeric: true,
+        sortValue: (c) => (c.cost_known ? c.est_cost_usd : -1),
+        cell: (c) => (!c.requests.length ? '—' : c.cost_known ? fmtUsd(c.est_cost_usd) : 'not known'),
+      },
       { key: 'requests', header: 'Runs to queue', hint: 'col.learn_remeasure.runs', numeric: true, sortValue: (c) => c.requests.length, cell: (c) => fmtInt(c.requests.length), hideBelowMd: true },
       ...(operator
         ? [
@@ -827,7 +964,13 @@ function RemeasureSection({ repo }: { repo: string }) {
               header: 'Queue',
               hint: 'col.learn_remeasure.queue' as const,
               cell: (c: RemeasureCell) =>
-                c.in_flight_run_ids.length ? (
+                !c.requests.length ? (
+                  // nothing the plan may ask for without repeating a commit: the server refuses
+                  // to queue it too, so the page says what to do instead of offering a button
+                  <Hint as="span" id="text.learn.remeasure_short" className="text-xs text-on-surface-muted">
+                    Nothing to queue: {c.note}
+                  </Hint>
+                ) : c.in_flight_run_ids.length ? (
                   // queued already and not finished: the server refuses a second queue
                   // (remeasure_already_queued), so the page offers the runs instead
                   <Hint as={Link} id="link.learn.remeasure_in_flight" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">
@@ -891,17 +1034,17 @@ function RemeasureSection({ repo }: { repo: string }) {
         </Hint>
       )}
       <p className="m-0 text-sm text-on-surface-muted">
-        Cells whose rows predate the current <Term id="apparatus">apparatus</Term>. <Term id="stale">Stale</Term> evidence is kept as history and licenses nothing; the plan lists the runs to queue and what they would cost. {operator ? 'Queue runs sends one cell’s runs, after showing you the estimate it will spend.' : 'An operator queues the runs.'}
+        Cells short of the rule’s first look: <Term id="stale">stale</Term> ones, whose rows predate the current <Term id="apparatus">apparatus</Term> (stale evidence is kept as history and licenses nothing), and thin ones, whose rows are current but too few. For each, the plan says how many more attempts it needs, which commits it can have them on without repeating one, and what they would cost. {operator ? 'Queue runs sends one cell’s runs, after showing you the estimate it will spend.' : 'An operator queues the runs.'}
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Stale rows" hint="stat.learn.stale_rows" value={p.rows_total ? fmtInt(p.rows_stale) : '—'} n={p.rows_total} apparatus={`older than apparatus ${p.current_apparatus}`} tone={p.rows_stale ? 'amber' : 'green'} />
-        <StatTile label="Rows still needed" hint="stat.learn.needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`first look at n = ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} cell(s)`} />
+        <StatTile label="Rows still needed" hint="stat.learn.needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`first look at n = ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} stale, ${fmtInt(p.summary.cells_thin)} thin`} />
         <StatTile
           label="Estimated spend"
           hint="stat.learn.remeasure_cost"
           value={p.summary.cost_known_cells ? fmtUsd(p.summary.est_cost_usd_total) : '—'}
           n={p.summary.cost_known_cells}
-          apparatus="each cell's own mean row cost × n needed"
+          apparatus="each cell's own mean row cost × the attempts its runs ask for"
           footer={
             <Hint as={Link} id="link.learn.runs" to={`/runs?repo=${enc(repo)}`}>
               Queue runs
@@ -912,12 +1055,17 @@ function RemeasureSection({ repo }: { repo: string }) {
       <DataTable
         rows={p.cells}
         columns={columns}
-        rowKey={(c) => c.label}
-        caption="Cells whose evidence predates the current apparatus"
+        rowKey={(c) => `${c.label}|${c.mode}`}
+        caption="Cells to re-measure or top up"
         dense
         initialSort={{ key: 'needed', dir: 'desc' }}
-        empty={<EmptyState compact title="Nothing stale" reason="Every row of this repo carries the current apparatus version." />}
+        empty={<EmptyState compact title="Nothing to re-measure or top up" reason="Every cell of this repo carries the current apparatus version and has reached the rule’s first look." />}
       />
+      {p.cannot_clear.length > 0 && (
+        <Hint as="p" id="text.learn.remeasure_cannot_clear" className="m-0 text-xs text-on-surface-muted">
+          Not offered, because no number of further attempts can bring them to the bar (their misses already exceed what the rule’s last look allows): {p.cannot_clear.join(', ')}.
+        </Hint>
+      )}
       <p className="text-xs text-on-surface-muted">{p.note}</p>
       {queueing && p.cells.some((c) => `${c.label}|${c.mode}` === queueing) && (
         <QueueDialog repo={repo} cell={p.cells.find((c) => `${c.label}|${c.mode}` === queueing)!} onClose={() => setQueueing('')} />
@@ -991,9 +1139,10 @@ export function LearnPage() {
           <Card eyebrow="Weak oracles" title="Weak oracles → strengthening backlog" id="strengthen">
             <StrengthenSection repo={repo} />
           </Card>
-          <Card eyebrow="Stale evidence" title="Apparatus change → re-measurement plan" id="remeasure">
+          <Card eyebrow="Stale or thin evidence" title="Cells short of the bar → re-measurement and top-up plan" id="remeasure">
             <RemeasureSection repo={repo} />
           </Card>
+          <FlowPanel stream="learn" repo={repo} />
         </>
       )}
     </div>
