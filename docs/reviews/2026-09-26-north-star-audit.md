@@ -15,9 +15,9 @@ Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0013-external-review-is-advisory-and-recorded.md (a review is advisory
               and recorded)
 Works with:   docs/PREVENTION.md (P-118 counts these rows), docs/DECISION-LOG.md (DL-063, the
-              Wave 0 correction, and DL-071, which answers item 17), docs/dod/PLAN.md (Wave 0,
-              the corrections), docs/reviews/2026-09-25-external-assessment.md (item 6 asked
-              for it to be vendored the same way)
+              Wave 0 correction), docs/dod/PLAN.md (Wave 0, the corrections),
+              docs/reviews/2026-09-25-external-assessment.md (item 6 asked for it to be
+              vendored the same way)
 Tested by:    not applicable — a review record; scripts/claims_check.py reads it for an
               Actions table (it has none)
 Touch when:   never to change its words; a finding it records is closed in the artefact that
@@ -30,7 +30,7 @@ Touch when:   never to change its words; a finding it records is closed in the a
 > 26 September 2026 to rank the open work, vendored verbatim with the paragraph that names
 > its sources. The rest of the synthesis (what done is, the order of work, the waves) is
 > carried by `docs/dod/GAP-ANALYSIS.md` and `docs/dod/PLAN.md`. `docs/PREVENTION.md` P-118
-> counts the rows below, and `docs/DECISION-LOG.md` DL-071 answers item 17.
+> counts the rows below.
 
 **Sources.** The integration tree, `origin/integration/next` at `81536f3`: `main` at #52 with the five open
 pull requests #53 to #57 merged onto it. And `origin/main` at `64cdf46`. On both trees
