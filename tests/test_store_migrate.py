@@ -73,8 +73,8 @@ try:
 except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
     from conftest_store import Backend, backend, grade_row, pg_schema  # noqa: F401
 
-#: The packaged head: 0015, the decisions clock (north-star Wave 4, stream S).
-HEAD = "0015"
+#: The packaged head: 0016, the context library's acts (north-star Wave 4, stream L).
+HEAD = "0016"
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -1243,3 +1243,55 @@ def test_0015_adds_the_decisions_due_table_and_adoption_tolerates_its_absence(
     migrate.upgrade(backend.url)
     assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
     assert "decisions_due" in set(inspect(fresh).get_table_names())
+
+
+def _insert_library_act(conn: Any, n: int) -> None:
+    """One stored library act with every column revision 0016 requires."""
+    conn.execute(
+        text(
+            "INSERT INTO library_acts (act_id, schema, repo, entry_id, version, act, actor, "
+            "body_json, created, prev_hash, row_hash) VALUES (:id, 'crb.library.v1', 'calc', "
+            "'convention/x', :v, 'propose', :who, '{}', '2026-09-27T00:00:00+00:00', :p, :h)"
+        ),
+        {"id": f"{n:032x}", "v": "v" * 64, "who": "a" * 32, "p": "0" * 64, "h": f"{n:064x}"},
+    )
+
+
+def test_0016_adds_the_library_acts_append_only_and_never_drops_a_signature(
+    backend: Backend,
+) -> None:
+    """Revision 0016 (ADR-0026 item 10) adds ``library_acts`` — the context library's
+    hash-chained acts — with the append-only triggers; a downgrade is refused while any act
+    exists (a signature is never dropped) and otherwise drops the table."""
+    migrate.upgrade(backend.url, revision="0015")
+    assert "library_acts" not in inspect(backend.engine).get_table_names()
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
+    assert {"library_acts_no_update", "library_acts_no_delete"} <= backend.trigger_names()
+    with backend.engine.begin() as c:
+        _insert_library_act(c, 1)
+    with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
+        c.execute(text("UPDATE library_acts SET actor = 'x'"))
+    cfg = migrate.alembic_config(backend.url)
+    with (
+        pytest.raises(RuntimeError, match="refusing to downgrade 0016"),
+        backend.engine.begin() as connection,
+    ):
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0015")
+    assert migrate.current(backend.url) == HEAD
+    fresh = _reset(backend)
+    migrate.upgrade(backend.url)
+    cfg = migrate.alembic_config(backend.url)
+    with fresh.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0015")
+    assert migrate.current(backend.url) == "0015"
+    assert "library_acts" not in inspect(fresh).get_table_names()
+    # a create_all schema from before the library adopts at 0015 and 0016 adds the table
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("DROP TABLE library_acts"))
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []

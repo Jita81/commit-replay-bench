@@ -52,6 +52,7 @@ from crb.store.models import (
     Base,
     Event,
     EvidencePackRow,
+    LibraryActRow,
     Repo,
     Review,
     Run,
@@ -121,6 +122,20 @@ def _one_row(table: str) -> object:
             body_json={"state": "qualified"},
             created="2026-09-25T12:00:00+00:00",
         )
+    if table == "library_acts":
+        return LibraryActRow(
+            act_id="l" * 32,
+            schema="crb.library.v1",
+            repo="r",
+            entry_id="convention/snake-case",
+            version="c" * 64,
+            act="propose",
+            actor="operator@example.org",
+            body_json={"entry": {}},
+            created="2026-09-27T12:00:00+00:00",
+            prev_hash=GENESIS_HASH,
+            row_hash="e" * 64,
+        )
     raise AssertionError(table)
 
 
@@ -132,6 +147,7 @@ def _pk(table: str) -> str:
         "evidence": "pack_hash",
         "reviews": "seq",
         "task_qualifications": "seq",
+        "library_acts": "seq",
     }[table]
 
 

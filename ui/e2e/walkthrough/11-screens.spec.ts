@@ -183,6 +183,7 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     [c.taskId ? `/tasks/${r}/${c.taskId}` : `/tasks/${r}/none`, 'tasks-detail'],
     ['/repos', 'repos'],
     [`/repos/${r}`, 'repos-detail'],
+    [`/library/${r}`, 'library-repo'],
     ['/capability', 'capability'],
     ['/routing', 'routing'],
     ['/oracle', 'oracle'],

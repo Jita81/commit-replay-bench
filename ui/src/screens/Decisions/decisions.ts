@@ -15,7 +15,9 @@
  *               what is blocking what, each row naming the act, the evidence behind it and
  *               where the act happens — so an approver sees what matters when it matters and
  *               a viewer sees the same list read-only — including the prevention loop's filed
- *               items, reopened classes and harm retirements (`preventionDecisions`). Nothing
+ *               items, reopened classes and harm retirements (`preventionDecisions`), and the
+ *               context library's entries to sign, gone stale or retired by measurement
+ *               (`libraryDecisions`). Nothing
  *               here decides: every row is a
  *               fact from the ledger or the factory chain with a link to the surface that
  *               records the human's answer.
@@ -42,7 +44,7 @@
  *               here, its surface there).
  */
 
-import type { CapabilityCell, FactoryTask, PreventionRegister, Signoff } from '../../api/types'
+import type { CapabilityCell, FactoryTask, LibraryIndex, PreventionRegister, Signoff } from '../../api/types'
 
 export type DecisionKind =
   | 'signoff_due' // a cell routes deliver and no active sign-off exists
@@ -54,6 +56,9 @@ export type DecisionKind =
   | 'rework' // a review asked for rework
   | 'delivery_withheld' // the route gate withheld a clean build's PR
   | 'prevention' // the prevention loop filed an item nobody owns, a class reopened, or a change was retired for harm (ADR-0020)
+  | 'entry_to_sign' // a library entry waits for its second person (or, when mined, for a sponsor) — ADR-0026 item 10
+  | 'entry_stale' // a signed library entry's source file changed at the head; it counts for nothing until signed again
+  | 'entry_retired' // a library entry was retired by measurement (its arm's reading) — read why
 
 export interface Decision {
   kind: DecisionKind
@@ -90,8 +95,11 @@ const ORDER: Record<DecisionKind, number> = {
   rework: 4,
   delivery_withheld: 5,
   prevention: 6,
-  item_human: 7,
-  routed_human: 8,
+  entry_stale: 7,
+  entry_to_sign: 8,
+  item_human: 9,
+  routed_human: 10,
+  entry_retired: 11,
 }
 
 function cellKeyOf(c: { capability_class: string; size: string }): string {
@@ -164,8 +172,40 @@ export function preventionDecisions(repo: string, register: PreventionRegister |
   return out
 }
 
+/**
+ * The context library's rows (ADR-0026 item 10): an entry waiting for its second person to sign
+ * (an approver's act — or, for a mined or drafted proposal nobody has adopted, an operator's
+ * Sponsor), a signed entry whose source file changed (an approver re-signs or retires it), and
+ * an entry the measurement retired (anyone reads why). Each links to the library's index.
+ * `me` is the viewer's account id: an entry they sponsored is never theirs to sign or re-sign
+ * (the API refuses it `same_person`), so its row is a read-only one naming who acts.
+ */
+export function libraryDecisions(repo: string, library: LibraryIndex | null | undefined, me = ''): Decision[] {
+  if (!library) return []
+  const out: Decision[] = []
+  const href = `/library/${encodeURIComponent(repo)}#index`
+  for (const e of library.entries) {
+    const who = e.sponsor_name || e.sponsor
+    const mine = me !== '' && e.sponsor === me
+    if (e.status === 'proposed' && !e.sponsor) {
+      out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} was proposed by ${e.entry.proposed_by} and needs a person to sponsor it`, evidence: `${e.entry.kind} · ${e.entry.title}`, act: 'Sponsor', href, role: 'operator' })
+    } else if (e.status === 'proposed' && mine) {
+      out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} waits for another approver to sign it — you sponsored it`, evidence: `sponsored by ${who} · ${e.entry.title}`, act: 'Read', href, role: 'viewer' })
+    } else if (e.status === 'proposed') {
+      out.push({ kind: 'entry_to_sign', repo, title: `${e.entry_id} waits for a second person to sign it`, evidence: `sponsored by ${who} · ${e.entry.title}`, act: 'Sign', href, role: 'approver' })
+    } else if (e.status === 'stale' && mine) {
+      out.push({ kind: 'entry_stale', repo, title: `${e.entry_id} went stale: ${e.stale?.path ?? 'its source file'} changed or went — you sponsored it, so another approver signs it again`, evidence: `at ${e.stale?.head_commit.slice(0, 12) ?? 'the head'} · ${e.approver ? `signed by ${e.approver_name || e.approver}` : 'not yet signed'}`, act: 'Read', href, role: 'viewer' })
+    } else if (e.status === 'stale') {
+      out.push({ kind: 'entry_stale', repo, title: `${e.entry_id} went stale: ${e.stale?.path ?? 'its source file'} changed or went`, evidence: `at ${e.stale?.head_commit.slice(0, 12) ?? 'the head'} · ${e.approver ? `signed by ${e.approver_name || e.approver}` : 'not yet signed'}`, act: 'Sign again or retire', href, role: 'approver' })
+    } else if (e.status === 'retired' && e.retired?.by === 'measurement') {
+      out.push({ kind: 'entry_retired', repo, title: `${e.entry_id} was retired by measurement`, evidence: `reading ${e.retired.reading_id} · ${e.retired.reason}`, act: 'Read why', href, role: 'viewer' })
+    }
+  }
+  return out
+}
+
 /** The rows for one repository, ordered by what blocks what. */
-export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; signoffs: Signoff[]; tasks: FactoryTask[]; register?: PreventionRegister | null }): Decision[] {
+export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; signoffs: Signoff[]; tasks: FactoryTask[]; register?: PreventionRegister | null; library?: LibraryIndex | null; me?: string }): Decision[] {
   const { repo } = input
   const q = `repo=${encodeURIComponent(repo)}`
   const out: Decision[] = []
@@ -228,6 +268,7 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
   }
 
   out.push(...preventionDecisions(repo, input.register))
+  out.push(...libraryDecisions(repo, input.library, input.me))
 
   return out.sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || a.title.localeCompare(b.title))
 }
@@ -242,4 +283,7 @@ export const KIND_LABEL: Record<DecisionKind, string> = {
   rework: 'Rework requested',
   delivery_withheld: 'Delivery withheld',
   prevention: 'Prevention',
+  entry_to_sign: 'Library entry to sign',
+  entry_stale: 'Library entry stale',
+  entry_retired: 'Library entry retired',
 }

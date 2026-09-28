@@ -9,7 +9,8 @@ a time and executes it by ``kind``:
             phase); ``counts_json`` is the :class:`~crb.core.runners.SetupResult`
 ``probe``   run the repo's known-green probe scope; write ``repos.probe_status``;
             runs ``setup`` first when the environment is not ready (``setup.auto``)
-``mine``    :func:`crb.core.mine.mine` → upsert ``tasks`` rows (RED / baseline / gold)
+``mine``    :func:`crb.core.mine.mine` → upsert ``tasks`` rows (RED / baseline / gold); then
+            the context library's files are read at head and changed ones go stale (G-736)
 ``replay``  :func:`crb.core.run.run` in *sighted* mode over the ladder → grade rows,
             evidence packs (file + DB), events
 ``blind``   the same in *blind* mode (held-out tests; the brief carries none)
@@ -152,7 +153,8 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               of every repository whose listener an operator switched on, ADR-0017),
               src/crb/server/github_app.py (installation tokens for clone, fetch,
               delivery and the pull-request read), src/crb/server/reaper.py (the durable
-              queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
+              queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``),
+              src/crb/store/library.py (``mark_stale`` — the library's staleness after a mine)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_spend.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
@@ -232,10 +234,12 @@ from crb.core.ledger import (
     FAILURE_HARNESS,
     LABEL_FAILURE_KIND,
     GradeRow,
+    LedgerIntegrityError,
     false_q1_total,
     is_outage_error,
     rows_for_checks,
 )
+from crb.core.library import ACTOR_FRESHNESS, files_cited
 from crb.core.mine import MineOutcome, mine
 from crb.core.oracle.controls import (
     CONTROLS,
@@ -362,6 +366,7 @@ from crb.store.jobs import (
     StaleClaim,
 )
 from crb.store.ledger import DbLedger
+from crb.store.library import DbLibraryLedger
 from crb.store.models import EvidencePackRow, Repo, Run, Task, User, WorkerRow
 
 #: Stop a build run after this many consecutive attempts the provider refused
@@ -2188,7 +2193,48 @@ class Worker:
         if cancelled:
             ctx.emit("mine", "mine.cancelled", **counts)
             return STATUS_CANCELLED, counts, ""
+        self._library_freshness(ctx, ref)
         return STATUS_SUCCEEDED, counts, ""
+
+    def _library_freshness(self, ctx: RunContext, ref: str) -> None:
+        """G-736, DL-114: after a mine, read the repository's head and mark stale every
+        library entry whose source file's bytes there differ from the ones it was signed
+        against — the same rule as ``POST /library/{repo}/freshness``, without a person
+        asking. Only the files entries cite are read (``git cat-file``, no checkout); a file
+        gone at head reads as changed. A failure is evented and never fails the mine: the
+        mine's tasks are sound whatever the library's state."""
+        repo = ctx.run.repo
+        ledger = DbLibraryLedger(self.factory)
+        try:
+            paths = files_cited(ledger.states(repo).values())
+            if not paths:
+                return
+            head = ctx.git.rev_parse(ref)
+            digests: dict[str, str | None] = {}
+            for path in paths:
+                blob = ctx.git.show_blob(head, path)
+                digests[path] = hashlib.sha256(blob).hexdigest() if blob is not None else None
+            marked = ledger.mark_stale(repo, head, digests, ACTOR_FRESHNESS)
+        except (GitError, LedgerIntegrityError) as exc:
+            ctx.emitter.error("mine", "library.freshness", exc)
+            return
+        for act, state in marked:
+            ctx.emit(
+                "mine",
+                "library.stale",
+                entry_id=state.entry_id,
+                path=state.entry.provenance.path,
+                head_commit=head,
+                act_id=act.act_id,
+                actor=ACTOR_FRESHNESS,
+            )
+        ctx.emit(
+            "mine",
+            "library.freshness",
+            head_commit=head,
+            files=len(paths),
+            stale=[state.entry_id for _act, state in marked],
+        )
 
     def _record_qualification(self, q: Qualification) -> None:
         """Append a qualification record (the mine's own posture) — after the task row, so

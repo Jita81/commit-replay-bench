@@ -153,6 +153,30 @@ imports (`sqlalchemy`, `openai`, …) are visible to the forbidden contract.
 4. The grader, not the builder, decides: assert on `GradeResult`, never on the builder's
    own report.
 
+## How to add a library miner
+
+A miner proposes context-library entries from files a repository already holds
+([ADR-0026](adr/0026-the-context-standard.md) item 10, DL-116, DL-117). The contract is written in
+`src/crb/core/miners.py`; in short:
+
+1. Write a class with `name` (a lower-case slug), `version` (a whole number — bump it whenever
+   its output for the same source changes; the new output is proposed again as a new version,
+   the same output under a new version is not), `kinds` (the entry kinds it proposes), `reads`
+   (what it reads, in words) and `mine(source)`.
+2. `mine` reads only the `MineSource` it is given — the file names and bytes at the pinned
+   commit, the mined tasks and the graded rows — and yields `Draft`s (each citing one file at
+   the commit, or graded rows) and `Note`s (what it could not propose, with counts). It calls
+   no model and no network; the import contract keeps every model SDK and HTTP client out of
+   `crb.core`.
+3. Never stamp a provenance or a proposer: the runner reads the cited file's bytes and records
+   `mined:<name>@<version>`. Never copy a guidance file's prose (`CLAUDE.md`, `AGENTS.md`,
+   `CONTRIBUTING`) into a statement. Never decide on your own which check backs an entry: read
+   what the check itself reads (the lint miner asks `crb.core.lint.belt5_evidence`, P-348).
+4. Register it with `register_miner(...)` and add a test like
+   `tests/test_miners.py::test_a_using_team_adds_a_miner_through_the_registry_and_the_contract_holds_it`
+   over a fixture repository. A draft that breaks the record's rules is refused and named in
+   the run, never written; nothing a miner proposes is signed.
+
 ## How to add an ADR
 
 1. Copy the format from [`docs/adr/README.md`](adr/README.md); next sequential number;

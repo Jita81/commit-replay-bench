@@ -4,7 +4,7 @@ level: stream
 name: Decide & license — decisions inbox → sign-off → licence sentence
 scope: decide-and-license
 parent: dod.product
-children: [dod.journey.sign-off-a-cell]
+children: [dod.journey.sign-off-a-cell, dod.journey.curate-the-library]
 persons: [approver, operator, viewer, admin]
 owner: server
 status: partial                # WRITTEN BY THE CHECKER — never by hand

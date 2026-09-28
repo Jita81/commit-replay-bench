@@ -12,8 +12,10 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               stack were usage-limit refusals), the ladder from builder columns and task ids,
               replay without a ladder failing closed, gold-dirty tasks excluded by default,
               cancel between tasks keeping partial counts and cancel-before-start honoured, mine
-              upserting tasks and rejecting an unknown pool, probe and setup runs (auto-setup
-              first when not ready; failing closed when it fails; runners bound to the repo's
+              upserting tasks and rejecting an unknown pool, a mine reading the head and
+              marking stale the library entries whose source file changed or went (G-736),
+              probe and setup runs (auto-setup first when not ready; failing closed when it
+              fails; runners bound to the repo's
               ``env_dir``), docker unavailable or without an image failing closed, oracle and
               controls runs recording their events (a violation failing the gate), unknown repo
               / kind failing cleanly, stale-claim reclaim with event seq resuming, the heartbeat
@@ -54,6 +56,7 @@ Touch when:   never for a new repository (the fixture repository stands in for e
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -83,6 +86,7 @@ from crb.builders.container import BuilderContainerSettings, SealedCheckout, Unc
 from crb.core.evidence import verify_pack
 from crb.core.execution import ExecResult, LocalExecutor, SandboxUnavailable
 from crb.core.ledger import verify_chain
+from crb.core.library import ACTOR_FRESHNESS, LibraryEntry, Provenance
 from crb.core.oracle import controls as nc
 from crb.core.runners.base import SetupResult, SetupStep
 from crb.core.runners.pytest_runner import PytestRunner
@@ -103,6 +107,7 @@ from crb.store.jobs import (
     STATUS_SUCCEEDED,
     JobQueue,
 )
+from crb.store.library import DbLibraryLedger, new_act
 from crb.store.models import Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
 from fixtures.proven_cells import every_cell_proven
@@ -876,6 +881,119 @@ def test_mine_run_upserts_tasks(h: Harness) -> None:
     fresh = next(t for t in h.tasks() if t.task_id == h.pyrepo.feat_sha)
     assert TaskSpec.from_dict(fresh.spec_json).target_tests == (pr.TEST_SUBTRACT,)
     assert (requal.progress_done, requal.progress_total) == (1, 1)
+
+
+def _signed_file_entry(h: Harness, slug: str, path: str) -> str:
+    """Propose (sponsor ``u-sponsor``) and sign (``u-approver``) a convention read from
+    ``path`` at the fixture's head; returns its entry id."""
+    head = pr.git(h.pyrepo.path, "rev-parse", "HEAD")
+    blob = h.pyrepo.repo.show_blob(head, path)
+    assert blob is not None
+    entry = LibraryEntry(
+        repo=pr.REPO_NAME,
+        kind="convention",
+        slug=slug,
+        title=f"What {path} says",
+        statement=f"The repository keeps {path} as it is.",
+        provenance=Provenance(
+            kind="file", path=path, commit=head, digest=hashlib.sha256(blob).hexdigest()
+        ),
+        proposed_by="u-sponsor",
+    )
+    ledger = DbLibraryLedger(h.factory)
+    ledger.append(
+        new_act(
+            pr.REPO_NAME,
+            entry.entry_id,
+            entry.version,
+            "propose",
+            "u-sponsor",
+            body={"entry": entry.content()},
+        )
+    )
+    ledger.append(new_act(pr.REPO_NAME, entry.entry_id, entry.version, "sign", "u-approver"))
+    return entry.entry_id
+
+
+def test_a_mine_reads_the_head_and_an_entry_whose_file_changed_goes_stale(h: Harness) -> None:
+    # G-736, DL-114: nobody posts digests — the mine itself reads the files entries cite
+    changed = _signed_file_entry(h, "readme", pr.README)
+    kept = _signed_file_entry(h, "pytest-ini", "pytest.ini")
+    ledger = DbLibraryLedger(h.factory)
+    assert {s.status for s in ledger.states(pr.REPO_NAME).values()} == {"signed"}
+    # a mine over an unchanged head marks nothing
+    first = h.enqueue("mine", params_json={"target": 5, "max_candidates": 10})
+    assert h.run_one().status == STATUS_SUCCEEDED
+    assert {s.status for s in ledger.states(pr.REPO_NAME).values()} == {"signed"}
+    quiet = next(e for e in h.events(first.id) if e.action == "library.freshness")
+    assert quiet.payload["files"] == 2 and quiet.payload["stale"] == []
+    # the README changes at head: its entry goes stale on the next mine, the other stays
+    (h.pyrepo.path / pr.README).write_text("# calc\n\nNow it multiplies too.\n", encoding="utf-8")
+    pr.git(h.pyrepo.path, "commit", "-q", "-am", "docs: say it multiplies")
+    head = pr.git(h.pyrepo.path, "rev-parse", "HEAD")
+    run = h.enqueue("mine", params_json={"target": 5, "max_candidates": 10})
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    states = ledger.states(pr.REPO_NAME)
+    assert states[changed].status == "stale" and states[kept].status == "signed"
+    assert states[changed].stale is not None and states[changed].stale["head_commit"] == head
+    ev = next(e for e in h.events(run.id) if e.action == "library.stale")
+    assert ev.payload["entry_id"] == changed and ev.payload["actor"] == ACTOR_FRESHNESS
+    assert ev.payload["path"] == pr.README and ev.payload["head_commit"] == head
+    # the act is the freshness reader's, never a person's, and the chain still verifies
+    last = ledger.acts(pr.REPO_NAME)[-1]
+    assert (last.act, last.actor) == ("stale", ACTOR_FRESHNESS)
+    assert ledger.verify() == len(ledger.acts())
+    # a third mine over the same head marks nothing twice
+    h.enqueue("mine", params_json={"target": 5, "max_candidates": 10})
+    assert h.run_one().status == STATUS_SUCCEEDED
+    assert len(ledger.acts(pr.REPO_NAME)) == 5
+
+
+def test_a_file_gone_at_head_makes_its_entry_stale(h: Harness) -> None:
+    gone = _signed_file_entry(h, "readme", pr.README)
+    pr.git(h.pyrepo.path, "rm", "-q", pr.README)
+    pr.git(h.pyrepo.path, "commit", "-q", "-m", "docs: drop the readme")
+    h.enqueue("mine", params_json={"target": 5, "max_candidates": 10})
+    assert h.run_one().status == STATUS_SUCCEEDED
+    state = DbLibraryLedger(h.factory).states(pr.REPO_NAME)[gone]
+    assert state.status == "stale" and state.stale is not None and state.stale["digest"] == ""
+
+
+def test_a_signed_entry_never_reaches_the_brief_a_replay_builds(h: Harness) -> None:
+    # ADR-0026 item 10: an entry reaches a brief only inside a measured arm (Wave 5, off by
+    # default). A signed, fresh entry scoped to the task's own class and file is in the store;
+    # the builder's brief carries none of its words.
+    marker = "ZEBRA-7731 always validate before subtracting"
+    entry = LibraryEntry(
+        repo=pr.REPO_NAME,
+        kind="convention",
+        slug="validate-first",
+        title="Validate first",
+        statement=marker,
+        provenance=Provenance(kind="person", person="u-sponsor"),
+        proposed_by="u-sponsor",
+        work_types=("bug.fix",),
+        components=("calc",),
+    )
+    ledger = DbLibraryLedger(h.factory)
+    ledger.append(
+        new_act(
+            pr.REPO_NAME,
+            entry.entry_id,
+            entry.version,
+            "propose",
+            "u-sponsor",
+            body={"entry": entry.content()},
+        )
+    )
+    ledger.append(new_act(pr.REPO_NAME, entry.entry_id, entry.version, "sign", "u-approver"))
+    assert ledger.states(pr.REPO_NAME)[entry.entry_id].usable
+    h.enqueue("replay")
+    assert h.run_one().status == STATUS_SUCCEEDED
+    assert FakeBuilder.briefs, "the replay built nothing"
+    for brief in FakeBuilder.briefs:
+        assert "ZEBRA-7731" not in repr(brief) and entry.entry_id not in repr(brief)
 
 
 def test_mine_rejects_unknown_pool(h: Harness) -> None:
@@ -1918,13 +2036,15 @@ def test_route_lookup_reads_the_map_as_it_stood_before_the_run(
     assert cells[0] is None and len(cells) == 2
     assert cells[1] == {k: before_second[k] for k in cells[1]}  # the evidence-facing slice
     assert cells[1]["n"] == 1 and cells[1]["apparatus_versions"] == [rows[-1].apparatus_version]
-    # ADR-0018 — every decision carries the cell's verification tier, so the delivery gate's
-    # second clause reads the same pre-run reading: nobody has signed this cell, and the
-    # chain says so rather than leaving the licence unrecorded
+    # every decision carries the map's verification tier for the record, and ``signed`` is
+    # the entry gate's own reading (ADR-0018 as amended by ADR-0026 item 8): the cell's
+    # proven standard — signed here by ``_proven_cells`` — never the map's tier
     assert everything["verification_tier"] == "automated-pass"
     assert cells[1]["verification_tier"] == "automated-pass"
-    # and the whole gate's answer, so the intake pass labels a ticket what a run would do
-    assert everything["signed"] is False and everything["deliverable"] is False
+    assert everything["signed"] is True
+    # and the whole gate's answer, so the intake pass labels a ticket what a run would do:
+    # a signed standard in a cell that does not route deliver opens no pull request
+    assert everything["route"] != "deliver" and everything["deliverable"] is False
 
 
 def test_every_finished_run_stamps_the_cells_that_first_route_deliver(

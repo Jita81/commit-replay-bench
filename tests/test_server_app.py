@@ -215,6 +215,7 @@ class TestFactory:
             "invitations",
             "learn",
             "ledger",
+            "library",
             "oracle",
             "prevention",
             "readings",
@@ -275,8 +276,8 @@ class TestFactory:
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "down"
             assert probe["data"] == {
-                "triggers": 10,
-                "expected": 12,
+                "triggers": 12,
+                "expected": 14,
                 "missing": ["grades_no_delete", "grades_no_update"],
             }
         # init_db is idempotent: a restart reinstalls the missing triggers.
@@ -284,7 +285,7 @@ class TestFactory:
             r = c.get(f"{API_PREFIX}/health")
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "ok"
-            assert probe["data"] == {"triggers": 12, "expected": 12}
+            assert probe["data"] == {"triggers": 14, "expected": 14}
 
 
 # --- middleware --------------------------------------------------------------------------

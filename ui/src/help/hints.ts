@@ -438,6 +438,102 @@ export const HINTS = {
   'stat.results.waiting_count':
     'How many decisions are waiting on a person for this repository alone: sign-offs due, gaps to sign and factory items to decide.',
 
+  // ── /library/:repo (screens/Library/LibraryPage.tsx) — the context library, ADR-0026 item 10
+  'link.library.back':
+    'Back to this repository’s page, where the library is one of the things it holds.',
+  'stat.library.count':
+    'How many entries this repository’s library holds, and how many of them two different people have signed. A proposed, stale, retired or revoked entry is not signed.',
+  'link.library.work_type':
+    'Open the page for this kind of change: what it is, what a ticket must carry, the signed context and what is proven per size. The count is the commits of that kind mined here.',
+  'row.library.definition':
+    'What this kind of change is, from the global vocabulary or from the work-type entry two people signed, and the global class it belongs to.',
+  'row.library.examples':
+    'Commits of this kind mined from the repository. Each opens the task with its failing test and every graded attempt.',
+  'row.library.ticket':
+    'The facts readiness asks a ticket of this kind for today. A structural one blocks the ticket until it is answered; a value one only routes it.',
+  'tag.library.slot_kind':
+    'Structural: the ticket cannot enter until this is answered. Value: an open answer routes the ticket to a person instead of blocking it.',
+  'tag.library.briefs':
+    'No library entry reaches a builder’s brief in this release. One would only inside a context arm whose effect was measured, and that switch is off by default.',
+  'col.library.entry':
+    'The entry’s id, kind/slug: one vocabulary for components, work types, decisions, conventions, patterns and standards.',
+  'col.library.statement':
+    'What the entry says, in at most 400 characters. Values that belong in a test, code and secrets are never entries.',
+  'col.library.sponsor':
+    'The person who put the entry forward: whoever proposed it, or who adopted a miner’s or a model’s proposal. A miner or a model is never a person.',
+  'col.library.approver':
+    'The person who signed the entry. It is never the sponsor: two different people are needed.',
+  'col.library.signed_at':
+    'The day the entry was signed. A new version needs a new signature.',
+  'col.library.provenance':
+    'Where the entry came from: a file at a commit, the graded rows it was learned from, or the person who wrote it. A file and commit are as the proposer gave them; after each mine the product reads the file at the head, and the entry goes stale when it differs. Graded rows are checked against the ledger.',
+  'col.library.effect':
+    'What the entry does to a builder’s pass rate. Unmeasured until an arm with the entry is read against the same arm without it.',
+  'col.library.size':
+    'The size of the change: XS to XL, by how much code it touches.',
+  'col.library.standard':
+    'The leanest context proven to pass changes of this kind and size, or no proven standard. A standard found only on the commit’s own tests is a ceiling, not a licence.',
+  'col.library.commits':
+    'For a proven standard, the clean first attempts out of the distinct commits read. Otherwise how many commits of this kind and size are mined so far.',
+  'col.library.interval':
+    'The 95 % Wilson interval of the proven standard’s first-attempt clean rate.',
+  'col.library.next':
+    'The apparatus the standard was proven under, or what would prove the cell: a registered reading and how far its pool of commits has to go.',
+  'col.library.characteristic':
+    'One of the nine product quality characteristics of ISO/IEC 25010:2023. Named, never claimed: the product does not certify conformity.',
+  'col.library.checks':
+    'The checks this repository runs that are counted as evidence of part of the characteristic.',
+  'col.library.evidenced':
+    'Whether a switched-on check evidences part of the characteristic here. Not evidenced says nothing either way.',
+  'tag.library.evidence':
+    'A standard or convention counts as evidence only when the product’s quality table counts its check for the characteristic it names, and the repository runs that check. Otherwise it is advisory: shown and signed, but no evidence.',
+  'col.library.kind':
+    'Which of the six kinds the entry is: component, work type, decision, convention, pattern or standard.',
+  'col.library.title':
+    'The entry’s short title, as a person would name it in a list or a review.',
+  'col.library.status':
+    'Proposed, signed, stale (its source file changed), retired or revoked. Only a signed entry counts as signed context.',
+  'tag.library.status':
+    'Where the entry stands. Proposed needs a second person; stale needs signing again; retired and revoked are kept as history.',
+  'col.library.act':
+    'The act due on the entry and who may take it: an operator sponsors a mined proposal; an approver who is not the sponsor signs.',
+  'button.library.sponsor':
+    'Adopt this mined or drafted proposal as its sponsor. Another person must then sign it.',
+  'button.library.sign':
+    'Sign this version of the entry as its second person. A later change to it needs a new signature.',
+  'button.library.sign_own':
+    'You sponsored this entry, so you cannot sign it. A different approver must; the rule cannot be relaxed.',
+  'field.library.entry':
+    'The entry to revoke or retire; its earlier acts stay on the record either way.',
+  'field.library.reason':
+    'Why, in your own words. It is kept on the record with your name.',
+  'button.library.revoke':
+    'Withdraw the entry because it was wrong. Appended to the record; the entry takes no act but a new proposal.',
+  'button.library.retire':
+    'Retire the entry because it no longer holds. Appended to the record and kept as history.',
+  'field.library.kind':
+    'Component, work type, decision, convention, pattern or standard. The kind becomes the first half of the id.',
+  'field.library.slug':
+    'A short name: lower case letters, digits, dots and dashes. The id is kind/slug.',
+  'field.library.title':
+    'A short title a person recognises in a list.',
+  'field.library.statement':
+    'What the entry says, in at most 400 characters. No code, no secrets and no values that belong in a test.',
+  'field.library.parent':
+    'The class of the global vocabulary this work type refines, such as bug.fix.',
+  'field.library.work_types':
+    'The kinds of change the entry applies to. Its page lists it as signed context once it is signed.',
+  'field.library.characteristic':
+    'The ISO/IEC 25010:2023 characteristic a standard refines. A standard must name one; a convention may.',
+  'field.library.check':
+    'The name of the repository’s check that evidences the entry. It counts only if the quality table counts that check for the characteristic named and the repository runs it; otherwise the entry is advisory.',
+  'button.library.propose':
+    'Record the proposal with you as its sponsor. Nothing is signed until a different approver signs it.',
+  'field.library.commit':
+    'The commit the miners read: a sha, a branch or a tag the repository’s clone holds. Leave it empty for the clone’s head. The run is pinned to the full sha, so a branch that moves later does not move it.',
+  'button.library.mine':
+    'Read the repository’s own files at that commit — its decision records, code owners and layout, lint and formatter settings, tests and change history — and propose entries from them. No model is called. Nothing is signed: each proposal waits for a person to sponsor it and a different approver to sign it. The same commit, with the same graded rows, proposes nothing new.',
+
   // ── /decisions (screens/Decisions/DecisionsPage.tsx)
   'stat.decisions.apparatus':
     'The apparatus version every decision below is read under. A sign-off made under an earlier version is listed as stale.',
@@ -446,7 +542,7 @@ export const HINTS = {
   'stat.decisions.repo_count':
     'How many of the decisions above belong to this repository; each is listed under it.',
   'pill.decisions.kind':
-    'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, or delivery withheld by the route.',
+    'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, delivery withheld by the route, or a library entry to sign, gone stale or retired by measurement.',
   'stat.decisions.waiting':
     'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
@@ -919,6 +1015,8 @@ export const HINTS = {
     'The run that made this probe reading; its log shows the command the toolchain ran and what it printed.',
   'button.repo.start_run':
     'Open the full run form for this repository: kind, builder, model, ladder, budget and executor.',
+  'button.repo.library':
+    'What people know about this repository that a test cannot say — its work types, decisions, conventions and standards — each signed by two different people.',
   'button.repo.next_steps':
     'The screens that read this repository: its walk, the factory, the capability map, the oracle and its runs.',
   'col.profile.class':
@@ -1969,6 +2067,8 @@ export const MIN_HINTS: Record<string, number> = {
   '/connect/:name/measure': 10,
   '/results': 31,
   '/decisions': 6,
+  // a signed entry, an unsigned one and a work type with slots, sizes and the quality table
+  '/library/:repo': 30,
   '/signoff': 30,
   '/factory': 28,
   '/factory/intake': 16,

@@ -9,7 +9,8 @@ What it does: Pins, with the real tools, that ``gofmt`` rewrites a changed Go fi
               configures it; that black configured but absent, prettier configured but absent,
               nothing configured and ``{disabled: true}`` are each skipped with their own named
               reason (never a guessed formatter); that a formatter failure leaves the file as
-              the builder wrote it and is recorded.
+              the builder wrote it and is recorded; and that the step reads a configuration
+              through belt 5's own detectors, never a copy of them.
 How:          Hermetic git fixture repositories (``tests/fixtures/langs``), the runners' own
               ``lint_plan`` detection, ``formatters_for`` → ``run_formatters`` on a
               ``LocalExecutor``.
@@ -31,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from crb.core import formatting as fm
+from crb.core import lint
 from crb.core.execution import LocalExecutor
 from crb.core.lint import LintPlan, LintTool
 from crb.core.runners import get_runner
@@ -194,3 +196,29 @@ def test_no_changed_source_file_is_its_own_skip(tmp_path: Path) -> None:
     assert fm.run_formatters(formatters, LocalExecutor(), tmp_path, []).label() == (
         "skipped=no_changed_source_files"
     )
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"pyproject.toml": "[tool.black]\nline-length = 88\n"},
+        {
+            ".pre-commit-config.yaml": "repos:\n  - repo: local\n    hooks:\n      - id: black-jupyter\n"
+        },
+        {"pyproject.toml": "[tool.ruff]\n[tool.ruff.format]\n[tool.black]\n"},
+        {"pyproject.toml": "not toml ["},
+        {".prettierrc.json5": "{}"},
+        {"package.json": '{"prettier": "@acme/prettier-config"}'},
+        {"package.json": '{"name": "x"}'},
+        {},
+    ],
+)
+def test_the_format_step_reads_a_configuration_by_belt_5s_own_detectors(
+    tmp_path: Path, files: dict[str, str]
+) -> None:
+    """One detector per tool: the format step asks crb.core.lint, never a copy (P-348)."""
+    for rel, text in files.items():
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    assert fm.black_configured(tmp_path) == lint.black_evidence(tmp_path)
+    assert fm.prettier_configured(tmp_path) == bool(lint.prettier_evidence(tmp_path))
+    assert not hasattr(fm, "_PRECOMMIT_BLACK")

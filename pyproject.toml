@@ -163,6 +163,19 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+# ADR-0026 item 10: a library entry reaches a builder only inside a measured context arm
+# (Wave 5, off by default). Nothing that composes or runs a brief may import the library.
+name = "library entries never reach a brief"
+type = "forbidden"
+source_modules = [
+  "crb.builders", "crb.factory", "crb.intake", "crb.core.run", "crb.core.playbook",
+  "crb.core.finish_gate", "crb.core.learn", "crb.core.prevention",
+]
+forbidden_modules = [
+  "crb.core.library", "crb.core.miners", "crb.store.library", "crb.server.routes.library",
+]
+
+[[tool.importlinter.contracts]]
 name = "layers depend downward only"
 type = "layers"
 # Parenthesised layers are optional: packages land phase by phase (cli/server/factory/store).

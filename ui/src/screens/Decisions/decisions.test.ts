@@ -26,6 +26,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CapabilityCell, FactoryTask, Signoff } from '../../api/types'
 import { REGISTER } from '../Learn/register.fixture'
+import { LIBRARY, PROPOSED, SIGNED } from '../Library/library.fixture'
 import { decisionsFor, evidenceStats, waitedFor } from './decisions'
 
 function cell(over: Partial<CapabilityCell>): CapabilityCell {
@@ -135,6 +136,37 @@ describe('decisionsFor', () => {
       ['protocol:network:go mod reopened after it was closed', 'Read why', 'viewer'],
     ])
     expect(rows[0]?.href).toBe('/learn?repo=alpha&class=protocol%3Anetwork%3Ago%20mod#prevention')
+  })
+
+  it('the library asks for a sponsor, a second signature, a re-signature, and reads a measured retirement', () => {
+    const retired = { ...SIGNED, entry_id: 'convention/old', status: 'retired' as const, retired: { actor: 'system:library-arm', by: 'measurement' as const, reason: 'the pairs favour the arm without it', reading_id: 'r7', at: '' } }
+    const byPerson = { ...SIGNED, entry_id: 'convention/gone', status: 'retired' as const, retired: { actor: 'u', by: 'person' as const, reason: 'no', reading_id: '', at: '' } }
+    const rows = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], library: { ...LIBRARY, entries: [...LIBRARY.entries, retired, byPerson] } })
+    expect(rows.map((r) => [r.kind, r.act, r.role, r.title])).toEqual([
+      ['entry_stale', 'Sign again or retire', 'approver', 'convention/lint went stale: .golangci.yml changed or went'],
+      ['entry_to_sign', 'Sign', 'approver', 'convention/context-first waits for a second person to sign it'],
+      ['entry_to_sign', 'Sponsor', 'operator', 'decision/adr-0001 was proposed by mined:adr@1 and needs a person to sponsor it'],
+      ['entry_retired', 'Read why', 'viewer', 'convention/old was retired by measurement'],
+    ])
+    expect(rows.every((r) => r.href === '/library/alpha#index')).toBe(true)
+    // a proposal whose file changed before anyone signed it says so, never "signed by" nobody
+    const staleEntry = LIBRARY.entries.find((e) => e.status === 'stale')!
+    const unsigned = { ...staleEntry, approver: '', approver_name: '', signed_at: '' }
+    const [row] = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], library: { ...LIBRARY, entries: [unsigned] } })
+    expect(row?.evidence).toMatch(/· not yet signed$/)
+  })
+
+  it('an entry the viewer sponsored waits for another approver: never their Sign, never their re-signature', () => {
+    const mine = PROPOSED.sponsor
+    const rows = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], library: LIBRARY, me: mine })
+    const own = rows.filter((r) => r.kind !== 'entry_retired' && r.act !== 'Sponsor')
+    expect(own.map((r) => [r.act, r.role, r.title])).toEqual([
+      ['Read', 'viewer', 'convention/lint went stale: .golangci.yml changed or went — you sponsored it, so another approver signs it again'],
+      ['Read', 'viewer', 'convention/context-first waits for another approver to sign it — you sponsored it'],
+    ])
+    // another approver still sees their Sign
+    const theirs = decisionsFor({ repo: 'alpha', cells: [], signoffs: [], tasks: [], library: LIBRARY, me: 'someone-else' })
+    expect(theirs.filter((r) => r.act === 'Sign')).toHaveLength(1)
   })
 
   it('every row carries the identity the server keeps the clock under (G-516)', () => {

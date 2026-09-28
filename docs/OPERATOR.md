@@ -1417,3 +1417,88 @@ repository (the product never writes a customer's tests), score the oracle again
 apparatus shows how many rows it still needs, the estimated cost and the `POST /runs` bodies to
 queue. Queue the ones worth paying for from **Runs**; nothing is queued for you.
 
+
+## 14. The context library
+
+The **Context library** of a repository (`/library/<repo>`, from the repository's page) holds
+what people know about it that a test cannot say, in one vocabulary: its **components**, its
+**work types** (kinds of change), the **decisions** in force, its **conventions**, the
+**patterns** that recur and its **standards**. Each entry has the id `<kind>/<slug>`, a
+statement of at most 400 characters and where it came from — a file at a commit, the graded
+rows it was learned from, or the person who wrote it (ADR-0026 item 10, DL-087). Graded rows
+must be rows of this repository's ledger. A file's path, commit and digest are read from the
+clone when a miner proposes the entry, and are as the person gave them when a person does; the
+product then reads the file at the repository's head after each mine, and marks the entry stale
+when it differs. No field of an entry may carry a credential — the
+library is append-only, so a secret written to it could never be removed.
+
+**Two people sign every entry.** An operator proposes an entry and becomes its sponsor; an
+entry a miner or a model proposed waits in Decisions until a person adopts it with
+**Sponsor**. A different approver then **Signs** it. The approver can never be the sponsor —
+the page disables the sponsor's own Sign button and the API refuses it (`409
+library_refused`, `same_person`) — and a miner or a model is never a person. A signature
+names the version the approver read: a changed entry is a new version and needs a new
+signature. For an entry learned from graded rows, an approver who produced one of those rows —
+as the row's actor or the person who queued its run — cannot sign it either (`same_actor`).
+On Decisions, an entry you sponsored reads "waits for another approver", with no Sign.
+
+**Proposals from the repository's files.** *Propose from the files* on the library page (or
+`POST /library/{repo}/mine`, operator) runs the **miners** over the repository's clone at one
+commit — a sha, branch or tag, or its head when you leave it empty — pinned to the full sha
+before anything is read. Each miner reads one kind of file the repository already holds and
+proposes entries from it, citing the file and the commit, with no model call:
+
+| miner | reads | proposes |
+|---|---|---|
+| `adrs` | architecture decision records (`docs/adr/NNNN-*.md` and the like) | a **decision** per record in force, stating the first paragraph of its decision; a superseded, rejected or proposed record is noted, not proposed |
+| `owners` | `CODEOWNERS` and the directory layout | a **component** per part of the system, with the owners `CODEOWNERS` names (an email address is counted, never copied) |
+| `lint` | lint and formatter configurations (`pyproject.toml` tables, `ruff.toml`, `.eslintrc*`, `.golangci.yml`, `go.mod` …), through belt 5's own detectors | a **convention** per tool, naming belt 5's check (`repo_lint_clean`) only where belt 5's own detection finds the tool — and saying which language's runner runs it — and advisory where it does not (a `[format]` table in `ruff.toml`, say, or black beside ruff format) |
+| `tests` | the test files and the runner's configuration | a **standard** per language: a change leads to a failing test, where the tests live, how they are named and run, with examples, scoped to the work types whose commits changed such tests |
+| `change-profile` | the mined commits and the graded rows | a **work-type** candidate per global class and part of the system it changes, with its counts, citing the graded rows — a candidate with no graded rows is noted with its counts, not proposed |
+
+`CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING` are read as data: only a command of a known tool
+whose every argument is a flag or a path the repository holds — no shell operator, no URL, no
+other word — reaches a proposal, inside a fixed sentence — never their prose.
+**No miner signs anything.** Every proposal is `proposed` under `mined:<miner>@<version>` and
+waits in Decisions for a person to **Sponsor** it; a different approver then signs it. The same
+commit, with the same graded rows, proposes nothing new. A later commit, a newly graded row or a
+new miner version proposes an entry again only when the source it cites has changed or the
+miner now reads it differently — a test standard, for one, names the runner's configuration but
+cites an example test, so a new runner is a new version even though the cited file is
+unchanged. A new version needs its two people again. A miner never replaces an entry a person
+wrote, revoked or retired. A refused proposal is named in the run with any credential it
+carried redacted, and nothing of it is written. The run is one
+`library.mined` event naming you, the commit and the counts, and each proposal a
+`library.proposed` event naming its miner. `crb library mine <repo>` prints what a run would
+propose from a workdir repository and writes nothing. A team adds its own miner through the
+registry in `src/crb/core/miners.py` (`register_miner`, and the contract in that module).
+
+**Nothing is edited.** A revocation (the entry was wrong) and a retirement (it no longer
+holds) are appended with a reason and kept as history. An entry read from a file goes
+**stale** when that file changes or goes at the repository's head — the worker reads the
+cited files at the head after every mine, and `POST /library/{repo}/freshness` takes the head
+commit and the files' sha256 from any other reader — returns to Decisions, and counts for nothing
+until an approver signs it again or retires it. Every act is a `system/library.*` event with
+the actor and the entry.
+
+**The page for a work type** says what the kind of change is (its definition and example
+commits), what a ticket of that kind must carry today, the signed context — each entry with
+its sponsor, signer, date, provenance and measured effect — what is proven for each size (the
+standard arm with its distinct commits, interval and apparatus, or "No proven standard" and
+the reading that would prove it), and which of the repository's switched-on checks evidence
+which ISO/IEC 25010 characteristic. A **standard** entry names the characteristic it refines
+and the check that evidences it. It counts as evidence only when the product's quality table
+counts that check for that characteristic and the repository runs it — `target_green` says
+nothing of Security — otherwise it is advisory and counts as no evidence. While the table is
+not on the build, every standard is advisory.
+
+**Time and money.** Proposing and signing an entry spends nothing: no act on the library starts
+a run or calls a model. **[measured — n = 1 scripted pass from the repository's page through
+proposing, the sponsor's refused signature, the second person's signature from Decisions and
+the work type's page; method: `ui/e2e/walkthrough/14-library.spec.ts`, timed by the spec on the
+tier-1 walkthrough stack on 2026-09-27; apparatus 2.3]** the scripted pass took 1.4 seconds,
+with nothing read. How long a person takes to write and check an entry has not been timed.
+
+**No entry reaches a builder's brief in this release.** An entry reaches a brief only inside a
+context arm whose effect was measured against the same arm without it, and the switch for that
+is off. Until then every entry's measured effect reads `unmeasured`.

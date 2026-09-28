@@ -2239,3 +2239,184 @@ export interface Flow {
   spend: Spend
   streams: StreamFlow[]
 }
+
+// ---------------------------------------------------------------------------
+// Library (the context library — ADR-0026 item 10; docs/API.md#library)
+// ---------------------------------------------------------------------------
+
+/** The six kinds of entry, in the order the nomenclature index lists them. */
+export type LibraryKind = 'component' | 'work-type' | 'decision' | 'convention' | 'pattern' | 'standard'
+export type LibraryStatus = 'proposed' | 'signed' | 'stale' | 'retired' | 'revoked'
+
+/** Where an entry came from (`crb.core.library.Provenance.to_dict`). */
+export interface LibraryProvenance {
+  kind: 'person' | 'file' | 'rows'
+  path: string
+  commit: string
+  digest: string
+  rows: string[]
+  person: string
+}
+
+/** One version of one entry (`LibraryEntry.content()`). */
+export interface LibraryRecord {
+  repo: string
+  kind: LibraryKind
+  slug: string
+  title: string
+  statement: string
+  provenance: LibraryProvenance
+  /** A person's account id, `mined:<miner version>` or `drafted:<model>`. */
+  proposed_by: string
+  components: string[]
+  work_types: string[]
+  characteristic: string
+  check: string
+  parent_class: string
+  examples: string[]
+  slots: string[]
+}
+
+/** An entry as it stands (`EntryState.to_dict()` plus names and evidence). */
+export interface LibraryEntry {
+  entry_id: string
+  version: string
+  entry: LibraryRecord
+  status: LibraryStatus
+  proposed_at: string
+  sponsor: string
+  sponsor_name: string
+  sponsored_at: string
+  approver: string
+  approver_name: string
+  signed_at: string
+  stale: { head_commit: string; path: string; digest: string; at: string } | null
+  retired: { actor: string; by: 'person' | 'measurement'; reason: string; reading_id: string; at: string } | null
+  revoked: { actor: string; reason: string; at: string } | null
+  /** `unmeasured` until a measured arm serves an effect (Wave 5). */
+  effect: string
+  /** For a standard or convention: `check` when the repository runs it, else `advisory`. */
+  evidence: '' | 'check' | 'advisory'
+  acts: number
+}
+
+export interface LibraryWorkType {
+  slug: string
+  title: string
+  parent_class: string
+  /** `global` for a class of the global vocabulary; otherwise the work-type entry's status. */
+  status: 'global' | LibraryStatus
+  tasks: number
+}
+
+/** `GET /library/{repo}`. */
+export interface LibraryIndex {
+  repo: string
+  entries: LibraryEntry[]
+  work_types: LibraryWorkType[]
+  kinds: LibraryKind[]
+  characteristics: string[]
+  statement_max: number
+  /** Always `false`: no entry reaches a builder's brief outside a measured arm. */
+  reaches_briefs: boolean
+}
+
+export interface LibraryContextRow {
+  entry_id: string
+  kind: LibraryKind
+  title: string
+  statement: string
+  sponsor: string
+  sponsor_name: string
+  approver: string
+  approver_name: string
+  signed_at: string
+  provenance: LibraryProvenance
+  provenance_label: string
+  proposed_by: string
+  effect: string
+  characteristic: string
+  check: string
+  evidence: '' | 'check' | 'advisory'
+}
+
+/** A cell's proven standard as stream R's reading serves it (`ProvenStandard.to_dict()`). */
+export interface LibraryStandard {
+  arm: string
+  n: number
+  clean: number
+  ci_low: number
+  ci_high: number
+  apparatus: string
+  state: string
+  ceiling: boolean
+  reading_id: string
+}
+
+export interface LibrarySizeRow {
+  size: string
+  tasks: number
+  standard: LibraryStandard | null
+  /** What would prove the cell, when nothing does. */
+  next: string
+}
+
+export interface LibraryQualityRow {
+  characteristic: string
+  checks: Array<{ check: string; label: string; sub: string; runs: string; on: boolean }>
+  evidenced: boolean
+  note: string
+}
+
+/** `GET /library/{repo}/work-types/{slug}` — the page per work type. */
+export interface WorkTypePage {
+  repo: string
+  slug: string
+  title: string
+  definition: string
+  definition_source: string
+  parent_class: string
+  examples: Array<{ sha: string; subject: string; size: string }>
+  ticket_slots: Array<{ name: string; question: string; kind: string }>
+  signed_slots: string[]
+  context: LibraryContextRow[]
+  sizes: LibrarySizeRow[]
+  quality: { served: boolean; rows: LibraryQualityRow[]; switched_on: string[]; standards: LibraryContextRow[] }
+  reaches_briefs: boolean
+}
+
+/** One outcome of a miner run: what it did with one draft or note. */
+export type LibraryMineOutcomeKind = 'proposed' | 'unchanged' | 'held' | 'refused' | 'noted' | 'failed'
+export interface LibraryMineOutcome {
+  miner: string
+  subject: string
+  outcome: LibraryMineOutcomeKind
+  reason: string
+  version: string
+  counts: Record<string, number>
+}
+
+/** `POST /library/{repo}/mine` — the miners over the clone at one pinned commit (G-677). */
+export interface LibraryMineRun {
+  repo: string
+  commit: string
+  miners: string[]
+  counts: Record<LibraryMineOutcomeKind, number>
+  proposed: LibraryEntry[]
+  outcomes: LibraryMineOutcome[]
+  files_read: number
+  reaches_briefs: boolean
+}
+
+/** `POST /library/{repo}/entries`. */
+export interface LibraryProposeRequest {
+  kind: LibraryKind
+  slug: string
+  title: string
+  statement: string
+  work_types?: string[]
+  components?: string[]
+  characteristic?: string
+  check?: string
+  parent_class?: string
+}

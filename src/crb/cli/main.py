@@ -22,6 +22,7 @@ Works with:   src/crb/cli/commands/__init__.py (``CliError``, the exit codes),
               src/crb/cli/commands/route.py (the pipeline verbs, in order),
               src/crb/cli/commands/service.py (``serve`` / ``worker`` / ``migrate`` /
               ``doctor``), src/crb/cli/commands/users.py (the break-glass account verbs),
+              src/crb/cli/commands/library.py (what the library's miners would propose),
               src/crb/core/execution.py (``SandboxUnavailable`` → exit 2),
               src/crb/core/deps.py (``ProvisionRefused`` → exit 2 with its fix)
 Tested by:    tests/test_cli.py, tests/test_cli_doctor.py, tests/test_cli_tasks.py,
@@ -46,6 +47,7 @@ from crb.cli.commands import (
     grade,
     learn,
     ledger,
+    library,
     mine,
     reading,
     repo,
@@ -85,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     route.register(sub)
     reading.register(sub)
     learn.register(sub)
+    library.register(sub)
     tasks.register(sub)
     config.register(sub)
     deps.register(sub)
