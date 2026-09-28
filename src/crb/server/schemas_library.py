@@ -13,8 +13,9 @@ How:          ``BaseModel`` with ``extra="forbid"``; the entry's own rules stay 
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 10)
 Works with:   src/crb/server/routes/library.py (the routes), src/crb/core/library.py (the
-              record), src/crb/core/miners.py (the run ``MineOut`` serves), ui/src/api/types.ts (``LibraryEntry``, ``LibraryIndex``,
-              ``WorkTypePage``), docs/API.md#library (the field list these models carry)
+              record), src/crb/core/miners.py (the run ``MineOut`` serves),
+              ui/src/api/types.ts (``LibraryEntry``, ``LibraryIndex``, ``WorkTypePage``,
+              ``LibraryMineRun``), docs/API.md#library (the field list these models carry)
 Tested by:    tests/test_server_routes_library.py, tests/test_server_routes_library_mine.py
 Touch when:   never for a new repository; a field of the record changes in
               src/crb/core/library.py first, then here, then the UI type and docs/API.md.

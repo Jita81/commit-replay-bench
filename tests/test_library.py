@@ -529,7 +529,13 @@ def test_a_fold_that_meets_an_act_the_rule_refuses_raises_rather_than_skipping()
 
 BRIEF_PACKAGES = ("builders", "factory", "intake")
 BRIEF_CORE = ("run", "playbook", "finish_gate", "learn", "prevention")
-LIBRARY_MODULES = {"crb.core.library", "crb.store.library", "crb.server.routes.library"}
+#: The library and its miners (G-677): a mined proposal is an entry too, and reaches no brief.
+LIBRARY_MODULES = {
+    "crb.core.library",
+    "crb.core.miners",
+    "crb.store.library",
+    "crb.server.routes.library",
+}
 
 
 def _imports(path: Path) -> set[str]:

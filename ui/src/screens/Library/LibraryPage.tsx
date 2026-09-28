@@ -18,9 +18,9 @@
  *               and says why (the API refuses it too, 409 `same_person`). Every refusal is shown
  *               in the API's words. The page says, in the lede and on its tag, that nothing here
  *               reaches a builder's brief until an arm measures it.
- * How:          `useLibrary` + `useWorkTypePage` + `useLibraryAct` + `useLibraryMine`; tables through `DataTable`
- *               with a hint on every column; forms through `Field`; every element a reader meets
- *               is a hint trigger (`*.library.*`).
+ * How:          `useLibrary` + `useWorkTypePage` + `useLibraryAct` + `useLibraryMine`; tables
+ *               through `DataTable` with a hint on every column; forms through `Field`; every
+ *               element a reader meets is a hint trigger (`*.library.*`).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0026-the-context-standard.md (item 10),
  *               docs/adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md

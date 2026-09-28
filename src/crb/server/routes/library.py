@@ -44,14 +44,15 @@ Works with:   src/crb/core/library.py (the record, the rule, the page as data),
               src/crb/store/library.py (the ledger), src/crb/server/schemas_library.py (the
               request and response bodies), src/crb/factory/readiness.py (``slots_for`` — what
               a ticket must carry today), src/crb/core/checks.py and src/crb/core/lint.py (the
-              switched-on checks), docs/API.md#library (the contract these routes serve),
-              ui/src/screens/Library/LibraryPage.tsx (the page that calls them),
+              switched-on checks), ui/src/screens/Library/LibraryPage.tsx (the page that
+              calls them),
               src/crb/store/models.py (``Grade``, ``Run`` — who produced a cited row),
               src/crb/core/miners.py (the miners and the run ``POST …/mine`` appends)
 Tested by:    tests/test_server_routes_library.py, tests/test_server_routes_library_mine.py,
               tests/test_worker_clone.py (the clone-path rule at ``mine_source``)
 Touch when:   never for a new repository; a new act is added in src/crb/core/library.py first,
-              then here with its event row in docs/API.md#event-vocabulary.
+              then here with its event row in docs/API.md#event-vocabulary and its route row in
+              docs/API.md#library (the contract these routes serve).
 """
 
 from __future__ import annotations
