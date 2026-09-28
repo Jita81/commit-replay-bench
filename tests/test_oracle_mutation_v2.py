@@ -226,3 +226,17 @@ def test_the_operator_set_hash_moves_with_the_scorer() -> None:
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(crb_version, "APPARATUS_VERSION", "2.3")
         assert ms.operator_set_hash(mut) != v2
+
+
+@pytest.mark.parametrize(
+    ("apparatus", "rule"),
+    [("2.3", ms.MUTATION_V2), ("2.0", ms.MUTATION_V2), ("2.4", ms.MUTATION_V1)],
+)
+def test_a_stamp_whose_rule_is_not_its_apparatus_rule_is_refused(apparatus: str, rule: str) -> None:
+    """P-127: the class P-121 named, closed where every score is stamped. A provenance that
+    names a rule other than its apparatus's cannot be built, whoever builds it — so a score
+    stamped 2.3 is never a v2 score even if a caller asks for one."""
+    with pytest.raises(ValueError, match="rule of apparatus"):
+        ms.MutationProvenance(apparatus_version=apparatus, mutation_version=rule)
+    ok = ms.MutationProvenance(apparatus_version=apparatus)
+    assert ok.mutation_version == ms.mutation_version(apparatus)

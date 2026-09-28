@@ -12,21 +12,22 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **A host tool can no longer change a verdict, and a package that names no failing test fails
-  belt 3** (north-star Wave 2, stream Q2; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-q2);
-  ADR-0048; DL-143). On the host, the Go, Python and Node runners' tests see only the tools
-  they declare, never the worker's `PATH`; a repository names others in `runner_opts.tools`.
-  The tools' versions and bytes are a digest on the posture, every qualification and every
-  pack, so a changed tool asks for the pool to be qualified again. The Posture panel names the
-  environment. A Go package that stops compiling beside baseline failures now fails belt 3.
+- **A host tool can no longer change a verdict, and a failure nothing names fails belt 3**
+  (north-star Wave 2, stream Q2; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-q2);
+  ADR-0048; DL-143, DL-150). On the host, the Go, Python and Node runners' tests see only the
+  tools they declare; `PATH` in `runner_opts.env` and host config files are refused. The
+  tools' bytes are a digest on the posture, every qualification and every pack, so a changed
+  tool asks for requalification. A Go belt narrower than the module also builds every
+  package. A package that stops compiling, or a test process that stops before every test
+  reported, now fails belt 3.
 
 - **The grade says why, and a distinct commit is a distinct change**
   (north-star Wave 2, stream G; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-g);
   ADR-0025 items 5, 6, 7 and 13; DL-105, DL-106). Belt 5 records why it holds what it holds.
   From apparatus 2.4 every row carries its failure kind, belt 5's reason and its change, and
-  the oracle scorer is `mutation.v2`; below 2.4 rows and scores keep the frozen 2.3 rules.
-  The miner counts each change once, even against tasks already mined. The executor and
-  worker refuse an empty kind, docker's exit 125 is told from a suite's, and each pack and
+  the oracle scorer is `mutation.v2`; a row or score below 2.4 keeps the 2.3 rules and is
+  refused if it carries a 2.4 label or rule. The miner counts each change once. The executor
+  and worker refuse an empty kind, docker's exit 125 is told from a suite's, each pack and
   worktree has its own files. The pack names the files the tests wrote.
 
 - **Find your way: every screen says what it is, and the decision records open in the product**

@@ -464,7 +464,12 @@ class GoldWitness:
         with Workspace.create(self.repo, self.task.task_id, dest, config=self.config) as ws:
             ws.overlay_tests(self.task.test_files)
             ws.overlay_sources(self.task.src_files)
-            run = self.runner.run_for(
+            # a belt-scope control (``allow_failing`` set) runs belt 3's whole instrument,
+            # the module build gate included, so the gold is judged as the patch was
+            run_scope = (
+                self.runner.run_belt_for if allow_failing is not None else self.runner.run_for
+            )
+            run = run_scope(
                 self.executor,
                 ws.root,
                 tuple(scope),
@@ -739,7 +744,7 @@ def qualify_task(
                 )
 
             runs = [
-                runner.run_for(
+                runner.run_belt_for(
                     executor,
                     ws.root,
                     task.belt_scope,
@@ -808,7 +813,7 @@ def qualify_task(
                     return refuse(QUAL_TARGET_FLAKY, gold["note"])
                 gold["note"] = f"gold target not green (rc={reds[0].returncode})"
                 return refuse(QUAL_GOLD_NOT_GREEN, gold["note"])
-            belt = runner.run_for(
+            belt = runner.run_belt_for(
                 executor,
                 gws.root,
                 task.belt_scope,

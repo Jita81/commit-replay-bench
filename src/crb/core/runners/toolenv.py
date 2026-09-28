@@ -25,13 +25,18 @@ Navigation
 What it is:   The declared test environment for the host executor — the tool farm, the
               explicit environment and its identity (``DeclaredEnvironment``).
 What it does: Resolves a runner's declared tools against the worker's ``PATH`` (or an explicit
-              path), links them into ``<tmp>/crb-toolenv-<uid>/<key>/bin``, and returns the
+              path), links them into ``<tmp>/crb-toolenv-<euid>/<key>/bin``, and returns the
               complete environment a host test command runs in, with a digest that moves when
-              a declared tool's bytes or version move and never when an undeclared tool
-              appears. It never reads a secret and never inherits ``PATH``.
+              a declared tool's bytes or version move, or what a directory after the farm on
+              ``PATH`` holds, and never when an undeclared tool appears. It never reads a
+              secret, never inherits ``PATH``, reads no host config file (git, Python user
+              site; the runner adds its own, such as ``GOENV=off``), refuses ``PATH`` and
+              loader names a runner option would put over it, and refuses a farm root that is
+              a link or another user's.
 How:          ``ToolSpec`` list → the worker's ``PATH`` / the explicit path → realpath, size and
-              mtime keyed cache of the SHA-256 and the version line → canonical JSON → SHA-256
-              digest → the farm, built in a sibling temp directory and renamed into place.
+              mtime keyed cache of the SHA-256 and the version line → canonical JSON (plus each
+              extra ``PATH`` directory's listing) → SHA-256 digest → the farm, built in a
+              sibling temp directory of a ``0700`` root and renamed into place.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0048-the-host-posture-declares-its-environment.md,
               docs/adr/0019-qualification-is-posture-relative.md
@@ -53,6 +58,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -119,6 +125,33 @@ POSIX_BASICS: tuple[str, ...] = (
 #: name's VALUE enters the digest unless it is a path (:data:`PATH_VALUED`), which counts by
 #: presence: a locale, a time zone or ``GOPROXY=off`` can change an outcome by value.
 HOST_PASSTHROUGH: tuple[str, ...] = ("HOME", "LANG", "LC_ALL", "TZ", "TMPDIR")
+
+#: What every declared environment sets, whatever the host holds: no host config file is
+#: read — git's global and system config and Python's per-user site directory live under
+#: ``HOME`` or ``/etc`` and are host state, not the tests' (a runner adds its own, such as
+#: Go's ``GOENV=off``). Values, so they are part of the digest.
+DECLARED_FIXED_ENV: dict[str, str] = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "PYTHONNOUSERSITE": "1",
+}
+
+#: Names that choose which program or library runs. In ``runner_opts.env`` they would sit
+#: over the declared ``PATH`` (or load code no declaration names) with the digest unchanged,
+#: so a runner that declares its environment refuses them before any test runs
+#: (:func:`refuse_lookup_names`); a pinned toolchain is named in ``runner_opts`` instead.
+LOOKUP_NAMES: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
+    }
+)
 
 #: Passthrough names whose value is a location, not a behaviour (counted by presence only).
 PATH_VALUED: frozenset[str] = frozenset(
@@ -291,23 +324,54 @@ def _canonical(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def directory_listing(directory: str) -> list[list[str]]:
+    """``[name, sha256]`` for every executable entry of ``directory`` (a link counts as the
+    bytes it reaches; an entry that cannot be read is named with ``""``), sorted — what a
+    directory on the tests' ``PATH`` offers them. A missing directory lists nothing."""
+    rows: list[list[str]] = []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return rows
+    for name in names:
+        path = os.path.join(directory, name)
+        real = os.path.realpath(path)
+        if not os.path.isfile(real) or not os.access(real, os.X_OK):
+            continue
+        try:
+            st = os.stat(real)
+            key = (real, st.st_size, st.st_mtime_ns, ())
+            with _CACHE_LOCK:
+                cached = _CACHE.get(key)
+            if cached is None:
+                cached = (_sha256_file(real), "")
+                with _CACHE_LOCK:
+                    _CACHE[key] = cached
+            rows.append([name, cached[0]])
+        except OSError:
+            rows.append([name, ""])
+    return rows
+
+
 def environment_digest(
-    tools: Iterable[ResolvedTool], values: Mapping[str, str], names: Iterable[str]
+    tools: Iterable[ResolvedTool],
+    values: Mapping[str, str],
+    names: Iterable[str],
+    listings: Sequence[Sequence[Sequence[str]]] = (),
 ) -> str:
     """SHA-256 over what can change a test's outcome: each tool's name, version and bytes
     (never its path — two paths to the same bytes are one environment), the values of every
-    name that is not a path, and the set of names present."""
-    return hashlib.sha256(
-        _canonical(
-            {
-                "tools": sorted(
-                    ([t.name, t.version, t.sha256] for t in tools), key=lambda row: row[0]
-                ),
-                "values": dict(sorted(values.items())),
-                "names": sorted(set(names)),
-            }
-        ).encode("utf-8")
-    ).hexdigest()
+    name that is not a path, the set of names present, and what each directory after the
+    farm on ``PATH`` holds (:func:`directory_listing`; hashed only when there is one, so a
+    farm-only environment hashes as it always did)."""
+    record: dict[str, Any] = {
+        "tools": sorted(([t.name, t.version, t.sha256] for t in tools), key=lambda row: row[0]),
+        "values": dict(sorted(values.items())),
+        "names": sorted(set(names)),
+    }
+    if listings:
+        record["path_dirs"] = [list(map(list, listing)) for listing in listings]
+    return hashlib.sha256(_canonical(record).encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -316,12 +380,32 @@ def environment_digest(
 
 
 def farm_root() -> Path:
-    """Where the farms live: ``$CRB_TOOLENV_DIR`` or ``<tmp>/crb-toolenv-<uid>``."""
+    """Where the farms live: ``$CRB_TOOLENV_DIR`` or ``<tmp>/crb-toolenv-<euid>``."""
     override = os.environ.get("CRB_TOOLENV_DIR", "").strip()
     if override:
         return Path(override).expanduser()
-    uid = os.getuid() if hasattr(os, "getuid") else 0
+    uid = os.geteuid() if hasattr(os, "geteuid") else 0
     return Path(tempfile.gettempdir()) / f"crb-toolenv-{uid}"
+
+
+def private_root(base: Path) -> Path:
+    """``base`` made (``0700``) or checked before a farm is built in it. It sits in a shared
+    temporary directory by default, so a root that is a link, or that another user made
+    first, is refused (``PermissionError``): whoever can write there could swap a farm's
+    links between the check and the test's exec. Our own root with looser bits is made
+    ``0700``."""
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    st = os.lstat(base)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise PermissionError(f"the tool farm root {base} is a link or not a directory: refused")
+    # the EFFECTIVE user: the one that creates, and so owns, what the farm holds
+    if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
+        raise PermissionError(
+            f"the tool farm root {base} belongs to another user (uid {st.st_uid}): refused"
+        )
+    if stat.S_IMODE(st.st_mode) != 0o700:
+        os.chmod(base, 0o700)
+    return base
 
 
 def _farm_ok(bin_dir: Path, tools: Sequence[ResolvedTool]) -> bool:
@@ -341,12 +425,11 @@ def ensure_farm(tools: Sequence[ResolvedTool], *, root: Path | None = None) -> P
     key = hashlib.sha256(
         _canonical([[t.name, t.path, t.sha256] for t in present]).encode("utf-8")
     ).hexdigest()[:24]
-    base = Path(root) if root is not None else farm_root()
+    base = private_root(Path(root) if root is not None else farm_root())
     final = base / key
     bin_dir = final / "bin"
     if _farm_ok(bin_dir, present):
         return bin_dir
-    base.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{key}-", dir=base))
     try:
         (staging / "bin").mkdir()
@@ -369,17 +452,31 @@ def ensure_farm(tools: Sequence[ResolvedTool], *, root: Path | None = None) -> P
     return bin_dir
 
 
+def refuse_lookup_names(env: Mapping[str, Any]) -> None:
+    """``ValueError`` naming each :data:`LOOKUP_NAMES` entry ``env`` sets (``runner_opts.env``
+    of a runner that declares its environment), before any test runs."""
+    bad = sorted(str(k) for k in env if str(k) in LOOKUP_NAMES)
+    if bad:
+        raise ValueError(
+            f"runner_opts.env may not set {', '.join(bad)}: it would override the declared "
+            "test environment; name a pinned toolchain in runner_opts (go, python, node, npm) "
+            "or an extra tool in runner_opts.tools (docs/OPERATOR.md, ADR-0048)"
+        )
+
+
 def declare_environment(
     specs: Sequence[ToolSpec],
     *,
     passthrough: Sequence[str] = (),
     host_env: Mapping[str, str] | None = None,
     extra_path: Sequence[str] = (),
+    fixed: Mapping[str, str] | None = None,
     root: Path | None = None,
 ) -> DeclaredEnvironment:
     """The declared environment for ``specs``: the farm as the whole ``PATH`` (then
-    ``extra_path``, directories the runner owns such as a virtualenv's ``bin``), the
-    fixed flags every host command carries, and the host's values of
+    ``extra_path``, directories the runner owns such as a virtualenv's ``bin``, each one's
+    listing part of the digest), the fixed flags every host command carries with
+    :data:`DECLARED_FIXED_ENV` and the runner's ``fixed``, and the host's values of
     :data:`HOST_PASSTHROUGH` plus ``passthrough`` — nothing else from the worker."""
     source = dict(os.environ if host_env is None else host_env)
     search = source.get("PATH", os.defpath)
@@ -391,24 +488,31 @@ def declare_environment(
     env: dict[str, str] = {k: source[k] for k in names if k in source}
     env.setdefault("LANG", "C.UTF-8")
     env.update(LOCAL_FIXED_ENV)
+    env.update(DECLARED_FIXED_ENV)
+    env.update(fixed or {})
     values = {k: v for k, v in env.items() if k not in PATH_VALUED}
-    digest = environment_digest(tools, values, env)
+    digest = environment_digest(tools, values, env, [directory_listing(d) for d in extra_path])
     bin_dir = ensure_farm(tools, root=root)
     env["PATH"] = os.pathsep.join([str(bin_dir), *extra_path])
     return DeclaredEnvironment(tools, env, str(bin_dir), digest)
 
 
 __all__ = [
+    "DECLARED_FIXED_ENV",
     "HOST_PASSTHROUGH",
     "IDENTITY_PREFIX",
+    "LOOKUP_NAMES",
     "PATH_VALUED",
     "POSIX_BASICS",
     "DeclaredEnvironment",
     "ResolvedTool",
     "ToolSpec",
     "declare_environment",
+    "directory_listing",
     "ensure_farm",
     "environment_digest",
     "farm_root",
+    "private_root",
+    "refuse_lookup_names",
     "resolve_tool",
 ]

@@ -342,9 +342,12 @@ def test_go_parse(tmp_path: Path) -> None:
             '{"Action":"output","Package":"github.com/x/gin/render","Test":"TestJSON","Output":"--- FAIL: TestJSON\\n"}',
             '{"Action":"fail","Package":"github.com/x/gin/render","Test":"TestJSON","Elapsed":0.01}',
             '{"Action":"pass","Package":"github.com/x/gin/render","Test":"TestXML","Elapsed":0.01}',
+            # the test binary's own summary line: it ran to its end (a binary that died has none)
+            '{"Action":"output","Package":"github.com/x/gin/render","Output":"FAIL\\n"}',
             '{"Action":"fail","Package":"github.com/x/gin/render","Elapsed":0.5}',  # package-level: no Test
             "not json at all",
             '{"Action":"fail","Package":"github.com/x/gin/binding","Test":"TestForm/sub"}',
+            '{"Action":"output","Package":"github.com/x/gin/binding","Output":"FAIL\\n"}',
         ]
     )
     run = GoRunner(_cfg(Language.GO)).parse(_res(out), tmp_path)

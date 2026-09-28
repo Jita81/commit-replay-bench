@@ -112,8 +112,15 @@ test.describe('repo configuration editing', () => {
     await addRow(page, 'repo-config-belt-list', 'Belt scope', ['tests/', 'packages/'])
     await addRow(page, 'runner-opt-extra_args', 'Extra arguments', ['--selectProjects', 'unit'])
     await page.getByTestId('runner-opt-env-add').click()
+    // a PATH would sit over the declared test environment: refused here as the runner refuses it
     await page.getByLabel('Environment variables name 1', { exact: true }).fill('PATH')
     await page.getByLabel('Environment variables value 1', { exact: true }).fill('/opt/node@24/bin:/usr/bin:/bin')
+    await expect(page.getByText(/PATH cannot be set here/)).toBeVisible()
+    await expect(page.getByTestId('repo-config-save')).toBeDisabled()
+    // the pinned node goes in its own field; the env row keeps a plain setting
+    await page.getByLabel('Environment variables name 1', { exact: true }).fill('TZ')
+    await page.getByLabel('Environment variables value 1', { exact: true }).fill('UTC')
+    await page.getByLabel('node binary', { exact: true }).fill('/opt/node@24/bin/node')
     await expect(page.getByTestId('repo-config-pending')).toContainText('belt_scope, ext, language, runner, runner_opts, test_mode, test_suffix')
 
     const put = nextPut(page)
@@ -125,7 +132,7 @@ test.describe('repo configuration editing', () => {
       test_mode: 'suffix',
       test_suffix: '.test.js|.test.ts|.test.tsx|.snap',
       belt_scope: ['tests/', 'packages/'],
-      runner_opts: { extra_args: ['--selectProjects', 'unit'], env: { PATH: '/opt/node@24/bin:/usr/bin:/bin' } },
+      runner_opts: { node: '/opt/node@24/bin/node', extra_args: ['--selectProjects', 'unit'], env: { TZ: 'UTC' } },
     })
     const toast = page.getByTestId('repo-config-toast')
     await expect(toast).toBeVisible()
@@ -152,8 +159,8 @@ test.describe('repo configuration editing', () => {
     await expect(page.getByLabel('Extra arguments 2', { exact: true })).toHaveValue('unit')
     await page.getByTestId('runner-opts-mode-json').click()
     const json = page.getByTestId('runner-opts-json')
-    expect(JSON.parse(await json.inputValue())).toEqual({ extra_args: ['--selectProjects', 'unit'], env: { PATH: '/opt/node@24/bin:/usr/bin:/bin' } })
-    await json.fill(JSON.stringify({ extra_args: ['--selectProjects', 'unit', '--ci'], env: { PATH: '/opt/node@24/bin:/usr/bin:/bin' } }))
+    expect(JSON.parse(await json.inputValue())).toEqual({ node: '/opt/node@24/bin/node', extra_args: ['--selectProjects', 'unit'], env: { TZ: 'UTC' } })
+    await json.fill(JSON.stringify({ node: '/opt/node@24/bin/node', extra_args: ['--selectProjects', 'unit', '--ci'], env: { TZ: 'UTC' } }))
     await page.getByTestId('runner-opts-mode-form').click()
     await expect(page.getByLabel('Extra arguments 3', { exact: true })).toHaveValue('--ci')
     await expect(page.getByTestId('repo-config-pending')).toContainText('runner_opts')
@@ -170,14 +177,16 @@ test.describe('repo configuration editing', () => {
     await page.getByTestId('repo-config-test-mode').selectOption('prefix')
     await expect(page.getByTestId('repo-config-test-prefix')).toHaveValue('tests/')
     await page.getByTestId('repo-config-belt-list-remove-1').click() // drop packages/, keep tests/
-    // the jest-only key is kept but listed as unread (env is read by pytest too, so it stays a
-    // sub-form field); drop both, then pin the interpreter
+    // the node-only keys are kept but listed as unread (env is read by pytest too, so it stays
+    // a sub-form field); drop them all, then pin the interpreter
     const extra = page.getByTestId('runner-opts-extra')
     await expect(extra).toContainText('extra_args')
+    await expect(extra).toContainText('node')
     await expect(extra).not.toContainText('env')
     await page.getByTestId('runner-opts-extra-remove-extra_args').click()
+    await page.getByTestId('runner-opts-extra-remove-node').click()
     await expect(page.getByTestId('runner-opts-extra')).toHaveCount(0)
-    await expect(page.getByLabel('Environment variables name 1', { exact: true })).toHaveValue('PATH')
+    await expect(page.getByLabel('Environment variables name 1', { exact: true })).toHaveValue('TZ')
     await page.getByTestId('runner-opt-env-remove-0').click()
     if (env.python) await page.getByLabel('Python interpreter', { exact: true }).fill(env.python)
     await page.getByLabel('PYTHONPATH suffix', { exact: true }).fill('/src')

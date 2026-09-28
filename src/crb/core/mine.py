@@ -448,7 +448,7 @@ def qualify(
             return MineOutcome(sha, None, "target green at parent", time.monotonic() - started)
 
         belt_scope = runner.belt_scope(target_scope, cand.test_files)
-        base = runner.run_for(
+        base = runner.run_belt_for(
             executor, ws.root, belt_scope, timeout=timeout, authored=repo.author_date(cand.sha)
         )
         if base.timed_out:
@@ -678,7 +678,7 @@ def gold_check(
             )
             _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
             return task.with_(gold_clean=False, gold_note=note)
-        belt = runner.run_for(
+        belt = runner.run_belt_for(
             executor, ws.root, task.belt_scope, timeout=timeout, authored=task.authored
         )
         if belt.timed_out or belt.parse_error:

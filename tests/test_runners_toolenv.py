@@ -10,8 +10,11 @@ What it does: Pins that the declared environment holds exactly the declared tool
               host executor inherits nothing from a declared command; that a Go test which
               fails when an extra tool is on the ``PATH`` reads the same with that tool on the
               worker's ``PATH`` (run and qualification alike); and that the host posture and
-              its qualification record name the environment, so a pool qualified under one
-              environment is refused under another.
+              its qualification record and evidence pack name the environment, so a pool
+              qualified under one environment is refused under another; and that nothing gets
+              round it — a ``PATH`` or loader name in ``runner_opts.env`` is refused, a venv
+              ``bin``'s contents move the digest and crb's own never reaches the tests, no
+              go env file or git config under ``HOME`` is read, and the farm root is private.
 How:          Fake tools in ``tmp_path`` directories prepended to ``PATH``; a real ``go`` for
               the fixture module (skipped without one); ``resolve_posture`` and ``context_for``
               for the identity.
@@ -38,6 +41,7 @@ import pytest
 from crb.core.deps import HOST_ENV_DEPS, TaskDeps
 from crb.core.execution import Command, LocalExecutor
 from crb.core.git import GitRepo
+from crb.core.grade import Belts
 from crb.core.mine import qualify
 from crb.core.posture import Posture, PostureMismatch, resolve_posture
 from crb.core.qualify import context_for
@@ -47,7 +51,7 @@ from crb.core.runners.toolenv import (
     ToolSpec,
     declare_environment,
 )
-from crb.core.spec import BELT_BARE, Language, RepoConfig
+from crb.core.spec import BELT_BARE, Language, RepoConfig, TaskSpec
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -356,7 +360,7 @@ def test_the_node_runners_declare_node_npm_and_the_basics_never_the_host_path(
 
 
 def test_maven_and_cargo_still_inherit_and_say_so() -> None:
-    """G-758: the two runners without a declaration hand the tests the worker's allowlist."""
+    """G-791: the two runners without a declaration hand the tests the worker's allowlist."""
     for runner_name, lang in (("maven", Language.JVM), ("cargo", Language.RUST)):
         runner = get_runner(RepoConfig(name="x", language=lang, runner=runner_name))
         assert runner.declared_tools(LocalExecutor()) is None
@@ -380,3 +384,271 @@ def test_the_declared_environment_reads_the_executors_host_environment(tmp_path:
         LocalExecutor(base_env={k: v for k, v in base.items() if k != "GOPROXY"})
     )
     assert online is not None and online.digest != offline.digest
+
+
+# ---------------------------------------------------------------------------
+# Stream Q2's verifiers (2026-09-28): the ways round the declaration, each closed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES"])
+@pytest.mark.parametrize(
+    ("runner_name", "lang"),
+    [("go", Language.GO), ("pytest", Language.PYTHON), ("node", Language.JAVASCRIPT)],
+)
+def test_a_path_in_runner_opts_env_is_refused_before_a_test_runs(
+    tmp_path: Path, name: str, runner_name: str, lang: Language
+) -> None:
+    """A ``PATH`` in ``runner_opts.env`` would sit over the tool farm and bring the leak back
+    with the digest unchanged; a loader variable would run code no declaration names."""
+    runner = get_runner(
+        RepoConfig(
+            name="x", language=lang, runner=runner_name, runner_opts={"env": {name: "/opt/x"}}
+        )
+    )
+    with pytest.raises(ValueError, match=rf"runner_opts\.env.*{name}"):
+        runner.declared_environment(LocalExecutor(), tmp_path)
+    with pytest.raises(ValueError, match=r"runner_opts\.env"):
+        runner.run(LocalExecutor(), tmp_path, ("x",))
+
+
+def test_a_pinned_node_leads_the_setup_path_so_npm_runs_under_it(tmp_path: Path) -> None:
+    """What the refused ``PATH`` was for: an engine-strict repository's ``npm`` (a node
+    script) must run under the pinned ``node``. ``runner_opts.node`` now leads setup's
+    ``PATH`` — declared, and part of the test environment's digest."""
+    pinned = _tool(tmp_path / "node24" / "bin", "node")
+    runner = get_runner(
+        RepoConfig(
+            name="js",
+            language=Language.JAVASCRIPT,
+            runner="node",
+            runner_opts={"node": str(pinned)},
+        )
+    )
+    ex = LocalExecutor(base_env={"PATH": "/usr/bin:/bin"})
+    env = runner.setup_env(ex)
+    assert env["PATH"].split(os.pathsep) == [str(pinned.parent), "/usr/bin", "/bin"]
+    plain = get_runner(RepoConfig(name="js", language=Language.JAVASCRIPT, runner="node"))
+    assert "PATH" not in plain.setup_env(ex)
+
+
+def test_the_evidence_pack_carries_the_declared_environment(tmp_path: Path) -> None:
+    """Packs are stamped with the run's ``Posture.to_dict()``; the pack itself — its dict and
+    its hash — must carry the environment's identity and its tool list."""
+    from crb.core import evidence as ev
+    from fixtures.posture import posture_result
+
+    runner = get_runner(RepoConfig(name="pyfix", language=Language.PYTHON, runner="pytest"))
+    posture = resolve_posture(LocalExecutor(), runner, deps_mode="host-env", root=tmp_path)
+    assert posture.environment.startswith(IDENTITY_PREFIX)
+    task = TaskSpec(
+        task_id="a" * 40,
+        repo="pyfix",
+        subject="s",
+        authored="2026-01-01T00:00:00+00:00",
+        test_files=["tests/test_a.py"],
+        src_files=["a.py"],
+        target_tests=["tests/test_a.py"],
+        belt_scope=["tests/"],
+    )
+    graded = posture_result(
+        task.task_id, "pyfix", "sighted", clean=True, belts=Belts(True, True, True, True)
+    )
+
+    def pack(p: dict[str, object]) -> ev.EvidencePack:
+        return ev.EvidencePack(
+            task=task,
+            grade=graded,
+            apparatus=ev.ApparatusStamp(runner="pytest", posture=p),
+            builder=ev.BuilderRef(name="b"),
+            run_id="r",
+            trial="t1",
+            created="2026-09-28T00:00:00+00:00",
+        )
+
+    here = pack(posture.to_dict())
+    stamped = here.to_dict()["apparatus"]["posture"]
+    assert stamped["environment"] == posture.environment
+    assert stamped["environment_tools"] == posture.environment_tools
+    moved = pack({**posture.to_dict(), "environment": IDENTITY_PREFIX + "0" * 64})
+    assert moved.pack_hash != here.pack_hash
+
+
+def _venv(where: Path) -> Path:
+    import subprocess
+    import sys
+
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(where)], check=True, timeout=120
+    )
+    return where / "bin" / "python"
+
+
+def test_a_tool_in_the_interpreters_venv_bin_moves_the_digest(tmp_path: Path) -> None:
+    """The venv's ``bin`` follows the farm on the tests' ``PATH``, so what is in it is part of
+    the identity: a console script added there moves the digest."""
+    python = _venv(tmp_path / "venv")
+    runner = get_runner(
+        RepoConfig(
+            name="pyfix",
+            language=Language.PYTHON,
+            runner="pytest",
+            runner_opts={"python": str(python)},
+        )
+    )
+    ex = LocalExecutor()
+    before = runner.declared_environment(ex, tmp_path)
+    assert before is not None and str(python.parent) in before.env["PATH"].split(os.pathsep)
+    _tool(python.parent, LEAK_TOOL)
+    after = runner.declared_environment(ex, tmp_path)
+    assert after is not None and after.digest != before.digest
+
+
+def test_the_fallback_interpreter_never_puts_crbs_own_venv_bin_on_the_path(
+    tmp_path: Path,
+) -> None:
+    """With no interpreter configured the tests run under crb's own; its ``bin`` (ruff, mypy,
+    crb, uvicorn…) is not the repository's and never reaches the tests."""
+    import sys
+
+    runner = get_runner(RepoConfig(name="pyfix", language=Language.PYTHON, runner="pytest"))
+    declared = runner.declared_environment(LocalExecutor(), tmp_path)
+    assert declared is not None
+    assert declared.env["PATH"].split(os.pathsep) == [declared.bin_dir]
+    assert str(Path(sys.executable).parent) not in declared.env["PATH"]
+    assert (Path(declared.bin_dir) / "python").exists()
+
+
+def test_a_bare_interpreter_name_resolves_on_the_executors_path(tmp_path: Path) -> None:
+    host = tmp_path / "host"
+    crbpy = _tool(host, "crbpy")
+    runner = get_runner(
+        RepoConfig(
+            name="pyfix", language=Language.PYTHON, runner="pytest", runner_opts={"python": "crbpy"}
+        )
+    )
+    declared = runner.declared_environment(LocalExecutor(base_env={"PATH": str(host)}), tmp_path)
+    assert declared is not None
+    python = next(t for t in declared.tools if t.name == "python")
+    assert python.path == str(crbpy)
+
+
+def test_every_declared_environment_reads_no_host_git_or_go_config_file() -> None:
+    """``$HOME``'s go env file and git's global and system config are host state: the
+    declaration switches all three off, by value, so they are part of the digest."""
+    for runner_name, lang in (
+        ("go", Language.GO),
+        ("pytest", Language.PYTHON),
+        ("node", Language.JAVASCRIPT),
+    ):
+        runner = get_runner(RepoConfig(name="x", language=lang, runner=runner_name))
+        declared = runner.declared_environment(LocalExecutor())
+        assert declared is not None
+        assert declared.env["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert declared.env["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert declared.env["PYTHONNOUSERSITE"] == "1"
+    go = get_runner(gorepo.config()).declared_environment(LocalExecutor())
+    assert go is not None and go.env["GOENV"] == "off"
+
+
+def _real_go_env(name: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["go", "env", name], capture_output=True, text=True, check=True, timeout=60
+    ).stdout.strip()
+
+
+_ARCH_TEST = (
+    'package leak\n\nimport (\n\t"runtime"\n\t"testing"\n)\n\n'
+    "func TestArch(t *testing.T) {\n"
+    '\tif runtime.GOARCH != "@ARCH@" {\n'
+    '\t\tt.Fatalf("built for %s", runtime.GOARCH)\n'
+    "\t}\n}\n"
+)
+
+
+@needs_go
+def test_a_go_env_file_under_home_never_changes_a_result(leak_module: Path, tmp_path: Path) -> None:
+    """``go env -w GOARCH=…`` writes a file under ``$HOME`` that every later ``go test``
+    reads; the declared environment passes ``HOME`` through, so the file must be ignored."""
+    import subprocess
+
+    arch = _real_go_env("GOARCH")
+    (leak_module / "leak" / "arch_test.go").write_text(
+        _ARCH_TEST.replace("@ARCH@", arch),
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    base = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(home),
+        "GOCACHE": _real_go_env("GOCACHE"),
+        "GOMODCACHE": _real_go_env("GOMODCACHE"),
+    }
+    runner = get_runner(gorepo.config())
+    clean = runner.run(LocalExecutor(base_env=base), leak_module, ("./leak",))
+    assert clean.green, clean.tail
+    before = runner.declared_environment(LocalExecutor(base_env=base))
+    goenv = subprocess.run(
+        ["go", "env", "GOENV"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**base, "GOENV": ""},
+        timeout=60,
+    ).stdout.strip()
+    Path(goenv).parent.mkdir(parents=True, exist_ok=True)
+    Path(goenv).write_text(f"GOARCH={'amd64' if arch != 'amd64' else 'arm64'}\n", encoding="utf-8")
+    configured = runner.run(LocalExecutor(base_env=base), leak_module, ("./leak",))
+    after = runner.declared_environment(LocalExecutor(base_env=base))
+    assert (configured.green, configured.failing) == (clean.green, clean.failing)
+    assert before is not None and after is not None and before.digest == after.digest
+
+
+def test_a_git_config_under_home_never_reaches_a_python_test(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text("[crb]\n\tleak = 1\n", encoding="utf-8")
+    root = tmp_path / "py"
+    root.mkdir()
+    (root / "test_git.py").write_text(
+        "import subprocess\n\n\ndef test_no_host_git_config():\n"
+        "    r = subprocess.run(['git', 'config', '--get', 'crb.leak'], capture_output=True)\n"
+        "    assert r.returncode != 0, r.stdout\n",
+        encoding="utf-8",
+    )
+    runner = get_runner(RepoConfig(name="pyfix", language=Language.PYTHON, runner="pytest"))
+    ex = LocalExecutor(base_env={"PATH": os.environ["PATH"], "HOME": str(home)})
+    run = runner.run(ex, root, ("test_git.py",))
+    assert run.green, run.tail
+
+
+def test_the_farm_root_is_private_to_its_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The farm root is where a grade's tools are linked: a root another user can write to
+    could swap a link between the check and the exec, so it is made ``0700`` and refused when
+    it is a link or belongs to another user."""
+    from crb.core.runners import toolenv
+
+    host = tmp_path / "host"
+    _tool(host, "crbdeclared")
+    root = tmp_path / "farms"
+    root.mkdir(mode=0o777)
+    root.chmod(0o777)
+    toolenv.declare_environment((ToolSpec("crbdeclared"),), host_env={"PATH": str(host)}, root=root)
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    link = tmp_path / "farms-link"
+    link.symlink_to(root)
+    with pytest.raises(PermissionError, match="farm root"):
+        toolenv.declare_environment(
+            (ToolSpec("crbdeclared"),), host_env={"PATH": str(host)}, root=link
+        )
+    other_uid = os.geteuid() + 1
+    monkeypatch.setattr(toolenv.os, "geteuid", lambda: other_uid)
+    with pytest.raises(PermissionError, match="another user"):
+        toolenv.declare_environment(
+            (ToolSpec("crbdeclared"),), host_env={"PATH": str(host)}, root=root
+        )

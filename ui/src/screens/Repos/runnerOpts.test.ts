@@ -37,15 +37,15 @@ describe('runnerOpts — the key table mirrors crb.core.runners', () => {
   it('exposes exactly the keys each runner reads', () => {
     expect(keysOf('pytest')).toEqual(['python', 'pythonpath_suffix', 'pip', 'pip_fallback', 'uninstall', 'tools', 'env'])
     expect(keysOf('node')).toEqual(['node', 'npm', 'tools', 'env']) // node --test never reads extra_args
-    expect(keysOf('jest')).toEqual(['npm', 'extra_args', 'tools', 'env'])
-    expect(keysOf('vitest')).toEqual(['npm', 'extra_args', 'tools', 'env'])
-    expect(keysOf('mocha')).toEqual(['npm', 'mocha_require', 'extra_args', 'tools', 'env'])
+    expect(keysOf('jest')).toEqual(['node', 'npm', 'extra_args', 'tools', 'env'])
+    expect(keysOf('vitest')).toEqual(['node', 'npm', 'extra_args', 'tools', 'env'])
+    expect(keysOf('mocha')).toEqual(['node', 'npm', 'mocha_require', 'extra_args', 'tools', 'env'])
     expect(keysOf('go')).toEqual(['go', 'cgo', 'gomodcache', 'tools'])
     expect(keysOf('cargo')).toEqual(['cargo', 'offline', 'cargo_home'])
     expect(keysOf('maven')).toEqual(['mvn', 'maven_flags', 'java_home', 'offline', 'writable', 'maven_opts'])
     // the BaseRunner keys follow every runner's own
     expect(specsFor('go').map((s) => s.key)).toEqual(['go', 'cgo', 'gomodcache', 'tools', 'timeout', 'setup_timeout'])
-    // maven and cargo still inherit the host's PATH (G-758): they read no tools list
+    // maven and cargo still inherit the host's PATH (G-791): they read no tools list
     expect(keysOf('maven')).not.toContain('tools')
     expect(keysOf('cargo')).not.toContain('tools')
     expect(specsFor('').map((s) => s.key)).toEqual(['timeout', 'setup_timeout'])
@@ -81,5 +81,16 @@ describe('runnerOpts — the key table mirrors crb.core.runners', () => {
     expect(validateRunnerOpts('mocha', { mocha_require: { a: 1 } })).toEqual({ mocha_require: 'Input should be a string' })
     // keys the runner does not read are not judged
     expect(validateRunnerOpts('go', { pip: 'whatever' })).toEqual({})
+  })
+
+  it('refuses PATH and loader variables in env, as the runner does before any test runs', () => {
+    // a PATH would sit over the declared test environment with its digest unchanged (ADR-0048)
+    expect(validateRunnerOpts('node', { env: { PATH: '/opt/node@24/bin:/usr/bin' } })).toEqual({
+      env: expect.stringMatching(/^PATH cannot be set here/),
+    })
+    expect(validateRunnerOpts('pytest', { env: { LD_PRELOAD: 'x', A: 'b' } })).toEqual({
+      env: expect.stringMatching(/^LD_PRELOAD cannot be set here/),
+    })
+    expect(validateRunnerOpts('jest', { env: { TZ: 'UTC' }, node: '/opt/node@24/bin/node' })).toEqual({})
   })
 })

@@ -26,7 +26,8 @@ Navigation
 What it is:   The Python runner — ``PytestRunner`` — and the reference implementation every
               other language runner mirrors.
 What it does: Builds a deterministic ``python -m pytest -rfE`` command for a scope, parses the
-              short summary into failing ids, checks a target file really defines tests
+              short summary into failing ids (a session that stopped early or printed no
+              result is unattributed), checks a target file really defines tests
               (malformed-oracle guard), installs the repository's test dependencies into a venv
               under ``env_dir`` (the network phase), declares the tools a test may run on the
               host (the interpreter, git and the basics; ADR-0048), and detects ruff for belt 5.
@@ -42,7 +43,8 @@ Works with:   src/crb/core/runners/base.py (the contract and the setup records),
               src/crb/core/execution.py (``Executor.tool`` picks the sandbox interpreter),
               src/crb/core/runners/__init__.py (registered as ``"pytest"``),
               tests/fixtures/pyrepo.py (the fixture repository the tests drive it on)
-Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_lint.py
+Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_lint.py,
+              tests/test_runners_toolenv.py, tests/test_runners_early_exit.py
 Touch when:   a Python repository needs a different install recipe — prefer ``runner_opts``
               (``pip``, ``pip_fallback``, ``uninstall``, ``python``, ``env``, ``tools``,
               ``dist_info_stubs``; docs/OPERATOR.md) over editing this file; a new pytest
@@ -75,6 +77,21 @@ from crb.core.runners.base import (
     tail_of,
 )
 from crb.core.runners.toolenv import POSIX_BASICS, ToolSpec
+
+#: pytest's banner when a session stops before every test ran: an interrupt, ``pytest.exit``
+#: or a failure limit (``-x`` / ``--maxfail`` set by a repository's conftest).
+_PYTEST_STOP = re.compile(
+    r"^!{3,} ((?:KeyboardInterrupt|Interrupted:|[\w.]*Exit:|stopping after)[^!\n]*) !{3,}\s*$",
+    re.MULTILINE,
+)
+#: The result line every finished session prints (``2 passed in 0.10s``, ``no tests ran in
+#: 0.01s``, ``1 failed, 1 error in 75.20s (0:01:15)``, an old pytest's ``in 0.12 seconds``),
+#: with or without the ``=`` rule.
+_PYTEST_RESULT = re.compile(
+    r"^=*\s*(?:no tests ran|\d+ [a-z]+(?:, \d+ [a-z]+)*)"
+    r"(?: in \d+(?:\.\d+)? ?s(?:econds)?(?: \(\d+:\d\d:\d\d\))?)?\s*=*\s*$",
+    re.MULTILINE,
+)
 
 #: (interpreter, spec) pairs already satisfied this process — one install per commit pin.
 _PINNED_RUFF_DONE: set[tuple[str, str]] = set()
@@ -158,35 +175,51 @@ class PytestRunner(BaseRunner):
         return self.configured_python(root, env_dir) or sys.executable
 
     # --- the declared environment on the host (ADR-0048) ----------------------------
-    def _host_python(self, root: Path | None) -> tuple[str | None, bool]:
-        """The interpreter a host command runs, as an absolute path when one can be
-        named, and whether it is a virtualenv's (a ``pyvenv.cfg`` beside its ``bin``)."""
-        python = self.python_for(Path(root) if root is not None else Path("."), self.env_dir)
+    def _host_python(
+        self, root: Path | None, executor: Executor | None = None
+    ) -> tuple[str | None, bool, bool]:
+        """The interpreter a host command runs, as an absolute path when one can be named
+        (a bare name is looked up on the EXECUTOR's ``PATH``, never the process's), whether
+        it is a virtualenv's (a ``pyvenv.cfg`` beside its ``bin``), and whether the
+        repository configured it (``runner_opts.python`` or the setup venv) rather than
+        falling back to crb's own."""
+        configured = self.configured_python(
+            Path(root) if root is not None else Path("."), self.env_dir
+        )
+        python = configured or sys.executable
         if not os.path.isabs(python):
-            python = shutil.which(python) or ""
+            base = getattr(executor, "base_env", None)
+            search = base.get("PATH", os.defpath) if isinstance(base, dict) else None
+            python = shutil.which(python, path=search) or ""
         if not python:
-            return None, False
-        return python, (Path(python).parent.parent / "pyvenv.cfg").is_file()
+            return None, False, configured is not None
+        is_venv = (Path(python).parent.parent / "pyvenv.cfg").is_file()
+        return python, is_venv, configured is not None
 
     def declared_tools(self, executor: Executor, root: Path | None = None) -> tuple[ToolSpec, ...]:
         """The interpreter the tests run (as ``python`` and ``python3``), ``git`` and the
-        POSIX basics. A virtualenv's interpreter is named in the identity but reached
-        through the venv's own ``bin`` (:meth:`declared_path`), never linked elsewhere."""
-        python, is_venv = self._host_python(root)
-        interp = [
-            ToolSpec(name, python, ("-V",), link=not is_venv) for name in ("python", "python3")
-        ]
+        POSIX basics. The repository's own virtualenv interpreter is named in the identity
+        but reached through the venv's ``bin`` (:meth:`declared_path`), never linked
+        elsewhere; crb's own interpreter (the fallback) is linked alone, so crb's ``bin``
+        (ruff, mypy, crb…) never reaches a repository's tests."""
+        python, is_venv, configured = self._host_python(root, executor)
+        link = not (is_venv and configured)
+        interp = [ToolSpec(name, python, ("-V",), link=link) for name in ("python", "python3")]
         return (
             *interp,
             ToolSpec("git", None, ("--version",)),
             *(ToolSpec(name) for name in POSIX_BASICS),
         )
 
-    def declared_path(self, root: Path | None = None) -> tuple[str, ...]:
-        """A virtualenv's ``bin``: the interpreter and the console scripts the repository's
-        own dependencies installed (the host-env mode's declared dependency set)."""
-        python, is_venv = self._host_python(root)
-        return (str(Path(python).parent),) if python and is_venv else ()
+    def declared_path(
+        self, root: Path | None = None, executor: Executor | None = None
+    ) -> tuple[str, ...]:
+        """The repository's virtualenv ``bin``: the interpreter and the console scripts its
+        own dependencies installed (the host-env mode's declared dependency set). What it
+        holds — each entry's name and bytes — is part of the digest; crb's own venv is
+        never on this list."""
+        python, is_venv, configured = self._host_python(root, executor)
+        return (str(Path(python).parent),) if python and is_venv and configured else ()
 
     # --- execution ---------------------------------------------------------------
     def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:
@@ -285,10 +318,37 @@ class PytestRunner(BaseRunner):
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
         """Failing ids from the ``-rfE`` short summary; the base ``run`` adds the
-        fail-closed ``parse_error`` when rc≠0 and nothing was parsed."""
-        failing = parse_pytest_failures(result.combined)
+        fail-closed ``parse_error`` when rc≠0 and nothing was parsed. A session that did not
+        run to its end is UNATTRIBUTED whatever it names (stream Q2's verifiers): the summary
+        lists only the failures so far — the baselined ones — and every later test is
+        unobserved. That is an exit code other than 0 or 1, a stop banner
+        (``KeyboardInterrupt``, ``pytest.exit``, ``stopping after``), or exit 0 with no
+        result line at all (``os._exit(0)``)."""
+        text = result.combined
+        failing = parse_pytest_failures(text)
+        parse_error = ""
+        stop = _PYTEST_STOP.search(text)
+        if stop:
+            parse_error = (
+                f"unattributed failure (pytest stopped early: {stop.group(1).strip()}; "
+                "later tests never ran)"
+            )
+        elif result.returncode not in (0, 1) and failing:
+            parse_error = (
+                f"unattributed failure (pytest stopped early: exit code {result.returncode}; "
+                "later tests never ran)"
+            )
+        elif result.returncode == 0 and not _PYTEST_RESULT.search(text):
+            parse_error = (
+                "unattributed failure (pytest exited 0 without reporting a result: the session "
+                "never finished)"
+            )
         return TestRun(
-            result.returncode, failing, tail_of(result.combined), duration_s=result.duration_s
+            result.returncode,
+            failing,
+            tail_of(text),
+            duration_s=result.duration_s,
+            parse_error=parse_error,
         )
 
     def is_valid_oracle(self, root: Path, test_file: str) -> bool:

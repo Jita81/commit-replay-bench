@@ -451,7 +451,7 @@ def build_item(
         posture = posture or resolve_posture(
             executor, runner, deps_mode=null.mode(config, executor.name), root=ws.root
         )
-        base = runner.run_for(
+        base = runner.run_belt_for(
             executor, ws.root, belt_scope, timeout=timeout, authored=None, deps=deps.parent
         )
         base_labels: dict[str, str] = {}

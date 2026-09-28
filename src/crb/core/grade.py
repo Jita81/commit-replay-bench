@@ -894,7 +894,7 @@ def grade(
             )
 
         # --- belt 3: no new failures vs the IN-POSTURE baseline ---------------------
-        belt_run = runner.run_for(
+        belt_run = runner.run_belt_for(
             executor,
             ws.root,
             task.belt_scope,

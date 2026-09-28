@@ -189,11 +189,14 @@ def _worker_args() -> Any:
 
 @pytest.mark.parametrize("value", [" ", "none", "host"])
 def test_a_worker_refuses_an_executor_setting_that_is_not_local_or_docker(
-    value: str, tmp_path: Path
+    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``CRB_SANDBOX__EXECUTOR=' '`` stripped to ``''`` once started a dev worker whose
     ``_executor`` fell back to ``local``: the setting is refused at start-up instead."""
     from crb.server import worker_main
+
+    # settings_from_args sets CRB_HOME in the process environment: undone after the test
+    monkeypatch.setenv("CRB_HOME", str(tmp_path / "h"))
 
     env = {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "dev", "CRB_SANDBOX__EXECUTOR": value}
     with pytest.raises(ValueError, match="expected 'local' or 'docker'"):
