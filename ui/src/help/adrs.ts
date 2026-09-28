@@ -19,7 +19,7 @@
  * How:          The glob is resolved by Vite (`../../../docs/adr/…` is the repository's
  *               docs/adr); the dev server reads it through `server.fs.allow` (`../docs`), and
  *               the image build carries it because deploy/Dockerfile.dockerignore re-includes
- *               `docs/adr/*.md` (P-106 — before that the image shipped no guide at all).
+ *               `docs/adr/*.md` (P-173 — before that the image shipped no guide at all).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-073)
  * Works with:   ui/src/screens/Help/HelpPage.tsx (lists `ADR_TITLES` as links),

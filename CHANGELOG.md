@@ -17,7 +17,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   The claims gate reads README, every guide, every review and every definition-of-done
   page; README's `[measured]` tags name vendored rows that a test re-derives; ISO/IEC 25010's characteristics are
   mapped to the checks that evidence part of them (`crb.core.quality_model`, EVIDENCE-AND-CLAIMS §9), and a
-  conformity claim is refused (DL-100, DL-101).
+  conformity claim is refused (DL-088, DL-089).
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

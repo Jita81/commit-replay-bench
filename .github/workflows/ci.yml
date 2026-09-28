@@ -155,7 +155,7 @@ jobs:
         with:
           persist-credentials: false
           # the artefacts' history vouches for each retired gap id, and the base branch's
-          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-060)
+          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-127)
           fetch-depth: 0
       - uses: actions/setup-python@v7
         with:

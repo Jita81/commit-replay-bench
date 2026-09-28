@@ -34,7 +34,7 @@ Every claim in this repository — README, ADRs, architecture, UI copy — carri
 pages on its allowlist, finds the sentences that quantify something, and fails when one
 carries no tag — or when a `[measured]` one carries no `n`, no method and no apparatus
 version, or says its own rows are not in this repository: a reading nobody can re-derive
-here is a `[hypothesis]` with that reason (DL-100). On README, the most public page, a `[measured]` tag must also say where its rows
+here is a `[hypothesis]` with that reason (DL-088). On README, the most public page, a `[measured]` tag must also say where its rows
 are — `rows: data/<campaign>/`, a directory the repository carries with a checksum manifest
 (`MANIFEST.sha256`) that verifies — and `tests/test_measured_claims.py` re-derives every
 number the tag covers, and its apparatus, from those rows with the product's own code. Each

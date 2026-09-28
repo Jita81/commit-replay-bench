@@ -12,11 +12,11 @@ How:          One table per wave; its `gaps` column holds gap ids and nothing el
               artefacts' git history shows they were gaps; every gap among the order of
               work's first 25 rows must sit in some wave.
 Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0026-the-context-standard.md (Waves 2 to 5 build it; DL-098,
-              DL-099); DL-063 records the rule the checker enforces on this file
+ADRs:         docs/adr/0026-the-context-standard.md (Waves 2 to 5 build it; DL-086,
+              DL-087); DL-063 records the rule the checker enforces on this file
 Works with:   docs/dod/GAP-ANALYSIS.md (the order of work this batches), docs/dod/STANDARD.md
               (§6: the next feature is the top of the gap analysis), scripts/dod_check.py
-              (refuses a wave item that is not a gap id), docs/PREVENTION.md (P-051, the class
+              (refuses a wave item that is not a gap id), docs/PREVENTION.md (P-118, the class
               this rule closes), docs/reviews/2026-09-25-external-assessment.md (the source of
               the "trustworthy when" criteria Wave 2 closes)
 Tested by:    tests/test_dod_check.py::test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid,
@@ -66,8 +66,8 @@ wave has started.
 | D0 · registered, not yet closed | G-970, G-971, G-972 | the docker-wait flake class, the five executor and mining defects (the assessment's B5) and the append-only probe (A5(c)) registered in `docs/PREVENTION.md`, each pending with its gap |
 | D0 · the criteria Wave 2 needs | G-973, G-974, G-975 | the criteria the assessment's A3 (`lint_status`), A6 (`mutation.v2`) and C4 (the delivered change's own cell) need before Wave 2 may build them, added `unmet` |
 
-D1, the checker, closes in the same change the register rows that name it (P-051, "the record
-drifts from the order of work", and P-060, "the generated file vouches for itself"), so it
+D1, the checker, closes in the same change the register rows that name it (P-118, "the record
+drifts from the order of work", and P-127, "the generated file vouches for itself"), so it
 carries no gap id: `dod_check.py` refuses a gap line no criterion cites, a wave item here that
 is not a gap id, and a gap among the first 25 of the order of work that no wave names; and it
 keeps a closed gap nameable only while the history vouches for it (DL-063, DL-064).
@@ -108,7 +108,7 @@ The external assessment's conditions for trust, all but the measured README sect
 Wave 3's; spend under control; and the operator's thesis of 26 September 2026 made buildable
 (ADR-0026): a context arm and a class-set version on every row, registered readings under the
 look rule, the leak guard and the entry gate. **T, the thesis record, lands first** and is docs
-only: ADR-0026, DL-098 and DL-099, the criteria and gaps the thesis needs, the corrected
+only: ADR-0026, DL-086 and DL-087, the criteria and gaps the thesis needs, the corrected
 specification-lever record and this plan. It closes no gap, so it has no row. Every other stream
 branches from T's head. R builds on G's branch, because it owns the one apparatus bump that G's
 `lint_status`, `failure_kind` and `mutation.v2` ride; F owns `worker.py`, the factory and the
