@@ -21,7 +21,9 @@
  *               escape, a thin set) reads "Done, with a finding" in amber — deliver is withheld
  *               until it is answered. A row whose oracle, controls or map read fails for a reason
  *               other than 404 (never run) shows that error with Retry in its Next stage cell,
- *               never a stage state (G-124). Every door to /results is named "Baseline", as the nav
+ *               never a stage state (G-124); on the walk, such a failed read (`failedRead`) is
+ *               said with Retry in place of the stages, with no stage action offered, so a
+ *               failed map never reads "Not started" beside a paid Measure… (G-730). Every door to /results is named "Baseline", as the nav
  *               names it, and opens /results (a measured row's button; an unmeasured row's reads
  *               "Continue" and opens the walk); at phone width the repository link is the row's
  *               door to the walk. Every element a reader meets — the two connect buttons, each
@@ -144,6 +146,26 @@ function clock(iso: string): string {
 /** A 404 from the oracle / controls routes means "never run" — a stage state, not an error. */
 function notRun(err: unknown): boolean {
   return isApiError(err) && err.status === 404
+}
+
+interface Read {
+  isError: boolean
+  error: unknown
+  refetch: () => unknown
+}
+
+/**
+ * The first of a repository's three stage reads that failed for a reason other than 404
+ * (never run), with what it reads, or `undefined`. While one has failed the walk cannot say
+ * where the repository is — a stage read from nothing would say "Not started" — so the list
+ * row and the walk each show this error with Retry in place of any stage (G-124, G-730).
+ */
+function failedRead(oracle: Read, controls: Read, map: Read): { q: Read; what: string } | undefined {
+  return [
+    { q: oracle, what: 'oracle scores' },
+    { q: controls, what: 'controls report' },
+    { q: map, what: 'capability map' },
+  ].find(({ q }) => q.isError && !notRun(q.error))
 }
 
 // ---------------------------------------------------------------------------
@@ -273,11 +295,7 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
   const d = STATUS_DISPLAY[s.status]
   // G-124: a read that failed for any reason but 404 (never run) is an error on this row,
   // never a stage state: the walk cannot say where the repository is without it
-  const failed = ([
-    { q: oracle, what: 'oracle scores' },
-    { q: controls, what: 'controls report' },
-    { q: map, what: 'capability map' },
-  ] as const).find(({ q }) => q.isError && !notRun(q.error))
+  const failed = failedRead(oracle, controls, map)
   return (
     <tr className="border-t border-border">
       <td className="py-2 pr-4 font-mono text-xs">
@@ -384,15 +402,20 @@ export function ConnectRepoPage() {
   }
   const busy = probe.isPending || createRun.isPending
   const actionError = probe.error ?? createRun.error ?? cancel.error
-  const allDone = stages.length > 0 && stages.every((s) => stageComplete(s.status))
-  const next = stages.find((s) => !stageComplete(s.status))
+  // G-730: a stage read that failed (not 404) leaves the walk unable to say where the
+  // repository is; it is said with Retry, and no stage state or stage action is shown
+  const failed = failedRead(oracle, controls, map)
+  const allDone = !failed && stages.length > 0 && stages.every((s) => stageComplete(s.status))
+  const next = failed ? undefined : stages.find((s) => !stageComplete(s.status))
 
   return (
     <>
       <PageHeader
         title={name}
         purpose={
-          allDone
+          failed
+            ? 'The walk cannot say where this repository is until every read answers.'
+            : allDone
             ? 'Every stage is done — the baseline holds what the evidence says about this repository.'
             : next
               ? `Next: ${next.title.toLowerCase()}. ${next.why}`
@@ -410,7 +433,16 @@ export function ConnectRepoPage() {
         }
       />
       {repo.isError && <ErrorState error={repo.error} onRetry={() => void repo.refetch()} />}
-      {repo.data && (
+      {repo.data && failed && (
+        <Card title="The walk" eyebrow="six stages · each says what it proves and what it costs">
+          <div data-testid="connect-walk-error">
+            <ErrorState compact title={`Could not read the ${failed.what}`} error={failed.q.error} onRetry={() => void failed.q.refetch()}>
+              <p className="m-0 text-xs">The walk cannot say where this repository is until it answers, so no stage is shown and nothing is offered to run. Retry, or open the configuration.</p>
+            </ErrorState>
+          </div>
+        </Card>
+      )}
+      {repo.data && !failed && (
         <Card title="The walk" eyebrow="six stages · each says what it proves and what it costs">
           <ol className="m-0 list-none space-y-3 p-0" aria-label="Connection stages">
             {stages.map((s, i) => {
