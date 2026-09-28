@@ -71,6 +71,7 @@ from crb.core.stats import wilson_interval
 from crb.core.value import (
     DEFAULT_USD_PER_GBP,
     DEFAULT_WINDOW,
+    LOSS_KINDS,
     REVIEWS_FROM_EXPORT,
     ReviewVerdict,
     ValueRow,
@@ -275,12 +276,13 @@ def render_markdown(
             kinds[r.failure_kind] = kinds.get(r.failure_kind, 0) + 1
     budget = [r for r in scoped if r.failure_kind == "budget"]
     rungs = [r for r in valid if r.trial in ("r2", "r3")]
-    # THE spend rule (DL-066): an unpriced row is never summed as $0, here as in the report;
-    # the loss share divides the two amounts printed beside it, so it cannot disagree with them.
+    # THE spend rule (DL-066): an unpriced row is never summed as $0, here as in the report.
+    # The loss share divides the exact priced sums, not the cent-rounded amounts the report
+    # serves, so `_pct` rounds once (P-028, P-406).
     budget_usd = spend_of_rows(budget).usd
-    loss_share = (
-        None if pl["usd"] is None or pl["all_usd"] is None else _frac(pl["usd"], pl["all_usd"])
-    )
+    loss_usd = spend_of_rows(r for r in scoped if r.failure_kind in LOSS_KINDS).usd
+    all_usd = spend_of_rows(scoped).usd
+    loss_share = None if loss_usd is None or all_usd is None else _frac(loss_usd, all_usd)
     bp = kinds.get("budget", 0) + kinds.get("protocol", 0)
     w = _working(ns)
     modes = ", ".join(f"{m} {c}" for m, c in rt["deliver_by_mode"].items()) or "none"

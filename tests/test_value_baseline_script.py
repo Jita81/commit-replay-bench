@@ -238,6 +238,51 @@ def test_the_page_sums_money_only_through_the_spend_rule() -> None:
     assert offenders == [], f"scripts/value_baseline.py sums cost_usd itself at lines {offenders}"
 
 
+def test_the_loss_share_is_rounded_once_from_the_exact_sums(vb: ModuleType, tmp_path: Path) -> None:
+    """docs/PREVENTION.md P-406: the loss share divided the two amounts the report had
+    already rounded to the cent, then ``_pct`` rounded again. 1.004 / 2.006 is 50.05%, which
+    prints as 50.0%; the cent-rounded $1.00 / $2.01 printed 49.8%."""
+    p = tmp_path / "ledger.psv"
+    rows = [
+        HEADER,
+        _row(1, clean="1", lint="1", cost="1.002"),
+        _row(2, kind="budget", cost="1.004"),
+    ]
+    p.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$1.00 of $2.01 (50.0%)" in loss, loss
+
+
+def test_no_percentage_on_the_page_is_formed_from_a_served_rounded_figure() -> None:
+    """docs/PREVENTION.md P-028 and P-406: the report serves money to the cent and shares and
+    rates to 4 places. A ``_pct`` or ``_frac`` whose argument reads one of those served keys
+    rounds twice; a percentage is formed from exact counts or exact sums only. Counts
+    (``rows``, ``all_rows``, ``valid_failures``, ``k``, ``n``) are exact and allowed."""
+    import ast
+
+    def rounded(key: str) -> bool:
+        return key.endswith(("usd", "gbp", "share")) or key in {"point", "ci_low", "ci_high"}
+
+    src = (ROOT / "scripts" / "value_baseline.py").read_text(encoding="utf-8")
+    offenders = [
+        node.lineno
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"_pct", "_frac"}
+        and any(
+            isinstance(sub, ast.Subscript)
+            and isinstance(sub.slice, ast.Constant)
+            and isinstance(sub.slice.value, str)
+            and rounded(sub.slice.value)
+            for arg in node.args
+            for sub in ast.walk(arg)
+        )
+    ]
+    assert offenders == [], f"a percentage reads a served rounded figure at lines {offenders}"
+
+
 def test_the_baseline_page_quotes_its_own_tables_and_names_the_live_register() -> None:
     """docs/PREVENTION.md P-015: the page's prose once quoted a learning curve (16% → 54%)
     its own generated table did not show (14% → 50%), and its tables named a stub register
