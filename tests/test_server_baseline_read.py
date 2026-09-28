@@ -18,9 +18,12 @@ What it does: Pins that a viewer may record a read (the least role that can open
               ``repo.baseline_read`` event naming the actor and the rows read, and a second read
               by the same person writes nothing and answers the first; that a second person's
               read is recorded too but ``baseline_read`` keeps the first; and that
-              ``GET /repos/{name}`` serves ``baseline_read: null`` until a read.
+              ``GET /repos/{name}`` serves ``baseline_read: null`` until a read; and that a
+              read which loses the race for the next ``seq`` on the shared repository trace
+              answers as documented instead of failing (P-421).
 How:          ``make_env`` over the seed (``alpha`` has graded rows, ``beta`` has none);
-              ``login`` switches the person.
+              ``login`` switches the person; a race is made real by committing a rival
+              event from another session between the route's ``seq`` read and its commit.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none (DL-074)
 Works with:   src/crb/server/routes/repos.py (the route and ``repo_detail``),
@@ -42,7 +45,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from crb.server.routes.runs import system_trace_id
+from crb.server.routes import repos as repos_routes
+from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.store.models import Event
 from fixtures.server_seed import (
     ALPHA,
@@ -139,3 +143,60 @@ def test_an_unknown_repository_is_404(env: Env) -> None:
     r = env.post("/repos/nope/baseline-read")
     assert r.status_code == 404
     assert envelope(r)["code"] == "not_found"
+
+
+def _race_once(monkeypatch: pytest.MonkeyPatch, env: Env, rival_actor: str, action: str) -> None:
+    """Between the route reading the trace's last ``seq`` and committing, another request
+    commits an event on the same repository trace — so the route's insert takes a ``seq``
+    that is no longer free and the unique index refuses it, exactly as two concurrent
+    requests would."""
+    real = repos_routes.append_system_event
+    raced = [False]
+
+    def racing(db, **kw):  # type: ignore[no-untyped-def]
+        ev = real(db, **kw)
+        if not raced[0]:
+            raced[0] = True
+            with env.factory() as other:
+                append_system_event(
+                    other,
+                    trace_id=system_trace_id("repo", ALPHA),
+                    action=action,
+                    repo=ALPHA,
+                    actor=rival_actor,
+                    payload={"rows": 1},
+                )
+                other.commit()
+        return ev
+
+    monkeypatch.setattr(repos_routes, "append_system_event", racing)
+
+
+def test_a_concurrent_second_read_by_the_same_person_answers_the_first(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-421: the same person's two concurrent reads both pass the "already read?" check; the
+    loser's commit breaks the unique ``(trace, seq)`` index. It answers the documented 200
+    with the read that won, never a 500, and one event stands."""
+    viewer = user_id(USERS["viewer"])
+    _race_once(monkeypatch, env, viewer, "repo.baseline_read")
+    r = env.post(f"/repos/{ALPHA}/baseline-read")
+    assert r.status_code == 200, r.text
+    assert r.json()["recorded"] is False and r.json()["by"] == viewer
+    assert [e.actor for e in _reads(env, ALPHA)] == [viewer]
+
+
+def test_a_read_that_loses_the_seq_to_another_write_is_still_recorded(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-421: any write on the repository's trace (another person's read, a config change)
+    can take the ``seq`` this read chose. That person has not read the baseline yet, so the
+    read is written again on the next ``seq`` and answered 201."""
+    _race_once(monkeypatch, env, user_id(USERS["operator"]), "repo.baseline_read")
+    r = env.post(f"/repos/{ALPHA}/baseline-read")
+    assert r.status_code == 201, r.text
+    assert r.json()["recorded"] is True
+    assert [e.actor for e in _reads(env, ALPHA)] == [
+        user_id(USERS["operator"]),
+        user_id(USERS["viewer"]),
+    ]

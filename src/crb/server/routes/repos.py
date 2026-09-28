@@ -69,6 +69,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query, Response, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from crb.core.capability import RepoChangeProfile, profile_repo
@@ -391,6 +392,11 @@ def repo_summary(session: Session, repo: Repo) -> RepoSummary:
 BASELINE_READ = "repo.baseline_read"
 
 
+#: Attempts at recording one baseline read before a ``seq`` conflict on the repository's
+#: trace is allowed to surface (P-421).
+_BASELINE_READ_ATTEMPTS = 3
+
+
 def _baseline_reads(session: Session, name: str, actor: str | None = None) -> Event | None:
     """The first ``repo.baseline_read`` on the repository's trace — by ``actor`` when given."""
     q = (
@@ -567,6 +573,8 @@ def record_baseline_read(
     The Baseline screen calls it once it shows the map of a repository with rows, so Home's
     "Read the baseline" completes on a read the server recorded, not on a sign-off (G-165,
     DL-074). A repository with no graded row has no baseline to read: 409 ``baseline_empty``.
+    A read that loses the trace's next ``seq`` to a concurrent write is retried, so the same
+    person's two concurrent reads answer 201 and 200, never a 500 (P-421).
     """
     get_repo_or_404(db, name)
     rows = int(db.execute(select(func.count(Grade.seq)).where(Grade.repo == name)).scalar_one())
@@ -577,25 +585,36 @@ def record_baseline_read(
             f"{name!r} has no graded row yet, so there is no baseline to read",
             detail={"repo": name, "rows": 0},
         )
-    prior = _baseline_reads(db, name, viewer.id)
-    if prior is not None:
-        response.status_code = status.HTTP_200_OK
-        return BaselineReadOut(
+    # P-421: the repository's trace is shared by every person's read and every config
+    # change, so this read can lose the next ``seq`` to a concurrent write. A lost race is
+    # rolled back and the check runs again: the same person's concurrent read is then found
+    # and answered (200), anyone else's write only moves this read to the next ``seq``.
+    for attempt in range(_BASELINE_READ_ATTEMPTS):
+        prior = _baseline_reads(db, name, viewer.id)
+        if prior is not None:
+            response.status_code = status.HTTP_200_OK
+            return BaselineReadOut(
+                repo=name,
+                at=prior.timestamp,
+                by=prior.actor,
+                rows=int(dict(prior.payload_json or {}).get("rows", rows)),
+                recorded=False,
+            )
+        ev = append_system_event(
+            db,
+            trace_id=system_trace_id("repo", name),
+            action=BASELINE_READ,
             repo=name,
-            at=prior.timestamp,
-            by=prior.actor,
-            rows=int(dict(prior.payload_json or {}).get("rows", rows)),
-            recorded=False,
+            actor=viewer.id,
+            payload={"rows": rows},
         )
-    ev = append_system_event(
-        db,
-        trace_id=system_trace_id("repo", name),
-        action=BASELINE_READ,
-        repo=name,
-        actor=viewer.id,
-        payload={"rows": rows},
-    )
-    db.commit()
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            db.rollback()
+            if attempt == _BASELINE_READ_ATTEMPTS - 1:
+                raise
     return BaselineReadOut(repo=name, at=ev.timestamp, by=viewer.id, rows=rows, recorded=True)
 
 
