@@ -19,6 +19,7 @@
 #   * it refuses to start if CRB_HOME or CRB_DATABASE_URL is already set — it never
 #     inherits, migrates or writes another stack's home or database;
 #   * it binds a FREE ephemeral port (never 8000) and the specs use CRB_E2E_BASE_URL only;
+#     the worker's metrics listener binds a free one too (CRB_METRICS_PORT=auto);
 #   * it stops ONLY the two processes it started (tracked PIDs; never `pkill`);
 #   * it removes ONLY its own temp directory, and keeps it on failure (or CRB_E2E_KEEP=1)
 #     so the report and the logs survive;
@@ -254,6 +255,9 @@ export CRB_SANDBOX__EXECUTOR=local
 export CRB_LOG_FORMAT=text
 export CRB_LOG_LEVEL="${CRB_LOG_LEVEL:-INFO}"
 export CRB_ALLOW_LOCAL_CLONE=1        # file:// remotes (test/dev switch)
+# the worker's metrics listener takes a FREE port too, never a fixed one another stack holds
+# (pilot D5, docs/PREVENTION.md P-206); a caller may still name one
+export CRB_METRICS_PORT="${CRB_METRICS_PORT:-auto}"
 export CRB_ENABLE_FIXTURE_BUILDER=1   # registers the test-only fixture_gold builder
 export CRB_ENABLE_FAKE_TRACKER=1      # admits the file-backed fake tracker (ADR-0017); NO real ADO/Jira is ever contacted
 export CRB_INTAKE__TRACKER=fake
