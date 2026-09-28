@@ -735,7 +735,7 @@ default), its **kept patch** (the builder's change, redacted, at most 1 MiB, und
 worktree; `CRB_RETENTION__PATCHES=false` keeps none) and a **ledger row** that carries the
 pack's hash. A row cannot be `clean` without a pack.
 
-#### 3.0.2 Spend: the calibrated budget and the measured escalation rule
+#### 3.0.3 Spend: the calibrated budget and the measured escalation rule
 
 The switches in the table below decide what a build run pays for (`crb.core.spend`). Each is set per run on
 `POST /runs` or per repository on `PUT /repos/{name}` as `spend: {…}`; the run wins, and
