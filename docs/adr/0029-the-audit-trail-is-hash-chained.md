@@ -71,8 +71,8 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
      rebuild [measured — n = 1 revision, 5 rows; method:
      `tests/test_store_migrate.py::test_0013_leaves_every_existing_events_field_byte_identical`
      casts every pre-0013 column to text before and after the upgrade and compares, on SQLite
-     here and on PostgreSQL in CI's `test-postgres` job (`CRB_TEST_POSTGRES_URL`); apparatus n/a, a property of the
-     product's own code, not a graded row].
+     here and on PostgreSQL in CI's `test-postgres` job (`CRB_TEST_POSTGRES_URL`); apparatus
+     n/a, a property of the product's own code, not a graded row].
    - *The trigger.* `events_no_update` is dropped for the back-fill and re-installed, with
      every other append-only trigger, before the revision ends, inside the one migration
      transaction `crb.store.migrate.upgrade` opens on both dialects.

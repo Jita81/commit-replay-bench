@@ -19,10 +19,11 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   tests/conftest.py (``_no_host_endpoint_env`` — the fixture under test),
               src/crb/builders/openai_client.py (``EndpointConfig.from_env`` — what the
-              variables would change), tests/test_factory_author.py,
-              tests/test_worker_test_author.py, tests/test_builders_endpoint.py,
-              tests/test_builders_openai_agent.py and tests/test_builders_editblock.py (the
-              modules that read the default endpoint)
+              variables would change), tests/test_factory_author.py (builds a default
+              author), tests/test_worker_test_author.py (the worker's default author),
+              tests/test_builders_endpoint.py (reads the configured endpoint),
+              tests/test_builders_openai_agent.py (builds a default agent builder),
+              tests/test_builders_editblock.py (builds a default edit-block builder)
 Tested by:    tests/test_endpoint_env_isolation.py
 Touch when:   never for a new repository; a new ``CRB_OPENAI_*`` or ``CRB_AZURE_*`` variable is read
               (add it to the hostile set here and to the fixture); a new module builds a default
