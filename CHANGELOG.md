@@ -12,93 +12,24 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **One governed delivery, end to end: the entry gate reads the registered readings**
-  (the north-star Wave 2 integration; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
-  The seven Wave 2 streams are merged on `feat/ns2` on Wave 1's final form (#63 to #65), their
-  ids renumbered after Wave 1's, and the pilot's prevention streams Q1 and Q2 after them. The factory's entry gate now reads a cell's standard from
-  routing.v2's registered readings, signed only by a sign-off on its arm, class-set version
-  and reading (`crb.server.factory_standard`). A new test walks sealed rows, a reading, a
-  sign-off, an authored test, a build, a required strength probe and a pull request on a fake
-  forge, and shows each gate stopping the chain before any spend (`product.truth.219`).
+- **Routing reads a registered reading; a ticket builds only on its cell's proven standard**
+  (Wave 2 part B: streams G, R, F, the pilot's Q1 and Q2, the integration;
+  [#69](https://github.com/Jita81/commit-replay-bench/pull/69)). Apparatus 2.4: every row stamps
+  its context arm and class-set version, never pooled, and a cell delivers only on its standard
+  arm once a pre-registered reading is decided by the look rule (ADR-0025, ADR-0026). An item
+  stops before any spend without a proven standard; a pull request opens only when the delivered
+  change's cell licenses its arm. A dead builder login is refused at submit and claim. Runners
+  see only declared tools; a patch breaking another Go package, or a test run that stops
+  part-way, no longer grades clean.
 
-- **A run cannot start on a dead login; a worker whose metrics port is taken keeps running and says so; the migrations probe tells the truth**
-  (north-star Wave 2, stream Q1; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
-  pilot D1, D5, D7; DL-233, DL-234; P-435 to P-439, P-444, P-445 and P-458 to P-461). A run
-  on a login that failed its check is refused at submit, or failed at claim. `/health` and Settings show each auth mode's login state, never calling a
-  model; viewers see presence only. Every builder names a refused key alike, so from
-  apparatus 2.4 an outage says "your login" apart from "the provider".
-  `CRB_METRICS_PORT=auto` picks a free port. A store at head is compared with the models.
-  A run refused as unqualified is refused before its login is verified, so it spends no
-  verify (P-462).
-
-- **A host tool can no longer change a verdict, and a failure nothing names fails belt 3**
-  (north-star Wave 2, stream Q2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
-  ADR-0048; DL-235, DL-236). On the host, the Go, Python and Node runners' tests see only the
-  tools they declare; `PATH` in `runner_opts.env` and host config files are refused. The
-  tools' bytes are a digest on the posture, every qualification and every pack, so a changed
-  tool asks for requalification. A Go belt narrower than the module also builds every
-  package. A package that stops compiling, or a test process that stops before every test
-  reported, now fails belt 3.
-
-- **Every public page is gated, README's measured numbers re-derive, and the quality baseline is named, never claimed**
-  (north-star Wave 2, stream C; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
-  The claims gate reads README, every guide, every review and every definition-of-done
-  page; README's `[measured]` tags name vendored rows that a test re-derives; ISO/IEC 25010's characteristics are
-  mapped to the checks that evidence part of them (`crb.core.quality_model`, EVIDENCE-AND-CLAIMS §9), and a
-  conformity claim is refused (DL-088, DL-089).
-
-- **Audit you can prove: the audit trail is hash-chained, and the unsealed override names who set it**
-  (north-star Wave 2, stream I; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
-  Every `events` row is chained as it is written, and revision 0013 chains the rows already
-  there (ADR-0029, DL-091); `/ledger/verify` and `crb ledger verify --store` walk it, and
-  each worker start logs both heads. In production the override names an active admin and a
-  reason, recorded at each start (DL-090). The append-only probe proves every table (DL-092).
-  From 0013 the database refuses an unchained event: stop the API and the worker for that
-  upgrade and never roll back across it (DEPLOYMENT §6).
-
-- **Gates from a lock, a run that keeps its spend cap, and click provisioned sealed**
-  (north-star Wave 2, stream H; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
-  CI and the image install every library, the audit tools and uv at pinned versions; a
-  `fresh-clone` job runs every gate as root with no docker daemon, though not yet (DL-101). A
-  build run may declare `max_cost_usd`, a guard that counts the test author's calls and says when
-  the run passed it (ADR-0030, DL-102). The sealed posture reads a `uv.lock`, refusing text
-  that would reach pip as an option, and provisions click across its lock move. The chart
-  ships the alert rules and one evidence store, carrying an older worker's evidence into it.
-
-- **A configured builder endpoint is the one called** (north-star Wave 2, stream X; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
-  `editblock`, `openai_agent`, the intent labeller and the factory's test author call the
-  endpoint `CRB_OPENAI_BASE_URL` (or Azure) names and stamp its provider: `azure`, `cerebras`
-  for the `cerebras.ai` domain, otherwise the URL's host and port. A URL carrying a key is
-  refused by name. A rung naming another provider is refused before any call, and a run's
-  `builder_config` cannot set a builder seam to skip that. The timeout, reply length and
-  retries are validated variables with stated defaults. The test author no longer takes the
-  run's provider, so a Claude ladder with a Cerebras author runs (ADR-0021).
-
-- **A ticket is built only on its cell's proven context standard; one composer writes every brief**
-  (north-star Wave 2, stream F; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
-  An item stops before any spend when its cell has no proven standard, or it lacks what the
-  standard's arm needs; an approver may fund one calibration build, which never opens a pull
-  request. A pull request opens only when the change's own cell licenses the arm it was
-  built on. The strength probe is required, keys are checked again at claim, and replay and
-  the factory share one composer with a leak guard and a replay `S1` arm (DL-098 to DL-100).
-
-- **Routing reads one reading: apparatus 2.4, routing.v2 and the context standard**
-  (north-star Wave 2, stream R; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
-  ADR-0025 as ADR-0026 amends it; DL-095 to DL-097). Every 2.4 row stamps its context arm and
-  class-set version, never pooled. A cell delivers only on its standard arm, when a reading
-  registered before its first attempt reaches a look of the look rule in the sealed posture,
-  with a measured oracle and controls. A reading licenses only the checks arm and posture
-  class it counted on, freezes its pool by a rule, never a list, and never counts an imported
-  row. A `crb.signoff.v5` sign-off lifts only its own arm, class-set version and reading.
-
-- **The grade says why, and a distinct commit is a distinct change**
-  (north-star Wave 2, stream G; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
-  ADR-0025 items 5, 6, 7 and 13; DL-093, DL-094). Belt 5 records why it holds what it holds.
-  From apparatus 2.4 every row carries its failure kind, belt 5's reason and its change, and
-  the oracle scorer is `mutation.v2`; a row or score below 2.4 keeps the 2.3 rules and is
-  refused if it carries a 2.4 label or rule. The miner counts each change once. The executor
-  and worker refuse an empty kind, docker's exit 125 is told from a suite's, each pack and
-  worktree has its own files. The pack names the files the tests wrote.
+- **Wave 2, part A: the context standard's record, checkable claims, provable audit, gates and spend**
+  (north-star Wave 2, streams T, C, I, H and X; [#68](https://github.com/Jita81/commit-replay-bench/pull/68)).
+  ADR-0026 proposes the context standard, with its criteria and gaps (DL-086, DL-087). The
+  claims gate reads every public page, README's measured numbers re-derive from vendored rows,
+  and ISO/IEC 25010 is named, never claimed (DL-088, DL-089). The audit trail is hash-chained
+  and the unsealed override names who set it (ADR-0029, DL-090 to DL-092): stop the API and the
+  worker to upgrade across revision 0013. CI installs from `uv.lock`; a build run keeps its spend
+  cap (ADR-0030, DL-101, DL-102). The configured endpoint is the one called (DL-103, DL-104).
 
 - **A pull request title is measured as the squash merge writes it**
   ([#67](https://github.com/Jita81/commit-replay-bench/pull/67)). The commit-subject gate now
