@@ -14,15 +14,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **Truth on the instrument screens: failed reads are said, exports are recorded, catches are witnessed**
   (north-star Wave 4, stream T; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-t4)).
-  A failed read on a Connect row, the walk or the Measure estimate is an error with Retry, never
-  a stage or a price, and a source ratchet stops the next screen doing otherwise; Repos and the
-  run dialog read every page, list each repository once and read a list that moved again; the
-  Ledger shows linked filters, and link values its selects do not offer, as removable chips;
-  every ledger export records a `ledger.exported` event first, or is not served (DL-128); each
-  caught negative control carries a gold witness graded in the same posture, and a red one is a
-  violation (`controls.v3`, DL-127); the About copy names no threshold the policy serves.
-  **Upgrading:** a passed controls report from before `controls.v3` now reads as unmeasured and
-  licenses nothing — run the controls again on every connected repository.
+  A failed read on Connect or the Measure estimate is an error with Retry, and a ratchet stops
+  the next screen showing a fallback instead; Repos reads every page and re-reads a list that
+  moved; the Ledger shows linked filters as chips; every ledger export is recorded first, or
+  not served (DL-128); each caught negative control carries a gold witness from the same
+  posture (`controls.v3`, DL-127). **Upgrading:** a passed controls report from before
+  `controls.v3` licenses nothing — run the controls again on every repository.
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

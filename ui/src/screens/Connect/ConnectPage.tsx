@@ -23,8 +23,9 @@
  *               other than 404 (never run) shows that error with Retry in its Next stage cell,
  *               never a stage state (G-124); on the walk, such a failed read (`failedRead`) is
  *               said with Retry in place of the stages, with no stage action offered, so a
- *               failed map never reads "Not started" beside a paid Measure… (G-730). Every door to /results is named "Baseline", as the nav
- *               names it, and opens /results (a measured row's button; an unmeasured row's reads
+ *               failed map never reads "Not started" beside a paid Measure… (G-730). Every door
+ *               to /results is named "Baseline", as the nav names it, and opens /results (a
+ *               measured row's button; an unmeasured row's reads
  *               "Continue" and opens the walk); at phone width the repository link is the row's
  *               door to the walk. Every element a reader meets — the two connect buttons, each
  *               column header, the stage-summary pill and row action, each stage's title, status

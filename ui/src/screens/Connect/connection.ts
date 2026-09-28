@@ -34,8 +34,9 @@
  *               ui/src/lib/format.ts (`fmtAgo`, `count`),
  *               docs/ONBOARDING-A-REPO.md (the same six steps for a developer at the CLI)
  * Tested by:    ui/src/screens/Connect/connection.test.ts
- * Touch when:   never for a new repository; a stage is added to onboarding (add it here and in ONBOARDING-A-REPO.md);
- *               the API exposes a stamp that answers a stage better than the proxy used.
+ * Touch when:   never for a new repository; a stage is added to onboarding (add it here and
+ *               in ONBOARDING-A-REPO.md); the API exposes a stamp that answers a stage better
+ *               than the proxy used.
  */
 
 import type { ControlsReport, OracleReport, RepoSummary, Run, RunKind, RunStatus } from '../../api/types'

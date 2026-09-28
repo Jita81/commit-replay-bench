@@ -15,8 +15,8 @@
  *               graded beside it in the same posture — and a red witness reads as an
  *               instrument failure (G-952); a passed report the server reads as unmeasured
  *               has no witness (it predates `controls.v3`) and the gate says it licenses
- *               nothing until the controls run again (P-176). A 404 on controls is the designed "not measured
- *               yet" state with the run button.
+ *               nothing until the controls run again (P-176). A 404 on controls is the
+ *               designed "not measured yet" state with the run button.
  * How:          `useOracle` → tiles computed from the tasks (mean over scored tasks only;
  *               unscoreable never averaged in) → two `DataTable`s; `ControlsSection` reads the
  *               latest report and builds the `GateBanner` criteria from its counts.

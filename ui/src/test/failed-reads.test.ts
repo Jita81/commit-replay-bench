@@ -20,7 +20,8 @@
  *               for the reads and one per way of reading the failure.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/components/QueryBoundary.tsx, ui/src/components/ErrorState.tsx,
+ * Works with:   ui/src/components/QueryBoundary.tsx (one way a read's failure is answered),
+ *               ui/src/components/ErrorState.tsx (how a failed read is said, with Retry),
  *               ui/src/screens/Connect/ConnectPage.tsx (`failedRead`, G-124 and the walk),
  *               ui/src/screens/Connect/MeasurePage.tsx (G-108), docs/PREVENTION.md (P-173)
  * Tested by:    ui/src/test/failed-reads.test.ts

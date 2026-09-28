@@ -110,10 +110,11 @@ Works with:   src/crb/core/grade.py (the grader every control goes through),
               src/crb/core/runners/base.py (the RED check and the compile probes),
               src/crb/server/worker.py (the ``controls`` run kind),
               src/crb/core/routing.py (``ControlsVerdict``, which ``controls_verdict_of``
-              builds), src/crb/server/routes/oracle.py, src/crb/server/flow.py and
-              src/crb/cli/commands/learn.py (the readers of ``controls_verdict_of``)
-Tested by:    tests/test_oracle_controls.py, tests/test_server_routes_oracle.py, tests/test_oracle_controls_go.py,
-              tests/test_oracle_controls_js.py
+              builds), src/crb/server/routes/oracle.py (reads each report through
+              ``controls_verdict_of`` for the map and the routes, as the flow's first pass and
+              ``crb learn`` do)
+Tested by:    tests/test_oracle_controls.py, tests/test_server_routes_oracle.py,
+              tests/test_oracle_controls_go.py, tests/test_oracle_controls_js.py
 Touch when:   never for a new repository (a repo whose regression control reads
               ``not_constructible`` needs a wider ``belt_scope`` in its config, not an edit
               here — docs/OPERATOR.md); a new language needs its own transform module and a
