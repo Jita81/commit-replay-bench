@@ -199,6 +199,45 @@ def test_the_markdown_carries_n_method_and_apparatus_on_every_figure(
     assert "| measure |" in out and "n = 2" in out and "apparatus" in out
 
 
+def test_the_budget_spend_and_the_loss_share_never_sum_an_unpriced_row_as_zero(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """DL-066: the budget spend and the process-loss share are sums of money too. They summed
+    ``cost_usd`` over every row, so an unpriced budget row printed as "$0.00" and the loss
+    share as 0.0% beside a loss amount the same table called unpriced."""
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join([HEADER, _row(1, clean="1", lint="1"), _row(2, kind="budget", cost="")]) + "\n",
+        encoding="utf-8",
+    )
+    out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
+    budget = next(line for line in out.splitlines() if "spend on budget-stopped" in line)
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$0.00" not in budget
+    assert "| unpriced (no row reported a cost) of $1.00;" in budget
+    assert "unpriced (no row reported a cost) of $1.00 (—)" in loss
+    assert "$1.00 (0.0%)" not in loss
+
+
+def test_the_page_sums_money_only_through_the_spend_rule() -> None:
+    """docs/PREVENTION.md P-401: the page summed ``cost_usd`` itself in two figures after the
+    report beside them had moved to the spend rule, so an unpriced row read as $0 there. No
+    ``sum(...)`` in the script may read ``cost_usd``; money goes through ``spend_of_rows`` or
+    the served report."""
+    import ast
+
+    src = (ROOT / "scripts" / "value_baseline.py").read_text(encoding="utf-8")
+    offenders = [
+        node.lineno
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "sum"
+        and "cost_usd" in ast.unparse(node)
+    ]
+    assert offenders == [], f"scripts/value_baseline.py sums cost_usd itself at lines {offenders}"
+
+
 def test_the_baseline_page_quotes_its_own_tables_and_names_the_live_register() -> None:
     """docs/PREVENTION.md P-015: the page's prose once quoted a learning curve (16% → 54%)
     its own generated table did not show (14% → 50%), and its tables named a stub register

@@ -64,13 +64,13 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from crb.core.flow import spend_of_rows
 from crb.core.ledger import BUDGET_STOP_REASONS, GradeRow, derive_failure_kind
 from crb.core.review import statement_mergeable
 from crb.core.stats import wilson_interval
 from crb.core.value import (
     DEFAULT_USD_PER_GBP,
     DEFAULT_WINDOW,
-    LOSS_KINDS,
     REVIEWS_FROM_EXPORT,
     ReviewVerdict,
     ValueRow,
@@ -275,8 +275,12 @@ def render_markdown(
             kinds[r.failure_kind] = kinds.get(r.failure_kind, 0) + 1
     budget = [r for r in scoped if r.failure_kind == "budget"]
     rungs = [r for r in valid if r.trial in ("r2", "r3")]
-    all_usd = sum(r.cost_usd for r in scoped)
-    loss_usd = sum(r.cost_usd for r in scoped if r.failure_kind in LOSS_KINDS)
+    # THE spend rule (DL-066): an unpriced row is never summed as $0, here as in the report;
+    # the loss share divides the two amounts printed beside it, so it cannot disagree with them.
+    budget_usd = spend_of_rows(budget).usd
+    loss_share = (
+        None if pl["usd"] is None or pl["all_usd"] is None else _frac(pl["usd"], pl["all_usd"])
+    )
     bp = kinds.get("budget", 0) + kinds.get("protocol", 0)
     w = _working(ns)
     modes = ", ".join(f"{m} {c}" for m, c in rt["deliver_by_mode"].items()) or "none"
@@ -293,9 +297,9 @@ def render_markdown(
         lines.append(f"| clean, blind {size} | {_rate(r)} | {_n(r)}; {method} |")
     lines += [
         f"| non-clean valid by kind | {', '.join(f'{k} {v}' for k, v in sorted(kinds.items(), key=lambda kv: -kv[1]))} | n = {sum(kinds.values())} non-clean valid rows; {method} |",
-        f"| spend on budget-stopped attempts | ${sum(r.cost_usd for r in budget):.2f} of {_cash('$', pl['all_usd'])}; {sum(1 for r in budget if r.detail == 'wall_clock')} at the {WALL_CLOCK_S:.0f} s wall clock | n = {len(budget)} budget rows; cost as recorded on the row |",
+        f"| spend on budget-stopped attempts | {_cash('$', budget_usd)} of {_cash('$', pl['all_usd'])}; {sum(1 for r in budget if r.detail == 'wall_clock')} at the {WALL_CLOCK_S:.0f} s wall clock | n = {len(budget)} budget rows; cost as recorded on the row |",
         f"| escalation rungs r2 / r3, clean | {sum(1 for r in rungs if r.clean)} / {len(rungs)} | n = {len(rungs)} valid rows on rungs r2-r3; {method} |",
-        f"| process loss (budget + protocol + harness + outage) | {pl['rows']} of {pl['all_rows']} rows ({_pct(_frac(pl['rows'], pl['all_rows']))}); {_cash('$', pl['usd'])} of {_cash('$', pl['all_usd'])} ({_pct(_frac(loss_usd, all_usd))}) = {_cash('£', pl['gbp'])} | n = {pl['all_rows']} rows; £ at {usd_per_gbp} USD per GBP (fixed) |",
+        f"| process loss (budget + protocol + harness + outage) | {pl['rows']} of {pl['all_rows']} rows ({_pct(_frac(pl['rows'], pl['all_rows']))}); {_cash('$', pl['usd'])} of {_cash('$', pl['all_usd'])} ({_pct(loss_share)}) = {_cash('£', pl['gbp'])} | n = {pl['all_rows']} rows; £ at {usd_per_gbp} USD per GBP (fixed) |",
         f"| budget + protocol, share of valid failures | {_pct(_frac(bp, pl['valid_failures']))} | n = {pl['valid_failures']} non-clean valid rows; {method} |",
         f"| reviewed clean patches judged mergeable | {_rate(pr['review'])} | n = {pr['review']['n']} reviews (by verdict: {', '.join(f'{k} {v}' for k, v in pr['review']['by_verdict'].items())}); {corrected} stored flag(s) corrected from the statement; reviews from the {rep['reviews_source']} file, not the live store |",
         f"| proxy: clean patches lint-clean with no API break | {_rate(pr['proxy'])}; {pr['proxy']['unknown']} unknown (belt 5 not recorded) | n = {pr['proxy']['n']} clean valid rows; method: the deterministic proxy, unknown counted as not working |",
