@@ -367,13 +367,13 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: ${{ matrix.python }}
           enable-cache: true
-          cache-dependency-glob: "pyproject.toml"
+          cache-dependency-glob: "uv.lock"
       - name: Install (dev extras — the coverage the shards measured with)
         run: |
-          uv venv -q .venv --python ${{ matrix.python }}
-          uv pip install -q -e '.[dev]' --python .venv/bin/python
+          uv sync -q --locked --python ${{ matrix.python }} --extra dev
       - name: Download every shard's report + coverage data (this Python version)
         uses: actions/download-artifact@v8
         with:
@@ -950,18 +950,18 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
+          version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
-          cache-dependency-glob: "pyproject.toml"
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - name: Install crb (server + dev extras)
+      - name: Install crb (server + dev extras, from uv.lock)
         run: |
-          uv venv -q .venv --python 3.12
-          uv pip install -q -e '.[server,dev]' --python .venv/bin/python
+          uv sync -q --locked --python 3.12 --extra server --extra dev
       - name: Install the UI + Playwright Chromium (with system deps)
         working-directory: ui
         run: |
