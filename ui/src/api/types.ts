@@ -1118,6 +1118,10 @@ export interface Signoff {
   stale: boolean
   /** The deployment's current apparatus, for comparison with `evidence.apparatus_versions`. */
   apparatus_current: string
+  /** This stored row no longer hashes to its own `row_hash` — altered under the append-only triggers (EI-6). */
+  tampered?: boolean
+  /** The whole sign-off chain verifies. `false` = some row was altered, removed or re-ordered: every record is served inactive and none lifts a cell (EI-6). */
+  chain_ok?: boolean
   /** The checks arm the evidence was signed on (ADR-0024) — `off` for a record from before the switchboard. A record signed on another arm than `checks_arm_current` is stale too. */
   checks_arm?: string
   /** The checks arm the repository's cells are read on now; `""` for a record not tied to one repository. */

@@ -472,6 +472,25 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(within(table).queryByRole('button', { name: 'Revoke' })).toBeNull()
   })
 
+  it('names a broken sign-off chain on every row it holds inactive, never as superseded (EI-6)', async () => {
+    const broken: SignoffWithPolicy[] = [
+      { ...SIGNED, approver_name: 'ada', active: false, chain_ok: false },
+      { ...SIGNED, id: 's2', approver_name: 'ada', active: false, tampered: true, chain_ok: false },
+    ]
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED },
+      'GET /signoffs': { items: broken, total: broken.length, limit: 50, offset: 0 },
+      'GET /signoffs/preview': signablePreview(),
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const table = await screen.findByRole('table', { name: 'Sign-offs for r' })
+    await waitFor(() => expect(within(table).getAllByRole('img', { name: /sign-off chain no longer verifies/ })).toHaveLength(2))
+    expect(within(table).getByRole('img', { name: /this row was altered/ })).toBeInTheDocument()
+    expect(within(table).queryByText('superseded')).toBeNull()
+  })
+
   it('naming a row keeps the Accepted row select enabled while the row’s preview loads, so keyboard focus is not dropped (G-905)', async () => {
     const unsigned = signablePreview()
     // the row's preview never answers in this test: what matters is the screen while it loads

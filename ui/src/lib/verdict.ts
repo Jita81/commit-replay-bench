@@ -297,6 +297,8 @@ export const ACTION_HELP: Record<string, string> = {
   'ledger.append': 'The graded row was appended to the hash-chained ledger.',
   'ledger.pack_missing': 'The row has no evidence pack, so it cannot be counted clean.',
   'ledger.pack_store_error': 'The evidence pack could not be stored; the row is not counted clean.',
+  'ledger.pack_forged': 'The evidence pack’s bytes do not match its name, so it was not kept and the row is not counted clean.',
+  'ledger.imported': 'An admin imported rows measured elsewhere; they are marked imported and never count toward a sign-off or a route.',
   // oracle — mutation scoring and the negative controls
   'oracle.mutation.mutant': 'A fault was planted on the changed lines.',
   'oracle.mutation.scored': 'The planted fault was scored: killed if the tests noticed it.',
