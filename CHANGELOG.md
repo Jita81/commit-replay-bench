@@ -13,7 +13,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 2, part A: the context standard's record, checkable claims, provable audit, gates and spend**
-  (north-star Wave 2, streams T, C, I, H and X; [the part A pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-a)).
+  (north-star Wave 2, streams T, C, I, H and X; [#68](https://github.com/Jita81/commit-replay-bench/pull/68)).
   ADR-0026 proposes the context standard, with its criteria and gaps (DL-086, DL-087). The
   claims gate reads every public page, README's measured numbers re-derive from vendored rows,
   and ISO/IEC 25010 is named, never claimed (DL-088, DL-089). The audit trail is hash-chained
