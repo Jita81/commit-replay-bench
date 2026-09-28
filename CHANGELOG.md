@@ -12,6 +12,12 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A pull request title is measured as the squash merge writes it**
+  ([#67](https://github.com/Jita81/commit-replay-bench/pull/67)). The commit-subject gate now
+  adds the ` (#<n>)` suffix a squash merge appends before it checks the 72-character limit:
+  CI passes the number, and a local run reserves room for four digits. #62, #64 and #65 landed
+  subjects of 73, 75 and 73 characters on `main` because the title was measured alone (P-500).
+
 - **Wave 1 finished: accounts, the Learn page's writes, keyboard and wayfinding**
   (north-star Wave 1, streams U, L, A1 and A2; [#65](https://github.com/Jita81/commit-replay-bench/pull/65)).
   Settings › Users shows each account's kind, state and last sign-in; an admin sets a password,
