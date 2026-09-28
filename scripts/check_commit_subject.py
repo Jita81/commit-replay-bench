@@ -13,9 +13,9 @@ characters and read as descriptions ("the work arrives from the board …"). Thi
 ``--range`` reads every non-merge commit in the range (a merge commit made by "Update branch"
 is not the author's subject); ``--title`` checks a pull request title, because a squash merge
 turns it into the commit subject on ``main`` — and GitHub appends `` (#<number>)`` to it, so
-the title is measured with that suffix: ``--pr-number`` gives the real one, and without it the
-gate reserves room for the longest it expects (P-500: three titles that fitted on their own
-landed on ``main`` at 73, 75 and 73 characters).
+the title is measured with that suffix: ``--pr-number`` gives the real one and is the only
+definitive check (CI passes it); without it the gate estimates a four-digit number (P-500: three
+titles that fitted on their own landed on ``main`` at 73, 75 and 73 characters).
 
 **The imperative heuristic, honestly.** English has no reliable marker for the imperative, so
 the gate refuses the four shapes that are reliably *not* imperative: a first word that is an
@@ -75,8 +75,10 @@ TYPES: tuple[str, ...] = (
 )
 MAX_LEN = 72
 
-#: The suffix a squash merge appends to the title; reserved at this width when the number is
-#: not given, so an unknown number never lets a title through that its real one would not.
+#: A fallback ESTIMATE of the suffix a squash merge appends, used only when ``--pr-number`` is
+#: not given (a local run): it covers pull request numbers up to four digits, so a title it
+#: passes may still be refused once numbers reach 10000. Only ``--pr-number`` is definitive, and
+#: CI always passes the real number.
 SQUASH_SUFFIX_UNKNOWN = " (#9999)"
 
 
