@@ -335,14 +335,14 @@ describe('FactoryPage — the shipped contract', () => {
     // the cell's own pill: the route is deliver and the answer is still withheld, and why
     const pill = screen.getByTestId('cell-route-I-1')
     expect(pill).toHaveTextContent('routes deliver · withheld')
-    expect(pill).toHaveAttribute('aria-label', expect.stringContaining('nobody has signed this cell off, so an item here is not built at all'))
+    expect(pill).toHaveAttribute('aria-label', expect.stringContaining('the cell routes deliver but nobody has signed it off, so an item here is not built at all'))
     // the readiness step: stopped before any spend, never "routed to a person"
     const step = screen.getByTestId('step-I-1-readiness')
     expect(step).toHaveTextContent('Not built — the cell routes deliver but nobody has signed it off')
     expect(step).not.toHaveTextContent('Routed to a person')
     expect(screen.getAllByText('Not built: cell not signed off').length).toBeGreaterThan(0)
     // nothing this deployment would deliver from today
-    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('0 of 2 items sit in a cell this deployment would deliver from today; an item in a cell nobody has signed off is not built at all')
+    expect(screen.getByTestId('factory-deliverable-count')).toHaveTextContent('0 of 2 items sit in a cell this deployment would deliver from today; an item in a deliver cell nobody has signed off is not built at all')
   })
 
   it('a stopped item shows what to change and the replacement item already drafted (G-904)', async () => {

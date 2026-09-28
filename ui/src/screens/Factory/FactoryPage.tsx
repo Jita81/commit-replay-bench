@@ -771,7 +771,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
             Open pull requests where the map routes <code>deliver</code>
             {tasks && (
               <Hint id="stat.factory.deliverable" className="block text-xs text-on-surface-muted" data-testid="factory-deliverable-count">
-                {deliverable} of {tasks.length} items sit in a cell this deployment would deliver from today; an item in a cell nobody has signed off is not built at all, and one in a cell that routes elsewhere is built and withheld (ADR-0018)
+                {deliverable} of {tasks.length} items sit in a cell this deployment would deliver from today; an item in a deliver cell nobody has signed off is not built at all, and one in a cell that routes elsewhere is built and withheld (ADR-0018)
               </Hint>
             )}
           </span>
@@ -1071,7 +1071,7 @@ function CellRoutePill({ t }: { t: FactoryTask }) {
  * the missing signature, which stops an item before it is built. Said in the reader's words,
  * never as a code on its own. */
 function withheldWhy(r: NonNullable<FactoryTask['cell_route']>): string {
-  return r.route === 'deliver' && r.signed === false ? 'nobody has signed this cell off, so an item here is not built at all unless an approver overrides the sign-off clause for one run' : r.reason
+  return r.route === 'deliver' && r.signed === false ? 'the cell routes deliver but nobody has signed it off, so an item here is not built at all unless an approver overrides the sign-off clause for one run' : r.reason
 }
 
 function pct(x: number): string {

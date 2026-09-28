@@ -305,7 +305,7 @@ export function PosturePage() {
           // no bare environment-variable token in a viewer's row: an unbreakable name this
           // long sets the summary list's min-content width and the page scrolls sideways at
           // 375 px (J-FAC-14). The admin's row prints it with break-all, as the sandbox row does.
-          value: signedCellRequired === undefined ? (admin ? '…' : 'a signed cell as well as a deliver route, unless this deployment has turned that off — the setting itself is shown to admins') : signedCellRequired ? 'a signed cell as well as a deliver route: the factory does not build an item in a cell until a person has attested that cell, on the current apparatus (a sign-off expires with the apparatus)' : (
+          value: signedCellRequired === undefined ? (admin ? '…' : 'a signed cell as well as a deliver route, unless this deployment has turned that off — the setting itself is shown to admins') : signedCellRequired ? 'a signed cell as well as a deliver route: the factory does not build an item in a cell that routes deliver until a person has attested that cell, on the current apparatus (a sign-off expires with the apparatus)' : (
             <>
               the route alone — this deployment has turned the sign-off clause off (<code className="break-all">CRB_FACTORY__REQUIRE_SIGNED_CELL=false</code>), so a measured cell licenses a pull request with no human attestation.{' '}
               <NextStep admin={admin} doc={<DocLink to="ONBOARDING-A-REPO#step-7--sign-off-approver">Sign off (ONBOARDING)</DocLink>}>

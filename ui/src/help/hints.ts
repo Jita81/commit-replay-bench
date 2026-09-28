@@ -580,7 +580,7 @@ export const HINTS = {
   'field.factory.deliver':
     'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell this deployment would open a pull request from: the map routes it deliver AND a person has signed the cell off. It is read at this moment and changes as measurement and sign-off change. An item in an unsigned cell is not built at all; one in a cell that routes elsewhere is built and withheld.',
+    'How many items sit right now in a cell this deployment would open a pull request from: the map routes it deliver AND a person has signed the cell off. It is read at this moment and changes as measurement and sign-off change. An item in an unsigned cell that routes deliver is not built at all; one in a cell that routes elsewhere is built and withheld.',
   'field.factory.override':
     'Let this run build, and open pull requests for, items in a cell that routes deliver but nobody has signed off — the sign-off clause, and only that one. It never lifts the route gate. It is recorded on the evidence chain under your name, licenses this run only, and is not a sign-off. Approver only.',
   'details.factory.own_builder':
@@ -752,7 +752,7 @@ export const HINTS = {
   'summary.posture.separation':
     'The two-person rule and how it is enforced: the server refuses a sign-off whose approver produced the evidence, so an operator who queued the runs cannot also sign them.',
   'summary.posture.delivery_licence':
-    'What has to be true before this deployment builds and delivers in someone else’s repository: the cell’s route, and — while the default is in force — a person’s sign-off on that cell. Without the sign-off an item is not built at all.',
+    'What has to be true before this deployment builds and delivers in someone else’s repository: the cell’s route, and — while the default is in force — a person’s sign-off on that cell. Without the sign-off an item in a cell that routes deliver is not built at all; in a cell that routes elsewhere it is built and its delivery withheld.',
   'summary.posture.source_control':
     'Whether the GitHub App is registered, how many installations it has, and that its tokens are minted per use and never stored.',
   'summary.posture.executor':

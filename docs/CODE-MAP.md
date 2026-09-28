@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-637 files with a header · 1 exempt (listed at the end).
+638 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -276,7 +276,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py) | a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (223 files)
+## `tests` (224 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -470,6 +470,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_settings_posture.py`](../tests/test_settings_posture.py) | The suite for the production posture rule, in the API's ``Settings`` and in the worker's entrypoint, plus the deployment defaults and the documents that name the override. | [`tests/test_settings_posture.py`](../tests/test_settings_posture.py) | the override changes name, a new executor kind is added (decide whether it is sealed), a posture key is added (write it in [`docs/API.md`](../docs/API.md) and the UI type too), or the deployment templates change the worker's executors. |
 | [`tests/test_settings_provision.py`](../tests/test_settings_provision.py) | The suite for ``ProvisionSettings`` (the API's ``CRB_PROVISION__*``) and the worker's ``ProvisionConfig``. | [`tests/test_settings_provision.py`](../tests/test_settings_provision.py) | a provisioning variable or production rule changes. |
 | [`tests/test_signoff.py`](../tests/test_signoff.py) | The sign-off ledger's test suite — human attestations that are append-only, hash-chained, revocable and never able to lift a false-Q1 cell. | [`tests/test_signoff.py`](../tests/test_signoff.py) | the policy gains a clause or a version (a refusal case, the defaults case and the older-record tolerance case together; update [`docs/EVIDENCE-AND-CLAIMS.md`](../docs/EVIDENCE-AND-CLAIMS.md) and the decision log). |
+| [`tests/test_signoff_clause_copy.py`](../tests/test_signoff_clause_copy.py) | The copy gate for the sign-off clause's scope, and the anchor that ties it to the rule it describes. | (this is a test file) | never for a new repository; the sign-off clause changes scope (change the anchor with the rule, and the words with both). |
 | [`tests/test_spec.py`](../tests/test_spec.py) | The domain vocabulary's test suite — languages, size tiers, path classes, ``RepoConfig`` and ``TaskSpec``. | [`tests/test_spec.py`](../tests/test_spec.py) | onboarding a repository whose layout the path rules misclassify (add the path to the right parametrised table — the table IS the rule); a class or tier is added (update the taxonomy, its definition and the reachability case together). |
 | [`tests/test_spend.py`](../tests/test_spend.py) | The unit suite for the spend rules (value programme stream K, leaks: 47 budget stops costing $28.87 for no output; escalation r2/r3 = 2 clean of 40). | [`tests/test_spend.py`](../tests/test_spend.py) | a bar, a minimum n, the margin or the ceiling changes; a cap is added to Budget. |
 | [`tests/test_spend_from_export.py`](../tests/test_spend_from_export.py) | The suite for the export analysis stream K's numbers were computed with. | [`tests/test_spend_from_export.py`](../tests/test_spend_from_export.py) | the export's columns change. |
