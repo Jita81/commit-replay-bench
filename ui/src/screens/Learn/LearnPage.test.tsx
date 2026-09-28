@@ -542,21 +542,26 @@ describe('LearnPage', () => {
     expect(within(cost).getByRole('link', { name: 'What strengthening costs' })).toHaveAttribute('href', '/help/docs/LEARNING-LOOP#24-what-strengthening-costs-a-person')
   })
   it('the plan can be read against a named apparatus before a bump, and a what-if plan queues nothing (G-983)', async () => {
+    // the running plan holds a cell (so it offers Queue runs); the what-if plan holds another
+    const whatIf: RemeasureCell = { ...CELL, label: 'replay|bug.fix|M|python|editblock|m|cerebras' }
     const { calls } = mockApi(
       operatorApi({
         'GET /learn/remeasure': (url: string) =>
-          url.includes('apparatus=9.9') ? json({ ...REMEASURE, current_apparatus: '9.9', rows_stale: 12, cells: [CELL] }) : json(REMEASURE),
+          url.includes('apparatus=9.9')
+            ? json({ ...REMEASURE, current_apparatus: '9.9', rows_stale: 12, cells: [whatIf] })
+            : json({ ...REMEASURE, rows_stale: 12, cells: [CELL] }),
       }),
     )
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
     const card = await waitFor(() => {
       const c = document.getElementById('remeasure')
-      if (!c || !within(c).queryByText('Nothing stale')) throw new Error('not yet')
+      if (!c || !within(c).queryByText(CELL.label)) throw new Error('not yet')
       return c
     })
+    expect(within(card).getByRole('button', { name: 'Queue runs' })).toBeInTheDocument()
     await userEvent.type(within(card).getByLabelText(/^Plan against apparatus/), '9.9')
     await userEvent.click(within(card).getByRole('button', { name: 'Plan' }))
-    expect(await within(card).findByText(CELL.label)).toBeInTheDocument()
+    expect(await within(card).findByText(whatIf.label)).toBeInTheDocument()
     expect(within(card).getByTestId('learn-plan-whatif')).toHaveTextContent('planned against apparatus 9.9')
     // a what-if plan is a preview: its runs would grade under the running apparatus, so none is offered
     expect(within(card).queryByRole('button', { name: 'Queue runs' })).toBeNull()
@@ -564,6 +569,9 @@ describe('LearnPage', () => {
     expect(calls.filter((c) => c.method === 'POST')).toEqual([])
     // back to the running version: the plan, and the Queue control, return
     await userEvent.click(within(card).getByRole('button', { name: 'Plan for the running version' }))
-    expect(await within(card).findByText('Nothing stale')).toBeInTheDocument()
+    expect(await within(card).findByText(CELL.label)).toBeInTheDocument()
+    expect(within(card).queryByText(whatIf.label)).toBeNull()
+    expect(within(card).queryByTestId('learn-plan-whatif')).toBeNull()
+    expect(within(card).getByRole('button', { name: 'Queue runs' })).toBeInTheDocument()
   })
 })

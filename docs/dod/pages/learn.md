@@ -50,8 +50,8 @@ and it offers two ways forward: choose one in the picker in the header, or `Conn
 makes one of the three decisions they hand off to — `Decide`, `Register` or `Queue runs` — and
 each is that person's act, recorded with their name (this replaces the earlier non-goal "the
 three reports never write", which contradicted G-532; STANDARD §2: "not yet" is a gap, not a
-non-goal). The page itself judges no refusal (every served verdict is `unsure` by
-construction), composes no body (a request names an id and the server re-derives the line, the
+non-goal). The page itself judges no refusal (the product never decides a verdict: a class reads `unsure`
+until a person records `honest` or `refuse`, and that decision is served with their name), composes no body (a request names an id and the server re-derives the line, the
 item and the run from the ledger), spends nothing without confirming the estimate first, and
 offers a viewer none of the three. The register card writes only what an operator does with its
 controls, each a record naming the person; it never writes a grader key and never computes a

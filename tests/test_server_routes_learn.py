@@ -24,8 +24,11 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               own run bodies, never the caller's, through the submit gate ``POST /runs`` applies
               (a cell whose builder has no credential is refused whole — P-160), refuses a
               what-if plan (P-165) and a cell whose queued runs are unfinished (P-182), even for
-              two requests at once, a lost ``seq`` race or a failed insert (P-420); that Learn
-              and the map agree on why a cell is held (P-426); that a
+              two requests at once, a lost ``seq`` race or a failed insert (P-420), and refuses
+              rather than run unlocked when a transaction is already open (P-429); that every
+              write on the ``learn:<repo>`` trace survives a lost ``seq`` race with its side
+              effect written once, and appends only through the one retrying step (P-431);
+              that Learn and the map agree on why a cell is held (P-426); that a
               ``command`` only completes a cut example (P-183); that a note with a line break is
               refused (P-161); that each write refuses a field it does not name; that the reads
               and writes follow the repository's checks arm (ADR-0024); and that a viewer, a
@@ -51,6 +54,7 @@ Touch when:   never for a new repository; a learn report gains a field (the CLI 
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import threading
@@ -59,9 +63,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import event as sa_event
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -923,6 +928,252 @@ def test_a_queue_that_fails_part_way_queues_nothing(env: Env, builder_keys: None
     assert r is None or r.status_code == 500
     assert env.get("/runs").json()["total"] == before
     assert _queued_events(env) == []
+
+
+def test_a_transaction_already_open_makes_the_queue_refuse_rather_than_run_unlocked(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-429: the lock fails closed. When a transaction is already open at the moment the
+    queue takes its SQLite write lock (here a deferred ``BEGIN``, which holds no write lock),
+    ``BEGIN IMMEDIATE`` cannot run; the queue must then refuse with nothing queued, never
+    carry on as if it held the lock and run the check and the runs unserialised (the P-420
+    double spend, with nothing to say so)."""
+    del builder_keys
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    real = learn_routes.submit_refusals
+    opened = [False]
+
+    def opens_a_transaction(db: Session, *args: Any, **kwargs: Any) -> Any:
+        out = real(db, *args, **kwargs)
+        if not opened[0]:
+            opened[0] = True
+            db.execute(text("BEGIN"))  # a transaction, but no write lock
+        return out
+
+    monkeypatch.setattr(learn_routes, "submit_refusals", opens_a_transaction)
+    try:
+        r = _queue(env, cell=STALE_CELL)
+    except RuntimeError as exc:
+        assert "already open" in str(exc)
+        r = None
+    assert opened[0]
+    assert r is None or r.status_code == 500, r.text
+    assert env.get("/runs").json()["total"] == before
+    assert _queued_events(env) == []
+
+
+#: Lock helpers that still carry on after ``BEGIN IMMEDIATE`` failed inside an open
+#: transaction, each with the gap that makes it fail closed. Only removed, never added to.
+_LOCKS_THAT_CARRY_ON = {"server/auth.py::lock_users_table": "G-246"}
+
+
+def test_no_lock_helper_carries_on_after_a_failed_begin_immediate() -> None:
+    """P-429's class: a helper that catches the "within a transaction" error of
+    ``BEGIN IMMEDIATE`` and returns normally lets its caller run as if it held the write
+    lock. Every such handler in ``src/crb`` must end by raising; the ones that do not yet
+    are listed above with their gap."""
+    src = Path(learn_routes.__file__).resolve().parents[2]
+    carry_on: set[str] = set()
+    handlers = 0
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for h in ast.walk(fn):
+                if isinstance(h, ast.ExceptHandler) and "within a transaction" in ast.unparse(h):
+                    handlers += 1
+                    if not isinstance(h.body[-1], ast.Raise):
+                        carry_on.add(f"{path.relative_to(src)}::{fn.name}")
+    assert handlers >= 2  # the walker found the real handlers (Learn's and auth's)
+    assert carry_on == set(_LOCKS_THAT_CARRY_ON), carry_on
+
+
+#: Every write on the shared ``learn:<repo>`` trace, and the event action it appends. A new
+#: ``POST /learn/*`` route fails ``test_every_learn_write_is_covered_by_the_lost_race_test``
+#: until it is added here, so no writer on the trace escapes the lost-race case (P-431).
+_LEARN_WRITE_ACTIONS = {
+    "/learn/refusals/accept": "learn.refusal.accepted",
+    "/learn/strengthen/register": "learn.strengthen.registered",
+    "/learn/remeasure/queue": "learn.remeasure.queued",
+}
+
+
+def test_every_learn_write_is_covered_by_the_lost_race_test() -> None:
+    """P-431: P-420's tests drove the queue alone and P-421's the baseline read alone, so the
+    two other writes on the same ``learn:<repo>`` trace kept a plain commit. The routes are
+    enumerated from the router, so a new write is refused here until the lost-race test
+    below drives it."""
+    posts = {
+        r.path
+        for r in learn_routes.router.routes
+        if isinstance(r, APIRoute) and "POST" in r.methods
+    }
+    assert posts == set(_LEARN_WRITE_ACTIONS)
+
+
+def test_every_append_on_the_learn_trace_goes_through_the_one_retrying_step() -> None:
+    """P-431: an event on ``learn:<repo>`` is appended in ONE place, the serialised,
+    retrying ``_learn_step``, so no route can append on the trace with a plain commit.
+    Every ``append_system_event`` call in ``src/crb`` whose ``trace_id`` is
+    ``learn_trace_id(...)`` is found by reading the source, not by trusting a list."""
+    src = Path(learn_routes.__file__).resolve().parents[2]
+    found: list[str] = []
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for call in ast.walk(fn):
+                if not (
+                    isinstance(call, ast.Call)
+                    and getattr(call.func, "id", getattr(call.func, "attr", ""))
+                    == "append_system_event"
+                ):
+                    continue
+                trace = next((k.value for k in call.keywords if k.arg == "trace_id"), None)
+                on_learn = isinstance(trace, ast.Call) and getattr(trace.func, "id", "") == (
+                    "learn_trace_id"
+                )
+                # anything learn.py appends is on its trace, whatever expression names it
+                if on_learn or (path.name == "learn.py" and path.parent.name == "routes"):
+                    found.append(f"{path.relative_to(src)}::{fn.name}")
+    assert found == [
+        "server/prevention_state.py::append",
+        "server/routes/learn.py::_learn_step",
+    ], found
+    # the prevention store's ``append`` commits nothing: each caller retries it inside a
+    # ``try`` that catches the lost race (tests/test_server_routes_prevention.py drives it)
+    unguarded: list[str] = []
+    appends = 0
+    for path in (
+        src / "server" / "prevention_state.py",
+        src / "server" / "routes" / "prevention.py",
+    ):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        guarded: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try) and any(
+                "IntegrityError" in ast.unparse(h.type) for h in node.handlers if h.type
+            ):
+                guarded.update(id(n) for stmt in node.body for n in ast.walk(stmt))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "append"
+                and ast.unparse(node.func.value).startswith(
+                    ("_store(", "store", "EventsPreventionStore(")
+                )
+            ):
+                appends += 1
+                if id(node) not in guarded:
+                    unguarded.append(f"{path.name}:{node.lineno}")
+    assert appends >= 2  # the walker found the real call sites
+    assert unguarded == [], unguarded
+
+
+@pytest.mark.parametrize("path", sorted(_LEARN_WRITE_ACTIONS))
+def test_every_learn_write_that_loses_a_seq_race_is_recorded_once_with_its_side_effect_once(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """P-431: every write on the shared ``learn:<repo>`` trace can lose the race for the
+    trace's next ``seq`` to another Learn write (on PostgreSQL the commit raises the unique
+    violation). Each one must then append its event again, not answer 500 after its side
+    effect: the accepted line is written once and its decision names it, the strengthening
+    item is registered once (no ``-v2`` superseding it), the runs are queued once."""
+    del builder_keys
+    _add_protocol_row(env)
+    _add_stale_rows(env)
+    action = _LEARN_WRITE_ACTIONS[path]
+    group = _group(env, "archaeology")
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    bodies = {
+        "/learn/refusals/accept": {"group_id": group["group_id"], "verdict": "honest"},
+        "/learn/strengthen/register": {"item_ids": [item_id]},
+        "/learn/remeasure/queue": {"cell": STALE_CELL},
+    }
+    runs_before = env.get("/runs").json()["total"]
+    real_commit = Session.commit
+    lost = [0]
+
+    def commit(self: Session) -> None:
+        pending = [o for o in self.new if isinstance(o, Event)]
+        if not lost[0] and any(o.action == action for o in pending):
+            lost[0] += 1
+            self.rollback()
+            raise IntegrityError(
+                "INSERT INTO events", {}, Exception("duplicate key: uq_events_trace_seq")
+            )
+        real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+    r = env.post(f"{path}?repo={ALPHA}", json=bodies[path])
+    assert lost[0] == 1
+    assert r.status_code == 201, r.text
+    with env.factory() as s:
+        (event,) = s.execute(
+            select(Event).where(Event.action == action, Event.repo == ALPHA)
+        ).scalars()
+    if path == "/learn/refusals/accept":
+        line = group["candidate_honest"]
+        assert r.json()["honest_added"] == [line] and r.json()["already_present"] is False
+        assert event.payload_json["lines"] == [line]
+        assert event.payload_json["already_present"] is False
+        corpus = Path(r.json()["honest_path"]).read_text(encoding="utf-8")
+        assert [x for x in corpus.splitlines() if x == line] == [line]
+        served = env.get(f"/learn/refusals?repo={ALPHA}").json()["decisions"]
+        assert [d["lines"] for d in served] == [[line]]
+    elif path == "/learn/strengthen/register":
+        assert [x["item_id"] for x in r.json()["registered"]] == [item_id]
+        assert [x["item_id"] for x in event.payload_json["items"]] == [item_id]
+        ids = [i["id"] for i in env.get(f"/factory/{ALPHA}/backlog").json()["items"]]
+        assert ids.count(item_id) == 1 and f"{item_id}-v2" not in ids
+    else:
+        assert event.payload_json["run_ids"] == r.json()["run_ids"]
+        assert env.get("/runs").json()["total"] == runs_before + len(r.json()["run_ids"])
+
+
+@pytest.mark.parametrize("path", ["/learn/refusals/accept", "/learn/strengthen/register"])
+def test_a_learn_write_that_loses_every_seq_race_answers_409_naming_what_it_wrote(
+    env: Env, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """P-431: the retry is bounded as the queue's is. When other Learn writes take the
+    trace's ``seq`` on every attempt, the write answers 409 ``learn_concurrent_write`` and
+    names the side effect it could not record, rather than a bare 500."""
+    _add_protocol_row(env)
+    action = _LEARN_WRITE_ACTIONS[path]
+    group = _group(env, "archaeology")
+    item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    body = (
+        {"group_id": group["group_id"], "verdict": "honest"}
+        if path == "/learn/refusals/accept"
+        else {"item_ids": [item_id]}
+    )
+    real_commit = Session.commit
+    lost = [0]
+
+    def commit(self: Session) -> None:
+        pending = [o for o in self.new if isinstance(o, Event)]
+        if any(o.action == action for o in pending):
+            lost[0] += 1
+            self.rollback()
+            raise IntegrityError(
+                "INSERT INTO events", {}, Exception("duplicate key: uq_events_trace_seq")
+            )
+        real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+    r = env.post(f"{path}?repo={ALPHA}", json=body)
+    assert lost[0] == learn_routes._QUEUE_ATTEMPTS
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "learn_concurrent_write"
+    written = envelope(r)["detail"]
+    if path == "/learn/refusals/accept":
+        assert written["lines"] == [group["candidate_honest"]]
+    else:
+        assert written["registered"] == [item_id]
 
 
 def test_queueing_refuses_a_cell_the_plan_does_not_hold(env: Env) -> None:
