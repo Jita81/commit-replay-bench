@@ -506,6 +506,7 @@ _USE_SITES = [
     ("server/worker.py", "_load_repo"),
     ("server/routes/repos.py", "compute_profile"),
     ("server/routes/repos.py", "_clone_history"),
+    ("server/routes/library.py", "mine_source"),
 ]
 
 

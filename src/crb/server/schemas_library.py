@@ -3,8 +3,8 @@
 Navigation
 ----------
 What it is:   The Pydantic models ``/library`` reads and serves: a proposal, the act bodies
-              (sponsor, sign, revoke, retire, freshness) and the entry, index and page
-              shapes.
+              (sponsor, sign, revoke, retire, freshness), a miner run (``MineRequest``,
+              ``MineOut``), the registry (``MinersOut``) and the entry, index and page shapes.
 What it does: Bounds every field at the edge (a statement of at most 400 characters, a slug,
               a version hash, a reason) so the core's own validation is the second line, and
               names each field the UI reads (ui/src/api/types.ts mirrors them).
@@ -13,9 +13,9 @@ How:          ``BaseModel`` with ``extra="forbid"``; the entry's own rules stay 
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 10)
 Works with:   src/crb/server/routes/library.py (the routes), src/crb/core/library.py (the
-              record), ui/src/api/types.ts (``LibraryEntry``, ``LibraryIndex``,
+              record), src/crb/core/miners.py (the run ``MineOut`` serves), ui/src/api/types.ts (``LibraryEntry``, ``LibraryIndex``,
               ``WorkTypePage``), docs/API.md#library (the field list these models carry)
-Tested by:    tests/test_server_routes_library.py
+Tested by:    tests/test_server_routes_library.py, tests/test_server_routes_library_mine.py
 Touch when:   never for a new repository; a field of the record changes in
               src/crb/core/library.py first, then here, then the UI type and docs/API.md.
 """
@@ -167,3 +167,56 @@ class LibraryVerifyOut(BaseModel):
     ok: bool
     acts: int
     error: str = ""
+
+
+class MineRequest(BaseModel):
+    """``POST /library/{repo}/mine``: the commit to pin (a sha, a branch or a tag of the
+    clone; empty = its ``HEAD``) and the miners to run (empty = every registered one)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    commit: str = Field(default="", max_length=100, pattern=r"^([A-Za-z0-9_.][A-Za-z0-9_./-]*)?$")
+    miners: list[Annotated[str, Field(max_length=32)]] = Field(default_factory=list, max_length=32)
+
+
+class MineOutcomeOut(BaseModel):
+    """What the run did with one draft or note of one miner."""
+
+    miner: str
+    subject: str
+    outcome: str
+    reason: str = ""
+    version: str = ""
+    counts: dict[str, int] = Field(default_factory=dict)
+
+
+class MineOut(BaseModel):
+    """``POST /library/{repo}/mine``: the pinned commit, the miners applied
+    (``name@version``), the count per outcome, the entries proposed (each ``proposed`` with
+    no sponsor — a person adopts it, a different person signs it) and every outcome."""
+
+    repo: str
+    commit: str
+    miners: list[str]
+    counts: dict[str, int]
+    proposed: list[EntryOut]
+    outcomes: list[MineOutcomeOut]
+    files_read: int
+    reaches_briefs: bool = False
+
+
+class MinerOut(BaseModel):
+    """One registered miner."""
+
+    name: str
+    version: str
+    proposer: str
+    kinds: list[str]
+    reads: str
+
+
+class MinersOut(BaseModel):
+    """``GET /library/{repo}/miners``: the registry a run applies, in its order."""
+
+    repo: str
+    miners: list[MinerOut]

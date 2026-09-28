@@ -45,7 +45,8 @@ from sqlalchemy import select
 from crb.core.library import LibraryAct, LibraryEntry, Provenance, ProvenStandard
 from crb.server.routes import library as library_routes
 from crb.store.library import DbLibraryLedger, new_act
-from crb.store.models import Event, Grade, LibraryActRow, Run
+from crb.store.models import Event, Grade, LibraryActRow, Repo, Run
+from fixtures.miner_repo import make_miner_repo
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, logout, make_env, user_id
 
 ENTRY = {
@@ -197,6 +198,8 @@ def test_every_act_is_gated_by_role(env: Env) -> None:
         min_role="operator",
         json={"head_commit": "1" * 40, "digests": {}},
     )
+    probe("GET", f"/library/{ALPHA}/miners", min_role="viewer")
+    probe("POST", f"/library/{ALPHA}/mine", min_role="operator", json={})
     assert probed == {(m, r.path) for r in _library_routes() for m in r.methods}
 
 
@@ -225,9 +228,12 @@ def test_an_operator_sponsors_a_mined_proposal_and_a_second_person_signs_it(env:
     assert r.status_code == 200 and r.json()["status"] == "signed"
 
 
-def test_every_act_writes_its_event_naming_the_actor_and_the_entry(env: Env) -> None:
+def test_every_act_writes_its_event_naming_the_actor_and_the_entry(
+    env: Env, tmp_path: Path
+) -> None:
     """P-283: every ``library.*`` event the routes write is produced here, by the act that
-    writes it, naming the actor and the entry — a renamed or dropped event fails."""
+    writes it, naming the actor and the entry — a renamed or dropped event fails. A miner
+    run's own event names the actor and the commit it pinned (G-677)."""
     tree = ast.parse(Path(library_routes.__file__).read_text(encoding="utf-8"))
     written = {
         n.value
@@ -249,9 +255,20 @@ def test_every_act_writes_its_event_naming_the_actor_and_the_entry(env: Env) -> 
     env.post(f"{base}/decision/adr-0002/retire", json={"reason": "superseded"})
     env.post(f"/library/{ALPHA}/freshness",
              json={"head_commit": "2" * 40, "digests": {".golangci.yml": "e" * 64}})  # fmt: skip
+    clone = make_miner_repo(tmp_path / "repos" / ALPHA)
+    with env.factory() as s:
+        row = s.get(Repo, ALPHA)
+        assert row is not None
+        row.clone_path = str(clone.path)
+        row.config_json = {**row.config_json, "path": str(clone.path)}
+        s.commit()
+    assert env.post(f"/library/{ALPHA}/mine", json={"miners": ["adrs"]}).status_code == 200
     events = _events(env)
     assert {e.action for e in events} == written, written
     for ev in events:
+        if ev.action == "library.mined":
+            assert ev.actor and ev.payload_json["commit"] == clone.sha
+            continue
         assert ev.actor and ev.payload_json["entry_id"], ev.action
 
 

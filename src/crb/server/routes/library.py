@@ -21,7 +21,8 @@ Navigation
 ----------
 What it is:   The ``/library`` route module: the index (``GET /library/{repo}``), the page per
               work type, the five acts over HTTP (propose, sponsor, sign, revoke, retire), the
-              freshness reading that makes an entry stale, and the chain's verification.
+              freshness reading that makes an entry stale, the miners (``GET …/miners``,
+              ``POST …/mine``) and the chain's verification.
 What it does: Gates each act by role — an operator proposes and sponsors, an approver signs,
               revokes and retires — and hands it to the core's rule; resolves a rows
               provenance in the grade ledger (422 for an unknown row; at signing, who produced
@@ -31,7 +32,9 @@ What it does: Gates each act by role — an operator proposes and sponsors, an a
               (``unmeasured``); builds the work-type page from
               the library, the mined tasks, the readiness catalogue, the repository's
               switched-on checks, the proven standard per size (stream R's reader, a seam) and
-              the ISO/IEC 25010 table (stream C's ``crb.core.quality_model``, a seam).
+              the ISO/IEC 25010 table (stream C's ``crb.core.quality_model``, a seam); runs
+              the miners over the clone at a pinned commit and appends their proposals under
+              ``mined:<name>@<version>``, unsigned and unsponsored (G-677).
 How:          ``DbLibraryLedger.append(new_act(…))`` → ``append_system_event`` → commit; reads
               fold ``DbLibraryLedger.states``; ``work_type_page`` assembles the page.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
@@ -43,8 +46,10 @@ Works with:   src/crb/core/library.py (the record, the rule, the page as data),
               a ticket must carry today), src/crb/core/checks.py and src/crb/core/lint.py (the
               switched-on checks), docs/API.md#library (the contract these routes serve),
               ui/src/screens/Library/LibraryPage.tsx (the page that calls them),
-              src/crb/store/models.py (``Grade``, ``Run`` — who produced a cited row)
-Tested by:    tests/test_server_routes_library.py
+              src/crb/store/models.py (``Grade``, ``Run`` — who produced a cited row),
+              src/crb/core/miners.py (the miners and the run ``POST …/mine`` appends)
+Tested by:    tests/test_server_routes_library.py, tests/test_server_routes_library_mine.py,
+              tests/test_worker_clone.py (the clone-path rule at ``mine_source``)
 Touch when:   never for a new repository; a new act is added in src/crb/core/library.py first,
               then here with its event row in docs/API.md#event-vocabulary.
 """
@@ -60,6 +65,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from crb.core.checks import RepoChecks
+from crb.core.git import GitError, GitRepo
 from crb.core.ledger import LedgerIntegrityError
 from crb.core.library import (
     ACT_PROPOSE,
@@ -88,13 +94,32 @@ from crb.core.library import (
     work_types_of,
 )
 from crb.core.lint import plan_from_config
+from crb.core.miners import (
+    OUTCOME_PROPOSED,
+    OUTCOME_UNCHANGED,
+    GradedRow,
+    MinedTask,
+    MineSource,
+    Outcome,
+    describe_miners,
+    miner_names,
+    run_miners,
+    source_from_git,
+)
 from crb.core.redact import redact
 from crb.core.spec import RepoConfig
 from crb.factory.readiness import slots_for
 from crb.observability.events import StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SessionFactoryDep
-from crb.server.routes.repos import get_repo_or_404
+from crb.server.deps import (
+    ApiError,
+    DbDep,
+    ErrorEnvelope,
+    Principal,
+    SessionFactoryDep,
+    SettingsDep,
+)
+from crb.server.routes.repos import clone_root, confined_clone_path, get_repo_or_404
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.schemas_library import (
     EntryOut,
@@ -103,6 +128,11 @@ from crb.server.schemas_library import (
     FreshnessRequest,
     LibraryIndexOut,
     LibraryVerifyOut,
+    MineOut,
+    MineOutcomeOut,
+    MineRequest,
+    MinerOut,
+    MinersOut,
     ReasonRequest,
     VersionRequest,
     WorkTypeOut,
@@ -699,3 +729,185 @@ def freshness(
         )
     db.commit()
     return FreshnessOut(repo=repo, head_commit=head, stale=stale)
+
+
+# ---------------------------------------------------------------------------
+# The miners: proposals from the repository's own files (G-677)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/library/{repo}/miners",
+    response_model=MinersOut,
+    responses={401: _ERR, 404: _ERR},
+    summary="The miners a run applies, in order, with what each reads and proposes",
+)
+def list_miners(repo: str, _viewer: ViewerDep, db: DbDep) -> MinersOut:
+    get_repo_or_404(db, repo)
+    return MinersOut(repo=repo, miners=[MinerOut(**m) for m in describe_miners()])
+
+
+def _mined_tasks(db: Session, repo: str) -> list[MinedTask]:
+    rows = db.execute(
+        select(Task.task_id, Task.capability_class, Task.size, Task.spec_json)
+        .where(Task.repo == repo)
+        .order_by(Task.authored.desc(), Task.task_id)
+    )
+    return [
+        MinedTask(
+            task_id=t,
+            capability_class=c,
+            size=z,
+            src_files=tuple(str(p) for p in (spec or {}).get("src_files") or ()),
+            test_files=tuple(str(p) for p in (spec or {}).get("test_files") or ()),
+        )
+        for t, c, z, spec in rows
+    ]
+
+
+def _graded_rows(db: Session, repo: str) -> list[GradedRow]:
+    rows = db.execute(select(Grade.row_hash, Grade.task_id, Grade.clean).where(Grade.repo == repo))
+    return [GradedRow(row_hash=h, task_id=t, clean=bool(c)) for h, t, c in rows if h]
+
+
+def mine_source(db: Session, repo_row: Any, ref: str, *, home: Any) -> MineSource:
+    """The repository at ``ref`` (empty = the clone's ``HEAD``), pinned to the full sha it
+    names now, with its mined tasks and graded rows. The clone-path rule is applied again at
+    use (:func:`~crb.server.routes.repos.confined_clone_path`) and git opens the checked
+    path; nothing is checked out — the tree and the blobs are read from the object store."""
+    config = _config(repo_row)
+    path = (config.path if config is not None else "") or repo_row.clone_path
+    if not path:
+        raise ApiError(
+            409, "no_clone_path", f"repo {repo_row.name!r} has no clone to mine",
+            detail={"repo": repo_row.name},
+        )  # fmt: skip
+    opened = confined_clone_path(path, home)
+    if opened is None:
+        raise ApiError(
+            422, "clone_path_escapes",
+            "clone_path is under the repositories directory but resolves outside it",
+            detail={"clone_root": str(clone_root(home))},
+        )  # fmt: skip
+    git = GitRepo(opened, timeout=60)
+    try:
+        if not opened.is_dir() or not git.is_repo():
+            raise ApiError(
+                409, "clone_unavailable",
+                f"the clone of {repo_row.name!r} is not a git repository on this host",
+                detail={"repo": repo_row.name},
+            )  # fmt: skip
+        return source_from_git(
+            git,
+            repo_row.name,
+            ref or "HEAD",
+            tasks=_mined_tasks(db, repo_row.name),
+            graded=_graded_rows(db, repo_row.name),
+        )
+    except GitError as exc:
+        raise ApiError(
+            422,
+            "unknown_commit",
+            f"{ref or 'HEAD'} names no commit of the clone of {repo_row.name!r}: fetch it "
+            "first, or name a sha, branch or tag the clone holds",
+            detail={"commit": ref},
+        ) from exc
+
+
+@router.post(
+    "/library/{repo}/mine",
+    response_model=MineOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
+    summary="Propose entries from the repository's files at a pinned commit (operator)",
+)
+def mine_library(
+    repo: str,
+    *,
+    body: MineRequest,
+    operator: OperatorDep,
+    db: DbDep,
+    factory: SessionFactoryDep,
+    settings: SettingsDep,
+) -> MineOut:
+    """Run the registered miners (or the ones named) over the repository at one pinned
+    commit and append each proposal as a ``propose`` act under its miner
+    (``mined:<name>@<version>``) — never signed, never sponsored: a person adopts it and a
+    different person signs it. The same sha proposes nothing new. The run is one
+    ``library.mined`` event naming the operator, the commit and the counts, and each
+    proposal a ``library.proposed`` event naming its miner."""
+    row = get_repo_or_404(db, repo)
+    names = list(dict.fromkeys(body.miners))
+    unknown = [n for n in names if n not in miner_names()]
+    if unknown:
+        msg = f"no miner registered as {', '.join(unknown)}; one of {', '.join(miner_names())}"
+        raise ApiError(
+            422, "validation_error", msg,
+            detail={"errors": [{"loc": ["body", "miners"], "msg": msg, "type": "value_error"}]},
+        )  # fmt: skip
+    source = mine_source(db, row, body.commit.strip(), home=settings.home)
+    run = run_miners(source, names=names or None, states=_states(factory, repo))
+    ledger = DbLibraryLedger(factory)
+    outcomes = list(run.outcomes)
+    written: list[tuple[Any, EntryState, Any]] = []
+    # every act first, then the events: an event added to ``db`` before the next locked
+    # append would hold SQLite's write lock against it
+    for p in run.proposals:
+        e = p.entry
+        act = new_act(repo, e.entry_id, e.version, ACT_PROPOSE, e.proposed_by,
+                      body={"entry": e.content()})  # fmt: skip
+        try:
+            chained, state = ledger.append(act)
+        except LibraryRefused as exc:
+            # another writer proposed this version between the read and the write
+            outcomes = [
+                Outcome(o.miner, o.subject, OUTCOME_UNCHANGED, str(exc), o.version)
+                if o.subject == e.entry_id and o.outcome == OUTCOME_PROPOSED
+                else o
+                for o in outcomes
+            ]
+            continue
+        written.append((chained, state, p))
+    proposed = [state for _c, state, _p in written]
+    for chained, state, p in written:
+        append_system_event(
+            db,
+            trace_id=_trace(repo),
+            action="library.proposed",
+            repo=repo,
+            actor=state.entry.proposed_by,
+            payload={
+                "entry_id": state.entry_id,
+                "version": state.entry.version,
+                "act_id": chained.act_id,
+                "commit": run.commit,
+                "miner": p.miner,
+                "drafted_by": p.drafted_by,
+                "run_by": operator.id,
+            },
+        )
+    counts = {k: sum(1 for o in outcomes if o.outcome == k) for k in run.counts()}
+    append_system_event(
+        db,
+        trace_id=_trace(repo),
+        action="library.mined",
+        repo=repo,
+        actor=operator.id,
+        payload={
+            "commit": run.commit,
+            "miners": list(run.miners),
+            "counts": counts,
+            "proposed": [s.entry_id for s in proposed],
+            "files_read": len(run.files_read),
+        },
+    )
+    db.commit()
+    counted = counted_evidence(_config(row))
+    return MineOut(
+        repo=repo,
+        commit=run.commit,
+        miners=list(run.miners),
+        counts=counts,
+        proposed=[_entry_out(s, {}, counted) for s in proposed],
+        outcomes=[MineOutcomeOut(**o.to_dict()) for o in outcomes],
+        files_read=len(run.files_read),
+    )
