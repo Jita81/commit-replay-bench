@@ -30,6 +30,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.core.evidence import canonical_json, sha256_text
 from crb.core.ledger import GradeRow
 from crb.core.reading import READING_EVENT_ACTION, RULE_LOOK_V1, Reading, register
 from crb.core.spec import TaskSpec
@@ -37,7 +38,7 @@ from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.store.events import append_event
 from crb.store.ledger import DbLedger
-from crb.store.models import Task
+from crb.store.models import EvidencePackRow, Task
 from fixtures.readings import SEALED, sealed_row
 from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, Env
 
@@ -134,21 +135,39 @@ def add_rows(
     cell: Mapping[str, str] = CELL,
     **kw: Any,
 ) -> list[GradeRow]:
-    """One sealed 2.4 first attempt per commit on ``arm`` in ``cell``; the chained rows."""
-    rows = [
-        sealed_row(
-            c,
-            clean=clean,
-            arm=arm,
-            created=LATER,
-            repo=ALPHA,
-            cell=dict(cell),
-            change=f"change-{c}",
-            labels=labels,
-            **kw,
+    """One sealed 2.4 first attempt per commit on ``arm`` in ``cell``; the chained rows. A
+    clean row's evidence pack is STORED and re-hashes to its name, as the worker keeps it
+    (EI-3): a row measured here is never clean without the pack an approver reads."""
+    rows: list[GradeRow] = []
+    packs: list[tuple[str, dict[str, Any], str]] = []
+    for c in commits:
+        extra = dict(kw)
+        if clean and "evidence_pack_hash" not in extra:
+            body = {"schema": "crb.fixture.pack.v1", "task_id": c, "arm": arm, "repo": ALPHA}
+            extra["evidence_pack_hash"] = sha256_text(canonical_json(body))
+            packs.append((extra["evidence_pack_hash"], body, c))
+        rows.append(
+            sealed_row(
+                c,
+                clean=clean,
+                arm=arm,
+                created=LATER,
+                repo=ALPHA,
+                cell=dict(cell),
+                change=f"change-{c}",
+                labels=labels,
+                **extra,
+            )
         )
-        for c in commits
-    ]
+    with factory() as s:
+        for pack_hash, body, task_id in packs:
+            if s.get(EvidencePackRow, pack_hash) is None:
+                s.add(
+                    EvidencePackRow(
+                        pack_hash=pack_hash, repo=ALPHA, task_id=task_id, run_id="", body_json=body
+                    )
+                )
+        s.commit()
     return DbLedger(factory).append_many(rows)
 
 
