@@ -73,7 +73,7 @@ What it does: Names a worktree by an opaque per-worktree token (``opaque_dest``,
               to git's own views (index bits, a moved HEAD, an exclude rule) can hide a file;
               proves the target tests are byte-identical to the commit's; counts the diff's
               lines by each hunk's declared counts (``diff_file_counts``), so a content
-              line shaped like a file header is still counted (P-127); reports every
+              line shaped like a file header is still counted (P-286); reports every
               git-view violation as tamper evidence rather than a verdict.
 How:          ``create`` → ``git worktree add`` at the parent + per-language fixups recorded
               in ``harness_files`` → the builder edits → ``enforce_integrity`` (HEAD, gitdir,
@@ -255,7 +255,7 @@ def diff_file_counts(text: str) -> tuple[tuple[str, int, int], ...]:
     A hunk's body is read by the line counts its ``@@ -a,b +c,d @@`` header declares, so
     every line inside it is content, whatever it starts with: an added line whose text is
     ``++ b/<path>`` (``+++ b/<path>`` in the diff) is an addition, never a file header, and
-    a deleted ``-- x`` is a deletion (docs/PREVENTION.md P-127). Outside a hunk only the
+    a deleted ``-- x`` is a deletion (docs/PREVENTION.md P-286). Outside a hunk only the
     ``diff --git`` / ``---`` / ``+++`` headers name the file; a deleted file is named by its
     old path. Pure, so the parse is tested without git.
     """
@@ -893,7 +893,7 @@ class Workspace:
         adds = dels = 0  # filters the files and counts below
         files: list[str] = []
         # a hunk's lines are read by its header's counts, never by their prefix: a content
-        # line shaped like a file header cannot end the count early (P-127)
+        # line shaped like a file header cannot end the count early (P-286)
         for path, a, d in diff_file_counts(text):
             if not path or path in ex:
                 continue

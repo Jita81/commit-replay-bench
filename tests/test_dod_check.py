@@ -27,10 +27,10 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               or the base branch's committed gap analysis vouches for it; that a gap
               among the order of work's first rows must sit in some wave; that a clause a
               reworded criterion dropped since the merge-base may not survive in a twin that
-              does not wait on the same gap (P-116); and that a value a Proposed ADR leaves
+              does not wait on the same gap (P-228); and that a value a Proposed ADR leaves
               to the operator is marked provisional on every row that states it, the ADR
               registers each such value, and the marker goes when the ADR is accepted —
-              on a fixture and on the live record (P-117).
+              on a fixture and on the live record (P-229).
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
@@ -782,7 +782,7 @@ def test_two_streams_numbering_the_same_criterion_id_are_refused(
 def test_a_gap_line_that_no_criterion_cites_is_refused(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """docs/PREVENTION.md P-051: a gap line no criterion cites never reaches the gap
+    """docs/PREVENTION.md P-118: a gap line no criterion cites never reaches the gap
     analysis, so it names work nobody is asked to do and hides work that was done (G-931,
     G-940 to G-944 and six stray copies of G-905 sat in the tree for a wave). An artefact's
     gap is cited by a criterion of the same file; a register gap by a pending row."""
@@ -812,7 +812,7 @@ def test_a_gap_line_that_no_criterion_cites_is_refused(
 def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """docs/PREVENTION.md P-051: nothing checked that PLAN.md's wave items were gaps at all, so
+    """docs/PREVENTION.md P-118: nothing checked that PLAN.md's wave items were gaps at all, so
     the plan and the order of work drifted apart unseen. Every item in a
     wave table's ``gaps`` column must be a gap id the record defines: an artefact's gap, a
     register gap, or a backlog row that a criterion or a pending row cites. A gap the wave
@@ -824,7 +824,7 @@ def test_a_plan_wave_item_must_be_a_gap_id_and_closing_it_keeps_the_plan_valid(
     _write_all(root, ng_state="unmet", ng_gap="G-001")
     plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
     assert mod.main([]) == 0 and mod.main(["--check"]) == 0
-    _commit(root, "G-001 is a gap")  # a retired id must be one the history defined (P-060)
+    _commit(root, "G-001 is a gap")  # a retired id must be one the history defined (P-127)
     capsys.readouterr()
     # a backlog row is a gap only while a criterion cites it: F23 is a row, but nothing
     # here asks for it (the old plan's "B-9", a backlog id no criterion cited, was this case)
@@ -923,7 +923,7 @@ def _retire_by_hand(root: Path, gid: str) -> None:
 def test_a_retired_id_must_have_been_a_gap_in_the_artefacts_history(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """docs/PREVENTION.md P-060: the retired list was read back from the generated file itself,
+    """docs/PREVENTION.md P-127: the retired list was read back from the generated file itself,
     so an id hand-inserted there (in sorted position) became a valid PLAN.md item and
     ``--check`` still reported the analysis current. A retired id is now admitted only when
     the git history of the artefacts (never of the generated file) once defined it, or the
@@ -997,7 +997,7 @@ def test_the_retired_list_never_reads_another_repositorys_history(tmp_path: Path
 def test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """docs/PREVENTION.md P-051: the plan left the top-ranked gaps (G-653, G-660 to G-664) in
+    """docs/PREVENTION.md P-118: the plan left the top-ranked gaps (G-653, G-660 to G-664) in
     no wave while it planned lower ones. Every gap among the order of work's first ``TOP`` rows
     is named by some wave."""
     mod, root = tree
@@ -1011,7 +1011,7 @@ def test_a_gap_at_the_top_of_the_order_of_work_must_be_in_a_wave(
 
 
 def test_the_ci_job_reads_the_full_history_and_the_pull_requests_base() -> None:
-    """The retired list is vouched for by git history (P-060): a shallow checkout would refuse
+    """The retired list is vouched for by git history (P-127): a shallow checkout would refuse
     ids a squash merge carried, and a missing base would ignore the base branch's gap
     analysis. The ``dod`` job must fetch everything and name the base — through ``DOD_BASE``,
     so the command it runs stays the one CONTRIBUTING tells a person to run."""
@@ -1057,7 +1057,7 @@ def _art(mod: ModuleType, rel: str, *crits: object) -> object:
 
 
 def test_a_reworded_criterion_leaves_no_twin_in_its_old_words() -> None:
-    """docs/PREVENTION.md P-116: stream T reworded manufacture.non-goals.12 from "items outside
+    """docs/PREVENTION.md P-228: stream T reworded manufacture.non-goals.12 from "items outside
     a deliver cell are built and withheld" to "is not built" and dropped it to unmet on G-933,
     while its twin on the page, factory.non-goals.19, kept the old clause and stayed met — two
     end states that cannot both hold, and nothing told G-933's builder to change the page.
@@ -1157,7 +1157,7 @@ ADR_OPERATOR = """# ADR-0099 — a proposal
 ## Operator values
 
 A criterion or gap line that states one of these carries `ADR-0099 [operator]` until the
-operator fixes it (P-117).
+operator fixes it (P-229).
 
 | item | the proposal | the words a criterion states it in |
 |---|---|---|
@@ -1169,7 +1169,7 @@ operator fixes it (P-117).
 def test_a_value_a_proposed_adr_leaves_to_the_operator_is_marked_provisional(
     tmp_path: Path,
 ) -> None:
-    """docs/PREVENTION.md P-117: product.truth.202, truth.207 and truth.208 fixed values
+    """docs/PREVENTION.md P-229: product.truth.202, truth.207 and truth.208 fixed values
     ADR-0026 still marks [operator] — the first look at 20, the size rule, twenty confirmation
     commits — with nothing on the row saying so, and the definition of done wins over the
     ADR, so a builder would have built a proposal as settled. A Proposed ADR registers each
@@ -1222,7 +1222,7 @@ def test_a_value_a_proposed_adr_leaves_to_the_operator_is_marked_provisional(
 
 def test_the_record_marks_every_operator_value_it_states() -> None:
     """The live record: every criterion and gap line that states a value a Proposed ADR leaves
-    to the operator says so (P-117)."""
+    to the operator says so (P-229)."""
     mod = _load()
     arts = [mod.parse_artefact(p)[0] for p in mod.artefact_files()]
     assert mod.validate_operator_values(arts, mod.ADR_DIR) == []
@@ -1231,7 +1231,7 @@ def test_the_record_marks_every_operator_value_it_states() -> None:
 def test_the_check_refuses_an_operator_value_stated_as_settled(
     tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``main`` runs the provisional-value rule over the tree's own ADRs (P-117)."""
+    """``main`` runs the provisional-value rule over the tree's own ADRs (P-229)."""
     mod, root = tree
     _write_all(root)
     assert mod.main([]) == 0

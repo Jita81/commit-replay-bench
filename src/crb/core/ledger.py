@@ -1312,7 +1312,7 @@ class CellStats:
     checks_arm: str = ARM_OFF
     #: Eligible rows whose cost is KNOWN (``GradeRow.cost_known``) — the denominator of
     #: ``cost_usd_mean``. ``0`` means the mean is unknown, never ``$0``: a reader decides
-    #: known-ness from this count, never by comparing the mean with zero (P-064).
+    #: known-ness from this count, never by comparing the mean with zero (P-131).
     n_cost_known: int = 0
 
     @property

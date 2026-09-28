@@ -289,7 +289,7 @@ describe('estimateFromMap — the repository’s measured mean per attempt (J-FA
     expect(estimateFromMap({ ...MAP, cells: [], economics: econ(0, 0, null, NONE_KNOWN) } as never)).toBeNull()
   })
 
-  it('a known $0 is a measured $0 over the attempts with a known cost, never dropped (P-064)', () => {
+  it('a known $0 is a measured $0 over the attempts with a known cost, never dropped (P-131)', () => {
     // 40 attempts, 36 with a known cost, every known cost $0: the flat cell mean reads 0
     const zero = { ...MAP, cells: [{ ...MAP.cells[0]!, cost_usd_mean: 0 }], economics: econ(40, 36, 0) }
     expect(estimateFromMap(zero as never)).toEqual({ mean: 0, n: 36, apparatus: '2.2' })

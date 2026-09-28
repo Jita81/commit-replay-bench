@@ -32,7 +32,7 @@ What it does: Turns the gate's open questions, the entry gate's stop and the map
               on, and picks exactly one of the four ``crb:`` labels (``crb:not-deliverable``
               for a ticket the entry gate stops, which will not be built, also once
               registered; ``crb:ready`` for one it admits, which is built whatever its
-              cell routes — the route decides only whether a pull request opens, P-129).
+              cell routes — the route decides only whether a pull request opens, P-288).
 How:          String building over :class:`crb.factory.readiness.Readiness` and the plain
               ``cell_route`` mapping the API and the worker both serve; no I/O, no clock,
               no randomness — determinism is the idempotency.
@@ -93,7 +93,7 @@ GLOSSED: dict[str, str] = {
 
 #: What each routing decision means for this ticket's PULL REQUEST, in one sentence a person
 #: can act on. The route gate decides delivery only: whether the ticket is BUILT is the entry
-#: gate's word (``_entry_block``), so no sentence here says "not built" (P-121, P-129).
+#: gate's word (``_entry_block``), so no sentence here says "not built" (P-280, P-288).
 ROUTE_WORDS: dict[str, str] = {
     "deliver": ("the product may build this and open a pull request for a person to review"),
     "calibrate": (
@@ -290,7 +290,7 @@ def _label_for(readiness: Readiness, route: Mapping[str, Any] | None, entry: Ent
     other entry stop — no proven standard, a ceiling, a size split, an unsigned cell — is
     not deliverable: NOT BUILT (ADR-0026 item 8). A ticket the entry gate admits is ready:
     it is built, graded and reviewed whatever its cell routes; the route decides only
-    whether a pull request opens, and the headline says which (P-129). ``route`` is not
+    whether a pull request opens, and the headline says which (P-288). ``route`` is not
     read here, so the label stays true once the ticket is registered (``crb:queued``)."""
     if not readiness.ready or not readiness.catalogued or entry.code in _ASK_STOPS:
         return LABEL_NEEDS_INFO

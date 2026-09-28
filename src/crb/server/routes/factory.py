@@ -188,7 +188,7 @@ class BacklogItemIn(BaseModel):
     acceptance_criteria: list[str] = Field(default_factory=list, max_length=50)
     capability_class: str = Field(default="(unclassified)", max_length=64)
     #: No estimate is ``unsized`` — the gate sends it to a person — never a size it did not
-    #: claim (ADR-0026 item 8; P-130). One of the ladder's sizes or ``unsized``.
+    #: claim (ADR-0026 item 8; P-289). One of the ladder's sizes or ``unsized``.
     size_estimate: str = Field(
         default=SIZE_UNSIZED, max_length=16, pattern=rf"^({'|'.join(ITEM_SIZES)})$"
     )

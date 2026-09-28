@@ -18,7 +18,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   standard's arm needs; an approver may fund one calibration build, which never opens a pull
   request. A pull request opens only when the change's own cell licenses the arm it was
   built on. The strength probe is required, keys are checked again at claim, and replay and
-  the factory share one composer with a leak guard and a replay `S1` arm (DL-110 to DL-112).
+  the factory share one composer with a leak guard and a replay `S1` arm (DL-098 to DL-100).
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

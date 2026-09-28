@@ -1216,7 +1216,7 @@ def test_a_2_2_row_without_posture_labels_still_verifies(tmp_path: Path) -> None
 
 
 def test_every_failure_kind_has_a_place_in_the_split() -> None:
-    """P-118: a failure kind added to ``FAILURE_KINDS`` without a place in
+    """P-277: a failure kind added to ``FAILURE_KINDS`` without a place in
     ``failure_split`` made the split refuse every cell holding one ("n must equal the sum of
     its eligible kinds") — found when the ``authoring`` kind landed (ADR-0026 item 1). Every
     kind an eligible row can carry must be counted inside ``n``."""

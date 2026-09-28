@@ -494,7 +494,7 @@ class FactoryLoop:
     def _calibration(self, item: BacklogItem) -> Calibration | None:
         """The item's unspent calibration grant: the newest ``calibration.funded`` that no
         run has claimed (one grant funds ONE run — :func:`spent_grants`). Reading it is not
-        taking it: :meth:`_assess` claims it on the chain before any spend (P-131)."""
+        taking it: :meth:`_assess` claims it on the chain before any spend (P-290)."""
         grant: Calibration | None = None
         events = self.spec.evidence.events_for(item.id)
         for ev in events:
@@ -602,7 +602,7 @@ class FactoryLoop:
             ev.claim_calibration(item.id, entry.calibration.event_id, run_id=s.run_id) is None
         ):
             # another run claimed the grant between our read and now: this run is answered
-            # as if it had never been funded — the gate's own stop, before any spend (P-131)
+            # as if it had never been funded — the gate's own stop, before any spend (P-290)
             self._stop_entry(item, r, decide(None))
         route = self._map_route(item)
         cell = _route_summary(route)
