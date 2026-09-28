@@ -18,7 +18,9 @@ deliveries, token mints, queue depth — and serves its own exposition on
 ``CRB_METRICS_PORT`` (:func:`start_worker_exposition`, J-TEL-1). Before that port
 existed the dashboards showed the API's registry only and every worker-side counter
 read as absent. docs/DEPLOYMENT.md#9-observability names which process carries
-which series.
+which series. The API's ``/metrics`` leaves out the worker-only series
+(:data:`WORKER_SERIES`): the registry is shared code, so the API would otherwise serve
+them as zeros, and an alert on their absence could never fire.
 
 Navigation
 ----------
@@ -29,7 +31,8 @@ What it does: Counts runs, graded tasks by outcome, belt failures, builder token
               (by repo), deliveries by outcome, GitHub installation-token mints (never the
               token); times grades and builds; gauges queue depth, ``crb_false_q1_total``
               (must stay 0) and the ledger row count; renders the exposition for the API's
-              ``/metrics`` and starts the worker's on its port.
+              ``/metrics`` less the worker-only series (``render_api``, P-128) and starts
+              the worker's, the whole registry, on its port.
 How:          Import-time try/except picks the real registry or ``_Noop``; every metric is
               a module-level object created through ``_counter``/``_gauge``/``_histogram``;
               call-sites use ``record_grade``/``record_build``/``record_event``/
@@ -338,11 +341,57 @@ def set_ledger_health(*, rows: int, false_q1: int) -> None:
     false_q1_total.set(false_q1)
 
 
-def render() -> bytes:
-    """Prometheus text exposition (empty when the client is not installed)."""
+#: The series only the worker records — docs/DEPLOYMENT.md §9's rows whose process is
+#: ``worker`` (tests/test_observability_metrics.py holds the two equal). The API process
+#: shares this module's registry, so without :func:`render_api` it would serve each of them
+#: too, as an empty family or a zero: ``crb_queue_depth 0.0`` from the API kept the
+#: ``CrbNoWorker`` rule (``absent_over_time(crb_queue_depth[…])``) from ever firing while the
+#: API was scraped (docs/PREVENTION.md P-128).
+WORKER_SERIES: frozenset[str] = frozenset(
+    {
+        "crb_runs_total",
+        "crb_tasks_total",
+        "crb_belt_failures_total",
+        "crb_builder_tokens_total",
+        "crb_builder_cost_usd_total",
+        "crb_grade_latency_seconds",
+        "crb_build_latency_seconds",
+        "crb_sandbox_unavailable_total",
+        "crb_deliveries_total",
+        "crb_github_tokens_minted_total",
+        "crb_queue_depth",
+    }
+)
+
+
+class _Omitting:
+    """A collector over ``source`` that leaves out the families named in ``omit`` (a
+    counter's family is named without its ``_total``)."""
+
+    def __init__(self, source: Any, omit: frozenset[str]) -> None:
+        self._source = source
+        self._omit = omit
+
+    def collect(self) -> Any:
+        for family in self._source.collect():
+            if family.name not in self._omit and f"{family.name}_total" not in self._omit:
+                yield family
+
+
+def render(*, omit: frozenset[str] = frozenset()) -> bytes:
+    """Prometheus text exposition of this process's registry, less the ``omit`` series
+    (empty when the client is not installed). The worker serves all of it."""
     if not _AVAILABLE or registry is None:  # pragma: no cover
         return b""
-    return bytes(generate_latest(registry))  # pragma: no cover
+    source = _Omitting(registry, omit) if omit else registry
+    return bytes(generate_latest(source))  # pragma: no cover
+
+
+def render_api() -> bytes:
+    """The API's ``/metrics``: every series but :data:`WORKER_SERIES`, so a series only the
+    worker records is served by a worker or by nothing, and an alert on its absence can
+    fire."""
+    return render(omit=WORKER_SERIES)
 
 
 def available() -> bool:

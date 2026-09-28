@@ -14,6 +14,8 @@ What it does: Pins that editing a worktree changes neither the inputs nor the ke
               into hashed, marked pins for the named groups (extras, forks and marker paths
               followed; any other index, a wheel-less package every environment needs, a
               workspace or another lock version refused), with the groups in the bundle key;
+              that a requirements lock's ``--hash`` is kept only as a whole sha256 and any
+              other hash or option after the pin refuses the lock (P-131);
               that ``deps_lock`` alternatives provision a lock that moved across a history;
               that ``.npmrc``, ``pip.conf`` and ``go.env`` are never read; that a trial never
               makes the selector read outside its tree (an escaping replace or a linked
@@ -252,6 +254,39 @@ def test_pip_includes_hashes_and_alternative_locks(tmp_path: Path) -> None:
     assert pv.LockInputs.from_git(repo, sha, _cfg("pytest", deps_lock=["locks/test.txt"])).pins == (
         "left==1.0.0",
     )
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "--hash=sha512:" + "a" * 128,
+        "--hash=sha256:" + "a" * 63,
+        "--hash=sha256:" + "a" * 65,
+        "--hash=sha256:" + "a" * 64 + " --hash=md5:" + "a" * 32,
+        "--hash",
+        "--hash=sha256:" + "a" * 64 + " --no-binary",
+    ],
+    ids=["sha512", "short", "long", "one_of_two", "empty", "trailing_option"],
+)
+def test_a_committed_hash_is_never_dropped_or_cut(tmp_path: Path, tail: str) -> None:
+    """ADR-0019 fetches with pip's hashes wherever the lock carries them, and DL-113 refuses
+    a hash that is not a whole sha256 before anything is fetched. A hash of another kind or
+    length was once skipped (the pin written bare, ``require_hashes`` off) or cut to 64
+    characters — a lock provisioned more loosely than it was committed (P-131). Every token
+    after the pin is a whole ``--hash=sha256:<64 hex>``, or the lock is refused."""
+    repo, (sha,) = _repo(tmp_path / "r", {"requirements.txt": f"six==1.16.0 {tail}\n"})
+    _refused("PROVISION_SOURCE_REFUSED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+
+
+def test_a_whole_sha256_in_either_spelling_is_kept(tmp_path: Path) -> None:
+    h, g = "sha256:" + "a" * 64, "sha256:" + "B" * 64
+    repo, (sha,) = _repo(
+        tmp_path / "r", {"requirements.txt": f"six==1.16.0 --hash {h} --hash={g}\n"}
+    )
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    assert got.require_hashes is True
+    (pin,) = got.py_pins
+    assert pin.hashes == (h, g)
 
 
 # ---------------------------------------------------------------------------

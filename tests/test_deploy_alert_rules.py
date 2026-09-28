@@ -13,15 +13,19 @@ What it does: Renders the chart with and without ``prometheusRule.enabled`` and 
               nothing is rendered by default; that the enabled render carries exactly the
               four alerts of DEPLOYMENT §9.2, each ``expr`` the table's own expression; that
               the false-Q1 alert fires on any non-zero value with no delay; that the
-              operator's labels reach the resource; and that a worker with its metrics port
-              off is refused, since three of the four rules read the worker's series.
+              operator's labels reach the resource; that a worker with its metrics port
+              off is refused, since three of the four rules read the worker's series; and
+              that the no-worker rule reads a series the API's exposition never serves, so it
+              can fire while the API is scraped (P-128).
 How:          ``helm template`` through tests/test_deploy_secrets_store.py's strict loader;
-              the guide's table read with a regular expression.
+              the guide's table read with a regular expression; the API's exposition from
+              ``metrics.render_api``.
 Layer:        tests — docs/ARCHITECTURE.md#6-deployment-view
 ADRs:         none
 Works with:   deploy/helm/crb/templates/prometheusrule.yaml (under test),
               deploy/helm/crb/values.yaml (``prometheusRule``), docs/DEPLOYMENT.md §9.2 (the
-              table it reads), docs/dod/product.md (go-live.20)
+              table it reads), src/crb/observability/metrics.py (``render_api``),
+              docs/dod/product.md (go-live.20)
 Tested by:    tests/test_deploy_alert_rules.py
 Touch when:   an alert rule is added or changed — change the table in DEPLOYMENT §9.2 and the
               template together; this suite fails until they agree.
@@ -33,6 +37,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from crb.observability import metrics
 from test_deploy_secrets_store import _refused, _render
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -97,3 +102,29 @@ def test_the_operators_labels_reach_the_rule_so_prometheus_selects_it() -> None:
 def test_rules_that_read_the_worker_are_refused_while_its_metrics_are_off() -> None:
     err = _refused(*ENABLED, "--set", "worker.metrics.port=0")
     assert "prometheusRule.enabled" in err and "worker.metrics.port" in err, err
+
+
+def _served(exposition: bytes) -> set[str]:
+    """The sample names an exposition carries (``name{labels} value`` or ``name value``)."""
+    return {
+        line.split("{", 1)[0].split(" ", 1)[0]
+        for line in exposition.decode().splitlines()
+        if line and not line.startswith("#")
+    }
+
+
+def test_the_no_worker_rule_reads_a_series_the_api_never_serves() -> None:
+    """``absent_over_time`` fires only while NO scraped target serves the series. The API's
+    ``/metrics`` once served ``crb_queue_depth 0.0`` (an unlabelled gauge in the shared
+    registry), and DEPLOYMENT §9.2 has both targets scraped, so with no worker at all the
+    critical alert stayed silent — G-602's class, an alert that can never fire (P-128). The
+    API's exposition is ``metrics.render_api()`` (tests/test_server_system.py pins that the
+    route serves it); the worker's is the whole registry, which must carry the series."""
+    rule = _rules(_render(*ENABLED))["CrbNoWorker"]
+    read = re.findall(r"absent_over_time\((crb_[a-z0-9_]+)", rule["expr"])
+    assert read, rule["expr"]
+    api = _served(metrics.render_api())
+    assert "crb_false_q1_total" in api, "the API's exposition lost the honesty gauge"
+    assert not set(read) & api, f"the API serves {sorted(set(read) & api)}: CrbNoWorker is mute"
+    # the negative control: the worker's exposition serves it, so the rule is not vacuous
+    assert set(read) <= _served(metrics.render())

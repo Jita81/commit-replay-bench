@@ -15,8 +15,9 @@ What it does: Pins ``record_grade`` (outcome mapping; a belt ``False`` is a fail
               ``crb_sandbox_unavailable_total`` after worker harness runs, the metered GitHub
               App counting REAL mints only (never a token in a label), ``crb_queue_depth`` on
               check-in, ``start_worker_exposition`` honouring enabled/port, the ``_Noop``
-              fallback, and that every metric in the module is in docs/DEPLOYMENT.md's table
-              with the same labels (the documentation ratchet).
+              fallback, that every metric in the module is in docs/DEPLOYMENT.md's table
+              with the same labels (the documentation ratchet), and that the API's exposition
+              serves none of the table's worker-only series (``WORKER_SERIES``, P-128).
 How:          ``metrics.fresh_registry()`` per test; the worker ``Harness`` from
               tests/test_worker.py for the end-to-end counters; ``GitHubApp.installation_token``
               monkeypatched to a scripted token sequence.
@@ -325,3 +326,22 @@ def test_every_metric_is_documented_with_its_labels() -> None:
         assert documented == labels, (name, documented, labels)
     # the API's HTTP series are documented too
     assert "crb_http_requests_total" in rows and "crb_http_request_duration_seconds" in rows
+
+
+def test_the_api_serves_no_series_the_table_calls_worker_only() -> None:
+    """The table's ``process`` column is the contract an alert is written against: a series
+    only the worker records is served only by the worker, so a rule that reads its absence
+    (CrbNoWorker) can fire. The module's :data:`metrics.WORKER_SERIES` is the table's
+    worker-only rows, and the API's exposition omits every one (P-128)."""
+    text = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    worker_only = {
+        m.group(1)
+        for m in re.finditer(r"^\| `(crb_[a-z0-9_]+)` \| \w+ \| [^|]* \| worker \|", text, re.M)
+    }
+    assert "crb_queue_depth" in worker_only
+    assert set(metrics.WORKER_SERIES) == worker_only
+    served = metrics.render_api().decode()
+    assert "crb_false_q1_total" in served
+    for name in worker_only:
+        family = name.removesuffix("_total")
+        assert family not in served, name

@@ -10,9 +10,11 @@ product.evidence.205: every gate, a clone made by root, no docker daemon (G-664)
 Navigation
 ----------
 What it is:   The gate on how CI installs Python dependencies and on the fresh-clone job.
-What it does: Fails when a CI job installs the project or a library other than from
-              ``uv.lock`` (``uv sync --locked``, or ``uv export --locked`` with
-              ``--require-hashes``); when ``uv.lock`` no longer matches the extras
+What it does: Fails when a job in any workflow, or the product image's Dockerfile, installs
+              the project or a library other than from ``uv.lock`` (``uv sync --locked``,
+              or ``uv export --locked`` with ``--require-hashes``, then the project's own
+              build with ``--no-deps``) — the image is what ships (P-130); when
+              ``uv.lock`` no longer matches the extras
               and dependency groups ``pyproject.toml`` declares (a dependency added or
               re-pinned without relocking) or pins a gate or reporting tool at another
               version than ``pyproject.toml``; when a workflow's ``setup-uv`` step lets the
@@ -20,11 +22,14 @@ What it does: Fails when a CI job installs the project or a library other than f
               ``fresh-clone`` job stops running a gate, stops running as root in its own
               clone, or stops proving the docker daemon is gone. Each check is also run on a
               planted regression so it cannot pass vacuously.
-How:          PyYAML reads ``ci.yml``; ``tomllib`` reads ``uv.lock`` and ``pyproject.toml``;
+How:          PyYAML reads the workflows; the Dockerfile's ``RUN`` instructions are joined
+              across continuations; ``tomllib`` reads ``uv.lock`` and ``pyproject.toml``;
               requirement strings are compared as (name, extras, specifier, extra marker).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   .github/workflows/ci.yml (the install steps and the ``fresh-clone`` job),
+              .github/workflows/release.yml (the wheel smoke test), deploy/Dockerfile (the
+              image's dependency layer),
               uv.lock (the lock), pyproject.toml (the extras it locks), docs/CONTRIBUTING.md
               (the same install for a person), docs/dod/product.md (product.evidence.205)
 Tested by:    (this is a test file)
@@ -44,6 +49,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 CI = ROOT / ".github" / "workflows" / "ci.yml"
+DOCKERFILE = ROOT / "deploy" / "Dockerfile"
 LOCK = ROOT / "uv.lock"
 PYPROJECT = ROOT / "pyproject.toml"
 
@@ -77,25 +83,89 @@ def _runs(workflow: dict[str, Any]) -> list[tuple[str, str]]:
     return out
 
 
-def install_findings(ci_text: str) -> list[str]:
-    """Each Python install in the workflow that does not come from ``uv.lock``."""
+#: Options of ``pip install`` that take a value; the value is not a package.
+_VALUED = ("--python", "-p")
+#: Options that name what to install from a file: never "only the local tree".
+_FROM_FILE = ("-r", "--requirement", "-c", "--constraint", "-e", "--editable")
+
+
+def _installs_only_a_local_build(command: str) -> bool:
+    """``uv pip install --no-deps <path>…``: the project's own wheel or tree, with nothing
+    resolved (its dependencies came from the lock in an earlier step)."""
+    words = command.split()
+    if "--no-deps" not in words:
+        return False
+    args: list[str] = []
+    skip = False
+    for w in words[words.index("install") + 1 :]:
+        if skip:
+            skip = False
+        elif w in _VALUED:
+            skip = True
+        elif w in _FROM_FILE:
+            return False
+        elif not w.startswith("-"):
+            args.append(w)
+    return bool(args) and all(a == "." or "/" in a for a in args)
+
+
+def run_findings(where: str, run: str) -> list[str]:
+    """Each Python install in one shell ``run`` (a workflow step, a Dockerfile ``RUN``) that
+    does not come from ``uv.lock``."""
     findings: list[str] = []
-    for job, run in _runs(yaml.safe_load(ci_text)):
-        for m in _UV_SYNC.finditer(run):
-            if "--locked" not in m.group(0):
-                findings.append(f"{job}: {m.group(0)!r} resolves instead of reading uv.lock")
-        for m in _PIP_INSTALL.finditer(run):
-            line = m.group(0)
+    for m in _UV_SYNC.finditer(run):
+        if "--locked" not in m.group(0):
+            findings.append(f"{where}: {m.group(0)!r} resolves instead of reading uv.lock")
+    for command in re.split(r"\n|;|&&", run):
+        for m in _PIP_INSTALL.finditer(command):
+            line = m.group(0).strip()
             hashed = re.search(r"--require-hashes -r (\S+)", line)
             if hashed:
                 exported = [e for e in _UV_EXPORT.findall(run) if f"-o {hashed.group(1)}" in e]
                 if not exported or not all("--locked" in e for e in exported):
-                    findings.append(f"{job}: {hashed.group(1)} is not exported --locked")
+                    findings.append(f"{where}: {hashed.group(1)} is not exported --locked")
                 continue
-            # anything else names packages on the command line: none come from the lock
-            # (the reporting tools are in uv.lock's audit and sbom dependency groups)
-            findings.append(f"{job}: {line!r} installs from outside uv.lock")
+            if _installs_only_a_local_build(line):
+                continue
+            # anything else names packages, or a file of them, on the command line: none
+            # come from the lock (the reporting tools are in uv.lock's audit and sbom groups)
+            findings.append(f"{where}: {line!r} installs from outside uv.lock")
     return findings
+
+
+def install_findings(ci_text: str) -> list[str]:
+    """Each Python install in the workflow that does not come from ``uv.lock``."""
+    findings: list[str] = []
+    for job, run in _runs(yaml.safe_load(ci_text)):
+        findings += run_findings(job, run)
+    return findings
+
+
+def dockerfile_runs(text: str) -> list[tuple[str, str]]:
+    """Every ``RUN`` instruction of a Dockerfile as ``(line, its shell text)``, the
+    backslash continuations joined and comment lines inside it dropped."""
+    out: list[tuple[str, str]] = []
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        start = i
+        parts = [lines[i]]
+        while parts[-1].rstrip().endswith("\\") and i + 1 < len(lines):
+            i += 1
+            if not lines[i].lstrip().startswith("#"):
+                parts.append(lines[i])
+        i += 1
+        joined = " ".join(p.rstrip().rstrip("\\").strip() for p in parts)
+        if joined.startswith("RUN "):
+            out.append((str(start + 1), joined[4:]))
+    return out
+
+
+def image_findings(text: str, name: str = "deploy/Dockerfile") -> list[str]:
+    """Each Python install in the product image's Dockerfile that does not come from
+    ``uv.lock`` — the image is what ships, so a pin that holds only in CI pins nothing a
+    customer runs (P-130)."""
+    return [f for line, run in dockerfile_runs(text) for f in run_findings(f"{name}:{line}", run)]
 
 
 def _req_key(req: dict[str, Any]) -> tuple[str, tuple[str, ...], str, str]:
@@ -228,6 +298,53 @@ def test_the_install_check_refuses_a_fresh_resolution() -> None:
 
 
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+
+
+def test_every_workflow_install_comes_from_the_lock() -> None:
+    """Not only ci.yml: the release's wheel smoke test installs too, and a release built on
+    a fresh resolution is a release of versions no gate ran."""
+    found = [f for w in WORKFLOWS for f in install_findings(w.read_text("utf-8"))]
+    assert found == []
+    assert len(WORKFLOWS) >= 4
+
+
+def test_the_product_image_installs_from_the_lock() -> None:
+    """The image CI's ``container`` job builds and the release pushes is what a customer
+    runs; its libraries come from uv.lock by version and hash, never from pyproject.toml
+    resolved at build time (the SQLAlchemy 2.1.0 class, in production — P-130)."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert image_findings(text) == []
+    runs = " ".join(run for _line, run in dockerfile_runs(text))
+    assert "uv export" in runs and "--locked" in runs and "--require-hashes" in runs
+    assert "COPY pyproject.toml uv.lock" in text
+
+
+def test_the_image_check_refuses_a_fresh_resolution() -> None:
+    """The negative controls: the old dependency layer, an unlocked export, a library named
+    in a RUN, and a local install that resolves its dependencies are each a finding."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    old = (
+        "RUN set -eu; \\\n    uv venv /app/.venv; \\\n    uv pip install --python "
+        "/app/.venv/bin/python \\\n        -r /app/pyproject.toml --extra server\n"
+    )
+    assert any("installs from outside uv.lock" in f for f in image_findings(old))
+    unlocked = text.replace("uv export --locked", "uv export", 1)
+    assert unlocked != text
+    assert any("is not exported --locked" in f for f in image_findings(unlocked))
+    assert any(
+        "installs from outside uv.lock" in f
+        for f in image_findings("RUN uv pip install --python /app/.venv/bin/python sqlalchemy\n")
+    )
+    resolving = text.replace("--no-deps /app", "/app", 1)
+    assert resolving != text
+    assert any("installs from outside uv.lock" in f for f in image_findings(resolving))
+    # and in a workflow: the wheel smoke test must not resolve the wheel's dependencies
+    release = (ROOT / ".github" / "workflows" / "release.yml").read_text("utf-8")
+    loose = release.replace("--no-deps dist/", "dist/", 1)
+    assert loose != release
+    assert any("installs from outside uv.lock" in f for f in install_findings(loose))
+
+
 _EXACT = re.compile(r"^\d+\.\d+\.\d+$")
 
 

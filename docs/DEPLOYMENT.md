@@ -718,7 +718,10 @@ series — every cost, run, belt and delivery counter reads as absent. Scrape bo
 | one process (`crb serve` + `crb worker` on a host) | `/api/v1/metrics` | `127.0.0.1:9464/metrics` — loopback by default; a Prometheus on another host needs `CRB_METRICS_HOST=<the interface it may reach>` (or `0.0.0.0` behind a host firewall) — the series name repositories, builders, per-repository cost and installation ids |
 
 The table is checked against the code by `tests/test_observability_metrics.py`: a metric
-the module defines that is not here, or is here under other labels, fails the suite.
+the module defines that is not here, or is here under other labels, fails the suite. A
+series whose process is `worker` is served by the worker only: the api's exposition leaves
+it out, so an alert on its absence (the no-worker rule below) fires when no worker is
+scraped, and that suite fails if the api serves one.
 
 | name | type | labels | process | meaning |
 |---|---|---|---|---|

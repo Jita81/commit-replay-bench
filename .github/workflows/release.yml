@@ -84,7 +84,11 @@ jobs:
       - name: Smoke-install the wheel and import the core
         run: |
           uv venv -q .smoke --python 3.12
-          uv pip install -q dist/*.whl --python .smoke/bin/python
+          # the wheel's dependencies from uv.lock by version and hash, then the wheel with
+          # nothing resolved: a fresh resolution would smoke-test versions no gate ran (P-130)
+          uv export -q --locked --no-default-groups --no-emit-project -o smoke-requirements.txt
+          uv pip install -q --require-hashes -r smoke-requirements.txt --python .smoke/bin/python
+          uv pip install -q --no-deps dist/*.whl --python .smoke/bin/python
           .smoke/bin/python -c "import crb.core, crb.core.version as v; print('crb', v.__version__, 'apparatus', v.APPARATUS_VERSION)"
       - name: Record checksums
         run: |

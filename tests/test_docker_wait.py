@@ -9,12 +9,15 @@ What it does: Pins #60's semantics — a failed query fails the check, every que
               listed, a daemon that never answers fails the check — and refuses any
               ``docker ps`` / ``docker container ls`` / ``docker network ls`` call in a test
               module other than the helper — as an argv list, a wrapper call or inside a
-              shell string — and any ``docker inspect`` of a container after a ``kill``,
-              ``rm`` or ``stop`` in the same function, proving on planted source that it
-              catches each shape (docs/PREVENTION.md P-052, P-119).
+              shell string, held in a variable or not — and any ``docker inspect`` of a
+              container after a ``kill``, ``rm`` or ``stop`` in the same function, either
+              one reached directly or through a same-module helper, proving on planted
+              source that it catches each shape (docs/PREVENTION.md P-052, P-123, P-132).
 How:          ``monkeypatch.setattr(subprocess, "run", …)`` for the helper; an ``ast`` walk
               for the ratchet: a call whose argv is ``[<docker>, "ps", …]``,
-              ``[<docker>, "network", "ls", …]`` or ``_docker("ps", …)``.
+              ``[<docker>, "network", "ls", …]`` or ``_docker("ps", …)``, a name read as the
+              literal it was bound to, and each module function's docker effects closed
+              over the calls between them.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   tests/docker_wait.py (under test), tests/test_sandbox_docker.py (the real leak
@@ -195,31 +198,98 @@ def _starts(words: list[str | None], shapes: tuple[tuple[str, ...], ...]) -> boo
     return any(tuple(words[: len(shape)]) == shape for shape in shapes)
 
 
+_Bindings = dict[str, list[tuple[int, ast.expr]]]
+_Fn = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+def _bound(nodes: list[ast.AST]) -> _Bindings:
+    """Names bound to a list, tuple or string literal among ``nodes``, with the line of each
+    binding — so ``argv = ["docker", "ps"]; run(argv)`` reads as the literal (P-132)."""
+    out: _Bindings = {}
+    for n in nodes:
+        if isinstance(n, ast.Assign):
+            targets, value = n.targets, n.value
+        elif isinstance(n, ast.AnnAssign) and n.value is not None:
+            targets, value = [n.target], n.value
+        else:
+            continue
+        if not isinstance(value, ast.List | ast.Tuple | ast.Constant):
+            continue
+        for tgt in targets:
+            if isinstance(tgt, ast.Name):
+                out.setdefault(tgt.id, []).append((n.lineno, value))
+    return out
+
+
+def _resolved(call: ast.Call, local: _Bindings, module: _Bindings) -> ast.Call:
+    """``call`` with each bare-name argument replaced by the literal it was last bound to —
+    in the function before the call, else anywhere at module level."""
+    args: list[ast.expr] = []
+    for a in call.args:
+        if isinstance(a, ast.Name):
+            before = [v for line, v in local.get(a.id, []) if line < call.lineno]
+            anywhere = [v for _line, v in module.get(a.id, [])]
+            a = (before or anywhere or [a])[-1]
+        args.append(a)
+    return ast.copy_location(ast.Call(func=call.func, args=args, keywords=call.keywords), call)
+
+
 def docker_listing_reads(source: str, name: str = "<source>") -> list[str]:
     """Every call in ``source`` that reads docker's state the instant after changing it, as
     ``name:line``: a listing of containers or networks (an argv list ``[<docker>, "ps", …]``,
-    a ``_docker("ps", …)``-style wrapper, or ``docker ps`` inside a shell string), and a
-    ``docker inspect`` / ``docker container inspect`` of a container after a ``kill``,
-    ``rm`` or ``stop`` earlier in the same function — each races the daemon's own
-    removal."""
+    the same list held in a variable, a ``_docker("ps", …)``-style wrapper, or ``docker ps``
+    inside a shell string), and a ``docker inspect`` / ``docker container inspect`` of a
+    container after a ``kill``, ``rm`` or ``stop`` earlier in the same function — either
+    one written directly or reached through a same-module helper whose body does it — each
+    races the daemon's own removal."""
     found: set[int] = set()
     tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if _lists(_docker_words(node)) or _shell_listing(node):
-            found.add(node.lineno)
-    for fn in ast.walk(tree):
-        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        calls = sorted((n for n in ast.walk(fn) if isinstance(n, ast.Call)), key=lambda n: n.lineno)
+    module = _bound(list(tree.body))
+    fns: list[_Fn] = [n for n in ast.walk(tree) if isinstance(n, _Fn)]
+    calls: dict[int, list[tuple[ast.Call, ast.Call]]] = {}
+    inside: set[int] = set()
+    for fn in fns:
+        local = _bound(list(ast.walk(fn)))
+        own = sorted((n for n in ast.walk(fn) if isinstance(n, ast.Call)), key=lambda n: n.lineno)
+        calls[id(fn)] = [(c, _resolved(c, local, module)) for c in own]
+        inside |= {id(c) for c in own}
+    top = [(c, _resolved(c, {}, module)) for c in ast.walk(tree) if isinstance(c, ast.Call)]
+    for _c, r in [*(pair for pairs in calls.values() for pair in pairs), *top]:
+        if _lists(_docker_words(r)) or _shell_listing(r):
+            found.add(r.lineno)
+    # which same-module functions change a container's state, and which inspect one —
+    # directly or through each other (closed to a fixed point)
+    helpers = {f.name: f for f in tree.body if isinstance(f, _Fn)}
+    changes: set[str] = set()
+    inspects: set[str] = set()
+    grew = True
+    while grew:
+        grew = False
+        for fname, f in helpers.items():
+            for _c, r in calls[id(f)]:
+                words, callee = _docker_words(r), _callee(r)
+                if fname not in changes and (_starts(words, _CHANGES) or callee in changes):
+                    changes.add(fname)
+                    grew = True
+                if fname not in inspects and (_starts(words, _INSPECTS) or callee in inspects):
+                    inspects.add(fname)
+                    grew = True
+    for fn in fns:
+        pairs = calls[id(fn)]
         changed_at = min(
-            (c.lineno for c in calls if _starts(_docker_words(c), _CHANGES)), default=None
+            (
+                c.lineno
+                for c, r in pairs
+                if _starts(_docker_words(r), _CHANGES) or _callee(r) in changes
+            ),
+            default=None,
         )
         if changed_at is None:
             continue
-        for c in calls:
-            if c.lineno > changed_at and _starts(_docker_words(c), _INSPECTS):
+        for c, r in pairs:
+            if c.lineno > changed_at and (
+                _starts(_docker_words(r), _INSPECTS) or _callee(r) in inspects
+            ):
                 found.add(c.lineno)
     return [f"{name}:{line}" for line in sorted(found)]
 
@@ -276,6 +346,59 @@ def test_i(name):
         "planted:23",
         "planted:26",
     ]
+
+
+def test_ratchet_sees_an_argv_held_in_a_variable() -> None:
+    """``argv = ["docker", "ps", …]; subprocess.run(argv)`` is the same listing: a name
+    bound to a list or tuple literal earlier in the function (or the module) is read as
+    that literal (P-132)."""
+    planted = """
+import subprocess
+ARGV = ("docker", "network", "ls", "-q")
+def test_a():
+    argv = ["docker", "ps", "-aq", "--filter", "name=x"]
+    subprocess.run(argv, capture_output=True)
+def test_b():
+    subprocess.run(ARGV)
+def test_c(docker, name):
+    cmd = [docker, "kill", name]
+    subprocess.run(cmd)
+    look = [docker, "inspect", name]
+    subprocess.run(look)
+def test_d():
+    line = "docker ps -aq --filter name=x"
+    subprocess.run(line, shell=True)
+"""
+    assert docker_listing_reads(planted, "planted") == [
+        "planted:6",
+        "planted:8",
+        "planted:13",
+        "planted:16",
+    ]
+
+
+def test_ratchet_sees_an_inspect_after_a_kill_in_a_helper() -> None:
+    """A ``docker inspect`` (or a kill) moved into a same-module helper is the same race:
+    a call to a function whose body inspects, after a call that changes a container's state
+    — directly or through another helper — is flagged at the call (P-132)."""
+    planted = """
+import subprocess
+def _state(name):
+    return subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name])
+def _kill(name):
+    subprocess.run(["docker", "kill", name])
+def _state_twice(name):
+    return _state(name)
+def test_a(name):
+    subprocess.run(["docker", "kill", name])
+    assert _state(name).returncode
+def test_b(name):
+    _kill(name)
+    assert _state_twice(name).returncode
+def test_ok(name):
+    assert _state(name).returncode == 0
+"""
+    assert docker_listing_reads(planted, "planted") == ["planted:11", "planted:14"]
 
 
 def test_the_ratchet_leaves_other_commands_alone() -> None:

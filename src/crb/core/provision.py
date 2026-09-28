@@ -26,7 +26,8 @@ Navigation
 What it is:   The pure half of dependency provisioning: lockfile readers over git objects, the
               refusal rules, the content-addressed bundle key and the closure selector.
 What it does: Reads ``go.mod``/``go.sum`` (and a local replace target's ``go.mod``),
-              pinned ``requirements*.txt`` (following ``-r``), a ``uv.lock`` (the project's
+              pinned ``requirements*.txt`` (following ``-r``; a ``--hash`` that is not a
+              whole sha256 refuses the lock, never dropped), a ``uv.lock`` (the project's
               dependencies and the ``runner_opts.deps_groups`` it names, closed, hashed and
               marked) or ``runner_opts.deps_lock`` (whose inner lists are alternatives: a
               commit reads the first it carries), and ``package.json`` +
@@ -407,11 +408,34 @@ def _strip_comment(line: str) -> str:
     return re.split(r"(?:^|\s)#", line, maxsplit=1)[0].strip()
 
 
+_HASH_OPTION = re.compile(r"--hash(?:=|\s+)(\S+)")
+
+
+def _whole_hashes(tail: str, where: str) -> tuple[str, ...]:
+    """The ``--hash`` options after a pin, each a whole ``sha256:<64 hex>``. Anything else
+    in the tail — a hash of another kind or length, a ``--hash`` with no value, another
+    option — refuses the lock (PROVISION_SOURCE_REFUSED): a hash is never skipped, so the
+    pin written bare, nor cut to 64 characters (DL-113; docs/PREVENTION.md P-131)."""
+    hashes: list[str] = []
+    rest = tail.strip()
+    while rest:
+        m = _HASH_OPTION.match(rest)
+        if not m or not _HASH.match(m.group(1)):
+            raise ProvisionRefused(
+                "PROVISION_SOURCE_REFUSED",
+                f"{where}: {rest.split()[0] if not m else m.group(1)!r} after the pin is not "
+                "a whole --hash=sha256:<64 hex>",
+            )
+        hashes.append(m.group(1))
+        rest = rest[m.end() :].strip()
+    return tuple(hashes)
+
+
 def parse_requirements(
     reader: _Reader, path: str, *, seen: set[str] | None = None
 ) -> tuple[list[LockFile], list[PyPin]]:
     """Read ``path`` and its ``-r`` includes through git objects. Only ``name==version``
-    (with optional ``--hash`` options and markers) is accepted."""
+    (with optional markers, and ``--hash`` options each a whole sha256) is accepted."""
     seen = set() if seen is None else seen
     norm = posixpath.normpath(path)
     if norm in seen:
@@ -447,8 +471,9 @@ def parse_requirements(
             raise ProvisionRefused(
                 "PROVISION_SOURCE_REFUSED", f"{where}: the option {opt} is not supported"
             )
-        hashes = tuple(re.findall(r"--hash[=\s]+(sha256:[0-9a-fA-F]{64})", line))
-        spec = re.split(r"\s--hash", line, maxsplit=1)[0].strip()
+        first_hash = re.search(r"\s--hash", line)
+        cut = first_hash.start() if first_hash else len(line)
+        spec, hashes = line[:cut].strip(), _whole_hashes(line[cut:], where)
         if (
             "://" in spec
             or " @ " in spec
