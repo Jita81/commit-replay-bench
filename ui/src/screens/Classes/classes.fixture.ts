@@ -66,7 +66,15 @@ export const SUMMARY: ClassSetVersionSummary = {
   passes: false,
 }
 
-export const INDEX: ClassSetIndex = { orgs: [{ org: 'acme', versions: [SUMMARY] }], repos: ['alpha'], thresholds: THRESHOLDS }
+export const INDEX: ClassSetIndex = {
+  orgs: [{ org: 'acme', versions: [SUMMARY] }],
+  repos: ['alpha'],
+  thresholds: THRESHOLDS,
+  global_classes: [
+    { slug: 'bug.fix', definition: 'Fixes a defect in existing behaviour.' },
+    { slug: 'feature.add', definition: 'Adds a new capability.' },
+  ],
+}
 
 export const VERSION: ClassSetVersionDetail = {
   ...SUMMARY,
@@ -109,7 +117,9 @@ export const CLASS_PAGE: ClassPage = {
   title: 'A fix to the parser',
   definition: 'A change that corrects how the parser reads its input.',
   parent: 'bug.fix',
+  parent_definition: 'Fixes a defect in existing behaviour.',
   rule: { words: ['parser', 'parse'], work_item_types: [], components: [], labels: [] },
+  // the server writes straight apostrophes; the page sets them as ’ (typeset in ClassesPage)
   rule_words: "A ticket is in this class when the ticket's text says “parser” or “parse”.",
   entry_id: '',
   entry_repo: '',
@@ -119,8 +129,8 @@ export const CLASS_PAGE: ClassPage = {
   context: [{ repo: 'alpha', entry_id: 'convention/errors-wrap', title: 'Wrap errors', statement: 'Every returned error names the operation.', sponsor: ADA, sponsor_name: 'Ada', approver: BEN, approver_name: 'Ben', signed_at: '2026-09-27T10:00:00+00:00', effect: 'unmeasured' }],
   library: [{ repo: 'alpha', work_type: 'bug.fix' }],
   sizes: [
-    { repo: 'alpha', size: 'XS', confirmation: 0, standard: null, next: 'No proven standard: the class set routes nothing yet — 0 qualified confirmation commits so far.' },
-    { repo: 'alpha', size: 'S', confirmation: 60, standard: null, next: 'No proven standard: the class set routes nothing yet — 60 qualified confirmation commits so far.' },
+    { repo: 'alpha', size: 'XS', confirmation: 0, standard: null, next: 'Wait for the class set to route; 0 qualified confirmation commits so far.' },
+    { repo: 'alpha', size: 'S', confirmation: 60, standard: null, next: 'Wait for the class set to route; 60 qualified confirmation commits so far.' },
   ],
 }
 
@@ -131,12 +141,13 @@ export const QUEUE: ClassLabelQueue = {
     { slug: 'cli-fix', title: 'A fix to the command line', definition: 'A change that corrects the command line’s flags.' },
   ],
   items: [
-    { repo: 'alpha', task_id: 'e'.repeat(40), message: 'fix: the cli flag --x4 is ignored', ticket: null, diff: { source_files: 1, test_files: 1, churn: 12 }, my_label: '' },
+    { repo: 'alpha', task_id: 'e'.repeat(40), message: 'fix: the cli flag --x4 is ignored', ticket: null, diff: { source_files: 1, test_files: 2, churn: 12 }, my_label: '' },
     { repo: 'alpha', task_id: 'f'.repeat(40), message: 'fix: the parser drops a token (3)', ticket: null, diff: { source_files: 1, test_files: 1, churn: 12 }, my_label: 'parser-fix' },
   ],
   labelled_by_me: 1,
   sample_min: 50,
   per_class_min: 5,
+  sponsor: false,
 }
 
 export const CLASSES_API: Record<string, unknown> = {

@@ -2514,6 +2514,8 @@ export interface ClassSetIndex {
   orgs: Array<{ org: string; versions: ClassSetVersionSummary[] }>
   repos: string[]
   thresholds: ClassSetThresholds
+  /** The global classes a class may name as its parent, with what each means. */
+  global_classes: Array<{ slug: string; definition: string }>
 }
 
 /** One line of the validity report. */
@@ -2522,7 +2524,8 @@ export interface ClassSetMeasure {
   value: number | null
   threshold: string
   n: number
-  state: 'pass' | 'fail' | 'not_applicable'
+  /** `withheld`: the agreement, from a person part-way through labelling the sample (P-686). */
+  state: 'pass' | 'fail' | 'not_applicable' | 'withheld'
   words: string
   detail: Record<string, unknown>
 }
@@ -2554,6 +2557,8 @@ export interface ClassPage {
   title: string
   definition: string
   parent: string
+  /** What the global parent means (the vocabulary's own definition). */
+  parent_definition: string
   rule: ClassRuleWire
   rule_words: string
   entry_id: string
@@ -2598,6 +2603,8 @@ export interface ClassLabelQueue {
   labelled_by_me: number
   sample_min: number
   per_class_min: number
+  /** The person asking sponsored the version: they are offered nothing to label (P-684). */
+  sponsor: boolean
 }
 
 /** `POST /classes/{org}/versions`. */

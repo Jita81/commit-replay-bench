@@ -184,6 +184,9 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     ['/repos', 'repos'],
     [`/repos/${r}`, 'repos-detail'],
     [`/library/${r}`, 'library-repo'],
+    // an organisation's classes of work: the index a persona reaches from the library's door
+    // (spec 15 opens a class's page and the labelling form and sweeps those with axe; P-687)
+    ['/classes', 'classes'],
     ['/capability', 'capability'],
     ['/routing', 'routing'],
     ['/oracle', 'oracle'],
