@@ -26,8 +26,9 @@
  *               ui/src/screens/Runs/ReviewPanel.tsx (the code under test), ui/src/test/utils.tsx,
  *               ui/src/components/Hint.tsx (the hinted opener in the focus test)
  * Tested by:    ui/src/screens/Runs/ReviewPanel.test.tsx
- * Touch when:   a header, a refusal code or a finding kind is added (docs/API.md "Reviews",
- *               "/grades/{row_hash}/patch") — extend the fixture and the matching case.
+ * Touch when:   never for a new repository; a header, a refusal code or a finding kind is added
+ *               (docs/API.md "Reviews", "/grades/{row_hash}/patch") — extend the fixture and the
+ *               matching case.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -427,6 +428,24 @@ describe('EvidenceDrawer: Review panel', () => {
     await user.click(screen.getByTestId('review-submit'))
     await screen.findByTestId('review-recorded')
     expect(posts[0]).toEqual({ grade_row_hash: ROW, statement: 'worktree gone', findings: [], mergeable: null, patch_sha256: '', not_reviewed: true })
+  })
+
+  it('takes the minutes the review took, only when stated, and refuses more than a working day', async () => {
+    const { posts } = setup({ [`GET /grades/${ROW}/retained`]: { ...RETAINED, patch_available: false, patch_reason: 'gone' } })
+    const user = userEvent.setup()
+    await user.click(await screen.findByTestId('tab-review'))
+    await user.click(screen.getByTestId('not-reviewed'))
+    await user.type(screen.getByLabelText(/^Statement/), 'worktree gone')
+    const minutes = screen.getByLabelText(/^Minutes this review took/)
+    await user.type(minutes, '481')
+    expect(screen.getByTestId('review-blockers')).toHaveTextContent('Minutes must be a whole number from 1 to 480')
+    expect(screen.getByTestId('review-submit')).toBeDisabled()
+    await user.clear(minutes)
+    await user.type(minutes, '1x2')
+    expect(minutes).toHaveValue('12')
+    await user.click(screen.getByTestId('review-submit'))
+    await screen.findByTestId('review-recorded')
+    expect(posts[0]).toEqual({ grade_row_hash: ROW, statement: 'worktree gone', findings: [], mergeable: null, patch_sha256: '', not_reviewed: true, minutes: 12 })
   })
 
   it('a viewer sees the panel but cannot record', async () => {

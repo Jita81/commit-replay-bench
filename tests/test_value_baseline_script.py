@@ -11,7 +11,8 @@ What it does: Pins that every row's failure kind is recomputed with the product'
               export's crude column; that a budget stop and a lint-only failure survive; that a
               review whose statement the operator marked as a flag defect is corrected in the
               reader and counted as corrected; that the critical-friend cobra reviews can be
-              left out; and that the JSONL export reads through ``GradeRow`` unchanged.
+              left out; that an empty cost column is no price, never a known $0 (P-185); and
+              that the JSONL export reads through ``GradeRow`` unchanged.
 How:          Small export files written to ``tmp_path``; the script loaded as a module.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
@@ -114,6 +115,21 @@ def test_the_failure_kind_is_the_products_rule_not_the_exports(
         ("disqualified", ""),
     ]
     assert rows[8].clean and rows[8].repo_lint_clean is True and rows[0].cost_usd == 1.0
+
+
+def test_an_empty_cost_is_unpriced_never_a_known_zero(vb: ModuleType, tmp_path: Path) -> None:
+    """DL-066: a row whose cost is not a measurement is counted apart, never as $0. The
+    pipe-separated reader turned an empty ``cost`` column into a KNOWN $0, so the baseline
+    this script regenerates would have summed it as priced and served per-pound figures that
+    must be withheld. ``ValueRow.cost_known`` has no default, so no adapter can claim a price
+    by leaving it out (P-185)."""
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join([HEADER, _row(1), _row(2, cost=""), _row(3, cost=" ")]) + "\n", encoding="utf-8"
+    )
+    rows = vb.read_ledger(p)
+    assert [r.cost_known for r in rows] == [True, False, False]
+    assert rows[0].cost_usd == 1.0
 
 
 def test_an_unknown_error_class_is_refused(vb: ModuleType, tmp_path: Path) -> None:

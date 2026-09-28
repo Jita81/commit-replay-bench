@@ -90,6 +90,7 @@ from crb.server.auth import (
     session_token_of,
 )
 from crb.server.deps import ApiError, client_ip, error_body
+from crb.server.flow_record import stamp_install
 from crb.server.settings import Settings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.ledger import assert_append_only
@@ -490,6 +491,9 @@ def _lifespan_factory(
         assert_append_only(factory)  # raises LedgerIntegrityError → refuse to start
         app.state.engine = engine
         app.state.session_factory = factory
+        # ADR-0028: the install is stamped before the bootstrap admin writes the first row,
+        # so a database that held nothing reads as this start being the install
+        stamp_install(factory)
         bootstrap_admin_if_empty(factory, settings)
         # Mounted at startup (not in the factory) so routes a caller adds after
         # create_app() still take precedence over the catch-all SPA mount.

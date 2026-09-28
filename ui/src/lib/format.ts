@@ -28,9 +28,9 @@
  *               dash for an absent value and the interval text),
  *               ui/src/screens/Capability/CapabilityPage.test.tsx (percentages and intervals as
  *               rendered)
- * Touch when:   the Wilson z or method changes in src/crb/core/stats.py (an apparatus change —
- *               docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires); never for a
- *               new repository.
+ * Touch when:   never for a new repository; the Wilson z or method changes in src/crb/core/stats.py
+ *               (an apparatus change —
+ *               docs/EVIDENCE-AND-CLAIMS.md#4-the-apparatus-stamp--evidence-expires).
  * Claims:       Every rate the UI shows is accompanied by n and a Wilson interval
  *               (docs/EVIDENCE-AND-CLAIMS.md#3-every-number-carries-its-method).
  */
@@ -124,6 +124,22 @@ export function fmtAge(seconds: number): string {
   if (m < 60) return `${m} min`
   const h = Math.floor(m / 60)
   return `${h} h ${m - h * 60} min`
+}
+
+/**
+ * Seconds as a lead time a person reads at a glance: "45 s" / "12 min" / "2 h 5 min" /
+ * "3 days 4 h". Absent is the dash — a duration nobody measured is never "0 s".
+ */
+export function fmtDuration(v: number | null | undefined): string {
+  if (!finite(v) || v < 0) return DASH
+  const s = Math.round(v)
+  if (s < 60) return `${s} s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60)
+  if (h < 48) return `${h} h ${m - h * 60} min`
+  const d = Math.floor(h / 24)
+  return `${d} days ${h - d * 24} h`
 }
 
 /** An ISO timestamp as an age against `nowMs`: "6 s ago", "12 min ago", "2 h 5 min ago"; `null` when absent or unreadable. */

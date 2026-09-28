@@ -140,6 +140,7 @@ from crb.observability import build_stamp, metrics, probes
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.provision.probe import probe_provision
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
+from crb.server.flow_record import stamp_first_healthy
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
 from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
@@ -810,6 +811,8 @@ def health(
     state = request.app.state
     mounted = state.ui_dist if getattr(state, "ui_mounted", False) else UI_DIST_UNKNOWN
     out = collect_health(factory, settings, request_id=request_id(request), ui_dist=mounted)
+    # ADR-0028: the first green read is the go-live stream's end mark, stamped once
+    stamp_first_healthy(factory, str(out["status"]))
     if out["status"] == DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return out
