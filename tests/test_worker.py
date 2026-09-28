@@ -30,7 +30,8 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               the worker's liveness bound — the check-in still lands. And (ADR-0023) that a
               production worker stamps the unsealed-production override into every run's
               apparatus and every pack, and refuses a run that asks for the local executor
-              without it.
+              without it. And that the idle loop calls every idle step under its guard and
+              survives each one raising (P-154).
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
               / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -43,7 +44,8 @@ Works with:   src/crb/server/worker.py (under test), src/crb/store/jobs.py (the 
               tests/test_worker_clone.py and tests/test_worker_budget_ladder.py (the same
               harness for one kind or seam each; so are the other test_worker_*.py files)
 Tested by:    tests/test_worker.py
-Touch when:   a run kind is added (``stage_for``, a run case here and the queue's
+Touch when:   never for a new repository (the fixture repository stands in for every one); a
+              run kind is added (``stage_for``, a run case here and the queue's
               ``RUN_KINDS``); a new way for a run to end must decide ``failed`` vs
               ``succeeded`` honestly.
 """
@@ -2352,3 +2354,134 @@ def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: 
     with h.factory() as db:
         again = {(r.kind, r.key): r for r in due_records(db)}[("gap_unsigned", "I-2")]
     assert again.first_due == rec.first_due and again.last_seen >= rec.last_seen
+
+
+# --- the idle loop's own steps (P-154) --------------------------------------------------
+
+
+def test_the_idle_loop_runs_the_decisions_clock_and_survives_each_idle_step_raising(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-516's clock runs with nobody looking only if the loop itself calls it: this drives
+    the real ``run_forever`` over an empty queue. And every idle step is under the loop's
+    guard — the decisions pass and the intake poll each raise on their first call (a
+    ``database is locked``, a unique-key race) and the loop goes round again and calls them
+    both a second time, where before one raise ended the worker (P-154)."""
+    from sqlalchemy.exc import OperationalError
+
+    calls: dict[str, int] = {"poll_intake": 0, "refresh_decisions": 0}
+    iterated_twice = threading.Event()
+
+    def flaky(name: str) -> Callable[..., int]:
+        def step(now: float | None = None) -> int:
+            calls[name] += 1
+            if calls[name] == 1:
+                raise OperationalError("SELECT 1", {}, Exception("database is locked"))
+            if all(n >= 2 for n in calls.values()):
+                iterated_twice.set()
+            return 0
+
+        return step
+
+    for name in calls:
+        monkeypatch.setattr(h.worker, name, flaky(name))
+    stop = threading.Event()
+    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
+    t.start()
+    ok = iterated_twice.wait(timeout=10)
+    stop.set()
+    t.join(timeout=5)
+    assert ok, f"the loop did not survive an idle step raising: {calls}"
+    assert not t.is_alive()
+    assert set(worker_mod.IDLE_STEPS) == set(calls)
+
+
+def test_run_forever_makes_no_call_outside_the_guard() -> None:
+    """The class, not the instance (P-154): a step added to the idle loop as a bare call
+    would take the worker down the first time it raised. ``run_forever`` may call only
+    methods that guard themselves (the check-in and the reaper say "never raises" and
+    catch), ``run_once`` inside its ``try``, and the idle steps through the guarded runner
+    that reads ``IDLE_STEPS``. Anything else fails here, before it fails in production."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(Worker.run_forever)))
+    guarded: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Try) and any(
+            isinstance(hd.type, ast.Name) and hd.type.id == "Exception" for hd in node.handlers
+        ):
+            for inner in node.body:
+                guarded |= {id(n) for n in ast.walk(inner)}
+    self_guarding = {"_checkin_if_due", "reap", "checkin", "_run_idle_steps"}
+    bare = [
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "self"
+        and id(node) not in guarded
+        and node.func.attr not in self_guarding
+    ]
+    assert bare == [], f"run_forever calls {bare} outside its guard: add it to IDLE_STEPS"
+    assert "_run_idle_steps" in inspect.getsource(Worker.run_forever)
+
+
+def test_the_decisions_pass_never_raises_and_one_repository_cannot_spoil_the_next(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``refresh_decisions`` says it never raises. The independent verifiers made it: a
+    ``GET /decisions`` committing the same first stamp between the pass's read and its
+    commit raised ``IntegrityError`` out of the pass, and a repository whose failure left
+    the session needing a rollback made the final commit raise too. Now each repository is
+    its own transaction and the clock joins a concurrent first stamp (P-154, P-157)."""
+    from types import SimpleNamespace
+
+    from crb.server import decisions as dec
+    from crb.server.decisions import DecisionRow
+    from crb.store.models import DecisionDue
+
+    with h.factory() as s:
+        s.add(
+            Repo(
+                name="aaa-broken",
+                language="python",
+                runner="pytest",
+                clone_path="/nope",
+                config_json={},
+            )
+        )
+        s.commit()
+    row = DecisionRow(kind="signoff_due", key="bug.fix|XS", title="sign it", role="approver")
+
+    def rows_for(db: Any, factory: Any, settings: Any, name: str, **kw: Any) -> list[Any]:
+        if name == "aaa-broken":  # a failure that leaves the session needing a rollback
+            for ident in ("a" * 32, "b" * 32):
+                db.add(DecisionDue(id=ident, repo=name, kind="k", key="k", title="", role=""))
+            db.flush()
+        return [row]
+
+    monkeypatch.setattr(worker_mod, "decision_rows_for", rows_for)
+    monkeypatch.setattr(h.worker, "_served_map", lambda repo, **kw: (SimpleNamespace(cells=[]), {}))
+    original = dec.due_records
+    raced: list[bool] = []
+
+    def racing(db: Any, repo: str = "") -> Any:
+        seen = original(db, repo)
+        if repo == pr.REPO_NAME and not raced:
+            raced.append(True)
+            with h.factory() as other:  # GET /decisions, stamping the same row first
+                dec.record_due(other, repo, [row], now="2026-09-01T09:00:00+00:00")
+                other.commit()
+        return seen
+
+    monkeypatch.setattr(dec, "due_records", racing)
+    assert h.worker.refresh_decisions(now=1000.0) == 1  # the good repository, and no raise
+    assert raced
+    with h.factory() as s:
+        recs = {(r.repo, r.kind, r.key): r for r in original(s)}
+    assert set(recs) == {(pr.REPO_NAME, "signoff_due", "bug.fix|XS")}
+    assert recs[(pr.REPO_NAME, "signoff_due", "bug.fix|XS")].first_due.startswith("2026-09-01")
+

@@ -35,7 +35,8 @@ Works with:   src/crb/server/decisions.py (the derivation and the clock),
               ui/src/screens/Decisions/useDecisionCount.ts (joins these ages to its own
               rows), docs/API.md#capability-routing-forecast-sign-off (the routes' contract)
 Tested by:    tests/test_server_decisions.py
-Touch when:   a human act is added to the product (src/crb/server/decisions.py first).
+Touch when:   never for a new repository (``?repo=`` names any connected one); a human act is
+              added to the product (src/crb/server/decisions.py first).
 """
 
 from __future__ import annotations
@@ -64,6 +65,7 @@ from crb.server.routes.capability import (
     signed_map,
 )
 from crb.server.routes.oracle import latest_controls_verdict
+from crb.server.routes.repos import get_repo_or_404
 from crb.store.ledger import DbLedger
 from crb.store.models import Repo
 
@@ -99,8 +101,12 @@ class DecisionList(BaseModel):
 
 
 def _repos(db: Session, repo: str) -> list[str]:
+    """The repositories one reading covers: the one named, which must be connected (404
+    ``not_found`` otherwise, as every per-repository route answers — an empty inbox for a
+    name nobody connected would read as "nothing is waiting", and the name goes on to a
+    filesystem path), or every connected repository."""
     if repo:
-        return [repo]
+        return [get_repo_or_404(db, repo).name]
     return list(db.execute(select(Repo.name).order_by(Repo.name)).scalars().all())
 
 
@@ -146,7 +152,7 @@ def rows_for(
 @router.get(
     "/decisions",
     response_model=DecisionList,
-    responses={401: _ERR},
+    responses={401: _ERR, 404: _ERR},
     summary="Every decision due now, with the moment it became due and how long it has waited",
 )
 def list_decisions(

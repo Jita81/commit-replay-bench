@@ -38,7 +38,8 @@ What it does: Derives the eight inbox kinds from the capability cells, the facto
               writes to the ledger: a row here is a pointer at an act a person must take.
 How:          Pure ``decision_rows`` over ``CapabilityCell`` and ``TaskView``; ``record_due``
               upserts under the caller's session (the caller commits), stamping ``first_due``
-              on arrival, ``last_seen`` every pass and ``resolved`` when a row goes.
+              on arrival (``INSERT … ON CONFLICT DO NOTHING``, so a concurrent first stamp is
+              joined — P-157), ``last_seen`` every pass and ``resolved`` when a row goes.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md (the routes the cell rows quote),
               docs/adr/0015-signoffs-expire-with-the-apparatus.md (why a stale sign-off puts a
@@ -50,8 +51,8 @@ Works with:   src/crb/server/routes/decisions.py (serves it), src/crb/server/wor
               (``TaskView`` — the item rows), ui/src/screens/Decisions/decisions.ts (the
               screen's own derivation of the same rows, joined to these ages by key)
 Tested by:    tests/test_server_decisions.py
-Touch when:   a human act is added to the product — a kind here AND in decisions.ts, with the
-              same key.
+Touch when:   never for a new repository (its inbox is derived, not configured); a human act
+              is added to the product — a kind here AND in decisions.ts, with the same key.
 """
 
 from __future__ import annotations
@@ -63,6 +64,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from crb.core.capability import CapabilityCell
@@ -291,28 +294,57 @@ def record_due(
         ident = (row.kind, row.key)
         rec = existing.get(ident)
         if rec is None:
-            rec = DecisionDue(
-                id=uuid.uuid4().hex,
-                repo=repo,
-                kind=row.kind,
-                key=row.key,
-                title=row.title,
-                role=row.role,
-                first_due=stamp,
-                last_seen=stamp,
-                resolved="",
-            )
-            db.add(rec)
-        else:
-            rec.title = row.title
-            rec.role = row.role
-            rec.last_seen = stamp
-            rec.resolved = ""
+            rec = _first_stamp(db, repo, row, stamp)
+        rec.title = row.title
+        rec.role = row.role
+        rec.last_seen = stamp
+        rec.resolved = ""
         live[ident] = rec
     for ident, rec in existing.items():
         if ident not in live and not rec.resolved:
             rec.resolved = stamp
     return live
+
+
+def _first_stamp(db: Session, repo: str, row: DecisionRow, stamp: str) -> DecisionDue:
+    """The clock row for a decision this pass saw arrive — inserted, or JOINED when another
+    stamper got there first.
+
+    Two stampers run: the worker's idle pass and every ``GET /decisions``. Both read the
+    clock, then write it, under the unique ``(repo, kind, key)``; when the other commits the
+    same first stamp in between, a plain insert raised ``IntegrityError`` — out of the
+    worker's pass, ending the loop, and out of the route as a 500 (P-157). So the insert is
+    ``ON CONFLICT DO NOTHING`` on that identity, in the dialect's own words (SQLite and
+    PostgreSQL both say it), and the row is then read back: ours, or the earlier one with its
+    earlier ``first_due`` — the wait is the decision's, whoever stamped it first."""
+    values = {
+        "id": uuid.uuid4().hex,
+        "repo": repo,
+        "kind": row.kind,
+        "key": row.key,
+        "title": row.title,
+        "role": row.role,
+        "first_due": stamp,
+        "last_seen": stamp,
+        "resolved": "",
+    }
+    identity = ["repo", "kind", "key"]
+    if db.get_bind().dialect.name == "postgresql":
+        stmt: Any = (
+            pg_insert(DecisionDue).values(**values).on_conflict_do_nothing(index_elements=identity)
+        )
+    else:
+        stmt = (
+            sqlite_insert(DecisionDue)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=identity)
+        )
+    db.execute(stmt)
+    return db.execute(
+        select(DecisionDue).where(
+            DecisionDue.repo == repo, DecisionDue.kind == row.kind, DecisionDue.key == row.key
+        )
+    ).scalar_one()
 
 
 def age_seconds(first_due: str, *, now: str = "") -> int:

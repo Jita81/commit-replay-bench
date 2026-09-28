@@ -154,10 +154,11 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py
-Touch when:   a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
+Touch when:   never for a new repository — repository behaviour lives in the runner and the
+              repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
-              every run must carry is added (``_RunLedger._stamp``); never for a new
-              repository — repository behaviour lives in the runner and the repo config.
+              every run must carry is added (``_RunLedger._stamp``); an idle-loop step is
+              added (a name in ``IDLE_STEPS``, never a bare call in ``run_forever``).
 Claims:       Nothing here decides a verdict: the grader does; the worker only sequences,
               stamps and records (docs/EVIDENCE-AND-CLAIMS.md).
 
@@ -336,6 +337,11 @@ DEFAULT_OUTAGE_STOP = 3
 #: over it (G-516). Five minutes: the age a person reads is a wait measured in hours and days,
 #: and each pass reduces a repository's whole ledger — a cost the idle loop should pay rarely.
 DECISIONS_REFRESH_S = 300.0
+#: The idle loop's own steps, in the order it takes them when no run is queued. Each runs
+#: under the loop's guard (:meth:`Worker._run_idle_steps`), so one that raises is logged and
+#: the worker goes on (P-154). A new idle step is a method name here, never a bare call in
+#: ``run_forever`` — tests/test_worker.py refuses a call there outside the guard.
+IDLE_STEPS: tuple[str, ...] = ("poll_intake", "refresh_decisions")
 
 _LOG = logging.getLogger(__name__)
 
@@ -827,11 +833,22 @@ class Worker:
                 _LOG.exception("worker loop error")
                 run = None
             if run is None:
-                self.poll_intake()
-                self.refresh_decisions()
+                self._run_idle_steps()
                 stop.wait(self.settings.poll_s)
         self.checkin(stopped=True)
         _LOG.info("worker %s stopped", self.worker_id)
+
+    def _run_idle_steps(self) -> None:
+        """Every step of :data:`IDLE_STEPS`, each under the loop's guard: a step that raises
+        is logged and the next one still runs, and so does the next iteration. A step's own
+        "never raises" is a promise; this guard is what keeps the loop alive when a promise
+        is broken — a unique-key race or a ``database is locked`` in the decisions pass
+        ended the worker before it (P-154). Never raises."""
+        for name in IDLE_STEPS:
+            try:
+                getattr(self, name)()
+            except Exception:  # the loop must survive anything an idle step throws
+                _LOG.exception("worker idle step %s failed", name)
 
     # --- the decisions clock (G-516) -------------------------------------------------
     def decisions_due_now(self, now: float | None = None) -> bool:
@@ -845,17 +862,26 @@ class Worker:
         tab (G-516). Returns how many repositories were refreshed.
 
         Called from the idle loop only, and never raises: a repository whose map cannot be
-        read is logged and the next pass retries. It writes nothing but ``decisions_due`` —
-        no evidence, no ledger row, no event — because it is a clock, not an act.
+        read is logged and the next pass retries. Each repository is its own transaction, so
+        one that fails — and leaves its session needing a rollback — neither spoils the next
+        nor makes a final commit raise (P-154); a first stamp ``GET /decisions`` committed
+        meanwhile is joined, not collided with (:func:`crb.server.decisions.record_due`). It
+        writes nothing but ``decisions_due`` — no evidence, no ledger row, no event —
+        because it is a clock, not an act.
         """
         if not self.decisions_due_now(now):
             return 0
         self._decisions_last = time.time() if now is None else now
-        with self.factory() as db:
-            repos = list(db.execute(select(Repo.name).order_by(Repo.name)).scalars().all())
-            done = 0
-            for name in repos:
-                try:
+        try:
+            with self.factory() as db:
+                repos = list(db.execute(select(Repo.name).order_by(Repo.name)).scalars().all())
+        except Exception:  # a database that cannot be read now is read on the next pass
+            _LOG.exception("decisions refresh could not list the repositories")
+            return 0
+        done = 0
+        for name in repos:
+            try:
+                with self.factory() as db:
                     rows = decision_rows_for(
                         db,
                         self.factory,
@@ -864,10 +890,10 @@ class Worker:
                         cells=self._served_map(name)[0].cells,
                     )
                     record_due(db, name, rows)
-                    done += 1
-                except Exception:  # the idle loop must survive a repository it cannot read
-                    _LOG.exception("decisions refresh failed for %s", name)
-            db.commit()
+                    db.commit()
+                done += 1
+            except Exception:  # the idle loop must survive a repository it cannot read
+                _LOG.exception("decisions refresh failed for %s", name)
         return done
 
     # --- intake: the enterprise's own board ----------------------------------------
@@ -3181,6 +3207,7 @@ def evidence_pack_from_file(evidence_dir: Path, pack_hash: str) -> dict[str, Any
 
 
 __all__ = [
+    "IDLE_STEPS",
     "PROBE_FAILED",
     "PROBE_OK",
     "RunContext",

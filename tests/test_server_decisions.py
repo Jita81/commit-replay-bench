@@ -9,8 +9,10 @@ What it does: Pins that the derivation produces the same eight kinds and the sam
               item rows keyed by item id — that a cell nobody has measured is not a decision,
               that a STALE sign-off puts its cell back in the inbox (ADR-0015), that the
               clock stamps ``first_due`` once and keeps it when a row goes away and comes
-              back, that a row that stops being due is resolved rather than deleted, and that
-              the route serves each row with its age and needs only a viewer.
+              back, that a row that stops being due is resolved rather than deleted, that a
+              first stamp another reader committed meanwhile is joined rather than collided
+              with (P-157), and that the route serves each row with its age, needs only a
+              viewer and answers 404 for a repository nobody connected.
 How:          The seeded server (``fixtures.server_seed``) for the route; hand-built
               ``CapabilityCell`` and ``TaskView`` objects for the derivation, so the rules
               are pinned without a ledger; the clock is moved by passing ``now`` rather than
@@ -22,7 +24,8 @@ Works with:   src/crb/server/decisions.py and src/crb/server/routes/decisions.py
               ui/src/screens/Decisions/decisions.ts (the screen's own derivation of the same
               rows — the kinds and keys pinned here are the join)
 Tested by:    tests/test_server_decisions.py
-Touch when:   a human act is added to the product (a kind in both derivations).
+Touch when:   never for a new repository; a human act is added to the product (a kind in
+              both derivations).
 """
 
 from __future__ import annotations
@@ -291,6 +294,38 @@ def test_one_repositorys_clock_is_its_own(env: Env) -> None:
         assert len(dec.due_records(db)) == 2
 
 
+def test_a_first_stamp_another_reader_committed_first_is_joined_not_collided(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker's idle pass and ``GET /decisions`` both stamp the clock, under a unique
+    ``(repo, kind, key)``. When the other one commits the SAME first stamp between this
+    pass's read and its write, the pass joins that row — keeps its ``first_due``, moves its
+    ``last_seen`` — instead of an ``IntegrityError`` that killed the worker loop and gave the
+    reader a 500 (the independent verifiers' attack on stream S, P-157)."""
+    rows = dec.decision_rows(cells=[cell()])
+    original = dec.due_records
+    raced: list[bool] = []
+
+    def racing(db: Any, repo: str = "") -> Any:
+        seen = original(db, repo)
+        if not raced:
+            raced.append(True)
+            with env.factory() as other:  # the other reader, in its own transaction
+                dec.record_due(other, ALPHA, rows, now="2026-09-01T09:00:00+00:00")
+                other.commit()
+        return seen
+
+    monkeypatch.setattr(dec, "due_records", racing)
+    with env.factory() as db:
+        live = dec.record_due(db, ALPHA, rows, now="2026-09-01T10:00:00+00:00")
+        db.commit()
+        assert raced and live[("signoff_due", "bug.fix|S")].first_due.startswith("2026-09-01T09:00")
+    with env.factory() as db:
+        (rec,) = dec.due_records(db, ALPHA)
+        assert rec.first_due == "2026-09-01T09:00:00+00:00"
+        assert rec.last_seen == "2026-09-01T10:00:00+00:00" and rec.resolved == ""
+
+
 # --- the route ------------------------------------------------------------------------
 
 
@@ -317,3 +352,16 @@ def test_the_route_serves_the_age_with_the_row_and_records_it_for_next_time(env:
     logout(env.client)
     r = env.get("/decisions")
     assert r.status_code == 401 and envelope(r)["code"] in {"unauthenticated", "forbidden"}
+
+
+def test_an_unknown_repository_is_a_404_and_writes_nothing(env: Env) -> None:
+    """``?repo=`` names a repository the deployment has connected, or it is refused the way
+    every other per-repository route refuses it — never a 200 with an empty inbox that
+    reads as "nothing is waiting", and never an unchecked name handed on as a path."""
+    login(env.client, "viewer")
+    for name in ("../../etc", "x" * 400, "not-connected"):
+        r = env.get("/decisions", params={"repo": name})
+        assert r.status_code == 404, (name, r.text)
+        assert envelope(r)["code"] == "not_found"
+    with env.factory() as db:
+        assert dec.due_records(db) == []

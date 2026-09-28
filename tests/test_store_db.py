@@ -11,7 +11,8 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               model table and is idempotent (as is installing the triggers alone), that foreign
               keys are enforced, that ``session_scope`` commits and rolls back, and that every
               append-only table refuses UPDATE and DELETE while still accepting INSERT — and that
-              the ordinary tables (``repos`` / ``runs`` / ``users``) stay mutable.
+              the ordinary tables (``repos`` / ``runs`` / ``users``) stay mutable; and that the
+              decisions clock joins a concurrent first stamp in both dialects (P-157).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -20,7 +21,7 @@ Works with:   src/crb/store/db.py (under test), src/crb/store/models.py (``APPEN
               and the rows), tests/conftest_store.py (the backends), tests/test_store_migrate.py
               (the same triggers through Alembic), docs/SECURITY.md (evidence integrity, §3.5)
 Tested by:    tests/test_store_db.py
-Touch when:   a table is added (decide whether it is append-only — if so, add it to
+Touch when:   never for a new repository; a table is added (decide whether it is append-only — if so, add it to
               ``APPEND_ONLY_TABLES`` and ``_one_row`` here, and a migration); a pragma changes.
 """
 
@@ -261,3 +262,42 @@ def test_append_only_tables_still_accept_inserts(backend: Backend) -> None:
             s.add(_one_row(table))
             s.commit()
         assert _count(backend, table) == 1
+
+
+# ---------------------------------------------------------------------------
+# the decisions clock's first stamp, on both dialects (P-157)
+# ---------------------------------------------------------------------------
+
+
+def test_a_concurrent_first_decision_stamp_is_joined_on_both_dialects(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``record_due`` writes a decision's first stamp with ``INSERT … ON CONFLICT DO
+    NOTHING`` in the dialect's own words, then reads the row back. Here the other stamper
+    commits the same ``(repo, kind, key)`` between this pass's read and its write: the pass
+    joins the earlier row — its ``first_due`` kept, ``last_seen`` moved — on SQLite and on
+    PostgreSQL alike, where a plain insert raised ``IntegrityError`` (P-157)."""
+    from crb.server import decisions as dec
+
+    store_db.init_db(backend.engine)
+    row = dec.DecisionRow(kind="signoff_due", key="bug.fix|S", title="sign it", role="approver")
+    original = dec.due_records
+    raced: list[bool] = []
+
+    def racing(db: object, repo: str = "") -> object:
+        seen = original(db, repo)  # type: ignore[arg-type]
+        if not raced:
+            raced.append(True)
+            with backend.factory() as other:
+                dec.record_due(other, "alpha", [row], now="2026-09-01T09:00:00+00:00")
+                other.commit()
+        return seen
+
+    monkeypatch.setattr(dec, "due_records", racing)
+    with backend.factory() as s:
+        dec.record_due(s, "alpha", [row], now="2026-09-01T10:00:00+00:00")
+        s.commit()
+    with backend.factory() as s:
+        (rec,) = original(s, "alpha")
+        assert raced and rec.first_due == "2026-09-01T09:00:00+00:00"
+        assert rec.last_seen == "2026-09-01T10:00:00+00:00" and rec.resolved == ""
