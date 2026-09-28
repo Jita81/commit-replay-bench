@@ -15,7 +15,8 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
  * Works with:   ui/src/screens/Ledger/LedgerPage.tsx (`LINKED_FILTERS`, the code under test),
- *               ui/src/test/utils.tsx, ui/src/help/hints.ts (`button.ledger.remove_filter`)
+ *               ui/src/test/utils.tsx (`mockApi`, `renderApp`), ui/src/help/hints.ts
+ *               (`button.ledger.remove_filter`)
  * Tested by:    ui/src/screens/Ledger/LedgerFilters.test.tsx
  * Touch when:   never for a new repository; a filter is added to `GET /grades` without a
  *               control on the page (it must get a chip, and a case here).

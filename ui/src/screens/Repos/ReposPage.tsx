@@ -5,14 +5,16 @@
  * ----------
  * What it is:   The screen at /repos — the first screen a new deployment shows — and the
  *               host of the Add-repo dialog.
- * What it does: Lists every page of `GET /repos` (never only the first page) with the probe pill (can the instrument run this repo's
- *               tests?), task counts, gold-clean and hard-pool counts and the last run's kind
- *               and status; rows open the repo page. Operators get "Add repo"; a viewer's
+ * What it does: Lists every page of `GET /repos` (never only the first page) with the probe
+ *               pill (can the instrument run this repo's tests?), task counts, gold-clean
+ *               and hard-pool counts and the last run's kind and status; rows open the repo
+ *               page. Operators get "Add repo"; a viewer's
  *               empty state says to ask an operator rather than offering a button that would
  *               403. A line above the table says how many of the served total are listed,
  *               so a list that is not whole says so (G-229).
- * How:          `useAllRepos` (every page, as each journey screen reads) → `DataTable`; `can('operator')` gates the action; the dialog
- *               navigates to the new repo on success.
+ * How:          `useAllRepos` (every page, as each journey screen reads) → `DataTable`;
+ *               `can('operator')` gates the action; the dialog navigates to the new repo on
+ *               success.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useAllRepos`), ui/src/api/types.ts (`RepoSummary`),
@@ -20,7 +22,8 @@
  *               (where a row leads), ui/src/lib/verdict.ts (`probeDisplay`,
  *               `runStatusDisplay`), src/crb/server/routes/repos.py
  * Tested by:    ui/src/screens/Repos/ReposPage.test.tsx (rows, probe pills, the empty state per
- *               role, every page read and the count line), ui/e2e/walkthrough/02-repo-onboard.spec.ts (Add repo → the repo page),
+ *               role, every page read and the count line),
+ *               ui/e2e/walkthrough/02-repo-onboard.spec.ts (Add repo → the repo page),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe)
  * Touch when:   never for a new repository — it appears here once added; a column is worth
  *               adding from `GET /repos` (docs/API.md).

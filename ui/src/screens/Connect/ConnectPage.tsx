@@ -8,30 +8,29 @@
  *               stages as a task list (register → probe → mine → oracle → controls → first
  *               measurement) with the action for the next one and, while a stage runs, an
  *               in-flight panel (the attempt in hand of total (`kOfN`), spend so far, started, Cancel).
- * What it does: Lets an enterprise tech lead connect a repository and get to the baseline
- *               without knowing the product's vocabulary: every stage says what it proves and
- *               what it costs ("no model involved" / "spends model budget"), gold-clean, oracle
- *               strength and negative controls carry their definitions (`Term`), the status is
- *               derived from the API (`stagesFor`), so the walk resumes where the repository
- *               is, and the action is gated on the operator role like the API is (a
- *               non-operator reads "An operator runs this."). Nothing here fabricates
- *               progress: a stage is done only when the API holds its evidence, a queued run
- *               reads "Queued" with its place in the line (the server's `queue_position`),
- *               the running stage's line is the polled run's own counter (`runningDetail`),
- *               and a passed controls report that still carries a finding (an escape, a
- *               thin set) reads "Done, with a finding" in amber — deliver is withheld until
- *               it is answered. A row whose oracle, controls or map read fails for a reason
- *               other than 404 (never run) shows that error with Retry in its Next stage
- *               cell, never a stage state (G-124). Every door to /results is named "Baseline", as the nav
- *               names it, and opens /results (a measured row's button; an unmeasured row's
- *               reads "Continue" and opens the walk); at phone width the repository link
- *               is the row's door to the walk. Every element a reader meets — the two
- *               connect buttons, each column header, the stage-summary pill and row action,
- *               each stage's title, status pill, "spends" pill, detail line, run link and
- *               action, and the in-flight panel's counters and Cancel — is a hint trigger
- *               (`button.connect.*`, `col.connect.*`, `pill.connect.*`, `stage.walk.*`,
- *               `pill.walk.*`, `stat.walk.*`, `link.walk.*`, `button.walk.*`) so what each
- *               shows opens on hover, focus and tap and is listed in the About block.
+ * What it does: Lets an enterprise tech lead connect a repository and get to the baseline without
+ *               knowing the product's vocabulary: every stage says what it proves and what it costs
+ *               ("no model involved" / "spends model budget"), gold-clean, oracle strength and
+ *               negative controls carry their definitions (`Term`), the status is derived from the
+ *               API (`stagesFor`), so the walk resumes where the repository is, and the action is
+ *               gated on the operator role like the API is (a non-operator reads "An operator runs
+ *               this."). Nothing here fabricates progress: a stage is done only when the API holds
+ *               its evidence, a queued run reads "Queued" with its place in the line (the server's
+ *               `queue_position`), the running stage's line is the polled run's own counter
+ *               (`runningDetail`), and a passed controls report that still carries a finding (an
+ *               escape, a thin set) reads "Done, with a finding" in amber — deliver is withheld
+ *               until it is answered. A row whose oracle, controls or map read fails for a reason
+ *               other than 404 (never run) shows that error with Retry in its Next stage cell,
+ *               never a stage state (G-124). Every door to /results is named "Baseline", as the nav
+ *               names it, and opens /results (a measured row's button; an unmeasured row's reads
+ *               "Continue" and opens the walk); at phone width the repository link is the row's
+ *               door to the walk. Every element a reader meets — the two connect buttons, each
+ *               column header, the stage-summary pill and row action, each stage's title, status
+ *               pill, "spends" pill, detail line, run link and action, and the in-flight panel's
+ *               counters and Cancel — is a hint trigger (`button.connect.*`, `col.connect.*`,
+ *               `pill.connect.*`, `stage.walk.*`, `pill.walk.*`, `stat.walk.*`, `link.walk.*`,
+ *               `button.walk.*`) so what each shows opens on hover, focus and tap and is listed in
+ *               the About block.
  * How:          `useAllRepos` → the table; `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` (+ the polled `useRun` while a stage runs, and
  *               `useQueuedRuns` only for an older server that sends no `queue_position`)

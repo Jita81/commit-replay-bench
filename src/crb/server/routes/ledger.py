@@ -40,7 +40,7 @@ Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this mus
               src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``),
               src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
               src/crb/server/routes/runs.py (``append_system_event`` — the export's audit
-              event), docs/DATA-RETENTION.md (§4, who read the rows),
+              event, DATA-RETENTION §4),
               src/crb/cli/commands/ledger.py (the CLI twin, incl. ``import-census``),
               docs/REPRODUCING-THE-CENSUS.md (the verify procedure end to end)
 Tested by:    tests/test_server_routes_ledger.py

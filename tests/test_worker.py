@@ -1209,7 +1209,10 @@ def test_controls_violation_fails_the_gate(h: Harness) -> None:
     )
     done = h.run_one()
     assert done.status == STATUS_FAILED and "gate FAILED" in done.error
-    assert done.counts_json["violations"] == 1 and done.counts_json["passed"] is False
+    # the GOLD row is a violation, and so is the noop's catch: its gold witness, graded in
+    # the same posture, is red too, so the red noop proves nothing (G-952, controls.v3)
+    assert done.counts_json["violations"] == 2 and done.counts_json["passed"] is False
+    assert done.counts_json["witnessed"] == 1 and done.counts_json["witness_failures"] == 1
 
 
 # --- worker mechanics --------------------------------------------------------------------------

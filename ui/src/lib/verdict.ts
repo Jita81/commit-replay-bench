@@ -297,6 +297,7 @@ export const ACTION_HELP: Record<string, string> = {
   'ledger.append': 'The graded row was appended to the hash-chained ledger.',
   'ledger.pack_missing': 'The row has no evidence pack, so it cannot be counted clean.',
   'ledger.pack_store_error': 'The evidence pack could not be stored; the row is not counted clean.',
+  'ledger.exported': 'Someone downloaded the ledger; the event names who, the format and the filter.',
   // oracle — mutation scoring and the negative controls
   'oracle.mutation.mutant': 'A fault was planted on the changed lines.',
   'oracle.mutation.scored': 'The planted fault was scored: killed if the tests noticed it.',
@@ -307,6 +308,7 @@ export const ACTION_HELP: Record<string, string> = {
   'oracle.worktree': 'A scoring worktree was prepared for this task under an opaque name that says nothing about the commit.',
   'controls.red_check': 'The task’s tests were checked to fail before the change, in a worktree with an opaque name.',
   'controls.control': 'One negative control (a deliberate cheat) was constructed.',
+  'controls.witness': 'The commit’s own change was graded beside a caught control, in the same posture; a catch stands only if this grades clean.',
   'controls.row': 'A control was graded; a cheat that grades clean is an escape.',
   'controls.skip': 'A control could not be constructed for this task; it is counted as not constructible.',
   'controls.error': 'A control failed to run.',

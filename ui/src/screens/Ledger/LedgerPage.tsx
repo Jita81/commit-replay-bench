@@ -9,8 +9,9 @@
  *               lists `GET /grades` rows AS STORED — belts, clean / DQ / error, cost, latency,
  *               oracle strength, provenance and the row hash — with the API's filters carried
  *               in the URL; a filter that arrives in a link and has no control (run, task,
- *               builder, language) shows as a removable chip above the rows (G-180). Export links point straight at the API's download URLs (JSONL,
- *               CSV, and for operators the abstract cell export that carries no code or ids).
+ *               builder, language) shows as a removable chip above the rows (G-180). Export
+ *               links point straight at the API's download URLs (JSONL, CSV, and for
+ *               operators the abstract cell export that carries no code or ids).
  * How:          `useLedgerVerify` → `GateBanner`; filters read from `?…` into
  *               `GradeListParams` → `useGrades` → `DataTable` with offset paging (100 rows).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers

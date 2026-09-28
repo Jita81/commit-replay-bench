@@ -14,6 +14,8 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useRepos`, `useAllRepos`, `fetchAllRepos`),
+ *               ui/src/screens/Repos/ReposPage.tsx (the list that read one page, G-229),
+ *               ui/src/screens/Runs/RunNewDialog.tsx (the select that did too),
  *               docs/PREVENTION.md (P-170)
  * Tested by:    ui/src/test/paged-reads.test.ts
  * Touch when:   never for a new repository; a new paged list hook is added (give it the same
