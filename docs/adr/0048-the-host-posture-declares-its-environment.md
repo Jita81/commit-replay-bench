@@ -50,17 +50,17 @@ package no longer compiled. A fixture reproduced a clean grade on exactly that p
      `Command.declared_env`, and the host executor then passes nothing else, not even `PATH`.
    - The test run, the environment probe and the witness's probe all run in it. Under docker
      nothing changes: the image is the environment.
-2. **The environment has an identity, and the posture carries it.** Each tool is recorded with
-   its resolved path, its version line and the SHA-256 of its bytes. The digest covers each
-   tool's name, version and bytes, the value of every passed name that is not a location (a
-   locale, a time zone, `GOPROXY=off`), and which names are present. `Posture.environment` is `declared:sha256:<digest>` and is part of the
-   `posture_id`; `Posture.environment_tools` names the tools for a reader and is not hashed,
-   as `image_ref` is not. Both are on every qualification record (its `posture`) and every
-   evidence pack (its `posture` block). A changed declared tool changes the posture, so the
+2. **The environment has an identity, and the posture carries it.** Each tool is recorded with its
+   resolved path, its version line and the SHA-256 of its bytes. The digest covers each tool's name,
+   version and bytes, the value of every passed name that is not a location (a locale, a time zone,
+   `GOPROXY=off`), and which names are present. `Posture.environment` is `declared:sha256:<digest>`
+   and is part of the `posture_id`; `Posture.environment_tools` names the tools for a reader and is
+   not hashed, as `image_ref` is not. Both are on every qualification record (its `posture`) and
+   every evidence pack (its `posture` block). A changed declared tool changes the posture, so the
    worker stops a run with `POSTURE_DRIFT` (whose fix now names a declared host tool beside
-   ADR-0019's list) and the pool is qualified again. A tool that is
-   merely installed changes nothing. A posture with no declared environment (a container, or
-   a runner with no declaration yet) hashes exactly as before, so no sandbox record goes stale.
+   ADR-0019's list) and the pool is qualified again. A tool that is merely installed changes
+   nothing. A posture with no declared environment (a container, or a runner with no declaration
+   yet) hashes exactly as before, so no sandbox record goes stale.
 3. **A package that fails without naming a test fails belt 3, whatever else the run names.**
    The Go parser records every package whose `fail` event names no test of its own. With no
    test named anywhere, the base fail-closed rule applies as before. Beside named failures, the
