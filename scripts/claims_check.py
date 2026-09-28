@@ -519,7 +519,9 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 #: A ``[measured]`` tag that says its own rows are not here contradicts itself (DL-088): a
 #: reading nobody can re-derive from the repository is a ``[hypothesis]`` with that reason.
 _NOT_HERE_RE = re.compile(
-    r"\bnot\s+in\s+this\s+repository\b|\bnot\s+vendored\b|\boperator's\s+(?:stack|export)\b",
+    r"\bnot\s+in\s+this\s+repository\b|\bnot\s+vendored\b|\boperator's\s+(?:stack|export)\b"
+    # the operator's stack named as "the stack" (P-704)
+    r"|\bthe\s+stack's\b",
     re.I,
 )
 #: A method is checked for presence only: words inside the tag beyond its n and its apparatus.

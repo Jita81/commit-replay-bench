@@ -1141,6 +1141,34 @@ def test_0013_chains_the_existing_events_deterministically_and_verifies(backend:
     assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
 
 
+def _events_as_text(engine: Engine, columns: list[str]) -> list[tuple[str | None, ...]]:
+    """Every ``events`` row, each named column cast to text by the database — the stored
+    bytes, not a driver's reading of them (a JSON column stays its stored text)."""
+    cast = ", ".join(f"CAST({c} AS TEXT)" for c in columns)
+    with engine.connect() as c:
+        return [tuple(r) for r in c.execute(text(f"SELECT {cast} FROM events ORDER BY id"))]
+
+
+def test_0013_leaves_every_existing_events_field_byte_identical(backend: Backend) -> None:
+    """ADR-0029 §3's recorded exception to the store rule: 0013 writes the two NEW chain
+    columns of rows that were already there (and SQLite rebuilds the table to add the
+    CHECK), so it must leave every column those rows held before — every hashed field and
+    the id — byte for byte as it was. A back-fill or rebuild that changed one (a JSON
+    re-serialised, a float re-rounded, an id renumbered) would alter the audit trail it
+    claims to protect (DL-350)."""
+    migrate.upgrade(backend.url, revision="0012")
+    before_cols = [c["name"] for c in inspect(backend.engine).get_columns("events")]
+    assert "row_hash" not in before_cols and "prev_hash" not in before_cols
+    with backend.engine.begin() as c:
+        for n in range(1, 6):
+            _insert_event(c, n=n, payload='{"k" : [1,2.50], "é": "\\u00e9 x"}')
+    before = _events_as_text(backend.engine, before_cols)
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == HEAD
+    assert _events_as_text(backend.engine, before_cols) == before
+    assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
+
+
 def test_0013_adopts_a_create_all_schema_from_the_release_before(backend: Backend) -> None:
     """A pre-0013 ``create_all`` database (events without the chain) is at 0012 by its
     markers; 0013 adds the columns, chains the rows it holds and leaves no drift."""

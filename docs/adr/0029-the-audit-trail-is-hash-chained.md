@@ -56,6 +56,31 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
    hashes on every run and either dialect. The `events` update trigger is dropped for the back-fill
    and every trigger is re-installed in the same revision. After the back-fill the revision drops
    the columns' server default and adds the CHECK (item 2).
+
+   **A recorded exception to the store rule.** The store's rule is that a migration may add
+   nullable columns and indexes and may never rewrite, drop or alter rows of an append-only
+   table. Revision 0013 is the one exception, recorded here (DL-350), and it is bounded:
+   - *Why there is no other way.* A chain that starts after 0013 would leave every event
+     written before it — every earlier sign-in, account change and sign-off decision —
+     unprovable, which is the gap this ADR closes; and nullable chain columns would let a
+     writer that names no chain store a row the chain cannot see (P-254). Only a back-fill
+     of the rows already there chains the whole trail.
+   - *What it writes.* Only the two columns this revision adds (`prev_hash`, `row_hash`) on
+     rows that existed before it. Every column those rows held before 0013 — each hashed
+     field and the id — is left byte for byte as it was, including through SQLite's table
+     rebuild [measured — n = 1 revision, 5 rows; method:
+     `tests/test_store_migrate.py::test_0013_leaves_every_existing_events_field_byte_identical`
+     casts every pre-0013 column to text before and after the upgrade and compares, on SQLite
+     here and on PostgreSQL in CI's `test-postgres` job (`CRB_TEST_POSTGRES_URL`); apparatus n/a, a property of the
+     product's own code, not a graded row].
+   - *The trigger.* `events_no_update` is dropped for the back-fill and re-installed, with
+     every other append-only trigger, before the revision ends, inside the one migration
+     transaction `crb.store.migrate.upgrade` opens on both dialects.
+   - *When it runs.* With the API and the worker stopped (DEPLOYMENT §6, "Upgrading to
+     revision `0013`"), so no writer races the back-fill.
+
+   No later revision inherits this exception: a change to a written row of an append-only
+   table needs its own ADR.
 4. **The walk is served.** `GET /ledger/verify` walks the audit trail after the grade
    ledger and serves `events: {rows, chain_ok, broken_at, detail, head_row_hash, walk,
    full_walk_at}`; `ok` now also needs the audit trail intact. Between full walks the route

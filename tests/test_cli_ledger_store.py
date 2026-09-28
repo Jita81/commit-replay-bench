@@ -111,3 +111,22 @@ def test_a_tampered_audit_event_fails_the_verb(
     assert d["events"]["chain_ok"] is False and d["events"]["broken_at"] == broken_at
     code, out = _run(["ledger", "verify", "--store"], capsys)
     assert code == 1 and "events chain BROKEN" in out
+
+
+def test_a_stored_row_the_reader_refuses_is_reported_not_raised(
+    db_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A clean row edited underneath its triggers to record a failed belt is a false-Q1 the
+    row reader refuses (``FalseQ1Violation``) — the verb reports it, still walks the audit
+    trail and prints its head, and exits 1; it does not stop on the exception (P-702)."""
+    engine = make_engine(db_url)
+    with engine.begin() as c:
+        c.execute(text("DROP TRIGGER grades_no_update"))
+        c.execute(text("UPDATE grades SET target_green = 0 WHERE seq = 2"))
+    code, out = _run(["ledger", "verify", "--store", "--json"], capsys)
+    d = json.loads(out)
+    assert code == 1 and d["ok"] is False and d["chain_ok"] is False
+    assert "refuses" in d["error"] and d["head_row_hash"] == ""
+    assert d["events"]["chain_ok"] is True and len(d["events"]["head_row_hash"]) == 64
+    code, out = _run(["ledger", "verify", "--store"], capsys)
+    assert code == 1 and "CHAIN BROKEN" in out and "events chain OK" in out

@@ -12,14 +12,17 @@ What it does: Pins that ``tests/conftest.py``'s autouse ``_no_host_endpoint_env`
               not (G-611), three tests that built a default author or builder began to fail
               on a developer's machine with ``CRB_OPENAI_BASE_URL`` set, and CI (which sets
               nothing) could not see it.
-How:          ``subprocess.run`` of ``python -m pytest`` on the modules, with the parent's
-              environment plus the hostile variables; the child's output is shown on failure.
+How:          ``subprocess.run`` of ``python -m pytest`` on each module in turn (one child per
+              module, so each has its own time limit), with the parent's environment plus the
+              hostile variables; the child's output is shown on failure.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   tests/conftest.py (``_no_host_endpoint_env`` — the fixture under test),
               src/crb/builders/openai_client.py (``EndpointConfig.from_env`` — what the
-              variables would change), tests/test_factory_author.py and
-              tests/test_worker_test_author.py (the modules that read the default endpoint)
+              variables would change), tests/test_factory_author.py,
+              tests/test_worker_test_author.py, tests/test_builders_endpoint.py,
+              tests/test_builders_openai_agent.py and tests/test_builders_editblock.py (the
+              modules that read the default endpoint)
 Tested by:    tests/test_endpoint_env_isolation.py
 Touch when:   never for a new repository; a new ``CRB_OPENAI_*`` or ``CRB_AZURE_*`` variable is read
               (add it to the hostile set here and to the fixture); a new module builds a default
@@ -32,6 +35,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _TESTS = Path(__file__).resolve().parent
 
@@ -48,10 +53,17 @@ HOSTILE = {
     "CRB_AZURE_KEY_ENV": "TENANT_KEY",
 }
 
-_MODULES = ("test_factory_author.py", "test_worker_test_author.py")
+_MODULES = (
+    "test_factory_author.py",
+    "test_worker_test_author.py",
+    "test_builders_endpoint.py",
+    "test_builders_openai_agent.py",
+    "test_builders_editblock.py",
+)
 
 
-def test_the_suite_ignores_the_shells_endpoint_variables() -> None:
+@pytest.mark.parametrize("module", _MODULES)
+def test_the_suite_ignores_the_shells_endpoint_variables(module: str) -> None:
     env = {**os.environ, **HOSTILE}
     proc = subprocess.run(
         [
@@ -65,7 +77,7 @@ def test_the_suite_ignores_the_shells_endpoint_variables() -> None:
             "no:warnings",
             "-o",
             "addopts=",
-            *(str(_TESTS / m) for m in _MODULES),
+            str(_TESTS / module),
         ],
         cwd=_TESTS.parent,
         env=env,
