@@ -21,8 +21,9 @@ Works with:   src/crb/store/db.py (under test), src/crb/store/models.py (``APPEN
               and the rows), tests/conftest_store.py (the backends), tests/test_store_migrate.py
               (the same triggers through Alembic), docs/SECURITY.md (evidence integrity, §3.5)
 Tested by:    tests/test_store_db.py
-Touch when:   never for a new repository; a table is added (decide whether it is append-only — if so, add it to
-              ``APPEND_ONLY_TABLES`` and ``_one_row`` here, and a migration); a pragma changes.
+Touch when:   never for a new repository; a table is added (decide whether it is
+              append-only — if so, add it to ``APPEND_ONLY_TABLES`` and ``_one_row`` here,
+              and a migration); a pragma changes.
 """
 
 from __future__ import annotations
