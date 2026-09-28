@@ -9,7 +9,9 @@
  *               lists `GET /grades` rows AS STORED — belts, clean / DQ / error, cost, latency,
  *               oracle strength, provenance and the row hash — with the API's filters carried
  *               in the URL; a filter that arrives in a link and has no control (run, task,
- *               builder, language) shows as a removable chip above the rows (G-180). Export
+ *               builder, language) shows as a removable chip above the rows, and so does a
+ *               link value the Clean, Mode or Size select does not offer, which is not applied
+ *               and says so (`SELECT_FILTERS`, G-180). Export
  *               links point straight at the API's download URLs (JSONL, CSV, and for
  *               operators the abstract cell export that carries no code or ids).
  * How:          `useLedgerVerify` → `GateBanner`; filters read from `?…` into
@@ -71,6 +73,20 @@ const LINKED_FILTERS: ReadonlyArray<{ key: (typeof FILTER_KEYS)[number]; label: 
   { key: 'language', label: 'Language' },
 ]
 
+/** The values each select offers; a link value outside them is not applied, and is said as a chip (G-180). */
+const SELECT_FILTERS: ReadonlyArray<{ key: 'clean' | 'mode' | 'size'; label: string; options: readonly string[] }> = [
+  { key: 'clean', label: 'Clean', options: ['true', 'false'] },
+  { key: 'mode', label: 'Mode', options: ['sighted', 'blind'] },
+  { key: 'size', label: 'Size', options: ['XS', 'S', 'M', 'L', 'XL'] },
+]
+const SIZES = SELECT_FILTERS[2]!.options
+
+/** A select-controlled filter whose URL value the select cannot show. */
+function unoffered(key: string, value: string | null): boolean {
+  const f = SELECT_FILTERS.find((x) => x.key === key)
+  return Boolean(f && value && !f.options.includes(value))
+}
+
 /** The screen. `?repo=` and the filters live in the URL so a filtered view is a shareable link; `offset` is local. */
 export function LedgerPage() {
   const [repo, setRepo] = useRepoParam()
@@ -82,13 +98,18 @@ export function LedgerPage() {
   const filters: GradeListParams = { repo: repo || undefined, limit: PAGE, offset }
   for (const k of FILTER_KEYS) {
     const v = params.get(k)
-    if (!v) continue
+    if (!v || unoffered(k, v)) continue
     if (k === 'clean') filters.clean = v === 'true'
     else if (k === 'mode') filters.mode = v as GradeListParams['mode']
     else filters[k] = v
   }
   const grades = useGrades(filters)
 
+  // a value the select does not offer reads as "all": it is not applied, and its chip says so
+  const selectValue = (k: string) => {
+    const v = params.get(k) ?? ''
+    return unoffered(k, v) ? '' : v
+  }
   const setFilter = (k: string, v: string) => {
     const next = new URLSearchParams(params)
     if (v) next.set(k, v)
@@ -193,19 +214,19 @@ export function LedgerPage() {
         title="Rows"
         actions={
           <>
-            <InlineSelect label="Clean" hint="field.ledger.clean" value={params.get('clean') ?? ''} onChange={(e) => setFilter('clean', e.target.value)}>
+            <InlineSelect label="Clean" hint="field.ledger.clean" value={selectValue('clean')} onChange={(e) => setFilter('clean', e.target.value)}>
               <option value="">all</option>
               <option value="true">clean</option>
               <option value="false">not clean</option>
             </InlineSelect>
-            <InlineSelect label="Mode" hint="field.ledger.mode" value={params.get('mode') ?? ''} onChange={(e) => setFilter('mode', e.target.value)}>
+            <InlineSelect label="Mode" hint="field.ledger.mode" value={selectValue('mode')} onChange={(e) => setFilter('mode', e.target.value)}>
               <option value="">all</option>
               <option value="sighted">sighted</option>
               <option value="blind">blind</option>
             </InlineSelect>
-            <InlineSelect label="Size" hint="field.ledger.size" value={params.get('size') ?? ''} onChange={(e) => setFilter('size', e.target.value)}>
+            <InlineSelect label="Size" hint="field.ledger.size" value={selectValue('size')} onChange={(e) => setFilter('size', e.target.value)}>
               <option value="">all</option>
-              {['XS', 'S', 'M', 'L', 'XL'].map((s) => (
+              {SIZES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
@@ -239,7 +260,7 @@ export function LedgerPage() {
           </>
         }
       >
-        {LINKED_FILTERS.some(({ key }) => params.get(key)) && (
+        {(LINKED_FILTERS.some(({ key }) => params.get(key)) || SELECT_FILTERS.some(({ key }) => unoffered(key, params.get(key)))) && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs" data-testid="ledger-linked-filters">
             <span className="text-on-surface-muted">Also filtered by:</span>
             {LINKED_FILTERS.filter(({ key }) => params.get(key)).map(({ key, label }) => {
@@ -256,6 +277,23 @@ export function LedgerPage() {
                   onClick={() => setFilter(key, '')}
                 >
                   {label}: {value.length > 16 ? `${value.slice(0, 12)}…` : value} <span aria-hidden>✕</span>
+                </Hint>
+              )
+            })}
+            {SELECT_FILTERS.filter(({ key }) => unoffered(key, params.get(key))).map(({ key, label }) => {
+              const value = params.get(key) ?? ''
+              return (
+                <Hint
+                  as="button"
+                  key={key}
+                  id="button.ledger.remove_filter"
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-surface-container px-2 py-0.5 font-mono hover:bg-surface-high"
+                  aria-label={`Remove the ${label.toLowerCase()} value ${value}, which is not one of the page’s choices and is not applied`}
+                  data-testid={`ledger-filter-chip-${key}`}
+                  onClick={() => setFilter(key, '')}
+                >
+                  {label}: {value.length > 16 ? `${value.slice(0, 12)}…` : value} — not applied <span aria-hidden>✕</span>
                 </Hint>
               )
             })}

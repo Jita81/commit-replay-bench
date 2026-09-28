@@ -800,7 +800,7 @@ export const HINTS = {
   'col.repos.last_run':
     'The kind and status of the most recent run, and when it finished.',
   'summary.repos.count':
-    'How many repositories this list shows of the total the server holds. Every page is read, so the two agree unless a repository was added or removed while the list was read.',
+    'How many repositories this list shows of the total the server holds. Every page is read, each repository is listed once, and a list that changed while it was read is read again; "All" is said only when one read saw a list that did not change.',
 
   // ── Add a repository dialog (screens/Repos/RepoNewDialog.tsx)
   'field.repo_new.name':
@@ -1589,7 +1589,7 @@ export const HINTS = {
   'stat.ledger.matching':
     'Rows matching the current filters, out of the whole ledger; the table shows one page of them.',
   'button.ledger.remove_filter':
-    'A filter that came with the link you followed, with no control of its own on this page. Matching rows counts only the rows it lets through; press it to remove the filter.',
+    'A filter that came with the link you followed, with no control of its own on this page. Matching rows counts only the rows it lets through; press it to remove the filter. A value a select on this page does not offer (Size xl, say) reads "not applied": the rows are not narrowed by it, and pressing it removes it from the link.',
   'field.ledger.clean':
     'Show only clean rows, or only rows that were not clean.',
   'field.ledger.mode':

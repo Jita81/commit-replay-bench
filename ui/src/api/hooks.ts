@@ -22,6 +22,9 @@
  *               non-terminal and never in a background tab; mutations invalidate the keys they
  *               change so screens refresh without ad-hoc refetches. `useMe` maps a 401 to
  *               `null` (not logged in); `normaliseEvidence` folds two server shapes into one.
+ *               `fetchAllRepos` walks every page of `GET /repos`, lists each repository once
+ *               and reads again a list that changed while it was walked, saying `stable`
+ *               only of a read that saw one unchanging list (G-229).
  * How:          `keys` is the single source of every query key → each hook wraps
  *               `api<T>(path)` in `useQuery` / `useMutation` with the key, `enabled` guards on
  *               empty ids and the polling rule → `useRunEvents` owns a `RunEventStream` per
@@ -248,24 +251,53 @@ export const PAGE_MAX = 500
 /**
  * EVERY repository, walking `/repos` page by page under the documented `limit`/`offset`
  * contract — for the picker, which must not omit a repo that fell outside the first page
- * (CodeRabbit on PR #6). The result keeps the `Page` shape with `total` = the count seen.
+ * (CodeRabbit on PR #6). The result keeps the `Page` shape with `total` = the last page's total.
+ *
+ * Offset paging over a list that changes while it is walked can miss one repository and list
+ * another twice with the counts still agreeing (a repository created ahead of the offset shifts
+ * every later page by one). So each repository is listed once (by name), and a walk whose pages
+ * disagree on the total, repeat a name or stop short is read again, up to `ALL_REPOS_READS`
+ * times; `stable` is false when no read saw one unchanging list, and the Repos count line then
+ * never says "All" (G-229).
  */
-export async function fetchAllRepos(): Promise<Page<RepoSummary>> {
-  const items: RepoSummary[] = []
-  let offset = 0
-  let total = 0
-  for (;;) {
-    const page = await api<Page<RepoSummary>>(`/repos${qs({ limit: PAGE_MAX, offset })}`)
-    items.push(...page.items)
-    total = page.total
-    offset += page.items.length
-    if (page.items.length === 0 || offset >= page.total) break
+export async function fetchAllRepos(): Promise<AllRepos> {
+  let last: AllRepos = { items: [], total: 0, limit: 0, offset: 0, stable: false }
+  for (let read = 0; read < ALL_REPOS_READS; read++) {
+    const seen = new Set<string>()
+    const items: RepoSummary[] = []
+    const totals = new Set<number>()
+    let offset = 0
+    let total = 0
+    let repeated = false
+    for (;;) {
+      const page = await api<Page<RepoSummary>>(`/repos${qs({ limit: PAGE_MAX, offset })}`)
+      for (const r of page.items) {
+        if (seen.has(r.name)) repeated = true
+        else {
+          seen.add(r.name)
+          items.push(r)
+        }
+      }
+      total = page.total
+      totals.add(page.total)
+      offset += page.items.length
+      if (page.items.length === 0 || offset >= page.total) break
+    }
+    const stable = !repeated && totals.size === 1 && items.length === total
+    last = { items, total, limit: items.length, offset: 0, stable }
+    if (stable) break
   }
-  return { items, total, limit: items.length, offset: 0 }
+  return last
 }
 
+/** How many times `fetchAllRepos` reads the whole list before it says the list kept changing. */
+export const ALL_REPOS_READS = 3
+
+/** Every repository, and whether one read saw a list that did not change while it was walked. */
+export type AllRepos = Page<RepoSummary> & { stable: boolean }
+
 /** `useRepos` over every page — the picker's source. Shares the repos cache key family so a created repo invalidates it. */
-export function useAllRepos(): UseQueryResult<Page<RepoSummary>, ApiError> {
+export function useAllRepos(): UseQueryResult<AllRepos, ApiError> {
   return useQuery({ queryKey: [...keys.repos, 'all'] as const, queryFn: fetchAllRepos, retry: false })
 }
 

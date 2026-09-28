@@ -11,7 +11,9 @@
  *               page. Operators get "Add repo"; a viewer's
  *               empty state says to ask an operator rather than offering a button that would
  *               403. A line above the table says how many of the served total are listed,
- *               so a list that is not whole says so (G-229).
+ *               so a list that is not whole says so, and "All" is said only of a read that
+ *               saw one unchanging list — a list that moved while it was read is read again
+ *               (G-229).
  * How:          `useAllRepos` (every page, as each journey screen reads) → `DataTable`;
  *               `can('operator')` gates the action; the dialog navigates to the new repo on
  *               success.
@@ -124,11 +126,13 @@ export function ReposPage() {
             <>
             {page.total > 0 && (
               <Hint as="p" id="summary.repos.count" className="m-0 px-4 pt-3 text-xs text-on-surface-muted" data-testid="repos-count">
-                {page.items.length === page.total
+                {page.stable && page.items.length === page.total
                   ? page.total === 1
                     ? 'The one repository is listed.'
                     : `All ${fmtInt(page.total)} repositories are listed.`
-                  : `${fmtInt(page.items.length)} of ${fmtInt(page.total)} repositories are listed: the list changed while it was read. Reload the page for all of them.`}
+                  : page.items.length === page.total
+                    ? `${fmtInt(page.items.length)} repositories are listed, but the list changed while it was read. Reload the page to be sure none is missing.`
+                    : `${fmtInt(page.items.length)} of ${fmtInt(page.total)} repositories are listed: the list changed while it was read. Reload the page for all of them.`}
               </Hint>
             )}
             <DataTable

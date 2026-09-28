@@ -9,7 +9,9 @@
  * What it does: Pins that arriving at `/ledger?run_id=…` (a run page's door) shows one chip per
  *               filter the page has no control for, that the request carries the filter, and
  *               that pressing a chip removes the filter from the URL and the request; with no
- *               linked filter there is no chip row (G-180).
+ *               linked filter there is no chip row; and that a link value a select does not
+ *               offer (`?size=xl`) is not sent, the select reads "all" and a chip says it is
+ *               not applied, while an offered value is applied with no chip (G-180).
  * How:          `mockApi` + `renderApp` at `/ledger?…`; the `GET /grades` calls are read back
  *               from the mock to see which filters each request carried.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -65,6 +67,32 @@ describe('LedgerPage — filters that arrive in a link (G-180)', () => {
     setup('/ledger?task_id=t1&language=go')
     expect(await screen.findByTestId('ledger-filter-chip-task_id')).toHaveTextContent('Task: t1')
     expect(screen.getByTestId('ledger-filter-chip-language')).toHaveTextContent('Language: go')
+  })
+
+  it('a link value a select does not offer is not applied, and says so as a chip that removes it (G-180)', async () => {
+    const { gradeUrls } = setup('/ledger?size=xl&mode=native&clean=maybe')
+    const size = await screen.findByTestId('ledger-filter-chip-size')
+    expect(size).toHaveTextContent('Size: xl — not applied')
+    expect(size).toHaveAccessibleName('Remove the size value xl, which is not one of the page’s choices and is not applied')
+    expect(screen.getByTestId('ledger-filter-chip-mode')).toHaveTextContent('Mode: native — not applied')
+    expect(screen.getByTestId('ledger-filter-chip-clean')).toHaveTextContent('Clean: maybe — not applied')
+    // each select reads "all", and the rows are not narrowed by a value it cannot show
+    for (const name of ['Clean', 'Mode', 'Size']) expect(screen.getByRole('combobox', { name })).toHaveValue('')
+    await waitFor(() => expect(gradeUrls().length).toBeGreaterThan(0))
+    for (const q of gradeUrls()) {
+      expect(q.get('size')).toBeNull()
+      expect(q.get('mode')).toBeNull()
+      expect(q.get('clean')).toBeNull()
+    }
+    await userEvent.click(size)
+    await waitFor(() => expect(screen.queryByTestId('ledger-filter-chip-size')).toBeNull())
+    expect(screen.getByTestId('ledger-filter-chip-mode')).toBeInTheDocument()
+  })
+
+  it('an offered select value is applied and gets no chip', async () => {
+    const { gradeUrls } = setup('/ledger?size=XL&mode=blind&clean=false')
+    await waitFor(() => expect(gradeUrls().some((q) => q.get('size') === 'XL' && q.get('mode') === 'blind' && q.get('clean') === 'false')).toBe(true))
+    expect(screen.queryByTestId('ledger-linked-filters')).toBeNull()
   })
 
   it('with no linked filter there is no chip row', async () => {
