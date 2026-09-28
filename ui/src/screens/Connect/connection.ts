@@ -13,7 +13,7 @@
  *               list the Connect screen renders: `done` with the evidence line, `warn` when
  *               the evidence carries a finding the person must answer (a controls escape,
  *               a thin set, or a passed report the server reads as unmeasured because no
- *               gold witness stands beside its catches, P-176: `controlsFinding` — passed is
+ *               gold witness stands beside its catches, P-344: `controlsFinding` — passed is
  *               not "nothing to do"), `running`
  *               with the run to watch and its live line (`runningDetail`: k of n, the kind's
  *               own counters, spend so far, or "Queued — n runs ahead of it"), `todo` with
@@ -164,7 +164,7 @@ export function controlsFinding(report: ControlsReport): string | null {
   const escapes = report.verdict?.escapes ?? report.escapes
   if (escapes > 0) return `${count(escapes, 'escape')} — deliver is withheld until the tests are hardened and the controls re-run`
   const v = report.verdict
-  // P-176: the server reads a passed report with no gold witness beside its catches (one
+  // P-344: the server reads a passed report with no gold witness beside its catches (one
   // written before controls.v3) as unmeasured — it licenses nothing until the controls re-run
   if (report.passed && v?.state === 'unmeasured') return 'no gold witness beside its catches (a report from before controls.v3) — run the controls again; deliver is withheld until then'
   const thin =v ? v.state === 'thin' || (v.total > 0 && v.constructible / v.total < 0.5) : report.n_rows > 0 && report.not_constructible / report.n_rows > 0.5

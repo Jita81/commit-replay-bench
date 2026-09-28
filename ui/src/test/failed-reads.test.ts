@@ -3,7 +3,7 @@
  *
  * Navigation
  * ----------
- * What it is:   A source ratchet over every screen and component (P-173, G-730).
+ * What it is:   A source ratchet over every screen and component (P-341, G-730).
  * What it does: Fails when a non-test source under ui/src/screens or ui/src/components reads a
  *               query's `data` through a fallback (`q.data ?? …`) or into a derived value
  *               (`q.data?.…`) and never reads that query's failure (`q.isError`, `q.error`), hands
@@ -23,7 +23,7 @@
  * Works with:   ui/src/components/QueryBoundary.tsx (one way a read's failure is answered),
  *               ui/src/components/ErrorState.tsx (how a failed read is said, with Retry),
  *               ui/src/screens/Connect/ConnectPage.tsx (`failedRead`, G-124 and the walk),
- *               ui/src/screens/Connect/MeasurePage.tsx (G-108), docs/PREVENTION.md (P-173)
+ *               ui/src/screens/Connect/MeasurePage.tsx (G-108), docs/PREVENTION.md (P-341)
  * Tested by:    ui/src/test/failed-reads.test.ts
  * Touch when:   never for a new repository; a new way of answering a failed read is added (teach
  *               `answered` it, with a pinned string); an entry of `NOT_YET_READ` is fixed (remove
@@ -82,7 +82,7 @@ export function unansweredReads(source: string): string[] {
 
 const key = (path: string, name: string) => `${path.replace(/^\.\.\//, '')}::${name}`
 
-describe('failed reads (P-173, G-730)', () => {
+describe('failed reads (P-341, G-730)', () => {
   it('the matcher finds a fallback read and a derived read, and each way of answering a failure', () => {
     expect(unansweredReads('const n = map.data?.summary.n_total')).toEqual(['map'])
     expect(unansweredReads('const a = oracle.data ?? null')).toEqual(['oracle'])

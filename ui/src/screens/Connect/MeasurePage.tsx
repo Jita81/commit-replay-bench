@@ -120,7 +120,7 @@ export function MeasurePage() {
 
   // the repository's own measured cost per attempt, when it has one: the map's economics
   // fold (F35) — its mean over the attempts with a KNOWN cost (a known $0 is $0), that
-  // count as n, and the apparatus; never the cells' flat means filtered by > 0 (P-064)
+  // count as n, and the apparatus; never the cells' flat means filtered by > 0 (P-131)
   const measured = useMemo(() => measuredCostPerAttempt(map.data?.economics), [map.data])
   const measuredMean = measured?.mean ?? null
   const gold = repo.data?.task_counts.gold_clean ?? 0

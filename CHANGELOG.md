@@ -17,8 +17,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   A failed read on Connect or the Measure estimate is an error with Retry, and a ratchet stops
   the next screen showing a fallback instead; Repos reads every page and re-reads a list that
   moved; the Ledger shows linked filters as chips; every ledger export is recorded first, or
-  not served (DL-128); each caught negative control carries a gold witness from the same
-  posture (`controls.v3`, DL-127). **Upgrading:** a passed controls report from before
+  not served (DL-112); each caught negative control carries a gold witness from the same
+  posture (`controls.v3`, DL-111). **Upgrading:** a passed controls report from before
   `controls.v3` licenses nothing — run the controls again on every repository.
 
 - **Find your way: every screen says what it is, and the decision records open in the product**

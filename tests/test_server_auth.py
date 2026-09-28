@@ -18,7 +18,7 @@ What it does: Pins password hashing (short passwords refused), session round tri
               a disabled account) a redirect to ``/login?error=<code>`` with no provider words;
               that every sign-in and refused sign-in is a ``user.*`` event (a refused name that
               is no account recorded without the name; a lost ``seq`` race retried); and that
-              /login's session sentence matches ``session_ttl`` (P-081).
+              /login's session sentence matches ``session_ttl`` (P-148).
 How:          ``create_app(oidc_client=FakeOidc(...))`` — no network; a ``TestClient`` per
               settings variant.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
@@ -1245,7 +1245,7 @@ class TestOidcFailureReturnsToLogin:
 
 
 def test_the_sign_in_page_states_the_session_length_the_server_sets(tmp_path: Path) -> None:
-    """P-081: /login told people a session "expires with the browser" while the cookie
+    """P-148: /login told people a session "expires with the browser" while the cookie
     carried ``Max-Age`` = ``session_ttl`` (8 hours). The page's sentence and the server's
     default are now held to each other: change one without the other and this fails."""
     import re
@@ -1304,7 +1304,7 @@ def test_the_recovery_hints_state_the_numbers_the_server_enforces() -> None:
 
 
 def test_every_sign_in_record_commits_through_the_retry() -> None:
-    """P-086: the retrying commit (DL-068) once covered local sign-in only; the organisation
+    """P-153: the retrying commit (DL-068) once covered local sign-in only; the organisation
     callback wrote ``user.login`` and called ``db.commit()`` itself, so a lost race answered a
     raw 500. In routes/auth.py a function that writes an audit event (directly, through a
     nested helper, or through ``_record_failed_login``) never commits by itself: it hands the

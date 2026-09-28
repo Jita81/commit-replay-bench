@@ -15,7 +15,7 @@
  *               graded beside it in the same posture — and a red witness reads as an
  *               instrument failure (G-952); a passed report the server reads as unmeasured
  *               has no witness (it predates `controls.v3`) and the gate says it licenses
- *               nothing until the controls run again (P-176). A 404 on controls is the
+ *               nothing until the controls run again (P-344). A 404 on controls is the
  *               designed "not measured yet" state with the run button.
  * How:          `useOracle` → tiles computed from the tasks (mean over scored tasks only;
  *               unscoreable never averaged in) → two `DataTable`s; `ControlsSection` reads the
@@ -165,7 +165,7 @@ function ControlsSection({ repo }: { repo: string }) {
   // with no verdict (a bare to_dict) is pending, never derived open from the counts.
   const v = c.verdict
   const verdictOk = v ? (v.state === 'passed' ? true : v.state === 'unmeasured' ? null : false) : null
-  // P-176: a passed report the server reads as unmeasured has no gold witness beside its
+  // P-344: a passed report the server reads as unmeasured has no gold witness beside its
   // catches (it was written before controls.v3), so it licenses nothing until the controls re-run
   const unwitnessed = v && c.passed && v.state === 'unmeasured'
   const version = typeof c.apparatus?.controls_version === 'string' ? c.apparatus.controls_version : 'before controls.v3'

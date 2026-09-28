@@ -172,7 +172,7 @@ export function parseTaskIds(text: string): string[] {
 }
 
 export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'replay', initialTaskIds, from, onCreated }: Props) {
-  const repos = useAllRepos() // every page: a repository past the first page must be choosable (P-170)
+  const repos = useAllRepos() // every page: a repository past the first page must be choosable (P-338)
   const create = useCreateRun()
   const { can } = useAuth()
   const settings = useSettings(can('admin'))

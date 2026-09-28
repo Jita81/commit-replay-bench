@@ -3,7 +3,7 @@
  *
  * Navigation
  * ----------
- * What it is:   A source ratchet over every screen and component (P-170).
+ * What it is:   A source ratchet over every screen and component (P-338).
  * What it does: Fails when any non-test source under ui/src/screens or ui/src/components calls
  *               `useRepos(` — the hook that reads one page of `GET /repos` (the server's default
  *               page size) — instead of `useAllRepos(`, which walks every page. A list or a picker
@@ -16,7 +16,7 @@
  * Works with:   ui/src/api/hooks.ts (`useRepos`, `useAllRepos`, `fetchAllRepos`),
  *               ui/src/screens/Repos/ReposPage.tsx (the list that read one page, G-229),
  *               ui/src/screens/Runs/RunNewDialog.tsx (the select that did too),
- *               docs/PREVENTION.md (P-170)
+ *               docs/PREVENTION.md (P-338)
  * Tested by:    ui/src/test/paged-reads.test.ts
  * Touch when:   never for a new repository; a new paged list hook is added (give it the same
  *               ratchet, or an all-pages twin).
@@ -35,7 +35,7 @@ function firstPageRepoReads(source: string): string[] {
   return code.match(/\buseRepos\s*\(/g) ?? []
 }
 
-describe('paged reads (P-170)', () => {
+describe('paged reads (P-338)', () => {
   it('the matcher finds a call and ignores a comment and the all-pages hook', () => {
     expect(firstPageRepoReads('const repos = useRepos()')).toHaveLength(1)
     expect(firstPageRepoReads('const repos = useRepos ( )')).toHaveLength(1)

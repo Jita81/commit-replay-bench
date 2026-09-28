@@ -16,7 +16,7 @@
  *               the run — never a second spend (J-ONR-4); and that every field, row and the
  *               button carry a hint, with the attempts radio opening on hover; and that the
  *               estimate reads the map's economics fold, so a known $0 is quoted as $0.00
- *               over the attempts with a known cost, never dropped for the planning range (P-064);
+ *               over the attempts with a known cost, never dropped for the planning range (P-131);
  *               and that a map that cannot be read is said with Retry while nothing is priced
  *               and the button waits (G-108).
  * How:          `mockApi` + `renderApp` with `path` for `useParams`.
@@ -82,7 +82,7 @@ describe('MeasurePage', () => {
     expect(box).toHaveTextContent('the operator’s own CLI login (development and evaluation only)')
   })
 
-  it('quotes a known $0 as $0.00 over the attempts with a known cost, never the planning range (P-064)', async () => {
+  it('quotes a known $0 as $0.00 over the attempts with a known cost, never the planning range (P-131)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/cobra': REPO,
