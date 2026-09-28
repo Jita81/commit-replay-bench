@@ -438,7 +438,7 @@ def test_a_provider_never_lets_the_authors_model_pass_as_another(
 
 
 def test_no_caller_stamps_a_named_provider_over_the_endpoints() -> None:
-    """P-967, ratcheted: ``provider or resolved_endpoint(endpoint).provider`` (and the older
+    """P-267, ratcheted: ``provider or resolved_endpoint(endpoint).provider`` (and the older
     ``provider or (endpoint.provider if endpoint else …)``) stamps whatever a rung names even
     when the endpoint called is another — the test author did so until G-611 closed. Every
     OpenAI-compatible caller takes its provider from ``resolve_endpoint``, which refuses a
@@ -472,7 +472,7 @@ _SECRET = "hunter2-s3cret"
 def test_a_base_url_carrying_a_credential_is_refused_by_name_and_never_echoed(
     monkeypatch: pytest.MonkeyPatch, url: str
 ) -> None:
-    """P-968: the provider column (and the endpoint in every apparatus stamp) is written
+    """P-268: the provider column (and the endpoint in every apparatus stamp) is written
     as-is to the append-only ledger, so a key in the URL's userinfo, query or fragment
     would be recorded on every row. It is refused where the URL is read — naming the
     variable, never echoing the value — and a direct ``EndpointConfig`` refuses it too."""
@@ -519,7 +519,7 @@ def test_a_base_url_without_a_scheme_is_refused_without_echoing_it() -> None:
         ("https://notcerebras.ai/v1", "notcerebras.ai"),
         ("http://GPU-Box.internal:8080/v1", "gpu-box.internal:8080"),
         ("http://[::1]:8080/v1", "[::1]:8080"),
-        # P-975: a host that IS a provider's bare name (a compose or Kubernetes service
+        # P-275: a host that IS a provider's bare name (a compose or Kubernetes service
         # called `cerebras`) is stamped as a host, never as that provider
         ("http://cerebras/v1", "host:cerebras"),
         ("http://Azure/v1", "host:azure"),
@@ -535,7 +535,7 @@ def test_only_a_cerebras_ai_host_is_stamped_cerebras(url: str, provider: str) ->
 
 @pytest.mark.parametrize("host", ["cerebras", "azure", "anthropic", "openai", "llm", "localhost"])
 def test_no_host_is_ever_stamped_as_a_bare_name(host: str) -> None:
-    """P-975: every provider the product names without a host (``cerebras``, ``azure``,
+    """P-275: every provider the product names without a host (``cerebras``, ``azure``,
     ``anthropic`` …) is a bare name, so a stamp taken from a host must never be one — a host
     with no dot and no port is stamped ``host:<name>``, whatever the name is."""
     stamp = oc.EndpointConfig(base_url=f"http://{host}/v1").provider
@@ -547,7 +547,7 @@ def test_no_host_is_ever_stamped_as_a_bare_name(host: str) -> None:
 def test_a_rung_naming_a_provider_is_refused_on_a_host_of_that_name(
     monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    """P-975, reproduced through the real constructors: with ``CRB_OPENAI_BASE_URL`` at a
+    """P-275, reproduced through the real constructors: with ``CRB_OPENAI_BASE_URL`` at a
     service called ``cerebras`` a ``@cerebras`` rung (builder or test author) was accepted
     and its rows pooled into Cerebras's cell of the append-only ledger."""
     monkeypatch.setenv("CRB_OPENAI_BASE_URL", f"http://{name}/v1")
@@ -572,7 +572,7 @@ def test_a_rung_naming_a_provider_is_refused_on_a_host_of_that_name(
     ],
 )
 def test_only_an_azure_domain_host_is_stamped_azure(endpoint: str, provider: str) -> None:
-    """P-975: ``CRB_AZURE_ENDPOINT`` at any host was stamped ``azure``. Azure is stamped only
+    """P-275: ``CRB_AZURE_ENDPOINT`` at any host was stamped ``azure``. Azure is stamped only
     for a host in an Azure domain; any other host is its own provider, like any endpoint."""
     az = oc.AzureConfig(endpoint=endpoint, api_version="2024-10-21", deployment="d")
     assert oc.EndpointConfig(azure=az).provider == provider
@@ -692,7 +692,7 @@ def _case_counts() -> tuple[int, int]:
 
 
 def test_the_guides_count_of_these_cases_is_this_modules() -> None:
-    """P-973: the guides said n = 20 cases against a fake server when the module collected
+    """P-273: the guides said n = 20 cases against a fake server when the module collected
     21 and about half used the server; ``claims_check`` checks that a tag is there, never
     its n. The two guides that cite this module state the count this module has."""
     total, fake_cases = _case_counts()

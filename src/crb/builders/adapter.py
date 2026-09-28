@@ -283,7 +283,7 @@ def rungs_from_entries(
 ) -> list[Rung]:
     """The rungs a run's ladder entries name — the ONE reading, used by the worker that
     builds them and by ``POST /runs`` that refuses at submit what the worker would refuse
-    (P-976), so the two never disagree on which rung carries which provider.
+    (P-276), so the two never disagree on which rung carries which provider.
 
     An entry is an object rung (:func:`rung_from_object`), a ``builder:model[:provider]``
     label, or a bare label (``r1``, no ``:``) meaning the run's own

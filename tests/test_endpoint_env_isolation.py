@@ -3,7 +3,7 @@
 
 Navigation
 ----------
-What it is:   The guard for P-969 — a subprocess run of the endpoint-sensitive test modules
+What it is:   The guard for P-269 — a subprocess run of the endpoint-sensitive test modules
               under a shell that points every OpenAI-compatible builder somewhere else.
 What it does: Pins that ``tests/conftest.py``'s autouse ``_no_host_endpoint_env`` clears the
               endpoint variables before every test: with a self-hosted URL, an Azure

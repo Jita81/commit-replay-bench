@@ -20,7 +20,7 @@ How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``t
               ``claude_cli_on_path`` to ``False`` for every test, so no test passes or fails on
               whether this machine has the ``claude`` CLI (P-037); ``_no_host_endpoint_env``
               clears the ``CRB_OPENAI_*`` / ``CRB_AZURE_*`` variables, so no test builds
-              against the endpoint this machine's shell names (P-969).
+              against the endpoint this machine's shell names (P-269).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
@@ -113,7 +113,7 @@ def _no_host_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(claude_code, "claude_cli_on_path", lambda: False)
 
 
-#: The deployment's endpoint variables ``EndpointConfig.from_env`` reads (P-969).
+#: The deployment's endpoint variables ``EndpointConfig.from_env`` reads (P-269).
 _HOST_ENDPOINT_ENV = (
     "CRB_OPENAI_BASE_URL",
     "CRB_OPENAI_KEY_ENV",

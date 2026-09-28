@@ -110,7 +110,7 @@ BUILDER_CONFIG_SECRET_MARKERS: tuple[str, ...] = (
 #: ``builder_config`` keys that name a builder's in-process seam or object — the model
 #: call, the transport, the endpoint, the executor. A request body is JSON and cannot carry
 #: one; a string in their place is not a seam and would let a rung skip the provider check
-#: (P-970), so they are refused with the reason.
+#: (P-270), so they are refused with the reason.
 BUILDER_CONFIG_SEAM_KEYS: frozenset[str] = frozenset(
     {"model_fn", "chat_fn", "spawn", "runner_factory", "endpoint", "executor"}
 )

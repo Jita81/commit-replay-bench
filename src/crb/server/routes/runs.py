@@ -675,7 +675,7 @@ def credential_refusal(run: Run, settings: Any) -> None:
 
 #: The builders that call the configured OpenAI-compatible endpoint, so a rung's provider
 #: must be that endpoint's — derived from the credential table, so a new OpenAI-compatible
-#: builder is checked for its provider as well as its key (P-976).
+#: builder is checked for its provider as well as its key (P-276).
 ENDPOINT_BUILDERS: frozenset[str] = frozenset(
     name for name, check in CREDENTIAL_CHECKS.items() if check is openai_credential_missing
 )
@@ -701,7 +701,7 @@ def provider_refusal(run: Run, settings: Any, test_author: str | None = None) ->
     ``test_author``, else the deployment's ``CRB_FACTORY__TEST_AUTHOR``) — names a provider
     that endpoint is not. The worker refuses such a rung before any call
     (``resolve_endpoint``), so the run could only fail; it is refused here instead, the
-    class P-003 closed for credentials (docs/PREVENTION.md P-976). The rungs are read by
+    class P-003 closed for credentials (docs/PREVENTION.md P-276). The rungs are read by
     ``rungs_from_entries`` and the author by ``author_from_label`` — the worker's own
     readings — so the two never disagree. A ladder or label that does not parse is left to
     the schema and the worker, which name it."""
@@ -743,7 +743,7 @@ def provider_refusal(run: Run, settings: Any, test_author: str | None = None) ->
 
 def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
     """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
-    route that enqueues a run cannot skip one (docs/PREVENTION.md P-093: the Learn queue
+    route that enqueues a run cannot skip one (docs/PREVENTION.md P-160: the Learn queue
     enqueued the plan's runs with no credential check, the class P-003 closed on
     ``POST /runs``). ``tests/test_server_routes_runs.py`` fails when a function that
     enqueues a run does not call this.
@@ -751,7 +751,7 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
     * 422 ``builder_credential_missing`` — a builder this run would call has no credential
       (P-003; presence only);
     * 422 ``builder_provider_mismatch`` — a rung (or the factory's test author) names a
-      provider the configured OpenAI-compatible endpoint is not (P-976);
+      provider the configured OpenAI-compatible endpoint is not (P-276);
     * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
       where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker.
     """

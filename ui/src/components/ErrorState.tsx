@@ -52,7 +52,7 @@ const CODE_TITLES: Record<string, string> = {
   invalid_response: 'Unexpected response from the server',
   // POST /runs: the chosen builder auth has no credential (docs/PREVENTION.md P-003)
   builder_credential_missing: 'No credential for this builder — nothing was queued',
-  // POST /runs: a rung names a provider the configured endpoint is not (docs/PREVENTION.md P-976)
+  // POST /runs: a rung names a provider the configured endpoint is not (docs/PREVENTION.md P-276)
   builder_provider_mismatch: 'This rung names a provider the endpoint is not — nothing was queued',
 }
 
