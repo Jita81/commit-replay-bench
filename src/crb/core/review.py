@@ -65,8 +65,9 @@ What it does: Derives a record's headline verdict from its findings by one rule 
               a record that contradicts them; refuses any verdict whose patch hash is not
               the reviewed row's pack ``diff_sha256`` or whose pack is not that row's own;
               chains records; joins the standing verdict per row onto cells so the map can
-              show how many accepted rows a human read and how many had a defect. Records
-              are kept forever.
+              show how many accepted rows a human read and how many had a defect. A record
+              may state the reviewer's own minutes (hashed only when stated, DL-067).
+              Records are kept forever.
 How:          ``ReviewRecord.__post_init__`` (vocabulary, ``derive_verdict``, hash shape,
               regression ⇒ not mergeable) → ``check_review_anchor`` (row match, pack
               self-certifies via ``verify_pack``, ``check_patch_anchor``) → ``chained`` +
@@ -107,6 +108,9 @@ from crb.core.redact import redact
 from crb.core.version import APPARATUS_VERSION
 
 REVIEW_SCHEMA = "crb.review.v1"
+#: The most minutes one review may state: a working day. A longer figure is a typing slip
+#: or several reviews in one, and either would skew the decide stream's median (DL-067).
+MAX_REVIEW_MINUTES = 480
 
 # --- verdicts (the vocabulary) ----------------------------------------------------
 #: The reviewer read the patch and found nothing to report.
@@ -228,6 +232,12 @@ class Finding:
         )
 
 
+#: Fields hashed only when set: a record that leaves them ``None`` hashes byte-for-byte as
+#: one written before they existed. Every reader that recomputes a review's hash from
+#: stored columns (``crb.server.routes.reviews.review_body_from_stored``) skips them alike.
+OPTIONAL_HASHED: frozenset[str] = frozenset({"minutes"})
+
+
 @dataclass(frozen=True)
 class ReviewRecord:
     """One human verdict on one graded row. ``grade_row_hash`` is the reviewed
@@ -244,6 +254,10 @@ class ReviewRecord:
     mergeable: bool | None = None
     patch_sha256_reviewed: str = ""
     evidence_pack_hash: str = ""
+    #: How long the review took, in whole minutes, as the reviewer stated it (``None``: not
+    #: stated). Hashed only when stated, so a record without it hashes as one written before
+    #: the field existed (DL-067).
+    minutes: int | None = None
     apparatus_version: str = APPARATUS_VERSION
     created: str = field(default_factory=utc_now_iso)
     schema: str = REVIEW_SCHEMA
@@ -296,6 +310,15 @@ class ReviewRecord:
                 )
             if self.mergeable is True and any(f.kind == VERDICT_REGRESSION for f in findings):
                 raise ValueError("a change with a regression finding cannot be mergeable")
+        if self.minutes is not None and (
+            isinstance(self.minutes, bool)
+            or not isinstance(self.minutes, int)
+            or not 1 <= self.minutes <= MAX_REVIEW_MINUTES
+        ):
+            raise ValueError(
+                f"minutes must be a whole number from 1 to {MAX_REVIEW_MINUTES} "
+                f"(the reviewer's own time on this review), got {self.minutes!r}"
+            )
         object.__setattr__(self, "statement", redact(self.statement.strip()))
         if not self.review_id:
             object.__setattr__(self, "review_id", uuid.uuid4().hex)
@@ -313,10 +336,11 @@ class ReviewRecord:
 
     # --- hashing ---------------------------------------------------------------------
     def body(self) -> dict[str, Any]:
-        """Everything hashed: every field but ``row_hash``; findings as dicts."""
+        """Everything hashed: every field but ``row_hash``; findings as dicts. ``minutes`` is
+        in the body only when stated, so every record written before it hashes unchanged."""
         out: dict[str, Any] = {}
         for k in self.__dataclass_fields__:
-            if k == "row_hash":
+            if k == "row_hash" or (k in OPTIONAL_HASHED and getattr(self, k) is None):
                 continue
             v = getattr(self, k)
             out[k] = [f.to_dict() for f in v] if k == "findings" else v
@@ -792,6 +816,8 @@ def review_cell_stats(
 __all__ = [
     "DEFECT_VERDICTS",
     "FINDING_KINDS",
+    "MAX_REVIEW_MINUTES",
+    "OPTIONAL_HASHED",
     "REFUSAL_MERGEABLE_CONTRADICTS",
     "REFUSAL_NO_DIFF_IN_PACK",
     "REFUSAL_PACK_MISMATCH",

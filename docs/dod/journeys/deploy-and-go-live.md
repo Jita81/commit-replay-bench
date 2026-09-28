@@ -8,7 +8,7 @@ children: [dod.page.settings, dod.page.posture]
 persons: [viewer, operator, admin, approver]
 owner: deploy
 status: partial                # WRITTEN BY THE CHECKER — never by hand
-updated: 2026-09-22
+updated: 2026-09-25
 ---
 
 # Deploy and go live

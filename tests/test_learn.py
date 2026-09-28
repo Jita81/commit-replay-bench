@@ -30,8 +30,9 @@ Works with:   src/crb/core/learn.py (under test), src/crb/core/ledger.py (the fa
               tests/test_cli_learn.py (the same derivations at the CLI), docs/LEARNING-LOOP.md
               (the properties this file pins, §5)
 Tested by:    tests/test_learn.py
-Touch when:   a builder refusal shape changes (a parser case with the row verbatim); a
-              derivation gains an input; never so that the loop decides for a human.
+Touch when:   never for a new repository; a builder refusal shape changes (a parser case with the
+              row verbatim); a derivation gains an input; never so that the loop decides for a
+              human.
 """
 
 from __future__ import annotations
@@ -957,9 +958,20 @@ class TestRemeasure:
 
     def test_unknown_cost_is_honest(self, tmp_path: Path) -> None:
         rows = _chained(
-            [_clean(task_id="1" * 40, apparatus_version="2.0", cost_usd=0.0, latency_s=0.0)],
+            # an unknown cost is one nobody reported (an imported row), not a builder's
+            # $0, which is a known $0 and prices at $0 (P-131: test_economics.py pins it)
+            [
+                _clean(
+                    task_id="1" * 40,
+                    apparatus_version="2.0",
+                    cost_usd=0.0,
+                    latency_s=0.0,
+                    provenance="imported:census",
+                )
+            ],
             tmp_path,
         )
+        assert not rows[0].cost_known
         plan = learn.remeasure_plan(rows, current_apparatus="2.1")
         (c,) = plan.cells
         assert not c.cost_known and c.est_cost_usd == 0.0 and c.n_needed == 16

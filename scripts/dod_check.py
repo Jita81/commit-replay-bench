@@ -20,9 +20,17 @@ without a resolvable evidence reference, ``partial``/``unmet`` without a gap id,
 defined nowhere, or an ``F-``/``B-`` id that is in no row of the backlog reviews; a gap
 line that does not read "what is missing · the smallest change that closes it · owner", or
 whose owner is not one of ui/server/factory/docs/deploy; the same gap id carrying two
-different lines in two files (one id is one piece of work); an evidence reference that does
-not resolve; and a ``GAP-ANALYSIS.md`` or a ``status:`` line that differs from what the
-artefacts generate. It never edits a criterion.
+different lines in two files (one id is one piece of work); a gap line that no criterion of
+its file cites (or, in the register, no pending row); a ``PLAN.md`` wave item that is not a
+gap id the record defines or has retired; a gap the order of work ranks that no table of
+the plan names, and a plan heading that quotes a rank; a retired id that neither the
+artefacts' git history nor the base branch's committed gap analysis shows was a gap (the
+generated file never vouches for itself); an evidence reference that does not resolve; and a
+``GAP-ANALYSIS.md`` or a ``status:`` line that differs from what the artefacts generate. It
+never edits a criterion.
+
+    python scripts/dod_check.py --check --base origin/integration/next   # another base branch
+    DOD_BASE=origin/integration/next python scripts/dod_check.py --check  # the same (CI's form)
 
 Navigation
 ----------
@@ -33,8 +41,11 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               (tests, vitest titles, walkthrough specs, hint registry and ratchet, API routes,
               code symbols, doc anchors, CI jobs, ADRs, decision-log rows), computes the
               four-level roll-up and writes docs/dod/GAP-ANALYSIS.md (the order of work, the
-              gaps by fan-out, and every open criterion); --check exits non-zero on any defect
-              or drift.
+              gaps by fan-out, the gap ids retired, and every open criterion); refuses a gap
+              line nothing cites, a PLAN.md wave item that is not a gap, a ranked gap in no
+              table of the plan, a plan heading that quotes a rank, and a retired id that git
+              history does not vouch for; --check exits
+              non-zero on any defect or drift.
 How:          Walk docs/dod/{pages,journeys,streams}/*.md + product.md → parse front matter
               and the criteria table → resolve evidence (one resolver per prefix) → demote
               ``met`` with no resolving reference → roll up child → parent → render.
@@ -42,10 +53,12 @@ Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/dod/STANDARD.md (the format it enforces), docs/dod/GAP-ANALYSIS.md (its
               output), docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog
-              a gap may cite), ui/src/App.tsx (the routes every page artefact must cover),
-              ui/src/components/Layout.tsx (JOURNEY_STEPS), ui/src/help/hints.ts and
+              a gap may cite), ui/src/App.tsx and ui/src/components/Layout.tsx (the routes
+              and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and
               hints-ratchet*.tsx (hint: references), docs/API.md (route: references),
-              .github/workflows/ci.yml (the dod job that runs --check)
+              .github/workflows/ci.yml (the dod job that runs --check, with full history and
+              the pull request's base in DOD_BASE, since the artefacts' git history vouches
+              for each retired id), docs/dod/PLAN.md (its wave items must be gap ids)
 Tested by:    tests/test_dod_check.py
 Touch when:   never for a new repository; a level or category is added to the standard (update
               CATEGORIES / LEVELS and the standard together); a new evidence prefix is needed (add a
@@ -56,7 +69,9 @@ Touch when:   never for a new repository; a level or category is added to the st
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,6 +89,7 @@ DECISION_LOG = ROOT / "docs" / "DECISION-LOG.md"
 BACKLOG = ROOT / "docs" / "reviews" / "2026-09-17-enterprise-front-end.md"
 ADR_DIR = ROOT / "docs" / "adr"
 PREVENTION = ROOT / "docs" / "PREVENTION.md"
+PLAN = DOD / "PLAN.md"
 
 LEVELS: tuple[str, ...] = ("page", "journey", "stream", "product")
 LEVEL_DIR: dict[str, str] = {"page": "pages", "journey": "journeys", "stream": "streams"}
@@ -759,6 +775,14 @@ def validate(arts: list[Artefact]) -> list[str]:
                 f"{a.rel}: the product's VALUE criteria come first — move them to the top "
                 "of the table (STANDARD.md §4)"
             )
+        cited = {c.gap for c in a.criteria}
+        for gid in a.gaps:
+            if gid not in cited:
+                errors.append(
+                    f"{a.rel}: gap {gid} is defined but no criterion in this file cites it — "
+                    "delete the line if its work is closed, or cite it from the criterion it "
+                    "blocks (a line nothing cites never reaches the order of work)"
+                )
         for c in a.criteria:
             where = f"{a.rel}:{c.line}"
             if not _ID_RE.match(c.id):
@@ -823,6 +847,254 @@ def roll_up(arts: list[Artefact]) -> None:
         a.status = "done" if own and kids_done else "partial"
 
 
+# ------------------------------------------------------------------ the plan and retired ids
+
+_ANY_GAP_ID = re.compile(r"\bG-\d{3}\b|\bF\d+[a-z]?\b|\bB-\d+[a-z]?\b")
+RETIRED_HEAD = "## Gap ids retired"
+_FANOUT_HEAD = "## Open gaps by fan-out"
+_REGISTER_HEAD = "## Our own bugs"
+
+
+def _gap_key(gid: str) -> tuple[str, int, str]:
+    digits = re.sub(r"\D", "", gid)
+    return (gid[0], int(digits) if digits else 0, gid)
+
+
+def previous_ids(text: str) -> tuple[set[str], set[str]]:
+    """(the ids the previous gap analysis carried as open work, the ids it had retired).
+
+    Open work is the first cell of each *Open gaps by fan-out* row and the gap cell of each
+    pending register row — ids the checker itself validated when it wrote them, so a typo can
+    never reach this list. The retired list is read back from its own section.
+    """
+    open_ids: set[str] = set()
+    retired: set[str] = set()
+    section = ""
+    for line in text.split("\n"):
+        s = line.strip()
+        if s.startswith("## "):
+            section = s
+            continue
+        if section.startswith(RETIRED_HEAD):
+            retired.update(_ANY_GAP_ID.findall(s))
+            continue
+        if not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if section.startswith(_FANOUT_HEAD) and cells and _GAP_RE.match(cells[0]):
+            open_ids.add(cells[0])
+        elif section.startswith(_REGISTER_HEAD) and len(cells) > 3 and _GAP_RE.match(cells[3]):
+            open_ids.add(cells[3])
+    return open_ids, retired
+
+
+def retired_ids(previous: str, defined: set[str]) -> list[str]:
+    """Every id the order of work once carried that nothing defines any more — closed, or
+    merged into another id. It only grows (an id defined again leaves it), so a wave that
+    closes a gap never breaks the plan that named it.
+
+    It is carried forward from the previous gap analysis; ``main`` keeps only the ids that
+    ``history_gap_ids`` or ``base_gap_analysis_ids`` vouch for, so that file never vouches
+    for itself."""
+    open_ids, retired = previous_ids(previous)
+    return sorted((open_ids | retired) - defined, key=_gap_key)
+
+
+#: Where a gap id is defined or cited by hand: the artefacts and the register — never the
+#: generated gap analysis, the plan or the standard's examples.
+HISTORY_PATHS: tuple[str, ...] = (
+    "docs/dod/pages",
+    "docs/dod/journeys",
+    "docs/dod/streams",
+    "docs/dod/product.md",
+    "docs/PREVENTION.md",
+)
+_HIST_GAP_LINE = re.compile(r"^\+\s*- \*\*(G-\d{3}|F\d+[a-z]?|B-\d+[a-z]?)\*\*\s*\u2014")
+#: The branch whose committed gap analysis is trusted, when ``--base`` is not given.
+DEFAULT_BASE = "origin/main"
+
+
+def _git(root: Path, *args: str) -> str | None:
+    """``git -C root …``'s stdout, or None when git fails or is missing."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def _own_work_tree(root: Path) -> bool:
+    """True only when ``root`` is itself the top of a git work tree. ``git -C`` walks up to the
+    nearest repository, and a parent's history must never vouch for this tree's ids."""
+    top = _git(root, "rev-parse", "--show-toplevel")
+    return top is not None and Path(top.strip()).resolve() == root.resolve()
+
+
+def history_gap_ids(root: Path) -> set[str]:
+    """Every gap id that a commit reachable from ``HEAD`` added to an artefact or the register:
+    a gap line (``- **G-nnn** — …``), or the gap cell of a criterion or pending register row
+    (the only way a backlog ``F``/``B`` id becomes a gap). Merges are read against their first
+    parent, so a line written while resolving a merge counts too. Empty when ``root`` is not
+    its own work tree or has no commits."""
+    if not _own_work_tree(root):
+        return set()
+    log = _git(
+        root,
+        "log",
+        "-p",
+        "--no-color",
+        "--no-ext-diff",
+        "--diff-merges=first-parent",
+        "--format=",
+        "HEAD",
+        "--",
+        *HISTORY_PATHS,
+    )
+    ids: set[str] = set()
+    for line in (log or "").split("\n"):
+        m = _HIST_GAP_LINE.match(line)
+        if m:
+            ids.add(m.group(1))
+        elif line.startswith("+|"):
+            cells = [c.strip() for c in line[1:].strip().strip("|").split("|")]
+            if cells and _GAP_RE.match(cells[-1]):
+                ids.add(cells[-1])
+    return ids
+
+
+def base_gap_analysis_ids(root: Path, base: str) -> set[str]:
+    """The ids — open or retired — in the gap analysis committed at the merge-base of ``HEAD``
+    and ``base``. That file passed this check on the pull request that wrote it, and it is
+    where an id opened and closed inside a squash-merged branch survives (the squash drops the
+    branch's own artefact commits). Empty when the base does not resolve."""
+    if not _own_work_tree(root):
+        return set()
+    mb = _git(root, "merge-base", "HEAD", base)
+    if mb is None:
+        return set()
+    rel = (
+        OUT.relative_to(root).as_posix() if OUT.is_relative_to(root) else "docs/dod/GAP-ANALYSIS.md"
+    )
+    text = _git(root, "show", f"{mb.strip()}:{rel}")
+    if text is None:
+        return set()
+    open_ids, retired = previous_ids(text)
+    return open_ids | retired
+
+
+def validate_retired(bad: list[str], base: str, root: Path) -> list[str]:
+    """A retired id must have been a gap somewhere a person wrote it: in the artefacts' own
+    history, or in the base branch's committed gap analysis. The generated file cannot vouch
+    for itself: ``bad`` are the ids it carries that nothing else vouches for — the generator
+    drops them, and ``--check`` names each one."""
+    if not bad:
+        return []
+    hint = ""
+    if not _own_work_tree(root):
+        hint = " (this tree is not a git work tree, so no history can vouch for any id)"
+    elif (_git(root, "rev-parse", "--is-shallow-repository") or "").strip() == "true":
+        hint = " (the clone is shallow: fetch the full history, e.g. fetch-depth: 0)"
+    return [
+        f"docs/dod/GAP-ANALYSIS.md retires {gid}, but no artefact or register row in the git "
+        f"history ever defined it and the gap analysis at the merge-base with {base} never "
+        f"carried it{hint} — the list is generated: never edit docs/dod/GAP-ANALYSIS.md by "
+        "hand; restore it (git checkout) and run scripts/dod_check.py"
+        for gid in bad
+    ]
+
+
+def validate_plan_covers_the_top(
+    ranked_gaps: list[str], items: list[tuple[int, str]], top: int | None = None
+) -> list[str]:
+    """STANDARD.md §6: the plan batches the order of work, so every gap the order ranks sits
+    in some table of the plan — a wave, or the list after the waves (the plan once left rank
+    1, G-653, in none; later a stream's new gap, G-556 at rank 73, sat in none while the plan
+    said every opened gap was placed, P-189). ``top`` limits the check to the first rows."""
+    planned = {gid for _n, gid in items}
+    errors: list[str] = []
+    seen: set[str] = set()
+    for rank, gid in enumerate(ranked_gaps[:top], start=1):
+        if not gid or gid in planned or gid in seen:
+            continue
+        seen.add(gid)
+        errors.append(
+            f"docs/dod/PLAN.md: gap {gid} is rank {rank} in the order of work but in no table "
+            "of the plan — add it to the wave that will close it, or to the list after the waves"
+        )
+    return errors
+
+
+_RANK_RE = re.compile(r"\branks?\s+\d", re.I)
+
+
+def plan_headings_quote_no_rank(path: Path) -> list[str]:
+    """A plan heading never quotes a rank: the order of work is the generated file, and a
+    rank copied into a heading reads false as soon as the order moves (P-189)."""
+    if not path.is_file():
+        return []
+    return [
+        f"docs/dod/PLAN.md:{n}: a heading quotes a rank ({line.strip()!r}) — the order of "
+        "work is GAP-ANALYSIS.md; name the gaps, never their ranks"
+        for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1)
+        if line.startswith("#") and _RANK_RE.search(line)
+    ]
+
+
+def plan_items(path: Path) -> tuple[list[tuple[int, str]], list[str]]:
+    """``(line, id)`` for every wave item in PLAN.md: each id in the ``gaps`` column of any
+    table that has one. A cell holds gap ids separated by commas and nothing else — the
+    plan batches the order of work; it does not restate it."""
+    if not path.is_file():
+        return [], [
+            "docs/dod/PLAN.md is missing — the batching of the order of work (STANDARD.md §6)"
+        ]
+    items: list[tuple[int, str]] = []
+    errors: list[str] = []
+    col: int | None = None
+    tables = 0
+    for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), start=1):
+        s = line.strip()
+        if not s.startswith("|"):
+            col = None
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if col is None:
+            low = [c.lower() for c in cells]
+            col = low.index("gaps") if "gaps" in low else -1
+            tables += col >= 0
+            continue
+        if col < 0 or all(set(c) <= {"-", ":", " "} for c in cells):
+            continue
+        cell = cells[col] if col < len(cells) else ""
+        tokens = [t.strip().strip("`") for t in cell.split(",")]
+        for tok in tokens:
+            if _GAP_RE.match(tok):
+                items.append((n, tok))
+            else:
+                errors.append(f"docs/dod/PLAN.md:{n}: a wave item is a gap id, not {tok!r}")
+    if not tables:
+        errors.append("docs/dod/PLAN.md names no wave item — no table has a 'gaps' column")
+    return items, errors
+
+
+def validate_plan(items: list[tuple[int, str]], known: set[str]) -> list[str]:
+    """PLAN.md's rule, as a gate: nothing enters a wave that is not a gap id.
+
+    ``known`` is every gap the record defines — an artefact's gap line, a register gap, a
+    backlog row a criterion or a pending row cites (a row nothing cites asks for no work) —
+    plus the ids the order of work has retired."""
+    return [
+        f"docs/dod/PLAN.md:{n}: wave item {gid} is not a gap id defined under docs/dod "
+        "(an artefact's gap line, a register gap, or a backlog row a criterion or a pending "
+        "row cites), nor one the order of work has retired — fix the artefact first (add the "
+        "criterion and its gap), then plan it"
+        for n, gid in items
+        if gid not in known
+    ]
+
+
 # ------------------------------------------------------------------ rendering
 
 
@@ -877,6 +1149,7 @@ def _rank(arts: list[Artefact]) -> list[tuple[int, int, Artefact, Criterion]]:
 def render(
     arts: list[Artefact],
     register: tuple[list[Prevention], dict[str, str]] | None = None,
+    retired: list[str] | None = None,
 ) -> str:
     by_level: dict[str, list[Artefact]] = {lvl: [] for lvl in LEVELS}
     for a in arts:
@@ -971,6 +1244,20 @@ def render(
     out.append("")
     if register is not None:
         out += render_prevention(*register)
+    if retired is not None:
+        out += [
+            RETIRED_HEAD,
+            "",
+            "Ids the order of work once carried that no artefact, register row or backlog row "
+            "defines any more: each was closed, or merged into another id. `PLAN.md` may go on "
+            "naming one; an id that was never a gap fails the check. Carried forward by the "
+            "generator, and kept only while the git history of the artefacts, or the gap "
+            "analysis committed on the base branch, shows the id was a gap — never because "
+            "this file says so.",
+            "",
+            ", ".join(retired) if retired else "none",
+            "",
+        ]
     out += [
         "## Every open criterion, ranked",
         "",
@@ -1020,6 +1307,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="validate and fail on any defect or drift; write nothing",
     )
+    ap.add_argument(
+        "--base",
+        default=os.environ.get("DOD_BASE") or DEFAULT_BASE,
+        help="the branch whose committed gap analysis may vouch for a retired id "
+        f"(default $DOD_BASE, else {DEFAULT_BASE}; CI sets DOD_BASE to the pull request's base)",
+    )
     args = ap.parse_args(argv)
     arts: list[Artefact] = []
     errors: list[str] = []
@@ -1030,14 +1323,44 @@ def main(argv: list[str] | None = None) -> int:
     errors.extend(validate(arts))
     prevention, pgaps, perrs = parse_prevention(PREVENTION)
     errors.extend(perrs)
-    errors.extend(validate_prevention(prevention, pgaps, backlog_index()))
+    backlog = backlog_index()
+    errors.extend(validate_prevention(prevention, pgaps, backlog))
+    pending_gaps = {r.gap for r in prevention if r.status == "pending"}
+    for gid in pgaps:
+        if gid not in pending_gaps:
+            errors.append(
+                f"docs/PREVENTION.md: gap {gid} is defined but no pending row cites it — "
+                "delete the line when its row closes"
+            )
     # one gap id is one piece of work across the register AND the artefacts
     art_gaps = {gid: " ".join(t.split()) for a in arts for gid, t in a.gaps.items()}
     for gid, text in pgaps.items():
         if gid in art_gaps and art_gaps[gid] != " ".join(text.split()):
             errors.append(f"docs/PREVENTION.md: gap {gid} is defined differently in an artefact")
+    # a backlog row is a gap of the record only while a criterion or a pending row cites it
+    cited_rows = {c.gap for a in arts for c in a.criteria} | pending_gaps
+    defined = {g for a in arts for g in a.gaps} | set(pgaps) | (set(backlog) & cited_rows)
+    previous = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
+    carried = retired_ids(previous, defined)
+    # the previous file cannot vouch for itself: an id stays retired only while the artefacts'
+    # history or the base's committed gap analysis shows it was a gap (P-127)
+    vouched = history_gap_ids(ROOT) | base_gap_analysis_ids(ROOT, args.base)
+    retired = [gid for gid in carried if gid in vouched]
+    unvouched = validate_retired([g for g in carried if g not in vouched], args.base, ROOT)
+    items, plan_errors = plan_items(PLAN)
+    errors.extend(plan_errors)
+    errors.extend(validate_plan(items, defined | set(retired)))
+    if args.check:
+        errors.extend(unvouched)
+    else:
+        for note in unvouched:
+            print(f"dropped from the retired list: {note}")
     roll_up(arts)
-    rendered = render(arts, (prevention, pgaps))
+    if PLAN.is_file():
+        ranked_gaps = [c.gap for _s, _f, _a, c in _rank(arts)]
+        errors.extend(validate_plan_covers_the_top(ranked_gaps, items))
+        errors.extend(plan_headings_quote_no_rank(PLAN))
+    rendered = render(arts, (prevention, pgaps), retired)
     if args.check:
         errors.extend(status_drift(arts))
         if not OUT.is_file() or OUT.read_text(encoding="utf-8") != rendered:

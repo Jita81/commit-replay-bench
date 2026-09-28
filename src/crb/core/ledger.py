@@ -1278,6 +1278,10 @@ class CellStats:
     n_api: int = 0
     #: The ``checks`` arm every row of the cell was graded under (ADR-0024) — one, always.
     checks_arm: str = ARM_OFF
+    #: Eligible rows whose cost is KNOWN (``GradeRow.cost_known``) — the denominator of
+    #: ``cost_usd_mean``. ``0`` means the mean is unknown, never ``$0``: a reader decides
+    #: known-ness from this count, never by comparing the mean with zero (P-131).
+    n_cost_known: int = 0
 
     @property
     def n_disqualified(self) -> int:
@@ -1345,10 +1349,11 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
     # re-checked at read time over ALL rows, not just eligible ones: the write-time
     # gate should make this 0, and a reader must be able to see that it is
     fq1 = sum(1 for r in rs if r.clean and not r.belts_all_true())
-    # means over the rows that carry a value — a $0 / 0 s is "not measured" here, not
-    # a free, instant trial (cost_known tells the two apart per row)
-    costs = [r.cost_usd for r in eligible if r.cost_usd]
-    lats = [r.latency_s for r in eligible if r.latency_s]
+    # means over the rows that carry a value: a cost is a row fact (``cost_known`` — a
+    # known $0 counts as $0, an unknown cost is left out, never read as $0); a 0 s
+    # latency is "not recorded", never an instant trial (crb.core.economics, F35)
+    costs = [r.cost_usd for r in eligible if r.cost_known]
+    lats = [r.latency_s for r in eligible if r.latency_s > 0]
     strengths = [r.oracle_strength for r in eligible if r.oracle_strength is not None]
     split = failure_split(rs)
     return CellStats(
@@ -1379,6 +1384,7 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_lint_evaluated=split.lint_evaluated,
         n_api=split.api,
         checks_arm=arms[0],
+        n_cost_known=len(costs),
     )
 
 
@@ -1389,6 +1395,19 @@ def rows_for_checks(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
     if arm not in ARMS:
         raise ValueError(f"unknown checks arm {arm!r}; expected one of {ARMS}")
     return [r for r in rows if r.checks_arm == arm]
+
+
+#: The axes on which two rows of one class and size are NEVER pooled into one cell: a row of
+#: another apparatus version, mode, checks arm (ADR-0024) or posture class (ADR-0019 §8) is
+#: another cell's evidence. A fold that keys cells by class and size keys them by
+#: :func:`pool_scope` too — so an axis added here reaches every such fold at once
+#: (``tests/test_server_routes_flow.py`` splits a cell on each axis; docs/PREVENTION.md P-184).
+NEVER_POOL_AXES: tuple[str, ...] = ("apparatus_version", "mode", "checks_arm", "posture_class")
+
+
+def pool_scope(row: GradeRow) -> tuple[str, ...]:
+    """``row``'s value on every axis of :data:`NEVER_POOL_AXES`, in that order."""
+    return tuple(str(getattr(row, axis)) for axis in NEVER_POOL_AXES)
 
 
 def group_by_cell(

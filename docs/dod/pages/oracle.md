@@ -19,9 +19,9 @@ cell to a human whatever its pass rate (`help.ts` About copy for `/oracle`; eyeb
 `Instrument · Oracle`, `OraclePage.tsx:218`).
 
 **Entry → exit.** Arrive by the Instrument nav entry `Oracle` (operator role only,
-`Layout.tsx:120`), the Baseline door `Oracle and controls` (`ResultsPage.tsx:249`), the
-repository's Next steps `Oracle adequacy` (`RepoDetail.tsx:204`) or the Learn strengthen
-report (`LearnPage.tsx:306`), always with `?repo=`. Leave with: per task and per cell the
+the `INSTRUMENT` list in `Layout.tsx`), the Baseline door `Oracle and controls` (`ResultsPage.tsx`), the
+repository's Next steps `Oracle adequacy` (`RepoDetail.tsx`) or the Learn strengthen
+report (`LearnPage.tsx`), always with `?repo=`. Leave with: per task and per cell the
 strength, band and the gate a green licenses; the negative-controls gate with the server's
 verdict and the seven control rows. Exits as coded: a task id opens `/tasks/:repo/:taskId`
 (`OraclePage.tsx:98,187`); no repo → `Choose a repo` with one link to `/connect` (`:223`); an

@@ -19,8 +19,10 @@ What it does: Pins that only measured cells appear, that the seed's controls ver
               separate apparatus, summaries with and without a profile, projections, the empty
               repo and 404, that a sign-off lifts the tier, that a false-Q1 row inserted around
               the ledger REFUSES the map, that a viewer reads, the per-cell route decisions
-              following the latest verdict, the failure split per repo and run, and that
-              sighted and blind rows are never pooled.
+              following the latest verdict, the failure split per repo and run, that
+              sighted and blind rows are never pooled, and that every cell and the map carry
+              their economics (known counts, t intervals, apparatus) and refuse to pool
+              apparatus versions or posture classes (F35).
 How:          ``make_env`` over the seed; newer ``controls.report`` events appended through the
               ORM where a different controls state is needed (the latest wins).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -197,6 +199,7 @@ class TestCapabilityMap:
             "summary",
             "policy",
             "controls",
+            "economics",
         }
         assert body["repo"] == ALPHA and body["by"] == ["capability_class", "size"]
         assert body["classes"] == ["backend.route.add", "bug.fix", "test.add"]
@@ -428,6 +431,49 @@ class TestCapabilityMap:
         assert c["cost_known"] is False and c["cost_usd_mean"] == 0.0
         # legacy rows carry no failure_kind label: derived on read → builder_red
         assert c["failure_split"]["builder_red"] == 1 and c["failure_split"]["harness"] == 0
+
+    def test_economics_per_cell_and_for_the_map(self, env: Env) -> None:
+        """F35: every cell and the map carry the known counts as denominators, the mean
+        and its interval with the method named, and the apparatus — and an unknown axis
+        is null with its reason, never 0."""
+        seed_beta_rows(env)  # 40 rows, 39 clean, $0.01 each (reported), no latency recorded
+        body = env.get(f"/capability-map?repo={BETA}").json()
+        (cell,) = body["cells"]
+        e = cell["economics"]
+        assert (e["n_attempts"], e["n_clean"]) == (cell["n"], cell["clean"]) == (40, 39)
+        assert (e["cost_known"], e["cost_known_clean"]) == (40, 39)
+        assert (e["latency_known"], e["latency_known_clean"]) == (0, 0)
+        assert e["apparatus_versions"] == [APPARATUS_VERSION] and e["pooled"] is False
+        cost = e["cost_per_attempt"]
+        assert cost["n"] == 40 and cost["value"] == 0.01 and cost["reason"] == ""
+        assert cost["ci_low"] == cost["ci_high"] == 0.01  # every row cost the same
+        assert cost["method"].startswith("Student-t 95%")
+        per_clean = e["cost_per_clean"]
+        assert per_clean["n"] == 39 and per_clean["value"] == round(0.40 / 39, 6)
+        assert per_clean["ci_low"] < per_clean["value"] < per_clean["ci_high"]
+        lat = e["latency_per_attempt"]
+        assert lat["value"] is None and lat["ci_low"] is None
+        assert lat["reason"] == "no attempt recorded a known latency"
+        # the flat fields agree with the fold; the map's block is folded from the same rows
+        assert cell["cost_usd_mean"] == 0.01 and cell["cost_known"] is True
+        assert cell["latency_known"] is False
+        assert body["economics"] == e
+
+    def test_economics_refuse_to_pool_apparatus_versions(self, env: Env) -> None:
+        pooled = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["economics"]
+        assert pooled["pooled"] is True
+        assert pooled["apparatus_versions"] == ["1.0-census", APPARATUS_VERSION]
+        for axis in ("cost_per_attempt", "cost_per_clean", "latency_per_attempt"):
+            assert pooled[axis]["value"] is None and pooled[axis]["ci_low"] is None
+            assert "never pooled across apparatus versions" in pooled[axis]["reason"]
+        current = env.get(f"/capability-map?repo={ALPHA}").json()
+        assert current["economics"]["pooled"] is False
+        assert current["economics"]["apparatus_versions"] == [APPARATUS_VERSION]
+        # a cell of imported census rows: one apparatus, no cost ever reported → null, not $0
+        legacy = _cells(env)["test.add|XS"]["economics"]
+        assert legacy["pooled"] is False and legacy["cost_known"] == 0
+        assert legacy["cost_per_attempt"]["value"] is None
+        assert legacy["cost_per_attempt"]["reason"] == "no attempt recorded a known cost"
 
     def test_summary_without_profile(self, env: Env) -> None:
         s = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["summary"]
@@ -819,6 +865,47 @@ def test_posture_all_pools_only_posture_invariant_tasks(env: Env) -> None:
     assert cell["n"] == 4  # tasks 0 and 1, in both classes
     assert body["summary"]["excluded_posture_divergent"] == 4  # tasks 2 and 3, both rows each
     assert sorted(cell["posture_ids"]) == ["pst_docker", "pst_local"]
+
+
+def test_economics_never_pool_posture_classes(env: Env) -> None:
+    """F35 × ADR-0019 §8: ``posture=all`` may pool RATES over posture-invariant tasks, but a
+    cost or a wall clock is not invariant across postures (a sealed container is slower
+    than the host) — the economics of a cell and of the map spanning two classes are
+    withheld with the classes named; each class read alone serves its own figures."""
+    from crb.core.qualify import Qualification
+    from crb.store import qualifications as sq
+
+    _posture_rows(env, 2, cls="local/inplace/host-env", pid="pst_local", latency_s=10.0)
+    _posture_rows(env, 2, cls="docker/copy/sealed", pid="pst_docker", latency_s=90.0)
+    for i in range(2):
+        for pid, cls in (
+            ("pst_local", "local/inplace/host-env"),
+            ("pst_docker", "docker/copy/sealed"),
+        ):
+            q = Qualification(
+                qualification_id="",
+                repo=BETA,
+                task_id=f"{i:040x}",
+                posture_id=pid,
+                posture={"posture_class": cls, "executor": cls.split("/")[0]},
+                state="qualified",
+            )
+            with env.factory() as s:
+                sq.append(s, q)
+    pooled = _beta(env, "&posture=all")
+    (cell,) = pooled["cells"]
+    assert cell["n"] == 4  # the rates pool: both tasks are posture-invariant
+    for e in (cell["economics"], pooled["economics"]):
+        assert e["pooled"] is True and e["latency_known"] == 4
+        assert e["posture_classes"] == ["docker/copy/sealed", "local/inplace/host-env"]
+        lat = e["latency_per_attempt"]
+        assert lat["value"] is None and lat["ci_low"] is None
+        assert "2 posture classes (docker/copy/sealed, local/inplace/host-env)" in lat["reason"]
+        assert e["pooled_reason"] == lat["reason"]
+    for cls, want in (("local/inplace/host-env", 10.0), ("docker/copy/sealed", 90.0)):
+        e = _beta(env, f"&posture={cls}")["economics"]
+        assert e["pooled"] is False and e["posture_classes"] == [cls]
+        assert e["latency_per_attempt"]["value"] == want
 
 
 def test_pre_2_3_docker_rows_are_excluded_and_counted(env: Env) -> None:

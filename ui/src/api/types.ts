@@ -917,6 +917,41 @@ export type CellField =
   | 'model'
   | 'provider'
 
+/**
+ * One economics figure (`crb.core.economics.Estimate`, F35). `n` is its denominator (the
+ * attempts — or clean attempts — with a KNOWN value). `value` is `null` when nothing is
+ * known, never `0`; `ci_low` / `ci_high` are `null` whenever no interval is served, and
+ * `reason` then says why (`''` only when the value and its interval are both served).
+ */
+export interface EconomicsEstimate {
+  n: number
+  value: number | null
+  ci_low: number | null
+  ci_high: number | null
+  method: string
+  reason: string
+}
+
+/** `crb.core.economics.Economics` — cost and latency with their denominators, intervals and apparatus. `pooled` = the rows span more than one apparatus version, posture class or checks arm, so every estimate is withheld and `pooled_reason` names what they span. */
+export interface Economics {
+  n_attempts: number
+  n_clean: number
+  cost_known: number
+  cost_known_clean: number
+  latency_known: number
+  latency_known_clean: number
+  apparatus_versions: string[]
+  /** The labelled posture classes of the rows (ADR-0019); empty for rows graded before 2.3. */
+  posture_classes: string[]
+  /** The checks arms of the rows (ADR-0024); one, unless the fold was refused. */
+  checks_arms: string[]
+  pooled: boolean
+  pooled_reason: string
+  cost_per_attempt: EconomicsEstimate
+  cost_per_clean: EconomicsEstimate
+  latency_per_attempt: EconomicsEstimate
+}
+
 /** One cell of `GET /capability-map` (API.md lists these fields). */
 export interface CapabilityCell {
   capability_class: string
@@ -933,8 +968,14 @@ export interface CapabilityCell {
   ci_low: number
   ci_high: number
   false_q1: number
+  /** Flat means over the known rows; they follow the map's filters, so `posture=all` / `apparatus=all` pools them (G-990). Quote `economics`, never these. */
   cost_usd_mean: number
   latency_s_mean: number
+  /** Did any eligible row record a known cost (a known $0 counts) / a latency? */
+  cost_known?: boolean
+  latency_known?: boolean
+  /** F35 — the cell's cost and latency with known counts, t intervals and apparatus. */
+  economics?: Economics
   oracle_strength_mean: number | null
   route: CellVerdict
   reason: string
@@ -975,6 +1016,8 @@ export interface CapabilityMap {
   cells: CapabilityCell[]
   summary: CapabilitySummary
   policy: RoutingPolicy
+  /** F35 — the economics of every row behind the map, folded from the rows (the Baseline's tiles). */
+  economics?: Economics
 }
 
 /** `crb.core.routing.RoutingPolicy.to_dict()` */
@@ -1776,8 +1819,14 @@ export interface ValueNorthStar {
   clean_rate: ValueRate
   precision_basis: 'review' | 'review_pooled' | 'proxy' | 'none'
   precision: ValueRate
-  spend_usd: number
-  spend_gbp: number
+  /** The priced blind spend; `null` when no blind attempt is priced — unmeasured, never $0. */
+  spend_usd: number | null
+  spend_gbp: number | null
+  /** Blind attempts whose cost is a measurement, and those with no price (never summed as zero). */
+  spend_rows_priced?: number
+  spend_rows_unpriced?: number
+  /** Why the per-pound figures are null although the rate is measured ('' when they are served). */
+  per_pound_withheld?: string
   usd_per_gbp: number
   method: string
 }
@@ -1795,4 +1844,78 @@ export interface ValueReport {
   usd_per_gbp: number
   north_star: ValueNorthStar
   learning_curve: { source: string; attempts: number; register: { source: string; n_classes: number; closed: number; closed_share: number | null } }
+}
+
+// ---------------------------------------------------------------------------
+// Flow (docs/API.md "Flow (how long each stream takes, and what it spent)")
+// ---------------------------------------------------------------------------
+
+/**
+ * One milestone pair's duration. `median_s` / `min_s` / `max_s` are `null` when `n` is 0 —
+ * unmeasured, not zero — and `reason` then says why in one sentence. `dropped` counts the pairs
+ * the server refused (an unreadable stamp, or an end before its start).
+ */
+export interface LeadTime {
+  key: string
+  label: string
+  n: number
+  median_s: number | null
+  min_s: number | null
+  max_s: number | null
+  dropped: number
+  reason: string
+}
+
+/**
+ * What a stream spent. `usd` sums only the rows whose cost is a measurement and is `null` when
+ * there are none; `rows_unpriced` is how many rows the sum leaves out, so the total is read as
+ * a floor and never as the whole bill.
+ */
+export interface Spend {
+  usd: number | null
+  rows_priced: number
+  rows_unpriced: number
+  /** The apparatus versions of the rows the reading covers, priced or not. */
+  apparatus_versions: string[]
+}
+
+/** A figure a stream's definition of done asks for that nothing in the product records. */
+export interface NotCaptured {
+  figure: string
+  why: string
+  gap: string
+}
+
+/** One value stream's own numbers. */
+export interface StreamFlow {
+  stream: string
+  name: string
+  lead_times: LeadTime[]
+  spend: Spend
+  /** Which rows the spend covers, in words — the streams do not all buy the same thing. */
+  spend_label: string
+  /**
+   * `per_unit_spend` divided by `per_unit_units` (the things the stream delivers), or `null` when
+   * either side is unmeasured or the spend is a floor; `per_unit_reason` then says which.
+   */
+  per_unit: number | null
+  per_unit_label: string
+  /** What `per_unit` divided: the spend of the rows it covers. */
+  per_unit_spend: Spend
+  per_unit_units: number
+  per_unit_reason: string
+  counts: Record<string, number>
+  not_captured: NotCaptured[]
+}
+
+/** `GET /flow?repo=` — every stream's lead time, spend and counts, derived from stored records. */
+export interface Flow {
+  repo: string
+  apparatus: string
+  generated: string
+  /** How the figures were produced — a fold over stored records, not a live probe. */
+  method: string
+  /** The repository's cumulative spend — every graded row once; the streams' spends partition it. */
+  spend: Spend
+  streams: StreamFlow[]
 }

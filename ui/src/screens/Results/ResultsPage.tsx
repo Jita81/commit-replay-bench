@@ -46,10 +46,13 @@
  * Works with:   ui/src/screens/Results/MapTable.tsx (the grid; `canSign`),
  *               ui/src/screens/Decisions/decisions.ts (the rows and the role rule reused
  *               here), ui/src/components/RepoPicker.tsx (`defaultToLatest`),
- *               ui/src/components/StatTile.tsx (the tile anatomy), ui/src/components/Help.tsx
- *               (`Term` on the route tiles), ui/src/help/hints.ts (the `stat.results.*` copy;
+ *               ui/src/components/StatTile.tsx (the tile anatomy, fed for cost and latency by
+ *               ui/src/lib/economics.ts from the served fold — F35), ui/src/components/Help.tsx +
+ *               ui/src/help/hints.ts (`Term` on the route tiles and the `stat.results.*` copy;
  *               the trigger is `Hint`), ui/src/screens/Capability/CapabilityPage.tsx
- *               (the full grid), docs/EVIDENCE-AND-CLAIMS.md (what a number may be said to mean)
+ *               (the full grid), ui/src/components/FlowPanel.tsx (the measure stream's own lead
+ *               time and spend under the map), docs/EVIDENCE-AND-CLAIMS.md (what a number may
+ *               be said to mean)
  * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id)
  * Touch when:   never for a new repository; a headline fact is added to the map summary; the
@@ -65,6 +68,7 @@ import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
+import { FlowPanel } from '../../components/FlowPanel'
 import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
@@ -73,7 +77,8 @@ import { StatTile } from '../../components/StatTile'
 import { Term } from '../../components/Help'
 import type { HintId } from '../../help/hints'
 import { useAuth } from '../../lib/auth'
-import { kOfN } from '../../lib/format'
+import { economicsTile } from '../../lib/economics'
+import { kOfN, wilson } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
 import { KIND_LABEL, decisionsFor } from '../Decisions/decisions'
 import { InsetText, NotificationBanner, WarningCallout } from '../../components/govuk'
@@ -263,14 +268,19 @@ export function ResultsPage() {
   const economics = useMemo(() => {
     const n = measured.reduce((a, c) => a + c.n, 0)
     const clean = measured.reduce((a, c) => a + c.clean, 0)
-    const costed = measured.filter((c) => c.cost_usd_mean > 0)
-    const costN = costed.reduce((a, c) => a + c.n, 0)
-    const perAttempt = costN ? costed.reduce((a, c) => a + c.cost_usd_mean * c.n, 0) / costN : null
-    const timed = measured.filter((c) => c.latency_s_mean > 0)
-    const timeN = timed.reduce((a, c) => a + c.n, 0)
-    const latency = timeN ? timed.reduce((a, c) => a + c.latency_s_mean * c.n, 0) / timeN : null
-    return { n, clean, perAttempt, perClean: perAttempt !== null && clean ? (perAttempt * n) / clean : null, latency }
-  }, [measured])
+    // F35: cost and latency come from the server's fold over the rows themselves — known
+    // counts as denominators, a t interval with its method, the apparatus — never a mean of
+    // cell means recombined here (an interval cannot be)
+    const e = mapData?.economics
+    const graded = mapData ? `apparatus ${mapData.summary.apparatus_versions.join(', ') || '—'}` : undefined
+    return {
+      n,
+      clean,
+      perAttempt: economicsTile(e, 'cost_per_attempt', graded),
+      perClean: economicsTile(e, 'cost_per_clean', graded),
+      latency: economicsTile(e, 'latency_per_attempt', graded),
+    }
+  }, [measured, mapData])
   const controlsNotRun = controls.isError && isApiError(controls.error) && controls.error.status === 404
   const oracleNotRun = oracle.isError && isApiError(oracle.error) && oracle.error.status === 404
   const verdict = controlsData?.verdict
@@ -408,14 +418,14 @@ export function ResultsPage() {
                 )}
                 <h3 className="mb-3 text-[24px] font-bold leading-[1.3]">Economics</h3>
                 <div className="mb-4 grid gap-3 sm:grid-cols-4">
-                  <StatTile label="Cost per attempt" value={economics.perAttempt === null ? '—' : `$${economics.perAttempt.toFixed(2)}`} n={economics.n} apparatus={`${mapApparatus} · a mean of builder-reported $ over cells with a known cost — no interval yet: the API serves the mean only`} hint="stat.results.cost_per_attempt" />
-                  <StatTile label="Cost per clean attempt" value={economics.perClean === null ? '—' : `$${economics.perClean.toFixed(2)}`} n={economics.clean} apparatus={`${mapApparatus} · ${economics.clean} clean of ${economics.n} — the same mean divided by the clean rate; no interval`} hint="stat.results.cost_per_clean" />
-                  <StatTile label="Latency per attempt" value={economics.latency === null ? '—' : `${Math.floor(Math.round(economics.latency) / 60)}m ${Math.round(economics.latency) % 60}s`} n={economics.n} apparatus={`${mapApparatus} · a mean over cells with a known latency — no interval yet: the API serves the mean only`} hint="stat.results.latency" />
-                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} apparatus={`${mapApparatus} · all attempts, all cells — never a routing input`} hint="stat.results.clean_rate" />
+                  <StatTile label="Cost per attempt" {...economics.perAttempt} hint="stat.results.cost_per_attempt" data-testid="tile-cost-per-attempt" />
+                  <StatTile label="Cost per clean attempt" {...economics.perClean} hint="stat.results.cost_per_clean" data-testid="tile-cost-per-clean" />
+                  <StatTile label="Latency per attempt" {...economics.latency} hint="stat.results.latency" data-testid="tile-latency" />
+                  <StatTile label="Clean rate" value={economics.n ? pct(economics.clean / economics.n) : '—'} n={economics.n} ci={economics.n ? wilson(economics.clean, economics.n) : null} apparatus={`${economics.clean} clean of ${economics.n} attempts, all cells · Wilson 95% · ${mapApparatus} — never a routing input`} hint="stat.results.clean_rate" data-testid="tile-clean-rate" />
                 </div>
                 <Hint as="div" id="banner.results.no_throughput">
                   <WarningCallout title="No throughput headline">
-                    The ledger records neither human hours nor merge outcomes yet, so cost per accepted change cannot be shown here honestly. What is shown is cost per clean attempt, which is measured.
+                    The ledger records no human hours, and the merge outcomes the factory records are not joined to the replay rows behind this map: it records merge outcomes only for the pull requests the factory opened (the map's merged count), never for the attempts measured here. So cost per accepted change cannot be shown here honestly. What is shown is cost per clean attempt, which is measured.
                   </WarningCallout>
                 </Hint>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -472,6 +482,8 @@ export function ResultsPage() {
               </ul>
             )}
           </Card>
+          {/* the measure stream's own numbers (docs/dod/streams/measure.md MEASURE) */}
+          <FlowPanel stream="measure" repo={repo} />
         </>
       )}
     </>

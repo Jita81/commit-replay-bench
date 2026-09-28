@@ -47,19 +47,21 @@
  * Works with:   ui/src/screens/Signoff/contract.ts (preview, policy, refusal vocabulary,
  *               the 409 shape), ui/src/components/GateBanner.tsx (the gate),
  *               ui/src/components/RepoPicker.tsx (`defaultToLatest`),
- *               ui/src/components/Help.tsx (`Term` in the refusal clauses),
- *               ui/src/help/hints.ts (the `*.signoff.*` copy; the trigger is `Hint`),
+ *               ui/src/components/Help.tsx + ui/src/help/hints.ts (`Term` in the refusal
+ *               clauses and the `*.signoff.*` copy; the trigger is `Hint`),
  *               ui/src/screens/Capability/FailureSplit.tsx (the controls pill and the split),
  *               ui/src/api/hooks.ts (`useSignoffs`, `useRevokeSignoff`),
+ *               ui/src/components/FlowPanel.tsx (the decide stream's own lead time under the
+ *               attestations),
  *               src/crb/server/routes/signoffs.py (the server's decision this screen
  *               previews and submits; the core rule it applies is the policy module it names)
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element resolves to a registry id), ui/e2e/walkthrough/08-signoff.spec.ts
  *               (a thin cell refused with observed vs threshold; a policy-clearing cell
  *               signed with an attestation), ui/e2e/walkthrough/05-replay-fake.spec.ts
- * Touch when:   a refusal clause or a policy threshold is added (src/crb/core/signoff.py) —
- *               add the gate row in `criteriaFor` and the vocabulary in
- *               ui/src/screens/Signoff/contract.ts; never for a new repository.
+ * Touch when:   never for a new repository; a refusal clause or a policy threshold is added
+ *               (src/crb/core/signoff.py) — add the gate row in `criteriaFor` and the vocabulary in
+ *               ui/src/screens/Signoff/contract.ts.
  * Claims:       A sign-off lifts the verification tier, never the route; it is refused
  *               outright on any false-Q1 row
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
@@ -77,6 +79,7 @@ import { CiBar } from '../../components/CiBar'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
+import { FlowPanel } from '../../components/FlowPanel'
 import { SelectField, TextArea } from '../../components/Field'
 import { GateBanner, type GateCriterion } from '../../components/GateBanner'
 import { ConfirmationPanel, Details, InsetText, SecondaryButton, SummaryList, WarningButton, WarningCallout } from '../../components/govuk'
@@ -660,6 +663,8 @@ export function SignoffPage() {
               </form>
             )}
           </Card>
+          {/* the decide stream's own numbers (docs/dod/streams/decide-and-license.md MEASURE) */}
+          <FlowPanel stream="decide-and-license" repo={repo} />
         </>
       )}
     </>

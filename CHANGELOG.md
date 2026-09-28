@@ -12,6 +12,17 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The record corrects itself; costs carry their n; each stream measures its own flow**
+  (north-star Waves 0 and 1, streams D, E and M;
+  [#64](https://github.com/Jita81/commit-replay-bench/pull/64)).
+  `scripts/dod_check.py` refuses a gap line no criterion cites, a plan item that is not a gap
+  and a ranked gap in no plan table (DL-063, DL-064); `scripts/check_branch_protection.py`
+  compares the required checks with the CI jobs. Cost and latency are means with n, an interval
+  and the apparatus; a known $0 counts, and a fold across apparatus versions, posture classes or
+  checks arms is refused (F35, DL-065). `GET /flow?repo=` derives each stream's lead time and
+  spend from stored records under one money rule (DL-066); `POST /reviews` takes minutes
+  (DL-067).
+
 - **Working changes per pound; a bug is closed by prevention; "clean" means working**
   ([#57](https://github.com/Jita81/commit-replay-bench/pull/57)). `GET /value` and a Home tile
   score working changes per pound, blind, and VALUE heads the definition of done. A bug class is

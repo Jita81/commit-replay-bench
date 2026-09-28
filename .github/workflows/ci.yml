@@ -186,10 +186,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # the artefacts' history vouches for each retired gap id, and the base branch's
+          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-127)
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Artefacts valid, evidence resolves, docs/dod/GAP-ANALYSIS.md current
+        env:
+          DOD_BASE: origin/${{ github.base_ref || 'main' }}
         run: python scripts/dod_check.py --check
 
   claims:

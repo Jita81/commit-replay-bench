@@ -11,7 +11,8 @@ What it does: Pins that every row's failure kind is recomputed with the product'
               export's crude column; that a budget stop and a lint-only failure survive; that a
               review whose statement the operator marked as a flag defect is corrected in the
               reader and counted as corrected; that the critical-friend cobra reviews can be
-              left out; and that the JSONL export reads through ``GradeRow`` unchanged.
+              left out; that an empty cost column is no price, never a known $0 (P-185); and
+              that the JSONL export reads through ``GradeRow`` unchanged.
 How:          Small export files written to ``tmp_path``; the script loaded as a module.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
@@ -116,6 +117,21 @@ def test_the_failure_kind_is_the_products_rule_not_the_exports(
     assert rows[8].clean and rows[8].repo_lint_clean is True and rows[0].cost_usd == 1.0
 
 
+def test_an_empty_cost_is_unpriced_never_a_known_zero(vb: ModuleType, tmp_path: Path) -> None:
+    """DL-066: a row whose cost is not a measurement is counted apart, never as $0. The
+    pipe-separated reader turned an empty ``cost`` column into a KNOWN $0, so the baseline
+    this script regenerates would have summed it as priced and served per-pound figures that
+    must be withheld. ``ValueRow.cost_known`` has no default, so no adapter can claim a price
+    by leaving it out (P-185)."""
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join([HEADER, _row(1), _row(2, cost=""), _row(3, cost=" ")]) + "\n", encoding="utf-8"
+    )
+    rows = vb.read_ledger(p)
+    assert [r.cost_known for r in rows] == [True, False, False]
+    assert rows[0].cost_usd == 1.0
+
+
 def test_an_unknown_error_class_is_refused(vb: ModuleType, tmp_path: Path) -> None:
     p = tmp_path / "ledger.psv"
     p.write_text(HEADER + "\n" + _row(1, err="ZZ") + "\n", encoding="utf-8")
@@ -181,6 +197,123 @@ def test_the_markdown_carries_n_method_and_apparatus_on_every_figure(
     )
     out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
     assert "| measure |" in out and "n = 2" in out and "apparatus" in out
+
+
+def test_the_budget_spend_and_the_loss_share_never_sum_an_unpriced_row_as_zero(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """DL-066: the budget spend and the process-loss share are sums of money too. They summed
+    ``cost_usd`` over every row, so an unpriced budget row printed as "$0.00" and the loss
+    share as 0.0% beside a loss amount the same table called unpriced."""
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join([HEADER, _row(1, clean="1", lint="1"), _row(2, kind="budget", cost="")]) + "\n",
+        encoding="utf-8",
+    )
+    out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
+    budget = next(line for line in out.splitlines() if "spend on budget-stopped" in line)
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$0.00" not in budget
+    assert "| unpriced (no row reported a cost) of $1.00;" in budget
+    assert "unpriced (no row reported a cost) of $1.00 (—)" in loss
+    assert "$1.00 (0.0%)" not in loss
+
+
+def test_the_page_sums_money_only_through_the_spend_rule() -> None:
+    """docs/PREVENTION.md P-401: the page summed ``cost_usd`` itself in two figures after the
+    report beside them had moved to the spend rule, so an unpriced row read as $0 there. No
+    ``sum(...)`` in the script may read ``cost_usd``; money goes through ``spend_of_rows`` or
+    the served report."""
+    import ast
+
+    src = (ROOT / "scripts" / "value_baseline.py").read_text(encoding="utf-8")
+    offenders = [
+        node.lineno
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "sum"
+        and "cost_usd" in ast.unparse(node)
+    ]
+    assert offenders == [], f"scripts/value_baseline.py sums cost_usd itself at lines {offenders}"
+
+
+def test_the_loss_share_is_rounded_once_from_the_exact_sums(vb: ModuleType, tmp_path: Path) -> None:
+    """docs/PREVENTION.md P-406: the loss share divided the two amounts the report had
+    already rounded to the cent, then ``_pct`` rounded again. 1.004 / 2.006 is 50.05%, which
+    prints as 50.0%; the cent-rounded $1.00 / $2.01 printed 49.8%."""
+    p = tmp_path / "ledger.psv"
+    rows = [
+        HEADER,
+        _row(1, clean="1", lint="1", cost="1.002"),
+        _row(2, kind="budget", cost="1.004"),
+    ]
+    p.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$1.00 of $2.01 (50.0%)" in loss, loss
+
+
+def test_the_page_reads_only_the_checks_arm_the_report_serves(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """docs/PREVENTION.md P-407: the page re-scoped the rows by apparatus alone, so a budget
+    row graded on another checks arm was added to the budget spend and the loss share,
+    beside the report's own figures, which read one arm (ADR-0024 - never two)."""
+    import dataclasses
+
+    from crb.core.checks import ARMS
+
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join(
+            [
+                HEADER,
+                _row(1, clean="1", lint="1"),
+                _row(2, kind="budget"),
+                _row(3, kind="budget", cost="5.0"),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rows = vb.read_ledger(p)
+    other = next(a for a in ARMS if a != rows[0].checks_arm)
+    rows = [rows[0], rows[1], dataclasses.replace(rows[2], checks_arm=other)]
+    out = vb.render_markdown(rows, [], apparatus="all")
+    budget = next(line for line in out.splitlines() if line.startswith("| spend on budget-stopped"))
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$1.00 of $2.00" in budget and "n = 1 budget rows" in budget, budget
+    assert "$1.00 of $2.00 (50.0%)" in loss, loss
+
+
+def test_no_percentage_on_the_page_is_formed_from_a_served_rounded_figure() -> None:
+    """docs/PREVENTION.md P-028 and P-406: the report serves money to the cent and shares and
+    rates to 4 places. A ``_pct`` or ``_frac`` whose argument reads one of those served keys
+    rounds twice; a percentage is formed from exact counts or exact sums only. Counts
+    (``rows``, ``all_rows``, ``valid_failures``, ``k``, ``n``) are exact and allowed."""
+    import ast
+
+    def rounded(key: str) -> bool:
+        return key.endswith(("usd", "gbp", "share")) or key in {"point", "ci_low", "ci_high"}
+
+    src = (ROOT / "scripts" / "value_baseline.py").read_text(encoding="utf-8")
+    offenders = [
+        node.lineno
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"_pct", "_frac"}
+        and any(
+            isinstance(sub, ast.Subscript)
+            and isinstance(sub.slice, ast.Constant)
+            and isinstance(sub.slice.value, str)
+            and rounded(sub.slice.value)
+            for arg in node.args
+            for sub in ast.walk(arg)
+        )
+    ]
+    assert offenders == [], f"a percentage reads a served rounded figure at lines {offenders}"
 
 
 def test_the_baseline_page_quotes_its_own_tables_and_names_the_live_register() -> None:
