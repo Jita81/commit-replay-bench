@@ -35,9 +35,12 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               that Learn and the map agree on why a cell is held (P-426); that a
               ``command`` only completes a cut example (P-183); that a note with a line break is
               refused (P-161); that each write refuses a field it does not name; that the reads
-              and writes follow the repository's checks arm (ADR-0024); and that a viewer, a
+              and writes follow the repository's checks arm (ADR-0024); that a viewer, a
               request with no CSRF token and one with another session's token are each refused
-              with nothing written.
+              with nothing written; and that the writes hold under concurrency — two queues of
+              one cell spend once, a prevention record landing mid-queue costs nothing, two
+              decisions at once are both on record, and two first registrations keep both
+              items (EI-1, EI-7).
 How:          ``make_env`` over the seed; a protocol row appended through ``DbLedger``; the CLI
               invoked over the API's own exports for the parity case; the writes driven through
               ``env.post`` and checked against ``GET /factory/{repo}/backlog``, ``GET /runs`` and
@@ -48,12 +51,14 @@ Works with:   src/crb/server/routes/learn.py (under test), src/crb/core/learn.py
               derivations and ``apply_triage`` — the writer both halves share),
               tests/test_cli_learn.py (the CLI half of the parity),
               tests/fixtures/server_seed.py (``make_env``, ``assert_rbac``, ``user_id``),
+              tests/fixtures/concurrency.py (``pause_after`` / ``at_once`` — the staged races),
               src/crb/server/factory_state.py (the backlog the register write moves),
               docs/LEARNING-LOOP.md (the contract these writes implement), docs/API.md
 Tested by:    tests/test_server_routes_learn.py
-Touch when:   never for a new repository; a learn report gains a field (the CLI must read the export
-              the same way — add the parity case); the event shapes the reports read change; a
-              fourth write path lands (pin its role, its refusals and its event here).
+Touch when:   never for a new repository; a learn report gains a field (the CLI must read
+              the export the same way — add the parity case); the event shapes the reports
+              read change; a fourth write path lands (pin its role, its refusals and its event
+              here).
 """
 
 from __future__ import annotations
@@ -62,7 +67,7 @@ import ast
 import json
 import os
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +88,7 @@ from crb.server.factory_state import FactoryHome
 from crb.server.routes import learn as learn_routes
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
+from fixtures.concurrency import at_once, pause_after
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -704,10 +710,10 @@ def test_a_register_whose_second_item_the_record_refuses_registers_nothing(
 def test_a_record_moved_under_the_register_records_exactly_what_landed(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """P-432's residue: another registration path (the factory's own route, the intake
-    Register act) does not take the Learn lock, so the record can refuse an item after the
-    in-memory trial passed. What already landed is then recorded on the Learn trace, naming
-    the refused item, before the 409 — never a backlog change with no Learn event."""
+    """P-432's residue: the record can still refuse a write after the in-memory trial passed
+    (the trial and the writes share the registration lock, EI-7, so only the record's own
+    refusal is left). What already landed is then recorded on the Learn trace, naming the
+    refused item, before the 409 — never a backlog change with no Learn event."""
     items = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"]
     first, second = items[0]["id"], items[1]["id"]
     real_register = FactoryHome.register_evolution
@@ -1366,3 +1372,146 @@ def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
     queued = _queue(env, cell=STALE_CELL)
     assert queued.status_code == 201, queued.text
     assert env.get("/runs").json()["total"] == before + len(queued.json()["run_ids"])
+
+
+# ---------------------------------------------------------------------------
+# concurrency: the writes hold what they read until they commit (EI-1, EI-7)
+# ---------------------------------------------------------------------------
+
+
+def _status(r: Any) -> Any:
+    return r.status_code if hasattr(r, "status_code") else type(r).__name__
+
+
+def test_two_simultaneous_queues_of_one_cell_spend_the_estimate_once(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EI-1: the in-flight guard (P-182) was check-then-act — two requests that both read "no
+    runs in flight" both queued, so one operator's intent spent the estimate twice
+    (runs 8 -> 12 on the attack). The guard is now read under the store's write lock, and
+    the runs and their event are one transaction: exactly one request queues, the other is
+    refused 409 naming the first request's runs."""
+    del builder_keys
+    import crb.server.routes.learn as learn_routes
+
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    pause_after(monkeypatch, learn_routes, "in_flight_runs", threading.Barrier(2))
+    results = at_once(lambda: _queue(env, cell=STALE_CELL), lambda: _queue(env, cell=STALE_CELL))
+    assert sorted(map(_status, results)) == [201, 409], [getattr(r, "text", r) for r in results]
+    won = next(r for r in results if r.status_code == 201)
+    lost = next(r for r in results if r.status_code == 409)
+    assert envelope(lost)["code"] == "remeasure_already_queued"
+    assert sorted(envelope(lost)["detail"]["run_ids"]) == sorted(won.json()["run_ids"])
+    assert env.get("/runs").json()["total"] == before + len(won.json()["run_ids"])
+    (event,) = _queued_events(env)
+    assert event.payload_json["run_ids"] == won.json()["run_ids"]
+
+
+def test_a_prevention_record_landing_while_a_queue_commits_costs_nothing(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EI-1: the worker's post-run ``learning_tick`` writes the prevention chain onto the same
+    ``learn:<repo>`` trace. When its record landed between the route's read of the trace and
+    its commit, the route answered a 500 with the runs ALREADY queued and no
+    ``learn.remeasure.queued`` event — so the guard could not see them and the retry queued
+    the cell again. Now the worker's append waits for the route's commit and chains after
+    it: one 201, the runs once, their event, and the prevention record, in order."""
+    del builder_keys
+    from sqlalchemy.exc import IntegrityError
+
+    import crb.server.routes.learn as learn_routes
+    from crb.server.prevention_state import ConcurrentAppend, EventsPreventionStore
+    from prevention_fixtures import switched
+
+    _add_stale_rows(env)
+    before = env.get("/runs").json()["total"]
+    tick: dict[str, Any] = {}
+
+    def _learning_tick() -> None:
+        # the worker's writer with learning_tick's own retry on a concurrent append
+        for _ in range(3):
+            try:
+                with env.factory() as s:
+                    rec = EventsPreventionStore(s, ALPHA).append(switched("off", i=1, repo=ALPHA))
+                    s.commit()
+                    tick["record"] = rec
+                    return
+            except (IntegrityError, ConcurrentAppend):
+                continue
+
+    real = learn_routes.append_system_event
+    worker = threading.Thread(target=_learning_tick)
+
+    def append_then_race(*args: Any, **kwargs: Any) -> Any:
+        out = real(*args, **kwargs)
+        if not worker.is_alive() and "record" not in tick:
+            worker.start()
+            worker.join(timeout=1.0)  # the old code let the worker commit here
+        return out
+
+    monkeypatch.setattr(learn_routes, "append_system_event", append_then_race)
+    r = _queue(env, cell=STALE_CELL)
+    worker.join(timeout=30)
+    assert r.status_code == 201, r.text
+    assert "record" in tick, "the worker's prevention record was lost"
+    assert env.get("/runs").json()["total"] == before + len(r.json()["run_ids"])
+    with env.factory() as s:
+        events = list(
+            s.execute(
+                select(Event)
+                .where(Event.trace_id == learn_routes.learn_trace_id(ALPHA))
+                .order_by(Event.seq)
+            ).scalars()
+        )
+    actions = [e.action for e in events]
+    assert actions[-2:] == ["learn.remeasure.queued", "learn.prevention.recorded"]
+    assert [e.seq for e in events] == list(range(1, len(events) + 1))
+    assert events[-2].payload_json["run_ids"] == r.json()["run_ids"]
+
+
+def test_two_operators_accepting_two_classes_at_once_both_land_on_the_record(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EI-1: two decisions on one repository at once both read the ``learn:<repo>`` trace's
+    last ``seq``; the second commit broke ``uq_events_trace_seq`` and answered a 500 AFTER
+    its corpus line was written, so the corpus held two lines and the product's record one
+    decision. The event is now allocated under the write lock: both decisions are served."""
+    import crb.server.routes.learn as learn_routes
+
+    _add_protocol_row(env)
+    arch, net = _group(env, "archaeology"), _group(env, "network")
+    pause_after(monkeypatch, learn_routes, "append_system_event", threading.Barrier(2))
+    results = at_once(
+        lambda: _accept(env, arch["group_id"], "honest"),
+        lambda: _accept(env, net["group_id"], "refuse"),
+    )
+    assert list(map(_status, results)) == [201, 201], [getattr(r, "text", r) for r in results]
+    served = env.get(f"/learn/refusals?repo={ALPHA}").json()["decisions"]
+    assert sorted(d["group_id"] for d in served) == sorted([arch["group_id"], net["group_id"]])
+
+
+def test_two_simultaneous_first_registrations_keep_both_items(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EI-7: with no backlog yet, two registrations both read "none", both FROZE a backlog, and
+    the second replaced the first — an item on the evidence chain and in its 201 that the
+    active backlog does not hold. Registration is now one locked read-modify-write: the
+    second sees the first's freeze and evolves onto it."""
+    from crb.server.factory_state import FactoryHome
+
+    items = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"]
+    first, second = items[0]["id"], items[1]["id"]
+    pause_after(monkeypatch, FactoryHome, "load_backlog", threading.Barrier(2))
+
+    def register(item_id: str) -> Callable[[], Any]:
+        return lambda: env.post(
+            f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [item_id]}
+        )
+
+    results = at_once(register(first), register(second))
+    assert list(map(_status, results)) == [201, 201], [getattr(r, "text", r) for r in results]
+    assert sorted(r.json()["registered"][0]["how"] for r in results) == ["evolved", "frozen"]
+    active = FactoryHome(env.settings.home, ALPHA).load_backlog()
+    assert active is not None
+    assert {first, second} <= {i.id for i in active.all_items()}

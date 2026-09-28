@@ -42,7 +42,8 @@ Works with:   src/crb/core/spec.py (``RepoConfig`` — the shape stored in ``con
               src/crb/server/routes/runs.py (``new_run`` / ``append_system_event`` /
               ``system_trace_id``), src/crb/server/schemas.py (``RepoCreateRequest`` and the
               ``Repo*`` shapes — ``RepoSummary.github_full_name`` is read off the row here),
-              src/crb/store/models.py (``Repo``, ``Task``), src/crb/server/routes/github.py
+              src/crb/store/models.py (``Repo``, ``Task``), src/crb/store/events.py
+              (``lock_event_writes`` — the baseline read's check), src/crb/server/routes/github.py
               (connect and link reuse ``get_repo_or_404`` / ``_config_of`` /
               ``_stored_config`` / ``PRESERVED_KEYS`` and write the ``github`` key this
               module preserves), src/crb/server/worker.py (``confined_clone_path`` at use),
@@ -116,6 +117,7 @@ from crb.server.schemas import (
     TaskSpecOut,
 )
 from crb.server.settings import ROLE_RANK
+from crb.store.events import lock_event_writes
 from crb.store.models import Event, Grade, Repo, Run, Task
 
 router = APIRouter(tags=["repos"])
@@ -573,8 +575,9 @@ def record_baseline_read(
     The Baseline screen calls it once it shows the map of a repository with rows, so Home's
     "Read the baseline" completes on a read the server recorded, not on a sign-off (G-165,
     DL-074). A repository with no graded row has no baseline to read: 409 ``baseline_empty``.
-    A read that loses the trace's next ``seq`` to a concurrent write is retried, so the same
-    person's two concurrent reads answer 201 and 200, never a 500 (P-421).
+    The check is read under the ``events`` write lock and a read that loses the trace's
+    next ``seq`` to a concurrent write is retried, so the same person's two concurrent reads
+    answer 201 and 200, never a 500 and never two records (P-421, DL-080).
     """
     get_repo_or_404(db, name)
     rows = int(db.execute(select(func.count(Grade.seq)).where(Grade.repo == name)).scalar_one())
@@ -586,10 +589,13 @@ def record_baseline_read(
             detail={"repo": name, "rows": 0},
         )
     # P-421: the repository's trace is shared by every person's read and every config
-    # change, so this read can lose the next ``seq`` to a concurrent write. A lost race is
-    # rolled back and the check runs again: the same person's concurrent read is then found
-    # and answered (200), anyone else's write only moves this read to the next ``seq``.
+    # change. The check is read under the ``events`` write lock (DL-080), so the same
+    # person's concurrent read waits, then finds this one and is answered 200. On a dialect
+    # with no such lock the read can still lose the next ``seq``: a lost race is rolled back
+    # and the check runs again — the same person's read is then found and answered (200),
+    # anyone else's write only moves this read to the next ``seq``.
     for attempt in range(_BASELINE_READ_ATTEMPTS):
+        lock_event_writes(db)
         prior = _baseline_reads(db, name, viewer.id)
         if prior is not None:
             response.status_code = status.HTTP_200_OK

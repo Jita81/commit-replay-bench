@@ -43,7 +43,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
-import { keys, useCancelRun, useHealth, useRun, useRunEvents, useRunTasks } from '../../api/hooks'
+import { keys, useCancelRun, useGrantDeliverOverride, useHealth, useRun, useRunEvents, useRunTasks } from '../../api/hooks'
 import type { EventSourceFactory } from '../../api/sse'
 import { isRunTerminal, ladderEntryLabel, type Health, type Run, type RunTaskRow, type StepEvent, type WorkerProbeData } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
@@ -102,9 +102,13 @@ function workerProbe(health: Health | undefined): { staleAfterS: number | null; 
 }
 
 function Header({ run }: { run: Run }) {
-  const { can } = useAuth()
+  const { can, me } = useAuth()
   const cancel = useCancelRun()
+  const grant = useGrantDeliverOverride()
   const d = runStatusDisplay(run.status)
+  // GOV-4: the route gate's override is a SECOND approver's act — never offered to the person who queued the run
+  const canGrantOverride =
+    run.kind === 'factory' && !!run.factory?.deliver && !run.factory.deliver_override_by && !isRunTerminal(run.status) && can('approver') && !!me && me.id !== run.actor
   return (
     <PageHeader
       eyebrow={`Runs · ${run.repo} · ${run.kind}`}
@@ -134,6 +138,16 @@ function Header({ run }: { run: Run }) {
           <Hint as={Link} id="link.run.repo" to={`/repos/${encodeURIComponent(run.repo)}`} className="text-sm">
             {run.repo}
           </Hint>
+          {canGrantOverride && (
+            <Button size="sm" onClick={() => grant.mutate(run.id)} disabled={grant.isPending} hint="button.run.deliver_override">
+              {grant.isPending ? 'Recording…' : 'Override the route gate (second approver)'}
+            </Button>
+          )}
+          {grant.error && (
+            <span role="alert" className="text-sm text-status-red">
+              {grant.error.message}
+            </span>
+          )}
           {can('operator') && !isRunTerminal(run.status) && !run.cancel_requested && (
             <Button variant="danger" size="sm" onClick={() => cancel.mutate(run.id)} disabled={cancel.isPending} hint="button.run.cancel">
               {cancel.isPending ? 'Requesting…' : 'Cancel run'}

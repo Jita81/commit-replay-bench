@@ -20,10 +20,13 @@ What it does: Pins that a viewer may record a read (the least role that can open
               read is recorded too but ``baseline_read`` keeps the first; and that
               ``GET /repos/{name}`` serves ``baseline_read: null`` until a read; and that a
               read which loses the race for the next ``seq`` on the shared repository trace
-              answers as documented instead of failing (P-421).
+              answers as documented instead of failing, and the same person's two reads at
+              once record one (P-421, DL-080).
 How:          ``make_env`` over the seed (``alpha`` has graded rows, ``beta`` has none);
               ``login`` switches the person; a race is made real by committing a rival
-              event from another session between the route's ``seq`` read and its commit.
+              event from another session between the route's ``seq`` read and its commit,
+              with the ``events`` write lock switched off to stand for a dialect without
+              it; two reads at once are staged with ``fixtures.concurrency``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none (DL-074)
 Works with:   src/crb/server/routes/repos.py (the route and ``repo_detail``),
@@ -39,6 +42,7 @@ Touch when:   never for a new repository; what counts as "read the baseline" cha
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -49,6 +53,7 @@ from sqlalchemy.exc import IntegrityError
 from crb.server.routes import repos as repos_routes
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.store.models import Event
+from fixtures.concurrency import at_once, pause_after
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -146,11 +151,25 @@ def test_an_unknown_repository_is_404(env: Env) -> None:
     assert envelope(r)["code"] == "not_found"
 
 
+def _without_the_events_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand for a dialect with no ``events`` write lock (``lock_event_writes`` is a no-op
+    there): on SQLite and PostgreSQL the lock serialises the read and the write (DL-080), so
+    the lost ``seq`` race the retry answers can only be staged with it switched off."""
+    import crb.server.routes.runs as runs_routes
+
+    def unlocked(_session: object) -> None:
+        return None
+
+    monkeypatch.setattr(runs_routes, "lock_event_writes", unlocked)
+    monkeypatch.setattr(repos_routes, "lock_event_writes", unlocked)
+
+
 def _race_once(monkeypatch: pytest.MonkeyPatch, env: Env, rival_actor: str, action: str) -> None:
     """Between the route reading the trace's last ``seq`` and committing, another request
     commits an event on the same repository trace — so the route's insert takes a ``seq``
     that is no longer free and the unique index refuses it, exactly as two concurrent
-    requests would."""
+    requests would on a dialect with no ``events`` write lock."""
+    _without_the_events_lock(monkeypatch)
     real = repos_routes.append_system_event
     raced = [False]
 
@@ -187,6 +206,22 @@ def test_a_concurrent_second_read_by_the_same_person_answers_the_first(
     assert [e.actor for e in _reads(env, ALPHA)] == [viewer]
 
 
+def test_two_simultaneous_reads_by_the_same_person_record_one(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-421 under the ``events`` write lock (DL-080): the "already read?" check is read
+    under the lock, so the same person's second read waits for the first to commit, then
+    finds it and is answered 200 — one event, never two records of one read."""
+    pause_after(monkeypatch, repos_routes, "_baseline_reads", threading.Barrier(2))
+    results = at_once(
+        lambda: env.post(f"/repos/{ALPHA}/baseline-read"),
+        lambda: env.post(f"/repos/{ALPHA}/baseline-read"),
+    )
+    codes = sorted(getattr(r, "status_code", -1) for r in results)
+    assert codes == [200, 201], [getattr(r, "text", r) for r in results]
+    assert [e.actor for e in _reads(env, ALPHA)] == [user_id(USERS["viewer"])]
+
+
 def test_a_read_that_loses_the_seq_to_another_write_is_still_recorded(
     env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -209,6 +244,7 @@ def test_a_read_that_loses_every_seq_race_stops_and_records_nothing(
     """P-421: the retry is bounded. When another person's write takes the trace's ``seq`` on
     every one of the ``_BASELINE_READ_ATTEMPTS`` tries, the route stops and re-raises the
     conflict instead of looping, and this person's read is not recorded."""
+    _without_the_events_lock(monkeypatch)
     real = repos_routes.append_system_event
     attempts = [0]
 

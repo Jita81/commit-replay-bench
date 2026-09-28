@@ -86,6 +86,7 @@ from crb.core.economics import Economics, fold_economics
 from crb.core.git import GitError, GitRepo
 from crb.core.ledger import (
     CELL_FIELDS,
+    PROVENANCE_MEASURED,
     CellKey,
     CellStats,
     GradeRow,
@@ -223,6 +224,12 @@ class CapabilityCell:
     cost_known: bool
     latency_known: bool
     economics: Economics | None = None
+    #: How many of ``rows`` were imported — a record of someone else's measurement, not one
+    #: this deployment made (``provenance`` other than ``measured``). A licensing reading
+    #: counts measured rows only, so it is 0 there; a reader's view that pools imported rows
+    #: (an explicit apparatus, ``all``, a census JSONL) names them rather than hiding whose
+    #: evidence a route rests on (EI-2 residual, 2026-09-27).
+    rows_imported: int = 0
 
     def __post_init__(self) -> None:
         # the invariants of the module docstring, enforced at construction: honest-empty
@@ -348,6 +355,7 @@ class CapabilityCell:
             "sigma": None if self.sigma is None else round(self.sigma, 4),
             "repos": self.repos,
             "rows": self.rows,
+            "rows_imported": self.rows_imported,
             "belt_sets": list(self.belt_sets),
             "cost_known": self.cost_known,
             "latency_known": self.latency_known,
@@ -415,9 +423,12 @@ def measure_cell(
     The route is ``route(stats, controls=controls, policy=policy)`` — nothing
     else. ``controls`` is the repo's negative-controls verdict (``None`` = not
     evaluated by this caller; the decision records the absence). ``oracle_by_task``
-    is the repo's latest mutation score per task (:func:`task_oracle_strength`); the
-    cell is routed under that measured strength, else under the rows' own
-    ``oracle_strength`` mean, else unmeasured. The tier is ``untrusted`` iff
+    is the repo's latest mutation score per task (:func:`task_oracle_strength`): when it
+    is given (even empty) the cell is routed under that measured strength or unmeasured,
+    and the rows' own ``oracle_strength`` is never read — a caller that keeps an oracle
+    ledger (the server) never lends a cell a row's own number (EI-2, 2026-09-27); with no
+    ledger (``None``, the CLI over a census JSONL) the rows' own mean, else unmeasured.
+    The tier is ``untrusted`` iff
     ``false_q1 > 0`` (structurally impossible for rows written through
     :class:`~crb.core.ledger.GradeRow`, re-checked here anyway) and
     ``automated-pass`` otherwise; earned tiers are overlaid by
@@ -433,6 +444,7 @@ def measure_cell(
         oracle_strength=task_oracle_strength(rows, oracle_by_task),
         controls=controls,
         policy=policy,
+        rows_oracle=oracle_by_task is None,
     )
     tier = TIER_UNTRUSTED if stats.false_q1 > 0 else TIER_AUTOMATED_PASS
     economics = fold_economics(rows)
@@ -452,6 +464,7 @@ def measure_cell(
         cost_known=economics.cost_known > 0,
         latency_known=economics.latency_known > 0,
         economics=economics,
+        rows_imported=sum(1 for r in rows if r.provenance != PROVENANCE_MEASURED),
     )
 
 

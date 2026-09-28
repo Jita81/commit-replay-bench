@@ -66,12 +66,22 @@ from pathlib import Path
 from typing import Any
 
 from crb.builders.base import Budget, BuildBrief, Builder, BuildOutcome, Rung
+from crb.core.checks import LABEL_CHECKS, RepoChecks, ResolvedChecks
+from crb.core.checks import resolve as resolve_checks
 from crb.core.deps import NullDepsProvider, TaskDeps
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack, utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
+from crb.core.formatting import formatters_for, run_formatters
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, GradeContext, GradeResult, grade
-from crb.core.ledger import BELT_SET_V5, PROCESS_FACTORY, GradeRow, JsonlLedger, posture_labels
+from crb.core.ledger import (
+    BELT_SET_V5,
+    PROCESS_FACTORY,
+    GradeRow,
+    JsonlLedger,
+    api_labels,
+    posture_labels,
+)
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
 from crb.core.patches import PatchStore, keep_patch
 from crb.core.posture import Posture, resolve_posture
@@ -365,8 +375,51 @@ def factory_row(
         evidence_pack_hash=pack.pack_hash,
         belt_set=BELT_SET_V5,
         provenance="measured",
-        labels={"rung": trial, **dict(labels), **posture_labels(result)},
+        labels={"rung": trial, **dict(labels), **posture_labels(result), **api_labels(result)},
     )
+
+
+#: The finish gate's label on a factory row: the switch is on, but the gate (checklist +
+#: verify + repair turn) runs in the replay adapter only — said, never claimed.
+FINISH_GATE_NOT_ON_FACTORY = "skipped=not_on_the_factory_path"
+
+
+def _apply_checks(
+    checks: ResolvedChecks,
+    ws: Workspace,
+    outcome: BuildOutcome | None,
+    error: str,
+    *,
+    config: RepoConfig,
+    runner: BaseRunner,
+    executor: Executor,
+    on_event: EventFn | None,
+) -> dict[str, str]:
+    """The ``checks`` switches on a factory attempt, after the builder and before the grade
+    (ADR-0024 §6, GOV-3): the ``checks`` stamp always; the repository's own formatter over
+    the changed source files when the format step is on and the attempt is admissible (the
+    graded patch is the formatted one, as in replay); the finish gate named as not run.
+    Returns the row labels. Never raises into the grade (``SandboxUnavailable`` excepted)."""
+    labels = {LABEL_CHECKS: checks.label()}
+    if checks.finish_gate:
+        labels["finish_gate"] = FINISH_GATE_NOT_ON_FACTORY
+    if not checks.format_step:
+        return labels
+    if outcome is None or error or outcome.violated:
+        labels["format_step"] = "skipped=attempt_not_admissible"
+        return labels
+    try:
+        files = [f for f in ws.touched_files() if not config.is_test(f) and (ws.root / f).is_file()]
+        plan = runner.lint_plan(ws.root, executor) if files else None
+        formatters, skipped = formatters_for(plan, ws.root, checks.repo.formatter)
+        fr = run_formatters(formatters, executor, ws.root, files, skipped=skipped)
+        labels["format_step"] = fr.label()
+        _emit(on_event, "build.format_step", **fr.to_dict())
+    except SandboxUnavailable:
+        raise
+    except Exception as exc:  # the grade still runs on whatever is in the worktree
+        labels["checks_error"] = redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=200)
+    return labels
 
 
 def build_item(
@@ -393,6 +446,7 @@ def build_item(
     posture: Posture | None = None,
     deps: TaskDeps | None = None,
     keep_patches: bool = True,
+    checks: ResolvedChecks | None = None,
 ) -> BuildResult:
     """Stage the oracle, build at the parent with it overlaid, grade, pack, ledger.
 
@@ -403,8 +457,16 @@ def build_item(
     the baseline measured here, in ``posture`` (resolved live when not given) — and a
     verdict that would blame the builder is witnessed by the environment probe on a
     fresh base tree (a factory item has no gold).
+
+    ADR-0024 §6 (GOV-3): the attempt is graded on the ``checks`` arm whose rows license its
+    delivery — ``checks`` (the run's switches over the repository's block, resolved by the
+    worker), else the repository's own block: the format step runs after an admissible
+    build, belt 6 is evaluated in forward mode, and the row carries the ``checks`` stamp. The
+    finish gate is not on the arm and does not run here; its label says so.
     """
     started = time.monotonic()
+    if checks is None:
+        checks = resolve_checks(RepoChecks.from_config(config.checks), None)
     label = builder_label(builder)
     assert_distinct_identity(authored.author, label, role="builder")
     oracle = stage_oracle_commit(repo, item, authored, proof, scratch=scratch)
@@ -462,6 +524,16 @@ def build_item(
             error=error,
         )
 
+        check_labels = _apply_checks(
+            checks,
+            ws,
+            outcome,
+            error,
+            config=config,
+            runner=runner,
+            executor=executor,
+            on_event=on_event,
+        )
         touched = ws.touched_files()
         changed = tuple(f for f in touched if f != oracle.test_path and not config.is_test(f))
         stats = ws.diff_stats(exclude=[oracle.test_path])
@@ -539,6 +611,8 @@ def build_item(
             mode=MODE_SIGHTED,
             timeout=timeout,
             on_event=on_event,
+            evaluate_api=checks.api_stable,
+            api_forward=True,
         )
         apparatus = ApparatusStamp(
             runner=runner.name,
@@ -575,7 +649,12 @@ def build_item(
             },
         )
         pack_path = write_pack(pack, evidence_dir)
-        row_labels = {"item_id": item.id, "test_author": authored.author, **base_labels}
+        row_labels = {
+            "item_id": item.id,
+            "test_author": authored.author,
+            **base_labels,
+            **check_labels,
+        }
         row = (
             ledger.append(
                 factory_row(
@@ -653,6 +732,7 @@ def build_ladder(
     posture: Posture | None = None,
     deps: TaskDeps | None = None,
     keep_patches: bool = True,
+    checks: ResolvedChecks | None = None,
 ) -> list[BuildResult]:
     """Climb the escalation ladder: one graded, ledgered attempt per rung until a
     rung is clean or an attempt is disqualified. Every rung's label is checked
@@ -688,6 +768,7 @@ def build_ladder(
             posture=posture,
             deps=deps,
             keep_patches=keep_patches,
+            checks=checks,
         )
         results.append(res)
         if res.clean or res.disqualified:

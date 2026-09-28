@@ -76,7 +76,7 @@ import { useEvidence, useRevokeSignoff, useSignoffs } from '../../api/hooks'
 import { PatchView } from '../Runs/EvidenceDrawer'
 import { useRetainedPatch } from '../Runs/contract'
 import type { AcceptedRow } from './contract'
-import { approverName, NOT_YET_MEASURED } from '../../api/types'
+import { approverName, NOT_YET_MEASURED, signoffStaleWhy } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
@@ -355,14 +355,16 @@ export function SignoffPage() {
         key: 'status',
         header: 'Status',
         hint: 'col.signoff.status',
-        sortValue: (s) => (s.revoked ? 3 : s.active ? 0 : s.stale ? 1 : 2),
+        sortValue: (s) => (s.chain_ok === false || s.tampered ? 4 : s.revoked ? 3 : s.active ? 0 : s.stale ? 1 : 2),
         cell: (s) =>
-          s.revoked ? (
+          s.chain_ok === false || s.tampered ? (
+            <Pill tone="red" glyph="✗" size="xs" label={`The sign-off chain no longer verifies${s.tampered ? ' — this row was altered after it was written' : ''}: no attestation lifts a cell until it is restored (GET /signoffs/verify names the row)`} hint="pill.signoff.status">chain broken</Pill>
+          ) : s.revoked ? (
             <Pill tone="amber" glyph="⊘" size="xs" label={`Revoked by ${s.revoked_by_name || s.revoked_by || '—'} at ${fmtDate(s.revoked_at)}`} hint="pill.signoff.status">revoked</Pill>
           ) : s.active ? (
             <Pill tone="green" glyph="✓" size="xs" label="Active attestation" hint="pill.signoff.status">active</Pill>
           ) : s.stale ? (
-            <Pill tone="amber" glyph="◷" size="xs" label={`Stale: signed at apparatus ${s.evidence.apparatus_versions.join(', ') || '?'}, the deployment now reads at ${s.apparatus_current || '?'} — lifts nothing until re-signed`} hint="pill.signoff.status">stale</Pill>
+            <Pill tone="amber" glyph="◷" size="xs" label={`Stale: ${signoffStaleWhy(s)} — lifts nothing until re-signed`} hint="pill.signoff.status">stale</Pill>
           ) : s.current_false_q1 > 0 ? (
             <Pill tone="red" glyph="✗" size="xs" label={`Invalidated: the cell now has false_q1 = ${s.current_false_q1}`} hint="pill.signoff.status">invalidated</Pill>
           ) : (

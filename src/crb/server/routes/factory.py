@@ -866,14 +866,22 @@ def register_evolution(
             if body.authored is not None
             else {}
         )
-        evolved = home.register_evolution(item, actor=operator.id)
-    except BacklogFrozen as exc:
-        raise ApiError(409, exc.code, str(exc)) from exc
     except (BacklogError, ValueError) as exc:
         raise ApiError(422, "validation_error", str(exc)) from exc
-    if authored:
-        home.save_authored(authored, merge=True)
-    out = _backlog_out(home, _delivery_preflight(db, settings, row))
+    preflight = _delivery_preflight(db, settings, row)
+    # the evolution, its oracle and the record this response serves are read under one
+    # registration lock (EI-7): a concurrent evolution waits, so the response is the
+    # backlog this request wrote — never a 500 from another writer's pointer
+    with home.registration():
+        try:
+            evolved = home.register_evolution(item, actor=operator.id)
+        except BacklogFrozen as exc:
+            raise ApiError(409, exc.code, str(exc)) from exc
+        except (BacklogError, ValueError) as exc:
+            raise ApiError(422, "validation_error", str(exc)) from exc
+        if authored:
+            home.save_authored(authored, merge=True)
+        out = _backlog_out(home, preflight)
     assert out is not None and out.evolutions_hash == evolved.evolutions_hash
     return out
 

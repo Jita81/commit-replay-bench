@@ -711,17 +711,19 @@ class TestCredentialPresence:
         """P-160, the route half of P-003's class: a second route that queues runs (Learn's
         re-measurement queue) enqueued them with no credential check, so a cell whose builder
         had no key was queued to fail at $0. Every function in the server that calls
-        ``.enqueue(`` — or ``.stage(``, which puts a run on the queue inside the caller's
-        transaction (P-420) — must call ``submit_refusals``, the one gate ``POST /runs``
-        applies, or be named here with the reason it cannot queue a build."""
+        ``.enqueue(`` (or stages a run with ``stage_queued(``, which puts a run on the queue
+        inside the caller's transaction — EI-1, P-420) must call ``submit_refusals`` — the
+        one gate ``POST /runs`` applies — or be named here with the reason it cannot queue a
+        build."""
         import ast
+
+        queue_calls = {"enqueue", "stage_queued"}
 
         import crb.server as server_pkg
 
         exempt = {
             ("routes/runs.py", "_jobs_api"): "builds the queue adapter the gated routes call",
             ("routes/runs.py", "_enqueue"): "the queue adapter itself, called by the gated routes",
-            ("routes/runs.py", "_stage"): "the queue adapter itself, called by the gated routes",
             ("routes/repos.py", "probe_repo"): "queues kind probe only: no builder, no spend",
         }
         root = Path(server_pkg.__file__).parent
@@ -734,8 +736,11 @@ class TestCredentialPresence:
                 if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
                     continue
                 calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)]
+                # ``.enqueue(`` commits a run; ``stage_queued(`` adds one to the caller's own
+                # transaction (the Learn queue, EI-1) — both put a run on the queue
                 enqueues = any(
-                    isinstance(c.func, ast.Attribute) and c.func.attr in ("enqueue", "stage")
+                    (isinstance(c.func, ast.Attribute) and c.func.attr in queue_calls)
+                    or (isinstance(c.func, ast.Name) and c.func.id in queue_calls)
                     for c in calls
                 )
                 if not enqueues:

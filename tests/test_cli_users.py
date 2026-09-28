@@ -231,16 +231,17 @@ def test_lifecycle_end_to_end(
         password_file(PW)
         assert run(["users", "create", "admin2", "--role", "admin"])[0] == 0
         code, out, _ = run(["users", "deactivate", "root"])
-        assert code == 0 and "deactivated root" in out and "set-password root" in out
+        assert code == 0 and "deactivated root" in out and "brings none back" in out
         assert c.get(f"{API_PREFIX}/auth/me").status_code == 401
         assert login(c, "root", PW2).status_code == 401
         code, out, _ = run(["users", "deactivate", "root"])
         assert code == 0 and "already deactivated" in out
         code, out, _ = run(["users", "activate", "root"])
         assert code == 0 and "activated root" in out
-        # The documented contract: the session issued before the deactivation is back
-        # (the credential version did not move); a password set is what ends it.
-        assert c.get(f"{API_PREFIX}/auth/me").status_code == 200
+        # AUTH-3: deactivation ended the session for good (the nonce rotated), so the
+        # cookie issued before it stays refused after re-activation; signing in works.
+        r = c.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and r.json()["error"]["code"] == "session_revoked"
         assert login(c, "root", PW2).status_code == 200
 
     code, _, errtxt = run(["users", "set-password", "nobody"])

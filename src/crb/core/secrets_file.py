@@ -113,6 +113,18 @@ def fingerprint(value: str) -> str:
     return value[-FINGERPRINT_CHARS:]
 
 
+def clean_value(name: str, value: str) -> str:
+    """``value`` as :meth:`SecretsStore.set` stores it (stripped); ``ValueError`` for an
+    empty value or one with line breaks or NUL. Lets a caller work out the fingerprint of
+    what will be stored before it writes anything (P-443)."""
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError(f"refusing to store an empty value for {name!r}")
+    if any(ch in cleaned for ch in "\r\n\x00"):
+        raise ValueError(f"refusing to store a value with line breaks or NUL for {name!r}")
+    return cleaned
+
+
 def validate_name(name: str) -> str:
     """``name`` if it is in the closed alphabet, else :class:`SecretsNameError` — so a
     name can never carry a separator, a dot-segment or a metadata suffix."""
@@ -259,11 +271,7 @@ class SecretsStore:
     def set(self, name: str, value: str, *, set_by: str = "") -> SecretStatus:
         """Store ``value`` (stripped) under ``name``; returns the new status, never the value."""
         vpath = self.value_path(name)
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError(f"refusing to store an empty value for {name!r}")
-        if any(ch in cleaned for ch in "\r\n\x00"):
-            raise ValueError(f"refusing to store a value with line breaks or NUL for {name!r}")
+        cleaned = clean_value(name, value)
         self.ensure_dir()
         meta = {
             "schema": META_SCHEMA,

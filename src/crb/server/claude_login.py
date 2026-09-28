@@ -33,8 +33,12 @@ What it is:   The login-session broker: start a ``claude setup-token`` helper, r
 What it does: ``LoginBroker.start`` creates the owner-only session directory, spawns the driver
               detached and waits for the authorisation URL; ``state`` reads ``status.json``;
               ``submit_code`` validates the code's shape and writes ``code.txt``; ``cancel``
-              signals the helper. One session per deployment at a time (a second start while
-              one is pending is refused); sessions expire after ``SESSION_TTL_S``.
+              signals the helper; ``meta`` serves who started a session (their account id
+              too) and ``done_sessions`` the ones whose token was stored, with the helper's
+              own ``stored_at``, so the API can record each stored token as an event naming
+              that admin and that time, however late it records it (EI-8). One session per
+              deployment at a time (a second start while one is pending is refused);
+              sessions expire after ``SESSION_TTL_S``.
 How:          Files under ``<secrets dir>/claude-code-login/<id>/`` with mode 0700/0600;
               ``subprocess.Popen(..., start_new_session=True)`` of ``python -m
               crb.server.claude_login_driver``; the state file is the single source of truth.
@@ -47,8 +51,8 @@ Works with:   src/crb/server/claude_login_driver.py (the helper this spawns),
               (``CLI_TOKEN_SECRET``, ``verify_login`` — the consumer), docs/OPERATOR.md
               (the operator's walkthrough), docs/SECURITY.md#33-credentials
 Tested by:    tests/test_server_claude_login.py (a fake ``claude`` script drives every path)
-Touch when:   the CLI changes the wording of its sign-in prompt (``URL_RE`` / the driver's
-              ``PASTE_PROMPT``) or its token prefix; never for a new repository.
+Touch when:   never for a new repository; the CLI changes the wording of its sign-in prompt
+              (``URL_RE`` / the driver's ``PASTE_PROMPT``) or its token prefix.
 """
 
 from __future__ import annotations
@@ -64,6 +68,7 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -109,6 +114,9 @@ class SessionState:
     started_at: str
     expires_at: str
     fingerprint: str = ""
+    #: When the helper stored the token (``done`` only) — for the API's event (EI-8), which
+    #: may be written later than this; not served, so not in :meth:`to_dict`.
+    stored_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -166,10 +174,11 @@ class LoginBroker:
         return self.sessions_dir / session_id
 
     # --- lifecycle ----------------------------------------------------------------
-    def start(self, *, started_by: str) -> SessionState:
+    def start(self, *, started_by: str, started_by_id: str = "") -> SessionState:
         """Spawn the helper and wait for the authorisation URL. Refuses while another
         session is pending (``login_in_progress``) or when the CLI is absent
-        (``cli_missing``)."""
+        (``cli_missing``). ``started_by_id`` is the account that started it: the API
+        records the stored token's event under it (EI-8), since the helper has no database."""
         binary = shutil.which(self.claude_binary or "claude") or ""
         if not binary:
             raise LoginError(
@@ -194,6 +203,7 @@ class LoginBroker:
         meta = {
             "id": session_id,
             "started_by": started_by,
+            "started_by_id": started_by_id,
             "started_at": started,
             "expires_at": expires,
             "ttl_s": self.ttl_s,
@@ -257,24 +267,51 @@ class LoginBroker:
             started_at=str(meta.get("started_at", "")),
             expires_at=str(meta.get("expires_at", "")),
             fingerprint=str(status.get("fingerprint", "")),
+            stored_at=str(status.get("stored_at", "")),
         )
+
+    def meta(self, session_id: str) -> dict[str, Any]:
+        """What :meth:`start` recorded about the session (who started it, when) — never a
+        code or a token, which ``meta.json`` does not hold."""
+        path = self.session_dir(session_id) / "meta.json"
+        if not path.exists():
+            raise LoginError("not_found", "no such login session")
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        return dict(loaded) if isinstance(loaded, dict) else {}
+
+    def _readable_sessions(self) -> Iterator[SessionState]:
+        """Every session that can be read, newest first — the one listing both readers
+        below use. A session that cannot be read is skipped, never raised: a directory a
+        concurrent sweep removed while it was listed (``OSError``), a ``meta.json`` that is
+        not JSON (``ValueError``) or lacks a field (``KeyError``, ``TypeError``). The secrets
+        list, every sign-in read and the API's start list sessions, so one damaged session
+        must not answer 500 to every role or stop the start (P-231)."""
+        if not self.sessions_dir.exists():
+            return
+
+        def mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:  # removed while it was listed
+                return 0.0
+
+        for sdir in sorted(self.sessions_dir.iterdir(), key=mtime, reverse=True):
+            try:
+                if not sdir.is_dir() or not (sdir / "meta.json").exists():
+                    continue
+                yield self.state(sdir.name)
+            except (LoginError, OSError, ValueError, KeyError, TypeError):
+                continue
+
+    def done_sessions(self) -> list[SessionState]:
+        """Every session whose token the helper stored (``done``), newest first."""
+        return [st for st in self._readable_sessions() if st.state == STATE_DONE]
 
     def active(self) -> SessionState | None:
         """The one non-terminal session, if any (newest first)."""
-        if not self.sessions_dir.exists():
-            return None
-        for sdir in sorted(
-            self.sessions_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
-        ):
-            if not sdir.is_dir() or not (sdir / "meta.json").exists():
-                continue
-            try:
-                st = self.state(sdir.name)
-            except LoginError:
-                continue
-            if st.state not in TERMINAL_STATES:
-                return st
-        return None
+        return next(
+            (st for st in self._readable_sessions() if st.state not in TERMINAL_STATES), None
+        )
 
     def submit_code(self, session_id: str, code: str) -> SessionState:
         """Hand the pasted code to the helper. The code is written once, owner-only, and

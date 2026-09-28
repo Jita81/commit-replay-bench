@@ -18,6 +18,9 @@ Invariants
 * Out-of-band system events (a reclaim, a worker note) go through
   :func:`append_event`, which allocates the next ``seq`` under the same write
   lock the ledger uses, so they never collide with a live emitter's sequence.
+  An event added to a caller's own transaction (the server's ``append_system_event``)
+  takes the same lock first, through :func:`lock_event_writes` — one lock for every
+  writer that allocates a ``seq``, so no two can read the same last one (EI-1).
 
 Navigation
 ----------
@@ -25,18 +28,22 @@ What it is:   The database ``EventSink`` and the readers the SSE route and the w
 What it does: Writes every ``StepEvent`` as one ``events`` row and never raises into the run
               (drops are counted and logged); reads a trace's events in ``seq`` order with a
               resume cursor; allocates the next ``seq`` for out-of-band system events under
-              the same write lock the ledger uses.
+              the same write lock the ledger uses, and lends that lock to a caller that
+              reads a trace's ``seq`` itself (``lock_event_writes``: the server's audited
+              commit and ``append_system_event``).
 How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one transaction
               with a per-row fallback; ``read_events`` = ``seq > after`` ordered by
               ``(seq, id)`` with a clamped limit; ``append_event`` = lock → ``max(seq)+1`` →
-              insert.
+              insert; ``lock_event_writes`` is that lock, for a writer adding an event to
+              its own caller's transaction.
 Layer:        store — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/observability/events.py (``StepEvent`` / ``Emitter`` — the envelope
               and the sequence assigner), src/crb/store/models.py (the ``Event`` columns),
               src/crb/store/jobs.py (writes reclaim / cancel notes through ``append_event``),
               src/crb/server/worker.py (installs the sink and resumes from ``last_seq``),
-              src/crb/server/routes/runs.py (serves ``read_events`` over SSE)
+              src/crb/server/routes/runs.py (serves ``read_events`` over SSE;
+              ``append_system_event`` takes ``lock_event_writes``)
 Tested by:    tests/test_store_events.py, tests/test_store_jobs.py, tests/test_server_routes_runs.py
 Touch when:   never for a new repository; when ``StepEvent`` gains a field (a migration and
               both mappers change together); when a new out-of-band system action is
@@ -113,13 +120,82 @@ def _from_model(m: Event) -> StepEvent:
     )
 
 
-def _lock(s: Session) -> None:
-    """Serialise ``seq`` allocation the way :class:`crb.store.ledger.DbLedger` does."""
+def lock_event_writes(s: Session) -> None:
+    """Hold the ``events`` write lock for the rest of ``s``'s transaction, so the trace's
+    last ``seq`` read after this call is still the last when the transaction commits.
+
+    Every out-of-band writer takes it before it reads ``max(seq)``: :func:`append_event`,
+    the sink's re-allocation, the server's ``append_system_event`` — which adds its event
+    to a CALLER's transaction and so may already have written there (EI-1, DL-080) — and
+    the server's audited commit, ``commit_audited`` (P-196). It is the one helper for this
+    lock: a second copy is refused by ``tests/test_advisory_lock_owners.py`` (P-224).
+    SQLite: ``BEGIN IMMEDIATE``; when a transaction is already open it cannot run, and an
+    open transaction proves nothing (pysqlite opens one at the first write, which holds the
+    write lock, but a caller's deferred ``BEGIN`` holds none), so a zero-row write takes the
+    database's write lock explicitly — a no-op when the transaction has written, a wait (or
+    "database is locked") when it has not — rather than swallow the refused ``BEGIN
+    IMMEDIATE`` and carry on (P-429's rule: no lock helper carries on after that error).
+    SQLite does take the write lock before it refuses (``OP_Transaction`` runs before
+    ``OP_AutoCommit``'s error), so a swallowing helper held it by accident of that order;
+    the explicit write removes the dependence on it.
+    PostgreSQL: a transaction-scoped advisory lock (id 7332 — one id per table, see
+    ``crb.store.jobs``), re-entrant within the transaction. Other dialects: no-op."""
     dialect = s.get_bind().dialect.name
     if dialect == "sqlite":
-        s.execute(text("BEGIN IMMEDIATE"))
+        # no autoflush: a pending ORM write flushed by the lock's own statement would open
+        # the transaction first; unflushed, it is written later, under the lock
+        with s.no_autoflush:
+            driver = s.connection().connection.driver_connection
+            if getattr(driver, "in_transaction", False):
+                s.execute(text("DELETE FROM events WHERE 0"))
+            else:
+                s.execute(text("BEGIN IMMEDIATE"))
     elif dialect == "postgresql":
         s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
+    write_locks_held(s).add(EVENTS_LOCK)
+
+
+#: The ``events`` write lock's name in :func:`write_locks_held`.
+EVENTS_LOCK = "events"
+#: The ``users`` lock's name (``crb.server.auth.lock_users_table``).
+USERS_LOCK = "users"
+#: Locks a transaction must take BEFORE the ``events`` lock, never after it (P-227): every
+#: admin act holds ``users`` and then records its event, so a path that holds ``events``
+#: and then asks for ``users`` deadlocks against it on PostgreSQL.
+TAKEN_BEFORE_EVENTS = frozenset({USERS_LOCK})
+
+_LOCKS_KEY = "crb.write_locks_held"
+
+
+class LockOrderError(RuntimeError):
+    """A write lock was asked for after a lock that must come after it (P-227)."""
+
+
+def write_locks_held(s: Session) -> set[str]:
+    """The names of the write locks ``s``'s CURRENT transaction holds, as the helpers that
+    take them record them. A new transaction starts with none: the set is keyed on the
+    transaction object, so a commit or a rollback forgets it."""
+    tx = s.get_transaction()
+    held = s.info.get(_LOCKS_KEY)
+    if held is None or held[0] is not tx:
+        held = (tx, set())
+        s.info[_LOCKS_KEY] = held
+    return set() if tx is None else held[1]
+
+
+def refuse_after_events_lock(s: Session, name: str) -> None:
+    """Raise :class:`LockOrderError` when ``s`` already holds the ``events`` write lock and
+    asks for ``name``, a lock in :data:`TAKEN_BEFORE_EVENTS` it does not yet hold. Re-taking
+    a lock the transaction holds is never an inversion. Called by the helper that takes
+    ``name`` BEFORE it waits for it, so the inverted order fails at once on every dialect
+    instead of deadlocking on PostgreSQL."""
+    held = write_locks_held(s)
+    if name in TAKEN_BEFORE_EVENTS and EVENTS_LOCK in held and name not in held:
+        raise LockOrderError(
+            f"the {name} lock was asked for after the events write lock in one transaction; "
+            f"take the {name} lock first (commit_audited's `before=`), or two writers "
+            "deadlock on PostgreSQL (P-227)"
+        )
 
 
 class DbEventSink:
@@ -166,7 +242,7 @@ class DbEventSink:
 
     def _emit_reallocated(self, event: StepEvent) -> None:
         with self._factory() as s:
-            _lock(s)
+            lock_event_writes(s)
             nxt = (
                 int(
                     s.execute(
@@ -283,7 +359,7 @@ def append_event(
     )
     try:
         with factory() as s:
-            _lock(s)
+            lock_event_writes(s)
             nxt = (
                 int(
                     s.execute(
@@ -311,10 +387,17 @@ def append_event(
 
 __all__ = [
     "DEFAULT_READ_LIMIT",
+    "EVENTS_LOCK",
     "MAX_READ_LIMIT",
+    "TAKEN_BEFORE_EVENTS",
+    "USERS_LOCK",
     "DbEventSink",
+    "LockOrderError",
     "append_event",
     "count_events",
     "last_seq",
+    "lock_event_writes",
     "read_events",
+    "refuse_after_events_lock",
+    "write_locks_held",
 ]
