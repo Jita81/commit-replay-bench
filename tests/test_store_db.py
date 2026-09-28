@@ -12,7 +12,7 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               keys are enforced, that ``session_scope`` commits and rolls back, and that every
               append-only table refuses UPDATE and DELETE while still accepting INSERT — and that
               the ordinary tables (``repos`` / ``runs`` / ``users``) stay mutable; and that the
-              decisions clock joins a concurrent first stamp in both dialects (P-157).
+              decisions clock joins a concurrent first stamp in both dialects (P-329).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -266,7 +266,7 @@ def test_append_only_tables_still_accept_inserts(backend: Backend) -> None:
 
 
 # ---------------------------------------------------------------------------
-# the decisions clock's first stamp, on both dialects (P-157)
+# the decisions clock's first stamp, on both dialects (P-329)
 # ---------------------------------------------------------------------------
 
 
@@ -277,7 +277,7 @@ def test_a_concurrent_first_decision_stamp_is_joined_on_both_dialects(
     NOTHING`` in the dialect's own words, then reads the row back. Here the other stamper
     commits the same ``(repo, kind, key)`` between this pass's read and its write: the pass
     joins the earlier row — its ``first_due`` kept, ``last_seen`` moved — on SQLite and on
-    PostgreSQL alike, where a plain insert raised ``IntegrityError`` (P-157)."""
+    PostgreSQL alike, where a plain insert raised ``IntegrityError`` (P-329)."""
     from crb.server import decisions as dec
 
     store_db.init_db(backend.engine)

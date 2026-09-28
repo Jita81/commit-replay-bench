@@ -31,7 +31,7 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               production worker stamps the unsealed-production override into every run's
               apparatus and every pack, and refuses a run that asks for the local executor
               without it. And that the idle loop calls every idle step under its guard and
-              survives each one raising (P-154), and that the production path stops an
+              survives each one raising (P-326), and that the production path stops an
               unsigned deliver cell before any spend unless the setting turns the clause off
               (ADR-0018).
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
@@ -2358,7 +2358,7 @@ def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: 
     assert again.first_due == rec.first_due and again.last_seen >= rec.last_seen
 
 
-# --- the idle loop's own steps (P-154) --------------------------------------------------
+# --- the idle loop's own steps (P-326) --------------------------------------------------
 
 
 def test_the_idle_loop_runs_the_decisions_clock_and_survives_each_idle_step_raising(
@@ -2368,7 +2368,7 @@ def test_the_idle_loop_runs_the_decisions_clock_and_survives_each_idle_step_rais
     the real ``run_forever`` over an empty queue. And every idle step is under the loop's
     guard — the decisions pass and the intake poll each raise on their first call (a
     ``database is locked``, a unique-key race) and the loop goes round again and calls them
-    both a second time, where before one raise ended the worker (P-154)."""
+    both a second time, where before one raise ended the worker (P-326)."""
     from sqlalchemy.exc import OperationalError
 
     calls: dict[str, int] = {"poll_intake": 0, "refresh_decisions": 0}
@@ -2399,7 +2399,7 @@ def test_the_idle_loop_runs_the_decisions_clock_and_survives_each_idle_step_rais
 
 
 def test_run_forever_makes_no_call_outside_the_guard() -> None:
-    """The class, not the instance (P-154): a step added to the idle loop as a bare call
+    """The class, not the instance (P-326): a step added to the idle loop as a bare call
     would take the worker down the first time it raised. ``run_forever`` may call only
     methods that guard themselves (the check-in and the reaper say "never raises" and
     catch), ``run_once`` inside its ``try``, and the idle steps through the guarded runner
@@ -2438,7 +2438,7 @@ def test_the_decisions_pass_never_raises_and_one_repository_cannot_spoil_the_nex
     ``GET /decisions`` committing the same first stamp between the pass's read and its
     commit raised ``IntegrityError`` out of the pass, and a repository whose failure left
     the session needing a rollback made the final commit raise too. Now each repository is
-    its own transaction and the clock joins a concurrent first stamp (P-154, P-157)."""
+    its own transaction and the clock joins a concurrent first stamp (P-326, P-329)."""
     from types import SimpleNamespace
 
     from crb.server import decisions as dec

@@ -13,10 +13,10 @@ signoffs   — APPEND-ONLY: human attestations (revocations are new rows)
 reviews    — APPEND-ONLY: human post-hoc verdicts on ONE graded row each, hash-chained
              (``ReviewRecord`` columns; revision 0003)
 users      — local accounts / OIDC subjects and their role
-invitations — one-time invitations for a local account (revision 0040); the token is stored
+invitations — one-time invitations for a local account (revision 0014); the token is stored
              only as a SHA-256 hash and the audit trail is the account's ``user.*`` events
 decisions_due — when each derived decisions-inbox row first became due and when it was last
-             seen (revision 0041); a clock over the derivation, never a second source of truth
+             seen (revision 0015); a clock over the derivation, never a second source of truth
 workers    — one row per worker process, upserted every heartbeat even when idle (the
              ``/health`` worker probe's liveness source; revision 0007)
 task_qualifications — APPEND-ONLY: each task's qualification per posture (ADR-0019); the
@@ -351,7 +351,7 @@ class User(Base):
 
 
 class Invitation(Base):
-    """An invitation for the second person (G-518, revision 0040). Creating one creates the
+    """An invitation for the second person (G-518, revision 0014). Creating one creates the
     account INACTIVE with a password nobody knows; the one-time token is shown to the admin
     once and stored only as a SHA-256 hash, so a leaked database row cannot be redeemed.
     Accepting it sets the account's own password and activates it.
@@ -388,7 +388,7 @@ class Invitation(Base):
 
 class DecisionDue(Base):
     """When a decision first became due, and when it was last seen due (G-518's sibling,
-    G-516; revision 0041).
+    G-516; revision 0015).
 
     The decisions inbox is DERIVED — from the capability map, the sign-offs and the factory
     chain — so before this table a decision existed only while somebody had the page open:

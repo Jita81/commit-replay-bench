@@ -9,7 +9,7 @@
  *               bundled docs, beside the GitHub App and builder-token cards' own links
  *               (J-HEL-20), and that the eyebrow names the instrument row; and that every form
  *               on the page is named once, so the Users card and the invitation card — which
- *               both ask for a Username — are told apart by a screen reader and a test (P-151).
+ *               both ask for a Username — are told apart by a screen reader and a test (P-323).
  * How:          `mockApi` + `renderApp` at `/settings`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -39,7 +39,7 @@ describe('SettingsPage', () => {
     expect(await screen.findByRole('link', { name: 'How sign-in and roles work' })).toHaveAttribute('href', '/help/docs/SECURITY#34-authentication-and-authorisation--crbserverauth')
     expect(screen.getByText('Instrument · Settings')).toBeInTheDocument()
   })
-  it('two cards that both ask for a Username are told apart: every form is named, once, and a repeated label never sits outside one (P-151)', async () => {
+  it('two cards that both ask for a Username are told apart: every form is named, once, and a repeated label never sits outside one (P-323)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'admin' },
       'GET /health': { status: 'ok', probes: [] },

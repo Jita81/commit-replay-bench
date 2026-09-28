@@ -15,7 +15,7 @@ with every path rendered as a link.
 in ``Layer``/``ADRs``/``Works with``/``Tested by``/``Touch when``/``Claims`` that does not exist
 in the repository (anchors are stripped before the check) — "in the repository" meaning what a
 fresh clone would hold: tracked, or new and not ignored, never a git-ignored build output that
-happens to be on this disk (P-155); a ``Tested by`` that is blank;
+happens to be on this disk (P-327); a ``Tested by`` that is blank;
 a ``docs/CODE-MAP.md`` that differs from what the headers generate. Files listed in
 ``EXEMPT`` (an explicit path → reason map; today only Vite's generated ambient types) are
 skipped and listed at the end of the map so the exemption is visible. There is no size- or
@@ -172,7 +172,7 @@ def _clone_paths(root: Path) -> frozenset[str] | None:
 
     A header that cites a git-ignored path (``ui/.tsbuild/``, the type-check's build info)
     resolved in the checkout that had built it and not in CI's fresh clone, so the gate
-    passed on a dirty tree and failed in the required job (P-155). Resolving against this
+    passed on a dirty tree and failed in the required job (P-327). Resolving against this
     set instead of the disk makes the answer the same in every checkout."""
     try:
         top = subprocess.run(

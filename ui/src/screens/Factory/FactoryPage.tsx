@@ -378,7 +378,7 @@ function statusLabel(t: FactoryTask): string {
  * J-FAC-2 — the repository's own measured cost per attempt, when it has one: the map's
  * economics fold (F35) — its mean over the attempts with a KNOWN cost (a known $0 is $0),
  * that count as n, and the apparatus. The same reading as Measure's; `null` when nothing
- * is measured, nothing is known or the server refused the pool (P-064).
+ * is measured, nothing is known or the server refused the pool (P-131).
  */
 export function estimateFromMap(map: CapabilityMap | undefined): MeasuredCost | null {
   return measuredCostPerAttempt(map?.economics)

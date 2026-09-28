@@ -11,7 +11,7 @@ What it does: Pins that the derivation produces the same eight kinds and the sam
               clock stamps ``first_due`` once and keeps it when a row goes away and comes
               back, that a row that stops being due is resolved rather than deleted, that a
               first stamp another reader committed meanwhile is joined rather than collided
-              with (P-157), and that the route serves each row with its age, needs only a
+              with (P-329), and that the route serves each row with its age, needs only a
               viewer and answers 404 for a repository nobody connected.
 How:          The seeded server (``fixtures.server_seed``) for the route; hand-built
               ``CapabilityCell`` and ``TaskView`` objects for the derivation, so the rules
@@ -301,7 +301,7 @@ def test_a_first_stamp_another_reader_committed_first_is_joined_not_collided(
     ``(repo, kind, key)``. When the other one commits the SAME first stamp between this
     pass's read and its write, the pass joins that row — keeps its ``first_due``, moves its
     ``last_seen`` — instead of an ``IntegrityError`` that killed the worker loop and gave the
-    reader a 500 (the independent verifiers' attack on stream S, P-157)."""
+    reader a 500 (the independent verifiers' attack on stream S, P-329)."""
     rows = dec.decision_rows(cells=[cell()])
     original = dec.due_records
     raced: list[bool] = []

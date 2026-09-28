@@ -12,7 +12,7 @@
  *               `location.hash` once the text is in. The page has one h1, its header: the
  *               file's own headings render one level down (`headingOffset`), so the `#`
  *               title is the article's h2 — two h1s made the walkthrough's heading query
- *               ambiguous and gave a screen reader two page titles (P-109). Under the header
+ *               ambiguous and gave a screen reader two page titles (P-176). Under the header
  *               it states what the page is not: a build-time, read-only copy of the
  *               repository's file (G-150). Three
  *               stops, each told apart: an unknown name renders the empty state with a way

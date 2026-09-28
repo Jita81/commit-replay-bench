@@ -2,7 +2,7 @@
 
 Navigation
 ----------
-What it is:   Revision 0040: the ``invitations`` table — ``id``, ``user_id``, ``token_hash``,
+What it is:   Revision 0014: the ``invitations`` table — ``id``, ``user_id``, ``token_hash``,
               ``role``, ``created``, ``expires``, ``accepted``, ``revoked``, ``created_by``,
               ``revoked_reason``, with a unique index on the token hash.
 What it does: Lets a deployment invite its approver instead of asking an admin to type a
@@ -18,7 +18,7 @@ How:          ``op.create_table`` guarded by an existence check (an ``init_db`` 
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         none
 Works with:   src/crb/store/models.py (``Invitation``), src/crb/store/migrate.py
-              (``REVISION_TABLES`` carries ``("0040", "invitations")``),
+              (``REVISION_TABLES`` carries ``("0014", "invitations")``),
               src/crb/server/routes/invitations.py (the routes that write it),
               src/crb/server/routes/admin.py (``record_user_event`` — the audit trail)
 Tested by:    tests/test_store_migrate.py, tests/test_server_invitations.py
@@ -32,8 +32,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import context, op
 
-revision: str = "0040"
-down_revision: str | None = "0012"
+revision: str = "0014"
+down_revision: str | None = "0013"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

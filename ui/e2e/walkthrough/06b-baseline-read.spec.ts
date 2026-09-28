@@ -24,7 +24,7 @@
  *               flow card for the measure stream (stream M, G-925): a measured lead time with
  *               its n and a spend that names the rows it covers. That check lived in 05 until
  *               the integration found it recorded the read before this spec could see it
- *               (P-113); tests/test_walkthrough_order.py now refuses a Baseline visit before 06b.
+ *               (P-180); tests/test_walkthrough_order.py now refuses a Baseline visit before 06b.
  * How:          support.ts's signed-in `test` (the bootstrap admin); `primary()`; the POST is
  *               awaited as the page's own response, never sent by the spec.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers

@@ -503,7 +503,7 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(within(picker).getByRole('option', { name: /fix: task 3 · dddddddddd/ })).toBeInTheDocument()
   })
 
-  it('while a newly named row’s preview loads, the gate is pending and Sign off stays disabled: the previous row’s verdict is never shown as this row’s (P-102)', async () => {
+  it('while a newly named row’s preview loads, the gate is pending and Sign off stays disabled: the previous row’s verdict is never shown as this row’s (P-169)', async () => {
     let row2Asked = false
     mockApi({
       'GET /auth/me': PRINCIPAL,

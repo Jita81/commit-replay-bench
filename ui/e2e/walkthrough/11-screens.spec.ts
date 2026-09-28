@@ -505,7 +505,7 @@ async function preSessionChecks(page: Page, where: string, width: number, button
 async function phoneMenu(page: Page, where: string): Promise<boolean> {
   const button = page.getByTestId('shell-menu-button')
   const primaryNav = page.getByRole('navigation', { name: 'Primary' })
-  const signOut = page.getByRole('button', { name: 'Sign out', exact: true }) // not a Users card's "Sign out everywhere" (P-114)
+  const signOut = page.getByRole('button', { name: 'Sign out', exact: true }) // not a Users card's "Sign out everywhere" (P-181)
   await expect(button, `${where}: no Menu button at 375 px`).toBeVisible()
   await expect(button).toHaveAttribute('aria-expanded', 'false')
   await expect(primaryNav, `${where}: the journey nav is not folded while the menu is closed`).toBeHidden()

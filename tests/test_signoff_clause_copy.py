@@ -1,4 +1,4 @@
-"""The words about the sign-off clause say no more than the clause does (P-156).
+"""The words about the sign-off clause say no more than the clause does (P-328).
 
 ADR-0018's sign-off clause stops an item before any spend only when its cell routes
 ``deliver`` and nobody has signed that cell: :func:`crb.factory.loop.unsigned_cell_reason`
@@ -26,7 +26,7 @@ Works with:   src/crb/factory/loop.py (``unsigned_cell_reason`` — the rule the
               describe), ui/src/screens/Posture/PosturePage.tsx and
               ui/src/screens/Factory/FactoryPage.tsx (the rows and sentences that said too
               much), ui/src/help/hints.ts and ui/src/help/help.ts (the hints), docs/PREVENTION.md
-              (P-156)
+              (P-328)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; the sign-off clause changes scope (change the
               anchor with the rule, and the words with both).

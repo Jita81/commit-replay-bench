@@ -339,7 +339,7 @@ DEFAULT_OUTAGE_STOP = 3
 DECISIONS_REFRESH_S = 300.0
 #: The idle loop's own steps, in the order it takes them when no run is queued. Each runs
 #: under the loop's guard (:meth:`Worker._run_idle_steps`), so one that raises is logged and
-#: the worker goes on (P-154). A new idle step is a method name here, never a bare call in
+#: the worker goes on (P-326). A new idle step is a method name here, never a bare call in
 #: ``run_forever`` — tests/test_worker.py refuses a call there outside the guard.
 IDLE_STEPS: tuple[str, ...] = ("poll_intake", "refresh_decisions")
 
@@ -843,7 +843,7 @@ class Worker:
         is logged and the next one still runs, and so does the next iteration. A step's own
         "never raises" is a promise; this guard is what keeps the loop alive when a promise
         is broken — a unique-key race or a ``database is locked`` in the decisions pass
-        ended the worker before it (P-154). Never raises."""
+        ended the worker before it (P-326). Never raises."""
         for name in IDLE_STEPS:
             try:
                 getattr(self, name)()
@@ -864,7 +864,7 @@ class Worker:
         Called from the idle loop only, and never raises: a repository whose map cannot be
         read is logged and the next pass retries. Each repository is its own transaction, so
         one that fails — and leaves its session needing a rollback — neither spoils the next
-        nor makes a final commit raise (P-154); a first stamp ``GET /decisions`` committed
+        nor makes a final commit raise (P-326); a first stamp ``GET /decisions`` committed
         meanwhile is joined, not collided with (:func:`crb.server.decisions.record_due`). It
         writes nothing but ``decisions_due`` — no evidence, no ledger row, no event —
         because it is a clock, not an act.

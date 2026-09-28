@@ -28,7 +28,7 @@
  *               first task `CONTINUE_STOPS` marks — one to act on now, or one that could not
  *               be read — so the first press never lands on an empty screen and a failed read
  *               never offers "Continue to the factory"; every status is a `HomeStatus`, so
- *               one nobody classified fails the type check (P-108). A viewer
+ *               one nobody classified fails the type check (P-175). A viewer
  *               (sponsor, auditor) and an approver get the same list read as a progress
  *               report — "Where this deployment is" — not as their to-do list: an approver
  *               outranks an operator but works none of the tasks, so the operators' view is
@@ -101,7 +101,7 @@ function inWords(items: string[]): string {
 const UNAVAILABLE: { status: HomeStatus; tone: TagTone } = { status: 'Unavailable', tone: 'grey' }
 
 /** Every status a task on Home can carry. A task's `status` is typed as one, so a new status
- * cannot be shown until `CONTINUE_STOPS` says whether Continue stops at it (P-108). */
+ * cannot be shown until `CONTINUE_STOPS` says whether Continue stops at it (P-175). */
 export type HomeStatus =
   | 'Completed'
   | 'Incomplete'

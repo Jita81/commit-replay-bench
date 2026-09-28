@@ -31,7 +31,7 @@
  *               that failed; that every GET the page makes, failed alone, reaches the
  *               envelope (a read added later cannot be missed); and that a failed read never
  *               offers "Continue to the factory" — Continue stops at the task it could not
- *               read (P-108); and that task 7 asks `GET /two-person-readiness?repo=` of the
+ *               read (P-175); and that task 7 asks `GET /two-person-readiness?repo=` of the
  *               repository shown and never reads Completed for the bootstrap admin alone — a
  *               viewer, or the admin who queued every run, is not a second person (G-477).
  * How:          `mockApi` + `renderApp`.

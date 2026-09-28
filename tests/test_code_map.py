@@ -5,7 +5,7 @@ Navigation
 What it is:   Unit tests for the code-map generator (the file-header gate).
 What it does: Pins that a valid Navigation block parses into its keys, that a missing key, a
               key out of order, a dangling link and a blank Tested by are refused, that a
-              path git ignores is dangling even when it is on the disk (P-155), that the
+              path git ignores is dangling even when it is on the disk (P-327), that the
               three languages (Python docstring, TS leading comment, shell comment) are read,
               and that --check fails on a stale map.
 How:          Writes tiny files under tmp_path (a ``git init`` there where ignoring
@@ -139,7 +139,7 @@ def _git(repo: Path, *args: str) -> None:
 
 
 def test_a_path_git_ignores_does_not_resolve_even_when_it_is_on_disk(repo: Path) -> None:
-    """P-155: a header named ``ui/.tsbuild/``, the type-check's build info.
+    """P-327: a header named ``ui/.tsbuild/``, the type-check's build info.
     The directory is ignored by git, so it existed in the builder's checkout (after
     ``npm run typecheck``) and not in CI's fresh clone: the gate passed on the dirty tree
     and failed on the clean one. A path resolves only if a fresh clone would have it —

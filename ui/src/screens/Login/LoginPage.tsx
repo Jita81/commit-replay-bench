@@ -13,7 +13,7 @@
  *               to the `?next=` path — same-origin paths only, so a crafted link cannot bounce
  *               a session to another host. An already-authenticated visitor is redirected
  *               straight to `next`, and while that check is in flight the form is not offered
- *               (a status line stands in), so nothing typed is lost to the redirect (P-152).
+ *               (a status line stands in), so nothing typed is lost to the redirect (P-324).
  *               Both fields and both sign-in buttons carry a hint (`field.login.*`,
  *               `button.login.*`) so the form explains itself on hover,
  *               focus and tap before a person has any role at all. Every stop names its way
@@ -146,7 +146,7 @@ export function LoginPage() {
         <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
           {/* While the session check is in flight the form is not offered: a signed-in visitor
               is about to be redirected, and a form shown for that moment takes typing that the
-              redirect then throws away (P-152). */}
+              redirect then throws away (P-324). */}
           {loading ? (
             <p role="status" data-testid="login-checking-session" className="m-0 text-sm text-on-surface-muted">
               Checking whether you are already signed in…

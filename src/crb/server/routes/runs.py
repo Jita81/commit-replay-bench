@@ -669,7 +669,7 @@ def credential_refusal(run: Run, settings: Any) -> None:
 
 def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
     """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
-    route that enqueues a run cannot skip one (docs/PREVENTION.md P-093: the Learn queue
+    route that enqueues a run cannot skip one (docs/PREVENTION.md P-160: the Learn queue
     enqueued the plan's runs with no credential check, the class P-003 closed on
     ``POST /runs``). ``tests/test_server_routes_runs.py`` fails when a function that
     enqueues a run does not call this.

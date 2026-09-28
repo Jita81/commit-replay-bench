@@ -15,7 +15,7 @@ An invitation instead:
 * ``POST /invitations/accept`` needs no session — it is the link's own page. The person
   sets their own password, and the account is activated at that moment. The token is
   spent; a second attempt is refused.
-* A link never outlives another way into the same account (P-153): when the admin
+* A link never outlives another way into the same account (P-325): when the admin
   activates the account or sets its password from the Users card, the link is withdrawn in
   that transaction (``supersede_invitations``, reason ``superseded: …``), and an account
   found already active or already signed in to refuses the link here and withdraws it.
@@ -55,7 +55,7 @@ ADRs:         docs/adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-
               (why the second person cannot be waived, which is why inviting one is a
               product feature)
 Works with:   src/crb/store/models.py (``Invitation``, ``User``),
-              src/crb/store/migrations/versions/v0040_invitations.py (the table),
+              src/crb/store/migrations/versions/v0014_invitations.py (the table),
               src/crb/server/routes/admin.py (``record_user_event``, ``UserOut`` — the same
               account lifecycle and audit trail), src/crb/server/auth.py (the password and
               active primitives, the login limiter), src/crb/core/signoff.py (the
@@ -67,7 +67,7 @@ Works with:   src/crb/store/models.py (``Invitation``, ``User``),
 Tested by:    tests/test_server_invitations.py
 Touch when:   never for a new repository; the role ladder changes (the readiness rule names
               the signing roles); a new way into an account is added (it withdraws the pending
-              link through ``supersede_invitations``, P-153).
+              link through ``supersede_invitations``, P-325).
 """
 
 from __future__ import annotations
@@ -486,7 +486,7 @@ def accept_invitation(
     if user.active or user.last_login:
         # the account was opened another way while the link sat unused — the break-glass
         # CLI, a restore, a direct write; the admin's own routes withdraw it themselves. A
-        # link never outlives another way into the same account (P-153): withdraw it on the
+        # link never outlives another way into the same account (P-325): withdraw it on the
         # record, and answer exactly as for any other dead link
         supersede_invitations(
             db, user, actor="system", how="the account was opened before the link was used"

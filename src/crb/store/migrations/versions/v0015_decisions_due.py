@@ -2,7 +2,7 @@
 
 Navigation
 ----------
-What it is:   Revision 0041: the ``decisions_due`` table — ``id``, ``repo``, ``kind``, ``key``,
+What it is:   Revision 0015: the ``decisions_due`` table — ``id``, ``repo``, ``kind``, ``key``,
               ``title``, ``role``, ``first_due``, ``last_seen``, ``resolved``, unique on
               ``(repo, kind, key)``.
 What it does: Gives the derived decisions inbox a memory (G-516). The rows are derived at read
@@ -17,7 +17,7 @@ How:          ``op.create_table`` guarded by an existence check (an ``init_db`` 
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         none
 Works with:   src/crb/store/models.py (``DecisionDue``), src/crb/store/migrate.py
-              (``REVISION_TABLES`` carries ``("0041", "decisions_due")``),
+              (``REVISION_TABLES`` carries ``("0015", "decisions_due")``),
               src/crb/server/decisions.py (the derivation and the upsert),
               src/crb/server/routes/decisions.py (serves the age with the row)
 Tested by:    tests/test_store_migrate.py, tests/test_server_decisions.py
@@ -31,8 +31,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import context, op
 
-revision: str = "0041"
-down_revision: str | None = "0040"
+revision: str = "0015"
+down_revision: str | None = "0014"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
