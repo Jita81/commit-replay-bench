@@ -1051,6 +1051,14 @@ def test_a_gap_line_is_its_own_tag_only_where_dod_check_reads_gaps(tree: Path) -
         "walk, sighted, one builder and model; apparatus 2.2]",
         "[measured — n = 602 rows; method: the stack's ledger verification read after the "
         "walk; exact counts, no interval; apparatus 2.2]",
+        # the live stack and a session's own note are not the repository either (P-705)
+        "[measured — n = 3 attempts, method: the run's grade rows read on the live stack on "
+        "2026-09-25, recorded in the session's findings note; apparatus 2.2]",
+        "[measured — n = 4 rows; method: the deployment's ledger export read by a stream, "
+        "which is not committed; apparatus 2.2]",
+        # a not-here phrase after an inner [gap] is still inside the [measured] tag (P-705)
+        "[measured — n = 3 or 4 rows; method: the run's grade rows as read on 2026-09-25; "
+        "apparatus 2.2. The count is disputed — [gap] F42, settled only by the stack's ledger]",
     ],
 )
 def test_a_measured_tag_whose_rows_are_not_in_the_repository_is_refused(

@@ -401,10 +401,11 @@ resolve plugins offline yet (README §6).
 container never has a network, so a repository's dependencies cannot be installed in it —
 and an image that bakes them in serves one commit's lockfile only. Before this, the docker
 posture could not build a Go repository with a third-party module and graded every attempt
-against the model **[measured — n = 3 or 4 rows of run `0c44ff24…` (cobra), each
-`builder_red` with the target red; method: the run's grade rows as read on 2026-09-25;
-apparatus 2.2. The count is disputed: 3 rows were observed when the run was cancelled, and
-stream D read 4 from the deployment's ledger export, which is not committed — [gap] F42]**. With `CRB_PROVISION__ENABLED=true`:
+against the model **[hypothesis, recorded as measured — n = 3 or 4 rows of run `0c44ff24…`
+(cobra), each `builder_red` with the target red; method: the run's grade rows as read on
+2026-09-25, neither read in this repository; apparatus 2.2. The count is disputed: 3 rows
+were observed when the run was cancelled, and stream D read 4 from the deployment's ledger
+export, which is not committed — [gap] F42]**. With `CRB_PROVISION__ENABLED=true`:
 
 - the lockfiles at the parent and at the gold are read from git objects; a fetch container
   (the pinned toolchain image, the worker's non-root uid, read-only, no capabilities) fetches

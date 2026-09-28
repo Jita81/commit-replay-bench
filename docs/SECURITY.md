@@ -697,8 +697,9 @@ subject to a retention window.
   apparatus 2.2]**. Every *verdict* to date is on the host executor posture. The first replay
   in the docker posture (run `0c44ff24…`, cobra) graded its rows `builder_red` because the
   sealed container could not load cobra's modules — an instrument failure charged to the
-  model **[measured — n = 3 or 4 rows, each `builder_red` with the target red; method: the
-  run's grade rows as read on 2026-09-25; apparatus 2.2. The count is disputed: 3 rows were
+  model **[hypothesis, recorded as measured — n = 3 or 4 rows, each `builder_red` with the
+  target red; method: the run's grade rows as read on 2026-09-25, neither read in this
+  repository; apparatus 2.2. The count is disputed: 3 rows were
   observed when the run was cancelled (the session's findings note), and stream D read 4 from
   the deployment's ledger export, which is not committed — [gap] F42, settled only by the
   stack's ledger]**. Dependency
