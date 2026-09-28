@@ -1772,7 +1772,9 @@ def _approver(h: Harness, name: str, role: str = "approver") -> str:
     return uid
 
 
-def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) -> None:
+def test_the_worker_honours_an_override_only_from_a_second_approver(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """GOV-4 (governance review 2026-09-27) under ADR-0026 item 8: the override lifts only
     the sign-off clause at the entry gate, and the worker honours ``deliver_override_by``
     only when it names a person with the approver role who is NOT the run's actor — read
@@ -1781,6 +1783,7 @@ def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) 
     an override; no override opens a pull request the route gate withheld."""
     from crb.factory import evidence as fe
 
+    _proven_cells(monkeypatch)
     home, _item, _ = _multiply_backlog(h)
     tester = _approver(h, "tester")
 
@@ -1836,7 +1839,9 @@ def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) 
     assert len(refusals()) == before + 1 and refusals()[-1]["override_by"] == tester
 
 
-def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness) -> None:
+def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """GOV-3 (governance review 2026-09-27): the worker resolves a factory run's ``checks``
     exactly as a replay's (``params.checks`` over the repository's block): the build is
     graded on that arm — belt 6 evaluated, the ``checks`` stamp on its row — the run's
@@ -1844,6 +1849,7 @@ def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness)
     rows of another arm never license it."""
     from crb.factory import evidence as fe
 
+    _proven_cells(monkeypatch)
     home, item, _ = _multiply_backlog(h)
     off = h.enqueue("factory", ladder_json=["fake:m0"])
     assert h.run_one().status == STATUS_SUCCEEDED

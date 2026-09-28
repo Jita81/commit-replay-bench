@@ -305,7 +305,13 @@ rule makes them prospective (item 10).
      2026-09-16 (decision 1: build and withhold, and the override of the route) and ADR-0018 as
      drafted (decision 1's build and withhold; decision 3's override of both clauses; decision
      5's "the route alone", which now means the proven standard alone). Wave 4's stream S
-     re-reads ADR-0018 against this item before it merges.
+     re-reads ADR-0018 against this item before it merges. **Who may grant it** is ADR-0003's
+     amendment of 2026-09-27 (GOV-1, GOV-4), which the Wave 2 integration applies to this
+     narrowed override: it is a second approver's evented act on the queued or running run
+     (`POST /runs/{id}/deliver-override`), read live at each item's entry gate, refused on the
+     chain (`override_refused`) when it names the run's own actor or the cell carries any
+     false-Q1 row; that amendment's route-gate override itself no longer exists — the route
+     gate has none.
    - **Size.** A ticket's size comes from story points only once the organisation's
      points-to-churn agreement has passed (item 9's validity report). Until then readiness reads
      the cell the points name and the next larger size's cell and applies the more demanding of

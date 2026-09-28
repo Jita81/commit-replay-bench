@@ -269,12 +269,19 @@ licenses a much larger change.
    The pull-request body names both sizes and the cell the licence was read on. A smaller
    change keeps the estimate's cell (a larger licence covers it).
 
+**Narrowed at the Wave 2 integration (2026-09-28) by [ADR-0026](0026-the-context-standard.md)
+item 8.** The route gate has no override any more: `deliver_override` lifts only a missing
+sign-off, at the entry gate, before any spend. Decisions 1 and 2 govern that narrowed
+override — its floor (`override_refused: false_q1`) and its second approver, read live at each
+item's entry gate (`override_refused: same_actor`) — and decision 3 still governs the route
+gate, after the delivered change's own licence (ADR-0025 item 12) has held.
+
 **Consequences.** false-Q1 = 0 is a floor for delivery as it is for a sign-off; the
 override is an accountable act by a person other than the one whose run produced the
 evidence; and story points choose which cell is read first, never which cell licenses a
 larger change. Tested by `tests/test_factory_loop.py`
-(`test_no_override_delivers_on_a_false_q1_cell`,
-`test_the_route_gate_override_is_never_the_runs_own_actor`,
+(`test_no_override_lifts_anything_on_a_false_q1_cell`,
+`test_the_sign_off_override_is_never_the_runs_own_actor`,
 `test_a_change_larger_than_its_licence_is_withheld_size_exceeds_licence`,
 `test_a_larger_change_is_delivered_when_its_measured_cell_routes_deliver`),
 `tests/test_server_routes_factory.py::test_factory_delivery_fields_and_the_second_approver_override`
