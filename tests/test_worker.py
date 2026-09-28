@@ -1823,6 +1823,23 @@ def test_the_worker_never_honours_an_override_from_a_deactivated_approver(h: Har
     assert not [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
 
 
+def test_every_statement_of_when_the_worker_honours_an_override_names_an_active_account() -> None:
+    """A review of PR #63: docs/API.md stated the P-229 rule twice, and the factory
+    paragraph left out that the approver's account must be active, so a reader could take a
+    leaver's grant as still licensing delivery. Every sentence in the guide that says when
+    the worker honours the override says ``active``."""
+    import re
+
+    api = (Path(__file__).resolve().parents[1] / "docs" / "API.md").read_text(encoding="utf-8")
+    rules = [
+        s
+        for s in re.split(r"(?<=[.;|])\s", api)
+        if re.search(r"worker\b.*\bhonours\b", s) and "override" in s.lower()
+    ]
+    assert len(rules) >= 2, rules  # the endpoint's row and the factory paragraph
+    assert [r for r in rules if "active" not in r] == []
+
+
 def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness) -> None:
     """GOV-3 (governance review 2026-09-27): the worker resolves a factory run's ``checks``
     exactly as a replay's (``params.checks`` over the repository's block): the build is

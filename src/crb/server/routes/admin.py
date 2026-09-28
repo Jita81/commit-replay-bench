@@ -638,37 +638,61 @@ def _record_secret_change(
     )
 
 
-def _stored(db: Session, actor: str, secret: str, stored: Any) -> SecretStatusOut:
-    """Record a store the API made and answer its status."""
-    commit_audited(
-        db,
-        lambda: _record_secret_change(
+def _stored(
+    db: Session, actor: str, secrets: Any, secret: str, token: str, *, set_by: str
+) -> SecretStatusOut:
+    """Store ``token`` as ``secret`` and record it, answering its status; 422
+    ``invalid_token`` on a bad shape, 409 ``secrets_insecure`` when the directory is refused.
+
+    The file is written INSIDE the audited write, after the ``events`` lock and just before
+    the commit (P-440): writing it first let a refused lock or a failed commit answer 500
+    with the token already replaced and no event (EI-8). A file cannot join the transaction,
+    so a crash, or a commit that fails after the write, can still leave the change
+    unrecorded; a lost ``seq`` race writes the same value again, which is safe."""
+    out: dict[str, Any] = {}
+
+    def write() -> None:
+        try:
+            out["status"] = secrets.set(secret, token, set_by=set_by)
+        except ValueError as exc:
+            raise ApiError(422, "invalid_token", str(exc)) from None
+        except SecretsInsecure as exc:
+            raise ApiError(409, "secrets_insecure", str(exc)) from None
+        _record_secret_change(
             db,
             removed=False,
             actor=actor,
             secret=secret,
-            fingerprint=stored.fingerprint,
+            fingerprint=out["status"].fingerprint,
             via="api",
-        ),
-    )
-    return _status_out(stored)
+        )
+
+    commit_audited(db, write)
+    return _status_out(out["status"])
 
 
 def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatusOut:
     """Remove ``secret``, record the removal (with whether anything was there) and answer
-    the now-absent status; 409 ``secrets_insecure`` when the directory is refused."""
-    try:
-        existed = bool(secrets.status(secret).present)
-        gone = secrets.delete(secret)
-    except SecretsInsecure as exc:
-        raise ApiError(409, "secrets_insecure", str(exc)) from None
-    commit_audited(
-        db,
-        lambda: _record_secret_change(
-            db, removed=True, actor=actor, secret=secret, existed=existed, via="api"
-        ),
-    )
-    return _status_out(gone)
+    the now-absent status; 409 ``secrets_insecure`` when the directory is refused.
+
+    Removed inside the audited write, as :func:`_stored` stores (P-440). A lost ``seq``
+    race runs ``write`` again and the removal is safe to repeat, but the second run finds
+    nothing, so whether the secret existed is read on the first run only."""
+    out: dict[str, Any] = {}
+
+    def write() -> None:
+        try:
+            if "existed" not in out:
+                out["existed"] = bool(secrets.status(secret).present)
+            out["status"] = secrets.delete(secret)
+        except SecretsInsecure as exc:
+            raise ApiError(409, "secrets_insecure", str(exc)) from None
+        _record_secret_change(
+            db, removed=True, actor=actor, secret=secret, existed=out["existed"], via="api"
+        )
+
+    commit_audited(db, write)
+    return _status_out(out["status"])
 
 
 def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> None:
@@ -773,13 +797,14 @@ def put_claude_code_token(
 ) -> SecretStatusOut:
     """Store the token; the response is its status, never the value. Recorded as
     ``settings.secret_set`` naming the admin (EI-8)."""
-    try:
-        stored = secrets.set(CLI_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id)
-    except ValueError as exc:
-        raise ApiError(422, "invalid_token", str(exc)) from None
-    except SecretsInsecure as exc:
-        raise ApiError(409, "secrets_insecure", str(exc)) from None
-    return _stored(db, admin.id, CLI_TOKEN_SECRET, stored)
+    return _stored(
+        db,
+        admin.id,
+        secrets,
+        CLI_TOKEN_SECRET,
+        body.token,
+        set_by=admin.display_name or admin.id,
+    )
 
 
 @router.delete(
@@ -810,15 +835,14 @@ def put_tracker_token(
     fingerprint and who set it when — never the value. One credential per deployment: the
     listener on every repository polls with it (ADR-0017). Recorded as
     ``settings.secret_set`` naming the admin (EI-8)."""
-    try:
-        stored = secrets.set(
-            TRACKER_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id
-        )
-    except ValueError as exc:
-        raise ApiError(422, "invalid_token", str(exc)) from None
-    except SecretsInsecure as exc:
-        raise ApiError(409, "secrets_insecure", str(exc)) from None
-    return _stored(db, admin.id, TRACKER_TOKEN_SECRET, stored)
+    return _stored(
+        db,
+        admin.id,
+        secrets,
+        TRACKER_TOKEN_SECRET,
+        body.token,
+        set_by=admin.display_name or admin.id,
+    )
 
 
 @router.delete(
