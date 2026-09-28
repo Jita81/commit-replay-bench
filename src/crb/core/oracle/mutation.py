@@ -640,8 +640,15 @@ class MutationProvenance:
     def __post_init__(self) -> None:
         object.__setattr__(self, "executor", dict(self.executor))
         object.__setattr__(self, "candidates_per_file", dict(self.candidates_per_file))
+        rule = mutation_version(self.apparatus_version)
         if not self.mutation_version:
-            object.__setattr__(self, "mutation_version", mutation_version(self.apparatus_version))
+            object.__setattr__(self, "mutation_version", rule)
+        if self.mutation_version != rule:
+            # poka-yoke (P-127): a stamp cannot name a rule its apparatus does not score by
+            raise ValueError(
+                f"mutation_version {self.mutation_version!r} is not the rule of apparatus "
+                f"{self.apparatus_version} ({rule!r}): a score's rule follows its apparatus"
+            )
         if self.mutation_version == MUTATION_V2 and not self.sampler:
             object.__setattr__(self, "sampler", SAMPLER_HASH_RR)
 

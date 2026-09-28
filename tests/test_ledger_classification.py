@@ -16,7 +16,8 @@ Navigation
 What it is:   The tests of the 2.4 classification labels and their refusals in the ledger.
 What it does: Pins each refusal of an unlabelled or self-contradicting 2.4 row; that the
               replay writer and the factory writer stamp the same kind through the one helper;
-              that a clean 2.4 row pins ``""``; that a 2.3 row is written as before.
+              that a clean 2.4 row pins ``""``; that a 2.3 row is written as before and a row
+              below 2.4 carrying a label only 2.4 defines is refused (P-127).
 How:          Hand-built ``GradeResult``s (``posture_result``) reduced by
               ``grade_row_from_result`` and ``factory_row``; ``GradeRow`` built from their
               fields with one label removed or changed.
@@ -115,6 +116,33 @@ def test_a_2_3_row_is_written_as_before() -> None:
     assert lg.LABEL_FAILURE_KIND not in row.labels
     assert lg.LABEL_LINT_REASON not in row.labels
     assert lg.LABEL_CHANGE_ID not in row.labels
+
+
+@pytest.mark.parametrize("key", [lg.LABEL_LINT_REASON, lg.LABEL_CHANGE_ID])
+def test_the_ledger_refuses_a_row_below_2_4_that_carries_a_2_4_label(key: str) -> None:
+    """P-127: the class P-123 named, closed where every writer passes — the row itself. A
+    label only 2.4 defines never sits on a row below 2.4, whichever writer built it, at write
+    and on read alike, so no writer's leak can split a 2.3 population."""
+    row = lg.grade_row_from_result(
+        _result(lint_status=lint_mod.LINT_NONE_DETECTED),
+        _task(),
+        pack_hash="c" * 64,
+        apparatus_version="2.3",
+    )
+    with pytest.raises(lg.LedgerIntegrityError, match=key):
+        lg.GradeRow(**_with(row, **{key: "x"}))
+
+
+def test_the_2_4_only_labels_are_the_labels_the_helper_adds_from_2_4() -> None:
+    """The list the refusal reads is the list the helper writes: every label the helper adds
+    at 2.4 that it does not write at 2.3 is in ``V2_ONLY_LABELS`` — except ``failure_kind``,
+    which a row below 2.4 has always carried when it was not clean."""
+    res = _result(lint_status=lint_mod.LINT_NONE_DETECTED)
+    kw: dict[str, Any] = {"error": "", "change_id": CHANGE}
+    added = set(lg.row_labels_at_write(res, apparatus_version=V2, **kw)) - set(
+        lg.row_labels_at_write(res, apparatus_version="2.3", **kw)
+    )
+    assert added - {lg.LABEL_FAILURE_KIND} == set(lg.V2_ONLY_LABELS)
 
 
 @pytest.mark.parametrize("key", [lg.LABEL_FAILURE_KIND, lg.LABEL_LINT_REASON, lg.LABEL_CHANGE_ID])

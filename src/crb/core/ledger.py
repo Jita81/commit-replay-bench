@@ -381,6 +381,9 @@ LABEL_LINT_REASON = "lint_reason"
 #: ``git patch-id --stable``, a revert's that of its original) — hashed, from 2.4, so a
 #: reader counts distinct CHANGES, never two commits of one change.
 LABEL_CHANGE_ID = "change_id"
+#: The labels only apparatus 2.4 defines (DL-106 (2)): a row below 2.4 never carries one,
+#: whichever writer built it — refused by the row itself, at write and on read (P-127).
+V2_ONLY_LABELS: tuple[str, ...] = (LABEL_LINT_REASON, LABEL_CHANGE_ID)
 #: Belt 6 (ADR-0024) is recorded as this hashed label — ``true`` / ``false`` / ``none``
 #: (switched on, not evaluated) — and is absent when the belt was switched off.
 LABEL_API_STABLE = BELT_API_STABLE
@@ -857,7 +860,16 @@ class GradeRow:
         """ADR-0025 items 5 and 6, at write and at read alike: a measured row of 2.4 or later
         pins its ``failure_kind`` and a ``lint_reason`` that agrees with belt 5, and a
         replay row names the change it observed and was gold-checked clean. Rows below 2.4
-        are never re-interpreted."""
+        are never re-interpreted, and never carry a label only 2.4 defines
+        (:data:`V2_ONLY_LABELS`, P-127)."""
+        if not is_v2_apparatus(self.apparatus_version):
+            leaked = [k for k in V2_ONLY_LABELS if k in self.labels]
+            if leaked:
+                raise LedgerIntegrityError(
+                    f"ledger refuses row {self.task_id[:10]} ({self.repo}) of "
+                    f"{self.apparatus_version}: {leaked} are labels of apparatus 2.4, which no "
+                    "row below 2.4 carries (DL-106 (2))"
+                )
         if not self.carries_classification:
             return
         where = f"ledger refuses row {self.task_id[:10]} ({self.repo}) of {self.apparatus_version}"
